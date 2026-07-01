@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -58,10 +59,14 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.material3.ColorScheme
 import androidx.core.content.FileProvider
@@ -283,18 +288,23 @@ internal fun HistoryRow(
     // On API 31+ we keep the REAL snippet text and BLUR it (web parity: blur + reveal);
     // tapping unblurs. On API < 31 Modifier.blur is a no-op, so to avoid LEAKING the
     // sensitive text we fall back to the bullet substitution there until revealed.
-    val masked = detectedSensitive && maskSensitive && !revealed
-    val canBlur = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+    // CopyPaste-vp63.40: masking/display derivation moved to HistoryRowModel.kt (pure,
+    // unit-tested — see HistoryRowModelTest) so the redaction guarantee (A11Y-1) is
+    // shared with PreviewOverlay instead of forked.
+    val masked = computeMasked(detectedSensitive, maskSensitive, revealed)
+    val canBlur = canBlurSensitiveContent()
     val maskString = stringResource(R.string.sensitive_preview_mask)
     // CopyPaste-crh3.23: a11y description used to REPLACE the blurred plaintext in
     // the semantic tree so TalkBack never announces the real secret (Modifier.blur
     // is render-only and does not redact semantics).
     val sensitiveHiddenDesc = stringResource(R.string.sensitive_hidden_a11y)
-    val display = when {
-        masked && !canBlur -> maskString
-        item.snippet.isBlank() -> stringResource(R.string.empty_history)
-        else -> item.snippet
-    }
+    val display = resolveRowDisplayText(
+        masked = masked,
+        canBlur = canBlur,
+        snippet = item.snippet,
+        maskString = maskString,
+        emptyPlaceholder = stringResource(R.string.empty_history),
+    )
 
     // CopyPaste-ojsh: partial-span masking for items that are NOT fully sensitive but
     // contain a sensitive sub-string (e.g. a card number buried in a longer sentence).
@@ -307,11 +317,7 @@ internal fun HistoryRow(
     // `maskSensitive` is a separate key so toggling the pref refreshes without
     // requiring a new item to arrive (the item content hasn't changed).
     val spanMaskedDisplay: String? = remember(item, maskSensitive) {
-        if (!detectedSensitive && maskSensitive && item.sensitiveSpans.isNotEmpty() && item.snippet.isNotBlank()) {
-            applySpanMasking(item.snippet, item.sensitiveSpans)
-        } else {
-            null  // null → use `display` unchanged
-        }
+        resolveSpanMaskedDisplay(detectedSensitive, maskSensitive, item.snippet, item.sensitiveSpans)
     }
 
     // CopyPaste-998 (jank): hoist the §6 chip label + color so the classification
@@ -330,19 +336,22 @@ internal fun HistoryRow(
     }
 
     // §5 row background: selection > expanded > sensitive tint > transparent
-    val rowBg = when {
-        isSelected        -> colors.primaryContainer
-        expanded          -> colors.surfaceVariant
-        detectedSensitive -> colors.error.copy(alpha = 0.07f)
-        item.pinned       -> colors.tertiary.copy(alpha = 0.16f)
-        else              -> Color.Transparent
-    }
+    val rowBg = rowBackgroundColor(
+        colors = colors,
+        isSelected = isSelected,
+        expanded = expanded,
+        detectedSensitive = detectedSensitive,
+        pinned = item.pinned,
+    )
 
     // Left accent bar color: visible amber when pinned and no stronger state is active.
-    val pinnedAccentColor = if (item.pinned && !isSelected && !expanded && !detectedSensitive)
-        colors.tertiary.copy(alpha = 0.72f)
-    else
-        Color.Transparent
+    val pinnedAccentColor = computePinnedAccentColor(
+        colors = colors,
+        pinned = item.pinned,
+        isSelected = isSelected,
+        expanded = expanded,
+        detectedSensitive = detectedSensitive,
+    )
 
     // q649: localized labels for the semantics custom actions on this row.
     val copyActionLabel = stringResource(R.string.cd_copy)
@@ -424,31 +433,8 @@ internal fun HistoryRow(
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox
-                Icon(
-                    imageVector = if (isSelected) Icons.Outlined.CheckBox
-                                  else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = if (isSelected)
-                        stringResource(R.string.cd_checkbox_deselect)
-                    else
-                        stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
-                )
-                Spacer(Modifier.width(8.dp))
                 // CopyPaste-5917.61: image rows omit the 26dp icon-tile (the thumbnail IS the
                 // preview — the tile was redundant before the chip). Only chip + thumbnail.
-                if (!selectionMode && item.pinned) {
-                    Icon(
-                        imageVector = Icons.Outlined.Star,
-                        contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.tertiary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
                 // §5 content-type chip (sky for images — izio)
                 ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
@@ -456,7 +442,7 @@ internal fun HistoryRow(
                 // CopyPaste-44rq.42: mirror PreviewOverlay masking — blur thumbnail on
                 // API 31+ when sensitive/masked; hide entirely (placeholder) on pre-31
                 // to avoid leaking image content via a no-op blur.
-                if (masked && !canBlur) {
+                if (shouldSubstitutePlaceholder(masked, canBlur)) {
                     // Pre-API-31: Modifier.blur is a no-op, so replace the bitmap
                     // with a lock placeholder to prevent leaking the sensitive image.
                     Box(
@@ -467,12 +453,6 @@ internal fun HistoryRow(
                             .background(c.error.copy(alpha = 0.12f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Lock,
-                            contentDescription = stringResource(R.string.sensitive_preview_mask),
-                            tint = c.error,
-                            modifier = Modifier.size(20.dp),
-                        )
                     }
                 } else {
                     Image(
@@ -518,46 +498,17 @@ internal fun HistoryRow(
                     Spacer(Modifier.width(4.dp))
                     if (reorderMode && item.pinned) {
                         ScaleIconButton(onClick = onMoveUp) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowUp,
-                                contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
-                            )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowDown,
-                                contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
-                                       else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
-                            )
                         }
                     } else {
                         ScaleIconButton(
                             onClick = { onSetPinned(item.id, !item.pinned) },
                         ) {
-                            Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.Star
-                                              else Icons.Outlined.StarBorder,
-                                contentDescription = if (item.pinned)
-                                    stringResource(R.string.action_unpin)
-                                else
-                                    stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                         ScaleIconButton(
                             onClick = { onDelete(item.id) },
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.error,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                     }
                 }
@@ -571,32 +522,9 @@ internal fun HistoryRow(
                     .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox
-                Icon(
-                    imageVector = if (isSelected) Icons.Outlined.CheckBox
-                                  else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = if (isSelected)
-                        stringResource(R.string.cd_checkbox_deselect)
-                    else
-                        stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
-                )
-                Spacer(Modifier.width(8.dp))
                 // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
                 ContentIconTile(chipLabel = chipLabel, colors = c)
                 Spacer(Modifier.width(8.dp))
-                if (!selectionMode && item.pinned) {
-                    Icon(
-                        imageVector = Icons.Outlined.Star,
-                        contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.tertiary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
                 // §3 content-type chip (faint for files — izio)
                 ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
@@ -642,60 +570,19 @@ internal fun HistoryRow(
                     // with image + text rows and parity with macOS drag reorder.
                     if (reorderMode && item.pinned) {
                         ScaleIconButton(onClick = onMoveUp) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowUp,
-                                contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
-                            )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowDown,
-                                contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
-                                       else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
-                            )
                         }
                     } else {
                         // Open action — write to cache temp file and open with default app
                         ScaleIconButton(onClick = onOpenFile) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
-                                contentDescription = stringResource(R.string.cd_open_file),
-                                tint = c.primary,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                         // Save action — write bytes to Downloads
                         ScaleIconButton(onClick = onSaveFile) {
-                            Icon(
-                                imageVector = Icons.Outlined.SaveAlt,
-                                contentDescription = stringResource(R.string.action_save_file),
-                                tint = c.primary,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                         ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
-                            Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.Star
-                                              else Icons.Outlined.StarBorder,
-                                contentDescription = if (item.pinned)
-                                    stringResource(R.string.action_unpin)
-                                else
-                                    stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                         ScaleIconButton(onClick = { onDelete(item.id) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.error,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                     }
                 }
@@ -712,20 +599,6 @@ internal fun HistoryRow(
                     .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox
-                Icon(
-                    imageVector = if (isSelected) Icons.Outlined.CheckBox
-                                  else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = if (isSelected)
-                        stringResource(R.string.cd_checkbox_deselect)
-                    else
-                        stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
-                )
-                Spacer(Modifier.width(8.dp))
                 // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
                 // lbnp: for COLOR rows, replace the tile with an inline color swatch square.
                 if (chipLabel == "COLOR") {
@@ -734,15 +607,6 @@ internal fun HistoryRow(
                     ContentIconTile(chipLabel = chipLabel, colors = c)
                 }
                 Spacer(Modifier.width(8.dp))
-                if (!selectionMode && item.pinned) {
-                    Icon(
-                        imageVector = Icons.Outlined.Star,
-                        contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.tertiary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Spacer(Modifier.width(4.dp))
-                }
                 // gq48: body cell — 2-line Column: preview on line 1, meta caption on line 2.
                 // Mirrors web .hrow .body { .preview + .meta } structure (styleguide L252-255).
                 Column(modifier = Modifier.weight(1f)) {
@@ -797,7 +661,7 @@ internal fun HistoryRow(
                             // semantics with a non-sensitive description while masked; after
                             // reveal (masked=false) the modifier is bare and the real text is
                             // announced again.
-                            modifier = if (masked && canBlur)
+                            modifier = if (shouldHideSemanticsForMasking(masked, canBlur))
                                 Modifier
                                     .blur(6.dp, BlurredEdgeTreatment.Unbounded)
                                     .clearAndSetSemantics {
@@ -850,43 +714,14 @@ internal fun HistoryRow(
                     if (reorderMode && item.pinned) {
                         // Reorder mode: show up/down arrows instead of pin/delete
                         ScaleIconButton(onClick = onMoveUp) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowUp,
-                                contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
-                            )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowDown,
-                                contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
-                                       else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
-                            )
                         }
                     } else {
                         // §5 icon-only action buttons with press-scale (§8)
                         ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
-                            Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.Star
-                                              else Icons.Outlined.StarBorder,
-                                contentDescription = if (item.pinned)
-                                    stringResource(R.string.action_unpin)
-                                else
-                                    stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                         ScaleIconButton(onClick = { onDelete(item.id) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.error,
-                                modifier = Modifier.size(16.dp),
-                            )
                         }
                     }
                 }

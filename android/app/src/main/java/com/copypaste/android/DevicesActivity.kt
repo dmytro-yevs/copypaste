@@ -889,7 +889,6 @@ fun DevicesScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                DiscoveryRingsIcon(size = 36.dp)
                                 Text(
                                     text = stringResource(R.string.no_devices_nearby),
                                     style = MaterialTheme.typography.bodySmall,

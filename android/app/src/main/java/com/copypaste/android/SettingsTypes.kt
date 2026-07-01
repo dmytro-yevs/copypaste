@@ -9,7 +9,8 @@ enum class SyncBackend {
 }
 
 /**
- * CopyPaste-gkgp: thrown by [Settings.loadOrCreateKey] when the AndroidKeyStore
+ * CopyPaste-gkgp: thrown by [KeystoreSecretStore]'s internal key-load path (via
+ * [Settings.encryptionKey]) when the AndroidKeyStore
  * KEK can no longer unwrap the persisted encryption key (e.g. after a factory
  * reset, keystore wipe, or device restore to a different device).
  *

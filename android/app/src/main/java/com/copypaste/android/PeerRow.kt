@@ -300,9 +300,6 @@ internal fun DiscoveredPeerRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Discovery icon with concentric rings — signals "device nearby, tap to pair".
-            DiscoveryRingsIcon(size = 40.dp)
-
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = peer.displayName(),

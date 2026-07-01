@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -277,15 +280,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 val errorMsg = readError
                 val isFilter = allLines.isNotEmpty() && errorMsg == null
                 EmptyStateCard(
-                    icon = {
-                        Icon(
-                            imageVector = if (isFilter) Icons.Outlined.SearchOff
-                                          else Icons.Outlined.Description,
-                            contentDescription = null,
-                            tint = if (errorMsg != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    },
+                    icon = {},
                     title = when {
                         errorMsg != null -> "Could not read logs"
                         isFilter -> "No lines match filter"

@@ -315,43 +315,13 @@ fun HistoryScreen(
     // (own device first, then peers alphabetically by display name, null-origin last),
     // then by recency within each device group — mirrors macOS HistoryView device sort.
     // Pinned items always remain at the top in user-defined order regardless of the sort.
+    // CopyPaste-vp63.37: sort derivation extracted to HistoryScreenState.kt
+    // (sortHistoryItems) — pure + unit-tested (HistoryScreenStateTest). The
+    // defensive de-dup-by-id comment below still applies (see that function's
+    // doc): the LazyColumn key is `it.id`, so duplicate ids would crash-loop
+    // the screen; sortHistoryItems collapses duplicates before sorting.
     val sortedItems = remember(items, sortByDevice, ownDeviceId, pairedPeers) {
-        // Defensive de-dup by id BEFORE the list reaches the LazyColumn. The list
-        // backing the LazyColumn uses `key = { it.id }`, so a duplicate id throws
-        // IllegalArgumentException ("Key … was already used") and crash-loops the
-        // screen. A persistent duplicate can arise in the repository id index (e.g.
-        // a synced item re-appended under the same overrideId after the
-        // synced-source-id seen-set was cleared by clearUnpinned). Collapsing
-        // duplicates here guarantees the LazyColumn can never crash regardless of
-        // how the backing store drifts; the repository fix below removes the source.
-        val deduped = items.distinctBy { it.id }
-        if (sortByDevice) {
-            // Group-by-device: pinned section first (user order), then device groups
-            // sorted own-device → peer-alphabetical → unknown. Within each device the
-            // items are sorted by recency (newest first) for macOS parity.
-            deduped.sortedWith(
-                compareByDescending<ClipboardItem> { it.pinned }
-                    .thenBy { if (it.pinned) it.pinnedSortIndex else 0 }
-                    // Own device first (null originDeviceId treated as own/local).
-                    .thenByDescending { item ->
-                        item.originDeviceId == null || item.originDeviceId == ownDeviceId
-                    }
-                    // Peer display name alphabetical for remaining devices.
-                    .thenBy { item ->
-                        item.originDeviceId?.let { id ->
-                            deviceDisplayName(id, ownDeviceId, pairedPeers)
-                        } ?: ""
-                    }
-                    // Recency within each device group.
-                    .thenByDescending { it.wallTimeMs }
-            )
-        } else {
-            deduped.sortedWith(
-                compareByDescending<ClipboardItem> { it.pinned }
-                    .thenBy { if (it.pinned) it.pinnedSortIndex else 0 }
-                    .thenByDescending { it.wallTimeMs }
-            )
-        }
+        sortHistoryItems(items, sortByDevice, ownDeviceId, pairedPeers)
     }
     // ── AB-11: full-content search ───────────────────────────────────────────
     // The snippet-only filter missed any match past the 140-char preview. We now
@@ -384,19 +354,10 @@ fun HistoryScreen(
     }
 
     // Filter: snippet match (instant) ∪ full-content match (async, debounced).
+    // CopyPaste-vp63.37: extracted to HistoryScreenState.kt (filterHistoryItemsBySearch)
+    // — pure + unit-tested (HistoryScreenStateTest).
     val filteredItems = remember(sortedItems, searchQuery, fullMatchIds, fullMatchQuery) {
-        val q = searchQuery.trim()
-        if (q.isEmpty()) {
-            sortedItems
-        } else {
-            // Only trust fullMatchIds when it was computed for the CURRENT query;
-            // otherwise fall back to the snippet match alone until it catches up.
-            val useFull = fullMatchQuery == q
-            sortedItems.filter { item ->
-                item.snippet.contains(q, ignoreCase = true) ||
-                    (useFull && item.id in fullMatchIds)
-            }
-        }
+        filterHistoryItemsBySearch(sortedItems, searchQuery, fullMatchIds, fullMatchQuery)
     }
 
     // ── Device filter (parity with macOS) ────────────────────────────────────

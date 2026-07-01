@@ -2,25 +2,37 @@ package com.copypaste.android
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
-import android.util.Log
-import java.security.KeyStore
-import java.security.SecureRandom
 import java.util.UUID
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 // SyncBackend, EncryptionKeyLostException → SettingsTypes.kt
 // PairedPeer, P2pIdentity → PeerRoster.kt
 // rememberSkin, applyScreenshotPolicy → SettingsComposables.kt
-
+//
+// CopyPaste-vp63.36: Settings is now a thin delegating FACADE over five
+// collaborator stores (see below) — every public property/method keeps its
+// original name/type/semantics so the many call sites across the app
+// (ClipboardService, FgsSyncLoop, ClipboardRepository*, SyncManager, the
+// History/Pair/Devices/Onboarding/Settings screens, ...) require zero changes.
+//   - KeystoreSecretStore.kt — AndroidKeyStore KEK + every KEK-wrapped secret
+//     (relay token/reg-key, cloud sync passphrase/direct key, Supabase
+//     email/password) + the local clipboard encryptionKey.
+//   - PeerRosterStore.kt     — multi-peer roster JSON + legacy single-peer shims.
+//   - P2pIdentityStore.kt    — this device's persistent P2P mTLS identity.
+//   - ConfigKnobsStore.kt    — FFI-backed size/quota/ttl config knobs.
+//   - SyncCursorsStore.kt    — relay/Supabase/P2P sync cursors + high-water marks.
 class Settings(context: Context) {
     private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
+
+    private val keystoreSecretStore = KeystoreSecretStore(prefs)
+    private val syncCursorsStore = SyncCursorsStore(prefs)
+    private val configKnobsStore = ConfigKnobsStore(prefs)
+    private val peerRosterStore = PeerRosterStore(
+        prefs,
+        keystoreSecretStore,
+        onPeerRemoved = { fingerprint -> syncCursorsStore.clearP2pHighWater(fingerprint) },
+    )
+    private val p2pIdentityStore = P2pIdentityStore(prefs, appContext, keystoreSecretStore)
 
     /**
      * HIGH-7: subscribe to live updates of any pref. The SharedPreferences
@@ -63,30 +75,13 @@ class Settings(context: Context) {
                 !relayUrl.contains("127.0.0.1")
 
     /**
-     * Server-issued relay bearer token (32 hex chars), persisted after a
-     * successful [RelayClient.registerDevice]. The relay issues this from random
-     * bytes — it is NOT derivable from any key — so we must register once and
-     * cache the result. Blank means "not yet registered with this relay".
-     *
-     * Used as the `Authorization: Bearer <token>` for the relay poll/subscribe
-     * routes. Never logged.
-     *
-     * bd CopyPaste-44rq.53: wrapped with the AndroidKeyStore KEK (AES-GCM-256)
-     * instead of being stored as plaintext SharedPreferences. Existing installs
-     * are migrated transparently on first read via [readWrappedSecret].
+     * Server-issued relay bearer token (32 hex chars). See
+     * [KeystoreSecretStore.relayToken] for the KEK-wrap/migration contract.
+     * Never logged.
      */
     var relayToken: String
-        get() = readWrappedSecret(
-            KEY_RELAY_TOKEN_WRAPPED_B64,
-            KEY_RELAY_TOKEN_IV_B64,
-            KEY_LEGACY_RELAY_TOKEN_PLAIN,
-        )
-        set(v) = writeWrappedSecret(
-            KEY_RELAY_TOKEN_WRAPPED_B64,
-            KEY_RELAY_TOKEN_IV_B64,
-            KEY_LEGACY_RELAY_TOKEN_PLAIN,
-            v,
-        )
+        get() = keystoreSecretStore.relayToken
+        set(v) { keystoreSecretStore.relayToken = v }
 
     /**
      * The `relayUrl` that [relayToken] was issued for. When the configured
@@ -99,54 +94,24 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putString("relay_token_url", v).apply()
 
     /**
-     * Relay SSE subscribe cursor — sender wall-clock time (Unix epoch ms) of the
-     * last relay item ingested. Forms a compound `(wall_time, id)` keyset cursor
-     * with [lastRelaySubscribeId], passed back as `?since=&since_id=` on each
-     * (re)connect so an at-least-once SSE stream resumes without gaps or dupes.
-     *
-     * This is the RELAY transport's own cursor — fully independent of the
-     * Supabase poll cursor ([lastSupabasePollWallTime]/[lastSupabasePollId]) so
-     * the 3-path architecture (P2P / Supabase / relay) advances each path
-     * separately. The relay inbox `id` is a per-device ascending integer (NOT a
-     * UUID), hence the Long type.
+     * Relay SSE subscribe cursor — see [SyncCursorsStore.lastRelaySubscribeWallTime].
      */
     var lastRelaySubscribeWallTime: Long
-        get() = prefs.getLong("relay_last_subscribe_wall_time", 0L)
-        set(v) = prefs.edit().putLong("relay_last_subscribe_wall_time", v).apply()
+        get() = syncCursorsStore.lastRelaySubscribeWallTime
+        set(v) { syncCursorsStore.lastRelaySubscribeWallTime = v }
 
     /** Relay inbox `id` companion to [lastRelaySubscribeWallTime] (0 = none yet). */
     var lastRelaySubscribeId: Long
-        get() = prefs.getLong("relay_last_subscribe_id", 0L)
-        set(v) = prefs.edit().putLong("relay_last_subscribe_id", v).apply()
+        get() = syncCursorsStore.lastRelaySubscribeId
+        set(v) { syncCursorsStore.lastRelaySubscribeId = v }
 
     /**
-     * Base64 of a stable 32-byte registration public-key value sent to the relay
-     * at [RelayClient.registerDevice]. The relay requires a 32-byte key per device
-     * (X25519 size) but in CopyPaste's 3-path model it only STORES it — actual
-     * payload crypto uses the cross-device cloud sync key, not relay ECDH — so a
-     * persisted random 32-byte value is sufficient and stable across launches.
-     * Minted lazily on first relay registration.
-     *
-     * CopyPaste-44rq.57: although this value is not itself an encryption key, it
-     * acts as a stable per-device identity token for relay registration. Its
-     * exposure would allow an attacker to re-register on behalf of this device.
-     * KEK-wrapped (same as [relayToken] / [cloudSyncPassphrase] / [supabasePassword])
-     * for consistency with the pattern used by every other secret in this class.
-     * The plaintext pref key "relay_registration_key_b64" becomes the legacy key
-     * so existing installs auto-migrate on first read via [readWrappedSecret].
+     * Base64 of a stable 32-byte registration public-key value sent to the relay.
+     * See [KeystoreSecretStore.relayRegistrationKeyB64] for the KEK-wrap contract.
      */
     var relayRegistrationKeyB64: String
-        get() = readWrappedSecret(
-            KEY_RELAY_REG_KEY_WRAPPED_B64,
-            KEY_RELAY_REG_KEY_IV_B64,
-            KEY_LEGACY_RELAY_REG_KEY_PLAIN,
-        )
-        set(v) = writeWrappedSecret(
-            KEY_RELAY_REG_KEY_WRAPPED_B64,
-            KEY_RELAY_REG_KEY_IV_B64,
-            KEY_LEGACY_RELAY_REG_KEY_PLAIN,
-            v,
-        )
+        get() = keystoreSecretStore.relayRegistrationKeyB64
+        set(v) { keystoreSecretStore.relayRegistrationKeyB64 = v }
 
     var syncEnabled: Boolean
         get() = prefs.getBoolean("sync_enabled", true)
@@ -227,81 +192,22 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putString("supabase_user_id", v).apply()
 
     /**
-     * Shared sync passphrase for cross-device encryption.
-     *
-     * This value is run through Argon2id (via the Rust FFI [derive_cloud_sync_key])
-     * to produce a 32-byte symmetric key used with XChaCha20-Poly1305 AEAD.
-     * The SAME passphrase entered on macOS and Android will derive the SAME key,
-     * enabling bidirectional decryption of cloud blobs.
-     *
-     * Security: persisted in SharedPreferences (protected by the device lock screen
-     * on Android 6+). For higher security, clear this field when the app is
-     * backgrounded and re-prompt on next launch.
-     *
-     * DO NOT log or include in crash reports.
+     * Shared sync passphrase for cross-device encryption. See
+     * [KeystoreSecretStore.cloudSyncPassphrase]. DO NOT log or include in
+     * crash reports.
      */
     var cloudSyncPassphrase: String
-        get() = readWrappedSecret(
-            KEY_PASSPHRASE_WRAPPED_B64,
-            KEY_PASSPHRASE_IV_B64,
-            KEY_LEGACY_PASSPHRASE_PLAIN,
-        )
-        set(v) = writeWrappedSecret(
-            KEY_PASSPHRASE_WRAPPED_B64,
-            KEY_PASSPHRASE_IV_B64,
-            KEY_LEGACY_PASSPHRASE_PLAIN,
-            v,
-        )
+        get() = keystoreSecretStore.cloudSyncPassphrase
+        set(v) { keystoreSecretStore.cloudSyncPassphrase = v }
 
     /**
-     * Directly-provisioned 32-byte cloud sync key, KEK-wrapped at rest.
-     *
-     * Set when a phone scans a configured PC's pairing QR: the macOS daemon
-     * carries its already-derived cross-device sync key in the pairing payload
-     * so the scanning device can decrypt cloud blobs WITHOUT the user typing the
-     * shared passphrase. Stored separately from [cloudSyncPassphrase] — a device
-     * may hold one, the other, or both.
-     *
-     * Returns null when unset. SyncManager prefers this over re-running Argon2id
-     * on the passphrase (see [SyncManager.Companion.resolveCloudSyncKey]).
-     *
-     * Security: raw bytes are NEVER persisted — wrapped via the AndroidKeyStore
-     * KEK (same path as the encryption key / session keys). DO NOT log the bytes.
+     * Directly-provisioned 32-byte cloud sync key, KEK-wrapped at rest. See
+     * [KeystoreSecretStore.cloudSyncKeyDirect]. DO NOT log the bytes.
      */
     var cloudSyncKeyDirect: ByteArray?
-        get() {
-            val wrappedB64 = prefs.getString(KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64, null) ?: return null
-            val ivB64 = prefs.getString(KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64, null) ?: return null
-            return runCatching {
-                unwrapKey(
-                    wrapped = Base64.decode(wrappedB64, Base64.NO_WRAP),
-                    iv = Base64.decode(ivB64, Base64.NO_WRAP),
-                )
-            }.getOrElse { e ->
-                Log.w(TAG, "Failed to unwrap direct cloud sync key (${e.javaClass.simpleName})", e)
-                null
-            }
-        }
-        set(v) {
-            if (v == null || v.isEmpty()) {
-                prefs.edit()
-                    .remove(KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64)
-                    .remove(KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64)
-                    .apply()
-                return
-            }
-            val (wrapped, iv) = wrapKey(v)
-            prefs.edit()
-                .putString(KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64, Base64.encodeToString(wrapped, Base64.NO_WRAP))
-                .putString(KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64, Base64.encodeToString(iv, Base64.NO_WRAP))
-                .apply()
-        }
+        get() = keystoreSecretStore.cloudSyncKeyDirect
+        set(v) { keystoreSecretStore.cloudSyncKeyDirect = v }
 
-    /**
-     * Which sync backend to use when [syncEnabled] is true.
-     * - [SyncBackend.RELAY]    — custom relay server (original, local-network-friendly)
-     * - [SyncBackend.SUPABASE] — Supabase PostgREST (cross-device, cloud-based)
-     */
     /**
      * Which sync backend to use when [syncEnabled] is true.
      *
@@ -321,43 +227,21 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putString("sync_backend", v.name).apply()
 
     /**
-     * Supabase account email for sign-in via GoTrue.
-     * Optional: when blank the anonKey is used as bearer (no Row Level Security).
+     * Supabase account email for sign-in via GoTrue. See
+     * [KeystoreSecretStore.supabaseEmail] (CopyPaste-crh3.24: KEK-wrapped, PII).
      */
-    // CopyPaste-crh3.24: KEK-wrapped at rest (AndroidKeyStore AES-GCM-256), same
-    // path as supabasePassword. Email is PII; a rooted device or unencrypted ADB
-    // backup could read the old plaintext XML. readWrappedSecret auto-migrates the
-    // legacy plaintext "supabase_email" value on first read.
     var supabaseEmail: String
-        get() = readWrappedSecret(
-            KEY_SUPABASE_EMAIL_WRAPPED_B64,
-            KEY_SUPABASE_EMAIL_IV_B64,
-            KEY_LEGACY_SUPABASE_EMAIL_PLAIN,
-        )
-        set(v) = writeWrappedSecret(
-            KEY_SUPABASE_EMAIL_WRAPPED_B64,
-            KEY_SUPABASE_EMAIL_IV_B64,
-            KEY_LEGACY_SUPABASE_EMAIL_PLAIN,
-            v.trim(),
-        )
+        get() = keystoreSecretStore.supabaseEmail
+        set(v) { keystoreSecretStore.supabaseEmail = v }
 
     /**
-     * Supabase account password for sign-in via GoTrue.
-     * Stored in SharedPreferences (protected by device lock on Android 6+).
-     * DO NOT log or include in crash reports.
+     * Supabase account password for sign-in via GoTrue. See
+     * [KeystoreSecretStore.supabasePassword]. DO NOT log or include in crash
+     * reports.
      */
     var supabasePassword: String
-        get() = readWrappedSecret(
-            KEY_SUPABASE_PW_WRAPPED_B64,
-            KEY_SUPABASE_PW_IV_B64,
-            KEY_LEGACY_SUPABASE_PW_PLAIN,
-        )
-        set(v) = writeWrappedSecret(
-            KEY_SUPABASE_PW_WRAPPED_B64,
-            KEY_SUPABASE_PW_IV_B64,
-            KEY_LEGACY_SUPABASE_PW_PLAIN,
-            v,
-        )
+        get() = keystoreSecretStore.supabasePassword
+        set(v) { keystoreSecretStore.supabasePassword = v }
 
     /**
      * Returns true when Supabase sync is fully configured: URL, anon key, and a
@@ -378,74 +262,27 @@ class Settings(context: Context) {
         get() = supabaseEmail.isNotBlank() && supabasePassword.isNotBlank()
 
     /**
-     * Compound keyset cursor for the Supabase ascending poll.
-     *
-     * Both fields are advanced together for EVERY row in a batch (including
-     * self-echo and blank rows) BEFORE any `continue`, so a batch that
-     * contains only own-device rows still advances the cursor and does not
-     * re-fetch the same window on the next poll.
-     *
-     * Mirror of the `(last_wall_time, last_id)` cursor in the macOS daemon's
-     * cloud.rs `build_poll_url`. PostgREST keyset filter:
-     *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
-     * with order=wall_time.asc,id.asc.
-     *
-     * CONCURRENCY: the setter is private. All callers MUST use [advanceSupabaseCursor]
-     * to serialise concurrent advances from FgsSyncLoop, SupabasePollWorker, and
-     * SupabaseRealtimeClient under [supabaseCursorLock].
+     * Compound keyset cursor for the Supabase ascending poll (read-only from
+     * outside [Settings] — see [SyncCursorsStore.lastSupabasePollWallTime]).
+     * Use [advanceSupabaseCursor] to write.
      */
-    var lastSupabasePollWallTime: Long
-        get() = prefs.getLong("supabase_last_poll_wall_time", 0L)
-        private set(v) = prefs.edit().putLong("supabase_last_poll_wall_time", v).apply()
+    val lastSupabasePollWallTime: Long
+        get() = syncCursorsStore.lastSupabasePollWallTime
 
     /**
-     * Row `id` (UUID string) of the last processed Supabase poll row.
-     * Combined with [lastSupabasePollWallTime] to form the compound keyset
-     * cursor — prevents burst-loss when >20 rows share the same wall_time.
-     * Empty string means "no rows seen yet" (initial state).
-     *
-     * Use [advanceSupabaseCursor] to write — direct setter is private.
+     * Row `id` (UUID string) of the last processed Supabase poll row
+     * (read-only from outside [Settings]). Use [advanceSupabaseCursor] to write.
      */
-    var lastSupabasePollId: String
-        get() = prefs.getString("supabase_last_poll_id", "") ?: ""
-        private set(v) = prefs.edit().putString("supabase_last_poll_id", v).apply()
+    val lastSupabasePollId: String
+        get() = syncCursorsStore.lastSupabasePollId
 
     /**
      * Atomically advance the Supabase compound keyset cursor `(wallTime, id)`
      * if the new values are strictly greater than what is currently stored.
-     *
-     * "Strictly greater" follows the same keyset ordering used by the PostgREST
-     * query: a row is newer when its `wall_time` is higher, OR its `wall_time`
-     * is equal AND its `id` is lexicographically greater.
-     *
-     * CONCURRENCY: the compare-and-write is performed under [supabaseCursorLock]
-     * (a companion-object process-wide monitor) so concurrent callers —
-     * FgsSyncLoop on the IO coroutine AND SupabasePollWorker on a WorkManager
-     * thread — serialise here and neither can observe a stale cursor value
-     * mid-advance.  SharedPreferences `.apply()` is async (off-thread write) but
-     * the in-memory prefs map is updated synchronously before `apply()` returns,
-     * so subsequent `get()` calls from any thread see the new value immediately.
-     *
-     * Mirrors [advanceP2pOutboundHighWater] / [advanceP2pInboundHighWater].
-     *
-     * @param wallTime  The candidate new wall-clock value (Unix epoch ms).
-     * @param id        The candidate new row UUID string.
+     * See [SyncCursorsStore.advanceSupabaseCursor].
      */
     fun advanceSupabaseCursor(wallTime: Long, id: String) {
-        synchronized(supabaseCursorLock) {
-            val curWall = lastSupabasePollWallTime
-            val curId   = lastSupabasePollId
-            val isNewer = wallTime > curWall ||
-                (wallTime == curWall && id > curId)
-            if (isNewer) {
-                // Write both atomically: single edit batch so readers never
-                // see one field updated and the other not.
-                prefs.edit()
-                    .putLong("supabase_last_poll_wall_time", wallTime)
-                    .putString("supabase_last_poll_id", id)
-                    .apply()
-            }
-        }
+        syncCursorsStore.advanceSupabaseCursor(wallTime, id)
     }
 
     // ── CopyPaste-dxq2: sync error surfacing ─────────────────────────────────
@@ -720,160 +557,48 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("sync_on_wifi_only", v).apply()
 
     // ── Storage / size limits (config via FFI) ──────────────────────────────
-    // Defaults are SEEDED from the native `defaultConfig()` and every write is
-    // run through the native `clampConfig(...)` so Android uses the SAME
-    // defaults/floors/ceilings the macOS daemon enforces
-    // (crates/copypaste-core/src/config/defaults.rs). [configDefaults] is read
-    // once per process; [clampConfig] tightens each set. In stub mode (.so
-    // absent) both fall back gracefully (see CopypasteBindings).
+    // Delegated to ConfigKnobsStore — see its doc for the defaultConfig()/
+    // clampConfig() FFI-parity contract.
 
-    /**
-     * Process-wide cached macOS-parity config defaults from the native
-     * `defaultConfig()`. Lazy so the FFI (or its Kotlin fallback) is invoked at
-     * most once per process; the values are immutable defaults.
-     */
-    private val configDefaults: uniffi.copypaste_android.Config
-        get() = cachedConfigDefaults ?: synchronized(configDefaultsLock) {
-            cachedConfigDefaults ?: defaultConfig().also { cachedConfigDefaults = it }
-        }
-
-    /**
-     * Clamp a candidate [Config]-shaped tuple of the size/quota/ttl knobs through
-     * the native `clampConfig(...)`, starting from [configDefaults] and overlaying
-     * only the byte/secs knobs Settings owns. Returns the clamped config so each
-     * setter can persist a daemon-valid value. Pure-ish: reads defaults, no writes.
-     */
-    private fun clampSizeKnobs(
-        maxTextSizeBytes: Long = this.maxTextSizeBytes,
-        maxImageSizeBytes: Long = this.maxImageSizeBytes,
-        maxFileSizeBytes: Long = this.maxFileSizeBytes,
-        storageQuotaBytes: Long = this.storageQuotaBytes,
-        sensitiveTtlSecs: Long = this.sensitiveTtlSecs,
-        collectPublicIp: Boolean = this.collectPublicIp,
-        pasteAsPlainText: Boolean = this.pasteAsPlainText,
-        excludedAppBundleIds: List<String> = this.excludedAppBundleIds,
-    ): uniffi.copypaste_android.Config {
-        val candidate = configDefaults.copy(
-            maxTextSizeBytes = maxTextSizeBytes.coerceAtLeast(0L).toULong(),
-            maxImageSizeBytes = maxImageSizeBytes.coerceAtLeast(0L).toULong(),
-            maxFileSizeBytes = maxFileSizeBytes.coerceAtLeast(0L).toULong(),
-            storageQuotaBytes = storageQuotaBytes.coerceAtLeast(0L).toULong(),
-            sensitiveTtlSecs = sensitiveTtlSecs.coerceAtLeast(0L).toULong(),
-            collectPublicIp = collectPublicIp,
-            pasteAsPlainText = pasteAsPlainText,
-            // Drop blank entries and de-dup so a clamped write never persists noise;
-            // the native clampConfig may further normalise the list.
-            excludedAppBundleIds = excludedAppBundleIds
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .distinct(),
-        )
-        return clampConfig(candidate)
-    }
-
-    /**
-     * Maximum size in bytes for a text clipboard item. Items larger than this
-     * are silently dropped at capture time. Default seeded from `defaultConfig()`
-     * (MAX_TEXT_SIZE_BYTES). Writes are clamped via the native `clampConfig`.
-     */
+    /** See [ConfigKnobsStore.maxTextSizeBytes]. */
     var maxTextSizeBytes: Long
-        get() = prefs.getLong("max_text_size_bytes", configDefaults.maxTextSizeBytes.toLong())
-        set(v) = prefs.edit()
-            .putLong("max_text_size_bytes", clampSizeKnobs(maxTextSizeBytes = v).maxTextSizeBytes.toLong())
-            .apply()
+        get() = configKnobsStore.maxTextSizeBytes
+        set(v) { configKnobsStore.maxTextSizeBytes = v }
 
-    /**
-     * Maximum size in bytes for an image clipboard item. Images larger than this
-     * are silently dropped at capture time. Default seeded from `defaultConfig()`
-     * (MAX_IMAGE_SIZE_BYTES). Writes are clamped via the native `clampConfig`.
-     */
+    /** See [ConfigKnobsStore.maxImageSizeBytes]. */
     var maxImageSizeBytes: Long
-        get() = prefs.getLong("max_image_size_bytes", configDefaults.maxImageSizeBytes.toLong())
-        set(v) = prefs.edit()
-            .putLong("max_image_size_bytes", clampSizeKnobs(maxImageSizeBytes = v).maxImageSizeBytes.toLong())
-            .apply()
+        get() = configKnobsStore.maxImageSizeBytes
+        set(v) { configKnobsStore.maxImageSizeBytes = v }
 
-    /**
-     * Maximum size in bytes for a file clipboard item. Default seeded from
-     * `defaultConfig()` (MAX_FILE_SIZE_BYTES — 100 MiB storable cap). Writes are
-     * clamped via the native `clampConfig`. Added in the ABI-9 Config dict.
-     */
+    /** See [ConfigKnobsStore.maxFileSizeBytes]. */
     var maxFileSizeBytes: Long
-        get() = prefs.getLong("max_file_size_bytes", configDefaults.maxFileSizeBytes.toLong())
-        set(v) = prefs.edit()
-            .putLong("max_file_size_bytes", clampSizeKnobs(maxFileSizeBytes = v).maxFileSizeBytes.toLong())
-            .apply()
+        get() = configKnobsStore.maxFileSizeBytes
+        set(v) { configKnobsStore.maxFileSizeBytes = v }
 
-    /**
-     * Total local storage quota for the clipboard database, in bytes. When the
-     * database approaches this limit the oldest non-sensitive items should be
-     * pruned by the repository — this is the SINGLE source of truth driving
-     * retention (NOT the item-count caps). Default seeded from `defaultConfig()`
-     * (STORAGE_QUOTA_BYTES — 10 GiB). Writes are clamped via `clampConfig`.
-     * NOTE: 10 GiB exceeds Int range — the pref MUST be Long.
-     */
+    /** See [ConfigKnobsStore.storageQuotaBytes]. */
     var storageQuotaBytes: Long
-        get() = prefs.getLong("storage_quota_bytes", configDefaults.storageQuotaBytes.toLong())
-        set(v) = prefs.edit()
-            .putLong("storage_quota_bytes", clampSizeKnobs(storageQuotaBytes = v).storageQuotaBytes.toLong())
-            .apply()
+        get() = configKnobsStore.storageQuotaBytes
+        set(v) { configKnobsStore.storageQuotaBytes = v }
 
-    /**
-     * Time-to-live (seconds) before a sensitive clipboard item is auto-wiped.
-     * Default seeded from `defaultConfig()` (SENSITIVE_TTL_SECS — 30 s). `0` is a
-     * valid "auto-wipe disabled" sentinel and is intentionally NOT clamped up by
-     * the daemon, so it survives `clampConfig`. Added in the ABI-9 Config dict.
-     */
+    /** See [ConfigKnobsStore.sensitiveTtlSecs]. */
     var sensitiveTtlSecs: Long
-        get() = prefs.getLong("sensitive_ttl_secs", configDefaults.sensitiveTtlSecs.toLong())
-        set(v) = prefs.edit()
-            .putLong("sensitive_ttl_secs", clampSizeKnobs(sensitiveTtlSecs = v).sensitiveTtlSecs.toLong())
-            .apply()
+        get() = configKnobsStore.sensitiveTtlSecs
+        set(v) { configKnobsStore.sensitiveTtlSecs = v }
 
-    /**
-     * Whether the daemon may issue a one-off STUN request to learn this device's
-     * public IP (shown in the device-info card). Mirrors the macOS daemon's
-     * `collect_public_ip` config field and "Discover public IP" toggle. Default
-     * seeded from `defaultConfig()`. Writes go through the native `clampConfig`
-     * for full parity even though this flag is not range-clamped.
-     */
+    /** See [ConfigKnobsStore.collectPublicIp]. */
     var collectPublicIp: Boolean
-        get() = prefs.getBoolean("collect_public_ip", configDefaults.collectPublicIp)
-        set(v) = prefs.edit()
-            .putBoolean("collect_public_ip", clampSizeKnobs(collectPublicIp = v).collectPublicIp)
-            .apply()
+        get() = configKnobsStore.collectPublicIp
+        set(v) { configKnobsStore.collectPublicIp = v }
 
-    /**
-     * Whether pasting strips rich formatting (RTF/HTML) and writes plain text only.
-     * Mirrors the macOS daemon's `paste_as_plain_text` config field and the
-     * "Paste as plain text" toggle. Default seeded from `defaultConfig()`. Writes
-     * are routed through `clampConfig` for parity.
-     */
+    /** See [ConfigKnobsStore.pasteAsPlainText]. */
     var pasteAsPlainText: Boolean
-        get() = prefs.getBoolean("paste_as_plain_text", configDefaults.pasteAsPlainText)
-        set(v) = prefs.edit()
-            .putBoolean("paste_as_plain_text", clampSizeKnobs(pasteAsPlainText = v).pasteAsPlainText)
-            .apply()
+        get() = configKnobsStore.pasteAsPlainText
+        set(v) { configKnobsStore.pasteAsPlainText = v }
 
-    /**
-     * Bundle/package IDs of apps whose clipboard is never captured. Mirrors the
-     * macOS daemon's `excluded_app_bundle_ids` config field and the editable
-     * "Excluded apps" list. Persisted as a NUL-delimited string (NUL never occurs
-     * in a bundle id) so arbitrary ids round-trip safely. Default seeded from
-     * `defaultConfig()` (empty). Writes are trimmed/de-duped via `clampConfig`.
-     */
+    /** See [ConfigKnobsStore.excludedAppBundleIds]. */
     var excludedAppBundleIds: List<String>
-        get() {
-            val stored = prefs.getString(KEY_EXCLUDED_APP_BUNDLE_IDS, null)
-                ?: return configDefaults.excludedAppBundleIds
-            return stored.split(EXCLUDED_APP_DELIM).filter { it.isNotBlank() }
-        }
-        set(v) {
-            val clamped = clampSizeKnobs(excludedAppBundleIds = v).excludedAppBundleIds
-            prefs.edit()
-                .putString(KEY_EXCLUDED_APP_BUNDLE_IDS, clamped.joinToString(EXCLUDED_APP_DELIM))
-                .apply()
-        }
+        get() = configKnobsStore.excludedAppBundleIds
+        set(v) { configKnobsStore.excludedAppBundleIds = v }
 
     /**
      * When true, the app operates in private mode: clipboard items are not
@@ -934,512 +659,85 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("lan_visibility", true)
         set(v) = prefs.edit().putBoolean("lan_visibility", v).apply()
 
-    /**
-     * Return the P2P outbound high-water cursor for [fingerprint]:
-     * the highest [LocalItem.wallTimeMs] successfully sent to that peer.
-     *
-     * A value of 0L means no items have been sent yet (send everything on
-     * the first dial). The cursor advances only on a fully successful
-     * [syncWithPeer] call — a partial/failed dial leaves it unchanged so the
-     * next dial retransmits the same window.
-     *
-     * Key pattern: `"p2p_outbound_hw_<fingerprint>"`.  Using the fingerprint
-     * as a suffix mirrors the [KEY_PAIRED_PEERS_JSON] roster key so cursor and
-     * roster share the same natural scope / lifecycle.
-     */
+    /** See [SyncCursorsStore.p2pOutboundHighWater]. */
     fun p2pOutboundHighWater(fingerprint: String): Long =
-        prefs.getLong(KEY_P2P_OUTBOUND_HW_PREFIX + fingerprint, 0L)
+        syncCursorsStore.p2pOutboundHighWater(fingerprint)
 
-    /**
-     * Advance the P2P outbound high-water cursor for [fingerprint] to [wallTimeMs],
-     * but only when [wallTimeMs] is strictly greater than the stored value.
-     * Monotonically-increasing guard prevents a clock skew or retry from
-     * rolling the cursor backward.
-     */
+    /** See [SyncCursorsStore.advanceP2pOutboundHighWater]. */
     fun advanceP2pOutboundHighWater(fingerprint: String, wallTimeMs: Long) {
-        val key = KEY_P2P_OUTBOUND_HW_PREFIX + fingerprint
-        val current = prefs.getLong(key, 0L)
-        if (wallTimeMs > current) {
-            prefs.edit().putLong(key, wallTimeMs).apply()
-        }
+        syncCursorsStore.advanceP2pOutboundHighWater(fingerprint, wallTimeMs)
     }
 
-    /**
-     * Return the P2P inbound high-water cursor for [fingerprint]:
-     * the highest [SyncedItem.wallTimeMs] received and stored from that peer.
-     * 0L = nothing received yet.
-     */
+    /** See [SyncCursorsStore.p2pInboundHighWater]. */
     fun p2pInboundHighWater(fingerprint: String): Long =
-        prefs.getLong(KEY_P2P_INBOUND_HW_PREFIX + fingerprint, 0L)
+        syncCursorsStore.p2pInboundHighWater(fingerprint)
 
-    /**
-     * Advance the P2P inbound high-water cursor for [fingerprint] to [wallTimeMs].
-     * Monotonically-increasing — never rolls backward.
-     */
+    /** See [SyncCursorsStore.advanceP2pInboundHighWater]. */
     fun advanceP2pInboundHighWater(fingerprint: String, wallTimeMs: Long) {
-        val key = KEY_P2P_INBOUND_HW_PREFIX + fingerprint
-        val current = prefs.getLong(key, 0L)
-        if (wallTimeMs > current) {
-            prefs.edit().putLong(key, wallTimeMs).apply()
-        }
+        syncCursorsStore.advanceP2pInboundHighWater(fingerprint, wallTimeMs)
     }
 
-    /**
-     * Remove the P2P outbound and inbound high-water cursors for [fingerprint].
-     * Called when the peer is removed from the roster so the next pairing starts
-     * from a clean slate. No-op when the cursor was never set.
-     */
+    /** See [SyncCursorsStore.clearP2pHighWater]. */
     fun clearP2pHighWater(fingerprint: String) {
-        prefs.edit()
-            .remove(KEY_P2P_OUTBOUND_HW_PREFIX + fingerprint)
-            .remove(KEY_P2P_INBOUND_HW_PREFIX + fingerprint)
-            .apply()
+        syncCursorsStore.clearP2pHighWater(fingerprint)
     }
 
     /**
-     * 256-bit AES key used for local clipboard encryption.
-     *
-     * Storage: the raw 32 random bytes are wrapped with an AndroidKeyStore-
-     * resident AES-256-GCM KEK (the KEK never leaves the secure hardware /
-     * software keystore — only its `wrap` and `unwrap` results pass through
-     * the JVM). The wrapped blob and its IV are persisted in
-     * SharedPreferences as base64.
-     *
-     * Migration: any pre-existing `encryption_key_b64` (plain key from a
-     * previous build) is read once, immediately wrapped with the KEK, and
-     * the plain value is removed from SharedPreferences. This preserves
-     * already-stored clipboard items across the upgrade.
+     * 256-bit AES key used for local clipboard encryption. See
+     * [KeystoreSecretStore.encryptionKey].
      */
     val encryptionKey: ByteArray
-        get() {
-            // H4: the unwrapped key is cached in RAM after the first AndroidKeyStore
-            // GCM unwrap. Without this cache, every call (each clipboard store, each
-            // sync poll, each FGS tick) performed a fresh AES-GCM keystore unwrap —
-            // a hardware/software keystore round-trip that is needlessly expensive
-            // on a hot path. The cache is process-local, never persisted, and dies
-            // with the process. We hand out a defensive copy so a caller mutating
-            // the returned array cannot corrupt the cached master key.
-            cachedKey?.let { return it.copyOf() }
-            synchronized(keyCacheLock) {
-                cachedKey?.let { return it.copyOf() }
-                val key = loadOrCreateKey()
-                cachedKey = key
-                return key.copyOf()
-            }
-        }
-
-    /**
-     * Unwrap (or migrate/generate) the 32-byte encryption key. Callers go through
-     * the cached [encryptionKey] accessor; this does the actual keystore work and
-     * is invoked at most once per process under [keyCacheLock].
-     *
-     * CopyPaste-gkgp: if a wrapped key ALREADY EXISTS but cannot be unwrapped
-     * (e.g. the user cleared the AndroidKeyStore, or a backup was restored to a
-     * different device), we THROW [EncryptionKeyLostException] instead of silently
-     * generating a new key. Regenerating a new key would make all existing
-     * ciphertexts unreadable — effectively destroying the user's entire clipboard
-     * history without any warning. The caller (service bootstrap / encryptionKey
-     * accessor) must surface a degraded-state error and MUST NOT overwrite the
-     * persisted wrapped key blob.
-     *
-     * Only when NO wrapped key exists at all (first run, or after the user
-     * explicitly wiped app data) do we create a fresh key.
-     *
-     * @throws EncryptionKeyLostException when a wrapped key exists but cannot
-     *   be decrypted by the current KeyStore. Callers must NOT catch and swallow
-     *   this; they must surface a hard error.
-     */
-    @Throws(EncryptionKeyLostException::class)
-    private fun loadOrCreateKey(): ByteArray {
-        run {
-            // CopyPaste-gkgp: already migrated path — unwrap and return.
-            // If unwrap fails, STOP: the existing key blob is still in prefs
-            // and throwing preserves it for a potential future recovery path
-            // (e.g. the user re-pairs the device and regains keystore access).
-            val wrappedB64 = prefs.getString(KEY_WRAPPED_KEY_B64, null)
-            val ivB64 = prefs.getString(KEY_WRAPPED_KEY_IV_B64, null)
-            if (wrappedB64 != null && ivB64 != null) {
-                return try {
-                    unwrapKey(
-                        wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
-                        iv = Base64.decode(ivB64, Base64.DEFAULT)
-                    )
-                } catch (e: Exception) {
-                    // DO NOT delete the wrapped key blob — it is the only handle
-                    // to the existing ciphertexts. Throwing gives the caller a
-                    // chance to surface a "History unavailable" degraded state.
-                    Log.e(
-                        TAG,
-                        "CopyPaste-gkgp: CRITICAL — encryption key unwrap failed " +
-                            "(${e.javaClass.simpleName}). History is locked; " +
-                            "NOT regenerating key to preserve existing data.",
-                        e,
-                    )
-                    throw EncryptionKeyLostException(
-                        "Encryption key unwrap failed (${e.javaClass.simpleName}): ${e.message}",
-                        e,
-                    )
-                }
-            }
-
-            // Legacy migration: a previous build persisted the raw key in
-            // plain SharedPreferences. Read it, wrap, then scrub the plain
-            // copy so an attacker reading the prefs file post-upgrade cannot
-            // recover the key.
-            val legacyPlain = prefs.getString(KEY_LEGACY_PLAIN_KEY_B64, null)
-            val key = if (legacyPlain != null) {
-                Log.i(TAG, "Migrating plain encryption key into AndroidKeyStore wrap")
-                Base64.decode(legacyPlain, Base64.DEFAULT)
-            } else {
-                // True first run — no key of any kind exists.
-                ByteArray(32).also { SecureRandom().nextBytes(it) }
-            }
-
-            val (wrapped, iv) = wrapKey(key)
-            val editor = prefs.edit()
-                .putString(KEY_WRAPPED_KEY_B64, Base64.encodeToString(wrapped, Base64.DEFAULT))
-                .putString(KEY_WRAPPED_KEY_IV_B64, Base64.encodeToString(iv, Base64.DEFAULT))
-            if (legacyPlain != null) {
-                editor.remove(KEY_LEGACY_PLAIN_KEY_B64)
-            }
-            editor.apply()
-            return key
-        }
-    }
+        get() = keystoreSecretStore.encryptionKey
 
     // ── Multi-peer roster ───────────────────────────────────────────────────
-    //
-    // A device may now be paired with several peers at once. The roster is a JSON
-    // array persisted under [KEY_PAIRED_PEERS_JSON]; each entry's PAKE session key
-    // stays KEK-wrapped (base64 ciphertext + IV) — raw key bytes are NEVER written
-    // to JSON. Use [pairedPeers] to read, [upsertPeer]/[removePeer] to mutate, and
-    // [sessionKeyFor] to KEK-unwrap a single peer's session key on demand.
-    //
-    // The legacy single-peer scalar getters ([pairedPeerFingerprint],
-    // [pairedPeerSyncAddr], [pairedPeerSessionKey]) are kept as thin shims over
-    // `pairedPeers.firstOrNull()` so existing callers keep working unchanged.
+    // Delegated to PeerRosterStore — see its doc for the JSON schema and the
+    // legacy single-peer migration/shim contract.
 
-    /**
-     * The full paired-peer roster, newest-relevant order preserved as stored.
-     * Reads migrate the legacy single-peer fields on first access (see
-     * [migrateLegacyPairedPeer]); a parse failure yields an empty roster rather
-     * than crashing. Per-peer session keys remain KEK-wrapped in the entries.
-     */
+    /** See [PeerRosterStore.pairedPeers]. */
     var pairedPeers: List<PairedPeer>
-        get() {
-            migrateLegacyPairedPeer()
-            val raw = prefs.getString(KEY_PAIRED_PEERS_JSON, null) ?: return emptyList()
-            return parsePairedPeers(raw)
-        }
-        set(v) {
-            prefs.edit().putString(KEY_PAIRED_PEERS_JSON, serializePairedPeers(v)).apply()
-        }
+        get() = peerRosterStore.pairedPeers
+        set(v) { peerRosterStore.pairedPeers = v }
 
-    /**
-     * Append [peer] to the roster, or replace the existing entry with the same
-     * [PairedPeer.fingerprint]. APPEND semantics: pairing a second device does NOT
-     * discard the first. Order is preserved; a replaced peer keeps its position.
-     */
-    fun upsertPeer(peer: PairedPeer) {
-        val current = pairedPeers
-        val idx = current.indexOfFirst { it.fingerprint == peer.fingerprint }
-        val next = if (idx >= 0) {
-            current.toMutableList().also { it[idx] = peer }
-        } else {
-            current + peer
-        }
-        pairedPeers = next
-    }
+    /** See [PeerRosterStore.upsertPeer]. */
+    fun upsertPeer(peer: PairedPeer) = peerRosterStore.upsertPeer(peer)
 
-    /** Remove the roster entry whose fingerprint matches [fingerprint] (no-op if absent). */
-    fun removePeer(fingerprint: String) {
-        val current = pairedPeers
-        val next = current.filterNot { it.fingerprint == fingerprint }
-        if (next.size != current.size) {
-            pairedPeers = next
-            // Clear associated P2P high-water cursors so a re-pairing starts fresh.
-            clearP2pHighWater(fingerprint)
-        }
-    }
+    /** See [PeerRosterStore.removePeer]. */
+    fun removePeer(fingerprint: String) = peerRosterStore.removePeer(fingerprint)
 
-    /**
-     * Stamp the roster entry for [fingerprint] with a fresh contact time
-     * [atMs] (real-presence signal — drives the Devices screen "online" dot).
-     *
-     * Replace-in-place: preserves the peer's position, name, syncAddr, and
-     * KEK-wrapped session key untouched — only [PairedPeer.lastSyncMs] changes.
-     * No-op when the peer is unknown. Called on a SUCCESSFUL P2P sync from
-     * [FgsSyncLoop]; keep it minimal (no migration/wrap work here).
-     */
-    fun updatePeerLastSync(fingerprint: String, atMs: Long) {
-        val current = pairedPeers
-        val idx = current.indexOfFirst { it.fingerprint == fingerprint }
-        if (idx < 0) return
-        val next = current.toMutableList().also { it[idx] = it[idx].copy(lastSyncMs = atMs) }
-        pairedPeers = next
-    }
+    /** See [PeerRosterStore.updatePeerLastSync]. */
+    fun updatePeerLastSync(fingerprint: String, atMs: Long) =
+        peerRosterStore.updatePeerLastSync(fingerprint, atMs)
 
-    /**
-     * KEK-unwrap and return the 32-byte PAKE session key for the peer with
-     * [fingerprint], or an empty array when the peer is unknown or the wrapped
-     * key can no longer be decrypted (lost KEK). DO NOT log the result.
-     */
-    fun sessionKeyFor(fingerprint: String): ByteArray {
-        val peer = pairedPeers.firstOrNull { it.fingerprint == fingerprint } ?: return ByteArray(0)
-        return unwrapPeerSessionKey(peer)
-    }
+    /** See [PeerRosterStore.sessionKeyFor]. DO NOT log the result. */
+    fun sessionKeyFor(fingerprint: String): ByteArray = peerRosterStore.sessionKeyFor(fingerprint)
 
-    /**
-     * Build the KEK-wrapped (ciphertext-b64, iv-b64) pair for a raw session key so
-     * a caller (e.g. [PairActivity]) can construct a [PairedPeer] without touching
-     * the private KEK. The raw bytes never leave this call wrapped.
-     */
-    fun wrapSessionKey(raw: ByteArray): Pair<String, String> {
-        val (wrapped, iv) = wrapKey(raw)
-        return Base64.encodeToString(wrapped, Base64.NO_WRAP) to
-            Base64.encodeToString(iv, Base64.NO_WRAP)
-    }
+    /** See [PeerRosterStore.wrapSessionKey]. */
+    fun wrapSessionKey(raw: ByteArray): Pair<String, String> = peerRosterStore.wrapSessionKey(raw)
 
-    /** Unwrap a single roster entry's KEK-wrapped session key; empty on failure. */
-    private fun unwrapPeerSessionKey(peer: PairedPeer): ByteArray {
-        if (peer.sessionKeyWrappedB64.isBlank() || peer.sessionKeyIvB64.isBlank()) return ByteArray(0)
-        return runCatching {
-            unwrapKey(
-                wrapped = Base64.decode(peer.sessionKeyWrappedB64, Base64.NO_WRAP),
-                iv = Base64.decode(peer.sessionKeyIvB64, Base64.NO_WRAP),
-            )
-        }.getOrElse { e ->
-            Log.w(TAG, "Failed to unwrap session key for peer ${peer.fingerprint.take(8)} (${e.javaClass.simpleName})", e)
-            ByteArray(0)
-        }
-    }
-
-    /**
-     * One-time migration: if the roster JSON is absent but a legacy single-peer
-     * `paired_peer_fingerprint` is non-blank, synthesize a [PairedPeer] from the
-     * legacy scalar fields (carrying the existing KEK-wrapped session key blob
-     * verbatim) and persist it as the roster. Idempotent — runs once because it
-     * writes [KEY_PAIRED_PEERS_JSON], after which the guard short-circuits.
-     */
-    private fun migrateLegacyPairedPeer() {
-        if (prefs.contains(KEY_PAIRED_PEERS_JSON)) return
-        val legacyFp = prefs.getString("paired_peer_fingerprint", "") ?: ""
-        if (legacyFp.isBlank()) return
-        val legacyAddr = prefs.getString("paired_peer_sync_addr", "") ?: ""
-        val wrappedB64 = prefs.getString(KEY_SESSION_WRAPPED_B64, null) ?: ""
-        val ivB64 = prefs.getString(KEY_SESSION_IV_B64, null) ?: ""
-        val migrated = PairedPeer(
-            fingerprint = legacyFp,
-            syncAddr = legacyAddr,
-            name = "",
-            sessionKeyWrappedB64 = wrappedB64,
-            sessionKeyIvB64 = ivB64,
-        )
-        Log.i(TAG, "Migrating legacy single paired peer into multi-peer roster")
-        prefs.edit().putString(KEY_PAIRED_PEERS_JSON, serializePairedPeers(listOf(migrated))).apply()
-    }
-
-    private fun parsePairedPeers(raw: String): List<PairedPeer> = runCatching {
-        val arr = org.json.JSONArray(raw)
-        (0 until arr.length()).map { i ->
-            val o = arr.getJSONObject(i)
-            PairedPeer(
-                fingerprint = o.optString("fingerprint", ""),
-                syncAddr = o.optString("syncAddr", ""),
-                name = o.optString("name", ""),
-                sessionKeyWrappedB64 = o.optString("sessionKeyWrappedB64", ""),
-                sessionKeyIvB64 = o.optString("sessionKeyIvB64", ""),
-                lastSyncMs = o.optLong("lastSyncMs", 0L),
-                pairedAtMs = o.optLong("pairedAtMs", 0L),
-                // ABI 14 (HB-1b): peer metadata; absent on a pre-ABI-14 roster → null.
-                peerModel = o.optString("peerModel", "").ifBlank { null },
-                peerOs = o.optString("peerOs", "").ifBlank { null },
-                peerAppVersion = o.optString("peerAppVersion", "").ifBlank { null },
-                peerLocalIp = o.optString("peerLocalIp", "").ifBlank { null },
-                peerPublicIp = o.optString("peerPublicIp", "").ifBlank { null },
-                // CopyPaste-27m7: peer UUID for origin-device-filter name resolution.
-                // Absent in legacy roster entries → null (backward-compatible).
-                peerDeviceId = o.optString("peerDeviceId", "").ifBlank { null },
-            )
-        }.filter { it.fingerprint.isNotBlank() }
-    }.getOrElse { e ->
-        Log.w(TAG, "Failed to parse paired_peers_json (${e.javaClass.simpleName}); treating roster as empty", e)
-        emptyList()
-    }
-
-    private fun serializePairedPeers(peers: List<PairedPeer>): String {
-        val arr = org.json.JSONArray()
-        for (p in peers) {
-            val o = org.json.JSONObject()
-                .put("fingerprint", p.fingerprint)
-                .put("syncAddr", p.syncAddr)
-                .put("name", p.name)
-                .put("sessionKeyWrappedB64", p.sessionKeyWrappedB64)
-                .put("sessionKeyIvB64", p.sessionKeyIvB64)
-                .put("lastSyncMs", p.lastSyncMs)
-                .put("pairedAtMs", p.pairedAtMs)
-                // ABI 14 (HB-1b): persist peer metadata (null → JSON key omitted).
-                .putOpt("peerModel", p.peerModel)
-                .putOpt("peerOs", p.peerOs)
-                .putOpt("peerAppVersion", p.peerAppVersion)
-                .putOpt("peerLocalIp", p.peerLocalIp)
-                .putOpt("peerPublicIp", p.peerPublicIp)
-                // CopyPaste-27m7: peer UUID for origin-device-filter (null → omitted).
-                .putOpt("peerDeviceId", p.peerDeviceId)
-            arr.put(o)
-        }
-        return arr.toString()
-    }
-
-    // ── Legacy single-peer shims (over pairedPeers.firstOrNull()) ────────────
-    // Retained so existing single-peer callers compile and behave unchanged. The
-    // setters route through the roster (upsert by fingerprint) so writes do not
-    // silently bypass the new storage.
-
-    /**
-     * Fingerprint of the first roster peer (legacy shim), or empty when none.
-     * Setting it upserts/updates that peer's fingerprint in the roster.
-     */
+    /** See [PeerRosterStore.pairedPeerFingerprint] (legacy single-peer shim). */
     var pairedPeerFingerprint: String
-        get() = pairedPeers.firstOrNull()?.fingerprint ?: ""
-        set(v) {
-            val first = pairedPeers.firstOrNull()
-            when {
-                // Blank clears the first peer — mirrors the legacy "forget peer"
-                // flow ([DevicesActivity.unpairPeer]) which set fingerprint = "".
-                v.isBlank() -> first?.let { removePeer(it.fingerprint) }
-                first == null -> upsertPeer(PairedPeer(fingerprint = v, syncAddr = "", name = ""))
-                first.fingerprint != v -> {
-                    // Fingerprint is the roster key; rename = remove old + insert
-                    // new carrying the existing addr/key so the shim is lossless.
-                    removePeer(first.fingerprint)
-                    upsertPeer(first.copy(fingerprint = v))
-                }
-            }
-        }
+        get() = peerRosterStore.pairedPeerFingerprint
+        set(v) { peerRosterStore.pairedPeerFingerprint = v }
 
-    /**
-     * Sync-listener address (host:port) of the first roster peer (legacy shim).
-     * Setting it updates that peer's [PairedPeer.syncAddr].
-     */
+    /** See [PeerRosterStore.pairedPeerSyncAddr] (legacy single-peer shim). */
     var pairedPeerSyncAddr: String
-        get() = pairedPeers.firstOrNull()?.syncAddr ?: ""
-        set(v) {
-            val first = pairedPeers.firstOrNull() ?: return
-            if (first.syncAddr != v) upsertPeer(first.copy(syncAddr = v))
-        }
+        get() = peerRosterStore.pairedPeerSyncAddr
+        set(v) { peerRosterStore.pairedPeerSyncAddr = v }
 
-    /**
-     * 32-byte PAKE session key of the first roster peer (legacy shim). Reading
-     * KEK-unwraps it; writing KEK-wraps [v] and stores it on that peer. Reading
-     * returns an empty array when unset or unwrappable. DO NOT log.
-     */
+    /** See [PeerRosterStore.pairedPeerSessionKey] (legacy single-peer shim). DO NOT log. */
     var pairedPeerSessionKey: ByteArray
-        get() = pairedPeers.firstOrNull()?.let { unwrapPeerSessionKey(it) } ?: ByteArray(0)
-        set(v) {
-            val first = pairedPeers.firstOrNull() ?: return
-            if (v.isEmpty()) {
-                upsertPeer(first.copy(sessionKeyWrappedB64 = "", sessionKeyIvB64 = ""))
-                return
-            }
-            val (wrappedB64, ivB64) = wrapSessionKey(v)
-            upsertPeer(first.copy(sessionKeyWrappedB64 = wrappedB64, sessionKeyIvB64 = ivB64))
-        }
+        get() = peerRosterStore.pairedPeerSessionKey
+        set(v) { peerRosterStore.pairedPeerSessionKey = v }
 
     // ── P2P device identity (mTLS) ──────────────────────────────────────────
 
     /**
-     * This device's persistent P2P mTLS identity (self-signed cert + private key
-     * + the derived fingerprint the peer pins), or null when no identity has been
-     * generated yet.
-     *
-     * STABILITY CONTRACT: this identity MUST be generated exactly once and reused
-     * across every app launch, pairing, and sync session. The peer pins our
-     * [P2pIdentity.fingerprint] (= SHA-256 of [P2pIdentity.certDer]) into its mTLS
-     * allowlist at pairing time; regenerating the cert mints a new fingerprint,
-     * which the peer rejects, silently breaking P2P sync after a restart. This is
-     * the Android-side mirror of the daemon's `load_or_create` cert persistence.
-     *
-     * The private [P2pIdentity.keyDer] is wrapped with the AndroidKeyStore-resident
-     * KEK (same mechanism as [encryptionKey] / [pairedPeerSessionKey]) so it never
-     * sits in SharedPreferences in cleartext. The cert DER, device id, and
-     * fingerprint are public material and stored verbatim.
-     *
-     * A legacy plaintext identity persisted by an earlier build in the dedicated
-     * `copypaste_device_cert` prefs file is migrated into this wrapped form on
-     * first read (see [migrateLegacyP2pIdentity]) so existing pairings survive the
-     * upgrade. Returns null (forcing regeneration) only if the wrapped key can no
-     * longer be unwrapped — a lost KEK already invalidates every other secret.
-     *
-     * DO NOT log [P2pIdentity.keyDer] or include it in crash reports.
+     * This device's persistent P2P mTLS identity. See [P2pIdentityStore.p2pIdentity]
+     * for the stability contract and migration. DO NOT log [P2pIdentity.keyDer].
      */
     var p2pIdentity: P2pIdentity?
-        get() {
-            migrateLegacyP2pIdentity()
-            val deviceId = prefs.getString(KEY_P2P_DEVICE_ID, null) ?: return null
-            val fingerprint = prefs.getString(KEY_P2P_FINGERPRINT, null) ?: return null
-            val certB64 = prefs.getString(KEY_P2P_CERT_DER_B64, null) ?: return null
-            val wrappedB64 = prefs.getString(KEY_P2P_KEY_WRAPPED_B64, null) ?: return null
-            val ivB64 = prefs.getString(KEY_P2P_KEY_IV_B64, null) ?: return null
-            val keyDer = runCatching {
-                unwrapKey(
-                    wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
-                    iv = Base64.decode(ivB64, Base64.DEFAULT),
-                )
-            }.getOrElse { e ->
-                Log.w(TAG, "Failed to unwrap P2P device key (${e.javaClass.simpleName}); identity reset", e)
-                return null
-            }
-            return P2pIdentity(
-                deviceId = deviceId,
-                fingerprint = fingerprint,
-                certDer = Base64.decode(certB64, Base64.DEFAULT),
-                keyDer = keyDer,
-            )
-        }
-        set(v) {
-            if (v == null) {
-                prefs.edit()
-                    .remove(KEY_P2P_DEVICE_ID)
-                    .remove(KEY_P2P_FINGERPRINT)
-                    .remove(KEY_P2P_CERT_DER_B64)
-                    .remove(KEY_P2P_KEY_WRAPPED_B64)
-                    .remove(KEY_P2P_KEY_IV_B64)
-                    .apply()
-                return
-            }
-            val (wrapped, iv) = wrapKey(v.keyDer)
-            prefs.edit()
-                .putString(KEY_P2P_DEVICE_ID, v.deviceId)
-                .putString(KEY_P2P_FINGERPRINT, v.fingerprint)
-                .putString(KEY_P2P_CERT_DER_B64, Base64.encodeToString(v.certDer, Base64.NO_WRAP))
-                .putString(KEY_P2P_KEY_WRAPPED_B64, Base64.encodeToString(wrapped, Base64.DEFAULT))
-                .putString(KEY_P2P_KEY_IV_B64, Base64.encodeToString(iv, Base64.DEFAULT))
-                .commit() // synchronous: an identity lost to a force-stop breaks pairing
-        }
-
-    /**
-     * Migrate a P2P identity persisted by an earlier build in the dedicated
-     * `copypaste_device_cert` SharedPreferences file (where the private key was
-     * stored as plaintext base64) into the KEK-wrapped form above, then scrub the
-     * legacy file. No-op when nothing legacy exists or migration already ran.
-     */
-    private fun migrateLegacyP2pIdentity() {
-        if (prefs.contains(KEY_P2P_KEY_WRAPPED_B64)) return
-        val legacy = appContext.getSharedPreferences(LEGACY_CERT_PREFS, Context.MODE_PRIVATE)
-        val deviceId = legacy.getString(LEGACY_CERT_DEVICE_ID, null) ?: return
-        val fingerprint = legacy.getString(LEGACY_CERT_FINGERPRINT, null) ?: return
-        val certB64 = legacy.getString(LEGACY_CERT_CERT_DER, null) ?: return
-        val keyB64 = legacy.getString(LEGACY_CERT_KEY_DER, null) ?: return
-        Log.i(TAG, "Migrating legacy plaintext P2P identity into AndroidKeyStore wrap")
-        p2pIdentity = P2pIdentity(
-            deviceId = deviceId,
-            fingerprint = fingerprint,
-            certDer = Base64.decode(certB64, Base64.NO_WRAP),
-            keyDer = Base64.decode(keyB64, Base64.NO_WRAP),
-        )
-        legacy.edit().clear().apply()
-    }
+        get() = p2pIdentityStore.p2pIdentity
+        set(v) { p2pIdentityStore.p2pIdentity = v }
 
     // ── Logcat capture (adb READ_LOGS fallback) ────────────────────────────
 
@@ -1511,7 +809,7 @@ class Settings(context: Context) {
      * so the synchronous write is acceptable.
      *
      * KEK-wrapped secrets (passphrase, Supabase password) are intentionally NOT
-     * batched here — they go through [writeWrappedSecret] separately because
+     * batched here — they go through [KeystoreSecretStore] separately because
      * their keystore wrap produces blob+IV pairs that this scalar batch cannot
      * express. They are also `apply()`-based, but losing a just-typed secret on
      * an immediate force-stop is far less surprising than a flipped toggle, and
@@ -1548,7 +846,7 @@ class Settings(context: Context) {
         // Clamp the size/quota knobs through the SAME native clampConfig the macOS
         // daemon uses so a force-stop-safe batch write can never persist a
         // sub-floor/over-ceiling value (mirrors the per-setter clamp above).
-        val clamped = clampSizeKnobs(
+        val clamped = configKnobsStore.clampConfigForSave(
             maxTextSizeBytes = maxTextSizeBytes,
             maxImageSizeBytes = maxImageSizeBytes,
             storageQuotaBytes = storageQuotaBytes,
@@ -1584,120 +882,8 @@ class Settings(context: Context) {
     fun clear() {
         // H4: drop the cached master key so a re-created key after clear() is
         // not shadowed by a stale RAM copy.
-        synchronized(keyCacheLock) { cachedKey = null }
+        keystoreSecretStore.clearCachedKey()
         prefs.edit().clear().apply()
-    }
-
-    // ── AndroidKeyStore KEK helpers ─────────────────────────────────────────
-
-    /**
-     * Wrap [raw] with the KeyStore-resident KEK. Returns (ciphertext, iv).
-     * The IV is generated by the KeyStore provider (12 bytes for GCM).
-     */
-    private fun wrapKey(raw: ByteArray): Pair<ByteArray, ByteArray> {
-        val cipher = Cipher.getInstance(KEK_TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKek())
-        val ct = cipher.doFinal(raw)
-        return ct to cipher.iv
-    }
-
-    private fun unwrapKey(wrapped: ByteArray, iv: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance(KEK_TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKek(), GCMParameterSpec(KEK_TAG_BITS, iv))
-        return cipher.doFinal(wrapped)
-    }
-
-    /**
-     * Read a KEK-wrapped UTF-8 string secret stored under [wrappedKey]/[ivKey],
-     * migrating any pre-existing plaintext value held under [legacyPlainKey].
-     *
-     * Resolution order:
-     *  1. If a wrapped blob exists, unwrap and return it (empty string when the
-     *     KEK can no longer decrypt it — same best-effort policy as
-     *     [pairedPeerSessionKey]: a lost KEK means the secret is simply re-prompted).
-     *  2. Otherwise, if a legacy plaintext value exists, wrap it now (so the
-     *     plaintext is scrubbed on first read post-upgrade) and return it.
-     *  3. Otherwise return "" (unset).
-     */
-    private fun readWrappedSecret(
-        wrappedKey: String,
-        ivKey: String,
-        legacyPlainKey: String,
-    ): String {
-        val wrappedB64 = prefs.getString(wrappedKey, null)
-        val ivB64 = prefs.getString(ivKey, null)
-        if (wrappedB64 != null && ivB64 != null) {
-            return runCatching {
-                String(
-                    unwrapKey(
-                        wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
-                        iv = Base64.decode(ivB64, Base64.DEFAULT),
-                    ),
-                    Charsets.UTF_8,
-                )
-            }.getOrElse { e ->
-                Log.w(TAG, "Failed to unwrap secret '$wrappedKey' (${e.javaClass.simpleName})", e)
-                ""
-            }
-        }
-
-        // Migration: a previous build persisted this secret in plain prefs.
-        val legacyPlain = prefs.getString(legacyPlainKey, null)
-        if (legacyPlain != null && legacyPlain.isNotEmpty()) {
-            Log.i(TAG, "Migrating plain secret '$legacyPlainKey' into AndroidKeyStore wrap")
-            writeWrappedSecret(wrappedKey, ivKey, legacyPlainKey, legacyPlain)
-            return legacyPlain
-        }
-        return ""
-    }
-
-    /**
-     * Wrap [value] with the KEK and persist under [wrappedKey]/[ivKey], scrubbing
-     * any legacy plaintext under [legacyPlainKey]. An empty [value] clears all
-     * three keys (logical "unset").
-     */
-    private fun writeWrappedSecret(
-        wrappedKey: String,
-        ivKey: String,
-        legacyPlainKey: String,
-        value: String,
-    ) {
-        if (value.isEmpty()) {
-            prefs.edit()
-                .remove(wrappedKey)
-                .remove(ivKey)
-                .remove(legacyPlainKey)
-                .apply()
-            return
-        }
-        val (wrapped, iv) = wrapKey(value.toByteArray(Charsets.UTF_8))
-        prefs.edit()
-            .putString(wrappedKey, Base64.encodeToString(wrapped, Base64.DEFAULT))
-            .putString(ivKey, Base64.encodeToString(iv, Base64.DEFAULT))
-            .remove(legacyPlainKey)
-            .apply()
-    }
-
-    private fun getOrCreateKek(): SecretKey {
-        val keystore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        (keystore.getKey(KEK_ALIAS, null) as? SecretKey)?.let { return it }
-
-        val keygen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
-        keygen.init(
-            KeyGenParameterSpec.Builder(
-                KEK_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                // No user-auth requirement — the service runs headless. The
-                // KEK is bound to the device's secure storage but does not
-                // require an unlocked screen to use.
-                .setRandomizedEncryptionRequired(true)
-                .build()
-        )
-        return keygen.generateKey()
     }
 
     /**
@@ -1715,45 +901,6 @@ class Settings(context: Context) {
         get() = getLamportClock(prefs)
 
     companion object {
-        private const val TAG = "Settings"
-
-        /**
-         * H4: process-wide cache of the unwrapped 32-byte encryption key.
-         *
-         * Lives in the companion (not a [Settings] instance field) because the
-         * app constructs many short-lived [Settings] objects — caching per
-         * instance would still re-unwrap on each new object. The cache is
-         * RAM-only (never written to prefs/disk) and dies with the process.
-         */
-        @Volatile
-        private var cachedKey: ByteArray? = null
-
-        private val keyCacheLock = Any()
-
-        /**
-         * Process-wide cache of the macOS-parity config defaults from the native
-         * `defaultConfig()` (or its Kotlin fallback). Seeded once; immutable
-         * defaults so a shared cache is safe across [Settings] instances.
-         */
-        @Volatile
-        private var cachedConfigDefaults: uniffi.copypaste_android.Config? = null
-
-        private val configDefaultsLock = Any()
-
-        /** Guards the read-or-generate-UUID critical section in [deviceId]. */
-        private val deviceIdLock = Any()
-
-        /**
-         * Process-wide monitor for [advanceSupabaseCursor].
-         *
-         * A single companion-object lock (rather than an instance field) means
-         * ALL [Settings] instances — whether constructed by FgsSyncLoop or by the
-         * WorkManager [SupabasePollWorker] in the same process — share the same
-         * mutex.  This is safe because [Settings] already shares the same
-         * `SharedPreferences` instance via `context.getSharedPreferences`.
-         */
-        private val supabaseCursorLock = Any()
-
         /**
          * Process-wide [LamportClock] singleton. Constructed once (double-checked
          * locking on [lamportClockLock]) and reused by all [Settings] instances.
@@ -1772,91 +919,11 @@ class Settings(context: Context) {
             }
         }
 
-        private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
-        private const val KEK_ALIAS = "copypaste_master_kek_v1"
-        private const val KEK_TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val KEK_TAG_BITS = 128
-        private const val KEY_WRAPPED_KEY_B64 = "encryption_key_wrapped_b64"
-        private const val KEY_WRAPPED_KEY_IV_B64 = "encryption_key_iv_b64"
-        private const val KEY_LEGACY_PLAIN_KEY_B64 = "encryption_key_b64"
-        private const val KEY_SESSION_WRAPPED_B64 = "paired_peer_session_key_wrapped_b64"
-        private const val KEY_SESSION_IV_B64 = "paired_peer_session_key_iv_b64"
-
-        /** Multi-peer roster JSON (see [pairedPeers]); presence also gates the
-         *  one-time legacy-single-peer migration. */
-        private const val KEY_PAIRED_PEERS_JSON = "paired_peers_json"
-
-        // ── KEK-wrapped cloud secrets (passphrase + Supabase password) ──────────
-        // Plaintext pref keys retained for read-time migration only.
-        private const val KEY_LEGACY_PASSPHRASE_PLAIN = "cloud_sync_passphrase"
-        private const val KEY_PASSPHRASE_WRAPPED_B64 = "cloud_sync_passphrase_wrapped_b64"
-        private const val KEY_PASSPHRASE_IV_B64 = "cloud_sync_passphrase_iv_b64"
-
-        private const val KEY_LEGACY_SUPABASE_PW_PLAIN = "supabase_password"
-        private const val KEY_SUPABASE_PW_WRAPPED_B64 = "supabase_password_wrapped_b64"
-        private const val KEY_SUPABASE_PW_IV_B64 = "supabase_password_iv_b64"
-
-        // CopyPaste-crh3.24: the Supabase account email is PII and was the only
-        // cloud secret still stored as raw plaintext. KEK-wrap it like the
-        // password (legacy plain key "supabase_email" auto-migrates on first read).
-        private const val KEY_LEGACY_SUPABASE_EMAIL_PLAIN = "supabase_email"
-        private const val KEY_SUPABASE_EMAIL_WRAPPED_B64 = "supabase_email_wrapped_b64"
-        private const val KEY_SUPABASE_EMAIL_IV_B64 = "supabase_email_iv_b64"
-
-        // bd CopyPaste-44rq.53: KEK-wrapped relay bearer token.
-        // The plaintext SharedPreferences key "relay_token" becomes the legacy key
-        // so existing installs auto-migrate to KEK-wrapped storage on first read.
-        private const val KEY_LEGACY_RELAY_TOKEN_PLAIN = "relay_token"
-        private const val KEY_RELAY_TOKEN_WRAPPED_B64 = "relay_token_wrapped_b64"
-        private const val KEY_RELAY_TOKEN_IV_B64 = "relay_token_iv_b64"
-
-        // CopyPaste-44rq.57: KEK-wrapped relay registration key (was plaintext).
-        // The plaintext key "relay_registration_key_b64" becomes the legacy key
-        // so existing installs auto-migrate to KEK-wrapped storage on first read.
-        private const val KEY_LEGACY_RELAY_REG_KEY_PLAIN = "relay_registration_key_b64"
-        private const val KEY_RELAY_REG_KEY_WRAPPED_B64 = "relay_reg_key_wrapped_b64"
-        private const val KEY_RELAY_REG_KEY_IV_B64 = "relay_reg_key_iv_b64"
-
-        // KEK-wrapped, directly-provisioned 32-byte cloud sync key. Carried over
-        // QR pairing (see PairActivity) so a scanning phone can decrypt cloud rows
-        // without the user re-typing the passphrase. Distinct from the
-        // passphrase-derived key path. Raw bytes are never persisted.
-        private const val KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64 = "cloud_sync_key_direct_wrapped_b64"
-        private const val KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64 = "cloud_sync_key_direct_iv_b64"
+        /** Guards the read-or-generate-UUID critical section in [deviceId]. */
+        private val deviceIdLock = Any()
 
         // ── P2P sync ──────────────────────────────────────────────────────────
         const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"
-
-        /**
-         * SharedPreferences key prefix for the per-peer P2P outbound high-water
-         * cursor. The full key is "$KEY_P2P_OUTBOUND_HW_PREFIX<fingerprint>".
-         * Value is a Long (Unix epoch ms) — the highest [LocalItem.wallTimeMs]
-         * successfully sent to that peer on the last dial. Items with wallTimeMs
-         * <= this value are skipped on subsequent dials (already synced).
-         * Default 0L = never synced (send everything on first dial).
-         */
-        private const val KEY_P2P_OUTBOUND_HW_PREFIX = "p2p_outbound_hw_"
-
-        /**
-         * SharedPreferences key prefix for the per-peer P2P inbound high-water
-         * cursor. The full key is "$KEY_P2P_INBOUND_HW_PREFIX<fingerprint>".
-         * Value is a Long (Unix epoch ms) — the highest [SyncedItem.wallTimeMs]
-         * received from that peer and successfully stored on the last dial.
-         * Items from the peer with wallTimeMs <= this value are skipped by LWW
-         * in [ClipboardRepository.storeItemWithLww], so this cursor is advisory
-         * (avoids unnecessary FFI work) rather than the primary dedup gate.
-         * Default 0L = never received from this peer.
-         */
-        private const val KEY_P2P_INBOUND_HW_PREFIX = "p2p_inbound_hw_"
-
-        // ── Excluded apps (privacy) ─────────────────────────────────────────────
-        private const val KEY_EXCLUDED_APP_BUNDLE_IDS = "excluded_app_bundle_ids"
-
-        /**
-         * NUL delimiter for the joined [excludedAppBundleIds] pref string. NUL never
-         * occurs in a package/bundle id, so it cannot collide with an entry.
-         */
-        private const val EXCLUDED_APP_DELIM = "\u0000"
 
         // ── Recent searches ─────────────────────────────────────────────────────
         private const val KEY_RECENT_SEARCHES = "recent_searches"
@@ -1865,24 +932,9 @@ class Settings(context: Context) {
         /**
          * NUL delimiter for the joined [recentSearches] pref string. NUL never
          * occurs in user-entered search text, so it cannot collide with a query.
+         * Built via [Char] rather than an inline NUL-escape literal to avoid any
+         * source-encoding ambiguity; behaviourally identical single-NUL-char string.
          */
-        private const val RECENT_SEARCH_DELIM = "\u0000"
-        // ── P2P device identity (mTLS): cert/id/fingerprint plain, key KEK-wrapped ──
-        private const val KEY_P2P_DEVICE_ID = "p2p_identity_device_id"
-        private const val KEY_P2P_FINGERPRINT = "p2p_identity_fingerprint"
-        private const val KEY_P2P_CERT_DER_B64 = "p2p_identity_cert_der_b64"
-        private const val KEY_P2P_KEY_WRAPPED_B64 = "p2p_identity_key_wrapped_b64"
-        private const val KEY_P2P_KEY_IV_B64 = "p2p_identity_key_iv_b64"
-
-        // Legacy plaintext identity prefs file (pre-KEK-wrap builds). Read-only,
-        // migrated and cleared by [migrateLegacyP2pIdentity].
-        private const val LEGACY_CERT_PREFS = "copypaste_device_cert"
-        private const val LEGACY_CERT_DEVICE_ID = "device_id"
-        private const val LEGACY_CERT_FINGERPRINT = "fingerprint"
-        private const val LEGACY_CERT_CERT_DER = "cert_der_b64"
-        private const val LEGACY_CERT_KEY_DER = "key_der_b64"
+        private val RECENT_SEARCH_DELIM: String = 0.toChar().toString()
     }
 }
-
-// PairedPeer, P2pIdentity → PeerRoster.kt
-// rememberSkin, applyScreenshotPolicy → SettingsComposables.kt

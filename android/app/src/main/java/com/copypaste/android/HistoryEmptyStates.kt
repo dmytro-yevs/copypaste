@@ -97,7 +97,7 @@ internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = 
                                 shape = RoundedCornerShape(20.dp),
                             ),
                         contentAlignment = Alignment.Center,
-                    )
+                    ) {}
                     Column {
                         // CopyPaste-crh3.31: tailor the empty state to private mode
                         // (parity with macOS HistoryView), so the user is not misled
@@ -164,7 +164,7 @@ internal fun EmptySearchState(padding: PaddingValues, query: String) {
                                 shape = RoundedCornerShape(20.dp),
                             ),
                         contentAlignment = Alignment.Center,
-                    )
+                    ) {}
                     Column {
                         Text(
                             text = stringResource(R.string.empty_search_title, query),
