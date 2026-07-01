@@ -74,21 +74,24 @@ export function GlideHighlight({
     <div
       aria-hidden
       style={{
+        // Functional measurement/positioning only — tracks the selected row's
+        // geometry so the glide layer overlays the right list item.
         position: "absolute",
         left: 0,
         right: 0,
         top,
         height,
-        // §3 selection fill — token so it re-themes in light mode.
-        background: "var(--selected)",
-        // zuzu: suppress the 130ms transition during scroll so the glide layer
-        // doesn't visibly slide out of the container during momentum scroll.
-        // Also hide (opacity 0) if the selected item is outside the viewport.
+        // Functional: suppress the transition during scroll, and hide
+        // (opacity 0) when the selected item has scrolled out of view —
+        // this is glide/visibility behavior wired to preserved state
+        // (visible/isScrolling/prefersReduced), not decoration.
         transition: prefersReduced.current || isScrolling
           ? "none"
           : "top 130ms cubic-bezier(0.2,0,0,1), height 130ms cubic-bezier(0.2,0,0,1)",
         opacity: visible && !isScrolling ? 1 : 0,
-        // Behind row content (z=0), above list background.
+        // Functional: absolutely-positioned elements paint above static
+        // siblings by default regardless of DOM order — zIndex 0 here keeps
+        // this layer behind the row content (text must stay legible).
         zIndex: 0,
         pointerEvents: "none",
       }}

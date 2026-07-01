@@ -1,13 +1,11 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
-import styles from "./ViewTransition.module.css";
 import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, setProtocolMismatchHandler, type PairSasStatus } from "./lib/ipc";
 import { AccessibilityBanner } from "./components/AccessibilityBanner";
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
 import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPresence";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
@@ -24,11 +22,10 @@ const HAS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // ---------------------------------------------------------------------------
-// ViewTransitionWrapper — per-panel fade-in wrapper (CopyPaste-2bhh / 4r48)
+// ViewTransitionWrapper — plain wrapper preserving data-testid (CopyPaste-2bhh / 4r48)
 // ---------------------------------------------------------------------------
-// Used by CrossfadeContainer for the INCOMING panel. Exported so
-// App.view-transition.test.tsx can assert on it directly without needing
-// to exercise the full crossfade orchestration.
+// Animation stripped in design-demolition pass (CopyPaste-h1n3). The wrapper
+// remains so tests can find data-testid="view-transition" and so routing works.
 export function ViewTransitionWrapper({
   viewKey: _viewKey,
   children,
@@ -36,44 +33,16 @@ export function ViewTransitionWrapper({
   viewKey: string;
   children: ReactNode;
 }) {
-  // Detect reduced-motion preference at render time (synchronous — avoids a
-  // flash of animated content before a useEffect could suppress it).
-  const prefersReduced =
-    typeof window !== "undefined" &&
-    window.matchMedia != null &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
   return (
-    <div
-      data-testid="view-transition"
-      className={["h-full", !prefersReduced ? styles["view-fade-in"] : ""].join(" ").trim()}
-      style={{
-        // Inline timing/fill so jsdom tests can assert the values without
-        // needing to parse CSS stylesheets.
-        animationDuration: prefersReduced ? "0ms" : "180ms",
-        animationFillMode: "forwards",
-      }}
-    >
+    <div data-testid="view-transition">
       {children}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// CrossfadeContainer — 4r48 true crossfade fix
+// CrossfadeContainer — plain wrapper (animation stripped in CopyPaste-h1n3)
 // ---------------------------------------------------------------------------
-// Renders outgoing view (position:absolute, fading OUT) and incoming view
-// (position:absolute, fading IN) simultaneously for CROSSFADE_MS.
-// After the outgoing animation ends it is removed from the DOM.
-// This fixes the "disappear then reappear" flash caused by the keyed-remount
-// approach where the old view unmounted instantly with no fade-out.
-const CROSSFADE_MS = 180;
-
-interface CrossfadeState {
-  outKey: string;
-  outNode: ReactNode;
-}
-
 function CrossfadeContainer({
   viewKey,
   children,
@@ -81,63 +50,10 @@ function CrossfadeContainer({
   viewKey: string;
   children: ReactNode;
 }) {
-  const prefersReduced =
-    typeof window !== "undefined" &&
-    window.matchMedia != null &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // Track the outgoing panel so we can render it as fading-out overlay.
-  const [outgoing, setOutgoing] = useState<CrossfadeState | null>(null);
-  const prevKeyRef = useRef(viewKey);
-  const prevChildrenRef = useRef<ReactNode>(children);
-
-  // When viewKey changes: save old view as outgoing, schedule removal.
-  useEffect(() => {
-    if (prevKeyRef.current === viewKey) {
-      // Same tab — update saved children reference for the next transition.
-      prevChildrenRef.current = children;
-      return;
-    }
-    // Real tab switch: begin crossfade.
-    const outKey = prevKeyRef.current;
-    const outNode = prevChildrenRef.current;
-    prevKeyRef.current = viewKey;
-    prevChildrenRef.current = children;
-
-    setOutgoing({ outKey, outNode });
-
-    // Remove outgoing panel after animation + a small buffer.
-    const t = setTimeout(() => setOutgoing(null), prefersReduced ? 0 : CROSSFADE_MS + 20);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewKey]);
-
-  const animDur = prefersReduced ? "0ms" : `${CROSSFADE_MS}ms`;
-
   return (
-    // position:relative so the absolute panels are clipped to the main area.
-    <div className="relative h-full w-full overflow-hidden">
-      {/* Outgoing view — fades out above the incoming panel */}
-      {outgoing !== null && (
-        <div
-          key={outgoing.outKey}
-          className={["absolute inset-0 h-full", !prefersReduced ? styles["view-fade-out"] : ""].join(" ").trim()}
-          style={{
-            animationDuration: animDur,
-            animationFillMode: "forwards",
-            // Sit above the incoming panel during the crossfade so the fade-out
-            // is visible (z=1 vs z=0 on the incoming wrapper).
-            zIndex: 1,
-          }}
-        >
-          {outgoing.outNode}
-        </div>
-      )}
-      {/* Incoming view — fades in below the outgoing panel */}
-      <ViewTransitionWrapper viewKey={viewKey}>
-        {children}
-      </ViewTransitionWrapper>
-    </div>
+    <ViewTransitionWrapper viewKey={viewKey}>
+      {children}
+    </ViewTransitionWrapper>
   );
 }
 
@@ -154,9 +70,6 @@ const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
 export default function App() {
   const view = useUI((s) => s.view);
   const setView = useUI((s) => s.setView);
-  const translucency = useUI((s) => s.prefs.translucency);
-  const theme = useUI((s) => s.prefs.theme);
-  const accent = useUI((s) => s.prefs.accent);
   const { Component: View, label } = VIEWS[view];
 
   // The popup window emits "open-settings" (after showing this main window) when
@@ -182,10 +95,6 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // Incoming pairing (responder side) — always-on background detection
   // ---------------------------------------------------------------------------
-  // The Tauri backend polls `pair_get_sas` every ~1 s and emits
-  // `"incoming-pairing"` when it observes state="awaiting_sas"+role="responder".
-  // We switch to the Devices tab and pass the payload to DevicesView so the SAS
-  // modal opens regardless of which tab was active when the request arrived.
   const [incomingPairing, setIncomingPairing] = useState<PairSasStatus | null>(null);
 
   useEffect(() => {
@@ -195,8 +104,6 @@ export default function App() {
     void listen<PairSasStatus>("incoming-pairing", (event) => {
       if (cancelled) return;
       const payload = event.payload;
-      // Only act on responder+awaiting_sas payloads (belt-and-suspenders guard;
-      // the Rust poller already filters, but defensive check here too).
       if (payload.state === "awaiting_sas" && payload.role === "responder") {
         setIncomingPairing(payload);
         setView("devices");
@@ -205,8 +112,7 @@ export default function App() {
       if (cancelled) fn();
       else unlisten = fn;
     }).catch(() => {
-      // Best-effort — not critical path; the in-component poll in DevicesView
-      // serves as a fallback when the user is already on the Devices tab.
+      // Best-effort.
     });
     return () => {
       cancelled = true;
@@ -217,60 +123,21 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // Live peer-presence polling (app-global, always-on)
   // ---------------------------------------------------------------------------
-  // Polls `poll_peer_events` every ~1 s so the DevicesView online dots update
-  // in real time without requiring the user to open the Devices page.
-  // The polling is intentionally app-global (not per-view) so presence state
-  // persists across tab switches and the sidebar badge (if added later) works.
   useEffect(() => {
     startPeerPresencePolling();
     return () => { stopPeerPresencePolling(); };
   }, []);
 
-  // Apply/remove the no-translucency root class whenever the pref changes.
-  // When translucency is OFF we add "no-translucency" on <html> so the CSS
-  // can key off it to swap transparent/blur surfaces for solid ones.
-  useEffect(() => {
-    if (translucency) {
-      document.documentElement.classList.remove("no-translucency");
-    } else {
-      document.documentElement.classList.add("no-translucency");
-    }
-  }, [translucency]);
-
-  // Apply data-theme and data-accent whenever either pref changes.
-  // §2 STYLEGUIDE: theme × accent are the only two appearance axes.
-  // <html data-theme="dark|light" data-accent="indigo|blue|teal|green|amber|rose">
-  // Also syncs the native NSWindow appearance so NSVisualEffectView (vibrancy)
-  // uses the correct glass tint. No-op in browser/mock and on non-macOS (the
-  // Rust command is cfg-gated). Best-effort — never block on this.
-  useEffect(() => {
-    const el = document.documentElement;
-    el.dataset.theme = theme;
-    el.dataset.accent = accent;
-    if (HAS_TAURI) {
-      void invoke("set_native_appearance", { appearance: theme }).catch(() => {
-        // Non-fatal — the window still renders correctly; only vibrancy tint is off.
-      });
-    }
-  }, [theme, accent]);
-
   // ---------------------------------------------------------------------------
   // Protocol-version mismatch banner (dismissible)
   // ---------------------------------------------------------------------------
-  // Assigned once on mount so all subsequent ipcCall()s use this handler.
-  // Shows when the daemon speaks a protocol version that differs from the
-  // client's CURRENT_PROTOCOL_VERSION — the daemon is ahead (needs app upgrade)
-  // or behind (needs daemon restart). Dismissible so it doesn't block use.
   const [protocolMismatch, setProtocolMismatch] = useState<number | null>(null);
   const [mismatchDismissed, setMismatchDismissed] = useState(false);
 
   useEffect(() => {
-    // Register handler so subsequent ipcCall()s surface the banner instead
-    // of the default console.warn. We only update state if not already dismissed.
     setProtocolMismatchHandler((daemonVersion) => {
       setProtocolMismatch(daemonVersion);
     });
-    // Deregister on unmount to restore the default console.warn behaviour.
     return () => { setProtocolMismatchHandler(null); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -280,48 +147,33 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // Daemon spawn error banner (non-dismissible, installation-incomplete)
   // ---------------------------------------------------------------------------
-  // On mount: call getDaemonError() for the case where the app launched,
-  // tried to start the daemon, failed, and we loaded after the event fired.
-  // Also listen for the real-time "daemon-spawn-result" event for the case
-  // where the app is still starting when this component mounts.
   const [daemonError, setDaemonError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    // Fallback: read whatever error was stored by ensure_daemon_running_async.
     void getDaemonError().then((err) => {
       if (!cancelled && err) {
-        // Log detail (may contain bundle/socket paths) to console only — not the DOM.
         // eslint-disable-next-line no-console
         console.error("[CopyPaste] daemon spawn error:", err);
         setDaemonError(err);
       }
-    }).catch(() => {
-      // Best-effort — never block on this.
-    });
+    }).catch(() => {});
 
-    // Real-time: listen for the daemon-spawn-result Tauri event so we show
-    // the banner immediately if the daemon fails while the UI is already open.
-    // Browser/mock has no Tauri event plugin — skip (audit P1-7).
     let unlisten: (() => void) | null = null;
     if (HAS_TAURI) {
       void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
         if (cancelled) return;
         if (!event.payload.ok && event.payload.error) {
-          // Log detail to console only — DOM shows a generic message (P2-54h5).
           // eslint-disable-next-line no-console
           console.error("[CopyPaste] daemon-spawn-result error:", event.payload.error);
           setDaemonError(event.payload.error);
         } else if (event.payload.ok) {
-          // Daemon started successfully — clear any stale error.
           setDaemonError(null);
         }
       }).then((fn) => {
         unlisten = fn;
-      }).catch(() => {
-        // Best-effort.
-      });
+      }).catch(() => {});
     }
 
     return () => {
@@ -333,12 +185,6 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // Stale-daemon banner (dismissible)
   // ---------------------------------------------------------------------------
-  // App-launch stale check: if an OLD daemon survived an upgrade and is still
-  // serving old code, show a single dismissible banner offering a restart.
-  // Uses detectStaleDaemonFromStatus (strictly OLDER semver only) so a newer
-  // daemon after a rollback does not trigger the "restart" banner.
-  // Minimal + non-annoying: we never auto-kill the daemon, and the banner is
-  // dismissible. Best-effort — any error yields no banner.
   const [staleDaemon, setStaleDaemon] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
@@ -354,7 +200,7 @@ export default function App() {
           setStaleDaemon(detectStaleDaemonFromStatus(status, myVer));
         }
       } catch {
-        // Best-effort — never show a banner on error.
+        // Best-effort.
       }
     })();
     return () => {
@@ -366,17 +212,10 @@ export default function App() {
   // ---------------------------------------------------------------------------
   // Accessibility permission banner (macOS only)
   // ---------------------------------------------------------------------------
-  // We check once on mount; the Tauri command always returns `true` on
-  // non-macOS so the banner never appears there.  After the user opens
-  // System Settings and grants the permission we re-check every 3 s until
-  // it's granted (or they dismiss the banner).
-  const [axGranted, setAxGranted] = useState<boolean>(true); // assume OK until checked
+  const [axGranted, setAxGranted] = useState<boolean>(true);
   const [axDismissed, setAxDismissed] = useState(false);
 
   useEffect(() => {
-    // s7ia B2: don't poll at all once dismissed or already granted — the
-    // banner is gone and CoreGraphics calls are wasted. The effect re-runs when
-    // axGranted or axDismissed changes so it naturally exits early.
     if (axGranted || axDismissed) return;
 
     let cancelled = false;
@@ -387,20 +226,16 @@ export default function App() {
         const granted = await checkAccessibilityPermission();
         if (cancelled) return;
         setAxGranted(granted);
-        // Stop the interval immediately on grant so we don't wait for cleanup.
         if (granted && interval !== null) {
           clearInterval(interval);
           interval = null;
         }
       } catch {
-        // Best-effort — never block startup on this check.
+        // Best-effort.
       }
     };
 
     void check();
-
-    // Poll every 3 s so the banner disappears automatically once the user
-    // grants the permission in System Settings (without needing an app restart).
     interval = setInterval(() => { void check(); }, 3000);
     return () => {
       cancelled = true;
@@ -408,62 +243,28 @@ export default function App() {
     };
   }, [axGranted, axDismissed]);
 
-  // showAxBanner removed — AccessibilityBanner component handles its own visibility.
-
   const handleOpenAxSettings = async () => {
     try {
       await requestAccessibilityPermission();
     } catch {
-      // Fire-and-forget — opening System Settings can't really fail in a
-      // meaningful way; if it does, the user can navigate there manually.
+      // Fire-and-forget.
     }
   };
 
   return (
-    // Outer boundary is the last line of defence: even if the chrome (Sidebar)
-    // itself throws, the window shows a fallback instead of going blank.
     <ErrorBoundary>
-      {/*
-        Floating shell layout — body gradient behind all panels.
-        Panels are floating glass cards inset ~10px from window edges with gaps.
-        The outer div is transparent so the gradient shows through every gap.
-      */}
-      <div className="flex h-screen w-screen gap-[10px] overflow-hidden p-[10px] text-ide-text">
+      <div>
         <Sidebar />
-        {/* Main column: banners + view shell */}
-        <div className="flex min-w-0 flex-1 flex-col gap-[10px]">
-          {/*
-            Thin transparent drag strip covering the 10px gap row at the very top
-            of the main column, between the window edge and the ViewShell header.
-            This ensures the user can still drag the window by clicking in the top
-            strip even when no banners are visible and the ViewShell header starts
-            below the 10px inset. h-0 collapses it — the ViewShell header's own
-            data-tauri-drag-region covers the draggable zone when rendered.
-            The sidebar top drag region also covers the full left stripe so the
-            main use case (drag the title bar area) still works.
-          */}
-
-          {/* Daemon spawn error — non-dismissible, installation-incomplete.
-              Raw error (may contain bundle/socket paths) is kept in the console only;
-              the DOM shows a generic message to avoid leaking install internals. */}
+        <div>
           {daemonError !== null && (
-            <div
-              className="surface-glass flex shrink-0 items-start gap-3 border border-red-500/40 px-3 py-2 text-[13px] text-red-400"
-              style={{ borderRadius: "var(--r-card)" }}
-            >
-              <span className="shrink-0 font-semibold">Background service error:</span>
+            <div>
+              <span>Background service error:</span>
               <span>The background service failed to start. Please reinstall CopyPaste or restart your Mac.</span>
             </div>
           )}
 
-          {/* Protocol version mismatch — dismissible. Shown when the daemon speaks
-              a different wire protocol version than this UI expects (ADR-007). */}
           {showMismatchBanner && (
-            <div
-              data-testid="protocol-mismatch-banner"
-              className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
-              style={{ borderRadius: "var(--r-card)" }}
-            >
+            <div data-testid="protocol-mismatch-banner">
               <span>
                 CopyPaste app and background service are on incompatible versions
                 {protocolMismatch !== null ? ` (service protocol v${protocolMismatch})` : ""}.
@@ -472,8 +273,6 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setMismatchDismissed(true)}
-                className="shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Dismiss
               </button>
@@ -481,17 +280,14 @@ export default function App() {
           )}
 
           {showStaleBanner && (
-            <div
-              className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
-              style={{ borderRadius: "var(--r-card)" }}
-            >
+            <div>
               <span>
                 CopyPaste was updated but an older background service is still
                 running
                 {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}.
                 Restart it to use the new version.
               </span>
-              <div className="flex shrink-0 items-center gap-2">
+              <div>
                 <RestartDaemonButton
                   onRestarted={() => {
                     setStaleDaemon(null);
@@ -501,8 +297,6 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setDismissed(true)}
-                  className="border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
-                  style={{ borderRadius: "var(--r-ctl)" }}
                 >
                   Dismiss
                 </button>
@@ -510,9 +304,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Accessibility permission banner — macOS only.
-              CopyPaste-xn95: extracted to AccessibilityBanner so it can show
-              positive "granted" feedback after the user grants permission. */}
           <AccessibilityBanner
             axGranted={axGranted}
             axDismissed={axDismissed}
@@ -520,20 +311,10 @@ export default function App() {
             onOpenSettings={() => { void handleOpenAxSettings(); }}
           />
 
-          <main className="min-h-0 flex-1 overflow-hidden">
-            {/* CrossfadeContainer renders the outgoing view (fading out) and
-                incoming view (fading in) simultaneously — a true crossfade that
-                fixes the "disappear then reappear" flash of the old keyed-remount
-                approach (CopyPaste-4r48 / 2bhh).
-                ErrorBoundary is inside so a crash stays contained per tab. */}
+          <main>
             <CrossfadeContainer viewKey={view}>
               <ErrorBoundary label={label}>
                 {view === "devices" ? (
-                  // DevicesView gets `incomingPairing` so the SAS modal opens
-                  // even when the user wasn't on the Devices tab when the request
-                  // arrived.  We clear it once DevicesView mounts (the prop is
-                  // stable for that render cycle; DevicesView owns the modal
-                  // lifetime after that).
                   <DevicesView incomingPairing={incomingPairing} />
                 ) : (
                   <View />

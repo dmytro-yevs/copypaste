@@ -78,8 +78,8 @@ export function StorageTab({
   vacuumMsg,
   deleteMsg,
   limitsMsg,
-  btnCls,
-  btnStyle,
+  btnCls: _btnCls,
+  btnStyle: _btnStyle,
   saveLimitsField,
   showLimitsMsg,
   handleExport,
@@ -114,7 +114,7 @@ export function StorageTab({
     const safeIdx = idx < 0 ? 0 : idx;
     return (
       <SettingsRow title={label} description={description}>
-        <div className="flex items-center gap-2">
+        <div>
           <SliderRow
             min={0}
             max={maxIdx}
@@ -139,7 +139,7 @@ export function StorageTab({
   );
 
   return (
-    <div className="space-y-2">
+    <div>
       <Panel>
         <LimitSliderRow
           label="Max clip text size"
@@ -182,7 +182,7 @@ export function StorageTab({
             void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v }, () => setMaxFileBytes(prev));
           }}
         />
-        <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">
+        <div>
           Files over ~8&nbsp;MB are kept locally but won&apos;t sync over P2P/cloud — they&apos;re skipped with a warning.
         </div>
         <LimitSliderRow
@@ -232,7 +232,7 @@ export function StorageTab({
             showLimitsMsg("max_items", "Saved", 1500, true);
           }}
         />
-        <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">
+        <div>
           Limits items shown in the UI only — the daemon stores more and prunes by the byte quota above.
         </div>
       </Panel>
@@ -244,29 +244,28 @@ export function StorageTab({
       />
       <Panel>
         {/* Export row */}
-        <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Export backup</span>
-            <div className="flex flex-col items-end gap-1.5">
+        <div>
+          <div>
+            <span>Export backup</span>
+            <div>
               {/* Include-sensitive checkbox with plaintext warning */}
-              <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ide-dim select-none">
+              <label>
                 <input
                   type="checkbox"
                   checked={exportIncludeSensitive}
                   onChange={(e) => setExportIncludeSensitive(e.target.checked)}
                   disabled={offline || exportInProgress}
-                  className="h-3.5 w-3.5 accent-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
                 />
                 Include sensitive items
               </label>
               {exportIncludeSensitive && (
-                <span className="text-[11px] text-ide-warning">
+                <span>
                   Warning: sensitive items will be exported as plaintext. Keep the file secure and delete it when done.
                 </span>
               )}
-              <div className="flex items-center gap-2">
+              <div>
                 {exportMsg !== null && (
-                  <span className={`text-[12px] ${exportMsg.isError ? "text-ide-danger" : "text-ide-success"}`}>
+                  <span>
                     {exportMsg.text}
                   </span>
                 )}
@@ -275,11 +274,6 @@ export function StorageTab({
                   disabled={offline || exportInProgress}
                   onClick={() => void handleExport()}
                   data-testid="export-button"
-                  className={[
-                    "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                    "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                  ].join(" ")}
-                  style={{ borderRadius: "var(--r-ctl)" }}
                 >
                   {exportInProgress ? "Exporting…" : "Export…"}
                 </button>
@@ -289,12 +283,12 @@ export function StorageTab({
         </div>
 
         {/* Import row — bdac.73: renamed "Restore backup" → "Import history" for parity with Android */}
-        <div className="px-3 py-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Import history</span>
-            <div className="flex flex-col items-end gap-1">
+        <div>
+          <div>
+            <span>Import history</span>
+            <div>
               {importMsg !== null && (
-                <span className={`text-[12px] ${importMsg.isError ? "text-ide-danger" : "text-ide-success"}`}>
+                <span>
                   {importMsg.text}
                 </span>
               )}
@@ -302,14 +296,7 @@ export function StorageTab({
                   accept="application/json" limits the picker to .json files.
                   The file is read entirely in-browser via FileReader (no fs
                   Tauri plugin needed). */}
-              <label
-                className={[
-                  "cursor-pointer border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                  "hover:bg-ide-hover",
-                  (offline || importInProgress) ? "pointer-events-none opacity-40" : "",
-                ].join(" ")}
-                style={{ borderRadius: "var(--r-ctl)" }}
-              >
+              <label>
                 {importInProgress ? "Importing…" : "Import…"}
                 <input
                   type="file"
@@ -317,7 +304,6 @@ export function StorageTab({
                   disabled={offline || importInProgress}
                   onChange={(e) => void handleImportFile(e)}
                   data-testid="import-file-input"
-                  className="sr-only"
                 />
               </label>
             </div>
@@ -331,7 +317,7 @@ export function StorageTab({
             Falls back gracefully when db_stats is not available (older daemon). */}
         {dbStats !== null && (
           <SettingsRow title="Database">
-            <span className="text-[13px] text-ide-dim tabular-nums">
+            <span>
               {dbStats.item_count} item{dbStats.item_count === 1 ? "" : "s"}
               {" — "}
               {dbStats.size_bytes < 1024
@@ -344,14 +330,9 @@ export function StorageTab({
         )}
         {/* gq51: Vacuum button — compacts the SQLite WAL to reclaim disk space */}
         <SettingsRow title="Compact database">
-          <div className="flex items-center gap-3">
+          <div>
             {vacuumMsg !== null && (
-              <span
-                className={[
-                  "text-[13px]",
-                  vacuumMsg.isError ? "text-ide-danger" : "text-ide-success",
-                ].join(" ")}
-              >
+              <span>
                 {vacuumMsg.text}
               </span>
             )}
@@ -359,22 +340,15 @@ export function StorageTab({
               type="button"
               disabled={offline || vacuumBusy}
               onClick={() => void handleVacuum()}
-              className={btnCls}
-              style={btnStyle}
             >
               {vacuumBusy ? "Vacuuming…" : "Vacuum"}
             </button>
           </div>
         </SettingsRow>
         <SettingsRow title="Clear clipboard history">
-          <div className="flex items-center gap-3">
+          <div>
             {deleteMsg !== null && (
-              <span
-                className={[
-                  "text-[13px]",
-                  deleteMsg.isError ? "text-ide-danger" : "text-ide-dim",
-                ].join(" ")}
-              >
+              <span>
                 {deleteMsg.text}
               </span>
             )}
@@ -383,11 +357,6 @@ export function StorageTab({
               type="button"
               disabled={offline}
               onClick={() => setDeleteConfirm(true)}
-              className={[
-                "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
-                "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-              ].join(" ")}
-              style={{ borderRadius: "var(--r-ctl)" }}
             >
               Clear history…
             </button>

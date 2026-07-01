@@ -34,7 +34,6 @@ function ConfirmModalInner({
   body,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
-  danger = true,
   busy = false,
   onConfirm,
   onCancel,
@@ -44,9 +43,6 @@ function ConfirmModalInner({
 
   return (
     <div
-      // modal-scrim-enter: approved motion entrance for modal backdrop (§MO-1).
-      className="modal-scrim-enter fixed inset-0 z-[9998] flex items-center justify-center p-6"
-      style={{ background: "var(--scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"
@@ -55,27 +51,15 @@ function ConfirmModalInner({
       // Escape key also cancels.
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
     >
-      {/* surface-glass-strong = floating frosted-glass material.
-          modal-card-enter: approved motion entrance for modal card (§MO-1). */}
-      <div
-        ref={dialogRef}
-        className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
-        style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh3)" }}
-      >
-        <p id="confirm-modal-title" className="mb-2 text-[13px] font-semibold text-ide-text">
+      <div ref={dialogRef}>
+        <p id="confirm-modal-title">
           {title}
         </p>
-        <div className="mb-4 text-[12px] leading-relaxed text-ide-dim">
+        <div>
           {body}
         </div>
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--r-ctl)" }}
-          >
+        <div>
+          <button type="button" onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </button>
           <button
@@ -83,13 +67,6 @@ function ConfirmModalInner({
             onClick={onConfirm}
             disabled={busy}
             data-testid="confirm-modal-confirm-btn"
-            className={[
-              "px-3 py-1.5 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
-              danger
-                ? "bg-ide-danger text-white hover:bg-ide-danger/85"
-                : "border border-ide-border bg-ide-elevated text-ide-text hover:bg-ide-hover",
-            ].join(" ")}
-            style={{ borderRadius: "var(--r-ctl)" }}
           >
             {busy ? "…" : confirmLabel}
           </button>

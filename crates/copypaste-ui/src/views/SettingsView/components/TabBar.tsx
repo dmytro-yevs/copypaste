@@ -41,9 +41,7 @@ export function TabBar({
   }, [active]);
 
   return (
-    // relative so the absolute indicator is contained within the tab bar.
-    // sk02: border-b removed — the outer glass wrapper header div provides the separator.
-    <div role="tablist" className="relative mb-0 flex gap-0.5 pb-0">
+    <div role="tablist">
       {TABS.map((t, idx) => (
         <button
           key={t.id}
@@ -54,25 +52,17 @@ export function TabBar({
           id={`tab-${t.id}`}
           aria-controls={`tabpanel-${t.id}`}
           onClick={() => onChange(t.id)}
-          className={[
-            "px-3 py-2 text-[13px] transition-colors -mb-px",
-            active === t.id
-              ? "text-ide-text font-medium"
-              : "text-ide-dim hover:text-ide-text",
-          ].join(" ")}
         >
           {t.label}
         </button>
       ))}
-      {/* §6.1: single absolutely-positioned indicator that slides between tabs */}
+      {/* Indicator position is computed from the active tab's measured
+          offsetLeft/offsetWidth (functional, kept) — visual styling removed. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute bottom-0 h-[2px] rounded-full bg-ide-accent"
         style={{
           left: indicatorStyle.left,
           width: indicatorStyle.width,
-          // 180ms ease-standard as per §6/§8 spec — use token, not inline curve
-          transition: "left 180ms var(--ease), width 180ms var(--ease)",
         }}
       />
     </div>

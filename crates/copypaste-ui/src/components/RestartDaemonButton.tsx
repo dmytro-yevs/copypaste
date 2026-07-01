@@ -16,7 +16,6 @@ type Phase = "idle" | "restarting" | "ok" | "error";
  */
 export function RestartDaemonButton({
   label = "Restart background service",
-  className,
   onRestarted,
 }: {
   label?: string;
@@ -42,30 +41,16 @@ export function RestartDaemonButton({
   }, [onRestarted]);
 
   return (
-    <div className="flex flex-col gap-1">
+    <div>
       <button
         type="button"
         disabled={phase === "restarting"}
         onClick={() => void handleClick()}
-        className={
-          className ??
-          [
-            "shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text",
-            "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-          ].join(" ")
-        }
-        style={{ borderRadius: "var(--r-ctl)" }}
       >
         {phase === "restarting" ? "Restarting…" : label}
       </button>
       {message !== null && (
-        <span
-          role="status"
-          className={[
-            "text-[11px]",
-            phase === "error" ? "text-ide-danger" : "text-ide-dim",
-          ].join(" ")}
-        >
+        <span role="status">
           {message}
         </span>
       )}

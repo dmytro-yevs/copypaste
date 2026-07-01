@@ -75,7 +75,6 @@ function GlassToastItem({
         boxShadow: "var(--sh1)",
       }}
       className={[
-        "surface-card toast-enter",
         "min-w-[200px] max-w-[340px] px-4 py-2.5",
         "flex items-center gap-3",
         KIND_CLS[kind],

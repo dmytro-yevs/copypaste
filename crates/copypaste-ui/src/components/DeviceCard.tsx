@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { Copy, Check } from "lucide-react";
 import {
   formatWallTime,
   formatEpochSecs,
@@ -48,38 +47,10 @@ export function StatusDot({
     // relative wrapper so the pulse ring can be absolutely positioned behind the dot
     // status-ping: adds a CSS ::after expanding ring (styleguide §presence) in addition to
     // the animate-online-pulse span (MO-5 one-shot, crh3.18 — replaces animate-pulse-ping).
-    <span
-      className={[
-        "relative inline-flex shrink-0 items-center justify-center w-2 h-2",
-        online ? "status-ping" : "",
-      ].join(" ")}
-    >
+    <span>
       {/* Expanding-ring pulse — only when online; respects prefers-reduced-motion */}
-      {online && (
-        <span
-          aria-hidden="true"
-          className="absolute inset-0 animate-online-pulse rounded-full bg-ide-success/50 motion-reduce:animate-none"
-        />
-      )}
-      <span
-        title={title}
-        aria-label={title}
-        className={[
-          "relative inline-block shrink-0 rounded-full",
-          "w-2 h-2",
-          // mztl: offline dot → danger red (matches SyncStatusChip and styleguide .dot-offline)
-          online ? "bg-ide-success" : "bg-ide-danger",
-        ].join(" ")}
-        // success glow: soft halo matching the --success token (styleguide §presence)
-        style={
-          online
-            ? {
-                boxShadow:
-                  "0 0 10px color-mix(in srgb, var(--ok) 55%, transparent)",
-              }
-            : undefined
-        }
-      />
+      {online && <span aria-hidden="true" />}
+      <span title={title} aria-label={title} />
     </span>
   );
 }
@@ -101,9 +72,8 @@ export function MetaRow({
   if (!value) return null;
   return (
     <>
-      <span className="text-[11px] text-ide-dim whitespace-nowrap">{label}</span>
-      {/* tabular-nums keeps time/numeric values from causing layout shifts */}
-      <span className="text-[11px] text-ide-faint break-all tabular-nums">{value}</span>
+      <span>{label}</span>
+      <span>{value}</span>
     </>
   );
 }
@@ -114,10 +84,7 @@ export function MetaRow({
 
 export function DeviceMetaGrid({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="mt-1.5 grid gap-x-3 gap-y-0.5 items-baseline"
-      style={{ gridTemplateColumns: "auto 1fr" }}
-    >
+    <div>
       {children}
     </div>
   );
@@ -155,7 +122,7 @@ function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
 
   return (
     <>
-      <span className="text-[11px] text-ide-dim whitespace-nowrap">Fingerprint</span>
+      <span>Fingerprint</span>
       {/* Clickable value — copies full fingerprint on click (Android parity).
           Uses a <button> so it is keyboard-accessible and screen-reader announced. */}
       <button
@@ -164,14 +131,8 @@ function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
         title={`Copy full fingerprint: ${fingerprint}`}
         aria-label={`Fingerprint: ${truncated} — click to copy`}
         onClick={handleCopy}
-        className="inline-flex items-center gap-1 text-left text-[11px] text-ide-faint font-mono break-all tabular-nums hover:text-ide-accent cursor-pointer focus:outline-none"
       >
         <span>{copied ? "Copied!" : truncated}</span>
-        {/* Subtle copy-affordance icon — transitions to a check on success */}
-        {copied
-          ? <Check width={10} height={10} strokeWidth={2} aria-hidden="true" className="shrink-0 text-ide-success" />
-          : <Copy width={10} height={10} strokeWidth={1.5} aria-hidden="true" className="shrink-0 opacity-40 group-hover:opacity-70" />
-        }
       </button>
     </>
   );
@@ -183,15 +144,14 @@ function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
 
 export function ThisDeviceCard({ info }: { info: OwnDeviceInfo }) {
   return (
-    <div className="px-3 py-2.5">
+    <div>
       {/* Name + online dot + "This Mac" badge */}
-      <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+      <div>
         <StatusDot online={true} />
-        <p className="truncate text-[13px] font-medium text-ide-text">
+        <p>
           {info.device_name ?? "This Device"}
         </p>
-        {/* nmea: pill with hairline border matching accent tint; badge-float adds subtle levitate */}
-        <span className="badge-float shrink-0 rounded-full border border-ide-accent/30 px-1.5 py-0.5 text-[10.5px] font-medium bg-ide-accent/14 text-ide-accent">
+        <span>
           This Mac
         </span>
       </div>
@@ -293,52 +253,32 @@ export function PeerRow({
   // Relay uses warning/amber token (store-and-forward, not live).
   // Supabase uses accent/purple token (cloud backend).
   let transportLabel: string;
-  let transportClass: string;
   if (peer.transport === "p2p") {
     transportLabel = "P2P";
-    transportClass =
-      "text-ide-sky bg-ide-sky/14 border border-ide-sky/30 rounded-full";
   } else if (peer.transport === "relay") {
     transportLabel = "Relay";
-    transportClass =
-      "text-ide-warning bg-ide-warning/14 border border-ide-warning/30 rounded-full";
   } else if (peer.transport === "supabase") {
     transportLabel = "Supabase";
-    transportClass =
-      "text-ide-accent bg-ide-accent/14 border border-ide-accent/30 rounded-full";
   } else {
     // Fallback heuristic: local_ip or address present → likely P2P; else Cloud.
     const isP2pHeuristic = !!(peer.local_ip || peer.address);
     transportLabel = isP2pHeuristic ? "P2P" : "Cloud";
-    transportClass = isP2pHeuristic
-      ? "text-ide-sky bg-ide-sky/14 border border-ide-sky/30 rounded-full"
-      : "text-ide-accent bg-ide-accent/14 border border-ide-accent/30 rounded-full";
   }
 
   return (
-    // card-in: glass entrance fade-up (styleguide §device-card)
-    // card-hover: approved motion primitive for device card hover lift (§MO-10, desktop-only via media).
-    // g4ze: changed from flex items-start justify-between to flex-col so the
-    // action footer sits BELOW the metadata, not floated to the right.
-    <div className="card-in card-hover px-3 pt-2.5 pb-2 hover:bg-ide-hover">
+    <div>
       {/* Content area — full width */}
-      <div className="min-w-0">
+      <div>
         {/* Name + online dot + transport chip */}
-        <div className="flex items-center gap-1.5">
+        <div>
           <StatusDot
             online={liveOnline !== undefined ? liveOnline : peer.online === true}
             lastSeenSecs={liveLastSeenSecs}
           />
-          <p className="truncate text-[13px] font-medium text-ide-text">
+          <p>
             {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
           </p>
-          {/* nmea: transport chip — full-radius pill with hairline border; badge-float adds levitate */}
-          <span
-            className={[
-              "badge-float shrink-0 px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wide",
-              transportClass,
-            ].join(" ")}
-          >
+          <span>
             {transportLabel}
           </span>
         </div>
@@ -347,21 +287,13 @@ export function PeerRow({
             "verified" → green Verified (SAS-confirmed peer).
             Any other value or absent → amber Unverified (matches Android trustLabel). */}
         {peer.trust === "verified" ? (
-          <span
-            data-testid="trust-badge"
-            style={{ borderRadius: "var(--r-chip)" }}
-            className="mt-1 inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 text-[10.5px] font-medium bg-ide-success/14 text-ide-success border border-ide-success/30"
-          >
-            <span className="inline-block w-1 h-1 rounded-full bg-ide-success" aria-hidden="true" />
+          <span data-testid="trust-badge">
+            <span aria-hidden="true" />
             Verified
           </span>
         ) : (
-          <span
-            data-testid="trust-badge"
-            style={{ borderRadius: "var(--r-chip)" }}
-            className="mt-1 inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 text-[10.5px] font-medium bg-ide-warning/14 text-ide-warning border border-ide-warning/30"
-          >
-            <span className="inline-block w-1 h-1 rounded-full bg-ide-warning" aria-hidden="true" />
+          <span data-testid="trust-badge">
+            <span aria-hidden="true" />
             Unverified
           </span>
         )}
@@ -383,12 +315,12 @@ export function PeerRow({
 
         {/* Revoked / error states — kept on their own line for visual weight */}
         {revokedAt !== null && (
-          <p className="mt-0.5 text-[11px] text-ide-accent">
+          <p>
             Revoked · {formatWallTime(revokedAt)}
           </p>
         )}
         {rowError !== null && (
-          <p className="mt-0.5 text-[11px] text-ide-danger">{rowError}</p>
+          <p>{rowError}</p>
         )}
       </div>
 
@@ -396,7 +328,7 @@ export function PeerRow({
            Both buttons are flex-1 equal width, matching Android's weight(1f) pattern.
            bdac.14: use ActionButton(variant="danger") so the danger-tint style comes
            from a single source of truth in ActionButton.tsx (spec §7). */}
-      <div className="mt-2 flex gap-1.5 border-t border-ide-border/20 pt-2">
+      <div>
         <ActionButton
           variant="danger"
           size="sm"
@@ -404,7 +336,6 @@ export function PeerRow({
           disabled={isPending}
           pending={isPending}
           aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
-          className="flex-1"
         >
           Unpair
         </ActionButton>
@@ -415,7 +346,6 @@ export function PeerRow({
           disabled={isPending}
           pending={isPending}
           aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
-          className="flex-1"
         >
           Revoke
         </ActionButton>

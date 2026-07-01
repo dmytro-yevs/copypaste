@@ -137,27 +137,31 @@ export function VirtualList({
       tabIndex={0}
       onKeyDown={onKeyDown}
       onScroll={handleScroll}
-      className="h-full overflow-y-auto focus:outline-none"
-      style={{ scrollbarWidth: "thin" }}
+      // FUNCTIONAL: height + overflowY required so the container is scrollable
+      // and listRef.clientHeight/scrollTop measurements (used by the
+      // virtualizer's offset math) are correct.
+      style={{ height: "100%", overflowY: "auto" }}
     >
       {/* Spacer establishes the full scroll height; the inner block is offset
-          to where the visible window starts. */}
+          to where the visible window starts. FUNCTIONAL: drives the virtual
+          scroller's total scrollable height. */}
       <div style={{ height: totalH, position: "relative" }}>
         {/* §8 selection glide: a single absolutely-positioned layer that animates
             its top/height to the selected row(s). Rendered before the rows so it
             sits behind them; rows carry no selection background of their own. */}
-        {/* kp6f: rounded-ide removed from glide div; borderRadius via inline style using card token */}
         {glideStyle && (
           <div
             aria-hidden
-            className="pointer-events-none absolute left-0 right-0 bg-ide-selection motion-reduce:transition-none"
+            // FUNCTIONAL: position/left/right/top/height/pointerEvents drive the
+            // glide layer's computed placement over the selected row(s) and
+            // ensure it never blocks clicks on the rows beneath it.
             style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
               top: glideStyle.top,
               height: glideStyle.height,
-              // CopyPaste-bdac.54: fallback corrected to 12px (Classic canonical) — was 14px.
-              borderRadius: "var(--r-card)",
-              transition:
-                "top 130ms cubic-bezier(.2,0,0,1), height 130ms cubic-bezier(.2,0,0,1)",
+              pointerEvents: "none",
             }}
           />
         )}

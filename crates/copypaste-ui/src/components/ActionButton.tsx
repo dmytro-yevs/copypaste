@@ -34,28 +34,7 @@ interface ActionButtonProps {
   size?: "sm" | "md";
 }
 
-const BASE =
-  "inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40";
-
-// Size modifiers
-const SIZE_SM = "px-2.5 py-1 text-[12px]";
-const SIZE_MD = "px-3 py-1.5 text-[13px]";
-
-const VARIANT_CLS: Record<ActionButtonVariant, string> = {
-  primary:
-    "bg-ide-accent font-medium text-white hover:bg-ide-accentHover",
-  secondary:
-    "border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text",
-  danger:
-    "bg-ide-danger/15 text-ide-danger hover:bg-ide-danger/25",
-  "danger-solid":
-    "bg-ide-danger font-medium text-white hover:bg-ide-danger/85",
-  ghost:
-    "text-ide-faint hover:text-ide-dim",
-};
-
 export function ActionButton({
-  variant = "secondary",
   onClick,
   disabled,
   pending,
@@ -63,13 +42,8 @@ export function ActionButton({
   type = "button",
   title,
   "aria-label": ariaLabel,
-  className,
   children,
-  size = "md",
 }: ActionButtonProps) {
-  const sizeCls = size === "sm" ? SIZE_SM : SIZE_MD;
-  const cls = [BASE, sizeCls, VARIANT_CLS[variant], className].filter(Boolean).join(" ");
-
   return (
     <button
       type={type}
@@ -77,8 +51,6 @@ export function ActionButton({
       disabled={disabled ?? pending}
       title={title}
       aria-label={ariaLabel}
-      className={cls}
-      style={{ borderRadius: "var(--r-ctl)" }}
     >
       {pending ? pendingLabel : children}
     </button>

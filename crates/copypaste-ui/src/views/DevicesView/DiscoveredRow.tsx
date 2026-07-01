@@ -24,7 +24,7 @@ export function DiscoveredRow({
   return (
     // list-item-in: staggered entrance; stagger delay = index × 60 ms (styleguide §list)
     <div
-      className="list-item-in px-3 py-2.5 hover:bg-ide-hover"
+      className="px-3 py-2.5 hover:bg-ide-hover"
       style={{ animationDelay: `${index * 60}ms` }}
     >
       <div className="flex items-center justify-between gap-4">

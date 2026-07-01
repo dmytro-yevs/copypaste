@@ -19,22 +19,6 @@ function levelOf(line: string): LogLevel {
   return "info";
 }
 
-const LEVEL_CLASS: Record<LogLevel, string> = {
-  error: "text-ide-danger",
-  warn: "text-ide-warning",
-  info: "text-ide-text",
-  debug: "text-ide-faint",
-};
-
-// Per-level left-border accent so the row type reads at a glance.
-// Uses color-mix via inline style to stay token-only (no hardcoded hex).
-const LEVEL_BORDER: Record<LogLevel, string> = {
-  error: "border-l-ide-danger",
-  warn: "border-l-ide-warning",
-  info: "border-l-transparent",
-  debug: "border-l-transparent",
-};
-
 /**
  * Redact the absolute log directory path before display (CopyPaste-2b3i).
  *
@@ -110,26 +94,21 @@ export function LogView() {
   }, [content]);
 
   const lines = content.split("\n");
-  const lastLineIdx = lines.length - 1;
 
   // Actions slot rendered into the ViewShell header (Refresh + Export buttons).
   const headerActions = (
-    <div className="flex items-center gap-2">
+    <div>
       <button
         onClick={() => {
           setLoading(true);
           void load();
         }}
-        className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text"
-        style={{ borderRadius: "var(--r-ctl)" }}
       >
         Refresh
       </button>
       <button
         onClick={handleExport}
         disabled={isEmpty || !content}
-        className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
-        style={{ borderRadius: "var(--r-ctl)" }}
       >
         Export
       </button>
@@ -140,30 +119,25 @@ export function LogView() {
     // SCRL-11: use shared ViewShell for consistent header + drag-region + glass
     // surface. The redundant inner surface-card header is removed (fixes SCRL-3).
     <ViewShell title="Daemon Logs" actions={headerActions}>
-      <div className="flex h-full flex-col">
+      <div>
         {/* Path subtitle shown below the ViewShell title, inside the content panel. */}
         {logPath && (
-          <p className="mb-2 text-[11px] text-ide-faint" title={relativizeLogPath(logPath)}>
+          <p title={relativizeLogPath(logPath)}>
             {relativizeLogPath(logPath)}
           </p>
         )}
 
         {/* Content */}
-        <div className="min-h-0 flex-1">
+        <div>
           {loading ? (
-            /* bdac.94: animated spinner replaces static "Loading…" text — matches
-               the DevicesView pattern (animate-spin + motion-reduce guard). */
-            <div className="flex h-full items-center justify-center">
-              <span
-                aria-label="Loading logs…"
-                className="inline-block h-5 w-5 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent"
-              />
+            <div>
+              <span aria-label="Loading logs…" />
             </div>
           ) : error ? (
             /* bdac.96: RestartDaemonButton added to error state so users can recover
                without navigating away — consistent with HistoryView / DevicesView. */
-            <div className="flex h-full flex-col items-center justify-center gap-3">
-              <p className="text-[13px] text-ide-danger">{error}</p>
+            <div>
+              <p>{error}</p>
               <RestartDaemonButton
                 label="Restart background service"
                 onRestarted={() => {
@@ -174,55 +148,20 @@ export function LogView() {
             </div>
           ) : isEmpty ? (
             // bdac.63: proper empty state instead of "(no log entries)" sentinel.
-            // Centered muted message matching the app's empty-state pattern.
-            <div className="flex h-full items-center justify-center">
-              <p className="text-[13px] text-ide-faint" data-testid="log-empty-state">
+            <div>
+              <p data-testid="log-empty-state">
                 No log entries yet
               </p>
             </div>
           ) : (
-            // Scrollable log area — no extra wrapper border; the rows live directly
-            // on the content panel surface (one cohesive glass surface, no box-in-box).
-            // select-text preserved so users can still copy lines.
-            <div
-              ref={scrollRef}
-              className="h-full w-full overflow-auto select-text"
-            >
+            // Scrollable log area — select-text preserved so users can still copy lines.
+            <div ref={scrollRef}>
               {lines.map((line, i) => {
                 const level = levelOf(line);
-                const isLast = i === lastLineIdx;
                 return (
-                  // Each row is a .mono-line glass pill — hover accent border via
-                  // Tailwind group and inline transition (mirrors source.html §870-896).
-                  // border-l-2 gives a per-level accent stripe (error/warn only).
-                  <div
-                    key={i}
-                    className={[
-                      "list-item-in",
-                      "group flex items-start gap-2",
-                      "rounded border border-ide-border bg-ide-hover",
-                      "px-2 py-1 font-mono text-[11px] leading-relaxed",
-                      "mb-1 last:mb-0",
-                      "border-l-2",
-                      LEVEL_BORDER[level],
-                      LEVEL_CLASS[level],
-                      // Hover: accent-tinted border + subtle bg fill (mirrors .mono-line:hover)
-                      "transition-[border-color,background] duration-200 ease-out",
-                      "hover:border-ide-accent/40 hover:bg-ide-accent/5",
-                      "cursor-default whitespace-pre-wrap break-words",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    style={{ animationDelay: `${Math.min(i * 8, 200)}ms` }}
-                  >
-                    <code className="flex-1 overflow-hidden">{line || " "}</code>
-                    {/* Terminal cursor blink on the last (live) line. */}
-                    {isLast && (
-                      <span
-                        className="cursor-blink ml-0.5 inline-block h-[1em] w-[6px] shrink-0 rounded-sm bg-current opacity-70"
-                        aria-hidden="true"
-                      />
-                    )}
+                  // data-level carries the parsed log level as data, not styling.
+                  <div key={i} data-level={level}>
+                    <code>{line || " "}</code>
                   </div>
                 );
               })}
@@ -231,7 +170,7 @@ export function LogView() {
         </div>
 
         {/* SCRL-13: corrected copy — daemon emits plain text, not JSON. */}
-        <div className="mt-2 shrink-0 border-t border-ide-border pt-2 text-[11px] text-ide-faint">
+        <div>
           Last {MAX_LINES} lines · Plain-text log
         </div>
       </div>

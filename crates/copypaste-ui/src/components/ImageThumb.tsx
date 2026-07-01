@@ -170,7 +170,7 @@ interface ImageThumbProps {
 // Sentinel distinct from null (= recorded miss) and undefined (= not cached).
 const FETCH_FAILED = "__failed__";
 
-export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
+export function ImageThumb({ id, maxHeight }: ImageThumbProps) {
   // Seed state from the resolved cache synchronously to avoid flicker on
   // re-mounts (same pattern as AppIcon).
   const [src, setSrc] = useState<string | null | typeof FETCH_FAILED>(() => {
@@ -215,63 +215,12 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
     // SCRH-11: Still loading — render a skeleton placeholder that occupies the
     // reserved row height so the row doesn't visually collapse while the fetch is
     // in flight. Previously returned null which left a blank gap in the list.
-    return (
-      <span
-        style={{
-          display: "inline-block",
-          width: 80,
-          height: Math.min(maxHeight, 40),
-          borderRadius: 3,
-          background: "var(--elevated)",
-          border: "1px solid var(--divider)",
-          flexShrink: 0,
-          // Subtle shimmer animation defined in index.css (.skeleton-pulse).
-          // Falls back gracefully when the class is absent (static muted rect).
-        }}
-        className="skeleton-pulse"
-        aria-label="Loading image…"
-        aria-busy="true"
-      />
-    );
+    return <span aria-label="Loading image…" aria-busy="true" />;
   }
 
   if (src === FETCH_FAILED) {
     // Fetch failed — render a small faint placeholder so the row isn't blank.
-    return (
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 48,
-          height: Math.min(maxHeight, 32),
-          borderRadius: 3,
-          background: "var(--elevated)",
-          border: "1px solid var(--divider)",
-          flexShrink: 0,
-        }}
-        aria-label="Image unavailable"
-        title="Image unavailable"
-      >
-        {/* Faint broken-image glyph */}
-        <svg
-          viewBox="0 0 16 16"
-          width="12"
-          height="12"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ color: "var(--faint)" }}
-          aria-hidden="true"
-        >
-          <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
-          <path d="m1.5 11 3.5-3.5 2 2 2-2 4.5 4" strokeDasharray="2 2" />
-          <line x1="10" y1="2.5" x2="10" y2="13.5" strokeDasharray="2 2" />
-        </svg>
-      </span>
-    );
+    return <span aria-label="Image unavailable" title="Image unavailable" />;
   }
 
   return (
@@ -283,28 +232,11 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
       // (small, LRU-capped) data-URI string length. Advertising the bounding-box
       // dimensions as the intrinsic width/height lets WebKit downsample at decode
       // time toward the displayed size rather than holding a larger source
-      // bitmap. These attributes do not drive layout — the CSS max-width/
-      // max-height + width/height:auto below stay authoritative for the Maccy
-      // bounding box; they only steer the decoder's target resolution.
+      // bitmap. These attributes do not drive layout — they only steer the
+      // decoder's target resolution (kept: functional decode-size hint, not styling).
       width={340}
       height={maxHeight}
       decoding="async"
-      // max-width/max-height + object-fit:contain implements the Maccy bounding
-      // box: the image shrinks to fit but is never upscaled past its natural size.
-      style={{
-        maxWidth: 340,
-        maxHeight: maxHeight,
-        width: "auto",
-        height: "auto",
-        objectFit: "contain",
-        // "auto" lets the browser choose the highest-quality resampling algorithm
-        // (typically Lanczos/Mitchell on modern engines) rather than nearest-neighbor.
-        imageRendering: "auto",
-        display: "block",
-        flexShrink: 0,
-        borderRadius: 2,
-      }}
-      className={className}
     />
   );
 }

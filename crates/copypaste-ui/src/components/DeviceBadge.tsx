@@ -42,17 +42,8 @@ export interface DeviceBadgeProps {
 export function DeviceBadge({ originId, ownId, originName }: DeviceBadgeProps) {
   const label = deviceLabel(originId, ownId, originName);
   if (!label) return null;
-  const isOwn = label === "This device";
   return (
-    <span
-      className={[
-        "flex shrink-0 items-center text-[10.5px] px-1 py-0.5 rounded border leading-none",
-        isOwn
-          ? "border-ide-accent/40 bg-ide-accent/10 text-ide-accent"
-          : "border-ide-divider/60 bg-ide-elevated/50 text-ide-faint",
-      ].join(" ")}
-      title={originId}
-    >
+    <span title={originId}>
       {label}
     </span>
   );

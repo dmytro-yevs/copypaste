@@ -43,16 +43,15 @@ export function InfoPopover({ text }: { text: string }) {
 
   const popoverEl = open
     ? ReactDOM.createPortal(
+        // Position is functionally required: computed from the trigger button's
+        // getBoundingClientRect so the popover anchors correctly (kept per de-style pass).
         <div
           ref={popoverRef}
-          className="surface-glass-strong z-[9999] w-56 p-2 text-[11px] text-ide-dim"
           style={{
             position: "fixed",
             top: pos.top,
             left: pos.left,
-            minWidth: "14rem",
             transform: "translateY(-50%)",
-            borderRadius: "var(--r-ctl)",
           }}
         >
           {text}
@@ -62,19 +61,14 @@ export function InfoPopover({ text }: { text: string }) {
     : null;
 
   return (
-    <div className="inline-flex items-center">
+    <div>
       <button
         ref={btnRef}
         type="button"
         aria-label="More info"
         aria-expanded={open}
         onClick={handleToggle}
-        className="flex h-6 w-6 items-center justify-center rounded-full text-ide-faint hover:text-ide-dim transition-colors"
-      >
-        <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
-          <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.9.9 0 1 1 0 1.8A.9.9 0 0 1 8 4Zm-.75 2.75h1.5v4.5h-1.5v-4.5Z" />
-        </svg>
-      </button>
+      />
       {popoverEl}
     </div>
   );

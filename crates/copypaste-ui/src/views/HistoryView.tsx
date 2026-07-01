@@ -661,33 +661,21 @@ export function HistoryViewInner() {
         ref={fileInputRef}
         type="file"
         multiple
-        className="hidden"
         onChange={(e) => void handleFileInputChange(e)}
         aria-label="Add file to clipboard history"
         tabIndex={-1}
       />
-      {/* kp6f: borderRadius uses var(--r-ctl) inline instead of rounded-ide class */}
       <button
         type="button"
         title="Add file to clipboard history"
         aria-label="Add file"
         onClick={() => fileInputRef.current?.click()}
-        className="flex h-7 w-7 items-center justify-center border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text"
-        style={{ borderRadius: "var(--r-ctl)" }}
-      >
-        {/* Paperclip / attach icon */}
-        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M13.5 7.5 7 14a4.243 4.243 0 0 1-6-6l7-7a2.828 2.828 0 1 1 4 4L5.5 12A1.414 1.414 0 0 1 3.5 10L9 4.5" />
-        </svg>
-      </button>
-      {/* Device filter dropdown — only shown when more than one device is present.
-          kp6f: borderRadius via var(--r-ctl) inline instead of rounded-ide. */}
+      />
+      {/* Device filter dropdown — only shown when more than one device is present. */}
       {knownDeviceIds.length > 1 && (
         <select
           value={deviceFilter}
           onChange={(e) => setDeviceFilter(e.target.value)}
-          className="h-7 border border-ide-border bg-ide-elevated px-1.5 text-[11px] text-ide-text hover:bg-ide-hover cursor-pointer"
-          style={{ borderRadius: "var(--r-ctl)" }}
           aria-label="Filter by device"
           title="Filter by origin device"
         >
@@ -707,21 +695,7 @@ export function HistoryViewInner() {
           title={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           onClick={toggleSortMode}
-          className={[
-            // kp6f: removed rounded-ide; borderRadius applied via inline style
-            "flex h-7 items-center gap-1 border px-2 text-[11px]",
-            sortMode === "device"
-              ? "border-ide-accent/60 bg-ide-accent/10 text-ide-accent"
-              : "border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text",
-          ].join(" ")}
-          style={{ borderRadius: "var(--r-ctl)" }}
         >
-          {/* Simple sort icon — two lines of different widths */}
-          <svg viewBox="0 0 14 12" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-            <line x1="1" y1="2" x2="13" y2="2" />
-            <line x1="1" y1="6" x2="9" y2="6" />
-            <line x1="1" y1="10" x2="5" y2="10" />
-          </svg>
           {sortMode === "device" ? "By device" : "By time"}
         </button>
       )}
@@ -731,7 +705,6 @@ export function HistoryViewInner() {
       {totalCount !== null && (
         <span
           data-testid="history-total-badge"
-          className="text-[11px] text-ide-faint tabular-nums"
           title="Total items in clipboard history"
         >
           {totalCount} {totalCount === 1 ? "item" : "items"}
@@ -747,34 +720,17 @@ export function HistoryViewInner() {
           aria-label="Clear all"
           disabled={clearAllBusy}
           onClick={() => setClearAllConfirmOpen(true)}
-          className="flex h-7 items-center gap-1 border border-ide-danger/50 bg-ide-elevated px-2 text-[11px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ borderRadius: "var(--r-ctl)" }}
         >
-          {/* Trash icon */}
-          <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <polyline points="1 3.5 2.5 3.5 13 3.5" />
-            <path d="M11.5 3.5l-.75 8.5h-7.5L2.5 3.5" />
-            <path d="M5 3.5V2a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1.5" />
-          </svg>
           Clear all
         </button>
       )}
-      {/* Search bar: premium focus ring — accent glow + smooth transition per styleguide §searchbar. */}
+      {/* Search bar */}
       <input
         ref={searchRef}
         type="search"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Filter…"
-        className={[
-          // kp6f: removed rounded-ide; borderRadius via inline style
-          "h-7 w-44 px-2 text-[12px]",
-          "border border-ide-border bg-ide-elevated/80 text-ide-text placeholder:text-ide-faint",
-          "transition-[border-color,box-shadow] duration-200 ease-out",
-          "focus:outline-none focus:border-ide-accent/60",
-          "focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent)_18%,transparent)]",
-        ].join(" ")}
-        style={{ borderRadius: "var(--r-ctl)" }}
       />
     </>
   );
@@ -786,30 +742,18 @@ export function HistoryViewInner() {
     // with DevicesView (animate-spin border ring, motion-reduce-safe). No shared
     // Spinner component exists; inline pattern mirrors DevicesView exactly.
     body = (
-      <div className="flex h-full items-center justify-center gap-2 text-[13px] text-ide-dim">
-        <span
-          className="inline-block h-4 w-4 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent"
-          aria-hidden="true"
-        />
+      <div>
+        <span aria-hidden="true" />
         Loading…
       </div>
     );
   } else if (loadState === "offline") {
     body = (
-      // reveal-up: glass-card entrance animation per styleguide §empty-state.
       <EmptyState
-        className="h-full reveal-up"
-        icon={
-          // network-rings: discovery ring pulse on the icon — matches §empty-icon ::before/::after.
-          <span className="network-rings inline-flex" style={{ borderRadius: 12 }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </span>
-        }
+        icon={null}
         title="Clipboard service offline"
         body="The background service is not running."
-        action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void load()} /></div>}
+        action={<div><RestartDaemonButton onRestarted={() => void load()} /></div>}
       />
     );
   } else if (loadState === "not_ready") {
@@ -817,12 +761,7 @@ export function HistoryViewInner() {
     // instead of the error/degraded state. No errorDetail is ever set here.
     body = (
       <EmptyState
-        className="h-full reveal-up"
-        icon={
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        }
+        icon={null}
         title="Starting up…"
         body="The clipboard service is initialising. History will appear in a moment."
       />
@@ -830,19 +769,18 @@ export function HistoryViewInner() {
   } else if (loadState === "error") {
     body = (
       <div
-        className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
         role="alert"
         aria-live="assertive"
       >
-        <div className="text-[13px] font-medium text-ide-danger">
+        <div>
           {degraded ? "Clipboard database can't be opened" : "Failed to load history."}
         </div>
         {errorDetail && (
-          <div className="max-w-md text-[12px] text-ide-dim break-words">{errorDetail}</div>
+          <div>{errorDetail}</div>
         )}
         {degraded && (
           <>
-            <div className="max-w-md text-[12px] text-ide-dim">
+            <div>
               The local database could not be decrypted (its key no longer matches).
               You can reset it to recover — this permanently erases this device's
               clipboard history.
@@ -852,8 +790,6 @@ export function HistoryViewInner() {
                 only after the user explicitly confirms. */}
             <button
               onClick={() => setResetConfirm(true)}
-              className="border border-ide-danger/60 bg-ide-elevated px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-hover"
-              style={{ borderRadius: "var(--r-ctl)" }}
             >
               Reset database (erases local history)
             </button>
@@ -866,34 +802,16 @@ export function HistoryViewInner() {
     );
   } else if (filtered.length === 0 && items.length === 0) {
     body = (
-      // reveal-up: glass-card entrance animation per styleguide §empty-state.
       <EmptyState
-        className="h-full reveal-up"
-        icon={
-          // network-rings: discovery ring pulse on the icon — matches §empty-icon ::before/::after.
-          <span className="network-rings inline-flex" style={{ borderRadius: 12 }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-            </svg>
-          </span>
-        }
+        icon={null}
         title={isPrivateMode ? "Private mode is on" : "Nothing copied yet"}
         body={isPrivateMode ? "Clipboard is not recorded while private mode is active." : "Copy something and it will appear here."}
       />
     );
   } else if (filtered.length === 0) {
     body = (
-      // reveal-up entrance; no network-rings on the search-empty state (different semantic).
       <EmptyState
-        className="h-full reveal-up"
-        icon={
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="7" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            <line x1="8" y1="11" x2="14" y2="11" />
-          </svg>
-        }
+        icon={null}
         title={`No results for "${search}"`}
         body="Try a different search term."
       />
@@ -901,7 +819,7 @@ export function HistoryViewInner() {
   } else {
     body = (
       // Outer wrapper so the bulk bar and list share the same flex column.
-      <div className="flex h-full flex-col overflow-hidden">
+      <div>
         {/* Bulk action bar — rendered above the list when items are selected */}
         {multiSelectedIds.size > 0 && (
           <BulkActionBar
@@ -916,7 +834,7 @@ export function HistoryViewInner() {
             isBusy={bulkBusy}
           />
         )}
-        <div className="flex-1 overflow-hidden">
+        <div>
         {/* SCRH-9: Show a subtle hint when the display-limit pref caps the visible list so
             the user isn't confused about why fewer items appear than the total-count badge
             shows. The sentinel value 100000 is used for "Unlimited" in settings. */}
@@ -1076,7 +994,7 @@ export function HistoryViewInner() {
           // (Previously z-[9999] rendered this toast on top of everything.)
           // CopyPaste-bdac.58: padding now via Tailwind classes (pl-2.5 pr-3.5 py-1.5)
           // instead of hardcoded inline "6px 14px 6px 10px" so density tokens apply.
-          className="surface-glass-strong toast-enter fixed bottom-3 left-1/2 z-40 pointer-events-auto flex items-center gap-2.5 whitespace-nowrap pl-2.5 pr-3.5 py-1.5"
+          className="fixed bottom-3 left-1/2 z-40 pointer-events-auto flex items-center gap-2.5 whitespace-nowrap pl-2.5 pr-3.5 py-1.5"
           role="status"
           aria-live="polite"
           style={{

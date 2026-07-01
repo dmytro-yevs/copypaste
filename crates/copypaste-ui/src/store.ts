@@ -3,12 +3,6 @@ import { create } from "zustand";
 export type ViewId = "history" | "devices" | "settings" | "about" | "logs";
 
 // ---------------------------------------------------------------------------
-// AccentId — §2 STYLEGUIDE two-axis appearance: theme × accent.
-// Six hues; "indigo" is the default. Drives data-accent on <html>.
-// ---------------------------------------------------------------------------
-export type AccentId = "indigo" | "blue" | "teal" | "green" | "amber" | "rose";
-
-// ---------------------------------------------------------------------------
 // UI preferences persisted to localStorage
 // ---------------------------------------------------------------------------
 
@@ -53,27 +47,6 @@ export interface UIPrefs {
    */
   notifyOnCopy: boolean;
   /**
-   * When true (default), the main window uses backdrop-blur translucency
-   * (native macOS vibrancy + CSS backdrop-filter). When false, all surfaces
-   * use solid opaque backgrounds — useful for accessibility or low-end GPUs.
-   */
-  translucency: boolean;
-  /**
-   * UI color theme — §2 STYLEGUIDE two-axis appearance axis 1.
-   *   "dark"  (default) — §2 STYLEGUIDE mandates dark-first.
-   *   "light"           — Light theme.
-   * Applied via <html data-theme="dark|light"> in App.tsx.
-   * Note: the "system" value from v1–v3 is removed; old stored "system" is
-   * mapped to "dark" by the migration shim in loadPrefs().
-   */
-  theme: "dark" | "light";
-  /**
-   * Active accent color — §2 STYLEGUIDE two-axis appearance axis 2.
-   * Drives data-accent on <html>. Default: "indigo".
-   * Six allowed values: indigo · blue · teal · green · amber · rose.
-   */
-  accent: AccentId;
-  /**
    * Maximum number of items rendered in the HistoryView list.
    * This is a UI-only display filter — the daemon may store more items on disk
    * (pruned by byte quota). Sentinel value 100000 means "Unlimited".
@@ -106,12 +79,6 @@ const DEFAULT_PREFS: UIPrefs = {
   imageMaxHeight: 40,
   playSoundOnCopy: true,
   notifyOnCopy: true,
-  translucency: true,
-  // §2 STYLEGUIDE dark-first: "dark" is the default theme. The former
-  // PARITY-SPEC §0 light-first default is superseded by this redesign (CopyPaste-2hfj.3).
-  theme: "dark",
-  // §2 STYLEGUIDE: "indigo" is the default accent.
-  accent: "indigo",
   // 1000 items is a sensible default — fast to render, shows plenty of history.
   historyDisplayLimit: 1000,
   // Show the "Sensitive — preview hidden · click to reveal" overlay by default (Android parity).
@@ -166,16 +133,6 @@ function loadPrefs(): UIPrefs {
         delete parsed[key];
       }
     }
-    // "system" was a valid theme value in v1–v3; §2 STYLEGUIDE removes it.
-    // Map to "dark" (the new §2 default — graphite is the design-language default).
-    if (parsed.theme === "system") {
-      parsed.theme = "dark";
-    }
-    // v1 used "dark" as its default; former PARITY-SPEC §0 reset it to "light"
-    // on upgrade. That reset is removed — §2 STYLEGUIDE restores dark as default.
-    // v1 users who stored "dark" (explicitly or via old default) keep it; "light"
-    // is also preserved as-is (an explicit user choice).
-
     // ── v0.5.3 migration ──────────────────────────────────────────────────
     // Migrate the legacy `previewLines` (shared) field to the new split fields.
     // `historySize` and `previewDelay` are no longer stored — removed silently.

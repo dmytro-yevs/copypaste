@@ -440,7 +440,7 @@ function DevicesViewInner({
 
       {/* card-in: glass card entrance (styleguide §device-card). */}
       <section
-        className="card-in surface-card p-4 space-y-3"
+        className="p-4 space-y-3"
         style={{ borderRadius: "var(--r-card)" }}
       >
         {qrState.status === "loading" && (

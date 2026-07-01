@@ -16,7 +16,6 @@ export function EmptyState({
   title,
   body,
   action,
-  className,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -25,24 +24,17 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div
-      className={[
-        "flex flex-col items-center justify-center gap-2 px-6 py-8 text-center",
-        className ?? "",
-      ]
-        .join(" ")
-        .trim()}
-    >
+    <div>
       {/* Decorative icon: --ide-ghost-deco = 3.01:1 on panel (WCAG AA large/decorative ≥3:1). */}
-      <span style={{ color: "var(--mute)", fontSize: 28, lineHeight: 1 }}>
+      <span>
         {icon}
       </span>
       {/* Title: --ide-dim = #9da0a8, contrast > 4.5:1 on panel. */}
-      <p className="text-[13px] text-ide-dim">
+      <p>
         {title}
       </p>
       {/* Body: --ide-ghost = rgba(255,255,255,0.46) = 4.56:1 on panel (WCAG AA). */}
-      <p className="text-[11px]" style={{ color: "var(--faint)" }}>
+      <p>
         {body}
       </p>
       {action}

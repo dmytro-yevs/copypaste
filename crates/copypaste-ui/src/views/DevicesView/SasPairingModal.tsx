@@ -265,7 +265,7 @@ export function SasPairingModal({
 
   return (
     <div
-      className="modal-scrim-enter fixed inset-0 z-50 flex items-center justify-center p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: "var(--scrim)" }}
       role="dialog"
       aria-modal="true"
@@ -279,7 +279,7 @@ export function SasPairingModal({
           modal-card-enter: approved motion entrance (§MO-1). */}
       <div
         ref={modalRef}
-        className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
+        className="w-full max-w-sm p-5"
         style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh3)" }}
       >
         <p id="sas-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">

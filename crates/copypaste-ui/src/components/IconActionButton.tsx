@@ -38,7 +38,6 @@ export interface IconActionButtonProps {
 export function IconActionButton({
   "aria-label": ariaLabel,
   title,
-  danger,
   onClick,
   children,
 }: IconActionButtonProps) {
@@ -46,18 +45,16 @@ export function IconActionButton({
     <button
       aria-label={ariaLabel}
       title={title}
-      className={[
-        "relative flex h-5 w-5 items-center justify-center rounded",
-        "border border-transparent hover:border-ide-border hover:bg-ide-elevated",
-        danger ? "text-ide-danger" : "text-ide-dim hover:text-ide-text",
-      ].join(" ")}
       onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
         e.stopPropagation();
         onClick();
       }}
     >
       {/* Transparent hit-target overlay expanding clickable area to ≥44×44px
-          without affecting the 20px visual button size or row layout. */}
+          without affecting the 20px visual button size or row layout.
+          KEPT: position/inset is functionally required to enlarge the click/tap
+          target beyond the visual glyph bounds (accessibility hit-target rule),
+          not decorative styling. */}
       <span aria-hidden="true" style={{ position: "absolute", inset: "-12px" }} />
       {children}
     </button>

@@ -14,8 +14,8 @@ interface PanelProps {
 
 export function Panel({ children }: PanelProps) {
   return (
-    <div className="surface-card" style={{ borderRadius: "var(--r-card)" }}>
-      <div className="overflow-hidden" style={{ borderRadius: "var(--r-card)" }}>
+    <div>
+      <div>
         {children}
       </div>
     </div>

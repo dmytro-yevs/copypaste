@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { Search, Clipboard, SearchX, PlugZap } from "lucide-react";
 import { api, friendlyIpcError, pasteAsPlainText } from "../lib/ipc";
 import { copyWithFeedback } from "../lib/copyWithFeedback";
 import { useUI } from "../store";
@@ -36,26 +35,7 @@ export function Popup() {
     notifyOnCopy = true,
     // M4: popup now has its own independent preview line count
     previewLinesPopup = 1,
-    // Theme + translucency drive the popup's glass material (mirrors App.tsx).
-    theme = "light",
-    translucency = true,
   } = useUI((s) => s.prefs);
-
-  // Apply the persisted theme + translucency to the popup's <html> at runtime.
-  // popup.html ships data-theme="light" so the FIRST paint is correct (no longer
-  // always-dark — the confirmed theming bug); this effect re-syncs to the saved
-  // pref and toggles the .no-translucency fallback exactly like App.tsx does.
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
-
-  useEffect(() => {
-    if (translucency) {
-      document.documentElement.classList.remove("no-translucency");
-    } else {
-      document.documentElement.classList.add("no-translucency");
-    }
-  }, [translucency]);
 
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -302,41 +282,16 @@ export function Popup() {
   const showQuery = query.trim();
 
   return (
-    // §4 popup: radius 14, E3 glass; entrance animation on SHOW only.
-    // CRITICAL: no exit animation — hide fires invoke("hide_popup") immediately.
     <div
       data-popup-root
-      // surface-glass-strong = the canonical floating frosted-glass material:
-      // translucent fill + backdrop-blur(40px) + specular highlight + float
-      // shadow, theme-aware (light/dark). Replaces the hardcoded dark-only
-      // rgba(19,20,26,0.82) so the popup is a real glass material on BOTH themes.
-      className="surface-glass-strong popup-enter flex flex-col h-screen overflow-hidden"
-      style={{
-        borderRadius: "var(--r-card)",
-      }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           void hide();
         }
       }}
     >
-      {/* ── Search bar §4 — 44px, icon + input + N of M count ─────────── */}
-      <div
-        className="flex items-center gap-2 px-3 shrink-0"
-        style={{
-          height: 44,
-          // Token divider (was hardcoded white) so it's visible on light glass too.
-          borderBottom: "1px solid var(--divider)",
-        }}
-      >
-        {/* Search icon — lucide-react, 16px stroke 1.5 */}
-        <Search
-          size={16}
-          strokeWidth={1.5}
-          aria-hidden
-          style={{ color: "var(--faint)", flexShrink: 0 }}
-        />
-
+      {/* ── Search bar ─────────────────────────────────────────────────── */}
+      <div>
         <input
           ref={inputRef}
           type="text"
@@ -345,34 +300,16 @@ export function Popup() {
           onKeyDown={handleKeyDown}
           placeholder="Search clipboard…"
           autoFocus
-          style={{
-            background: "transparent",
-            border: "none",
-            boxShadow: "none",
-            borderRadius: 0,
-            // Token text (was hardcoded white) — legible on light + dark glass.
-            color: "var(--text)",
-            fontSize: "13px",
-            outline: "none",
-            flex: 1,
-            padding: 0,
-          }}
-          className="placeholder:text-ide-faint"
         />
 
         {/* Right: N of M result count (right-aligned, tabular-nums) */}
         {!loading && filtered.length > 0 && (
-          <span
-            className="shrink-0 text-[11px]"
-            style={{ color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}
-          >
+          <span>
             {showQuery ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}` : `${filtered.length}`}
           </span>
         )}
         {loading && (
-          <span className="text-[11px] shrink-0" style={{ color: "var(--faint)" }}>
-            …
-          </span>
+          <span>…</span>
         )}
       </div>
 
@@ -380,26 +317,20 @@ export function Popup() {
       {error ? (
         error === "daemon_offline" ? (
           <EmptyState
-            icon={<PlugZap size={28} strokeWidth={1.5} aria-hidden />}
+            icon={undefined}
             title="Clipboard service offline"
             body="The background service is not running. Restart it from Settings."
             action={<RestartDaemonButton onRestarted={() => void refresh()} />}
           />
         ) : error === "ipc_not_ready" ? (
           <EmptyState
-            icon={<PlugZap size={28} strokeWidth={1.5} aria-hidden />}
+            icon={undefined}
             title="Starting up…"
             body="The clipboard service is initialising. It will be ready in a moment."
           />
         ) : (
           <EmptyState
-            icon={
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-            }
+            icon={undefined}
             title="Something went wrong"
             body="The clipboard service could not be reached. Please try again."
           />
@@ -407,25 +338,19 @@ export function Popup() {
       ) : filtered.length === 0 ? (
         showQuery ? (
           <EmptyState
-            icon={<SearchX size={28} strokeWidth={1.5} aria-hidden />}
+            icon={undefined}
             title={`No matches for "${showQuery}"`}
             body="Try a different search term."
           />
         ) : (
           <EmptyState
-            icon={<Clipboard size={28} strokeWidth={1.5} aria-hidden />}
+            icon={undefined}
             title="Nothing copied yet"
             body="Copy something and it will appear here."
           />
         )
       ) : (
-        /* §4/§8 Selection glide: a single absolutely-positioned highlight layer
-           that animates top/height as selectedIdx changes. The layer sits behind
-           each row's content (z-index 0). Each row renders transparent so only
-           the glide layer provides the selection background.
-           prefers-reduced-motion: the transition is skipped when the user prefers
-           reduced motion (instant position change with no animation). */
-        <div className="relative flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+        <div>
           {/* Glide highlight layer — tracks selectedIdx */}
           <GlideHighlight
             selectedIdx={selectedIdx}
@@ -442,8 +367,6 @@ export function Popup() {
             aria-activedescendant={
               filtered[selectedIdx] ? `popup-item-${filtered[selectedIdx].item.id}` : undefined
             }
-            className="relative flex-1 overflow-y-auto py-1 h-full"
-            style={{ minHeight: 0 }}
           >
             {filtered.map(({ item, positions }, idx) => (
               <PopupRow
@@ -474,50 +397,25 @@ export function Popup() {
       )}
 
       {/* ── Footer keycap pills ─────────────────────────────────────────── */}
-      <div
-        className="flex items-center justify-between px-3 py-1.5 shrink-0"
-        style={{
-          // Token divider (was hardcoded white) so it shows on light glass too.
-          borderTop: "1px solid var(--divider)",
-          color: "var(--faint)",
-        }}
-      >
-        <span className="text-[10.5px] flex items-center gap-1">
-          <span className="keycap">↑↓</span>
+      <div>
+        <span>
+          <span>↑↓</span>
           <span>navigate</span>
         </span>
-        <div className="flex items-center gap-2">
-          <span className="text-[10.5px] flex items-center gap-1">
-            <span className="keycap">⏎</span>
+        <div>
+          <span>
+            <span>⏎</span>
             <span>paste</span>
-            <span className="text-[10.5px]">·</span>
-            <span className="keycap">Esc</span>
+            <span>·</span>
+            <span>Esc</span>
             <span>close</span>
           </span>
-          {/* Settings gear — opens the main window Settings view. Inline SVG to
-              match the popup's existing inline-icon style (Lucide "settings").
-              CopyPaste-5917.101: visual size is h-7 w-7 (28px) to keep the footer
-              at its designed compact height; the expanded hit area is achieved via
-              a negative-inset ::after pseudo-element (position:relative + ::after
-              inset:-8px) matching the approved .icon-btn pattern. */}
           <button
             type="button"
             aria-label="Open settings"
             title="Open settings"
             onClick={() => void openSettings()}
-            className="relative flex h-7 w-7 items-center justify-center rounded hover:bg-ide-hover transition-colors"
-            style={{ border: "none", background: "none", cursor: "pointer", color: "var(--faint)" }}
-          >
-            <svg
-              width="13" height="13" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" strokeWidth="1.75"
-              strokeLinecap="round" strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          </button>
+          />
         </div>
       </div>
     </div>

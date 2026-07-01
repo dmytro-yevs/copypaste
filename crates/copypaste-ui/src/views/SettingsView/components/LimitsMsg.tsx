@@ -10,7 +10,7 @@ export function LimitsMsg({
   const entry = limitsMsg[field];
   if (!entry) return null;
   return (
-    <span className={`text-[11px] ${entry.ok ? "text-ide-success" : "text-ide-danger"}`}>
+    <span>
       {entry.message}
     </span>
   );

@@ -47,25 +47,17 @@ export class ErrorBoundary extends Component<
 
     const where = this.props.label ? ` in ${this.props.label}` : "";
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-        <div className="text-[14px] font-medium text-ide-text">
+      <div>
+        <div>
           Something went wrong{where}
         </div>
-        <div className="max-w-sm text-[12px] text-ide-dim">
+        <div>
           The background service may be unavailable, or this screen failed to
           load. The rest of the app is still usable.
         </div>
         {/* Error detail is logged by componentDidCatch — not rendered here
             to avoid leaking filesystem paths or internal strings into the DOM. */}
-        <button
-          type="button"
-          onClick={this.handleRetry}
-          style={{ borderRadius: "var(--r-ctl)" }}
-          className={[
-            "mt-1 border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-            "hover:bg-ide-hover",
-          ].join(" ")}
-        >
+        <button type="button" onClick={this.handleRetry}>
           Retry
         </button>
       </div>

@@ -141,15 +141,6 @@ export function ShortcutCapture({
       onFocus={() => setCapturing(true)}
       onBlur={() => setCapturing(false)}
       onKeyDown={handleKeyDown}
-      className={[
-        "w-48 cursor-pointer border px-2.5 py-1.5 text-[13px] text-ide-text",
-        // audit P2: bg-ide-bg looked disabled; use the white/elevated control fill.
-        "outline-none select-none bg-ide-elevated",
-        capturing
-          ? "border-ide-accent ring-1 ring-ide-accent"
-          : "border-ide-border hover:border-ide-accent",
-      ].join(" ")}
-      style={{ borderRadius: "var(--r-ctl)" }}
       title="Click and press a key combination"
     />
   );

@@ -1,7 +1,4 @@
 import { useRef, useState } from "react";
-// ICON-11: use lucide-react FileText so FileChip shares the same glyph family
-// as ContentIcon's "file" case (no more inline SVG divergence).
-import { FileText } from "lucide-react";
 import { api } from "../lib/ipc";
 // bdac.20: ActionButton for consistent secondary variant styling.
 import { ActionButton } from "./ActionButton";
@@ -143,30 +140,14 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
   };
 
   return (
-    <span
-      ref={mountedRefCallback}
-      className="inline-flex items-center gap-2 border border-ide-divider/60 bg-ide-elevated/60 px-2 py-1"
-      style={{ maxWidth: "100%", borderRadius: "var(--r-chip)" }}
-    >
-      {/* File icon — lucide FileText (ICON-11: unified glyph family with ContentIcon) */}
-      <FileText
-        width={14}
-        height={14}
-        strokeWidth={1.5}
-        aria-hidden={true}
-        className="shrink-0 text-ide-warning"
-      />
-
+    <span ref={mountedRefCallback}>
       {/* Filename + optional size */}
-      <span className="flex min-w-0 flex-col">
-        <span
-          className="truncate text-[12px] text-ide-text leading-snug"
-          title={filename}
-        >
+      <span>
+        <span title={filename}>
           {filename}
         </span>
         {resolvedSize !== null && (
-          <span className="text-[10.5px] text-ide-faint leading-snug">
+          <span>
             {formatBytes(resolvedSize)}
           </span>
         )}
@@ -174,14 +155,14 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
 
       {/* Error message when Save As or Open fails */}
       {saveError !== null && (
-        <span className="text-[11px] text-ide-danger shrink-0">{saveError}</span>
+        <span>{saveError}</span>
       )}
       {openError !== null && (
-        <span className="text-[11px] text-ide-danger shrink-0">{openError}</span>
+        <span>{openError}</span>
       )}
 
       {/* Action buttons — bdac.20: ActionButton for consistent radius, focus ring, and disabled opacity. */}
-      <span className="ml-auto flex shrink-0 items-center gap-1">
+      <span>
         {/* Open — write to temp file and open with OS default app (no save dialog) */}
         <ActionButton
           variant="secondary"

@@ -19,22 +19,15 @@ interface SectionHeaderProps {
   faint?: boolean;
 }
 
-export function SectionHeader({ label, hint, faint = false }: SectionHeaderProps) {
-  // Phase 4: density axis removed — fixed comfortable spacing (mt-7).
-  const mt = "mt-7";
+export function SectionHeader({ label, hint }: SectionHeaderProps) {
   return (
-    <div className={`${mt} mb-1.5 first:mt-0`}>
+    <div>
       {/* §3: section labels = grey (text-ide-dim or text-ide-faint), NOT accent blue;
           11px semibold uppercase matching Components.kt SectionLabel. */}
-      <div
-        className={[
-          "text-[11px] font-semibold uppercase tracking-wider",
-          faint ? "text-ide-faint" : "text-ide-dim",
-        ].join(" ")}
-      >
+      <div>
         {label}
       </div>
-      {hint && <div className="mt-0.5 text-[11px] text-ide-faint">{hint}</div>}
+      {hint && <div>{hint}</div>}
     </div>
   );
 }

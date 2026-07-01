@@ -43,19 +43,14 @@ export function CloudAccountMismatchBanner({
   if (!hasMismatch) return null;
 
   return (
-    <div
-      role="alert"
-      data-testid="cloud-account-mismatch-banner"
-      className="border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning"
-      style={{ borderRadius: "var(--r-ctl)" }}
-    >
+    <div role="alert" data-testid="cloud-account-mismatch-banner">
       <strong>Supabase account mismatch detected.</strong> Two or more paired
       devices are using different Supabase accounts or projects. Clipboard items
       will not sync — Supabase RLS only allows rows owned by the same GoTrue
       user to be shared. Make sure every device signs in with the same Supabase
       email and points to the same Supabase project URL.
       {localAccountId != null && (
-        <span className="mt-1 block text-[11px] opacity-75">
+        <span>
           This device: <code>{localAccountId}</code>
         </span>
       )}

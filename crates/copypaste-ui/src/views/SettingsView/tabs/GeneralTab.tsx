@@ -71,7 +71,7 @@ export function GeneralTab({
   setReloadKey,
 }: GeneralTabProps) {
   return (
-    <div className="space-y-2">
+    <div>
       {/* bdac.93: sub-group "General" — sync + private mode */}
       <SectionHeader label="General" />
       <Panel>
@@ -83,15 +83,15 @@ export function GeneralTab({
           title="Enable sync"
           info={<InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />}
         >
-          <div className="flex flex-col items-end gap-1">
+          <div>
             {/* 7set: warn when daemon doesn't acknowledge sync_enabled so the
                 user knows the toggle may have no effect on this daemon version. */}
             {syncEnabledStub && !offline && (
-              <span className="text-[11px] text-ide-warning" role="note">
+              <span role="note">
                 Sync control unavailable — please update the CopyPaste background service to enable this setting.
               </span>
             )}
-            <div className="flex items-center gap-1.5">
+            <div>
               <LimitsMsg field="sync_enabled" limitsMsg={limitsMsg} />
               <Toggle
                 checked={syncEnabled}
@@ -108,9 +108,9 @@ export function GeneralTab({
           title="Private Mode"
           info={<InfoPopover text="When on, this device stops recording new clipboard items and suppresses sync for the session. The notification's Pause action is a temporary per-session pause; Private Mode persists across restarts." />}
         >
-          <div className="flex items-center gap-2">
+          <div>
             {privateModeError !== null && (
-              <span className="text-[11px] text-ide-danger">{privateModeError}</span>
+              <span>{privateModeError}</span>
             )}
             <Toggle
               checked={privateMode}
@@ -142,11 +142,11 @@ export function GeneralTab({
           />
         </SettingsRow>
         <SettingsRow title="Show notification on copy">
-          <div className="flex items-center gap-2">
+          <div>
             {/* vrur: warn when notify is enabled but OS has denied permission.
                 Shows inline so the user can act without leaving Settings. */}
             {prefs.notifyOnCopy && notifPermDenied && (
-              <span className="text-[11px] text-ide-warning" role="alert">
+              <span role="alert">
                 OS notification permission denied — notifications won't appear.
                 Grant access in System Settings → Notifications.
               </span>
@@ -236,14 +236,14 @@ export function GeneralTab({
           title="Allow screenshots / screen recording"
           info={<InfoPopover text="When off (default), CopyPaste is excluded from screenshots and screen recordings (macOS NSWindowSharingNone / Android FLAG_SECURE). Enable only if you need to record or share your screen while using CopyPaste. The preference is applied immediately to all open windows." />}
         >
-          <div className="flex flex-col items-end gap-1">
+          <div>
             {allowScreenshots && (
-              <span className="text-[11px] text-ide-warning" role="note">
+              <span role="note">
                 Clipboard content may be captured by screenshots and screen recordings.
               </span>
             )}
             {allowScreenshotsError !== null && (
-              <span className="text-[11px] text-ide-danger">{allowScreenshotsError}</span>
+              <span>{allowScreenshotsError}</span>
             )}
             <Toggle
               checked={allowScreenshots}
@@ -252,12 +252,12 @@ export function GeneralTab({
             />
           </div>
         </SettingsRow>
-        <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[13px] text-ide-text">Excluded apps</span>
+        <div>
+          <div>
+            <span>Excluded apps</span>
             <InfoPopover text="Bundle IDs of apps whose clipboard is never captured, e.g. com.1password.1password (macOS)." />
           </div>
-          <div className="mt-2 flex items-center gap-2">
+          <div>
             <input
               type="text"
               value={newExcludedApp}
@@ -272,26 +272,20 @@ export function GeneralTab({
               }}
               /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
                  the Sync-tab text inputs: white/near-white elevated fill. */
-              className="flex-1 border border-ide-border bg-ide-elevated px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
-              style={{ borderRadius: "var(--r-ctl)" }}
             />
             <button
               type="button"
               disabled={offline || newExcludedApp.trim() === ""}
               onClick={() => void addExcludedApp()}
-              className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-              style={{ borderRadius: "var(--r-ctl)" }}
             >
               Add
             </button>
           </div>
           {excludedApps.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
+            <div>
               {excludedApps.map((bundleId) => (
                 <span
                   key={bundleId}
-                  className="inline-flex items-center gap-1 border border-ide-border bg-ide-elevated/40 px-2 py-1 text-[12px] text-ide-dim"
-                  style={{ borderRadius: "var(--r-ctl)" }}
                 >
                   {bundleId}
                   <button
@@ -299,7 +293,6 @@ export function GeneralTab({
                     aria-label={`Remove ${bundleId}`}
                     disabled={offline}
                     onClick={() => void removeExcludedApp(bundleId)}
-                    className="flex h-6 w-6 items-center justify-center text-ide-faint hover:text-ide-danger disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ×
                   </button>
@@ -317,7 +310,7 @@ export function GeneralTab({
           title="Version"
           description="Current daemon and app version."
         >
-          <span className="text-[13px] text-ide-text">
+          <span>
             {offline ? "Not running" : (daemonVersion ?? "unknown")}
           </span>
         </SettingsRow>

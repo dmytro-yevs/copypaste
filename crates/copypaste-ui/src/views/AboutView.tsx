@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { ViewShell } from "../components/ViewShell";
 import { SectionHeader } from "../components/SectionHeader";
@@ -22,14 +21,6 @@ type DaemonView =
   | { kind: "connected" }
   | { kind: "degraded"; reason: string | null }
   | { kind: "offline" };
-
-// Badge color mapping for daemon state — uses only ide.* tokens, no hex.
-const DAEMON_BADGE: Record<string, string> = {
-  pending: "text-ide-faint",
-  connected: "text-ide-success",
-  degraded: "text-ide-warning",
-  offline: "text-ide-danger",
-};
 
 // GitHub base for external links. Changelog and privacy policy are linked
 // directly to their repo paths since no separate hosted URLs exist.
@@ -93,56 +84,34 @@ export function AboutView() {
 
   return (
     <ViewShell title="About">
-      <div className="flex h-full flex-col items-center justify-center px-6">
-        {/* surface-card = frosted translucent glass.
-            .card-in = entrance animation (scale+fade from tokens).
-            bg-ide-elevated is kept so the existing token assertion in
-            AboutView.test.tsx still finds it; .surface-card overrides the opaque
-            fill at paint time. */}
-        <div
-          className="surface-card card-in flex w-full max-w-sm flex-col gap-0 overflow-hidden bg-ide-elevated"
-          style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh1)" }}
-        >
+      <div>
+        <div>
 
-          {/* Identity — .reveal-up staggers the heading after the card enters.
-              UIC-11: unified to px-6 to match all other sections (was px-8). */}
-          <div className="reveal-up flex flex-col items-center gap-1 border-b border-ide-divider px-6 py-6 text-center">
-            <h2 className="text-[18px] font-semibold text-ide-text">CopyPaste</h2>
+          {/* Identity */}
+          <div>
+            <h2>CopyPaste</h2>
             {/* audit P2: hide the line entirely when no version is known instead
-                of rendering a bare "—". Version badge floats gently (.badge-float).
+                of rendering a bare "—".
                 bdac.77: Android shows "VERSION_NAME (build VERSION_CODE)". macOS shows
                 only the version name — Tauri's getVersion() / app_version IPC expose no
                 build number, so parity is achieved at the version-name level only. */}
             {version !== null && (
-              <span
-                className="badge-float mt-0.5 inline-block rounded-full border border-ide-divider bg-ide-elevated px-2.5 py-0.5 text-[11px] font-medium text-ide-faint"
-              >
+              <span>
                 {version}
               </span>
             )}
             {/* bdac.79: canonical short tagline — no platform suffix (matches Android about_tagline). */}
-            <p className="mt-2 text-[13px] text-ide-dim">
+            <p>
               Encrypted clipboard manager
             </p>
           </div>
 
-          {/* Feature list — UIC-2/VISM-13: replaced hand-rolled accent-coloured
-              label with shared SectionHeader (11px, text-ide-dim, non-accent). */}
-          <div className="border-b border-ide-divider px-6 py-4">
+          {/* Feature list */}
+          <div>
             <SectionHeader label="Features" />
-            <ul className="flex flex-col gap-1.5">
-              {FEATURES.map((feature, idx) => (
-                <li
-                  key={feature}
-                  // Stagger each feature row: 40 ms per item above the base 40 ms.
-                  className="list-item-in flex items-start gap-2 text-[13px] text-ide-dim"
-                  style={{ animationDelay: `${(idx + 1) * 40}ms` }}
-                >
-                  <Check
-                    size={14}
-                    className="mt-px shrink-0 text-ide-success"
-                    aria-hidden="true"
-                  />
+            <ul>
+              {FEATURES.map((feature) => (
+                <li key={feature}>
                   {feature}
                 </li>
               ))}
@@ -152,15 +121,13 @@ export function AboutView() {
           {/* Daemon status — distinct degraded state, never a false green. */}
           {/* SCRL-5: aria-live="polite" so screen readers announce status changes
               when the async probe resolves (bd CopyPaste-5917.89). */}
-          <div className="border-b border-ide-divider px-6 py-3">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-ide-dim">Background daemon</span>
-              <span aria-live="polite" className={`text-[12px] font-medium ${DAEMON_BADGE[daemon.kind]}`}>
+          <div>
+            <div>
+              <span>Background daemon</span>
+              <span aria-live="polite">
                 {daemon.kind === "pending" && "Checking…"}
                 {daemon.kind === "connected" && (
-                  <span className="inline-flex items-center gap-1">
-                    Connected <Check size={12} aria-hidden="true" />
-                  </span>
+                  <span>Connected</span>
                 )}
                 {daemon.kind === "degraded" && (
                   <>Degraded{daemon.reason ? ` (${daemon.reason})` : ""}</>
@@ -171,7 +138,7 @@ export function AboutView() {
             {/* bdac.98: offer RestartDaemonButton in degraded/offline states so users
                 can recover without navigating away — consistent with all other views. */}
             {(daemon.kind === "offline" || daemon.kind === "degraded") && (
-              <div className="mt-2">
+              <div>
                 <RestartDaemonButton onRestarted={checkStatus} />
               </div>
             )}
@@ -181,13 +148,12 @@ export function AboutView() {
               the GitHub link. Both targets exist in-repo (CHANGELOG.md,
               docs/privacy/telemetry-policy.md); linked via GitHub since no separate
               hosted URLs exist. window.open used so Tauri opens the system browser. */}
-          <div className="flex flex-col gap-0 px-6 py-3">
+          <div>
             <button
               type="button"
               onClick={() =>
                 window.open(GITHUB_BASE, "_blank")
               }
-              className="cursor-pointer border-0 bg-transparent p-0 text-left text-[13px] text-ide-accent hover:underline"
             >
               github.com/dmytro-yevs/copypaste ↗
             </button>
@@ -196,7 +162,6 @@ export function AboutView() {
               onClick={() =>
                 window.open(`${GITHUB_BASE}/blob/main/CHANGELOG.md`, "_blank")
               }
-              className="mt-1.5 cursor-pointer border-0 bg-transparent p-0 text-left text-[13px] text-ide-accent hover:underline"
             >
               Changelog ↗
             </button>
@@ -208,7 +173,6 @@ export function AboutView() {
                   "_blank"
                 )
               }
-              className="mt-1.5 cursor-pointer border-0 bg-transparent p-0 text-left text-[13px] text-ide-accent hover:underline"
             >
               Privacy policy ↗
             </button>

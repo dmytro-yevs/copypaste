@@ -14,15 +14,7 @@ export function HighlightedText({ text, positions }: { text: string; positions: 
       let j = i;
       while (j < text.length && posSet.has(j)) j++;
       nodes.push(
-        <span
-          key={i}
-          style={{
-            color: "var(--accent)",
-            background: "var(--selected)",  /* rgba(61,139,255,0.16) — §3 selected fill */
-            borderRadius: 2,
-            // Deliberately NO fontWeight change — prevents width-shift on highlight
-          }}
-        >
+        <span key={i}>
           {text.slice(i, j)}
         </span>
       );

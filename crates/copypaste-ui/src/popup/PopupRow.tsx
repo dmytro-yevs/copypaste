@@ -1,13 +1,10 @@
 // ── PopupRow ──────────────────────────────────────────────────────────────────
 import React, { useState } from "react";
-import { Star, StarOff } from "lucide-react";
 import type { HistoryEntry } from "../lib/ipc";
 import { isImageType, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking, shouldMask } from "../lib/masking";
 import { formatRelativeTime } from "../lib/time";
 import { ImageThumb } from "../components/ImageThumb";
-import { AppIcon } from "../components/AppIcon";
-import { ContentIcon } from "../components/ContentIcon";
 import { HighlightedText } from "./HighlightedText";
 
 // Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding.
@@ -79,36 +76,25 @@ export const PopupRow = React.memo(function PopupRow({
       id={`popup-item-${item.id}`}
       role="option"
       aria-selected={selected}
-      className={[
-        isImage ? "popup-row-image" : "popup-row",
-        "flex items-center gap-2 px-3 cursor-pointer select-none relative group",
-        selected ? "row-selected-bar" : "",
-      ].join(" ")}
       style={{
+        // Functional: matches the geometry GlideHighlight reads via
+        // child.offsetHeight to size/position its overlay for this row.
         minHeight: isImage ? Math.max(rowH, 50) : rowH,
-        // §4/§8 glide: row background is always transparent — the GlideHighlight
-        // layer provides the selection colour via absolute positioning.
-        // Pinned rows keep their warm tint since it's a persistent state marker.
-        background: item.pinned ? "color-mix(in srgb,var(--warn) 14%,transparent)" : "transparent",
-        // No per-row transition needed — GlideHighlight handles animation.
+        // Functional: row content must paint above the GlideHighlight
+        // overlay (which uses zIndex 0) so text stays legible.
         zIndex: 1,
       }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
-      {/* Content-type glyph — shared ContentIcon (Lucide, strokeWidth 1.5) */}
-      <ContentIcon contentType={isImage ? "image" : item.content_type} size={14} />
-
       {/* Primary label / image thumb */}
       {isImage ? (
         <ImageThumb id={item.id} maxHeight={imageMaxHeight} />
       ) : (
         <span
-          className="flex-1 min-w-0 text-[13px]"
           style={{
-            // Token text (was hardcoded white) — legible on light + dark glass.
-            color: blurred ? "var(--faint)" : "var(--text)",
-            // M4: multi-line clamp when previewLines > 1, single-line ellipsis otherwise
+            // Functional: M4 multi-line clamp when previewLines > 1,
+            // single-line ellipsis otherwise — implements the previewLines prop.
             ...(previewLines > 1
               ? {
                   display: "-webkit-box",
@@ -133,11 +119,9 @@ export const PopupRow = React.memo(function PopupRow({
                 setRevealed(true);
               }}
               style={{
+                // Functional: the blur filter itself is the reveal mechanic,
+                // not decoration — without it there is nothing to "reveal".
                 filter: "blur(5px)",
-                userSelect: "none",
-                cursor: "pointer",
-                display: "inline-block",
-                maxWidth: "100%",
               }}
             >
               {label}
@@ -154,58 +138,22 @@ export const PopupRow = React.memo(function PopupRow({
       {item.app_bundle_id && (() => {
         const appLabel = sourceAppLabel(item.app_bundle_id);
         return appLabel ? (
-          <span
-            // Theme-aware subtle pill (was hardcoded white fill/border, invisible on light).
-            className="flex shrink-0 items-center gap-1 text-[10.5px] leading-none px-1 py-0.5"
-            style={{
-              color: "var(--faint)",
-              background: "var(--hover)",
-              border: "1px solid var(--divider)",
-              borderRadius: "var(--r-chip)",
-            }}
-            title={item.app_bundle_id ?? undefined}
-          >
-            {/* §4: AppIcon 12→16px */}
-            <AppIcon bundleId={item.app_bundle_id} size={16} />
+          <span title={item.app_bundle_id ?? undefined}>
             {appLabel}
           </span>
         ) : null;
       })()}
 
-      {/* Right cluster — fixed-width so layout never shifts */}
-      <div
-        className="flex items-center gap-1.5 shrink-0"
-        style={{ minWidth: "5.5rem", justifyContent: "flex-end" }}
-      >
-        {/* Relative time (tabular-nums, 11px) */}
-        <span
-          className="text-[11px]"
-          style={{ color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}
-        >
+      {/* Right cluster */}
+      <div>
+        {/* Relative time */}
+        <span>
           {relTime}
         </span>
 
-        {/* Star interactive hover pin button and at-rest indicator.
-            HW-M5 fix: both the hover button and the at-rest badge are absolute
-            within the fixed h-5 w-5 slot — no in-flow children, so the slot
-            width never changes between pinned/unpinned rows, keeping the
-            timestamp and keycap aligned across all rows.
-            dm51: ★ star glyph (styleguide §pin) replaces bookmark SVG. */}
-        <div className="relative flex items-center justify-center h-5 w-5 shrink-0">
-          {/* At-rest pinned badge — visible when pinned, fades out on row hover */}
-          {item.pinned && (
-            <Star
-              width={10}
-              height={10}
-              strokeWidth={0}
-              fill="currentColor"
-              aria-label="Pinned"
-              className="absolute group-hover:opacity-0 transition-opacity"
-              style={{ color: "var(--warn)", transitionDuration: "120ms", zIndex: 1 }}
-            />
-          )}
-
-          {/* Hover pin/unpin button — shown on group hover, sits above badge */}
+        {/* Pin/unpin button. */}
+        <div>
+          {/* Hover pin/unpin button — sits above the at-rest indicator. */}
           <button
             type="button"
             aria-label={item.pinned ? "Unpin" : "Pin"}
@@ -214,34 +162,12 @@ export const PopupRow = React.memo(function PopupRow({
               e.stopPropagation();
               onPin();
             }}
-            className="absolute inset-0 flex items-center justify-center rounded hover:bg-ide-hover text-ide-dim hover:text-ide-text transition-opacity opacity-0 group-hover:opacity-100"
-            style={{ border: "none", background: "none", cursor: "pointer", zIndex: 2 }}
-          >
-            {item.pinned ? (
-              // Filled star = currently pinned; amber tint matches at-rest badge
-              <Star
-                width={11}
-                height={11}
-                strokeWidth={0}
-                fill="currentColor"
-                aria-hidden={true}
-                style={{ color: "var(--warn)" }}
-              />
-            ) : (
-              // Outline star = unpinned; inherits button's text-ide-dim / hover:text-white
-              <StarOff
-                width={11}
-                height={11}
-                strokeWidth={1.5}
-                aria-hidden={true}
-              />
-            )}
-          </button>
+          />
         </div>
 
         {/* ⌘1-9 keycap (first 9 rows, no active query) */}
         {showKeycap && (
-          <span className={selected ? "keycap keycap-selected" : "keycap"}>
+          <span>
             ⌘{index + 1}
           </span>
         )}

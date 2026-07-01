@@ -29,19 +29,13 @@ export function BulkActionBar({
   isBusy,
 }: BulkBarProps) {
   return (
-    <div
-      className={[
-        // surface-card glass: the bulk bar floats over the list as a frosted layer.
-        "surface-card flex items-center gap-2 border-b border-ide-border/60 px-3 py-1.5",
-        "text-[12px] text-ide-text",
-      ].join(" ")}
-    >
+    <div>
       {/* Selection count — neutral text, no amber */}
-      <span className="shrink-0 font-medium text-ide-dim">
+      <span>
         {count} selected
       </span>
 
-      <span className="text-ide-divider">|</span>
+      <span>|</span>
 
       {/* Select-all toggle — CopyPaste-bdac.23: ActionButton(secondary,sm).
           CopyPaste-5917.18: aria-pressed conveys toggle state to screen readers. */}
@@ -92,7 +86,7 @@ export function BulkActionBar({
       </ActionButton>
 
       {/* Spacer */}
-      <span className="flex-1" />
+      <span />
 
       {/* Clear selection — CopyPaste-bdac.23: ActionButton(secondary,sm). */}
       <ActionButton

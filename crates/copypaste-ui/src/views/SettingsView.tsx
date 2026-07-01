@@ -23,16 +23,16 @@ export function SettingsView() {
       <StatusBanners loadState={s.loadState} staleDaemon={s.staleDaemon} degradedReason={s.degradedReason} onRetry={onRetry} />
 
       {s.loadState === "loading" && (
-        <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">Loading…</div>
+        <div>Loading…</div>
       )}
 
       {s.loadState !== "loading" && (
-        <div className="mx-auto w-full" style={{ maxWidth: "620px" }}>
-          <div className="surface-card overflow-hidden shadow-ide-sm" style={{ borderRadius: "var(--r-card)" }}>
-            <div className="px-4 pt-4 border-b border-ide-border/30">
+        <div>
+          <div>
+            <div>
               <TabBar active={activeTab} onChange={setActiveTab} />
             </div>
-            <div className="p-4">
+            <div>
               {activeTab === "general" && (
                 <div role="tabpanel" id="tabpanel-general" aria-labelledby="tab-general">
                   <GeneralTab
