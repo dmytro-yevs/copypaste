@@ -3,7 +3,7 @@ import { resolveView } from "./resolveView";
 
 describe("resolveView — defensive view narrowing (task 6.3)", () => {
   it("passes every known production view id through unchanged", () => {
-    for (const id of ["history", "devices", "settings", "about", "logs"] as const) {
+    for (const id of ["history", "devices", "settings"] as const) {
       expect(resolveView(id)).toBe(id);
     }
   });

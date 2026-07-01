@@ -60,7 +60,7 @@ describe("loadPrefs — appearance-field validation & merge", () => {
   });
 
   it("an invalid theme defaults while a valid accent is kept", () => {
-    seed({ theme: "system", accent: "teal" });
+    seed({ theme: "neon", accent: "teal" });
     const prefs = loadPrefs();
     expect(prefs.theme).toBe("dark"); // defaulted
     expect(prefs.accent).toBe("teal"); // preserved
@@ -109,7 +109,7 @@ describe("loadPrefs — appearance-field validation & merge", () => {
     expect(p.accent).toBe("amber");
     expect(p.translucency).toBe(false);
     // And an invalid stored value still defaults per-field on reload.
-    seed({ ...DEFAULT_PREFS, theme: "system", accent: "teal" });
+    seed({ ...DEFAULT_PREFS, theme: "neon", accent: "teal" });
     useUI.getState().reloadPrefs();
     expect(useUI.getState().prefs.theme).toBe("dark");
     expect(useUI.getState().prefs.accent).toBe("teal");

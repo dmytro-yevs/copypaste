@@ -214,9 +214,9 @@ export function HistoryViewInner() {
     if (!el) return;
     let top = 0;
     for (let i = 0; i < selectedIdx; i++) {
-      top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
+      top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density, previewLinesApp);
     }
-    const rowH = _rowHeightFor(filtered[selectedIdx], previewSize, imageMaxHeight, density);
+    const rowH = _rowHeightFor(filtered[selectedIdx], previewSize, imageMaxHeight, density, previewLinesApp);
     const viewTop = el.scrollTop;
     const viewBottom = viewTop + el.clientHeight;
     if (top < viewTop) {
@@ -225,7 +225,7 @@ export function HistoryViewInner() {
       el.scrollTop = top + rowH - el.clientHeight;
     }
     isKeyboardNavRef.current = false;
-  }, [selectedIdx, filtered, previewSize, imageMaxHeight, density]);
+  }, [selectedIdx, filtered, previewSize, imageMaxHeight, density, previewLinesApp]);
 
   // §8 Selection glide: update the glide layer position whenever selection or
   // filtered list changes. Computes the offset from rowHeightFor so it stays
@@ -242,9 +242,9 @@ export function HistoryViewInner() {
       if (idx < 0) { setGlideStyle(null); return; }
       let top = 0;
       for (let i = 0; i < idx; i++) {
-        top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
+        top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density, previewLinesApp);
       }
-      const height = _rowHeightFor(filtered[idx], previewSize, imageMaxHeight, density);
+      const height = _rowHeightFor(filtered[idx], previewSize, imageMaxHeight, density, previewLinesApp);
       setGlideStyle({ top, height });
       return;
     }
@@ -255,7 +255,7 @@ export function HistoryViewInner() {
     // class (driven by the `multiSelected` prop on HistoryRow) to highlight only
     // the actually-selected rows.
     setGlideStyle(null);
-  }, [selectedId, multiSelectedIds, filtered, previewSize, imageMaxHeight, density]);
+  }, [selectedId, multiSelectedIds, filtered, previewSize, imageMaxHeight, density, previewLinesApp]);
 
   // Defined before handleKeyDown so the Enter-key path can route copies through
   // it (sound/notification fire on success via the same prefs as row-click copy).
@@ -832,7 +832,7 @@ export function HistoryViewInner() {
   } else {
     body = (
       // Outer wrapper so the bulk bar and list share the same flex column.
-      <div>
+      <div className="fill-col">
         {/* Bulk action bar — rendered above the list when items are selected */}
         {multiSelectedIds.size > 0 && (
           <BulkActionBar
@@ -847,7 +847,7 @@ export function HistoryViewInner() {
             isBusy={bulkBusy}
           />
         )}
-        <div>
+        <div className="fill-col">
         {/* SCRH-9: Show a subtle hint when the display-limit pref caps the visible list so
             the user isn't confused about why fewer items appear than the total-count badge
             shows. The sentinel value 100000 is used for "Unlimited" in settings. */}
@@ -878,6 +878,7 @@ export function HistoryViewInner() {
           previewSize={previewSize}
           imageMaxHeight={imageMaxHeight}
           density={density}
+          previewLines={previewLinesApp}
           glideStyle={glideStyle}
           listRef={listRef}
           onKeyDown={(e) => void handleKeyDown(e)}
@@ -981,7 +982,7 @@ export function HistoryViewInner() {
         on the inner label so the Tauri drag event fires on the webview, not
         on a React element.
       */}
-      <div>
+      <div className="fill-col">
         {fileDragOver && (
           <div
             aria-hidden="true"

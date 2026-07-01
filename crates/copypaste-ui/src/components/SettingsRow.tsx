@@ -45,7 +45,7 @@ export function SettingsRow({ title, description, info, children, disabled, full
       <div className="srow__l" style={disabled ? { opacity: 0.5 } : undefined}>
         {/* W4-3: fixed min-width on label column prevents wrapping on narrow labels */}
         {/* bdac.104: info slot rendered inline after title — stays in label column */}
-        <div>
+        <div className="srow__title">
           <span>{title}</span>
           {info}
         </div>

@@ -3,8 +3,9 @@
 // Extracted hooks: useOwnDevice, usePairedDevices, useDiscoveredDevices, useQrCode.
 // Default export + props unchanged; all data-testids preserved.
 import { useState, useEffect, useCallback } from "react";
-import { Briefcase, Info, RefreshCw, Wifi } from "lucide-react";
+import { Briefcase, Info, QrCode, RefreshCw, Trash2, Wifi, X } from "lucide-react";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { Dialog } from "../../lib/dialog/Dialog";
 // 5917.19: GlassToast system — routes "Revoke all" confirmation/feedback through
 // the shared toast provider instead of a raw <span> in the actions bar.
 import { useToast, ToastProvider } from "../../components/Toast";
@@ -129,7 +130,12 @@ function DevicesViewInner({
   }, [incomingPairing]);
 
   // --- QR pairing ---
+  // The useQrCode() hook itself keeps its existing eager-generate-on-mount +
+  // auto-refresh wiring UNCHANGED (CopyPaste-g27b.19 is presentation-only for
+  // this hook) — only the JSX that displays qrState now moves into a modal,
+  // gated by this purely-local open flag.
   const { qrState, qrSecsLeft, qrBlur, handleQrReveal, handleQrRegenerate } = useQrCode();
+  const [qrModalOpen, setQrModalOpen] = useState(false);
 
   // Begin a discovery-initiated SAS pairing, then open the SAS modal.
   const handlePairDiscovered = useCallback(async (device: DiscoveredDevice) => {
@@ -173,6 +179,7 @@ function DevicesViewInner({
         onClick={() => setRevokeAllConfirm(true)}
         disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
       >
+        <Trash2 aria-hidden="true" />
         {revokeAllPending ? "Revoking…" : "Revoke all"}
       </button>
       <ConfirmModal
@@ -364,8 +371,11 @@ function DevicesViewInner({
       {/* ── Discovered on your network ─────────────────────────── */}
       {/* HB-9: header + Refresh button always render so a manual rescan is
           reachable even when passive polling hasn't surfaced any peer yet. */}
-      {/* zxv2: SectionHeader replaces raw <p> tag. */}
-      <div className="dev-subhead">
+      {/* zxv2: SectionHeader replaces raw <p> tag.
+          g27b.19: .dev-body adds the same 14px/var(--s-6) horizontal inset as
+          .dev-head (shell.css) so this header lines up with "Paired devices"
+          and the device rows below, instead of sitting flush left. */}
+      <div className="dev-subhead dev-body">
         <SectionHeader label="Discovered on your network" />
         <button
           type="button"
@@ -399,97 +409,129 @@ function DevicesViewInner({
         </p>
       )}
       {discoverError !== null && (
-        <p className="field-note field-note--err">{discoverError}</p>
+        <p className="field-note field-note--err dev-body">{discoverError}</p>
       )}
 
-      {/* ── Divider ────────────────────────────────────────────── */}
-      <div />
+      {/* ── Divider ── real hairline (was an empty, invisible <div/> that
+          contributed no visible separation and no reliable gap). ────────── */}
+      <div className="dev-divider" />
 
-      {/* ── Pair via QR — full width, compact code ───────────────── */}
-      {/* zxv2: SectionHeader replaces raw <p> tag for consistency */}
-      <div>
+      {/* ── Pair via QR — CopyPaste-g27b.19: the panel itself moved into a
+          modal (below); this section is now just a primary button so the
+          Devices list doesn't permanently reserve QR real-estate. ────────── */}
+      {/* zxv2: SectionHeader replaces raw <p> tag for consistency.
+          g27b.19: .dev-body inset matches every other section header/hint/list. */}
+      <div className="dev-body">
         <SectionHeader label="Pair a new device" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => setQrModalOpen(true)}
+        >
+          <QrCode aria-hidden="true" />
+          Pair a new device
+        </button>
       </div>
 
-      <section className="card qr-panel">
-        {qrState.status === "loading" && (
-          // Static muted text — no animate-pulse (MOT-21)
-          <p className="field-note">Generating…</p>
-        )}
+      {/* ── QR pairing modal — mounted only while open (CopyPaste-g27b.19).
+          Contains the exact same qr-panel content/handlers/hook wiring that
+          previously rendered inline; only the JSX's location moved. */}
+      {qrModalOpen && (
+        <Dialog labelledBy="qr-modal-title" onClose={() => setQrModalOpen(false)}>
+          <div className="modal__hd">
+            <p id="qr-modal-title" className="modal__t">Pair a new device</p>
+            <button
+              type="button"
+              className="iconbtn"
+              aria-label="Close"
+              onClick={() => setQrModalOpen(false)}
+            >
+              <X aria-hidden="true" />
+            </button>
+          </div>
 
-        {qrState.status === "ready" && (
-          <>
-            {/* QR code — SVG comes from our own Tauri backend and never contains
-                remote markup — dangerouslySetInnerHTML is safe here. Privacy-first:
-                frosted `.qr-reveal` overlay by default, revealed only on intentional
-                click (spec §10 / CopyPaste-1jms.2). qrBlur is INDEPENDENT of QR
-                generation — regenerating the token does NOT reset the reveal state.
-                The `.qr-frame` keeps a white background so the QR is always
-                black-on-white and scannable. */}
-            <div className="qr-wrap">
-              <div
-                className="qr-frame"
-                // eslint-disable-next-line react/no-danger
-                dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
-              />
-              {qrBlur === "blurred" && (
-                <button
-                  type="button"
-                  className="qr-reveal"
-                  onClick={handleQrReveal}
-                  aria-label="Click to reveal QR code"
-                >
-                  <span>Click to reveal</span>
-                </button>
-              )}
-            </div>
-            <div className="qr-meta">
-              {/* CopyPaste-1jms.5: The raw QR payload string (CPPAIR2.* — contains
-                  PAKE password, device cert fingerprint, Supabase anon key) must
-                  NEVER be rendered into the DOM, even when the QR is revealed. The
-                  QR SVG above is the sole canonical pairing channel. */}
-              {qrSecsLeft !== null && qrSecsLeft > 0 && (
-                <>
-                  {/* Determinate drain bar: width drains from 100% to 0 as the
-                      pairing token (300 s TTL) runs out. */}
-                  <div className="qr-drain">
-                    <div
-                      className="qr-drain__fill"
-                      data-testid="qr-drain-bar"
-                      style={{ width: `${Math.max(0, Math.min(100, (qrSecsLeft / 300) * 100))}%` }}
-                    />
-                  </div>
+          <section className="qr-panel">
+            {qrState.status === "loading" && (
+              // Static muted text — no animate-pulse (MOT-21)
+              <p className="field-note">Generating…</p>
+            )}
+
+            {qrState.status === "ready" && (
+              <>
+                {/* QR code — SVG comes from our own Tauri backend and never contains
+                    remote markup — dangerouslySetInnerHTML is safe here. Privacy-first:
+                    frosted `.qr-reveal` overlay by default, revealed only on intentional
+                    click (spec §10 / CopyPaste-1jms.2). qrBlur is INDEPENDENT of QR
+                    generation — regenerating the token does NOT reset the reveal state.
+                    The `.qr-frame` keeps a white background so the QR is always
+                    black-on-white and scannable. */}
+                <div className="qr-wrap">
+                  <div
+                    className="qr-frame"
+                    // eslint-disable-next-line react/no-danger
+                    dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
+                  />
+                  {qrBlur === "blurred" && (
+                    <button
+                      type="button"
+                      className="qr-reveal"
+                      onClick={handleQrReveal}
+                      aria-label="Click to reveal QR code"
+                    >
+                      <span>Click to reveal</span>
+                    </button>
+                  )}
+                </div>
+                <div className="qr-meta">
+                  {/* CopyPaste-1jms.5: The raw QR payload string (CPPAIR2.* — contains
+                      PAKE password, device cert fingerprint, Supabase anon key) must
+                      NEVER be rendered into the DOM, even when the QR is revealed. The
+                      QR SVG above is the sole canonical pairing channel. */}
+                  {qrSecsLeft !== null && qrSecsLeft > 0 && (
+                    <>
+                      {/* Determinate drain bar: width drains from 100% to 0 as the
+                          pairing token (300 s TTL) runs out. */}
+                      <div className="qr-drain">
+                        <div
+                          className="qr-drain__fill"
+                          data-testid="qr-drain-bar"
+                          style={{ width: `${Math.max(0, Math.min(100, (qrSecsLeft / 300) * 100))}%` }}
+                        />
+                      </div>
+                      <p className="field-note">
+                        Expires in <span>{qrSecsLeft}s</span>
+                      </p>
+                    </>
+                  )}
                   <p className="field-note">
-                    Expires in <span>{qrSecsLeft}s</span>
+                    Scan from CopyPaste on another device to pair automatically.
                   </p>
-                </>
-              )}
-              <p className="field-note">
-                Scan from CopyPaste on another device to pair automatically.
-              </p>
-              {/* Explicit regenerate button — separate from reveal so blur state
-                  is not accidentally cleared by a refresh (spec §10). */}
-              <button
-                type="button"
-                className="btn btn--secondary sm"
-                onClick={handleQrRegenerate}
-                aria-label="Regenerate pairing QR code"
-              >
-                Regenerate
-              </button>
-            </div>
-          </>
-        )}
+                  {/* Explicit regenerate button — separate from reveal so blur state
+                      is not accidentally cleared by a refresh (spec §10). */}
+                  <button
+                    type="button"
+                    className="btn btn--secondary sm"
+                    onClick={handleQrRegenerate}
+                    aria-label="Regenerate pairing QR code"
+                  >
+                    <RefreshCw aria-hidden="true" />
+                    Regenerate
+                  </button>
+                </div>
+              </>
+            )}
 
-        {qrState.status === "error" && (
-          <p className="field-note field-note--err">{qrState.message}</p>
-        )}
+            {qrState.status === "error" && (
+              <p className="field-note field-note--err">{qrState.message}</p>
+            )}
 
-        {qrState.status === "idle" && (
-          // Static muted text — no animate-pulse (MOT-21)
-          <p className="field-note">Generating pairing code…</p>
-        )}
-      </section>
+            {qrState.status === "idle" && (
+              // Static muted text — no animate-pulse (MOT-21)
+              <p className="field-note">Generating pairing code…</p>
+            )}
+          </section>
+        </Dialog>
+      )}
 
       {/* ── SAS pairing modal (discovery-initiated, initiator). The responder
           path is handled by the dedicated `responderPairing` modal below,

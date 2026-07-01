@@ -28,6 +28,7 @@ const BOOTSTRAP_SRC = readFileSync(
 function runBootstrap(stored?: unknown): DOMStringMap {
   const el = document.documentElement;
   delete el.dataset.theme;
+  delete el.dataset.themePref;
   delete el.dataset.accent;
   delete el.dataset.translucency;
   delete el.dataset.themeBootstrapped;
@@ -43,6 +44,17 @@ function runBootstrap(stored?: unknown): DOMStringMap {
   return el.dataset;
 }
 
+/** Minimal MediaQueryList mock — enough for the bootstrap's `.matches` read. */
+function mockMatchMedia(prefersDark: boolean): void {
+  window.matchMedia = ((): MediaQueryList =>
+    ({
+      matches: prefersDark,
+      media: "(prefers-color-scheme: dark)",
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }) as unknown as MediaQueryList) as unknown as typeof window.matchMedia;
+}
+
 beforeEach(() => {
   localStorage.clear();
 });
@@ -50,9 +62,13 @@ beforeEach(() => {
 afterEach(() => {
   const el = document.documentElement;
   delete el.dataset.theme;
+  delete el.dataset.themePref;
   delete el.dataset.accent;
   delete el.dataset.translucency;
   delete el.dataset.themeBootstrapped;
+  // @ts-expect-error — test-only cleanup of a jsdom global that isn't
+  // implemented by default.
+  delete window.matchMedia;
 });
 
 // Strip comments so the "no import/eval/Function" check inspects CODE only —
@@ -74,6 +90,7 @@ describe("theme-bootstrap.js — anti-drift parity with prefsSchema", () => {
   it("uses the same storage KEY (seeding under PREFS_KEY is read back)", () => {
     const ds = runBootstrap({ theme: "light", accent: "teal", translucency: false });
     expect(ds.theme).toBe("light");
+    expect(ds.themePref).toBe("light");
     expect(ds.accent).toBe("teal");
     expect(ds.translucency).toBe("off");
   });
@@ -81,14 +98,36 @@ describe("theme-bootstrap.js — anti-drift parity with prefsSchema", () => {
   it("defaults match prefsSchema defaults + translucency mapping (empty storage)", () => {
     const ds = runBootstrap();
     expect(ds.theme).toBe(DEFAULT_THEME);
+    expect(ds.themePref).toBe(DEFAULT_THEME);
     expect(ds.accent).toBe(DEFAULT_ACCENT);
     expect(ds.translucency).toBe(translucencyAttr(DEFAULT_TRANSLUCENCY));
   });
 
-  it("accepts exactly the schema's allowed theme values", () => {
+  it("accepts exactly the schema's allowed theme values (\"system\" resolves; data-theme-pref keeps the raw choice)", () => {
     for (const theme of THEME_VALUES) {
-      expect(runBootstrap({ theme }).theme).toBe(theme);
+      if (theme === "system") continue; // covered explicitly below (needs matchMedia control)
+      const ds = runBootstrap({ theme });
+      expect(ds.theme).toBe(theme);
+      expect(ds.themePref).toBe(theme);
     }
+  });
+
+  it('"system" resolves data-theme via matchMedia("(prefers-color-scheme: dark)"), keeping data-theme-pref="system"', () => {
+    mockMatchMedia(true);
+    let ds = runBootstrap({ theme: "system" });
+    expect(ds.theme).toBe("dark");
+    expect(ds.themePref).toBe("system");
+
+    mockMatchMedia(false);
+    ds = runBootstrap({ theme: "system" });
+    expect(ds.theme).toBe("light");
+    expect(ds.themePref).toBe("system");
+  });
+
+  it('"system" resolves data-theme to "dark" when matchMedia is unavailable (matches prefsSchema resolveTheme guard)', () => {
+    const ds = runBootstrap({ theme: "system" });
+    expect(ds.theme).toBe("dark");
+    expect(ds.themePref).toBe("system");
   });
 
   it("accepts exactly the schema's allowed accent values", () => {
@@ -112,14 +151,17 @@ describe("theme-bootstrap.js — defensive behavior", () => {
   it("malformed JSON → defaults, marker still set, no throw", () => {
     const ds = runBootstrap("{not json");
     expect(ds.theme).toBe(DEFAULT_THEME);
+    expect(ds.themePref).toBe(DEFAULT_THEME);
     expect(ds.accent).toBe(DEFAULT_ACCENT);
     expect(ds.translucency).toBe("on");
     expect(ds.themeBootstrapped).toBe("1");
   });
 
   it("each field invalid defaults independently, valid siblings kept", () => {
-    const ds = runBootstrap({ theme: "system", accent: "teal", translucency: 1 });
+    // "sepia" is not in THEMES (unlike "system", which is now a valid choice).
+    const ds = runBootstrap({ theme: "sepia", accent: "teal", translucency: 1 });
     expect(ds.theme).toBe(DEFAULT_THEME); // invalid → default
+    expect(ds.themePref).toBe(DEFAULT_THEME); // invalid → default
     expect(ds.accent).toBe("teal"); // valid → kept
     expect(ds.translucency).toBe("on"); // non-boolean → default true → "on"
   });

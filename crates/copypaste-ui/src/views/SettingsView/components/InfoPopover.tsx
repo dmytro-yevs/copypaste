@@ -48,7 +48,8 @@ export function InfoPopover({ text }: { text: string }) {
         // getBoundingClientRect so the popover anchors correctly (kept per de-style pass).
         <div
           ref={popoverRef}
-          className="srow__s"
+          className="popover"
+          role="tooltip"
           style={{
             position: "fixed",
             top: pos.top,

@@ -7,8 +7,8 @@ import type { ViewId } from "../store";
 // narrowing concern — it is a runtime guard for input that could disagree
 // with that type at the boundary: a `?view=` URL param, a future call site, a
 // hot-reload edge case, or the dev-only `"gallery"` value leaking into a
-// production build. Any value that is not one of the five production view
-// ids resolves to `"history"`.
+// production build. Any value that is not one of the production view ids
+// resolves to `"history"`. (About + Logs are Settings tabs, not views.)
 //
 // This is explicitly NOT persisted-state recovery: `view` lives only in the
 // in-memory Zustand store (store.ts has no `persist`/`partialize` of `view` —
@@ -21,8 +21,6 @@ const PRODUCTION_VIEW_IDS: ReadonlySet<string> = new Set<ViewId>([
   "history",
   "devices",
   "settings",
-  "about",
-  "logs",
 ]);
 
 /**

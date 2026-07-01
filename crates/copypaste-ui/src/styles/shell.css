@@ -7,6 +7,7 @@
 
   .app {
     display: flex;
+    height: 100%;
     background: var(--bg);
     padding: var(--s-4);
     gap: var(--s-4);
@@ -80,13 +81,15 @@
   .view-host {
     flex: 1;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
   }
   /* App-level banners stack at the top of the pane with a small inset. */
   .main > .banner { margin: var(--s-4) var(--s-4) 0; }
-  .view { display: flex; flex-direction: column; }
+  /* View frame (ViewShell root) fills the pane; its body owns the scroll. */
+  .view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .view__body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   @keyframes viewIn {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
@@ -120,6 +123,7 @@
   /* --- Settings tabs / groups / rows ---------------------------------------- */
   .set-tabs {
     display: flex;
+    flex: none;
     gap: var(--s-1);
     padding: 8px 12px 0;
     border-bottom: var(--stroke-1) solid var(--divider);
@@ -143,7 +147,7 @@
   .set-tab:hover { color: var(--text); }
   .set-tab.on,
   .set-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-  .set-body { padding: 18px 20px; }
+  .set-body { padding: 18px 20px; flex: 1; min-height: 0; overflow-y: auto; }
   .set-pane { display: none; }
   .set-pane.on { display: block; animation: viewIn var(--dur) var(--ease); }
   .set-grp { margin-bottom: 22px; }
@@ -168,6 +172,8 @@
   .srow__l { font-size: 13.5px; color: var(--text); }
   .srow__s { font-size: var(--fs-sm); color: var(--faint); margin-top: var(--s-1); max-width: 340px; }
   .srow__c { flex: none; display: flex; align-items: center; gap: var(--gap-field); }
+  /* Title + inline info (i) trigger — keeps the popover icon beside the label. */
+  .srow__title { display: inline-flex; align-items: center; gap: var(--s-3); }
   .statusrow { display: flex; align-items: center; gap: var(--s-3); font-size: var(--fs-125); color: var(--dim); }
 
   /* --- Accent swatches (Appearance) ----------------------------------------- */
@@ -184,7 +190,28 @@
   .swatch[aria-pressed="true"] { border-color: var(--text); }
 
   /* --- Logs ----------------------------------------------------------------- */
-  .logs { padding: var(--s-3) var(--s-2); font-family: var(--f-mono); font-size: var(--fs-smd); }
+  /* Logs toolbar (filter + Refresh + Export) — top bar when Logs is a Settings tab. */
+  .logs-toolbar { flex: none; display: flex; padding: 12px 14px; border-bottom: var(--stroke-1) solid var(--divider); }
+  .logs-toolbar .srow__c { flex: 1; }
+  .logs-toolbar .field { flex: 1; }
+  /* Log dir path subtitle + footer — spaced apart from the log lines. */
+  .logs-path {
+    flex: none;
+    margin: 0;
+    padding: var(--s-4) var(--s-6) var(--s-3);
+    font-family: var(--f-mono);
+    font-size: var(--fs-sm);
+    color: var(--faint);
+    border-bottom: var(--stroke-1) solid var(--divider);
+  }
+  .logs-foot {
+    flex: none;
+    padding: var(--s-3) var(--s-6);
+    font-size: var(--fs-xs);
+    color: var(--faint);
+    border-top: var(--stroke-1) solid var(--divider);
+  }
+  .logs { padding: var(--s-3) var(--s-2); font-family: var(--f-mono); font-size: var(--fs-smd); flex: 1; min-height: 0; overflow-y: auto; }
   .logline { display: flex; gap: var(--s-5); padding: var(--s-2) var(--s-5); border-radius: var(--r-sm); }
   .logline:hover { background: var(--hover); }
   .logline .t { color: var(--faint); flex: none; }
@@ -206,6 +233,9 @@
 
   /* --- About ---------------------------------------------------------------- */
   .about {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     padding: 34px;
     display: flex;
     flex-direction: column;

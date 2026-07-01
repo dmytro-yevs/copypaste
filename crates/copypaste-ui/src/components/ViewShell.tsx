@@ -30,7 +30,7 @@ export function ViewShell({
         {actions ? <div className="vhead__actions">{actions}</div> : null}
       </header>
 
-      <div>
+      <div className="view__body">
         {children}
       </div>
     </div>

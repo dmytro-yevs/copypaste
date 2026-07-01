@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Download, RefreshCw, Search } from "lucide-react";
 import { readLogs, logDirPath, IpcError } from "../lib/ipc";
-import { ViewShell } from "../components/ViewShell";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 
 const MAX_LINES = 500;
@@ -73,7 +72,7 @@ function relativizeLogPath(absPath: string): string {
   return absPath.replace(/^\/Users\/[^/]+\//, "~/");
 }
 
-export function LogView() {
+export function LogContent() {
   const [content, setContent] = useState<string>("");
   // bdac.63: track empty state as a boolean, not a string sentinel.
   // Previously setContent("(no log entries)") tied display text to logic.
@@ -184,17 +183,16 @@ export function LogView() {
   return (
     // SCRL-11: use shared ViewShell for consistent header + drag-region + glass
     // surface. The redundant inner surface-card header is removed (fixes SCRL-3).
-    <ViewShell title="Daemon Logs" actions={headerActions}>
-      <div>
-        {/* Path subtitle shown below the ViewShell title, inside the content panel. */}
-        {logPath && (
-          <p title={relativizeLogPath(logPath)}>
+    <div className="fill-col">
+      <div className="logs-toolbar">{headerActions}</div>
+      {logPath && (
+          <p className="logs-path" title={relativizeLogPath(logPath)}>
             {relativizeLogPath(logPath)}
           </p>
         )}
 
         {/* Content */}
-        <div>
+        <div className="fill-col">
           {loading ? (
             <div>
               <span aria-label="Loading logs…" />
@@ -241,10 +239,9 @@ export function LogView() {
         </div>
 
         {/* SCRL-13: corrected copy — daemon emits plain text, not JSON. */}
-        <div>
+        <div className="logs-foot">
           Last {MAX_LINES} lines · Plain-text log
         </div>
-      </div>
-    </ViewShell>
+    </div>
   );
 }

@@ -1,12 +1,12 @@
 // TabBar.tsx — extracted from SettingsView.tsx (CopyPaste-g06m.35)
 // Animated sliding tab underline bar for the Settings screen.
 import { useEffect, useRef, useState } from "react";
-import { Settings, Monitor, RefreshCw, Keyboard, Database, type LucideIcon } from "lucide-react";
+import { Settings, Monitor, RefreshCw, Keyboard, Database, Info, ScrollText, type LucideIcon } from "lucide-react";
 import { tabListKeyDown } from "../../../lib/a11y/tabListKeyDown";
 
 // CopyPaste-44rq.30: "advanced" removed — was a "coming soon" stub with no real content.
 // File a new feature issue when Advanced tab content is ready to ship.
-export type TabId = "general" | "display" | "sync" | "shortcuts" | "storage";
+export type TabId = "general" | "display" | "sync" | "shortcuts" | "storage" | "about" | "logs";
 
 export const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "general",   label: "General",   icon: Settings },
@@ -14,6 +14,8 @@ export const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: "sync",      label: "Sync",      icon: RefreshCw },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "storage",   label: "Storage",   icon: Database },
+  { id: "about",     label: "About",     icon: Info },
+  { id: "logs",      label: "Logs",      icon: ScrollText },
 ];
 
 export function TabBar({

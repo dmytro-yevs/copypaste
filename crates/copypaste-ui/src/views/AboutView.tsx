@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { Clipboard } from "lucide-react";
-import { ViewShell } from "../components/ViewShell";
 import { SectionHeader } from "../components/SectionHeader";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { appVersion, probeStatus, type StatusProbe } from "../lib/ipc";
@@ -27,7 +26,7 @@ type DaemonView =
 // directly to their repo paths since no separate hosted URLs exist.
 const GITHUB_BASE = "https://github.com/dmytro-yevs/copypaste";
 
-export function AboutView() {
+export function AboutContent() {
   const [daemon, setDaemon] = useState<DaemonView>({ kind: "pending" });
   // Real app version, pulled at runtime from the Tauri bundle (tauri.conf.json)
   // instead of a hardcoded string that drifts out of date on every release.
@@ -84,8 +83,7 @@ export function AboutView() {
   }, [checkStatus]);
 
   return (
-    <ViewShell title="About">
-      <div className="about">
+    <div className="about">
         {/* Identity */}
         <div className="about__logo">
           <Clipboard aria-hidden="true" />
@@ -177,6 +175,5 @@ export function AboutView() {
           </button>
         </div>
       </div>
-    </ViewShell>
   );
 }

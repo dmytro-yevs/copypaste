@@ -1,9 +1,7 @@
 import {
   Clock,
   FlaskConical,
-  Info,
   MonitorSmartphone,
-  ScrollText,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -25,8 +23,6 @@ const NAV: NavItem[] = [
   { id: "history",  label: "History",  icon: Clock },
   { id: "devices",  label: "Devices",  icon: MonitorSmartphone },
   { id: "settings", label: "Settings", icon: Settings },
-  { id: "about",    label: "About",    icon: Info },
-  { id: "logs",     label: "Logs",     icon: ScrollText },
 ];
 
 // Dev-only: activate the gallery branch (App.tsx's `galleryActive()`) by
@@ -46,7 +42,9 @@ export function Sidebar() {
   const setView = useUI((s) => s.setView);
 
   return (
-    <aside>
+    // display:contents so the .sb nav is the direct flex child of .app and
+    // stretches to full height (no empty gap below the footer).
+    <aside style={{ display: "contents" }}>
       <nav className="sb" aria-label="Primary">
         <div data-tauri-drag-region />
 

@@ -13,8 +13,6 @@ import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPre
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
-import { AboutView } from "./views/AboutView";
-import { LogView } from "./views/LogView";
 
 // audit P1-7: the Tauri event plugin is only present inside the Tauri runtime.
 // In a plain browser / ?mock=1 harness, listen() rejects and logs a console
@@ -37,7 +35,9 @@ export function ViewTransitionWrapper({
   children: ReactNode;
 }) {
   return (
-    <div data-testid="view-transition">
+    // display:contents so this wrapper doesn't break the flex height-chain
+    // between .view-host and the ViewShell .view (scroll regions need it).
+    <div data-testid="view-transition" style={{ display: "contents" }}>
       {children}
     </div>
   );
@@ -66,8 +66,6 @@ const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
   history: { Component: HistoryView, label: "History" },
   devices: { Component: DevicesView, label: "Devices" },
   settings: { Component: SettingsView, label: "Settings" },
-  about: { Component: AboutView, label: "About" },
-  logs: { Component: LogView, label: "Logs" },
 };
 
 // Dev-only component gallery activation (design.md Decision 6). NOT a production

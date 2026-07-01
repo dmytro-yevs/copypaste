@@ -1,6 +1,7 @@
 // Extracted from DevicesView.tsx (CopyPaste-g06m.15).
 // Cut/paste only — NO behavior changes.
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Check, X, XCircle } from "lucide-react";
 import { MetaRow } from "../../components/DeviceCard";
 import {
   api,
@@ -344,6 +345,7 @@ export function SasPairingModal({
                 onClick={() => void handleConfirm(false)}
                 disabled={confirmPending}
               >
+                <XCircle aria-hidden="true" />
                 Doesn't match
               </button>
               {/* wv57: aria-label so screen readers announce "Codes match" even when
@@ -357,6 +359,7 @@ export function SasPairingModal({
                 disabled={confirmPending}
                 aria-label="Codes match — confirm pairing"
               >
+                <Check aria-hidden="true" />
                 {confirmPending && (
                   <span className="spinner" />
                 )}
@@ -383,6 +386,7 @@ export function SasPairingModal({
             <p>Paired ✓</p>
             <div className="modal__act">
               <button type="button" className="btn btn--secondary" onClick={handleClose}>
+                <X aria-hidden="true" />
                 Close
               </button>
             </div>
@@ -405,6 +409,7 @@ export function SasPairingModal({
             </p>
             <div className="modal__act">
               <button type="button" className="btn btn--secondary" onClick={handleClose}>
+                <X aria-hidden="true" />
                 Close
               </button>
             </div>
@@ -422,6 +427,7 @@ export function SasPairingModal({
             </p>
             <div className="modal__act">
               <button type="button" className="btn btn--secondary" onClick={handleClose}>
+                <X aria-hidden="true" />
                 Close
               </button>
             </div>
@@ -437,6 +443,7 @@ export function SasPairingModal({
         {!terminal && (
           <div className="modal__act">
             <button type="button" className="btn btn--secondary" onClick={handleClose}>
+              <X aria-hidden="true" />
               Cancel
             </button>
           </div>

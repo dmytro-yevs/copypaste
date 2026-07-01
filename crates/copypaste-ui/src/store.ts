@@ -11,7 +11,8 @@ import {
   type ThemeValue,
 } from "./lib/theme/prefsSchema";
 
-export type ViewId = "history" | "devices" | "settings" | "about" | "logs";
+// About + Logs moved into Settings as trailing tabs — no longer top-level views.
+export type ViewId = "history" | "devices" | "settings";
 
 // ---------------------------------------------------------------------------
 // UI preferences persisted to localStorage

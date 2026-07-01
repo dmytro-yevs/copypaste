@@ -12,6 +12,8 @@ import { DisplayTab } from "./SettingsView/tabs/DisplayTab";
 import { SyncTab } from "./SettingsView/tabs/SyncTab";
 import { ShortcutsTab } from "./SettingsView/tabs/ShortcutsTab";
 import { StorageTab, type StorageTabProps } from "./SettingsView/tabs/StorageTab";
+import { AboutContent } from "./AboutView";
+import { LogContent } from "./LogView";
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<TabId>("general");
@@ -27,7 +29,7 @@ export function SettingsView() {
       )}
 
       {s.loadState !== "loading" && (
-        <div>
+        <div className="fill-col">
           {/* TabBar itself carries .set-tabs (shell.css: the flex row that
               directly parents the .set-tab buttons) — see TabBar.tsx. */}
           <TabBar active={activeTab} onChange={setActiveTab} />
@@ -112,6 +114,16 @@ export function SettingsView() {
                   handleImportFile={s.handleImportFile} handleVacuum={s.handleVacuum}
                   setDeleteConfirm={s.setDeleteConfirm}
                 />
+              </div>
+            )}
+            {activeTab === "about" && (
+              <div className="set-pane on" role="tabpanel" id="tabpanel-about" aria-labelledby="tab-about">
+                <AboutContent />
+              </div>
+            )}
+            {activeTab === "logs" && (
+              <div className="set-pane on" role="tabpanel" id="tabpanel-logs" aria-labelledby="tab-logs">
+                <LogContent />
               </div>
             )}
           </div>

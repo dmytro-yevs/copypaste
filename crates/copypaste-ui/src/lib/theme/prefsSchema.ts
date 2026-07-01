@@ -18,7 +18,7 @@
 
 export const PREFS_KEY = "copypaste-ui-prefs-v4";
 
-export const THEME_VALUES = ["dark", "light"] as const;
+export const THEME_VALUES = ["system", "dark", "light"] as const;
 export const ACCENT_VALUES = [
   "indigo",
   "blue",
@@ -31,9 +31,48 @@ export const ACCENT_VALUES = [
 export type ThemeValue = (typeof THEME_VALUES)[number];
 export type AccentValue = (typeof ACCENT_VALUES)[number];
 
+/** The two concrete values the CSS token layer (`tokens.css`) keys off of —
+ * `[data-theme="dark"|"light"]`. "system" is never a resolved value; it is
+ * always mapped to one of these two via `resolveTheme()` before being written
+ * to `data-theme`. */
+export type ResolvedTheme = Exclude<ThemeValue, "system">;
+
+// DEFAULT_THEME stays "dark", NOT "system" (CopyPaste-g27b.20): the pre-paint
+// fallback in index.html / popup.html hardcodes `data-theme="dark"` as a
+// static attribute (those files are outside this task's owned scope, see the
+// worktree file list), and themeBootstrap.test.ts's anti-drift check asserts
+// that static HTML default against DEFAULT_THEME. Flipping the default to
+// "system" would require editing those HTML files to keep that test green,
+// which this task does not own — so the safer, test-preserving choice is to
+// keep "dark" as the DEFAULT_THEME while still fully supporting "system" as a
+// user-selectable, non-default option.
 export const DEFAULT_THEME: ThemeValue = "dark";
 export const DEFAULT_ACCENT: AccentValue = "indigo";
 export const DEFAULT_TRANSLUCENCY = true;
+
+/**
+ * Resolve a persisted theme CHOICE to the concrete "dark"/"light" value the
+ * CSS token layer keys off of. "dark"/"light" pass through unchanged;
+ * "system" is resolved live from the OS via `matchMedia`. SSR / environments
+ * without `matchMedia` (or where it throws) fall back to "dark" — matching
+ * DEFAULT_THEME — instead of throwing.
+ */
+export function resolveTheme(theme: ThemeValue): ResolvedTheme {
+  if (theme !== "system") return theme;
+  try {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
+      return "dark";
+    }
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  } catch {
+    return "dark";
+  }
+}
 
 /**
  * `data-translucency` attribute value for a given boolean pref. The DOM axis is

@@ -340,10 +340,145 @@
   .modal__s { font-size: var(--fs-md); color: var(--dim); margin-bottom: var(--gap-modal-sub); line-height: var(--lh-normal); }
   .modal__act { display: flex; gap: var(--s-4); }
   .modal__act .btn { flex: 1; }
+  /* Modal header (title + close), body, monospace text, metadata footer. */
+  .modal__hd { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-5); margin-bottom: var(--s-4); }
+  .modal__hd .iconbtn { flex: none; margin: calc(-1 * var(--s-2)) calc(-1 * var(--s-2)) 0 0; }
+  .modal__pre {
+    font-family: var(--f-mono);
+    font-size: var(--fs-md);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 50vh;
+    overflow: auto;
+    color: var(--text);
+    margin: 0;
+  }
+  .modal__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-4);
+    margin-top: var(--s-5);
+    padding-top: var(--s-4);
+    border-top: var(--stroke-1) solid var(--divider);
+    font-size: var(--fs-sm);
+    color: var(--faint);
+  }
+  .modal__meta > span:not(:last-child)::after { content: "·"; margin-left: var(--s-4); color: var(--faint); }
 
   /* --- Range slider + growable field (slice 5 cleanup) ---------------------- */
   .field--grow { flex: 1; max-width: 320px; }
-  .range { flex: 1; accent-color: var(--accent); }
+
+  /* CopyPaste-g27b.21: one themed range-slider look shared by every settings
+     slider. SliderRow.tsx sets `--range-fill` inline as a "N%" string derived
+     from (value-min)/(max-min); the gradients below use it to paint an
+     accent-colored filled segment up to the thumb and an unfilled remainder
+     in --border. This is a robust, cross-engine substitute for relying on
+     `accent-color` alone (which only reliably tints the thumb, not a filled
+     track, and paints inconsistently between engines) — accent-color is kept
+     as a same-hue fallback. --range-track-h / --range-thumb-sz are local
+     component metrics (not on the shared token scale) so the track/thumb
+     geometry used by the base element and every vendor pseudo-element below
+     stays in one place.
+     Native tick marks (`list=`/`<datalist>`) are intentionally not wired by
+     SliderRow — see that file's header — so no CSS is needed here to make
+     ticks "uniform"; every slider is simply tick-free. */
+  .range {
+    /* Hit-area height stays thumb-sized (comfortable click/drag target); the
+       *visual* track is the thin, rounded bar painted by the vendor track
+       pseudo-elements below (and, as a Firefox base-element fallback, here). */
+    --range-track-h: var(--stroke-3);
+    --range-thumb-sz: var(--icon-md);
+    flex: 1;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: var(--range-thumb-sz);
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+    outline: none;
+    /* Firefox base-element fallback: the same filled gradient the WebKit
+       ::-webkit-slider-runnable-track and ::-moz-range-track rules use, in
+       case an engine paints the element's own background under the thumb. */
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--range-fill, 0%),
+      var(--border) var(--range-fill, 0%),
+      var(--border) 100%
+    );
+    background-size: 100% var(--range-track-h);
+    background-position: center;
+    background-repeat: no-repeat;
+    border-radius: var(--r-pill);
+  }
+  .range:disabled { cursor: not-allowed; opacity: .5; }
+  .range::-webkit-slider-runnable-track {
+    width: 100%;
+    height: var(--range-track-h);
+    border-radius: var(--r-pill);
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--range-fill, 0%),
+      var(--border) var(--range-fill, 0%),
+      var(--border) 100%
+    );
+  }
+  .range::-moz-range-track {
+    width: 100%;
+    height: var(--range-track-h);
+    border: none;
+    border-radius: var(--r-pill);
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--range-fill, 0%),
+      var(--border) var(--range-fill, 0%),
+      var(--border) 100%
+    );
+  }
+  .range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: var(--range-thumb-sz);
+    height: var(--range-thumb-sz);
+    margin-top: calc((var(--range-track-h) - var(--range-thumb-sz)) / 2);
+    border-radius: var(--r-sm);
+    background: var(--accent);
+    border: var(--stroke-2) solid var(--knob-fill);
+    box-shadow: var(--sh-knob);
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  .range::-moz-range-thumb {
+    box-sizing: border-box;
+    width: var(--range-thumb-sz);
+    height: var(--range-thumb-sz);
+    border-radius: var(--r-sm);
+    background: var(--accent);
+    border: var(--stroke-2) solid var(--knob-fill);
+    box-shadow: var(--sh-knob);
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  /* Kept as separate rules (not comma-grouped): a selector list containing an
+     unsupported vendor pseudo-element can invalidate the whole rule in some
+     engines, so ::-webkit-* and ::-moz-* rules never share a selector list. */
+  .range:hover:not(:disabled)::-webkit-slider-thumb { transform: scale(1.08); }
+  .range:hover:not(:disabled)::-moz-range-thumb { transform: scale(1.08); }
+  .range:focus-visible::-webkit-slider-thumb {
+    outline: var(--focus-ring-width) solid var(--accent);
+    outline-offset: var(--focus-ring-offset);
+  }
+  .range:focus-visible::-moz-range-thumb {
+    outline: var(--focus-ring-width) solid var(--accent);
+    outline-offset: var(--focus-ring-offset);
+  }
+  /* Strip Firefox's dotted inner focus ring so only the ring above shows. */
+  .range::-moz-focus-outer { border: 0; }
+
   .range__value {
     min-width: 80px;
     text-align: right;

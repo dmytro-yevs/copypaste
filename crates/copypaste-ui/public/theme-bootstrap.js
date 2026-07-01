@@ -17,12 +17,21 @@
  *     cannot import). The parity test fails loudly on any drift (task 1.14).
  *   - try/catch around storage so a localStorage exception (private mode) falls
  *     back to defaults instead of throwing before app code runs.
+ *
+ * "system" theme (CopyPaste-g27b.20): `data-theme-pref` carries the raw stored
+ * CHOICE ("system"/"dark"/"light"); `data-theme` always carries the RESOLVED
+ * "dark"/"light" value the CSS token layer selects on (unchanged selectors —
+ * no CSS edits needed). When the choice is "system", resolve it here via
+ * `matchMedia("(prefers-color-scheme: dark)")`, mirroring
+ * `prefsSchema.ts`'s `resolveTheme()` in plain classic JS (no imports). A
+ * missing/throwing `matchMedia` falls back to "dark", matching
+ * `resolveTheme()`'s SSR/no-matchMedia guard.
  */
 (function () {
   "use strict";
 
   var KEY = "copypaste-ui-prefs-v4";
-  var THEMES = ["dark", "light"];
+  var THEMES = ["system", "dark", "light"];
   var ACCENTS = ["indigo", "blue", "teal", "green", "amber", "rose"];
   var DEFAULT_THEME = "dark";
   var DEFAULT_ACCENT = "indigo";
@@ -54,8 +63,25 @@
     // Missing/malformed JSON or a storage-access exception → keep defaults.
   }
 
+  // Resolve the stored CHOICE to the concrete dark/light value the CSS token
+  // layer keys off of. Mirrors prefsSchema.ts's resolveTheme() exactly.
+  var resolvedTheme = theme;
+  if (theme === "system") {
+    resolvedTheme = "dark";
+    try {
+      if (typeof window.matchMedia === "function") {
+        resolvedTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+      }
+    } catch (e) {
+      // matchMedia unavailable/throwing → keep the "dark" fallback.
+    }
+  }
+
   var el = document.documentElement;
-  el.dataset.theme = theme;
+  el.dataset.theme = resolvedTheme;
+  el.dataset.themePref = theme;
   el.dataset.accent = accent;
   el.dataset.translucency = translucency ? "on" : "off";
 

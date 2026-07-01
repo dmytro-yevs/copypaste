@@ -5,6 +5,7 @@
 // revoke-device confirmation dialog. Extracted from DevicesView's inline JSX
 // so the useFocusTrap hook can run unconditionally (hooks must not be called
 // conditionally; the dialog is conditionally *rendered* by DevicesView).
+import { ShieldOff, X } from "lucide-react";
 import { Dialog } from "../../lib/dialog/Dialog";
 
 export function RevokeConfirmDialog({
@@ -62,6 +63,7 @@ export function RevokeConfirmDialog({
           onClick={onCancel}
           disabled={revokeBusy}
         >
+          <X aria-hidden="true" />
           Cancel
         </button>
         <button
@@ -70,6 +72,7 @@ export function RevokeConfirmDialog({
           onClick={() => onRevoke(fingerprint)}
           disabled={revokeBusy}
         >
+          <ShieldOff aria-hidden="true" />
           Revoke only
         </button>
         <button
@@ -86,6 +89,7 @@ export function RevokeConfirmDialog({
           // action even when the visible text is replaced by "..." when busy.
           aria-label="Revoke and rotate sync key"
         >
+          <ShieldOff aria-hidden="true" />
           {/* bdac.83: aligned to Android label "Revoke & rotate key" for platform parity */}
           {revokeBusy ? "…" : "Revoke & rotate key"}
         </button>

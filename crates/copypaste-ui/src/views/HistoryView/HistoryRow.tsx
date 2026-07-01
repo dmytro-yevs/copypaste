@@ -5,13 +5,14 @@
  * Includes micro-components: PinIndicator, SyncBlockedIndicator.
  * And helpers: parseUrl, parseFilename.
  */
-import React, { useEffect } from "react";
+import React, { useEffect, type CSSProperties } from "react";
 import { AlertTriangle, Check, Eye, Pin, Trash2 } from "lucide-react";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { isImageType, type HistoryEntry } from "../../lib/ipc";
 import { applySpanMasking, shouldMask } from "../../lib/masking";
 import { ImageThumb } from "../../components/ImageThumb";
 import { normalizeContentKind } from "../../lib/clip/normalizeContentKind";
+import { rowHeightFor } from "./historyVirtualizer";
 import { ContentTile } from "../../lib/clip/ContentTile";
 import { ClipMetadata } from "../../lib/clip/ClipMetadata";
 import { ClipPreview, MASKED_A11Y_LABEL } from "../../lib/clip/ClipPreview";
@@ -103,12 +104,12 @@ export const HistoryRow = React.memo(function HistoryRow({
   selected,
   multiSelected,
   selectionMode,
-  previewLines: _previewLines,
-  previewSize: _previewSize,
+  previewLines,
+  previewSize,
   imageMaxHeight,
   maskSensitive,
   showSensitiveWarnings: _showSensitiveWarnings,
-  density: _density,
+  density,
   ownDeviceId,
   onSelect,
   onToggleMultiSelect,
@@ -162,6 +163,20 @@ export const HistoryRow = React.memo(function HistoryRow({
   const urlParsed =
     kind === "url" && !entry.is_sensitive ? parseUrl(entry.preview) : null;
 
+  // Preview-lines setting (main window): 1 = single-line ellipsis (default),
+  // > 1 = multi-line clamp. Applied inline so it overrides `.row__title`'s
+  // static `white-space:nowrap`. Row height grows to match via rowHeightFor.
+  const titleStyle: CSSProperties | undefined =
+    previewLines > 1
+      ? {
+          display: "-webkit-box",
+          WebkitLineClamp: previewLines,
+          WebkitBoxOrient: "vertical",
+          whiteSpace: "normal",
+          overflow: "hidden",
+        }
+      : undefined;
+
   const handleRowClick = (e: React.MouseEvent) => {
     if (selectionMode) {
       onToggleMultiSelect(e);
@@ -180,6 +195,13 @@ export const HistoryRow = React.memo(function HistoryRow({
   const rowClass =
     "row" + (multiSelected ? " sel" : "") + (entry.pinned ? " pinned" : "");
 
+  // Per-row max-height (CSS var) — bounds the collapse animation to the row's
+  // real allocated height (same as the virtualizer) so multi-line preview rows
+  // and taller image rows aren't clipped by the static `.row` cap.
+  const rowStyle = {
+    ["--row-max"]: `${rowHeightFor(entry, previewSize, imageMaxHeight, density, previewLines)}px`,
+  } as CSSProperties;
+
   return (
     <div
       id={`clip-${entry.id}`}
@@ -187,6 +209,7 @@ export const HistoryRow = React.memo(function HistoryRow({
       aria-selected={multiSelected || selected}
       aria-label={ariaRowLabel}
       className={rowClass}
+      style={rowStyle}
       draggable={dragHandleProps !== undefined}
       onClick={handleRowClick}
       onMouseEnter={onMouseEnter}
@@ -231,18 +254,18 @@ export const HistoryRow = React.memo(function HistoryRow({
 
       <div className="row__body">
         {isImage ? null : isFile ? (
-          <div className="row__title">{parseFilename(entry.preview)}</div>
+          <div className="row__title" style={titleStyle}>{parseFilename(entry.preview)}</div>
         ) : blurred ? (
           <ClipPreview entry={entry} masked onReveal={() => setRevealed(true)} mono={mono} />
         ) : urlParsed ? (
-          <div className="row__title">
+          <div className="row__title" style={titleStyle}>
             <span className="host">{urlParsed.host}</span>
             {urlParsed.rest && urlParsed.rest !== "/" && (
               <span className="rest">{urlParsed.rest}</span>
             )}
           </div>
         ) : (
-          <div className={mono ? "row__title mono" : "row__title"}>{displayPreview}</div>
+          <div className={mono ? "row__title mono" : "row__title"} style={titleStyle}>{displayPreview}</div>
         )}
 
         <ClipMetadata entry={entry} ownDeviceId={ownDeviceId} />

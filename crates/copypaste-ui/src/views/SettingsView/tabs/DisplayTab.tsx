@@ -20,6 +20,7 @@ export type DisplayTabProps = {
 };
 
 const THEME_LABEL: Record<(typeof THEME_VALUES)[number], string> = {
+  system: "System",
   dark: "Dark",
   light: "Light",
 };

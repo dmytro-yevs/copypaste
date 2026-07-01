@@ -5,7 +5,7 @@
 // (unpaired) device has no expandable metadata — it renders as a static
 // .devrow (no DisclosureHeader/.devrow__chev, no .devrow__foot) with a single
 // "Pair" affordance, and its own not-pairable hint styled as .dev-hint.
-import { Info } from "lucide-react";
+import { Info, Link } from "lucide-react";
 import { type DiscoveredDevice } from "../../lib/ipc";
 
 /** One discovered (unpaired) LAN device row with a Pair button. */
@@ -43,6 +43,7 @@ export function DiscoveredRow({
           disabled={!pairable || busy}
           title={pairable ? undefined : "This device does not support secure pairing"}
         >
+          <Link aria-hidden="true" />
           Pair
         </button>
       </div>

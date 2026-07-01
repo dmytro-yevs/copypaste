@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, ShieldOff, Unlink } from "lucide-react";
 import {
   formatWallTime,
   formatEpochSecs,
@@ -8,8 +8,6 @@ import {
 } from "../lib/ipc";
 // i2sr (PG-40): hybrid relative/absolute formatter for last-sync timestamps.
 import { formatSyncTime } from "../lib/time";
-// bdac.14: shared button so danger-tint style comes from one source of truth.
-import { ActionButton } from "./ActionButton";
 // CopyPaste-g27b.11: typed disclosure-header primitive drives the expandable
 // device-row header (aria-expanded/aria-controls) — never a raw .btn.
 import { DisclosureHeader } from "../lib/a11y/DisclosureHeader";
@@ -365,34 +363,35 @@ export function PeerRow({
             <p className="field-note field-note--err">{rowError}</p>
           )}
 
-          {/* g4ze: Action footer — full-width row below metadata with hairline border-t.
-               Decision 16: Unpair + Revoke are equal-width .btn.btn--danger buttons in
-               a .devrow__foot (Revoke & rotate stays inside RevokeConfirmDialog).
-               bdac.14: use ActionButton(variant="danger") so the danger-tint style comes
-               from a single source of truth in ActionButton.tsx (spec §7) — it already
-               emits the "btn btn--danger sm" classes; only the wrapping .devrow__foot
-               (equal-width flex layout) is new here. */}
+          {/* g4ze / g27b.19: Action footer — hairline border-t, right-aligned compact
+               buttons (not full-width — Decision 16 superseded). Unpair and Revoke are
+               two distinct-severity actions, not one destructive bar: Unpair is
+               reversible (re-pair anytime) and uses .btn--warning; Revoke immediately
+               breaks trust and keeps .btn--danger (Revoke & rotate stays inside
+               RevokeConfirmDialog). Rendered as plain buttons (not ActionButton, which
+               only knows primary/secondary/danger/danger-solid/ghost — no warning
+               variant) so ActionButton.tsx (out of this slice's scope) stays untouched. */}
           <div className="devrow__foot">
-            <ActionButton
-              variant="danger"
-              size="sm"
+            <button
+              type="button"
+              className="btn btn--warning sm"
               onClick={() => onUnpair(peer.fingerprint)}
               disabled={isPending}
-              pending={isPending}
               aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
             >
-              Unpair
-            </ActionButton>
-            <ActionButton
-              variant="danger"
-              size="sm"
+              <Unlink aria-hidden="true" />
+              {isPending ? "…" : "Unpair"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--danger sm"
               onClick={() => onRevoke(peer.fingerprint)}
               disabled={isPending}
-              pending={isPending}
               aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
             >
-              Revoke
-            </ActionButton>
+              <ShieldOff aria-hidden="true" />
+              {isPending ? "…" : "Revoke"}
+            </button>
           </div>
         </div>
       </div>

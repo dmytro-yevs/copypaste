@@ -12,7 +12,9 @@
     padding: var(--pad-row);
     border-radius: var(--r-row);
     position: relative;
-    max-height: 74px;
+    /* Per-row bound set by HistoryRow (--row-max) so multi-line preview rows and
+       taller image rows aren't clipped; falls back to the single-line default. */
+    max-height: var(--row-max, 74px);
     transition:
       background var(--dur-fast) var(--ease),
       max-height var(--dur) var(--ease),
@@ -276,7 +278,22 @@
     gap: var(--s-3);
   }
   .dev-hint svg { font-size: var(--fs-md); opacity: 0.7; }
-  .dev-list { padding: 4px 12px 14px; display: flex; flex-direction: column; gap: var(--s-4); }
+  /* CopyPaste-g27b.19: horizontal inset bumped from 12px to var(--s-6) (14px)
+     to exactly match .dev-head's 14px padding (shell.css) — "PAIRED DEVICES",
+     "DISCOVERED…", "PAIR A NEW DEVICE" and the device rows all start at the
+     same x. Top padding widened to var(--s-4) for a consistent gap under the
+     preceding section header row (was a too-tight 4px). */
+  .dev-list { padding: var(--s-4) var(--s-6) var(--s-6); display: flex; flex-direction: column; gap: var(--s-4); }
+  /* --- Devices view body inset (CopyPaste-g27b.19) --------------------------
+     .dev-head (shell.css) already carries the canonical 14px/var(--s-6)
+     horizontal inset. This utility gives every other "naked" section
+     (sub-headers, the pair-a-device CTA, error notes) the same left/right
+     edge, and a consistent vertical rhythm, without touching shell.css. */
+  .dev-body { padding: var(--s-4) var(--s-6); }
+  /* Real divider between "Discovered on your network" and "Pair a new
+     device" — previously an empty unstyled <div/> that rendered no visible
+     line and no reliable gap. */
+  .dev-divider { height: var(--hairline); background: var(--divider); margin: var(--s-5) var(--s-6); }
   .devrow {
     border: var(--stroke-1) solid var(--border);
     border-radius: var(--r-card);
@@ -355,9 +372,22 @@
     word-break: break-all;
     flex: 1;
   }
-  .devrow__foot { display: flex; gap: var(--s-4); padding: 3px 13px 13px; }
-  .devrow__foot .btn { flex: 1; }
+  /* g27b.19: right-aligned, compact (no flex:1) — Unpair/Revoke read as two
+     distinct, differently-severe actions rather than one giant equal-width bar. */
+  .devrow__foot { display: flex; gap: var(--s-4); padding: 3px 13px 13px; justify-content: flex-end; }
   @media (max-width: 600px) { .cfields { grid-template-columns: 1fr; } }
+
+  /* --- Warning button variant (g27b.19) — Unpair is destructive-but-reversible
+     (re-pairing is easy), so it gets an amber/warn treatment one notch below
+     .btn--danger (Revoke, which breaks trust immediately). Lives here rather
+     than primitives.css because primitives.css is a shared read-only file for
+     this slice. */
+  .btn--warning {
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+    background: color-mix(in srgb, var(--warn) 9%, transparent);
+  }
+  .btn--warning:hover { background: color-mix(in srgb, var(--warn) 16%, transparent); }
 
   /* --- SAS pairing (slice 4) — QR must stay literal black/white to scan ----- */
   .qr {
@@ -510,4 +540,19 @@
   /* Image thumb placeholders (loading / failed) — keep the row from collapsing. */
   .thumb-ph { display: inline-block; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--raised); }
   .thumb-ph--err { background: transparent; border: var(--stroke-1) dashed var(--border); }
+
+  /* Portaled info popover (settings (i) tooltips). Real card — bg/border/shadow/
+     z-index — so it never floats transparently over the row content. */
+  .popover {
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-ctl);
+    box-shadow: var(--sh2);
+    padding: var(--s-5) var(--s-6);
+    font-size: var(--fs-sm);
+    color: var(--dim);
+    line-height: var(--lh-normal);
+    max-width: 280px;
+    z-index: 80;
+  }
 }

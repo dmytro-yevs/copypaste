@@ -142,7 +142,7 @@ export function DetailsModal({
   return (
     <Dialog labelledBy="details-modal-title" onClose={onClose} className="modal--wide">
         {/* Header */}
-        <div>
+        <div className="modal__hd">
           <span id="details-modal-title" className="modal__t">
             {modalTitle}
           </span>
@@ -152,7 +152,7 @@ export function DetailsModal({
             aria-label="Close"
             onClick={onClose}
           >
-            <X size={16} aria-hidden="true" />
+            <X aria-hidden="true" />
           </button>
         </div>
 
@@ -200,7 +200,7 @@ export function DetailsModal({
                   swap in entry.preview after an explicit reveal action. CSS blur
                   alone is insufficient — screen readers, devtools, and clipboard
                   scanners all read raw text nodes regardless of visual styling. */}
-              <pre>
+              <pre className="modal__pre">
                 {blurred ? maskPlaceholder() : entry.preview}
               </pre>
               {/* n9gp (PG-34): show the confirmation overlay only when
@@ -237,7 +237,7 @@ export function DetailsModal({
             For file entries, Type and Copied are already in the table body — omit
             them here to avoid duplication. For image/text entries the footer is
             the only metadata row, so show content_type + source app + timestamp. */}
-        <div>
+        <div className="modal__meta">
           {!isFile && <span>{entry.content_type}</span>}
           {entry.app_bundle_id && !isFile && (
             // Show the human-readable app label; raw bundle ID is available via title tooltip.
