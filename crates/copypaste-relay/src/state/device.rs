@@ -169,10 +169,20 @@ impl super::RelayStore {
         token: &str,
         now_unix: Option<i64>,
     ) -> Result<(), RelayError> {
-        let record = self
-            .devices
-            .get(device_id)
-            .ok_or(RelayError::Unauthorized)?;
+        let record = match self.devices.get(device_id) {
+            Some(record) => record,
+            None => {
+                // Timing-equalization (CopyPaste-qk0y): a registered device runs
+                // the ct_eq token loop below, so returning immediately here would
+                // let a network attacker distinguish "device registered" vs not by
+                // wall-clock, despite the identical `Unauthorized` response. Run one
+                // constant-time compare against a fixed sentinel so the absent-device
+                // path performs comparable work. Result is discarded.
+                let sentinel = [0u8; 32];
+                let _dummy = sentinel.ct_eq(token.as_bytes());
+                return Err(RelayError::Unauthorized);
+            }
+        };
         // A device_id maps to a SET of co-registered tokens (R1a): the request
         // authorizes if ANY currently-valid token matches. We evaluate every
         // entry (no early break) so the comparison work does not vary with how
