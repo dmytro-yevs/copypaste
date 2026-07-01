@@ -13,17 +13,32 @@
 //! |---|---|
 //! | [`realtime_tls`] | TLS cert-pinning ([`SpkiPins`], `PinningVerifier`, `DerReader`, `build_rustls_connector`) |
 //! | [`realtime_config`] | URL helpers, config struct, PII redaction ([`RealtimeConfig`], [`scrub_ws_url`], …) |
-//! | [`realtime_client`] | WS client, connection loop, Phoenix dispatch ([`RealtimeClient`], [`ClientHandle`], …) |
+//! | `client` | [`RealtimeClient`], [`ClientHandle`], `RealtimeError`, connection lifecycle |
+//! | `reconnect` | `RunningGuard`, `connection_loop` (exponential-backoff orchestration), `SessionResult` |
+//! | `session` | `run_session` — a single WS session (connect → join → heartbeat + recv) |
+//! | `dispatch` | `handle_message` (frame decode) + `dispatch_event` (Phoenix event routing) |
+//! | `join` | `build_join_payload` (mandatory RLS `user_id` row filter) |
+//!
+//! CopyPaste-vp63.26: `realtime_client.rs` (formerly a single 1102-line file)
+//! was split into the `client`/`reconnect`/`session`/`dispatch`/`join`
+//! submodules above; this `mod.rs` re-exports the same public surface
+//! (`ClientHandle`, `RealtimeClient`, `RealtimeError`) so `mod.rs` consumers
+//! (e.g. `copypaste-daemon`'s `cloud/ws.rs`) are unaffected.
 
 #![allow(clippy::result_large_err)] // RealtimeError carries WebSocket variants; boxing not worth the noise here
 
-pub mod realtime_client;
+mod client;
+mod dispatch;
+mod join;
+mod reconnect;
+mod session;
+
 pub mod realtime_config;
 pub mod realtime_tls;
 
 // ── Public re-exports (preserves the API surface of the old flat realtime.rs) ─
 
-pub use realtime_client::{ClientHandle, RealtimeClient, RealtimeError};
+pub use client::{ClientHandle, RealtimeClient, RealtimeError};
 pub use realtime_config::{scrub_ws_url, RealtimeConfig};
 pub use realtime_tls::SpkiPins;
 
