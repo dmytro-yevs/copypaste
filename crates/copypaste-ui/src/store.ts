@@ -1,19 +1,27 @@
 import { create } from "zustand";
+import {
+  PREFS_KEY,
+  DEFAULT_ACCENT,
+  DEFAULT_THEME,
+  DEFAULT_TRANSLUCENCY,
+  validateAccent,
+  validateTheme,
+  validateTranslucency,
+  type AccentValue,
+  type ThemeValue,
+} from "./lib/theme/prefsSchema";
 
 export type ViewId = "history" | "devices" | "settings" | "about" | "logs";
 
 // ---------------------------------------------------------------------------
 // UI preferences persisted to localStorage
 // ---------------------------------------------------------------------------
-
-// v4 key — Phase 2 redesign: two-axis theming (theme × accent). Migrates from v3/v2/v1.
-const PREFS_KEY = "copypaste-ui-prefs-v4";
-// v3 key — legacy; migrated to v4 (drops old appearance fields).
-const LEGACY_PREFS_V3_KEY = "copypaste-ui-prefs-v3";
-// v2 key — legacy; migrated to v4.
-const LEGACY_PREFS_V2_KEY = "copypaste-ui-prefs-v2";
-// v1 key — pre-redesign legacy. See loadPrefs() migration block.
-const LEGACY_PREFS_KEY = "copypaste-ui-prefs-v1";
+//
+// Single current key (`copypaste-ui-prefs-v4`, defined in ./lib/theme/prefsSchema).
+// No back-compat: the former v1/v2/v3 legacy-key migration branches were removed
+// in the design-system redesign (design.md Decision 10 / task 1.10a). A user whose
+// prefs remain under an old v1–v3 key (never re-saved under v4) resets to defaults —
+// an accepted, documented impact of the no-back-compat directive.
 
 export interface UIPrefs {
   /**
@@ -69,9 +77,26 @@ export interface UIPrefs {
    * Android parity: Android default is also false (off-by-default).
    */
   sortByDevice: boolean;
+  /**
+   * Appearance theme axis — `"dark"` (default) or `"light"`. Applied to
+   * `<html data-theme>` by the pre-paint bootstrap (first paint) and the
+   * App/Popup effect (live). Additive field on the v4 key — no migration.
+   */
+  theme: ThemeValue;
+  /**
+   * Appearance accent axis — one of 6 hues (default `"indigo"`), independent of
+   * theme. Applied to `<html data-accent>`. Additive field on the v4 key.
+   */
+  accent: AccentValue;
+  /**
+   * Translucency axis (default `true`). `true` frosts chrome surfaces via
+   * `backdrop-filter`; `false` renders every surface solid. Applied to
+   * `<html data-translucency="on"|"off">`. Additive field on the v4 key.
+   */
+  translucency: boolean;
 }
 
-const DEFAULT_PREFS: UIPrefs = {
+export const DEFAULT_PREFS: UIPrefs = {
   previewLinesApp: 1,
   previewLinesPopup: 1,
   previewSize: 28,
@@ -85,92 +110,62 @@ const DEFAULT_PREFS: UIPrefs = {
   showSensitiveWarnings: true,
   // Off by default — matches Android's default (sortByDevice is opt-in on both platforms).
   sortByDevice: false,
+  // Appearance axes (redesign, Slice 1). Defaults sourced from prefsSchema so the
+  // store and the pre-paint bootstrap can never disagree on them (task 1.14).
+  theme: DEFAULT_THEME,
+  accent: DEFAULT_ACCENT,
+  translucency: DEFAULT_TRANSLUCENCY,
 };
 
-function loadPrefs(): UIPrefs {
+export function loadPrefs(): UIPrefs {
+  // Read the single current key. A localStorage access exception (private mode,
+  // disabled storage) falls back to defaults rather than throwing to callers.
+  let raw: string | null;
   try {
-    let raw = localStorage.getItem(PREFS_KEY);
-    // ── Two-axis theming upgrade migration (v3 → v4) ──────────────────────
-    // Phase 2 (CopyPaste-2hfj.3): old appearance fields removed from UIPrefs v4.
-    // If only v3 prefs exist, adopt them and run the cleanup below.
-    let migratedFromV3 = false;
-    if (!raw) {
-      const v3 = localStorage.getItem(LEGACY_PREFS_V3_KEY);
-      if (v3) {
-        raw = v3;
-        migratedFromV3 = true;
-      }
-    }
-    // ── v2 → v4 migration ────────────────────────────────────────────────
-    // If only v2 prefs exist, adopt them and run the cleanup below.
-    let migratedFromV2 = false;
-    if (!raw) {
-      const v2 = localStorage.getItem(LEGACY_PREFS_V2_KEY);
-      if (v2) {
-        raw = v2;
-        migratedFromV2 = true;
-      }
-    }
-    // ── Pre-Liquid-Glass upgrade migration (v1 → v4) ──────────────────────
-    let migratedFromLegacy = false;
-    if (!raw) {
-      const legacy = localStorage.getItem(LEGACY_PREFS_KEY);
-      if (legacy) {
-        raw = legacy;
-        migratedFromLegacy = true;
-      } else {
-        return DEFAULT_PREFS;
-      }
-    }
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-    // ── Drop all keys not in the current schema (applies on every upgrade path) ──
-    // Old appearance fields (Phase 2, CopyPaste-2hfj.3) and any future renames are
-    // cleaned up automatically by this whitelist approach.
-    const knownKeys = new Set(Object.keys(DEFAULT_PREFS));
-    for (const key of Object.keys(parsed)) {
-      if (!knownKeys.has(key)) {
-        delete parsed[key];
-      }
-    }
-    // ── v0.5.3 migration ──────────────────────────────────────────────────
-    // Migrate the legacy `previewLines` (shared) field to the new split fields.
-    // `historySize` and `previewDelay` are no longer stored — removed silently.
-    if (typeof parsed.previewLines === "number" && parsed.previewLines > 0) {
-      if (parsed.previewLinesApp === undefined) {
-        parsed.previewLinesApp = parsed.previewLines;
-      }
-      if (parsed.previewLinesPopup === undefined) {
-        parsed.previewLinesPopup = parsed.previewLines;
-      }
-    }
-    // Drop obsolete keys so they don't accumulate
-    delete parsed.previewLines;
-    delete parsed.historySize;
-    delete parsed.previewDelay;
-    // ──────────────────────────────────────────────────────────────────────
-
-    const merged = { ...DEFAULT_PREFS, ...parsed } as UIPrefs;
-    if (migratedFromV3) {
-      // Persist under v4 and drop the v3 key so this runs exactly once.
-      savePrefs(merged);
-      try { localStorage.removeItem(LEGACY_PREFS_V3_KEY); } catch { /* ignore */ }
-    }
-    if (migratedFromV2) {
-      // Persist under v4 and drop the v2 key so this runs exactly once.
-      savePrefs(merged);
-      try { localStorage.removeItem(LEGACY_PREFS_V2_KEY); } catch { /* ignore */ }
-    }
-    if (migratedFromLegacy) {
-      // Persist under v4 and drop the legacy v1 key so this runs exactly once.
-      savePrefs(merged);
-      try { localStorage.removeItem(LEGACY_PREFS_KEY); } catch { /* ignore */ }
-    }
-    return merged;
+    raw = localStorage.getItem(PREFS_KEY);
   } catch (err) {
-    console.warn("loadPrefs: failed to read localStorage, using defaults", err);
+    console.warn("loadPrefs: localStorage access failed, using defaults", err);
     return DEFAULT_PREFS;
   }
+  if (!raw) return DEFAULT_PREFS;
+
+  // Malformed JSON → full defaults (logged, never thrown). A non-object payload
+  // (array, string, number, null) is treated the same way.
+  let parsed: Record<string, unknown>;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      console.warn("loadPrefs: stored prefs not an object, using defaults");
+      return DEFAULT_PREFS;
+    }
+    parsed = value as Record<string, unknown>;
+  } catch (err) {
+    console.warn("loadPrefs: malformed JSON, using defaults", err);
+    return DEFAULT_PREFS;
+  }
+
+  // Drop any key not in the current schema (unknown keys are dropped, never
+  // re-persisted — design.md Decision 10). This also sweeps up stale appearance
+  // fields from earlier eras via the same whitelist.
+  const knownKeys = new Set(Object.keys(DEFAULT_PREFS));
+  for (const key of Object.keys(parsed)) {
+    if (!knownKeys.has(key)) {
+      delete parsed[key];
+    }
+  }
+
+  // Whitelist-merge over defaults: a blob predating the appearance fields gains
+  // them at their defaults here (no migration step runs).
+  const merged = { ...DEFAULT_PREFS, ...parsed } as UIPrefs;
+
+  // Per-field runtime validation for the appearance axes: an invalid stored value
+  // for one axis defaults independently without discarding the others, and can
+  // never reach the DOM (design.md Decision 10 / task 1.11).
+  merged.theme = validateTheme(merged.theme);
+  merged.accent = validateAccent(merged.accent);
+  merged.translucency = validateTranslucency(merged.translucency);
+
+  return merged;
 }
 
 function savePrefs(prefs: UIPrefs) {
@@ -186,6 +181,14 @@ interface UIState {
   setView: (view: ViewId) => void;
   prefs: UIPrefs;
   setPrefs: (patch: Partial<UIPrefs>) => void;
+  /**
+   * Re-read persisted prefs from storage into the store. The quick-paste popup
+   * is a warm WebView built once and shown/hidden — its JS runtime (and this
+   * module's one-time `loadPrefs()`) never re-evaluates across shows. Calling
+   * this when the popup regains focus lets it pick up appearance (and every
+   * other pref) changed in the main window since it was built (task 1.17).
+   */
+  reloadPrefs: () => void;
 }
 
 export const useUI = create<UIState>((set, get) => ({
@@ -197,4 +200,5 @@ export const useUI = create<UIState>((set, get) => ({
     savePrefs(next);
     set({ prefs: next });
   },
+  reloadPrefs: () => set({ prefs: loadPrefs() }),
 }));

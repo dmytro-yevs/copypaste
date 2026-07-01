@@ -4,40 +4,40 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
 
 ## Slice 1 — Tokens, cascade layers, pre-paint bootstrap, `UIPrefs` additive fields
 
-- [ ] 1.1 Create `crates/copypaste-ui/src/styles/reset.css`, `tokens.css`, `base.css`,
+- [x] 1.1 Create `crates/copypaste-ui/src/styles/reset.css`, `tokens.css`, `base.css`,
       `primitives.css`, `patterns.css`, `shell.css`, `utilities.css` (empty placeholders except
       `reset`/`tokens`/`base`, filled in later slices) and `src/styles/index.css` that `@import`s
       them in order and declares `@layer reset, tokens, base, primitives, patterns, shell,
       utilities;` up front (design.md Decision 2).
-- [ ] 1.2 Populate `tokens.css`'s `@layer tokens` with the `:root`/`:root[data-theme="dark"]`/
+- [x] 1.2 Populate `tokens.css`'s `@layer tokens` with the `:root`/`:root[data-theme="dark"]`/
       `:root[data-theme="light"]` blocks copied from `copypaste-design-reference.html` (surfaces,
       lines, text, overlays, status tokens), plus every selector duplicated under
       `.theme-scope[data-theme="…"]` so the gallery's scoped wrapper (slice 6) resolves the same
       tokens without mutating `<html>` (design.md Decision 7 gallery isolation).
-- [ ] 1.3 Add the 6 `:root[data-accent="…"]` / `.theme-scope[data-accent="…"]` blocks plus the
+- [x] 1.3 Add the 6 `:root[data-accent="…"]` / `.theme-scope[data-accent="…"]` blocks plus the
       light-theme accent-value overrides, verbatim from the reference file.
-- [ ] 1.4 Add a `data-translucency="on"|"off"` axis: on `.theme-scope`/`:root`, a `--scrim`/frost
+- [x] 1.4 Add a `data-translucency="on"|"off"` axis: on `.theme-scope`/`:root`, a `--scrim`/frost
       recipe applied only to chrome surfaces (sidebar, popup container, modal scrim, toast, tab
       bar) via `backdrop-filter`; content surfaces (cards, rows, fields) always solid; `off` (or
       `backdrop-filter` unsupported, or `prefers-reduced-transparency: reduce` where the WebView
       supports that media feature) falls back to fully solid tokens for the chrome surfaces too.
-- [ ] 1.5 Add content-type tokens (`--c-text`, `--c-url`, `--c-mail`, `--c-num`, `--c-code`,
+- [x] 1.5 Add content-type tokens (`--c-text`, `--c-url`, `--c-mail`, `--c-num`, `--c-code`,
       `--c-json`, `--c-color`, `--c-file`, `--c-image`, `--c-secret`) for both themes.
-- [ ] 1.6 Add spacing (`--s-1`…`--s-9`), radius (`--r-chip/pill/ctl/input/card/window`), shadow
+- [x] 1.6 Add spacing (`--s-1`…`--s-9`), radius (`--r-chip/pill/ctl/input/card/window`), shadow
       (`--sh1/2/3`, themed), typography (font stack(s), weight scale, line-height scale,
       letter-spacing scale — design.md Decision 12/S5), and motion (`--dur-fast`/`--dur`/
       `--dur-theme`/`--ease`) tokens, plus explicit tokens for focus-ring width/offset
       (`--focus-ring-width`, `--focus-ring-offset`), hairline width (`--hairline`), icon sizes
       (`--icon-sm/md/lg`), and control heights (`--ctl-h-sm/md/lg`) — design.md Decision 12 (S1).
       Include the `@media (prefers-reduced-motion: reduce)` override collapsing `--dur*` to `0ms`.
-- [ ] 1.7 Add layout-constraint tokens/documentation: minimum main-window dimensions, popup
+- [x] 1.7 Add layout-constraint tokens/documentation: minimum main-window dimensions, popup
       width, and a note on long/localized-text handling (design.md Decision 12/S5).
-- [ ] 1.8 Add a script/test asserting **exact name-and-value parity** between
+- [x] 1.8 Add a script/test asserting **exact name-and-value parity** between
       `copypaste-design-reference.html`'s token block and `tokens.css` (design.md Decision 11) —
       not a name-only diff.
-- [ ] 1.9 Add the `2-base` layer (`@layer base`) — box-sizing reset, body/svg/button/input/link/
+- [x] 1.9 Add the `2-base` layer (`@layer base`) — box-sizing reset, body/svg/button/input/link/
       focus-visible/selection/scrollbar base rules — from the reference file's Layer 2.
-- [ ] 1.10 In `crates/copypaste-ui/src/store.ts`: add `theme: "dark" | "light"`,
+- [x] 1.10 In `crates/copypaste-ui/src/store.ts`: add `theme: "dark" | "light"`,
       `accent: "indigo" | "blue" | "teal" | "green" | "amber" | "rose"`, and
       `translucency: boolean` to `UIPrefs` as **additive fields** on the current key
       `copypaste-ui-prefs-v4` — NO version bump, NO migration chain, NO dual-write, NO downgrade
@@ -46,22 +46,22 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       Do NOT add a `"gallery"` member to the store's `view` type — `view` stays the production union
       and is in-memory only (NOT persisted). The gallery is a dev-only navigation branch handled
       outside the production view registry (design.md Decision 6/B3); no `DevViewId` in the store.
-- [ ] 1.10a REMOVE the existing legacy prefs migration branches in `store.ts` (reads of
+- [x] 1.10a REMOVE the existing legacy prefs migration branches in `store.ts` (reads of
       `copypaste-ui-prefs-v3`/`v2`/`v1` that forward to v4) as an EXPLICIT part of the no-back-compat
       policy (design.md Decision 10/round-5 B2). **Accepted, documented impact:** a user whose prefs
       are still under an old v1–v3 key (never re-saved under v4) loses ALL UI prefs (not only
       appearance) → reset to defaults. This is intentional cleanup — do it deliberately, not by
       inference. The `v4` key remains the single current key.
-- [ ] 1.11 Add per-field runtime validation to the loader (design.md Decision 10): `theme`
+- [x] 1.11 Add per-field runtime validation to the loader (design.md Decision 10): `theme`
       must be `"dark"`/`"light"` else default; `accent` must be one of the 6 known values else
       default; `translucency` must be `boolean` else default `true`; an invalid field never
       discards other valid fields. Log a console warning whenever a validation-fallback path is
       taken.
-- [ ] 1.12 Add validation tests (NO migration tests — there is no migration): malformed JSON →
+- [x] 1.12 Add validation tests (NO migration tests — there is no migration): malformed JSON →
       full `DEFAULT_PREFS`; unknown keys dropped; each new field individually invalid → that field
       defaults while other valid fields are kept; a blob predating the fields → fields default in;
       normal reload round-trips (design.md Decision 10).
-- [ ] 1.13 Add the pre-paint theme bootstrap as an **EXTERNAL same-origin classic script**
+- [x] 1.13 Add the pre-paint theme bootstrap as an **EXTERNAL same-origin classic script**
       (NOT inline — the CSP is `script-src 'self'`, which blocks inline; design.md Decision 4/B1).
       Author it at `crates/copypaste-ui/public/theme-bootstrap.js` (Vite emits `public/` verbatim to
       a stable un-hashed path) and reference it from both `index.html` and `popup.html` with a
@@ -74,14 +74,14 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       runs. It contains NO `import`/`eval`/`Function` (must stay a synchronous classic asset). Delete
       the stale `data-palette`/`data-density`/`data-motion`/`data-contrast` attributes + comment
       trails from both HTML files.
-- [ ] 1.14 Prevent bootstrap↔store DRIFT (N1): the key name (`copypaste-ui-prefs-v4`), the three
+- [x] 1.14 Prevent bootstrap↔store DRIFT (N1): the key name (`copypaste-ui-prefs-v4`), the three
       field defaults (`dark`/`indigo`/`true`), the allowed enum values, and the dataset mapping are
       duplicated between `theme-bootstrap.js` and `store.ts`. Either generate `theme-bootstrap.js`
       from a shared constants module at build time, OR add an exact parity test asserting key /
       defaults / allowed-values / dataset-mapping match between the two. Both the bootstrap and the
       store are tested against: malformed JSON, each field individually invalid, missing storage, and
       a `localStorage` access exception.
-- [ ] 1.15 PACKAGED-Tauri verification (not only Vite dev — B1/N2/N5): in a packaged build, confirm
+- [x] 1.15 PACKAGED-Tauri verification (not only Vite dev — B1/N2/N5): in a packaged build, confirm
       `theme-bootstrap.js` loads under the Tauri asset protocol (URL resolution correct for both
       windows), applies `data-theme`/`data-accent`/`data-translucency` to `<html>` BEFORE first
       content paint, and produces NO CSP violation. This is a first-class release-gate check, not a
@@ -91,10 +91,10 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       pixel-level paint timing); and the packaged smoke also asserts no stale static
       `data-palette`/`data-density`/`data-motion`/`data-contrast` attributes remain in the shipped
       HTML.
-- [ ] 1.16 In `src/App.tsx` and `src/popup/Popup.tsx` (or their `main.tsx`), add a `useEffect`
+- [x] 1.16 In `src/App.tsx` and `src/popup/Popup.tsx` (or their `main.tsx`), add a `useEffect`
       that re-applies `prefs.theme`/`.accent`/`.translucency` to `<html>` on mount and on change
       (live updates after the bootstrap has already handled first paint).
-- [ ] 1.17 Cross-window prefs (design.md Decision 4/A5 — required next-open, best-effort live).
+- [x] 1.17 Cross-window prefs (design.md Decision 4/A5 — required next-open, best-effort live).
       REQUIRED (release gate, N3): verify in a PACKAGED Tauri build that after a Settings
       theme/accent/translucency change, opening/recreating the popup shows the current values —
       because each WebView has a separate JS runtime, "same Zustand module + same key" proves intent,
@@ -104,7 +104,7 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       gate): live-update an already-open popup via a Tauri `ui-prefs-changed` event (+ `storage`
       event where the partition is shared); if a live channel doesn't reach the popup it corrects on
       next open.
-- [ ] 1.18 Record the pre-change performance baseline AND apply the pre-approved budget policy
+- [x] 1.18 Record the pre-change performance baseline AND apply the pre-approved budget policy
       (design.md Decision 15/M2 — methodology + thresholds are fixed NOW, not chosen after the
       result). Method: popup open→first-render latency via a `performance.now()` mark around popup
       mount, **10 runs, warm cache, report p50 and p95**; bundle size measured as **gzip** of the
@@ -112,10 +112,10 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       over baseline; **CSS gzip delta ≤ 20 KB** and **JS gzip delta ≤ 30 KB** per entry. Any
       exception must be documented and justified in the slice-6 PR (approval = reviewer sign-off).
       Record the concrete baseline numbers alongside.
-- [ ] 1.19 State the supported OS/WebView matrix (macOS 13+ / WKWebView Safari 16.2+) as a
+- [x] 1.19 State the supported OS/WebView matrix (macOS 13+ / WKWebView Safari 16.2+) as a
       non-functional requirement; confirm no `color-mix()` fallback is needed (design.md
       Decision 14/S2).
-- [ ] 1.20 Verify: `rg` the repo for `data-palette|data-skin|data-density|data-motion|
+- [x] 1.20 Verify: `rg` the repo for `data-palette|data-skin|data-density|data-motion|
       data-contrast` outside `docs/`/changelog and confirm zero remaining occurrences
       (STYLEGUIDE.md §12 done-check).
 

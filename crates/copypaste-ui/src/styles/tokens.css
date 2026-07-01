@@ -1,0 +1,178 @@
+@layer tokens {
+  /* ===================================================================== *
+   * LAYER 1 — TOKENS                                                       *
+   *                                                                       *
+   * The themed/accent blocks below are kept in EXACT name-and-value parity *
+   * with copypaste-design-reference.html (design.md Decision 11). The      *
+   * parity is enforced by tokens.parity.test.ts — do not edit a value here *
+   * without mirroring the reference (and vice-versa).                      *
+   *                                                                       *
+   * Every :root themed/accent selector is duplicated on .theme-scope[…] so *
+   * the dev-only gallery (Slice 6) can render a preview in a different     *
+   * theme/accent/translucency inside a scoped wrapper WITHOUT mutating     *
+   * <html> (design.md Decision 7 — gallery isolation). The non-themed      *
+   * scale block (:root, below) inherits into .theme-scope and needs no     *
+   * twin. Custom properties inherit, so a nested wrapper resolves them.    *
+   * ===================================================================== */
+
+  :root,
+  :root[data-theme="dark"],
+  .theme-scope[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:#0E0F14; --panel:#16181F; --elevated:#1E2027; --card:#1E2027; --raised:#282B33; --raised-2:#33373F;
+    --border:#33363F; --divider:#24262D;
+    --text:#E7E9EE; --dim:#9CA1AC; --faint:#7E838E; --mute:#5C616B;
+    --hover:rgba(255,255,255,.045); --pressed:rgba(255,255,255,.075);
+    --selected:color-mix(in srgb,var(--accent) 16%,transparent); --scrim:rgba(0,0,0,.55);
+    --ok:#4FB866; --warn:#E0A33F; --err:#E5645F; --info:#5B9DFF;
+    --c-text:#8B93A5; --c-url:#34D1BF; --c-code:#A78BFA; --c-image:#E879C6; --c-mail:#4ED98A;
+    --c-color:#F5A524; --c-num:#5CC1CE; --c-path:#5B9DFF; --c-file:#5B9DFF; --c-json:#FB7B53; --c-secret:#F2616B;
+    --sh1:0 1px 2px rgba(0,0,0,.30); --sh2:0 8px 24px -6px rgba(0,0,0,.45); --sh3:0 24px 64px -12px rgba(0,0,0,.60);
+  }
+
+  :root[data-theme="light"],
+  .theme-scope[data-theme="light"] {
+    color-scheme: light;
+    --bg:#F5F6F8; --panel:#FFFFFF; --elevated:#FFFFFF; --card:#FFFFFF; --raised:#EFF1F4; --raised-2:#E2E5EA;
+    --border:#E1E4E9; --divider:#ECEEF1;
+    --text:#1A1C22; --dim:#565B66; --faint:#767B86; --mute:#A2A7B1;
+    --hover:rgba(15,18,26,.045); --pressed:rgba(15,18,26,.075);
+    --selected:color-mix(in srgb,var(--accent) 12%,transparent); --scrim:rgba(20,22,30,.28);
+    --ok:#1FA85B; --warn:#C77F1A; --err:#D64545; --info:#2563EB;
+    --c-text:#6A7282; --c-url:#0E9E8C; --c-code:#7C5CE6; --c-image:#C44BA0; --c-mail:#1FA85B;
+    --c-color:#C77F1A; --c-num:#1C8B9B; --c-path:#2F6FE0; --c-file:#2F6FE0; --c-json:#DC5A2E; --c-secret:#D64545;
+    --sh1:0 1px 2px rgba(20,22,30,.06); --sh2:0 8px 24px -8px rgba(20,22,30,.12); --sh3:0 24px 64px -12px rgba(20,22,30,.18);
+  }
+
+  /* --- Accent axis (6 hues), independent of theme --- */
+  :root[data-accent="indigo"], .theme-scope[data-accent="indigo"] {--accent:#6E5BFF;--accent-2:#9C8FFF;--on-accent:#fff}
+  :root[data-accent="blue"],   .theme-scope[data-accent="blue"]   {--accent:#3B82F6;--accent-2:#7CB0FF;--on-accent:#fff}
+  :root[data-accent="teal"],   .theme-scope[data-accent="teal"]   {--accent:#13B8A6;--accent-2:#5FE0D2;--on-accent:#06302C}
+  :root[data-accent="green"],  .theme-scope[data-accent="green"]  {--accent:#46C56A;--accent-2:#84E29A;--on-accent:#062A12}
+  :root[data-accent="amber"],  .theme-scope[data-accent="amber"]  {--accent:#F5A524;--accent-2:#FFC56B;--on-accent:#2A1B05}
+  :root[data-accent="rose"],   .theme-scope[data-accent="rose"]   {--accent:#F43F7E;--accent-2:#FF85AC;--on-accent:#fff}
+
+  /* --- Light-theme accent overrides (keep AA contrast on white surfaces) --- */
+  :root[data-theme="light"][data-accent="indigo"], .theme-scope[data-theme="light"][data-accent="indigo"] {--accent:#5B49E0}
+  :root[data-theme="light"][data-accent="blue"],   .theme-scope[data-theme="light"][data-accent="blue"]   {--accent:#2563EB}
+  :root[data-theme="light"][data-accent="teal"],   .theme-scope[data-theme="light"][data-accent="teal"]   {--accent:#0E9E8C;--on-accent:#fff}
+  :root[data-theme="light"][data-accent="green"],  .theme-scope[data-theme="light"][data-accent="green"]  {--accent:#1FA85B;--on-accent:#fff}
+  :root[data-theme="light"][data-accent="amber"],  .theme-scope[data-theme="light"][data-accent="amber"]  {--accent:#C77F1A;--on-accent:#fff}
+  :root[data-theme="light"][data-accent="rose"],   .theme-scope[data-theme="light"][data-accent="rose"]   {--accent:#E11D6B}
+
+  /* --- Non-themed scale tokens (fonts, radius, spacing, motion) --- */
+  :root {
+    --f-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+    --f-mono:'JetBrains Mono',ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,monospace;
+    --r-chip:7px; --r-pill:999px; --r-ctl:8px; --r-input:9px; --r-card:13px; --r-window:12px;
+    --s-1:2px;--s-2:4px;--s-3:6px;--s-4:8px;--s-5:11px;--s-6:14px;--s-7:16px;--s-8:20px;--s-9:24px;
+    --dur-fast:120ms; --dur:200ms; --dur-theme:300ms; --ease:cubic-bezier(.2,.8,.2,1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :root { --dur-fast:0ms; --dur:0ms; --dur-theme:0ms; }
+    * { animation-duration:.001ms !important; animation-iteration-count:1 !important; }
+  }
+
+  /* ===================================================================== *
+   * ADDITIVE TOKENS — introduced by this redesign, NOT present in the      *
+   * reference file, so they carry no parity constraint. They tokenize the  *
+   * remaining design constants (design.md Decision 12/S1 + S5) so the      *
+   * primitives/patterns/shell layers never hardcode a magic number.        *
+   * ===================================================================== */
+
+  :root {
+    /* Typography — font-size / weight / line-height / letter-spacing scales.
+       The size scale covers the discrete sizes the reference primitives use so
+       no component layer hardcodes a px font-size (design.md Decision 12/S5). */
+    --fs-3xs:9.5px; --fs-2xs:10px; --fs-xs:11px; --fs-sm:11.5px; --fs-smd:12px;
+    --fs-md:13px; --fs-base:14px; --fs-lg:15px; --fs-xl:17px;
+    --fw-normal:450; --fw-medium:500; --fw-semibold:550; --fw-strong:600; --fw-bold:700;
+    --lh-tight:1.2; --lh-normal:1.5;
+    --ls-body:-.006em; --ls-tight:-.01em; --ls-none:0; --ls-wide:.05em; --ls-wider:.06em;
+
+    /* Focus ring (design.md Decision 12 — explicit tokens). */
+    --focus-ring-width:2px; --focus-ring-offset:2px;
+
+    /* Hairline / icon sizes / control heights (design.md Decision 12/S1). */
+    --hairline:1px;
+    --icon-sm:14px; --icon-md:16px; --icon-lg:20px;
+    --ctl-h-sm:26px; --ctl-h-md:30px; --ctl-h-lg:34px;
+
+    /* Layout constraints (design.md Decision 12/S5 · task 1.7). Provisional
+       floors documented here; the shell/popup wire them in slices 3/5.
+       Long/localized text: rows, labels, and buttons truncate or wrap per
+       their own overflow rule — never rely on a fixed English string width. */
+    --main-min-w:640px; --main-min-h:480px;
+    --popup-w:400px;
+
+    /* Component metrics — control paddings, fixed anatomy dimensions, and the
+       extra radius/stroke/fill design constants the primitives layer needs, so
+       that layer never hardcodes a px/hex literal (design.md Decision 12). The
+       values are the reference file's exact control metrics (visual fidelity).
+       Paddings are `v h` shorthands consumed via `padding: var(--pad-…)`. */
+    --r-xs:2px;                 /* chip status-dot radius */
+    --r-sm:6px;                 /* keycap / thumb radius (off the --r-* scale) */
+    --stroke-1:1px; --stroke-2:2px; --stroke-3:3px;
+    --knob-fill:#fff;           /* iOS-switch knob + solid-danger text */
+    --sh-knob:0 1px 2px rgba(0,0,0,.3);          /* fixed switch-knob shadow */
+    --ring-inset:rgba(255,255,255,.18);          /* swatch tile inset ring */
+    --sheen:rgba(255,255,255,.22);               /* thumbnail tile highlight */
+
+    --pad-btn:7px 13px; --pad-btn-sm:5px 10px;
+    --pad-field:8px 11px; --pad-chip:3px 9px; --pad-seg-btn:5px 12px;
+    --pad-tpill:2px 8px; --pad-badge:2px 7px; --pad-kbd:0 5px;
+    --gap-field:9px; --gap-badge:5px;
+
+    --sz-iconbtn:30px;
+    --sz-toggle-w:38px; --sz-toggle-h:22px; --sz-toggle-knob:18px;
+    --sz-tile:34px; --sz-dot:8px; --sz-spinner:16px;
+    --sz-kbd:22px; --sz-chip-dot:7px; --sz-badge-dot:5px;
+  }
+
+  /* ===================================================================== *
+   * TRANSLUCENCY AXIS (design.md Decision 4/B4 · task 1.4).                *
+   *                                                                       *
+   * `on`  → chrome surfaces (sidebar, popup container, modal scrim, toast, *
+   *         tab bar) frost via backdrop-filter; content surfaces stay      *
+   *         solid. Chrome rules (slices 2/5) consume --frost-filter +      *
+   *         --chrome-bg; content rules use the solid --panel/--card.       *
+   * `off` / backdrop-filter unsupported / prefers-reduced-transparency     *
+   *         → every chrome surface renders solid.                          *
+   * Default (attribute absent) = on, matching translucency:true.           *
+   * ===================================================================== */
+
+  /* SOLID is the baseline — this covers translucency=off AND any engine that
+     does not support backdrop-filter. Frosting is applied ADDITIVELY below only
+     where it is both supported and requested, so no lower-specificity fallback
+     can be defeated by the higher-specificity on-state selector. */
+  :root,
+  .theme-scope {
+    --frost-filter: none;
+    --chrome-bg: var(--panel);
+  }
+
+  /* Frost chrome only where backdrop-filter is supported AND translucency=on.
+     On engines without backdrop-filter this @supports block is inert, so the
+     solid baseline above wins — no explicit "unsupported" fallback needed. */
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root[data-translucency="on"],
+    .theme-scope[data-translucency="on"] {
+      --frost-filter: saturate(180%) blur(20px);
+      --chrome-bg: color-mix(in srgb, var(--panel) 72%, transparent);
+    }
+  }
+
+  /* Reduced-transparency users → force chrome solid, overriding the frost above.
+     Same selector/specificity (0,2,0) as the @supports rule but authored later,
+     so it wins when the feature matches. Note: prefers-reduced-transparency is
+     unsupported before Safari 17, so on macOS 13/Safari 16.2–16.6 this simply
+     never matches and translucency stays honored — the desired default. */
+  @media (prefers-reduced-transparency: reduce) {
+    :root[data-translucency="on"],
+    .theme-scope[data-translucency="on"] {
+      --frost-filter: none;
+      --chrome-bg: var(--panel);
+    }
+  }
+}

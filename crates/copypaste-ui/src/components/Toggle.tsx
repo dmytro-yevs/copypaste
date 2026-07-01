@@ -29,11 +29,13 @@ export function Toggle({
     <button
       type="button"
       role="switch"
+      className={checked ? "toggle" : "toggle off"}
       aria-checked={checked}
       aria-label={ariaLabel}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >
+      {/* Knob — styled via `.toggle > span` in primitives.css. */}
       <span />
     </button>
   );

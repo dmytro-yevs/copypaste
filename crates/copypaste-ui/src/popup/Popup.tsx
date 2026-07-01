@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, friendlyIpcError, pasteAsPlainText } from "../lib/ipc";
 import { copyWithFeedback } from "../lib/copyWithFeedback";
 import { useUI } from "../store";
+import { applyAppearanceToRoot } from "../lib/theme/applyTheme";
 import { EmptyState } from "../components/EmptyState";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { GlideHighlight } from "./GlideHighlight";
@@ -36,6 +38,35 @@ export function Popup() {
     // M4: popup now has its own independent preview line count
     previewLinesPopup = 1,
   } = useUI((s) => s.prefs);
+
+  // Next-open correctness for the popup window (task 1.17). The popup is a warm
+  // WebView built once and shown/hidden, so `loadPrefs()` runs only once for its
+  // lifetime — a Settings change in the main window would otherwise never reach
+  // it. Re-read persisted prefs whenever the popup regains focus (i.e. is shown),
+  // mirroring usePopupHistory's onFocusChanged refresh. In the browser harness
+  // (no Tauri) each navigation reloads the module, so the mount read suffices.
+  const reloadPrefs = useUI((s) => s.reloadPrefs);
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+    let cancelled = false;
+    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (!cancelled && focused) reloadPrefs();
+    });
+    return () => {
+      cancelled = true;
+      void unlisten.then((fn) => fn());
+    };
+  }, [reloadPrefs]);
+
+  // Live appearance sync for the popup window (task 1.16/1.17). Applying keyed on
+  // the three axes re-runs on mount and whenever reloadPrefs (above) or a live
+  // change updates them, keeping <html> data-* in step with the current prefs.
+  const theme = useUI((s) => s.prefs.theme);
+  const accent = useUI((s) => s.prefs.accent);
+  const translucency = useUI((s) => s.prefs.translucency);
+  useEffect(() => {
+    applyAppearanceToRoot(document.documentElement, { theme, accent, translucency });
+  }, [theme, accent, translucency]);
 
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);

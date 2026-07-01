@@ -1,0 +1,13 @@
+@layer reset {
+  /* LAYER 0 — RESET. Box model + zeroed margins/padding. Element-level type
+     defaults live in the base layer. */
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    overflow-x: clip;
+  }
+}

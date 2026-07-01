@@ -1,0 +1,21 @@
+/* ======================================================================= *
+ * Design-system entry — imported by both main.tsx and popup/main.tsx.      *
+ *                                                                         *
+ * The @layer statement below declares cascade order UP FRONT, so the       *
+ * browser's native layer ordering — not @import/source order — decides     *
+ * priority (design.md Decision 2). Each imported file wraps its rules in    *
+ * its matching @layer block, so a misordered import can never silently      *
+ * invert cascade priority. Gallery-only CSS lives in a separate            *
+ * styles/gallery.css imported only by the DEV-gated gallery module — never  *
+ * here (Slice 6).                                                          *
+ * ======================================================================= */
+
+@layer reset, tokens, base, primitives, patterns, shell, utilities;
+
+@import "./reset.css";
+@import "./tokens.css";
+@import "./base.css";
+@import "./primitives.css";
+@import "./patterns.css";
+@import "./shell.css";
+@import "./utilities.css";

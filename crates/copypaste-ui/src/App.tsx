@@ -1,5 +1,6 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { useUI, type ViewId } from "./store";
+import { applyAppearanceToRoot } from "./lib/theme/applyTheme";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
@@ -71,6 +72,16 @@ export default function App() {
   const view = useUI((s) => s.view);
   const setView = useUI((s) => s.setView);
   const { Component: View, label } = VIEWS[view];
+
+  // Live appearance sync (task 1.16). The pre-paint bootstrap owns FIRST paint;
+  // this re-applies theme/accent/translucency to <html> on mount and whenever a
+  // Settings change updates prefs, so the running window updates without reload.
+  const theme = useUI((s) => s.prefs.theme);
+  const accent = useUI((s) => s.prefs.accent);
+  const translucency = useUI((s) => s.prefs.translucency);
+  useEffect(() => {
+    applyAppearanceToRoot(document.documentElement, { theme, accent, translucency });
+  }, [theme, accent, translucency]);
 
   // The popup window emits "open-settings" (after showing this main window) when
   // the user clicks its footer gear. Navigate to the Settings view in response.

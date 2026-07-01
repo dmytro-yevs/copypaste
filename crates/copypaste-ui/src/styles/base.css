@@ -1,0 +1,95 @@
+@layer base {
+  /* LAYER 2 — BASE (one consistent type system), lifted from
+     copypaste-design-reference.html's Layer 2. Design constants reference the
+     token layer (font weights, focus ring) instead of repeating literals. */
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--f-ui);
+    font-size: var(--fs-base);
+    font-weight: var(--fw-normal);
+    line-height: var(--lh-normal);
+    letter-spacing: var(--ls-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv11", "ss01";
+    transition:
+      background var(--dur-theme) var(--ease),
+      color var(--dur-theme) var(--ease);
+  }
+
+  svg {
+    width: 1em;
+    height: 1em;
+    flex: none;
+    stroke-width: 1.85;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    display: block;
+  }
+
+  button {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  input {
+    font: inherit;
+    letter-spacing: inherit;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--accent);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--raised-2);
+    border-radius: 6px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--mute);
+  }
+
+  .mono {
+    font-family: var(--f-mono);
+    font-weight: var(--fw-normal);
+    letter-spacing: var(--ls-none);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Reduced motion: keep root-level scrolling non-smooth (design.md Decision
+     13/S3). `scroll-behavior` is NOT inherited, so any future scroll container
+     that opts into `smooth` must add its own reduced-motion override — the later
+     slices that introduce such containers are responsible for that (audited in
+     slice 6). Nothing sets `smooth` today. */
+  @media (prefers-reduced-motion: reduce) {
+    html,
+    :root {
+      scroll-behavior: auto;
+    }
+  }
+}
