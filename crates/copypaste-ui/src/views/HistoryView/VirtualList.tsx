@@ -45,6 +45,13 @@ export interface VirtualListProps {
    * selection background themselves, so this is the sole selection indicator.
    */
   glideStyle?: { top: number; height: number } | null;
+  /**
+   * CopyPaste redesign (Slice 3, 3.5): class name(s) applied to the scrollable
+   * list container (the root role="listbox" div below). The caller composes
+   * "list" / "list selecting" from its own selectionMode state — VirtualList
+   * only forwards it onto the DOM node it owns.
+   */
+  className?: string;
 }
 
 export function VirtualList({
@@ -58,6 +65,7 @@ export function VirtualList({
   onNearBottom,
   activeDescendantId,
   glideStyle,
+  className,
 }: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
@@ -131,6 +139,7 @@ export function VirtualList({
   return (
     <div
       ref={listRef}
+      className={className}
       role="listbox"
       aria-label="Clipboard history"
       aria-activedescendant={safeActiveDescendantId}

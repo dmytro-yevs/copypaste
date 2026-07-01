@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Search } from "lucide-react";
 // h97m: listen for cross-view "history-refresh" events emitted after a
 // successful backup import so HistoryView re-fetches immediately.
 import { ViewShell } from "../components/ViewShell";
@@ -725,13 +726,16 @@ export function HistoryViewInner() {
         </button>
       )}
       {/* Search bar */}
-      <input
-        ref={searchRef}
-        type="search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Filter…"
-      />
+      <div className="field">
+        <Search aria-hidden="true" />
+        <input
+          ref={searchRef}
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter…"
+        />
+      </div>
     </>
   );
 
@@ -850,6 +854,10 @@ export function HistoryViewInner() {
           );
         })()}
         <VirtualList
+          // CopyPaste redesign (Slice 3, 3.5): .list.selecting reveals row
+          // checkboxes and hides row actions (patterns.css) — driven by the
+          // existing selectionMode state, not a new variable.
+          className={selectionMode ? "list selecting" : "list"}
           // Cap the rendered list to the persisted display-limit preference.
           // Sentinel 100000 means "Unlimited" (effectively uncapped for any realistic history).
           // The daemon may hold more items on disk; this is a UI rendering cap only.
