@@ -1,7 +1,9 @@
 // ── GlideHighlight ────────────────────────────────────────────────────────────
 // §4/§8: A single absolutely-positioned layer that slides to the selected row.
-// Animates top + height over 130ms ease (CSS var --ease-standard if defined,
-// else cubic-bezier(0.2,0,0,1)). Instant when prefers-reduced-motion is set.
+// Animates top + height using the shared motion tokens (--dur/--ease from
+// tokens.css). Instant when prefers-reduced-motion is set (--dur collapses to
+// 0ms in that case too, so the explicit isScrolling/prefersReduced guard below
+// is a belt-and-suspenders skip of the transition altogether).
 import React, { useEffect, useRef, useState } from "react";
 import type { HistoryEntry } from "../lib/ipc";
 
@@ -85,9 +87,11 @@ export function GlideHighlight({
         // (opacity 0) when the selected item has scrolled out of view —
         // this is glide/visibility behavior wired to preserved state
         // (visible/isScrolling/prefersReduced), not decoration.
+        // Durations/easing come from the motion tokens (tokens.css --dur/--ease)
+        // so this auto-no-ops under prefers-reduced-motion (--dur collapses to 0ms).
         transition: prefersReduced.current || isScrolling
           ? "none"
-          : "top 130ms cubic-bezier(0.2,0,0,1), height 130ms cubic-bezier(0.2,0,0,1)",
+          : "top var(--dur) var(--ease), height var(--dur) var(--ease)",
         opacity: visible && !isScrolling ? 1 : 0,
         // Functional: absolutely-positioned elements paint above static
         // siblings by default regardless of DOM order — zIndex 0 here keeps

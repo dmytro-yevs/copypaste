@@ -1,10 +1,12 @@
 // ── PopupRow ──────────────────────────────────────────────────────────────────
 import React, { useState } from "react";
+import { Pin } from "lucide-react";
 import type { HistoryEntry } from "../lib/ipc";
 import { isImageType, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking, shouldMask } from "../lib/masking";
 import { formatRelativeTime } from "../lib/time";
 import { ImageThumb } from "../components/ImageThumb";
+import { MASKED_A11Y_LABEL } from "../lib/clip/ClipPreview";
 import { HighlightedText } from "./HighlightedText";
 
 // Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding.
@@ -75,7 +77,9 @@ export const PopupRow = React.memo(function PopupRow({
     <li
       id={`popup-item-${item.id}`}
       role="option"
+      className={selected ? "row sel" : "row"}
       aria-selected={selected}
+      aria-label={blurred ? MASKED_A11Y_LABEL : undefined}
       style={{
         // Functional: matches the geometry GlideHighlight reads via
         // child.offsetHeight to size/position its overlay for this row.
@@ -87,41 +91,39 @@ export const PopupRow = React.memo(function PopupRow({
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
-      {/* Primary label / image thumb */}
+      {/* Primary label / image thumb (condensed — no leading tile in the popup) */}
       {isImage ? (
         <ImageThumb id={item.id} maxHeight={imageMaxHeight} />
       ) : (
         <span
+          className="row__title"
           style={{
-            // Functional: M4 multi-line clamp when previewLines > 1,
-            // single-line ellipsis otherwise — implements the previewLines prop.
+            // Functional layout: fill available width so the right cluster is
+            // pushed to the edge; M4 multi-line clamp when previewLines > 1.
+            flex: 1,
+            minWidth: 0,
             ...(previewLines > 1
               ? {
                   display: "-webkit-box",
                   WebkitLineClamp: previewLines,
                   WebkitBoxOrient: "vertical" as const,
                   overflow: "hidden",
+                  whiteSpace: "normal" as const,
                 }
-              : {
-                  whiteSpace: "nowrap" as const,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }),
+              : {}),
           }}
         >
           {blurred ? (
-            // Blur reveal: click temporarily shows this row's text.
-            // stopPropagation prevents triggering the row's copy-on-click.
+            // X6 masking: the real text is blurred + aria-hidden (width preserved,
+            // selectable); the row's aria-label announces the hidden state. Click
+            // reveals; stopPropagation prevents triggering copy-on-click.
             <span
+              className="mask"
+              aria-hidden="true"
               title="Click to reveal sensitive content"
               onClick={(e) => {
                 e.stopPropagation();
                 setRevealed(true);
-              }}
-              style={{
-                // Functional: the blur filter itself is the reveal mechanic,
-                // not decoration — without it there is nothing to "reveal".
-                filter: "blur(5px)",
               }}
             >
               {label}
@@ -134,43 +136,32 @@ export const PopupRow = React.memo(function PopupRow({
         </span>
       )}
 
-      {/* Source-app icon + label chip — subtle, right of preview text */}
+      {/* Source-app label — subtle, right of preview text */}
       {item.app_bundle_id && (() => {
         const appLabel = sourceAppLabel(item.app_bundle_id);
         return appLabel ? (
-          <span title={item.app_bundle_id ?? undefined}>
+          <span className="row__meta" title={item.app_bundle_id ?? undefined}>
             {appLabel}
           </span>
         ) : null;
       })()}
 
-      {/* Right cluster */}
-      <div>
-        {/* Relative time */}
-        <span>
-          {relTime}
-        </span>
-
-        {/* Pin/unpin button. */}
-        <div>
-          {/* Hover pin/unpin button — sits above the at-rest indicator. */}
-          <button
-            type="button"
-            aria-label={item.pinned ? "Unpin" : "Pin"}
-            title={item.pinned ? "Unpin" : "Pin"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onPin();
-            }}
-          />
-        </div>
-
-        {/* ⌘1-9 keycap (first 9 rows, no active query) */}
-        {showKeycap && (
-          <span>
-            ⌘{index + 1}
-          </span>
-        )}
+      {/* Right cluster: relative time, pin, ⌘-keycap */}
+      <div className="row__right">
+        <span className="row__meta mono">{relTime}</span>
+        <button
+          type="button"
+          className={item.pinned ? "iconbtn star-btn on" : "iconbtn star-btn"}
+          aria-label={item.pinned ? "Unpin" : "Pin"}
+          title={item.pinned ? "Unpin" : "Pin"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPin();
+          }}
+        >
+          <Pin aria-hidden="true" />
+        </button>
+        {showKeycap && <span className="kbd">⌘{index + 1}</span>}
       </div>
     </li>
   );
