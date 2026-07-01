@@ -1,16 +1,10 @@
 package com.copypaste.android
 
 import android.util.Log
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,11 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.font.FontFamily
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
@@ -76,12 +66,7 @@ private fun SasPeerMetadataCard(status: PairStatus) {
     // Nothing to show yet — the card is silent (not even a placeholder).
     if (fields.isEmpty()) return
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         fields.forEach { (label, value) ->
             MetaRow(label = label, value = value)
         }
@@ -376,19 +361,13 @@ internal fun SasPairingDialog(
         onDismissRequest = { handleClose() },
         title = { Text("Pair “$title”") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column {
                 when {
                     ended -> {
-                        Text(
-                            "Pairing ended — check the other device.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        Text("Pairing ended — check the other device.")
                     }
                     status.state == "confirmed" -> {
-                        Text(
-                            "Paired ✓",
-                            style = MaterialTheme.typography.titleSmall,
-                        )
+                        Text("Paired ✓")
                     }
                     status.state == "rejected" || status.state == "aborted" || status.state == "timed_out" -> {
                         Text(
@@ -397,7 +376,6 @@ internal fun SasPairingDialog(
                                 "rejected" -> "Pairing was rejected."
                                 else -> "Pairing was cancelled."
                             },
-                            style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                     status.state == "awaiting_sas" && status.sas != null -> {
@@ -405,13 +383,9 @@ internal fun SasPairingDialog(
                         // awaiting_sas. Rendered before the SAS prompt so the user can verify
                         // they are pairing with the right device before confirming the code.
                         SasPeerMetadataCard(status = status)
-                        Text(
-                            stringResource(R.string.sas_confirm_prompt),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        // §10 SAS per-digit cells — styleguide .sas: each digit in its
-                        // own 38dp-wide centered mono cell, 28sp/600, letterSpacing 1.1sp
-                        // (≈.04em at 28sp), gap 8dp.
+                        Text(stringResource(R.string.sas_confirm_prompt))
+                        // §10 SAS digits — plain text row (per-digit cell chrome removed,
+                        // CopyPaste-g5u1). The code is still shown in full for comparison.
                         //
                         // CopyPaste-quux: the SAS code must NOT be copyable to the system
                         // clipboard. Copying it opens a sniff window — any other app that
@@ -419,27 +393,10 @@ internal fun SasPairingDialog(
                         // token. The row is display-only (no clickable, no long-press copy).
                         val sasFull = status.sas ?: ""
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth(),
                         ) {
-                            sasFull.forEach { digit ->
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.width(38.dp),
-                                ) {
-                                    Text(
-                                        text = digit.toString(),
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 28.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        letterSpacing = 1.1.sp,
-                                        textAlign = TextAlign.Center,
-                                    )
-                                }
-                            }
+                            Text(text = sasFull, textAlign = TextAlign.Center)
                         }
                     }
                     status.state == "awaiting_sas" -> {
@@ -447,34 +404,22 @@ internal fun SasPairingDialog(
                         // peer to accept — same macOS parity, displayed above the spinner.
                         SasPeerMetadataCard(status = status)
                         // Accepted locally; waiting for the peer to also accept.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                            Text(
-                                stringResource(R.string.sas_waiting_other),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator()
+                            Text(stringResource(R.string.sas_waiting_other))
                         }
                     }
                     else -> {
                         // initiating / idle-before-active → connecting spinner.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                            Text(
-                                stringResource(R.string.sas_connecting),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator()
+                            Text(stringResource(R.string.sas_connecting))
                         }
                     }
                 }
                 error?.let { msg ->
                     if (!terminal) {
-                        Text(msg, style = MaterialTheme.typography.labelSmall)
+                        Text(msg)
                     }
                 }
             }

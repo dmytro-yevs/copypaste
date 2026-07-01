@@ -14,23 +14,17 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -123,19 +116,12 @@ internal fun SourceAppBadge(
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .background(
-                    color = c.surfaceVariant.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(4.dp),
-                ),
         ) {
             iconBitmap?.let { iconBmp ->
                 Image(
                     bitmap = iconBmp,
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp)),
                 )
             }
             Text(
@@ -408,8 +394,7 @@ internal fun HistoryRow(
                 onPeeking = onPreviewPeek,
                 onPinned = onPreviewPin,
                 onDismissPeek = onPreviewDismiss,
-            )
-            .padding(horizontal = 12.dp, vertical = 0.dp),
+            ),
     ) {
         val bmp = imageBitmap
         if (item.isImage && bmp != null) {
@@ -420,58 +405,46 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp)
-                    .padding(vertical = 6.dp),
+                    .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox
-                Icon(
-                    imageVector = if (isSelected) Icons.Outlined.CheckBox
-                                  else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = if (isSelected)
-                        stringResource(R.string.cd_checkbox_deselect)
-                    else
-                        stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
+                // Checkbox — de-styled to a clickable text label (was a CheckBox icon).
+                Text(
+                    text = if (isSelected) stringResource(R.string.cd_checkbox_deselect)
+                           else stringResource(R.string.cd_checkbox_select),
+                    color = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier
-                        .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(8.dp))
                 // CopyPaste-5917.61: image rows omit the 26dp icon-tile (the thumbnail IS the
                 // preview — the tile was redundant before the chip). Only chip + thumbnail.
                 if (!selectionMode && item.pinned) {
-                    Icon(
-                        imageVector = Icons.Outlined.Star,
-                        contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.tertiary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp),
+                    // Pinned indicator — de-styled to a text badge (was a Star icon).
+                    Text(
+                        text = stringResource(R.string.cd_pin_item),
+                        color = c.tertiary.copy(alpha = 0.9f),
+                        maxLines = 1,
                     )
-                    Spacer(Modifier.width(4.dp))
                 }
                 // §5 content-type chip (sky for images — izio)
                 ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
-                Spacer(Modifier.width(8.dp))
                 // CopyPaste-44rq.42: mirror PreviewOverlay masking — blur thumbnail on
                 // API 31+ when sensitive/masked; hide entirely (placeholder) on pre-31
                 // to avoid leaking image content via a no-op blur.
                 if (masked && !canBlur) {
                     // Pre-API-31: Modifier.blur is a no-op, so replace the bitmap
-                    // with a lock placeholder to prevent leaking the sensitive image.
+                    // with a text placeholder to prevent leaking the sensitive image
+                    // (was a Lock icon).
                     Box(
                         modifier = Modifier
                             .widthIn(max = 340.dp)
-                            .heightIn(max = imageMaxHeightDp.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(c.error.copy(alpha = 0.12f)),
+                            .heightIn(max = imageMaxHeightDp.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Lock,
-                            contentDescription = stringResource(R.string.sensitive_preview_mask),
-                            tint = c.error,
-                            modifier = Modifier.size(20.dp),
+                        Text(
+                            text = stringResource(R.string.sensitive_preview_mask),
+                            color = c.error,
                         )
                     }
                 } else {
@@ -482,8 +455,6 @@ internal fun HistoryRow(
                         modifier = Modifier
                             .widthIn(max = 340.dp)
                             .heightIn(max = imageMaxHeightDp.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(c.surfaceVariant)
                             // CopyPaste-44rq.42: blur on API 31+ when sensitive + masked;
                             // unmasked images render at full quality.
                             .then(
@@ -515,48 +486,39 @@ internal fun HistoryRow(
                     OriginDeviceBadge(deviceId = imageOriginId, ownDeviceId = ownDeviceId, peers = peers)
                 }
                 if (!selectionMode) {
-                    Spacer(Modifier.width(4.dp))
                     if (reorderMode && item.pinned) {
+                        // Reorder arrows — de-styled to text-label buttons (were KeyboardArrowUp/Down icons).
                         ScaleIconButton(onClick = onMoveUp) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowUp,
-                                contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
+                            Text(
+                                text = stringResource(R.string.action_move_up),
+                                color = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
                             )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowDown,
-                                contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
+                            Text(
+                                text = stringResource(R.string.action_move_down),
+                                color = if (pinnedIndex < pinnedCount - 1) c.primary
                                        else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
                             )
                         }
                     } else {
+                        // Pin/unpin toggle — de-styled to a text-label button (was Star/StarBorder icon).
                         ScaleIconButton(
                             onClick = { onSetPinned(item.id, !item.pinned) },
                         ) {
-                            Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.Star
-                                              else Icons.Outlined.StarBorder,
-                                contentDescription = if (item.pinned)
-                                    stringResource(R.string.action_unpin)
-                                else
-                                    stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = if (item.pinned) stringResource(R.string.action_unpin)
+                                       else stringResource(R.string.action_pin),
+                                color = if (item.pinned) c.tertiary else c.onSurfaceVariant,
                             )
                         }
+                        // Delete — de-styled to a text-label button (was a Delete icon).
                         ScaleIconButton(
                             onClick = { onDelete(item.id) },
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.error,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = stringResource(R.string.cd_delete),
+                                color = c.error,
                             )
                         }
                     }
@@ -571,36 +533,27 @@ internal fun HistoryRow(
                     .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox
-                Icon(
-                    imageVector = if (isSelected) Icons.Outlined.CheckBox
-                                  else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = if (isSelected)
-                        stringResource(R.string.cd_checkbox_deselect)
-                    else
-                        stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
+                // Checkbox — de-styled to a clickable text label (was a CheckBox icon).
+                Text(
+                    text = if (isSelected) stringResource(R.string.cd_checkbox_deselect)
+                           else stringResource(R.string.cd_checkbox_select),
+                    color = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier
-                        .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(8.dp))
                 // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
                 ContentIconTile(chipLabel = chipLabel, colors = c)
-                Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
-                    Icon(
-                        imageVector = Icons.Outlined.Star,
-                        contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.tertiary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp),
+                    // Pinned indicator — de-styled to a text badge (was a Star icon).
+                    Text(
+                        text = stringResource(R.string.cd_pin_item),
+                        color = c.tertiary.copy(alpha = 0.9f),
+                        maxLines = 1,
                     )
-                    Spacer(Modifier.width(4.dp))
                 }
                 // §3 content-type chip (faint for files — izio)
                 ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
-                Spacer(Modifier.width(6.dp))
                 // Filename / label — snippet holds "[file: name]" or "[file]"
                 // gq48: two-line body cell: preview on line 1, meta (timestamp) beneath.
                 Column(modifier = Modifier.weight(1f)) {
@@ -615,7 +568,6 @@ internal fun HistoryRow(
                     // CopyPaste-9uyk: source-app badge added after timestamp for file rows.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
                             text = relativeTime(item.wallTimeMs),
@@ -637,64 +589,53 @@ internal fun HistoryRow(
                     }
                 }
                 if (!selectionMode) {
-                    Spacer(Modifier.width(2.dp))
                     // CopyPaste-9uyk: reorder arrows for pinned file rows — aligns
                     // with image + text rows and parity with macOS drag reorder.
                     if (reorderMode && item.pinned) {
+                        // Reorder arrows — de-styled to text-label buttons (were KeyboardArrowUp/Down icons).
                         ScaleIconButton(onClick = onMoveUp) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowUp,
-                                contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
+                            Text(
+                                text = stringResource(R.string.action_move_up),
+                                color = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
                             )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowDown,
-                                contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
+                            Text(
+                                text = stringResource(R.string.action_move_down),
+                                color = if (pinnedIndex < pinnedCount - 1) c.primary
                                        else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
                             )
                         }
                     } else {
-                        // Open action — write to cache temp file and open with default app
+                        // Open action — write to cache temp file and open with default app.
+                        // De-styled to a text-label button (was an OpenInNew icon).
                         ScaleIconButton(onClick = onOpenFile) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
-                                contentDescription = stringResource(R.string.cd_open_file),
-                                tint = c.primary,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = stringResource(R.string.cd_open_file),
+                                color = c.primary,
                             )
                         }
-                        // Save action — write bytes to Downloads
+                        // Save action — write bytes to Downloads.
+                        // De-styled to a text-label button (was a SaveAlt icon).
                         ScaleIconButton(onClick = onSaveFile) {
-                            Icon(
-                                imageVector = Icons.Outlined.SaveAlt,
-                                contentDescription = stringResource(R.string.action_save_file),
-                                tint = c.primary,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = stringResource(R.string.action_save_file),
+                                color = c.primary,
                             )
                         }
+                        // Pin/unpin toggle — de-styled to a text-label button (was Star/StarBorder icon).
                         ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
-                            Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.Star
-                                              else Icons.Outlined.StarBorder,
-                                contentDescription = if (item.pinned)
-                                    stringResource(R.string.action_unpin)
-                                else
-                                    stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = if (item.pinned) stringResource(R.string.action_unpin)
+                                       else stringResource(R.string.action_pin),
+                                color = if (item.pinned) c.tertiary else c.onSurfaceVariant,
                             )
                         }
+                        // Delete — de-styled to a text-label button (was a Delete icon).
                         ScaleIconButton(onClick = { onDelete(item.id) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.error,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = stringResource(R.string.cd_delete),
+                                color = c.error,
                             )
                         }
                     }
@@ -712,20 +653,14 @@ internal fun HistoryRow(
                     .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox
-                Icon(
-                    imageVector = if (isSelected) Icons.Outlined.CheckBox
-                                  else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = if (isSelected)
-                        stringResource(R.string.cd_checkbox_deselect)
-                    else
-                        stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
+                // Checkbox — de-styled to a clickable text label (was a CheckBox icon).
+                Text(
+                    text = if (isSelected) stringResource(R.string.cd_checkbox_deselect)
+                           else stringResource(R.string.cd_checkbox_select),
+                    color = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier
-                        .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(8.dp))
                 // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
                 // lbnp: for COLOR rows, replace the tile with an inline color swatch square.
                 if (chipLabel == "COLOR") {
@@ -733,15 +668,13 @@ internal fun HistoryRow(
                 } else {
                     ContentIconTile(chipLabel = chipLabel, colors = c)
                 }
-                Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
-                    Icon(
-                        imageVector = Icons.Outlined.Star,
-                        contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.tertiary.copy(alpha = 0.9f),
-                        modifier = Modifier.size(12.dp),
+                    // Pinned indicator — de-styled to a text badge (was a Star icon).
+                    Text(
+                        text = stringResource(R.string.cd_pin_item),
+                        color = c.tertiary.copy(alpha = 0.9f),
+                        maxLines = 1,
                     )
-                    Spacer(Modifier.width(4.dp))
                 }
                 // gq48: body cell — 2-line Column: preview on line 1, meta caption on line 2.
                 // Mirrors web .hrow .body { .preview + .meta } structure (styleguide L252-255).
@@ -811,8 +744,6 @@ internal fun HistoryRow(
                     // gq48: parity web .hrow .meta (11px faint, gap 7px, margin-top 2px).
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                        modifier = Modifier.padding(top = 2.dp),
                     ) {
                         // Kind chip in meta row
                         ContentTypeChip(label = chipLabel, color = chipColor)
@@ -846,46 +777,36 @@ internal fun HistoryRow(
                 // Action buttons (right gutter) — hidden in selectionMode; height floor
                 // (qwyq) means the row stays same height regardless.
                 if (!selectionMode) {
-                    Spacer(Modifier.width(2.dp))
                     if (reorderMode && item.pinned) {
-                        // Reorder mode: show up/down arrows instead of pin/delete
+                        // Reorder mode: show up/down arrows instead of pin/delete.
+                        // De-styled to text-label buttons (were KeyboardArrowUp/Down icons).
                         ScaleIconButton(onClick = onMoveUp) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowUp,
-                                contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
+                            Text(
+                                text = stringResource(R.string.action_move_up),
+                                color = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
                             )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
-                            Icon(
-                                imageVector = Icons.Outlined.KeyboardArrowDown,
-                                contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
+                            Text(
+                                text = stringResource(R.string.action_move_down),
+                                color = if (pinnedIndex < pinnedCount - 1) c.primary
                                        else c.onSurfaceVariant.copy(alpha = 0.3f),
-                                modifier = Modifier.size(18.dp),
                             )
                         }
                     } else {
-                        // §5 icon-only action buttons with press-scale (§8)
+                        // §5 action buttons with press-scale (§8) — de-styled to
+                        // text-label buttons (were Star/StarBorder + Delete icons).
                         ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
-                            Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.Star
-                                              else Icons.Outlined.StarBorder,
-                                contentDescription = if (item.pinned)
-                                    stringResource(R.string.action_unpin)
-                                else
-                                    stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = if (item.pinned) stringResource(R.string.action_unpin)
+                                       else stringResource(R.string.action_pin),
+                                color = if (item.pinned) c.tertiary else c.onSurfaceVariant,
                             )
                         }
                         ScaleIconButton(onClick = { onDelete(item.id) }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.error,
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = stringResource(R.string.cd_delete),
+                                color = c.error,
                             )
                         }
                     }

@@ -9,15 +9,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
@@ -123,26 +120,14 @@ internal fun HistoryNormalTopBar(
                     // ClipboardViewModel.totalCount which reads totalItemCount()
                     // without decrypting items.
                     if (totalCount > 0) {
-                        // §9: total badge unified at 10sp + 1dp bordered
-                        // (parity with origin/device badges).
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    color = c.surfaceVariant,
-                                    shape = RoundedCornerShape(6.dp),
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = c.outline,
-                                    shape = RoundedCornerShape(6.dp),
-                                ),
-                        ) {
-                            Text(
-                                text = "$totalCount",
-                                color = c.onSurfaceVariant,
-                                maxLines = 1,
-                            )
-                        }
+                        // g5u1: de-styled — the tinted fill + border box was
+                        // purely decorative. Bare colored Text, same pattern
+                        // as ContentTypeChip/TooLargeBadge.
+                        Text(
+                            text = "$totalCount",
+                            color = c.onSurfaceVariant,
+                            maxLines = 1,
+                        )
                     }
                 }
             },

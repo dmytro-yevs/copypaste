@@ -1,13 +1,8 @@
 package com.copypaste.android
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.SectionLabel
 
 /**
@@ -27,7 +22,7 @@ internal fun NotificationsTab(
     soundOnCopy: Boolean,
     onSoundOnCopyChange: (Boolean) -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column {
         SectionLabel(stringResource(R.string.section_notifications))
         SettingsCard {
             SettingsRow(
@@ -44,6 +39,5 @@ internal fun NotificationsTab(
                 onCheckedChange = onSoundOnCopyChange,
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }

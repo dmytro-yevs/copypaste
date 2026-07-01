@@ -15,8 +15,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,7 +26,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,7 +52,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
@@ -582,17 +578,11 @@ private fun PermissionCard(
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
-                    // Required badge — accent-tinted chip pill
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                            .border(0.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(8.dp)),
-                    ) {
-                        Text(
-                            text = "required",
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+                    // CopyPaste-g5u1: de-styled — text-only "required" marker, no pill/border.
+                    Text(
+                        text = "required",
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
             Text(
@@ -712,23 +702,16 @@ private fun AdbBackgroundCaptureCard(
     }
 }
 
-/** Status badge pill — green on granted, muted otherwise. */
+/**
+ * Status label — plain colored text (green on granted, muted otherwise).
+ * CopyPaste-g5u1: de-styled — dropped the pill background/border, text-only.
+ */
 @Composable
 private fun StatusPill(text: String, ok: Boolean) {
-    Box(
-        modifier = Modifier
-            .background(if (ok) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
-            .border(
-                0.5.dp,
-                if (ok) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                RoundedCornerShape(8.dp),
-            ),
-    ) {
-        Text(
-            text = text,
-            color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    Text(
+        text = text,
+        color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /** Single tap-to-copy ADB command row: label + monospaced command text. */

@@ -3,11 +3,7 @@ package com.copypaste.android
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.SectionLabel
@@ -69,29 +64,15 @@ internal fun SyncTab(
     val settings = remember { Settings(ctx) }
     var relayEnabled by remember { mutableStateOf(settings.relayEnabled) }
     var supabaseEnabled by remember { mutableStateOf(settings.supabaseEnabled) }
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column {
         // CopyPaste-dxq2: display sync error banner when the sync loop has written an
         // error to Settings.lastSyncError. A 401 Unauthorized is shown with a distinct
         // prompt ("check credentials") instead of the generic retry message.
         if (syncError.isNotBlank()) {
-            androidx.compose.foundation.layout.Spacer(
-                modifier = Modifier.height(4.dp),
-            )
-            androidx.compose.material3.Card(
-                colors = androidx.compose.material3.CardDefaults.cardColors(
-                    containerColor = if (syncErrorIsUnauthorized)
-                        MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
-                    else
-                        MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+            SettingsCard {
+                Column {
                     Text(
                         text = if (syncErrorIsUnauthorized) "Sync: authentication failed" else "Sync error",
-                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
                     Text(
@@ -99,9 +80,7 @@ internal fun SyncTab(
                             "$syncError\n\nCheck your passphrase / credentials below and save."
                         else
                             syncError,
-                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(top = 4.dp),
                     )
                 }
             }
@@ -152,16 +131,13 @@ internal fun SyncTab(
             // transportFanoutSet). These per-transport switches make that explicit:
             // enable either or both. Disabling a transport here actually stops its
             // send (the fan-out reads settings.relayEnabled / settings.supabaseEnabled).
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Column {
                 Text(
                     text = stringResource(R.string.setting_sync_transports_title),
-                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 4.dp),
                 )
                 Text(
                     text = stringResource(R.string.setting_sync_transports_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -200,7 +176,7 @@ internal fun SyncTab(
         if (supabaseEnabled) {
             SectionLabel(stringResource(R.string.section_supabase_config))
             SettingsCard {
-                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                Column {
                     SettingsTextField(
                         label = stringResource(R.string.setting_supabase_url_label),
                         hint = "https://your-project.supabase.co",
@@ -237,36 +213,24 @@ internal fun SyncTab(
             val localAccountId = settings.supabaseEmail.ifBlank { null }
             val peerAccountIds: List<String?> = emptyList()
             if (detectCloudAccountMismatch(localAccountId, peerAccountIds)) {
-                androidx.compose.material3.Card(
-                    colors = androidx.compose.material3.CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                SettingsCard {
+                    Column {
                         Text(
                             text = stringResource(R.string.setting_cloud_account_mismatch_title),
-                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.tertiary,
                         )
                         Text(
                             text = stringResource(R.string.setting_cloud_account_mismatch_body),
-                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
                 }
             }
             SettingsCard {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Column {
                     Text(
                         text = stringResource(R.string.setting_supabase_account_note),
-                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 4.dp),
                     )
                     // CopyPaste-otb7: "signed in" must reflect an ACTUAL backend session
                     // (a successful Supabase op against the SAVED account), never a draft
@@ -283,18 +247,15 @@ internal fun SyncTab(
                             stringResource(R.string.setting_supabase_account_signed_in, savedEmail)
                         else
                             stringResource(R.string.setting_supabase_account_anon),
-                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = stringResource(R.string.setting_supabase_account_same_warning),
-                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 2.dp),
                     )
                 }
                 SettingsCardDivider()
-                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                Column {
                     SettingsTextField(
                         label = stringResource(R.string.setting_supabase_email_label),
                         hint = "user@example.com",
@@ -345,21 +306,17 @@ internal fun SyncTab(
         // implemented on Android; in that case the button is disabled with a note.
         SettingsCard {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.setting_test_connection_label),
-                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = stringResource(R.string.setting_test_connection_subtitle),
-                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -372,7 +329,6 @@ internal fun SyncTab(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -469,27 +425,27 @@ private fun SyncDiagnosticsCard(
     }
 
     SettingsCard {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Column {
             var first = true
             // Supabase backend row (only when enabled).
             if (supabaseEnabled) {
                 val (label, color) = stateLabelColor(supaState)
                 DiagnosticsRow("Supabase", label, color)
-                DiagnosticsDivider()
+                SettingsCardDivider()
                 DiagnosticsRow("Supabase last sync", lastSyncLabel(supabaseOp.lastSuccessMs), onSurfaceColor)
                 first = false
             }
             // Relay backend row (only when enabled).
             if (relayEnabled) {
-                if (!first) DiagnosticsDivider()
+                if (!first) SettingsCardDivider()
                 val (label, color) = stateLabelColor(relayState)
                 DiagnosticsRow("Relay", label, color)
-                DiagnosticsDivider()
+                SettingsCardDivider()
                 DiagnosticsRow("Relay last sync", lastSyncLabel(relayOp.lastSuccessMs), onSurfaceColor)
                 first = false
             }
             // P2P peer presence — SEPARATE from backend status (otb7).
-            if (!first) DiagnosticsDivider()
+            if (!first) SettingsCardDivider()
             val peerCount = if (liveOnlineCount >= 0) liveOnlineCount else 0
             DiagnosticsRow(
                 label = "Peers online (P2P)",
@@ -498,10 +454,9 @@ private fun SyncDiagnosticsCard(
             )
             // Misconfig hints — one per enabled transport with a detected issue.
             for (hint in listOfNotNull(supabaseHint, relayHint)) {
-                DiagnosticsDivider()
+                SettingsCardDivider()
                 Text(
                     text = hint,
-                    style = MaterialTheme.typography.bodySmall,
                     color = errorColor,
                 )
             }
@@ -521,15 +476,7 @@ private fun DiagnosticsRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = valueColor)
+        Text(text = label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text = value, color = valueColor)
     }
-}
-
-/** A standard divider with vertical breathing room between diagnostics rows. */
-@Composable
-private fun DiagnosticsDivider() {
-    Spacer(modifier = Modifier.height(8.dp))
-    HorizontalDivider(thickness = 1.dp)
-    Spacer(modifier = Modifier.height(8.dp))
 }

@@ -12,25 +12,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.outlined.Battery5Bar
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.PhonelinkSetup
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -46,11 +35,8 @@ import com.copypaste.android.ui.GlassToastState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
@@ -306,22 +292,17 @@ fun BackgroundCaptureSetupScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
 
             // ── Intro ──────────────────────────────────────────────────────────
             Text(
                 text = stringResource(R.string.bg_capture_intro),
-                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            Spacer(modifier = Modifier.height(4.dp))
 
             // ── Step 1: SYSTEM_ALERT_WINDOW ────────────────────────────────────
             BgCaptureCard(
-                icon = Icons.Outlined.Layers,
                 title = stringResource(R.string.bg_capture_overlay_title),
                 description = stringResource(R.string.bg_capture_overlay_desc),
                 granted = overlayGranted,
@@ -335,7 +316,6 @@ fun BackgroundCaptureSetupScreen(
 
             // ── Step 2: Battery Optimization exemption ─────────────────────────
             BgCaptureCard(
-                icon = Icons.Outlined.Battery5Bar,
                 title = stringResource(R.string.bg_capture_battery_title),
                 description = stringResource(R.string.bg_capture_battery_desc),
                 granted = batteryExempt,
@@ -358,7 +338,6 @@ fun BackgroundCaptureSetupScreen(
                     }
                 }
                 BgCaptureCard(
-                    icon = Icons.Outlined.PhonelinkSetup,
                     title = stringResource(R.string.bg_capture_oem_title),
                     description = oemDesc,
                     // OEM autostart state cannot be reliably detected without root.
@@ -372,7 +351,6 @@ fun BackgroundCaptureSetupScreen(
             } else if (oemAcknowledged) {
                 // User has confirmed they enabled OEM autostart — show a compact granted card.
                 BgCaptureCard(
-                    icon = Icons.Outlined.PhonelinkSetup,
                     title = stringResource(R.string.bg_capture_oem_title),
                     description = stringResource(R.string.bg_capture_oem_ack_done),
                     granted = true,
@@ -383,27 +361,13 @@ fun BackgroundCaptureSetupScreen(
             } else {
                 // Stock Android / Pixel: no OEM power-management layer present.
                 CopyPasteCard {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.PhonelinkSetup,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Text(
-                                text = stringResource(R.string.bg_capture_oem_title),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.bg_capture_oem_title),
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                         Text(
                             text = stringResource(R.string.bg_capture_oem_not_needed),
-                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -412,27 +376,13 @@ fun BackgroundCaptureSetupScreen(
 
             // ── Step 4: Final instruction (text-only) ──────────────────────────
             CopyPasteCard {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.PlayArrow,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                        )
-                        Text(
-                            text = stringResource(R.string.bg_capture_restart_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
+                Column {
+                    Text(
+                        text = stringResource(R.string.bg_capture_restart_title),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
                     Text(
                         text = stringResource(R.string.bg_capture_restart_desc),
-                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -447,9 +397,9 @@ fun BackgroundCaptureSetupScreen(
  * Status card for the Background Capture Setup screen.
  *
  * [granted] semantics:
- *  - `true`  → success border + CheckCircle icon.
- *  - `false` → danger border + ErrorOutline icon (when [required]).
- *  - `null`  → neutral border — OEM autostart: state not queryable.
+ *  - `true`  → "Granted" status text.
+ *  - `false` → "Not granted" status text (error color when [required]).
+ *  - `null`  → no status text shown — OEM autostart: state not queryable.
  *
  * The button is always enabled so the user can revisit the system Settings
  * screen at any time (matches PermissionsSettingsActivity design).
@@ -460,7 +410,6 @@ fun BackgroundCaptureSetupScreen(
  */
 @Composable
 private fun BgCaptureCard(
-    icon: ImageVector,
     title: String,
     description: String,
     granted: Boolean?,
@@ -471,66 +420,36 @@ private fun BgCaptureCard(
     acknowledgeLabel: String? = null,
 ) {
     CopyPasteCard {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (granted == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = stringResource(R.string.label_required),
-                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(6.dp))
 
             // Live status badge — only when state is deterministic.
             if (granted != null) {
-                Row(
-                    // CopyPaste-aod: merge the status icon + text into ONE node so
-                    // TalkBack reads "Granted" / "Not granted" as a single element
-                    // rather than announcing the icon and text separately.
-                    modifier = Modifier.semantics(mergeDescendants = true) {},
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        imageVector = if (granted) Icons.Outlined.CheckCircle
-                                      else Icons.Filled.ErrorOutline,
-                        contentDescription = null,
-                        tint = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    )
-                    Text(
-                        text = if (granted)
-                            stringResource(R.string.status_granted)
-                        else
-                            stringResource(R.string.status_not_granted),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (granted)
+                        stringResource(R.string.status_granted)
+                    else
+                        stringResource(R.string.status_not_granted),
+                    color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
             }
 
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(8.dp))
             CopyPasteButton(
                 onClick = onClick,
                 enabled = true, // always enabled — user can revisit at any time
@@ -541,7 +460,6 @@ private fun BgCaptureCard(
             }
             // ANDO-6: secondary "Done" button for OEM cards whose state is not queryable.
             if (onAcknowledge != null && acknowledgeLabel != null) {
-                Spacer(modifier = Modifier.height(6.dp))
                 CopyPasteButton(
                     onClick = onAcknowledge,
                     enabled = true,

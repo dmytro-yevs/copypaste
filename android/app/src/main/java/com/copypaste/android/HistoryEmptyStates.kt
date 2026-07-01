@@ -4,16 +4,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -21,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.animation.core.FastOutSlowInEasing
 import com.copypaste.android.ui.theme.CopyPasteCard
 
@@ -33,9 +28,10 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 internal fun LoadingBox(padding: PaddingValues) {
     val c = MaterialTheme.colorScheme
     Box(
+        // g5u1: dropped the redundant .background(c.background) — the Scaffold
+        // already paints containerColor behind this content.
         modifier = Modifier
             .fillMaxSize()
-            .background(c.background)
             .padding(padding),
         contentAlignment = Alignment.Center,
     ) {
@@ -63,9 +59,10 @@ internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = 
     // Halo ring removed — idle pulse animation was distracting; static border below.
 
     Box(
+        // g5u1: dropped the redundant .background(c.background) — the Scaffold
+        // already paints containerColor behind this content.
         modifier = Modifier
             .fillMaxSize()
-            .background(c.background)
             .padding(padding),
         contentAlignment = Alignment.Center,
     ) {
@@ -78,26 +75,12 @@ internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = 
                          ),
         ) {
             CopyPasteCard(
-                modifier = Modifier.widthIn(max = 400.dp),
                 accent = MaterialTheme.colorScheme.outline, // neutral border, not semantic
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Icon container: accent@15% bg with gradient shimmer border.
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                color = c.primary.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(20.dp),
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = c.primary.copy(alpha = 0.28f),
-                                shape = RoundedCornerShape(20.dp),
-                            ),
-                        contentAlignment = Alignment.Center,
-                    )
+                    // Icon container removed (de-style pass) — text-only empty state.
                     Column {
                         // CopyPaste-crh3.31: tailor the empty state to private mode
                         // (parity with macOS HistoryView), so the user is not misled
@@ -130,9 +113,10 @@ internal fun EmptySearchState(padding: PaddingValues, query: String) {
     val enterDurMs = 450
 
     Box(
+        // g5u1: dropped the redundant .background(c.background) — the Scaffold
+        // already paints containerColor behind this content.
         modifier = Modifier
             .fillMaxSize()
-            .background(c.background)
             .padding(padding),
         contentAlignment = Alignment.Center,
     ) {
@@ -145,26 +129,12 @@ internal fun EmptySearchState(padding: PaddingValues, query: String) {
                          ),
         ) {
             CopyPasteCard(
-                modifier = Modifier.widthIn(max = 400.dp),
                 accent = MaterialTheme.colorScheme.outline,
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Icon container: accent@12% bg, no halo for search-empty.
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                color = c.primary.copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(20.dp),
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = c.primary.copy(alpha = 0.24f),
-                                shape = RoundedCornerShape(20.dp),
-                            ),
-                        contentAlignment = Alignment.Center,
-                    )
+                    // Icon container removed (de-style pass) — text-only empty state.
                     Column {
                         Text(
                             text = stringResource(R.string.empty_search_title, query),

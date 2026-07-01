@@ -8,20 +8,15 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -49,9 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.R
 import com.copypaste.android.RECENT_SYNC_MS
@@ -316,11 +309,13 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         Row(
             modifier = modifier
                 .fillMaxWidth()
-                .clickable { showSheet = true }
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .clickable { showSheet = true },
             horizontalArrangement = Arrangement.Start,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Status dot — kept as a functional state indicator (colour + pulse
+            // encode sync state); a minimal fixed size is required for the dot
+            // to render at all.
             Box(
                 modifier = Modifier
                     .size(8.dp)
@@ -334,33 +329,16 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
             Text(
                 text = footerLabel,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.5.sp,
-                modifier = Modifier.padding(start = 6.dp),
             )
-            // CopyPaste-1jms.15: amber "Misconfig" pill — parity with macOS
-            // SyncStatusChip (PG-44 / CopyPaste-k1jo). Shown only when a Supabase
-            // URL is set but credentials are incomplete. Mirrors the macOS pill:
-            //   border border-ide-warning/30 bg-ide-warning/14 text-ide-warning
+            // CopyPaste-1jms.15 / CopyPaste-g5u1: "Misconfig" indicator — pill chrome
+            // (background/border/clip/padding) removed; the tertiary (warning) text
+            // colour alone now conveys the state. Shown only when a Supabase URL is
+            // set but credentials are incomplete.
             if (cloudMisconfig) {
-                Box(
-                    modifier = Modifier
-                        .padding(start = 6.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f))
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.30f),
-                            shape = RoundedCornerShape(50),
-                        )
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                ) {
-                    Text(
-                        text = "Misconfig",
-                        color = MaterialTheme.colorScheme.tertiary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
+                Text(
+                    text = "Misconfig",
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
             }
         }
     }
@@ -378,10 +356,7 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                 lastActivityMs = lastActivityMs,
                 settings = settings,
                 translucent = syncSheetEffectiveTranslucent(false),
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             )
-            // Bottom spacing so the sheet content clears system gesture bar.
-            Spacer(Modifier.height(32.dp))
         }
     }
 }
@@ -407,9 +382,6 @@ private fun SyncStatusSheet(
     modifier: Modifier = Modifier,
 ) {
     val nowMs = System.currentTimeMillis()
-
-    // ModalBottomSheet default top-corner radius is 28.dp (Material3 spec).
-    val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
     // Relative last-sync label matching the DevicesScreen PeerRow format exactly.
     val lastSyncLabel: String = if (lastActivityMs <= 0L) {
@@ -437,7 +409,6 @@ private fun SyncStatusSheet(
     // opaque background container — same as before.
     if (translucent) {
         Surface(
-            shape = sheetShape,
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize(),
         ) {
@@ -466,32 +437,20 @@ private fun SheetContent(
     maskedEmail: String?,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(0.dp)) {
+    Column(modifier = modifier) {
         Text(
             text = "Sync status",
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
         )
 
-        Spacer(Modifier.height(16.dp))
-
         SheetRow(label = "Devices connected", value = if (count > 0) "$count" else "None")
 
-        HorizontalDivider(
-            modifier = Modifier.padding(vertical = 8.dp),
-            color = MaterialTheme.colorScheme.outlineVariant,
-            thickness = 1.dp,
-        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         SheetRow(label = "Last sync", value = lastSyncLabel)
 
         if (maskedEmail != null) {
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 8.dp),
-                color = MaterialTheme.colorScheme.outlineVariant,
-                thickness = 1.dp,
-            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             SheetRow(label = "Account", value = maskedEmail)
         }
     }
@@ -501,21 +460,17 @@ private fun SheetContent(
 @Composable
 private fun SheetRow(label: String, value: String) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = label,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 13.sp,
         )
         Text(
             text = value,
             color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 13.sp,
         )
     }
 }

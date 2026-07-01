@@ -9,7 +9,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -18,37 +17,19 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-// CopyPaste-5917.23: use Outlined variants to match the app-wide outlined icon styleguide.
-// AttachFile, BookmarkAdded, BookmarkBorder, Close, ContentCopy, Delete, OpenInNew, SaveAlt
-// all have Outlined equivalents — no Filled exceptions needed.
-import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.BookmarkAdded
-import androidx.compose.material.icons.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,11 +54,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.FastOutSlowInEasing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -310,7 +289,8 @@ fun PreviewOverlay(
                     scaleX = cardScale
                     scaleY = cardScale
                 }
-                .background(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = RoundedCornerShape(16.dp))
+                // CopyPaste-g5u1: dropped the RoundedCornerShape skin — bare surface fill.
+                .background(color = MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() },
@@ -318,20 +298,14 @@ fun PreviewOverlay(
                 ),
         ) {
             Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxSize(),
             ) {
                 PreviewHeader(
                     item = item,
                     pinned = pinned,
                     onDismiss = if (pinned) onDismiss else null,
                 )
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                    thickness = 0.5.dp,
-                )
+                HorizontalDivider()
                 Box(modifier = Modifier.weight(1f)) {
                     when {
                         item.isImage -> PreviewImageContent(
@@ -362,23 +336,14 @@ fun PreviewOverlay(
                     }
                 }
                 if (!pinned) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                        thickness = 0.5.dp,
-                    )
+                    HorizontalDivider()
                     Text(
                         text = stringResource(R.string.preview_drag_up_hint),
-                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.CenterHorizontally),
                     )
                 } else {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                        thickness = 0.5.dp,
-                    )
+                    HorizontalDivider()
                     PreviewActionRow(
                         item = item,
                         onCopy = onCopy,
@@ -408,46 +373,36 @@ private fun PreviewHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             PreviewContentTypeChip(item.contentType, item.isSensitive, item.snippet)
             item.sourceApp?.let { pkg ->
                 sourceAppLabel(pkg)?.let { label ->
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = relativeTimePreview(item.wallTimeMs),
-                style = TextStyle(
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Normal,
-                    fontFeatureSettings = "tnum",
-                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (pinned && onDismiss != null) {
-                // CopyPaste-5jcj: 48dp touch target (WCAG 2.5.5 / Android min) while
-                // keeping the visible glyph at 16dp. IconButton centres its content,
-                // so the icon does not grow.
-                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = stringResource(R.string.cd_close_selection),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
+                // CopyPaste-g5u1: text-only close control (was Icon+IconButton),
+                // matching the bare-tappable-text pattern used elsewhere in this
+                // de-style pass (see PreviewActionRow / AdbCmdRow).
+                val closeLabel = stringResource(R.string.cd_close_selection)
+                Text(
+                    text = closeLabel,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.clickable(
+                        onClickLabel = closeLabel,
+                        role = Role.Button,
+                        onClick = onDismiss,
+                    ),
+                )
             }
         }
     }
@@ -503,30 +458,15 @@ private fun PreviewContentTypeChip(
 ) {
     // CopyPaste-1b55 parity: keep content-type label even for sensitive items;
     // privacy is signalled by the blur/mask, not the chip label.
+    // CopyPaste-g5u1: de-styled — dropped the pill background/border/shape and the
+    // hardcoded TextStyle; the color still conveys the content-type classification.
     val label = previewChipLabel(contentType, snippet)
     val color = previewChipColor(label, MaterialTheme.colorScheme.primary)
-    // Match ContentTypeChip style from HistoryActivity: 7dp radius, 1dp border, 10sp SemiBold.
-    Box(
-        modifier = Modifier
-            .background(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(7.dp))
-            .border(
-                width = 1.dp,
-                color = color.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(7.dp),
-            )
-            .padding(horizontal = 5.dp, vertical = 2.dp),
-    ) {
-        Text(
-            text = label,
-            style = TextStyle(
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.4.sp,
-            ),
-            color = color,
-            maxLines = 1,
-        )
-    }
+    Text(
+        text = label,
+        color = color,
+        maxLines = 1,
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -566,7 +506,6 @@ private fun PreviewTextContent(
         SelectionContainer {
             Text(
                 text = displayText,
-                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .fillMaxSize()
@@ -576,7 +515,6 @@ private fun PreviewTextContent(
     } else {
         Text(
             text = displayText,
-            style = MaterialTheme.typography.bodyMedium,
             color = if (masked) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             maxLines = if (pinned) Int.MAX_VALUE else 8,
             overflow = TextOverflow.Clip,
@@ -631,20 +569,11 @@ private fun PreviewImageContent(
     ) {
         if (masked && !canBlur) {
             // Pre-API-31 fallback: Modifier.blur is a no-op, so hide the image entirely
-            // to prevent leaking sensitive content. Show a lock placeholder instead.
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.AttachFile,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(32.dp),
-                )
+            // to prevent leaking sensitive content. Text-only warning (icon dropped —
+            // CopyPaste-g5u1).
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     text = stringResource(R.string.sensitive_preview_mask),
-                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
             }
@@ -670,11 +599,7 @@ private fun PreviewImageContent(
                     ),
             )
         } else {
-            CircularProgressIndicator(
-                color = MaterialTheme.colorScheme.primary,
-                strokeWidth = 2.dp,
-                modifier = Modifier.size(24.dp),
-            )
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
         }
     }
 }
@@ -685,21 +610,15 @@ private fun PreviewImageContent(
 
 @Composable
 private fun PreviewFileContent(item: ClipboardItem) {
+    // CopyPaste-g5u1: dropped the decorative file icon and the manual Spacer —
+    // text-only, filename truncation (maxLines/overflow) is unchanged.
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            imageVector = Icons.Outlined.AttachFile,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(40.dp),
-        )
-        Spacer(Modifier.size(12.dp))
         Text(
             text = item.snippet,
-            style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -721,66 +640,53 @@ private fun PreviewActionRow(
     /** Open with default app. Non-null only for file items. */
     onOpenFile: (() -> Unit)? = null,
 ) {
-    // CopyPaste-5jcj: every action IconButton is 48dp (WCAG 2.5.5 minimum touch
-    // target) while the inner Icon glyph stays 18dp — IconButton centres its content
-    // so the visible icon is unchanged, only the tappable area grows.
+    // CopyPaste-g5u1: de-styled — icon-only IconButtons replaced with bare
+    // tappable text labels (role=Button), matching the AdbCmdRow pattern in
+    // SettingsComponents.kt. The visible label doubles as the click label, so
+    // the former WCAG 48dp IconButton touch-target sizing is dropped along with
+    // the icon glyphs; flagged for a follow-up a11y tap-target check.
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onCopy, modifier = Modifier.size(48.dp)) {
-            Icon(
-                imageVector = Icons.Outlined.ContentCopy,
-                contentDescription = stringResource(R.string.cd_copy),
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        Spacer(Modifier.width(4.dp))
-        IconButton(onClick = { onSetPinned(!item.pinned) }, modifier = Modifier.size(48.dp)) {
-            Icon(
-                imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
-                              else Icons.Outlined.BookmarkBorder,
-                contentDescription = stringResource(
-                    if (item.pinned) R.string.action_unpin else R.string.action_pin,
-                ),
-                tint = if (item.pinned) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
-            )
-        }
+        val copyLabel = stringResource(R.string.cd_copy)
+        Text(
+            text = copyLabel,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.clickable(onClickLabel = copyLabel, role = Role.Button, onClick = onCopy),
+        )
+        val pinLabel = stringResource(if (item.pinned) R.string.action_unpin else R.string.action_pin)
+        Text(
+            text = pinLabel,
+            color = if (item.pinned) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clickable(onClickLabel = pinLabel, role = Role.Button) {
+                onSetPinned(!item.pinned)
+            },
+        )
         // Open with default app — shown only for file items
         if (onOpenFile != null) {
-            Spacer(Modifier.width(4.dp))
-            IconButton(onClick = onOpenFile, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    imageVector = Icons.Outlined.OpenInNew,
-                    contentDescription = stringResource(R.string.cd_open_file),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-        if (onSaveFile != null) {
-            Spacer(Modifier.width(4.dp))
-            IconButton(onClick = onSaveFile, modifier = Modifier.size(48.dp)) {
-                Icon(
-                    imageVector = Icons.Outlined.SaveAlt,
-                    contentDescription = stringResource(R.string.action_save_file),
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        }
-        Spacer(Modifier.width(4.dp))
-        IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
-            Icon(
-                imageVector = Icons.Outlined.Delete,
-                contentDescription = stringResource(R.string.cd_delete),
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(18.dp),
+            val openLabel = stringResource(R.string.cd_open_file)
+            Text(
+                text = openLabel,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClickLabel = openLabel, role = Role.Button, onClick = onOpenFile),
             )
         }
+        if (onSaveFile != null) {
+            val saveLabel = stringResource(R.string.action_save_file)
+            Text(
+                text = saveLabel,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable(onClickLabel = saveLabel, role = Role.Button, onClick = onSaveFile),
+            )
+        }
+        val deleteLabel = stringResource(R.string.cd_delete)
+        Text(
+            text = deleteLabel,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.clickable(onClickLabel = deleteLabel, role = Role.Button, onClick = onDelete),
+        )
     }
 }
 

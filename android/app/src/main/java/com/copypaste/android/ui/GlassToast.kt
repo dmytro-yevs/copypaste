@@ -7,19 +7,14 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,9 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
@@ -180,7 +173,6 @@ fun GlassToastHost(
                     animationSpec = tween(150),
                     targetOffsetY = { it / 3 },
                 ),
-            modifier = Modifier.padding(bottom = 12.dp),
         ) {
             // Keep the last non-null data during the exit animation so the
             // content doesn't blank out mid-transition.
@@ -192,10 +184,13 @@ fun GlassToastHost(
 
 @Composable
 private fun GlassToastContent(data: GlassToastData) {
-    // Fixed toast geometry (STYLEGUIDE §5 --r-card 13dp + §5 --sh2 float).
-    val shadowElevationDp = 6.dp
-    val toastShape = RoundedCornerShape(13.dp)
-
+    // dotColor is functional, not decorative — it's the only visual signal of
+    // which semantic kind (success/danger/info/accent) this toast is, so it's
+    // kept per the same "functional state indicator" exception as a selection
+    // background. shape/border/elevation/color skinning around it (previously
+    // RoundedCornerShape(13.dp), a danger-tinted BorderStroke, 6dp shadow, and a
+    // custom surfaceContainerHigh fill) were purely cosmetic and are dropped in
+    // favor of Surface's bare Material defaults.
     val dotColor: Color = when (data.kind) {
         GlassToastKind.SUCCESS -> MaterialTheme.colorScheme.primary
         GlassToastKind.DANGER -> MaterialTheme.colorScheme.error
@@ -203,67 +198,31 @@ private fun GlassToastContent(data: GlassToastData) {
         GlassToastKind.ACCENT -> MaterialTheme.colorScheme.primary
     }
 
-    // f6x0: DANGER toasts get a danger-tinted hairline border (alert tonization) so
-    // they read as distinctly critical vs. neutral toasts. Other kinds keep the
-    // standard rim grey border.
-    val borderColor: Color = if (data.kind == GlassToastKind.DANGER) {
-        MaterialTheme.colorScheme.error.copy(alpha = 0.55f)
-    } else {
-        MaterialTheme.colorScheme.outline
-    }
-
     Surface(
-        // A-C9: skin-aware radius. CLASSIC frozen at 10dp; QUIET 7dp; VAPOR 12dp.
-        shape = toastShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        // §4: single 1dp hairline border (subtle, like CopyPasteCard).
-        // f6x0: danger toasts use danger-tinted border for alert tonization.
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
-        // A-C9: skin-aware elevation. GLASS_FLOAT (Classic/Vapor) → 6dp shadow;
-        // NONE (Quiet) → 0dp (flat, no shadow).
-        shadowElevation = shadowElevationDp,
-        modifier = Modifier
-            .padding(horizontal = 16.dp)
-            // CopyPaste-n7ff: announce the toast via a polite live region so the
-            // message is read even when focus is elsewhere.
-            .semantics { liveRegion = LiveRegionMode.Polite },
+        // CopyPaste-n7ff: announce the toast via a polite live region so the
+        // message is read even when focus is elsewhere.
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
-        ) {
-            // 6dp semantic dot (web parity).
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Semantic kind dot — size kept (functional: a drawBehind-only Box
+            // needs an explicit size to render at all), shape kept as the
+            // dot's defining form.
             Box(
                 modifier = Modifier
                     .size(6.dp)
                     .clip(CircleShape)
                     .drawBehind { drawCircle(dotColor) },
             )
-            // VISA-14: use bodyLarge (13sp/18sp line-height) so lineHeight is correct.
-            // bodyMedium.copy(fontSize=13.sp) overrides the size but keeps bodyMedium's
-            // shorter lineHeight — bodyLarge carries the matching 18sp lineHeight for 13sp.
             Text(
                 text = data.message,
                 color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Normal,
-                ),
             )
             // Optional action button — rendered after the message when present.
             if (data.action != null) {
-                Spacer(Modifier.width(4.dp))
                 TextButton(onClick = data.action.second) {
-                    // VISA-14: match bodyLarge baseline (13sp/18sp) consistent with message text.
                     Text(
                         text = data.action.first,
                         color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Normal,
-                        ),
                     )
                 }
             }

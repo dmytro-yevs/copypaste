@@ -231,11 +231,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
             if (subtitle.isNotBlank()) {
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
@@ -243,11 +240,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
             if (isTruncated) {
                 Text(
                     text = "Showing last ${TAIL_BYTES / 1024} KB — older lines omitted to avoid OOM.",
-                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
 
@@ -258,34 +252,24 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 placeholder = {
                     Text(
                         "Filter lines…",
-                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
                 singleLine = true,
                 colors = ideTextFieldColors(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth(),
             )
 
             // ── Log lines ─────────────────────────────────────────────────
             if (displayLines.isEmpty()) {
                 // CopyPaste-bdac.15: use shared EmptyStateCard (icon+card) so the empty state
                 // matches HistoryActivity's pattern (was a bare centered Text composable).
-                // Error state (bdac.4) still uses accent2 icon but with danger text below.
+                // CopyPaste-g5u1: dropped the decorative icon glyph — title/subtitle below
+                // already convey the state in text; icon slot is required but left empty.
                 val errorMsg = readError
                 val isFilter = allLines.isNotEmpty() && errorMsg == null
                 EmptyStateCard(
-                    icon = {
-                        Icon(
-                            imageVector = if (isFilter) Icons.Outlined.SearchOff
-                                          else Icons.Outlined.Description,
-                            contentDescription = null,
-                            tint = if (errorMsg != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    },
+                    icon = {},
                     title = when {
                         errorMsg != null -> "Could not read logs"
                         isFilter -> "No lines match filter"
@@ -355,18 +339,13 @@ private fun LogLine(line: String) {
     }
 
     // A6: soft-wrap long lines so everything is visible without horizontal scrolling
+    // CopyPaste-g5u1: dropped the monospace/fontSize/lineHeight style override — bare
+    // default text style, color-coding by log level is preserved.
     Text(
         text = line,
-        style = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-        ),
         color = color,
         softWrap = true,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 1.dp),
+        modifier = Modifier.fillMaxWidth(),
     )
 }
 

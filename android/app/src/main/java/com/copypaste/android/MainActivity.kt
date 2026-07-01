@@ -14,7 +14,6 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -26,7 +25,6 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,7 +38,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -262,11 +259,9 @@ private fun MainShell(viewModel: ClipboardViewModel) {
 
     val density = LocalDensity.current
 
-    // Styleguide floating tab bar geometry:
-    //   side margin 12 dp, bottom margin 10 dp (matching web `.tabbar` margin)
-    //   radius 28 dp, internal padding 8 dp top/sides + 12 dp bottom
-    //   height driven by content — no fixed min-height (Android wraps tightly)
-    val tabBarShape = RoundedCornerShape(28.dp)
+    // Floating tab bar sits above the system nav bar with a bottom margin;
+    // height is driven by content — no fixed min-height (Android wraps tightly).
+    // CopyPaste-g5u1: dropped the bespoke corner-radius shape — bare Surface rectangle.
     // Bottom safe-area (nav bar) inset so the bar clears the system nav buttons.
     val navBarInsetDp = WindowInsets.navigationBars
         .asPaddingValues()
@@ -330,9 +325,8 @@ private fun MainShell(viewModel: ClipboardViewModel) {
             }
         }
 
-        // ── Floating glass tab bar ──────────────────────────────────────────
-        // Detached from the Scaffold bottomBar slot so it floats over the content
-        // with side margins (12 dp) and a rounded glass pill (radius 28 dp).
+        // ── Floating tab bar ─────────────────────────────────────────────────
+        // Detached from the Scaffold bottomBar slot so it floats over the content.
         // Positioned via Alignment.BottomCenter + padding, clears the system nav bar.
         FloatingTabBar(
             modifier = Modifier
@@ -341,7 +335,6 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                     tabBarHeightDp = with(density) { size.height.toDp() }
                 },
             selectedTab = selectedTab,
-            tabBarShape = tabBarShape,
             navBarBottomPadding = navBarInsetDp,
             onTabSelected = { index ->
                 val leavingSettings =
@@ -361,20 +354,18 @@ private fun MainShell(viewModel: ClipboardViewModel) {
 }
 
 /**
- * Floating tab bar (styleguide `.tabbar` floating treatment).
+ * Floating tab bar — detached from the screen edge, sits above the system
+ * navigation bar (bottom padding supplied by the caller).
  *
- * Detached from the screen edge — sits 10 dp above the system navigation bar,
- * with 12 dp side margins and a 28 dp corner radius.
- *
- * Active tab: accent-tinted pill background + primary-colored icon/label
+ * Active tab: accent-tinted pill background + primary-colored label
  * + a spring pop scale (0.94 → 1.06 → 1.0).
- * Inactive: onSurfaceVariant icon/label, no background.
+ * Inactive: onSurfaceVariant label, no background.
+ * CopyPaste-g5u1: de-styled — bare Surface (no corner-radius shape).
  */
 @Composable
 private fun FloatingTabBar(
     modifier: Modifier = Modifier,
     selectedTab: Int,
-    tabBarShape: RoundedCornerShape,
     navBarBottomPadding: androidx.compose.ui.unit.Dp,
     onTabSelected: (Int) -> Unit,
 ) {
@@ -386,7 +377,6 @@ private fun FloatingTabBar(
     )
 
     Surface(
-        shape = tabBarShape,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         modifier = modifier
             .fillMaxWidth()
@@ -417,7 +407,6 @@ private fun FloatingTabBar(
                     modifier = Modifier
                         .weight(1f)
                         .scale(scale)
-                        .clip(RoundedCornerShape(7.dp))
                         .background(pillColor)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },

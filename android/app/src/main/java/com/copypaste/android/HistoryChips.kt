@@ -1,19 +1,15 @@
 package com.copypaste.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §6 Content-type chip — CANONICAL kind→color table (PARITY-SPEC §6).
@@ -77,22 +73,14 @@ internal fun chipLabelFor(contentType: String, @Suppress("UNUSED_PARAMETER") isS
  */
 @Composable
 internal fun ContentTypeChip(label: String, color: Color) {
-    // vzfn: radius 7dp (was 4dp) + 10sp (was 9sp) — parity styleguide .badge --radius-chip/10px
-    Box(
-        modifier = Modifier
-            .background(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(7.dp))
-            .border(
-                width = 1.dp,
-                color = color.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(7.dp),
-            ),
-    ) {
-        Text(
-            text = label,
-            color = color,
-            maxLines = 1,
-        )
-    }
+    // g5u1: de-styled — the tinted fill + border box was purely decorative
+    // (the kind color is already conveyed by the text color). Bare colored
+    // Text label, same pattern as TooLargeBadge below.
+    Text(
+        text = label,
+        color = color,
+        maxLines = 1,
+    )
 }
 
 /**
@@ -156,20 +144,12 @@ internal fun parseHexColor(snippet: String): Color? {
  */
 @Composable
 internal fun ContentIconTile(chipLabel: String, colors: ColorScheme) {
-    Box(
-        modifier = Modifier
-            .background(
-                color = colors.surfaceVariant.copy(alpha = 0.16f),
-                shape = RoundedCornerShape(7.dp),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        // CopyPaste-5917.15: announce content kind to TalkBack (was null).
-        Text(
-            text = chipLabel,
-            color = colors.onSurfaceVariant,
-        )
-    }
+    // g5u1: de-styled — the tinted tile box was purely decorative. Bare
+    // text label (CopyPaste-5917.15: still announced to TalkBack).
+    Text(
+        text = chipLabel,
+        color = colors.onSurfaceVariant,
+    )
 }
 
 /**
@@ -181,14 +161,11 @@ internal fun ContentIconTile(chipLabel: String, colors: ColorScheme) {
 internal fun ColorSwatchOrTile(snippet: String, colors: ColorScheme) {
     val parsed = remember(snippet) { parseHexColor(snippet) }
     if (parsed != null) {
+        // g5u1: de-styled — border/rounding removed; the swatch fill itself is
+        // the actual parsed color (functional content, not decoration).
         Box(
             modifier = Modifier
-                .background(color = parsed, shape = RoundedCornerShape(4.dp))
-                .border(
-                    width = 0.5.dp,
-                    color = colors.outline.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(4.dp),
-                ),
+                .background(color = parsed),
         )
     } else {
         // No parseable hex — fall back to the icon tile at reduced size

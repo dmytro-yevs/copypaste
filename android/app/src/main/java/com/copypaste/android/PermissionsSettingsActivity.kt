@@ -17,26 +17,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.outlined.Battery5Bar
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.PhonelinkSetup
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -53,11 +42,8 @@ import com.copypaste.android.ui.GlassToastState
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
@@ -279,20 +265,15 @@ fun PermissionsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 text = stringResource(R.string.permissions_intro),
-                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(modifier = Modifier.height(4.dp))
 
             // 1. Notifications
             PermissionStatusCard(
-                icon = Icons.Outlined.Notifications,
                 title = "Notifications",
                 description = "Required on Android 13+ so the clipboard-monitoring " +
                         "foreground service can show its status notification (Pause/Resume).",
@@ -313,7 +294,6 @@ fun PermissionsScreen(
 
             // 3. Battery Optimization exemption
             PermissionStatusCard(
-                icon = Icons.Outlined.Battery5Bar,
                 title = "Battery Optimization Exemption",
                 description = "Prevents Android from killing the sync service when the " +
                         "phone is idle. Recommended for reliable Supabase polling.",
@@ -338,7 +318,6 @@ fun PermissionsScreen(
                     }
                 }
                 PermissionStatusCard(
-                    icon = Icons.Outlined.PhonelinkSetup,
                     title = "OEM Autostart / Protected Apps",
                     description = oemDesc,
                     // Cannot reliably detect this without root; never shown "granted".
@@ -351,7 +330,6 @@ fun PermissionsScreen(
 
             // 5. Foreground service (install-time, info only)
             PermissionStatusCard(
-                icon = Icons.Outlined.Tune,
                 title = "Foreground Service",
                 description = "Granted automatically at install — no action needed. Lets the " +
                         "clipboard-monitoring service run in the background.",
@@ -385,26 +363,21 @@ private fun BgCaptureStatusCard(
         MaterialTheme.colorScheme.outline
     }
     CopyPasteCard(accent = borderColor) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
             Text(
                 text = stringResource(R.string.bg_adb_section_title),
-                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.bg_adb_explainer),
-                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row {
                 Text(
                     text = if (readLogsGranted)
                         stringResource(R.string.bg_adb_status_read_logs_ok)
                     else
                         stringResource(R.string.bg_adb_status_read_logs_no),
-                    style = MaterialTheme.typography.labelSmall,
                     color = if (readLogsGranted) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -413,26 +386,22 @@ private fun BgCaptureStatusCard(
                         stringResource(R.string.bg_adb_status_overlay_ok)
                     else
                         stringResource(R.string.bg_adb_status_overlay_no),
-                    style = MaterialTheme.typography.labelSmall,
                     color = if (overlayGranted) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
             AdbCommandBlock(
                 label = stringResource(R.string.bg_adb_cmd1_label),
                 command = stringResource(R.string.bg_adb_cmd1),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
                 onToastRequest = onToastRequest,
             )
-            Spacer(modifier = Modifier.height(4.dp))
             AdbCommandBlock(
                 label = stringResource(R.string.bg_adb_cmd2_label),
                 command = stringResource(R.string.bg_adb_cmd2),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
                 onToastRequest = onToastRequest,
             )
-            Spacer(modifier = Modifier.height(4.dp))
             AdbCommandBlock(
                 label = stringResource(R.string.bg_adb_cmd3_label),
                 command = stringResource(R.string.bg_adb_cmd3),
@@ -444,7 +413,7 @@ private fun BgCaptureStatusCard(
 }
 
 /**
- * A small monospace code block displaying [command] with a tap-to-copy
+ * A small code block displaying [command] with a tap-to-copy
  * interaction. On tap it writes [command] to the system clipboard and calls
  * [onToastRequest] with [toastText] so the parent screen can show a GlassToast.
  *
@@ -460,20 +429,13 @@ internal fun AdbCommandBlock(
     onToastRequest: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = command,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
                 .fillMaxWidth()
@@ -481,8 +443,7 @@ internal fun AdbCommandBlock(
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("adb_a11y_command", command))
                     onToastRequest(toastText)
-                }
-                .padding(vertical = 4.dp),
+                },
         )
     }
 }
@@ -498,7 +459,6 @@ internal fun AdbCommandBlock(
  */
 @Composable
 private fun PermissionStatusCard(
-    icon: ImageVector,
     title: String,
     description: String,
     granted: Boolean?,
@@ -516,64 +476,36 @@ private fun PermissionStatusCard(
     }
 
     CopyPasteCard(accent = borderColor) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (granted == true) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = "required",
-                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(6.dp))
 
             // Live status indicator.
             if (granted != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = if (granted) Icons.Outlined.CheckCircle
-                                      else Icons.Filled.ErrorOutline,
-                        contentDescription = null,
-                        tint = if (granted) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error,
-                    )
-                    Text(
-                        text = if (granted) "Granted" else "Not granted",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error,
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (granted) "Granted" else "Not granted",
+                    color = if (granted) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+                )
             }
 
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             if (!infoOnly) {
-                Spacer(modifier = Modifier.height(8.dp))
                 CopyPasteButton(
                     onClick = onClick,
                     // Stay enabled even when granted so the user can re-open the window.

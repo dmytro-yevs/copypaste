@@ -15,24 +15,18 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -1256,9 +1250,10 @@ private fun HistoryList(
 
     LazyColumn(
         state = listState,
+        // g5u1: dropped the redundant .background(c.background) — the Scaffold
+        // already paints containerColor behind this content.
         modifier = Modifier
             .fillMaxSize()
-            .background(c.background)
             .padding(padding),
         contentPadding = PaddingValues(
             // A-C1 INSET: add top+bottom content padding equal to rowGap so the first and
@@ -1267,8 +1262,8 @@ private fun HistoryList(
             bottom = if (isInset) rowGap else 0.dp,
         ),
         // A-C1: row spacing — CARD/LINE=0dp (divider-separated), INSET=tok.rowGap (card-spaced).
-        // Classic: spacedBy(0.dp) — identical to previous Arrangement.spacedBy(0.dp).
-        verticalArrangement = Arrangement.spacedBy(rowGap),
+        // g5u1: dropped the explicit Arrangement.spacedBy(0.dp) — identical to the
+        // LazyColumn default when rowGap is always 0.dp (CARD/LINE mode).
     ) {
         val pinnedCount = items.count { it.pinned }
         itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
@@ -1358,14 +1353,12 @@ private fun HistoryList(
             item(key = "__load_more_footer__") {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
+                        .fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator(
                         color = c.primary.copy(alpha = 0.5f),
                         strokeWidth = 1.5.dp,
-                        modifier = Modifier.size(16.dp),
                     )
                 }
             }

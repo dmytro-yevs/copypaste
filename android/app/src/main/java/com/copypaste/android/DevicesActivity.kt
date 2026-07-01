@@ -10,19 +10,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,7 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
@@ -452,17 +446,15 @@ fun DevicesScreen(
             onDismissRequest = { revokeTarget = null },
             title = { Text("Revoke pairing?") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column {
                     Text(
                         "${target.displayName()} will no longer connect over P2P and a " +
                         "revocation record is kept.",
-                        style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
                         "A revoked device that still knows the sync passphrase can " +
                         "keep reading new relay and cloud items. To close that gap, " +
                         "choose “Revoke & rotate key” below.",
-                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
             },
@@ -481,7 +473,7 @@ fun DevicesScreen(
                 }
             },
             dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                Row {
                     // "Revoke only" — left; performs the plain audit+remove path.
                     CopyPasteButton(onClick = {
                         val t = revokeTarget ?: return@CopyPasteButton
@@ -559,11 +551,10 @@ fun DevicesScreen(
             },
             title = { Text("Set new sync passphrase") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column {
                     Text(
                         "Enter a new passphrase to rotate the sync key. All trusted " +
                         "devices will need to re-enter this passphrase to keep syncing.",
-                        style = MaterialTheme.typography.bodySmall,
                     )
                     // Passphrase text field — skin-aware surface colors, password masking.
                     OutlinedTextField(
@@ -576,10 +567,7 @@ fun DevicesScreen(
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (!isValidRotatePassphrase(revokePassphrase) && revokePassphrase.isNotEmpty()) {
-                        Text(
-                            "Passphrase must be at least 8 characters.",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                        Text("Passphrase must be at least 8 characters.")
                     }
                 }
             },
@@ -649,7 +637,7 @@ fun DevicesScreen(
                     variant = ButtonVariant.DANGER,
                 ) {
                     if (revokeRotateInFlight) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator()
                     } else {
                         Text("Confirm revoke & rotate")
                     }
@@ -742,7 +730,7 @@ fun DevicesScreen(
                     variant = ButtonVariant.DANGER,
                 ) {
                     if (revokeAllInFlight) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator()
                     } else {
                         Text("Revoke all")
                     }
@@ -796,7 +784,6 @@ fun DevicesScreen(
                         onClick = { revokeAllConfirmOpen = true },
                         variant = ButtonVariant.DANGER,
                         enabled = revokeAllEnabled(peers.size) && !revokeAllInFlight,
-                        modifier = Modifier.padding(end = 8.dp),
                     ) {
                         Text("Revoke all")
                     }
@@ -808,9 +795,7 @@ fun DevicesScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .verticalScroll(rememberScrollState()),
         ) {
 
             // ── Deliverable 1: own QR at the top, always visible, blurred ────
@@ -878,22 +863,14 @@ fun DevicesScreen(
                         SectionLabel("Discovered on your network")
                     }
                     if (discovered.isEmpty()) {
-                        // CopyPaste-0nd4: add DiscoveryRingsIcon + text in a Row so the
-                        // empty-state has an icon anchor and visual breathing room, matching
-                        // the macOS .network-rings icon + text pattern in DevicesView.tsx.
+                        // CopyPaste-g5u1: decorative DiscoveryRingsIcon removed — text-only
+                        // empty state (icon added no functional information).
                         add {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                DiscoveryRingsIcon(size = 36.dp)
-                                Text(
-                                    text = stringResource(R.string.no_devices_nearby),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                                Text(text = stringResource(R.string.no_devices_nearby))
                             }
                         }
                     } else {
@@ -931,10 +908,7 @@ fun DevicesScreen(
 
             if (p2pEnabled) {
                 discoverError?.let { msg ->
-                    Text(
-                        text = msg,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Text(text = msg)
                 }
             }
 
@@ -951,8 +925,6 @@ fun DevicesScreen(
             ) {
                 Text(stringResource(R.string.btn_scan_qr))
             }
-
-            Spacer(Modifier.height(24.dp))
         }
     }
 }

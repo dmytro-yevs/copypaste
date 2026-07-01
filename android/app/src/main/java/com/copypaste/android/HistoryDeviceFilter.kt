@@ -1,20 +1,17 @@
 package com.copypaste.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Device filter strip — parity with macOS HistoryView deviceFilter.
@@ -77,8 +74,10 @@ internal fun DeviceChip(
     val bg = if (isSelected) c.primary else inactiveBg
     val fg = if (isSelected) c.onPrimary else inactiveFg
 
+    // g5u1: de-styled — rounding removed; the background fill itself still
+    // conveys selection state (functional), same pattern as IdeSegmentedControl.
     val baseModifier = Modifier
-        .background(color = bg, shape = RoundedCornerShape(12.dp))
+        .background(color = bg)
         .clickable(onClick = onClick)
 
     Box(modifier = baseModifier) {
@@ -108,20 +107,12 @@ internal fun OriginDeviceBadge(
     val isOwn = deviceId == ownDeviceId
     val label = deviceDisplayName(deviceId, ownDeviceId, peers)
 
-    // §9: origin badge unified (parity with other badges).
-    val tint = if (isOwn) c.primary else c.onSurfaceVariant
-    Box(
-        modifier = Modifier
-            .background(
-                color = if (isOwn) c.primaryContainer else c.surfaceVariant,
-                shape = RoundedCornerShape(4.dp),
-            )
-            .border(width = 1.dp, color = tint.copy(alpha = 0.30f), shape = RoundedCornerShape(4.dp)),
-    ) {
-        Text(
-            text = label,
-            color = if (isOwn) c.primary else c.onSurfaceVariant,
-            maxLines = 1,
-        )
-    }
+    // g5u1: de-styled — the tinted fill + border box was purely decorative
+    // (own vs peer is already conveyed by the text color). Bare colored Text,
+    // same pattern as ContentTypeChip/TooLargeBadge.
+    Text(
+        text = label,
+        color = if (isOwn) c.primary else c.onSurfaceVariant,
+        maxLines = 1,
+    )
 }

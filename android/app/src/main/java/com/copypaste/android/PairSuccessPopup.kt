@@ -1,16 +1,9 @@
 package com.copypaste.android
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
@@ -44,32 +37,14 @@ internal fun PairedSuccessPopup(
         },
         text = {
             Column {
-                // ── Avatar + name + status row ────────────────────────────────
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // lclr: avatar tile in success-tint (peer is now online/paired).
-                    val displayName = peer.name.ifBlank { "Paired device" }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(text = displayName.take(1).uppercase())
-                    }
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            // prld: status dot, success state.
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape),
-                            )
-                            Text(text = displayName)
-                        }
-                        Text(text = "Paired ✓")
-                    }
+                // ── Name + status row ─────────────────────────────────────────
+                // CopyPaste-g5u1: decorative avatar tile + status-dot shells removed
+                // (they carried no size/colour after the earlier de-style pass and
+                // rendered as invisible empty boxes).
+                val displayName = peer.name.ifBlank { "Paired device" }
+                Column {
+                    Text(text = displayName)
+                    Text(text = "Paired ✓")
                 }
 
                 // ── Device metadata rows (only non-blank fields) ─────────────

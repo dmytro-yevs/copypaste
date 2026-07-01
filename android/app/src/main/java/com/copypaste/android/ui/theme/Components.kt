@@ -11,13 +11,10 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -36,7 +33,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -163,8 +159,11 @@ fun SectionLabel(
 ) {
     Text(
         text = text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // CopyPaste-g5u1: padding intentionally kept — QrHelper.kt and other call
+        // sites compensate for this exact start/top/bottom inset (see
+        // QrHelper.kt's `Modifier.offset(x = (-16).dp)` comment); stripping it
+        // would silently shift section labels across every screen that uses it.
         modifier = modifier
             .semantics { heading() }
             .padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
@@ -204,10 +203,12 @@ fun CopyPasteIconButton(
 ) {
     IconButton(
         onClick = onClick,
+        // hitTarget stays applied — a11y minimum-touch-target sizing, not a
+        // decorative dimension. Disabled-state dimming is left to IconButton's
+        // own default (enabled = enabled) instead of a custom alpha override.
         modifier = modifier
             .size(hitTarget)
-            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription!! } else Modifier)
-            .alpha(if (enabled) 1f else 0.40f),
+            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription!! } else Modifier),
         enabled = enabled,
         content = { icon() },
     )
@@ -227,18 +228,13 @@ fun SharedSettingsRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .semantics(mergeDescendants = true) {}
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .semantics(mergeDescendants = true) {},
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 12.dp)
-        ) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         IdeSwitch(checked = checked, onCheckedChange = onCheckedChange, name = title)
     }
@@ -258,22 +254,18 @@ fun SharedSettingsNavRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
+        // leadingIcon param + rendering kept — functional nav icon plumbing.
+        // Bare Icon() at its Material default size, no decorative gap spacer.
         if (leadingIcon != null) {
-            Icon(imageVector = leadingIcon, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.width(12.dp))
+            Icon(imageVector = leadingIcon, contentDescription = null)
         }
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 12.dp)
-        ) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, color = MaterialTheme.colorScheme.onSurface)
+            Text(text = subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -291,24 +283,21 @@ fun EmptyStateCard(
     reducedMotion: Boolean = false,
 ) {
     Box(
+        // `padding` is the caller-supplied PaddingValues (e.g. scaffold insets) —
+        // functional, kept. The hardcoded 32/24dp inset on top of it was cosmetic.
         modifier = modifier
             .fillMaxWidth()
-            .padding(padding)
-            .padding(horizontal = 32.dp, vertical = 24.dp),
+            .padding(padding),
         contentAlignment = Alignment.Center,
     ) {
-        CopyPasteCard(modifier = Modifier.widthIn(max = 400.dp)) {
-            Row(
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+        CopyPasteCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(contentAlignment = Alignment.Center) {
                     icon()
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(text = title, style = MaterialTheme.typography.bodyLarge)
-                    Text(text = subtitle, style = MaterialTheme.typography.bodyMedium)
+                Column {
+                    Text(text = title, color = MaterialTheme.colorScheme.onSurface)
+                    Text(text = subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

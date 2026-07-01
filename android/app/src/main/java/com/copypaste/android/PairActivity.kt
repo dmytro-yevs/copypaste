@@ -16,7 +16,6 @@ import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -28,13 +27,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -49,8 +44,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
@@ -63,11 +56,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
-import androidx.compose.ui.text.font.FontFamily
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
@@ -844,30 +835,22 @@ fun PairScreen(
                 // reached instead of being clipped — mirrors Settings/History.
                 .verticalScroll(rememberScrollState())
                 // Keep the bottom-most content clear of the system navigation bar.
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(24.dp),
+                .windowInsetsPadding(WindowInsets.navigationBars),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.Top)
         ) {
             // ── Deliverable 2: hide own-QR once a peer has been scanned ───────
             // When scannedPeer is non-null we are in "confirm peer" mode. The own-QR
             // card, instructions text, and Scan button belong only to the "show my QR"
             // mode and are hidden so the screen focuses on the scanned-peer confirmation.
             if (scannedPeer == null) {
-                Text(
-                    text = stringResource(R.string.pair_instructions),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                Text(text = stringResource(R.string.pair_instructions))
             }
 
             if (scannedPeer == null) {
             CopyPasteCard {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(28.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     // Reserve a fixed-size slot for the QR area. Every state
                     // (loading / QR present / placeholder) renders into this same
@@ -882,13 +865,9 @@ fun PairScreen(
                             loading -> {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     CircularProgressIndicator()
-                                    Text(
-                                        text = stringResource(R.string.status_pairing),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
+                                    Text(text = stringResource(R.string.status_pairing))
                                 }
                             }
                             bmp != null && !expired -> {
@@ -941,23 +920,16 @@ fun PairScreen(
                                         ) {
                                             Text(
                                                 text = "Tap to reveal",
-                                                style = MaterialTheme.typography.labelMedium,
                                                 textAlign = TextAlign.Center,
-                                                modifier = Modifier
-                                                    .padding(horizontal = 12.dp, vertical = 5.dp),
                                             )
                                         }
                                     }
                                 }
                             }
                             else -> {
-                                Icon(
-                                    imageVector = Icons.Filled.QrCode,
-                                    // CopyPaste-3nyq: announce the QR-loading state so AT
-                                    // is not silent while the code is being generated.
-                                    contentDescription = stringResource(R.string.cd_pairing_qr_loading),
-                                    modifier = Modifier.size(96.dp),
-                                )
+                                // CopyPaste-g5u1: decorative QrCode icon removed — text-only
+                                // placeholder. CopyPaste-3nyq: still announces the loading state.
+                                Text(text = stringResource(R.string.cd_pairing_qr_loading))
                             }
                         }
                     }
@@ -970,10 +942,7 @@ fun PairScreen(
                     if (qr != null && !loading) {
                         when {
                             expired -> {
-                                Text(
-                                    text = stringResource(R.string.pair_token_expired),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
+                                Text(text = stringResource(R.string.pair_token_expired))
                             }
                             else -> {
                                 // !loading: outer if(qr != null && !loading) guards this
@@ -985,23 +954,10 @@ fun PairScreen(
                                         R.string.pair_token_expires_in_seconds,
                                         remainingSeconds
                                     ),
-                                    style = MaterialTheme.typography.bodyMedium,
                                     color = if (urgent) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
                                 )
-                                // Drain bar — 2dp thin track draining left-to-right over the TTL.
-                                // Static (no pulse): progress bar pulse removed for calm UI.
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(2.dp)
-                                        .clip(RoundedCornerShape(999.dp)),
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth(qrCountdownProgress(remainingSeconds, PAIR_TOKEN_TTL_SECONDS))
-                                            .height(2.dp),
-                                    )
-                                }
+                                // CopyPaste-g5u1: decorative drain bar removed — the countdown
+                                // text above already conveys the remaining time.
                             }
                         }
                     }
@@ -1036,61 +992,22 @@ fun PairScreen(
             scannedPeer?.let { peer ->
                 // 6i0w: replace raw Material Card with CopyPasteCard (glass surface).
                 CopyPasteCard {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        // lclr: avatar tile — 38dp accent-tint rounded tile with device initial.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            val displayName = peer.deviceName.ifBlank { "Unknown device" }
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = displayName.take(1).uppercase(),
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                            }
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    text = "Device to pair with",
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                                // Device name (from QR payload field 5)
-                                Text(
-                                    text = displayName,
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                            }
+                    Column {
+                        // CopyPaste-g5u1: decorative avatar tile removed — name shown as
+                        // plain text below.
+                        val displayName = peer.deviceName.ifBlank { "Unknown device" }
+                        Column {
+                            Text(text = "Device to pair with")
+                            // Device name (from QR payload field 5)
+                            Text(text = displayName)
                         }
 
-                        // 483o: transport chip pill — pill shape + hairline border + glyph.
-                        Row(
-                            modifier = Modifier
-                                .padding(horizontal = 9.dp, vertical = 3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(text = "⟲", fontSize = 11.sp)
-                            Text(
-                                text = "P2P",
-                                fontSize = 11.sp,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
+                        // 483o: transport indicator — plain text (pill chrome removed).
+                        Text(text = "P2P")
 
                         // Address (host:port from QR payload field 6, if present)
                         if (peer.addrHint.isNotBlank()) {
-                            Text(
-                                text = "Address: ${peer.addrHint}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                            Text(text = "Address: ${peer.addrHint}")
                         }
                         // 65gv (PG-47): show the FULL fingerprint in the SAS confirmation
                         // card — truncating a security fingerprint during verification
@@ -1098,10 +1015,6 @@ fun PairScreen(
                         // the peer device. Matches macOS SAS modal which shows 64 chars.
                         Text(
                             text = "Fingerprint: ${peer.fingerprint}",
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 11.sp,
-                            ),
                             modifier = Modifier.clickable {
                                 clipboardManager.setText(AnnotatedString(peer.fingerprint))
                                 scope.launch {
@@ -1122,7 +1035,7 @@ fun PairScreen(
                                 peerAppVersion = bs.peerAppVersion,
                             )
                             if (metaRows.isNotEmpty()) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Column {
                                     metaRows.forEach { (labelKey, value) ->
                                         // Resolve the string resource by name.
                                         // The label keys map 1:1 to strings.xml entries
@@ -1208,63 +1121,19 @@ fun PairScreen(
                 if (pairedFingerprint.isNotBlank()) {
                     // 6i0w: replace raw Material Card with CopyPasteCard.
                     CopyPasteCard {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // lclr: avatar tile — 38dp accent-tint rounded tile.
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(RoundedCornerShape(10.dp)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    // Device glyph placeholder — phone icon initial.
-                                    Text(
-                                        text = "📱",
-                                        fontSize = 18.sp,
-                                    )
-                                }
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = "Paired device",
-                                        style = MaterialTheme.typography.labelLarge,
-                                    )
-                                    // prld: status dot — danger for offline (unknown reachability here),
-                                    // no redundant "Online/Offline" text label per styleguide.
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape),
-                                            // CopyPaste-5917.49: was c.err (hardcoded red even
-                                            // when peer is reachable). PairScreen has no liveness
-                                            // signal for the peer, so a neutral (no tint) dot
-                                            // avoids misleading the user. Danger would only be
-                                            // appropriate when confirmed unreachable.
-                                        )
-                                        if (pairedAddr.isNotBlank()) {
-                                            Text(
-                                                text = pairedAddr,
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                        }
-                                    }
-                                }
+                        Column {
+                            // CopyPaste-g5u1: decorative avatar tile + neutral status dot
+                            // removed (the dot carried no state — PairScreen has no
+                            // liveness signal for the peer).
+                            Text(text = "Paired device")
+                            if (pairedAddr.isNotBlank()) {
+                                Text(text = pairedAddr)
                             }
 
-                            // 10hh: fingerprint mono + 16…8 truncation.
+                            // 10hh: fingerprint — 16…8 truncation.
                             val truncatedFp = formatPeerFingerprint(pairedFingerprint)
                             Text(
                                 text = truncatedFp,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp,
-                                ),
                                 modifier = Modifier.clickable {
                                     clipboardManager.setText(AnnotatedString(pairedFingerprint))
                                     scope.launch {

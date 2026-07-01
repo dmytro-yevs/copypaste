@@ -1,16 +1,5 @@
 package com.copypaste.android.ui.theme
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Tag
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.Link
-import androidx.compose.material.icons.outlined.Code
-import androidx.compose.material.icons.outlined.Email
-import androidx.compose.material.icons.outlined.Phone
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
@@ -41,39 +30,11 @@ import androidx.compose.ui.unit.dp
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// contentIconFor — canonical content-type → icon mapping (CopyPaste-5917.84)
-//
-// Maps the chip label string (as produced by TextKind and used by
-// ContentIconTile) to an Outlined Material icon. This is the SINGLE SOURCE OF
-// TRUTH for the Android icon parity with macOS (lucide canonical):
-//   PATH    → FolderOpen   (was: AttachFile — wrong, macOS uses folder-open)
-//   NUMBER  → Tag          (hash/# symbol — matches macOS Hash/lucide)
-//   IMAGE   → Image
-//   URL     → Link
-//   CODE    → Code
-//   EMAIL   → Email
-//   PHONE   → Phone
-//   COLOR   → Palette
-//   JSON    → DataObject
-//   default → ContentCopy
-//
-// Call sites: ContentIconTile in HistoryActivity (delegates here), and any
-// future composable that needs the same icon mapping.
+// contentIconFor (CopyPaste-5917.84) removed (g5u1): the chip-label → glyph
+// mapping it fed was decorative and unreferenced — ContentIconTile
+// (HistoryChips.kt) was already de-styled to show the chipLabel text instead
+// of an icon, so this function had zero remaining call sites.
 // ---------------------------------------------------------------------------
-fun contentIconFor(chipLabel: String): ImageVector = when (chipLabel) {
-    "IMAGE"  -> Icons.Outlined.Image
-    "URL"    -> Icons.Outlined.Link
-    "CODE"   -> Icons.Outlined.Code
-    "EMAIL"  -> Icons.Outlined.Email
-    "PHONE"  -> Icons.Outlined.Phone
-    "COLOR"  -> Icons.Outlined.Palette
-    "JSON"   -> Icons.Outlined.DataObject
-    // CopyPaste-5917.84: NUMBER=Tag (hash/# matches macOS lucide Hash)
-    "NUMBER" -> Icons.Outlined.Tag
-    // CopyPaste-5917.84: PATH=FolderOpen (was AttachFile — parity fix)
-    "PATH"   -> Icons.Outlined.FolderOpen
-    else     -> Icons.Outlined.ContentCopy
-}
 
 private val NoFill = SolidColor(Color.Transparent)
 private val PlaceholderStroke = SolidColor(Color.Black)

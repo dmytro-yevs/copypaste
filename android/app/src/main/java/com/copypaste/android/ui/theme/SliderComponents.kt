@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -20,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 
 // ---------------------------------------------------------------------------
 // Neutral slider rows — design-strip pass.
@@ -49,20 +47,16 @@ fun SteppedSliderRow(
     val maxIdx = (stepValues.size - 1).toFloat()
     val discreteSteps = (stepValues.size - 2).coerceAtLeast(0)
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = label, style = MaterialTheme.typography.bodyLarge)
+            Text(text = label, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 text = stepLabels[sliderPosition.toInt().coerceIn(0, stepValues.size - 1)],
-                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         val stepLabel = stepLabels[sliderPosition.toInt().coerceIn(0, stepValues.size - 1)]
@@ -97,20 +91,16 @@ fun ContinuousSliderRow(
 ) {
     var sliderPos by remember(value) { mutableFloatStateOf(value.coerceIn(min, max).toFloat()) }
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = label, style = MaterialTheme.typography.bodyLarge)
+            Text(text = label, color = MaterialTheme.colorScheme.onSurface)
             Text(
                 text = formatValue(sliderPos.toInt().coerceIn(min, max)),
-                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         val valueLabel = formatValue(sliderPos.toInt().coerceIn(min, max))
