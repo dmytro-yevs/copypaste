@@ -17,6 +17,21 @@ const MAX_ITEMS = 50;
 // synchronous — focusing too early silently no-ops on macOS.
 const FOCUS_DELAY_MS = 50;
 
+// getCurrentWindow() reads window.__TAURI_INTERNALS__.metadata and THROWS in a
+// plain browser (the mock/bridge preview: ?mock=1 / ?bridge=1), which crashed
+// the popup surface before it could render. Guard it: with no Tauri runtime,
+// return a stub whose focus subscription is a no-op. onFocusChanged is the only
+// member the hook uses. In the real app (and in vitest, which injects internals
+// via test/setup.ts) the real window is returned unchanged.
+type FocusWindow = Pick<ReturnType<typeof getCurrentWindow>, "onFocusChanged">;
+function getPopupWindow(): FocusWindow {
+  const hasTauri =
+    typeof window !== "undefined" &&
+    (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== undefined;
+  if (hasTauri) return getCurrentWindow();
+  return { onFocusChanged: () => Promise.resolve(() => {}) };
+}
+
 export interface UsePopupHistoryResult {
   items: HistoryEntry[];
   setItems: React.Dispatch<React.SetStateAction<HistoryEntry[]>>;
@@ -35,7 +50,7 @@ export function usePopupHistory(
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const win = getCurrentWindow();
+  const win = getPopupWindow();
 
   // Fetch/refresh clipboard items from the daemon.
   const refresh = useCallback(async () => {
