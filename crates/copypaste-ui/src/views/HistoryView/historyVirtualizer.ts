@@ -42,10 +42,15 @@ export function rowHeightFor(
   // §2: spacious = 42px, comfortable = 34px, compact = 28px (floor at 22px).
   const base = density === "spacious" ? 42 : density === "compact" ? 28 : 34;
   const single = Math.max(previewSize, base, 22);
-  // Each extra preview line adds ~20px (fs-base line-height). previewLines=1
-  // keeps the original single-line height exactly (back-compatible default).
+  // Estimate how many lines THIS clip actually needs (explicit newlines +
+  // rough width-agnostic wrap), capped at the previewLines setting — so short
+  // clips stay compact (no dead gap) while long clips grow up to the limit.
   const LINE_PX = 20;
-  return single + Math.max(0, previewLines - 1) * LINE_PX;
+  const CHARS_PER_LINE = 120;
+  const explicit = (entry.preview.match(/\n/g)?.length ?? 0) + 1;
+  const wrapped = Math.ceil(entry.preview.length / CHARS_PER_LINE);
+  const estLines = Math.min(previewLines, Math.max(1, explicit, wrapped));
+  return single + Math.max(0, estLines - 1) * LINE_PX;
 }
 
 /**

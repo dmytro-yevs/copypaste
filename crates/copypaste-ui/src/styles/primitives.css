@@ -244,7 +244,12 @@
     color: var(--ct, var(--c-text));
   }
   .tile--swatch { box-shadow: inset 0 0 0 var(--stroke-1) var(--ring-inset); }
+  .tile--thumb img { display: block; max-width: 100%; border-radius: var(--r-chip); }
   .tile--thumb {
+    width: auto;
+    height: auto;
+    min-width: var(--sz-tile);
+    max-width: 168px;
     background: linear-gradient(
       135deg,
       color-mix(in srgb, var(--c-image) 45%, var(--card)),

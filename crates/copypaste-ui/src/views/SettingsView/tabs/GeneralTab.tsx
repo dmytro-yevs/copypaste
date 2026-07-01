@@ -81,25 +81,24 @@ export function GeneralTab({
         {/* bdac.104: InfoPopover moved to info= slot (label column) for all rows */}
         <SettingsRow
           title="Enable sync"
+          // 7set: warn as a row subtitle (not a far-right control-cluster span)
+          // when the daemon doesn't acknowledge sync_enabled so the user knows
+          // the toggle may have no effect on this daemon version.
+          description={
+            syncEnabledStub && !offline
+              ? "Sync control unavailable — please update the CopyPaste background service to enable this setting."
+              : undefined
+          }
           info={<InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />}
         >
-          <div className="ctl ctl--field">
-            {/* 7set: warn when daemon doesn't acknowledge sync_enabled so the
-                user knows the toggle may have no effect on this daemon version. */}
-            {syncEnabledStub && !offline && (
-              <span role="note" className="field-note">
-                Sync control unavailable — please update the CopyPaste background service to enable this setting.
-              </span>
-            )}
-            <div className="ctl">
-              <LimitsMsg field="sync_enabled" limitsMsg={limitsMsg} />
-              <Toggle
-                checked={syncEnabled}
-                onChange={(v) => void handleSyncEnabledToggle(v)}
-                disabled={offline}
-                aria-label="Enable sync"
-              />
-            </div>
+          <div className="ctl">
+            <LimitsMsg field="sync_enabled" limitsMsg={limitsMsg} />
+            <Toggle
+              checked={syncEnabled}
+              onChange={(v) => void handleSyncEnabledToggle(v)}
+              disabled={offline}
+              aria-label="Enable sync"
+            />
           </div>
         </SettingsRow>
         {/* bdac.47: InfoPopover added — Private mode had no description */}

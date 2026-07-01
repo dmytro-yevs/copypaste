@@ -8,8 +8,9 @@ import { KIND_PRESENTATION } from "./kindPresentation";
 
 export interface ClipMetadataProps {
   entry: HistoryEntry;
-  /** This device's id (to resolve the "This device" origin label). */
-  ownDeviceId: string;
+  /** This device's id (to resolve the "This device" origin label). Optional —
+   *  the popup has no own-device id and just shows the origin device name. */
+  ownDeviceId?: string;
 }
 
 /**
@@ -22,7 +23,7 @@ export function ClipMetadata({ entry, ownDeviceId }: ClipMetadataProps) {
   const kind = normalizeContentKind(entry);
   const p = KIND_PRESENTATION[kind];
   const app = sourceAppLabel(entry.app_bundle_id);
-  const origin = deviceLabel(entry.origin_device_id, ownDeviceId, entry.origin_device_name);
+  const origin = deviceLabel(entry.origin_device_id, ownDeviceId ?? "", entry.origin_device_name);
 
   return (
     <div className="row__meta">
