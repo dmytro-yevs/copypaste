@@ -122,9 +122,9 @@ export function SyncTab({
         syncStatus.supabase_configured &&
         syncStatus.signed_in &&
         syncStatus.email && (
-          <div>
+          <div className="statusrow mb-4">
             <span>Signed in as {syncStatus.email}</span>
-            <span>— All devices must use this same account to sync.</span>
+            <span className="txt-faint">— All devices must use this same account to sync.</span>
           </div>
         )}
 
@@ -143,7 +143,7 @@ export function SyncTab({
       />
       <Panel>
         <SettingsRow title="Sync on Wi-Fi only">
-          <div>
+          <div className="ctl">
             <LimitsMsg field="sync_on_wifi_only" limitsMsg={limitsMsg} />
             <Toggle
               checked={syncOnWifiOnly}
@@ -157,7 +157,7 @@ export function SyncTab({
           title="Auto-apply synced clipboard"
           info={<InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />}
         >
-          <div>
+          <div className="ctl">
             {/* wrfv: visible inline notice so the user knows synced clips will
                 silently overwrite the active clipboard (the actual write is
                 daemon-side; this is the UI surface for the setting). */}
@@ -165,12 +165,13 @@ export function SyncTab({
               <span
                 data-testid="auto-apply-notice"
                 role="note"
+                className="field-note"
               >
                 Synced clips will overwrite the active clipboard automatically.
                 Turn off to keep clipboard intact and paste manually from history.
               </span>
             )}
-            <div>
+            <div className="ctl">
               <LimitsMsg field="auto_apply_synced_clip" limitsMsg={limitsMsg} />
               <Toggle
                 checked={autoApplySyncedClip}
@@ -195,7 +196,7 @@ export function SyncTab({
           title="Enable P2P (LAN) sync"
           info={<InfoPopover text="Direct device-to-device sync over your local network. Requires a paired device on the Devices screen. Disable for cloud-only sync." />}
         >
-          <div>
+          <div className="ctl">
             <LimitsMsg field="p2p_enabled" limitsMsg={limitsMsg} />
             <Toggle
               checked={config.p2p_enabled}
@@ -210,7 +211,7 @@ export function SyncTab({
           title="Visible on local network"
           info={<InfoPopover text="When off, this device stops advertising via mDNS-SD and will not appear in the device list on other Macs on the same network. Paired peers with a known address can still connect directly." />}
         >
-          <div>
+          <div className="ctl">
             <LimitsMsg field="lan_visibility" limitsMsg={limitsMsg} />
             <Toggle
               checked={lanVisibility}
@@ -237,34 +238,38 @@ export function SyncTab({
       />
       <Panel>
         <SettingsRow title="Supabase URL">
-          <input
-            type="url"
-            placeholder="https://your-project.supabase.co"
-            value={supabaseUrl}
-            onChange={(e) => setSupabaseUrl(e.target.value)}
-            disabled={offline}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </SettingsRow>
-        {/* bdac.80: standardized to "Anon key" (sentence case, drop redundant "Supabase" prefix — section header already provides context) */}
-        <SettingsRow title="Anon key">
-          <div>
+          <div className="field">
             <input
-              type="password"
-              placeholder={
-                syncStatus?.supabase_configured && !supabaseKey
-                  ? "set ✓ (leave blank to keep)"
-                  : "eyJ…"
-              }
-              value={supabaseKey}
-              onChange={(e) => setSupabaseKey(e.target.value)}
+              type="url"
+              placeholder="https://your-project.supabase.co"
+              value={supabaseUrl}
+              onChange={(e) => setSupabaseUrl(e.target.value)}
               disabled={offline}
               autoComplete="off"
               spellCheck={false}
             />
+          </div>
+        </SettingsRow>
+        {/* bdac.80: standardized to "Anon key" (sentence case, drop redundant "Supabase" prefix — section header already provides context) */}
+        <SettingsRow title="Anon key">
+          <div className="ctl">
+            <div className="field">
+              <input
+                type="password"
+                placeholder={
+                  syncStatus?.supabase_configured && !supabaseKey
+                    ? "set ✓ (leave blank to keep)"
+                    : "eyJ…"
+                }
+                value={supabaseKey}
+                onChange={(e) => setSupabaseKey(e.target.value)}
+                disabled={offline}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
             {syncStatus?.supabase_configured && !supabaseKey && (
-              <span>set ✓</span>
+              <span className="statusrow">set ✓</span>
             )}
           </div>
         </SettingsRow>
@@ -274,43 +279,47 @@ export function SyncTab({
              Inputs are cleared after a successful Save. Password is always masked. */}
         {/* crh3.17: "Email" matches "Anon key" pattern (no prefix; bdac.80) */}
         <SettingsRow title="Email">
-          <div>
-            <input
-              type="email"
-              placeholder={
-                syncStatus?.supabase_email_set && !supabaseEmail
-                  ? "set ✓ (leave blank to keep)"
-                  : "user@example.com"
-              }
-              value={supabaseEmail}
-              onChange={(e) => setSupabaseEmail(e.target.value)}
-              disabled={offline}
-              autoComplete="username"
-              spellCheck={false}
-            />
+          <div className="ctl">
+            <div className="field">
+              <input
+                type="email"
+                placeholder={
+                  syncStatus?.supabase_email_set && !supabaseEmail
+                    ? "set ✓ (leave blank to keep)"
+                    : "user@example.com"
+                }
+                value={supabaseEmail}
+                onChange={(e) => setSupabaseEmail(e.target.value)}
+                disabled={offline}
+                autoComplete="username"
+                spellCheck={false}
+              />
+            </div>
             {syncStatus?.supabase_email_set && !supabaseEmail && (
-              <span>set ✓</span>
+              <span className="statusrow">set ✓</span>
             )}
           </div>
         </SettingsRow>
         {/* crh3.17: "Password" matches "Anon key" / "Email" pattern (no prefix) */}
         <SettingsRow title="Password">
-          <div>
-            <input
-              type="password"
-              placeholder={
-                syncStatus?.supabase_password_set && !supabasePassword
-                  ? "set ✓ (leave blank to keep)"
-                  : "Password"
-              }
-              value={supabasePassword}
-              onChange={(e) => setSupabasePassword(e.target.value)}
-              disabled={offline}
-              autoComplete="current-password"
-              spellCheck={false}
-            />
+          <div className="ctl">
+            <div className="field">
+              <input
+                type="password"
+                placeholder={
+                  syncStatus?.supabase_password_set && !supabasePassword
+                    ? "set ✓ (leave blank to keep)"
+                    : "Password"
+                }
+                value={supabasePassword}
+                onChange={(e) => setSupabasePassword(e.target.value)}
+                disabled={offline}
+                autoComplete="current-password"
+                spellCheck={false}
+              />
+            </div>
             {syncStatus?.supabase_password_set && !supabasePassword && (
-              <span>set ✓</span>
+              <span className="statusrow">set ✓</span>
             )}
           </div>
         </SettingsRow>
@@ -319,37 +328,42 @@ export function SyncTab({
           title="Relay URL"
           info={<InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />}
         >
-          <input
-            type="url"
-            placeholder="https://relay.example.com"
-            value={relayUrl}
-            onChange={(e) => setRelayUrl(e.target.value)}
-            disabled={offline}
-            autoComplete="off"
-            spellCheck={false}
-          />
+          <div className="field">
+            <input
+              type="url"
+              placeholder="https://relay.example.com"
+              value={relayUrl}
+              onChange={(e) => setRelayUrl(e.target.value)}
+              disabled={offline}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
         </SettingsRow>
         {/* bdac.104: InfoPopover moved to info= slot (label column) */}
         <SettingsRow
           title="Sync passphrase"
           info={<InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Click 'Set passphrase' or press Enter to save." />}
         >
-          <div>
-            <div>
-              <input
-                type="password"
-                placeholder="Shared passphrase…"
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
-                disabled={offline}
-                autoComplete="new-password"
-                spellCheck={false}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleSetPassphrase();
-                }}
-              />
+          <div className="ctl ctl--col">
+            <div className="ctl">
+              <div className="field">
+                <input
+                  type="password"
+                  placeholder="Shared passphrase…"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  disabled={offline}
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleSetPassphrase();
+                  }}
+                />
+              </div>
               <button
                 type="button"
+                className="btn btn--secondary sm"
                 disabled={offline || passphrase.trim() === ""}
                 onClick={() => void handleSetPassphrase()}
               >
@@ -357,26 +371,27 @@ export function SyncTab({
               </button>
             </div>
             {passphraseSavedMsg !== null && (
-              <span>
+              <span className="field-note field-note--dim">
                 {passphraseSavedMsg}
               </span>
             )}
           </div>
         </SettingsRow>
         {testMsg !== null && (
-          <div>
-            {testMsg.text}
+          <div className={` mt-3`}>
+            <span className="banner__x">{testMsg.text}</span>
           </div>
         )}
-        <div>
+        <div className="ctl ctl--wide mt-4">
           {saveError !== null && (
-            <span>{saveError}</span>
+            <span className="field-note field-note--err">{saveError}</span>
           )}
           {savedMsg && !saveError && (
-            <span>Saved</span>
+            <span className="field-note field-note--ok">Saved</span>
           )}
           <button
             type="button"
+            className="btn btn--secondary sm"
             disabled={offline || testing}
             onClick={() => void handleTestConnection()}
           >
@@ -384,6 +399,7 @@ export function SyncTab({
           </button>
           <button
             type="button"
+            className="btn btn--primary sm"
             disabled={offline}
             onClick={() => void handleSaveConfig()}
           >
@@ -397,21 +413,18 @@ export function SyncTab({
         <>
           <SectionHeader label="Status" />
           <Panel>
-            <div>
-              <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
-              <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
-              <StatusRow label="Signed in" ok={syncStatus.signed_in} />
-              {/* i2sr (PG-40): hybrid relative/absolute format + "Synced " prefix
-                  to match Android parity. Relative when ≤24 h ago; absolute beyond. */}
-              <div>
-                <span>Last sync</span>
-                <span>
-                  {syncStatus.last_sync_ms
-                    ? `Synced ${formatLastSync(syncStatus.last_sync_ms)}`
-                    : "Never"}
-                </span>
-              </div>
-            </div>
+            <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
+            <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
+            <StatusRow label="Signed in" ok={syncStatus.signed_in} />
+            {/* i2sr (PG-40): hybrid relative/absolute format + "Synced " prefix
+                to match Android parity. Relative when ≤24 h ago; absolute beyond. */}
+            <SettingsRow title="Last sync">
+              <span className="field-note field-note--dim">
+                {syncStatus.last_sync_ms
+                  ? `Synced ${formatLastSync(syncStatus.last_sync_ms)}`
+                  : "Never"}
+              </span>
+            </SettingsRow>
           </Panel>
         </>
       )}

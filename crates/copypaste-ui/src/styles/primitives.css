@@ -340,4 +340,16 @@
   .modal__s { font-size: var(--fs-md); color: var(--dim); margin-bottom: var(--gap-modal-sub); line-height: var(--lh-normal); }
   .modal__act { display: flex; gap: var(--s-4); }
   .modal__act .btn { flex: 1; }
+
+  /* --- Range slider + growable field (slice 5 cleanup) ---------------------- */
+  .field--grow { flex: 1; max-width: 320px; }
+  .range { flex: 1; accent-color: var(--accent); }
+  .range__value {
+    min-width: 80px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-sm);
+    color: var(--dim);
+    flex: none;
+  }
 }

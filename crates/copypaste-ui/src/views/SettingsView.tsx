@@ -28,94 +28,92 @@ export function SettingsView() {
 
       {s.loadState !== "loading" && (
         <div>
-          <div>
-            <div>
-              <TabBar active={activeTab} onChange={setActiveTab} />
-            </div>
-            <div>
-              {activeTab === "general" && (
-                <div role="tabpanel" id="tabpanel-general" aria-labelledby="tab-general">
-                  <GeneralTab
-                    offline={s.offline} loadState={s.loadState} prefs={s.prefs} setPrefs={s.setPrefs}
-                    syncEnabled={s.syncEnabled} syncEnabledStub={s.syncEnabledStub}
-                    privateMode={s.privateMode} privateModeError={s.privateModeError}
-                    notifPermDenied={s.notifPermDenied} collectPublicIp={s.collectPublicIp}
-                    setCollectPublicIp={s.setCollectPublicIp} pasteAsPlainText={s.pasteAsPlainText}
-                    setPasteAsPlainText={s.setPasteAsPlainText} allowScreenshots={s.allowScreenshots}
-                    allowScreenshotsError={s.allowScreenshotsError} excludedApps={s.excludedApps}
-                    newExcludedApp={s.newExcludedApp} setNewExcludedApp={s.setNewExcludedApp}
-                    daemonVersion={s.daemonVersion} limitsMsg={s.limitsMsg}
-                    buildConfigPatch={s.buildConfigPatch} handleSyncEnabledToggle={s.handleSyncEnabledToggle}
-                    handlePrivateMode={s.handlePrivateMode} handleAllowScreenshots={s.handleAllowScreenshots}
-                    addExcludedApp={s.addExcludedApp} removeExcludedApp={s.removeExcludedApp}
-                    setReloadKey={s.setReloadKey}
-                  />
-                </div>
-              )}
-              {activeTab === "display" && (
-                <div role="tabpanel" id="tabpanel-display" aria-labelledby="tab-display">
-                  <DisplayTab prefs={s.prefs} setPrefs={s.setPrefs} />
-                </div>
-              )}
-              {activeTab === "sync" && (
-                <div role="tabpanel" id="tabpanel-sync" aria-labelledby="tab-sync">
-                  <SyncTab
-                    offline={s.offline} syncEnabled={s.syncEnabled} syncOnWifiOnly={s.syncOnWifiOnly}
-                    autoApplySyncedClip={s.autoApplySyncedClip} config={s.config}
-                    syncRestarting={s.syncRestarting} lanVisibility={s.lanVisibility}
-                    supabaseUrl={s.supabaseUrl} setSupabaseUrl={s.setSupabaseUrl}
-                    supabaseKey={s.supabaseKey} setSupabaseKey={s.setSupabaseKey}
-                    supabaseEmail={s.supabaseEmail} setSupabaseEmail={s.setSupabaseEmail}
-                    supabasePassword={s.supabasePassword} setSupabasePassword={s.setSupabasePassword}
-                    relayUrl={s.relayUrl} setRelayUrl={s.setRelayUrl}
-                    passphrase={s.passphrase} setPassphrase={s.setPassphrase}
-                    passphraseSavedMsg={s.passphraseSavedMsg} passphraseSaveOk={s.passphraseSaveOk} testMsg={s.testMsg} testing={s.testing}
-                    savedMsg={s.savedMsg} saveError={s.saveError} syncStatus={s.syncStatus}
-                    limitsMsg={s.limitsMsg} inputCls={INPUT_CLS} btnCls={BTN_CLS} btnStyle={BTN_STYLE}
-                    handleWifiOnlyToggle={s.handleWifiOnlyToggle}
-                    handleAutoApplySyncedClipToggle={s.handleAutoApplySyncedClipToggle}
-                    handleP2pToggle={s.handleP2pToggle} handleLanVisibilityToggle={s.handleLanVisibilityToggle}
-                    handleSetPassphrase={s.handleSetPassphrase} handleTestConnection={s.handleTestConnection}
-                    handleSaveConfig={s.handleSaveConfig}
-                    cloudAccountMismatch={s.cloudAccountMismatch}
-                    localSupabaseAccountId={s.localSupabaseAccountId}
-                  />
-                </div>
-              )}
-              {/* bdac.59: Shortcuts tab is macOS-only — no Android equivalent. */}
-              {activeTab === "shortcuts" && (
-                <div role="tabpanel" id="tabpanel-shortcuts" aria-labelledby="tab-shortcuts">
-                  <ShortcutsTab
-                    pendingShortcut={s.pendingShortcut} setPendingShortcut={s.setPendingShortcut}
-                    currentShortcut={s.currentShortcut} defaultShortcut={s.defaultShortcut}
-                    shortcutMsg={s.shortcutMsg} btnCls={BTN_CLS} btnStyle={BTN_STYLE}
-                    handleResetShortcut={s.handleResetShortcut} handleSaveShortcut={s.handleSaveShortcut}
-                  />
-                </div>
-              )}
-              {activeTab === "storage" && (
-                <div role="tabpanel" id="tabpanel-storage" aria-labelledby="tab-storage">
-                  <StorageTab
-                    offline={s.offline} prefs={s.prefs} setPrefs={s.setPrefs}
-                    maxTextBytes={s.maxTextBytes} setMaxTextBytes={s.setMaxTextBytes}
-                    maxImageBytes={s.maxImageBytes} setMaxImageBytes={s.setMaxImageBytes}
-                    maxFileBytes={s.maxFileBytes} setMaxFileBytes={s.setMaxFileBytes}
-                    quotaBytes={s.quotaBytes} setQuotaBytes={s.setQuotaBytes}
-                    sensitiveTtlSecs={s.sensitiveTtlSecs} setSensitiveTtlSecs={s.setSensitiveTtlSecs}
-                    exportInProgress={s.exportInProgress} exportMsg={s.exportMsg}
-                    exportIncludeSensitive={s.exportIncludeSensitive}
-                    setExportIncludeSensitive={s.setExportIncludeSensitive}
-                    importInProgress={s.importInProgress} importMsg={s.importMsg}
-                    dbStats={s.dbStats} vacuumBusy={s.vacuumBusy} vacuumMsg={s.vacuumMsg}
-                    deleteMsg={s.deleteMsg} limitsMsg={s.limitsMsg} btnCls={BTN_CLS} btnStyle={BTN_STYLE}
-                    saveLimitsField={s.saveLimitsField as StorageTabProps["saveLimitsField"]}
-                    showLimitsMsg={s.showLimitsMsg} handleExport={s.handleExport}
-                    handleImportFile={s.handleImportFile} handleVacuum={s.handleVacuum}
-                    setDeleteConfirm={s.setDeleteConfirm}
-                  />
-                </div>
-              )}
-            </div>
+          {/* TabBar itself carries .set-tabs (shell.css: the flex row that
+              directly parents the .set-tab buttons) — see TabBar.tsx. */}
+          <TabBar active={activeTab} onChange={setActiveTab} />
+          <div className="set-body">
+            {activeTab === "general" && (
+              <div className="set-pane on" role="tabpanel" id="tabpanel-general" aria-labelledby="tab-general">
+                <GeneralTab
+                  offline={s.offline} loadState={s.loadState} prefs={s.prefs} setPrefs={s.setPrefs}
+                  syncEnabled={s.syncEnabled} syncEnabledStub={s.syncEnabledStub}
+                  privateMode={s.privateMode} privateModeError={s.privateModeError}
+                  notifPermDenied={s.notifPermDenied} collectPublicIp={s.collectPublicIp}
+                  setCollectPublicIp={s.setCollectPublicIp} pasteAsPlainText={s.pasteAsPlainText}
+                  setPasteAsPlainText={s.setPasteAsPlainText} allowScreenshots={s.allowScreenshots}
+                  allowScreenshotsError={s.allowScreenshotsError} excludedApps={s.excludedApps}
+                  newExcludedApp={s.newExcludedApp} setNewExcludedApp={s.setNewExcludedApp}
+                  daemonVersion={s.daemonVersion} limitsMsg={s.limitsMsg}
+                  buildConfigPatch={s.buildConfigPatch} handleSyncEnabledToggle={s.handleSyncEnabledToggle}
+                  handlePrivateMode={s.handlePrivateMode} handleAllowScreenshots={s.handleAllowScreenshots}
+                  addExcludedApp={s.addExcludedApp} removeExcludedApp={s.removeExcludedApp}
+                  setReloadKey={s.setReloadKey}
+                />
+              </div>
+            )}
+            {activeTab === "display" && (
+              <div className="set-pane on" role="tabpanel" id="tabpanel-display" aria-labelledby="tab-display">
+                <DisplayTab prefs={s.prefs} setPrefs={s.setPrefs} />
+              </div>
+            )}
+            {activeTab === "sync" && (
+              <div className="set-pane on" role="tabpanel" id="tabpanel-sync" aria-labelledby="tab-sync">
+                <SyncTab
+                  offline={s.offline} syncEnabled={s.syncEnabled} syncOnWifiOnly={s.syncOnWifiOnly}
+                  autoApplySyncedClip={s.autoApplySyncedClip} config={s.config}
+                  syncRestarting={s.syncRestarting} lanVisibility={s.lanVisibility}
+                  supabaseUrl={s.supabaseUrl} setSupabaseUrl={s.setSupabaseUrl}
+                  supabaseKey={s.supabaseKey} setSupabaseKey={s.setSupabaseKey}
+                  supabaseEmail={s.supabaseEmail} setSupabaseEmail={s.setSupabaseEmail}
+                  supabasePassword={s.supabasePassword} setSupabasePassword={s.setSupabasePassword}
+                  relayUrl={s.relayUrl} setRelayUrl={s.setRelayUrl}
+                  passphrase={s.passphrase} setPassphrase={s.setPassphrase}
+                  passphraseSavedMsg={s.passphraseSavedMsg} passphraseSaveOk={s.passphraseSaveOk} testMsg={s.testMsg} testing={s.testing}
+                  savedMsg={s.savedMsg} saveError={s.saveError} syncStatus={s.syncStatus}
+                  limitsMsg={s.limitsMsg} inputCls={INPUT_CLS} btnCls={BTN_CLS} btnStyle={BTN_STYLE}
+                  handleWifiOnlyToggle={s.handleWifiOnlyToggle}
+                  handleAutoApplySyncedClipToggle={s.handleAutoApplySyncedClipToggle}
+                  handleP2pToggle={s.handleP2pToggle} handleLanVisibilityToggle={s.handleLanVisibilityToggle}
+                  handleSetPassphrase={s.handleSetPassphrase} handleTestConnection={s.handleTestConnection}
+                  handleSaveConfig={s.handleSaveConfig}
+                  cloudAccountMismatch={s.cloudAccountMismatch}
+                  localSupabaseAccountId={s.localSupabaseAccountId}
+                />
+              </div>
+            )}
+            {/* bdac.59: Shortcuts tab is macOS-only — no Android equivalent. */}
+            {activeTab === "shortcuts" && (
+              <div className="set-pane on" role="tabpanel" id="tabpanel-shortcuts" aria-labelledby="tab-shortcuts">
+                <ShortcutsTab
+                  pendingShortcut={s.pendingShortcut} setPendingShortcut={s.setPendingShortcut}
+                  currentShortcut={s.currentShortcut} defaultShortcut={s.defaultShortcut}
+                  shortcutMsg={s.shortcutMsg} btnCls={BTN_CLS} btnStyle={BTN_STYLE}
+                  handleResetShortcut={s.handleResetShortcut} handleSaveShortcut={s.handleSaveShortcut}
+                />
+              </div>
+            )}
+            {activeTab === "storage" && (
+              <div className="set-pane on" role="tabpanel" id="tabpanel-storage" aria-labelledby="tab-storage">
+                <StorageTab
+                  offline={s.offline} prefs={s.prefs} setPrefs={s.setPrefs}
+                  maxTextBytes={s.maxTextBytes} setMaxTextBytes={s.setMaxTextBytes}
+                  maxImageBytes={s.maxImageBytes} setMaxImageBytes={s.setMaxImageBytes}
+                  maxFileBytes={s.maxFileBytes} setMaxFileBytes={s.setMaxFileBytes}
+                  quotaBytes={s.quotaBytes} setQuotaBytes={s.setQuotaBytes}
+                  sensitiveTtlSecs={s.sensitiveTtlSecs} setSensitiveTtlSecs={s.setSensitiveTtlSecs}
+                  exportInProgress={s.exportInProgress} exportMsg={s.exportMsg}
+                  exportIncludeSensitive={s.exportIncludeSensitive}
+                  setExportIncludeSensitive={s.setExportIncludeSensitive}
+                  importInProgress={s.importInProgress} importMsg={s.importMsg}
+                  dbStats={s.dbStats} vacuumBusy={s.vacuumBusy} vacuumMsg={s.vacuumMsg}
+                  deleteMsg={s.deleteMsg} limitsMsg={s.limitsMsg} btnCls={BTN_CLS} btnStyle={BTN_STYLE}
+                  saveLimitsField={s.saveLimitsField as StorageTabProps["saveLimitsField"]}
+                  showLimitsMsg={s.showLimitsMsg} handleExport={s.handleExport}
+                  handleImportFile={s.handleImportFile} handleVacuum={s.handleVacuum}
+                  setDeleteConfirm={s.setDeleteConfirm}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}

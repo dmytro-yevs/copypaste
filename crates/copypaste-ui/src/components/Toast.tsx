@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import ReactDOM from "react-dom";
+import { X } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // GlassToast — web equivalent of Android GlassToast (CopyPaste-1a4t)
@@ -25,6 +26,26 @@ export interface ToastMessage {
   text: string;
   kind?: ToastKind;
   duration?: number;
+}
+
+/**
+ * Map a ToastKind to the leading `.dot-stat` colour (patterns.css `.toast`,
+ * design.md Decision 13/X5). `.dot-stat` itself only ships on/off (ok/err)
+ * variants, so the full four-severity palette is applied inline here — same
+ * approach as SyncStatusChip's status dot.
+ */
+function toastDotColor(kind: ToastKind | undefined): string {
+  switch (kind) {
+    case "success":
+      return "var(--ok)";
+    case "warning":
+      return "var(--warn)";
+    case "error":
+      return "var(--err)";
+    case "info":
+    default:
+      return "var(--info)";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -47,22 +68,28 @@ function GlassToastItem({
   }, [msg.id, duration, onDismiss]);
 
   return (
-    // surface-card: glass float (spec §surface-card)
-    // toast-enter: approved motion primitive for entrance (§MO-6).
+    // .toast/.show: patterns.css toast pill (design.md Decision 13/X5).
+    // aria-live="polite": announced without interrupting the user.
     <div
       role="status"
       aria-live="polite"
+      className="toast show"
     >
       {/* VISM-11: leading semantic colour dot — visual consistency with HistoryView toasts */}
       <span
+        className="dot-stat"
+        style={{ background: toastDotColor(msg.kind) }}
         aria-hidden="true"
       />
       <span>{msg.text}</span>
       <button
         type="button"
+        className="iconbtn"
         aria-label="Dismiss"
         onClick={() => onDismiss(msg.id)}
-      />
+      >
+        <X aria-hidden="true" />
+      </button>
     </div>
   );
 }

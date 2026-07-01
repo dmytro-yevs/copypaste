@@ -3,6 +3,7 @@
 // Extracted hooks: useOwnDevice, usePairedDevices, useDiscoveredDevices, useQrCode.
 // Default export + props unchanged; all data-testids preserved.
 import { useState, useEffect, useCallback } from "react";
+import { Briefcase, Info, Wifi } from "lucide-react";
 import { ConfirmModal } from "../../components/ConfirmModal";
 // 5917.19: GlassToast system — routes "Revoke all" confirmation/feedback through
 // the shared toast provider instead of a raw <span> in the actions bar.
@@ -167,6 +168,8 @@ function DevicesViewInner({
     <div>
       {/* uw45: replaced tiny inline Yes/No with a proper modal confirmation */}
       <button
+        type="button"
+        className="btn btn--danger sm"
         onClick={() => setRevokeAllConfirm(true)}
         disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
       >
@@ -269,8 +272,11 @@ function DevicesViewInner({
           falls back to peer.online from the last 10 s list_peers poll when the
           store has no entry yet. */}
       {/* zxv2: SectionHeader replaces raw <p> tag.
-          crh3.43: faint removed — PARITY-SPEC §3 canonical colour is text-ide-dim. */}
-      <div>
+          crh3.43: faint removed — PARITY-SPEC §3 canonical colour is text-ide-dim.
+          CopyPaste-g27b.11: this title+count row doubles as the devices view's
+          header bar (.dev-head — shell.css) — ViewShell's own <header> is wired
+          separately (out of this slice's scope) and stays a plain title above it. */}
+      <div className="dev-head">
         {/* bdac.48: sentence case to match other section headers */}
         <SectionHeader label="Paired devices" />
         {loadState === "ready" && peers.length > 0 && (
@@ -284,8 +290,15 @@ function DevicesViewInner({
         )}
       </div>
 
+      {/* CopyPaste-g27b.11: educates the user about the new tap-to-expand /
+          tap-to-copy interaction added by the .devrow disclosure pattern. */}
+      <p className="dev-hint">
+        <Info aria-hidden="true" />
+        Tap a device to expand · tap any value to copy
+      </p>
+
       {/* ── Single unified device list (this Mac first, then peers) ── */}
-      <div>
+      <div className="dev-list">
         {/* This device — always first */}
         {ownState.status === "loading" && (
           /* Skeleton matches ThisDeviceCard layout: avatar block + two text rows.
@@ -311,10 +324,11 @@ function DevicesViewInner({
         {/* Paired peers — loadState is always "ready" here; "loading" returns
             early with a full-page spinner (CopyPaste-bdac.2). */}
         {loadState === "ready" && peers.length === 0 && (
-          <div>
-            {/* Briefcase icon via lucide-react (§9: replace inline SVGs) */}
-            <p>No paired devices</p>
-          </div>
+          <EmptyState
+            icon={<Briefcase aria-hidden="true" />}
+            title="No paired devices"
+            body="Pair your phone or another Mac to sync your clipboard — end-to-end encrypted."
+          />
         )}
         {loadState === "ready" &&
           peers.map((peer) => {
@@ -365,7 +379,7 @@ function DevicesViewInner({
         </button>
       </div>
       {discovered.length > 0 ? (
-        <div>
+        <div className="dev-list">
           {discovered.map((device, idx) => (
             <DiscoveredRow
               key={device.device_id}
@@ -378,15 +392,13 @@ function DevicesViewInner({
         </div>
       ) : (
         // reveal-up: section fades up into view; network-rings on icon = expanding discovery rings
-        <div>
-          <span
-            aria-hidden="true"
-          />
-          <p>No devices found on the network yet.</p>
-        </div>
+        <p className="dev-hint">
+          <Wifi aria-hidden="true" />
+          No devices found on the network yet.
+        </p>
       )}
       {discoverError !== null && (
-        <p>{discoverError}</p>
+        <p className="field-note field-note--err">{discoverError}</p>
       )}
 
       {/* ── Divider ────────────────────────────────────────────── */}

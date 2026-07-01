@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Download, RefreshCw, Search } from "lucide-react";
 import { readLogs, logDirPath, IpcError } from "../lib/ipc";
 import { ViewShell } from "../components/ViewShell";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
@@ -17,6 +18,44 @@ function levelOf(line: string): LogLevel {
   if (/\bWARN(?:ING)?\b/i.test(line)) return "warn";
   if (/\b(?:DEBUG|TRACE)\b/i.test(line)) return "debug";
   return "info";
+}
+
+/**
+ * Map the internal LogLevel to the design system's `.lvl` severity modifier
+ * (`ok`/`info`/`warn`/`err` — shell.css `.logline .lvl`). There is no
+ * dedicated DEBUG/TRACE swatch in the design system, so it folds into `info`
+ * (still a neutral/subdued tone relative to WARN/ERROR); the displayed label
+ * text still shows the real level (levelOf's return value), only the colour
+ * class is collapsed.
+ */
+function lvlClass(level: LogLevel): "ok" | "info" | "warn" | "err" {
+  switch (level) {
+    case "error":
+      return "err";
+    case "warn":
+      return "warn";
+    case "info":
+    case "debug":
+    default:
+      return "info";
+  }
+}
+
+// Matches tracing_subscriber's compact formatter: "<timestamp>  <LEVEL> <target>: <message>".
+const LOG_LINE_RE = /^(\S+)\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(.*)$/;
+
+/**
+ * Split one raw daemon log line into a `.t` timestamp + `.m` message for the
+ * `.logline` layout (shell.css). Falls back to an empty timestamp and the
+ * full line as the message for anything that doesn't match (e.g. a wrapped
+ * continuation line) — no log content is ever dropped.
+ */
+function splitLogLine(line: string): { t: string; m: string } {
+  const match = LOG_LINE_RE.exec(line);
+  if (match) {
+    return { t: match[1], m: match[3] };
+  }
+  return { t: "", m: line };
 }
 
 /**
@@ -42,6 +81,9 @@ export function LogView() {
   const [logPath, setLogPath] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Slice 5 (CopyPaste-g27b.12): client-side substring filter over the
+  // already-loaded lines, wired to the `.field` search box in the header.
+  const [filter, setFilter] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -94,22 +136,46 @@ export function LogView() {
   }, [content]);
 
   const lines = content.split("\n");
+  const trimmedFilter = filter.trim().toLowerCase();
+  const visibleLines = trimmedFilter
+    ? lines.filter((line) => line.toLowerCase().includes(trimmedFilter))
+    : lines;
 
-  // Actions slot rendered into the ViewShell header (Refresh + Export buttons).
+  // Actions slot rendered into the ViewShell header (filter field + Refresh +
+  // Export buttons). Wrapped locally in `.srow__c` (shell.css "flex cluster of
+  // controls") so this view's own row lays out correctly — kept local to
+  // LogView rather than changing ViewShell's shared actions wrapper, which
+  // would also reflow the other (still-unwired) views' action rows.
   const headerActions = (
-    <div>
+    <div className="srow__c">
+      <div className="field">
+        <Search aria-hidden="true" />
+        <input
+          type="search"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter logs…"
+          aria-label="Filter logs"
+        />
+      </div>
       <button
+        type="button"
+        className="btn sm btn--secondary"
         onClick={() => {
           setLoading(true);
           void load();
         }}
       >
+        <RefreshCw aria-hidden="true" />
         Refresh
       </button>
       <button
+        type="button"
+        className="btn sm btn--secondary"
         onClick={handleExport}
         disabled={isEmpty || !content}
       >
+        <Download aria-hidden="true" />
         Export
       </button>
     </div>
@@ -155,13 +221,18 @@ export function LogView() {
             </div>
           ) : (
             // Scrollable log area — select-text preserved so users can still copy lines.
-            <div ref={scrollRef}>
-              {lines.map((line, i) => {
+            <div className="logs" ref={scrollRef}>
+              {visibleLines.map((line, i) => {
                 const level = levelOf(line);
+                const { t, m } = splitLogLine(line);
                 return (
                   // data-level carries the parsed log level as data, not styling.
-                  <div key={i} data-level={level}>
-                    <code>{line || " "}</code>
+                  <div key={i} className="logline" data-level={level}>
+                    {t && <span className="t">{t}</span>}
+                    <span className={`lvl ${lvlClass(level)}`}>{level}</span>
+                    <span className="m">
+                      <code>{m || " "}</code>
+                    </span>
                   </div>
                 );
               })}

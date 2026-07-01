@@ -262,9 +262,11 @@ export function SasPairingModal({
           {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
         </p>
 
-        {/* Peer metadata (responder path, or when daemon provides it) */}
+        {/* Peer metadata (responder path, or when daemon provides it).
+            CopyPaste-g27b.11: MetaRow now renders a .cfield button, so its
+            container needs the .cfields grid (patterns.css) to lay out right. */}
         {(status.peer_model || status.peer_os || status.peer_app_version || status.peer_ip) && (
-          <div>
+          <div className="cfields">
             <MetaRow label="Model" value={status.peer_model} />
             <MetaRow label="OS" value={status.peer_os} />
             <MetaRow label="Version" value={status.peer_app_version} />
@@ -308,12 +310,16 @@ export function SasPairingModal({
             </p>
             {/* Security: SAS code is display-only. userSelect:none + no click-to-copy
                 prevents any clipboard reader from grabbing the live PAKE secret.
-                (bd CopyPaste-1jms.1) */}
+                (bd CopyPaste-1jms.1) CopyPaste-g27b.11: each digit is its own
+                .sas span (patterns.css); the 6-digit string itself is unchanged. */}
             <div
+              className="sas"
               aria-label={`Security code: ${status.sas}`}
               data-testid="sas-code-display"
             >
-              {status.sas}
+              {status.sas.split("").map((digit, i) => (
+                <span key={i}>{digit}</span>
+              ))}
             </div>
             {/* Peer metadata grid — rendered from whatever the daemon knows at
                 SAS time (mDNS: name, IPs, fingerprint). All rows are optional;
@@ -322,7 +328,7 @@ export function SasPairingModal({
             {(status.peer_device_name ??
               status.peer_ip_addrs?.length ??
               status.peer_fingerprint) && (
-              <div>
+              <div className="cfields">
                 <MetaRow label="Name" value={status.peer_device_name} />
                 <MetaRow
                   label="Addresses"

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { AlertTriangle, ServerCrash } from "lucide-react";
 import { useUI, type ViewId } from "./store";
 import { applyAppearanceToRoot } from "./lib/theme/applyTheme";
 import { Sidebar } from "./components/Sidebar";
@@ -291,41 +292,53 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <div>
+      <div className="app">
         <Sidebar />
-        <div>
+        <div className="main">
           {daemonError !== null && (
-            <div>
-              <span>Background service error:</span>
-              <span>The background service failed to start. Please reinstall CopyPaste or restart your Mac.</span>
+            <div className="banner banner--err" role="alert">
+              <ServerCrash aria-hidden="true" />
+              <span className="banner__x">
+                <b>Background service error:</b> The background service failed to
+                start. Please reinstall CopyPaste or restart your Mac.
+              </span>
             </div>
           )}
 
           {showMismatchBanner && (
-            <div data-testid="protocol-mismatch-banner">
-              <span>
+            <div
+              className="banner banner--warn"
+              role="alert"
+              data-testid="protocol-mismatch-banner"
+            >
+              <AlertTriangle aria-hidden="true" />
+              <span className="banner__x">
                 CopyPaste app and background service are on incompatible versions
                 {protocolMismatch !== null ? ` (service protocol v${protocolMismatch})` : ""}.
                 Restart the app or the background service to resolve.
               </span>
-              <button
-                type="button"
-                onClick={() => setMismatchDismissed(true)}
-              >
-                Dismiss
-              </button>
+              <span className="banner__act">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setMismatchDismissed(true)}
+                >
+                  Dismiss
+                </button>
+              </span>
             </div>
           )}
 
           {showStaleBanner && (
-            <div>
-              <span>
+            <div className="banner banner--warn" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <span className="banner__x">
                 CopyPaste was updated but an older background service is still
                 running
                 {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}.
                 Restart it to use the new version.
               </span>
-              <div>
+              <span className="banner__act">
                 <RestartDaemonButton
                   onRestarted={() => {
                     setStaleDaemon(null);
@@ -334,11 +347,12 @@ export default function App() {
                 />
                 <button
                   type="button"
+                  className="btn"
                   onClick={() => setDismissed(true)}
                 >
                   Dismiss
                 </button>
-              </div>
+              </span>
             </div>
           )}
 
@@ -349,7 +363,7 @@ export default function App() {
             onOpenSettings={() => { void handleOpenAxSettings(); }}
           />
 
-          <main>
+          <main className="view-host">
             <CrossfadeContainer viewKey={view}>
               <ErrorBoundary label={label}>
                 {view === "devices" ? (

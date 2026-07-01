@@ -432,4 +432,26 @@
   }
   .toast.show { opacity: 1; transform: translateX(-50%); }
   .toast svg { font-size: var(--fs-base); }
+
+  /* --- Form controls & inline messages (slice 5 cleanup) -------------------- */
+  /* Reusable clusters/notes that replace repeated inline `display:flex; gap`
+     and `font-size; color` styles across the Settings tabs and status lines. */
+  .ctl { display: flex; align-items: center; gap: var(--s-3); }
+  .ctl--field { gap: var(--gap-field); }
+  .ctl--wide { gap: var(--s-4); }
+  .ctl--tight { gap: var(--s-2); }
+  .ctl--stack { flex-direction: column; align-items: stretch; gap: var(--s-3); }
+  .ctl--col { flex-direction: column; align-items: flex-end; gap: var(--s-2); }
+  .ctl--wrap { flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3); }
+  .check-label { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); }
+  .field-note { font-size: var(--fs-sm); color: var(--faint); }
+  .field-note--err { color: var(--err); }
+  .field-note--ok { color: var(--ok); }
+  .field-note--warn { color: var(--warn); }
+  .field-note--dim { color: var(--dim); }
+  .field-note--mono { font-family: var(--f-mono); }
+  .field-note--row { padding: var(--s-2) 0; }
+  .kbd-capture { display: inline-flex; align-items: center; gap: var(--s-2); cursor: pointer; }
+  /* Search-match highlight (popup HighlightedText). */
+  .hl-match { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); border-radius: var(--r-xs); }
 }

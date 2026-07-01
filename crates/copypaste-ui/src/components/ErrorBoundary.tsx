@@ -1,4 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { AlertTriangle } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 
 interface ErrorBoundaryProps {
   /** Where this boundary sits, used in the fallback heading (e.g. "Settings"). */
@@ -47,20 +49,18 @@ export class ErrorBoundary extends Component<
 
     const where = this.props.label ? ` in ${this.props.label}` : "";
     return (
-      <div>
-        <div>
-          Something went wrong{where}
-        </div>
-        <div>
-          The background service may be unavailable, or this screen failed to
-          load. The rest of the app is still usable.
-        </div>
-        {/* Error detail is logged by componentDidCatch — not rendered here
-            to avoid leaking filesystem paths or internal strings into the DOM. */}
-        <button type="button" onClick={this.handleRetry}>
-          Retry
-        </button>
-      </div>
+      // Error detail is logged by componentDidCatch — not rendered here to
+      // avoid leaking filesystem paths or internal strings into the DOM.
+      <EmptyState
+        icon={<AlertTriangle aria-hidden="true" />}
+        title={`Something went wrong${where}`}
+        body="The background service may be unavailable, or this screen failed to load. The rest of the app is still usable."
+        action={
+          <button type="button" className="btn btn--secondary" onClick={this.handleRetry}>
+            Retry
+          </button>
+        }
+      />
     );
   }
 }

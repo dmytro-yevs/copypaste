@@ -14,14 +14,7 @@ export function HighlightedText({ text, positions }: { text: string; positions: 
       let j = i;
       while (j < text.length && posSet.has(j)) j++;
       nodes.push(
-        <span
-          key={i}
-          style={{
-            background: "color-mix(in srgb, var(--accent) 30%, transparent)",
-            color: "var(--text)",
-            borderRadius: "var(--r-xs)",
-          }}
-        >
+        <span key={i} className="hl-match">
           {text.slice(i, j)}
         </span>
       );

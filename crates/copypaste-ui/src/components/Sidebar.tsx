@@ -1,21 +1,29 @@
+import {
+  Clock,
+  Info,
+  MonitorSmartphone,
+  ScrollText,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 import { useUI, type ViewId } from "../store";
 import { SyncStatusChip } from "./SyncStatusChip";
 
-// Classnames stripped in design-demolition pass (CopyPaste-h1n3).
-// Icon usages removed in the aggressive de-style pass (CopyPaste-3sys); NavIcons
-// import dropped accordingly.
+// Redesign wiring (Slice 5 / CopyPaste-g27b.12): .sb / .sb__item / .sb__foot
+// (shell.css). Gallery nav item wiring happens in slice 6 — do not add it here.
 
 type NavItem = {
   id: ViewId;
   label: string;
+  icon: LucideIcon;
 };
 
 const NAV: NavItem[] = [
-  { id: "history",  label: "History"  },
-  { id: "devices",  label: "Devices"  },
-  { id: "settings", label: "Settings" },
-  { id: "about",    label: "About"    },
-  { id: "logs",     label: "Logs"     },
+  { id: "history",  label: "History",  icon: Clock },
+  { id: "devices",  label: "Devices",  icon: MonitorSmartphone },
+  { id: "settings", label: "Settings", icon: Settings },
+  { id: "about",    label: "About",    icon: Info },
+  { id: "logs",     label: "Logs",     icon: ScrollText },
 ];
 
 export function Sidebar() {
@@ -24,34 +32,29 @@ export function Sidebar() {
 
   return (
     <aside>
-      {/* Radial accent tint — pure decorative */}
-      <div
-        aria-hidden
-      />
-
-      <div>
+      <nav className="sb" aria-label="Primary">
         <div data-tauri-drag-region />
 
-        <nav>
-          {NAV.map(({ id, label }) => {
-            const active = view === id;
-            return (
-              <button
-                key={id}
-                onClick={() => setView(id)}
-                aria-current={active ? "page" : undefined}
-              >
-                <span>{label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        {NAV.map(({ id, label, icon: Icon }) => {
+          const active = view === id;
+          return (
+            <button
+              key={id}
+              className={active ? "sb__item on" : "sb__item"}
+              onClick={() => setView(id)}
+              aria-current={active ? "page" : undefined}
+            >
+              <Icon aria-hidden="true" />
+              <span>{label}</span>
+            </button>
+          );
+        })}
 
-        <div>
+        <div className="sb__foot">
           <span>CopyPaste</span>
           <SyncStatusChip />
         </div>
-      </div>
+      </nav>
     </aside>
   );
 }

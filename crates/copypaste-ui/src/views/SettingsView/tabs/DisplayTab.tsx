@@ -1,12 +1,17 @@
-// DisplayTab.tsx — design-stripped (CopyPaste-h1n3)
-// Appearance section (Theme, Accent, Translucency) removed.
-// "Mask sensitive data" relocated into "History list" panel.
+// DisplayTab.tsx
+// "Mask sensitive data" also lives in "History list" panel (kept, CopyPaste-h1n3).
+// Appearance section (Theme, Accent, Translucency) restored — Slice 5 / task 5.3:
+// wired to the same UIPrefs (prefs/setPrefs props, sourced from useUI in
+// useSettingsState.ts) that already drove the pre-paint bootstrap and the
+// removed Appearance section, so this is a rebuild of existing wiring, not new
+// state/logic.
 import { SectionHeader } from "../../../components/SectionHeader";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
 import { SliderRow } from "../../../components/SliderRow";
 import { InfoPopover } from "../components/InfoPopover";
+import { THEME_VALUES, ACCENT_VALUES } from "../../../lib/theme/prefsSchema";
 import type { UIPrefs } from "../../../store";
 
 export type DisplayTabProps = {
@@ -14,9 +19,72 @@ export type DisplayTabProps = {
   setPrefs: (p: Partial<UIPrefs>) => void;
 };
 
+const THEME_LABEL: Record<(typeof THEME_VALUES)[number], string> = {
+  dark: "Dark",
+  light: "Light",
+};
+
 export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
   return (
     <div>
+      {/* task 5.3: Theme / Accent / Translucency — bound directly to prefs.theme,
+          prefs.accent, prefs.translucency via the prefs/setPrefs props (already
+          the useUI-backed store values threaded down from useSettingsState.ts;
+          no separate useUI() call needed here — same binding, same store). */}
+      <SectionHeader label="Appearance" />
+      <Panel>
+        <SettingsRow
+          title="Theme"
+          info={<InfoPopover text="Dark or light chrome across the whole app. Applied immediately and persisted." />}
+        >
+          <div className="seg" role="group" aria-label="Theme">
+            {THEME_VALUES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={prefs.theme === t ? "on" : undefined}
+                aria-pressed={prefs.theme === t}
+                onClick={() => setPrefs({ theme: t })}
+              >
+                {THEME_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title="Accent"
+          info={<InfoPopover text="One accent color used across buttons, toggles, and highlights." />}
+        >
+          <div className="swatches" role="group" aria-label="Accent">
+            {ACCENT_VALUES.map((a) => (
+              // Each swatch is its own nested theme-scope so var(--accent)
+              // resolves to THAT swatch's accent value, not the page's live
+              // accent (matches GalleryView's swatch-preview pattern).
+              <span key={a} className="theme-scope" data-accent={a}>
+                <button
+                  type="button"
+                  className="swatch"
+                  aria-label={a}
+                  aria-pressed={prefs.accent === a}
+                  style={{ background: "var(--accent)" }}
+                  onClick={() => setPrefs({ accent: a })}
+                />
+              </span>
+            ))}
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title="Translucency"
+          info={<InfoPopover text="Frost chrome surfaces with a subtle blur. Turn off to render every surface solid." />}
+        >
+          <Toggle
+            checked={prefs.translucency}
+            onChange={(v) => setPrefs({ translucency: v })}
+            aria-label="Translucency"
+          />
+        </SettingsRow>
+      </Panel>
+
       <SectionHeader label="History list" />
       <Panel>
         {/* M4: split previewLines — main window has its own independent setting */}

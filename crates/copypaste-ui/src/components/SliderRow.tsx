@@ -45,9 +45,13 @@ export function SliderRow({
       : [];
 
   return (
-    <div>
+    // Slider layout/theming lives in primitives.css: `.range` themes the native
+    // track/thumb via accent-color (live accent token); `.range__value` sizes
+    // the readout. The row is a token-driven `.ctl` cluster.
+    <div className="ctl ctl--field">
       <input
         type="range"
+        className="range"
         min={min}
         max={max}
         step={step}
@@ -67,8 +71,10 @@ export function SliderRow({
           ))}
         </datalist>
       )}
-      {/* §6.4: w-[80px] (was w-[52px]) so longer labels like "Unlimited" fit */}
-      <span>{formatValue(value)}</span>
+      {/* §6.4: min-width 80px (was 52px) so longer labels like "Unlimited" fit */}
+      <span className="range__value">
+        {formatValue(value)}
+      </span>
     </div>
   );
 }

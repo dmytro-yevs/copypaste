@@ -83,15 +83,15 @@ export function GeneralTab({
           title="Enable sync"
           info={<InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />}
         >
-          <div>
+          <div className="ctl ctl--field">
             {/* 7set: warn when daemon doesn't acknowledge sync_enabled so the
                 user knows the toggle may have no effect on this daemon version. */}
             {syncEnabledStub && !offline && (
-              <span role="note">
+              <span role="note" className="field-note">
                 Sync control unavailable — please update the CopyPaste background service to enable this setting.
               </span>
             )}
-            <div>
+            <div className="ctl">
               <LimitsMsg field="sync_enabled" limitsMsg={limitsMsg} />
               <Toggle
                 checked={syncEnabled}
@@ -108,9 +108,9 @@ export function GeneralTab({
           title="Private Mode"
           info={<InfoPopover text="When on, this device stops recording new clipboard items and suppresses sync for the session. The notification's Pause action is a temporary per-session pause; Private Mode persists across restarts." />}
         >
-          <div>
+          <div className="ctl">
             {privateModeError !== null && (
-              <span>{privateModeError}</span>
+              <span className="field-note field-note--err">{privateModeError}</span>
             )}
             <Toggle
               checked={privateMode}
@@ -142,11 +142,11 @@ export function GeneralTab({
           />
         </SettingsRow>
         <SettingsRow title="Show notification on copy">
-          <div>
+          <div className="ctl">
             {/* vrur: warn when notify is enabled but OS has denied permission.
                 Shows inline so the user can act without leaving Settings. */}
             {prefs.notifyOnCopy && notifPermDenied && (
-              <span role="alert">
+              <span role="alert" className="field-note field-note--err">
                 OS notification permission denied — notifications won't appear.
                 Grant access in System Settings → Notifications.
               </span>
@@ -236,14 +236,14 @@ export function GeneralTab({
           title="Allow screenshots / screen recording"
           info={<InfoPopover text="When off (default), CopyPaste is excluded from screenshots and screen recordings (macOS NSWindowSharingNone / Android FLAG_SECURE). Enable only if you need to record or share your screen while using CopyPaste. The preference is applied immediately to all open windows." />}
         >
-          <div>
+          <div className="ctl">
             {allowScreenshots && (
-              <span role="note">
+              <span role="note" className="field-note">
                 Clipboard content may be captured by screenshots and screen recordings.
               </span>
             )}
             {allowScreenshotsError !== null && (
-              <span>{allowScreenshotsError}</span>
+              <span className="field-note field-note--err">{allowScreenshotsError}</span>
             )}
             <Toggle
               checked={allowScreenshots}
@@ -252,29 +252,35 @@ export function GeneralTab({
             />
           </div>
         </SettingsRow>
-        <div>
-          <div>
-            <span>Excluded apps</span>
-            <InfoPopover text="Bundle IDs of apps whose clipboard is never captured, e.g. com.1password.1password (macOS)." />
-          </div>
-          <div>
-            <input
-              type="text"
-              value={newExcludedApp}
-              placeholder="com.example.app"
-              disabled={offline}
-              onChange={(e) => setNewExcludedApp(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void addExcludedApp();
-                }
-              }}
-              /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
-                 the Sync-tab text inputs: white/near-white elevated fill. */
-            />
+        {/* fullWidth: a label+info + input/add-button row + chip list doesn't
+            fit the two-column SettingsRow layout — stacks title above the
+            full-width control per SettingsRow's fullWidth contract. */}
+        <SettingsRow
+          title="Excluded apps"
+          fullWidth
+          info={<InfoPopover text="Bundle IDs of apps whose clipboard is never captured, e.g. com.1password.1password (macOS)." />}
+        >
+          <div className="ctl">
+            <div className="field field--grow">
+              <input
+                type="text"
+                value={newExcludedApp}
+                placeholder="com.example.app"
+                disabled={offline}
+                onChange={(e) => setNewExcludedApp(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void addExcludedApp();
+                  }
+                }}
+                /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
+                   the Sync-tab text inputs: white/near-white elevated fill. */
+              />
+            </div>
             <button
               type="button"
+              className="btn btn--secondary sm"
               disabled={offline || newExcludedApp.trim() === ""}
               onClick={() => void addExcludedApp()}
             >
@@ -282,10 +288,11 @@ export function GeneralTab({
             </button>
           </div>
           {excludedApps.length > 0 && (
-            <div>
+            <div className="ctl ctl--wrap">
               {excludedApps.map((bundleId) => (
                 <span
                   key={bundleId}
+                  className="chip"
                 >
                   {bundleId}
                   <button
@@ -300,7 +307,7 @@ export function GeneralTab({
               ))}
             </div>
           )}
-        </div>
+        </SettingsRow>
       </Panel>
 
       <SectionHeader label="Background service" />
@@ -310,7 +317,7 @@ export function GeneralTab({
           title="Version"
           description="Current daemon and app version."
         >
-          <span>
+          <span className="field-note field-note--dim field-note--mono">
             {offline ? "Not running" : (daemonVersion ?? "unknown")}
           </span>
         </SettingsRow>

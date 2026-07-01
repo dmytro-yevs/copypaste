@@ -75,6 +75,17 @@
     border-radius: var(--r-card);
     overflow: hidden;
   }
+  /* View region inside the (overflow:hidden) pane: owns its own scroll so
+     long histories / settings panes scroll internally, not the whole shell. */
+  .view-host {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  /* App-level banners stack at the top of the pane with a small inset. */
+  .main > .banner { margin: var(--s-4) var(--s-4) 0; }
   .view { display: flex; flex-direction: column; }
   @keyframes viewIn {
     from { opacity: 0; transform: translateY(6px); }

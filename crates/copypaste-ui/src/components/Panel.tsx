@@ -1,11 +1,13 @@
 // ---------------------------------------------------------------------------
-// Panel — frosted-glass card wrapper for settings sections
+// Panel — settings row-group wrapper
 //
-// HW-M3 note: overflow-hidden on the inner div clips bottom-borders to the
-// panel's rounded corners without clipping absolutely-positioned InfoPopover
-// (z-50), which floats above the outer div via z-50.
-//
-// surface-card = frosted translucent glass card with radius and shadow tokens.
+// Always paired with a sibling SectionHeader (which renders .set-grp__h) —
+// Panel itself supplies the `.set-grp` grouping box (shell.css: 22px
+// margin-bottom) around a stack of SettingsRow `.srow` children. Matches
+// the reference markup's flat `<div class="set-grp"><div class="set-grp-h">…
+// <div class="srow">…` shape: no card/border surface here — `.srow` borders
+// (border-bottom divider, last-child:0) already delineate rows, and
+// `.set-body`'s own padding provides the horizontal inset.
 // ---------------------------------------------------------------------------
 
 interface PanelProps {
@@ -14,10 +16,8 @@ interface PanelProps {
 
 export function Panel({ children }: PanelProps) {
   return (
-    <div>
-      <div>
-        {children}
-      </div>
+    <div className="set-grp">
+      {children}
     </div>
   );
 }

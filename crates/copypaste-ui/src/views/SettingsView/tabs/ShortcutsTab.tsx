@@ -4,6 +4,8 @@
 // global keyboard shortcuts are not available on Android (no system-level hotkey
 // registration API). If Android gains a quick-paste gesture/shortcut in the future,
 // a corresponding settings entry should be added to Android's SettingsActivity.
+import { RotateCcw } from "lucide-react";
+import { SectionHeader } from "../../../components/SectionHeader";
 import { Panel } from "../../../components/Panel";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { InfoPopover } from "../components/InfoPopover";
@@ -34,20 +36,23 @@ export function ShortcutsTab({
 }: ShortcutsTabProps) {
   return (
     <div>
+      {/* Design-reference parity: this group is labelled "Global shortcuts". */}
+      <SectionHeader label="Global shortcuts" />
       <Panel>
         {/* bdac.104: InfoPopover moved to info= slot (label column) */}
         <SettingsRow
           title="Open popup"
           info={<InfoPopover text="Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden." />}
         >
-          <div>
-            <div>
+          <div className="ctl ctl--col">
+            <div className="ctl">
               <ShortcutCapture
                 value={pendingShortcut}
                 onChange={setPendingShortcut}
               />
               <button
                 type="button"
+                className="iconbtn"
                 aria-label="Reset shortcut to default"
                 title={`Reset to default (${defaultShortcut})`}
                 disabled={
@@ -55,9 +60,12 @@ export function ShortcutsTab({
                   pendingShortcut === defaultShortcut
                 }
                 onClick={() => void handleResetShortcut()}
-              />
+              >
+                <RotateCcw aria-hidden="true" />
+              </button>
               <button
                 type="button"
+                className="btn btn--primary sm"
                 disabled={pendingShortcut === currentShortcut}
                 onClick={() => void handleSaveShortcut()}
               >
@@ -65,7 +73,7 @@ export function ShortcutsTab({
               </button>
             </div>
             {shortcutMsg !== null && (
-              <span>
+              <span className={`field-note `}>
                 {shortcutMsg.text}
               </span>
             )}

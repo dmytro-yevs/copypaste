@@ -114,7 +114,7 @@ export function StorageTab({
     const safeIdx = idx < 0 ? 0 : idx;
     return (
       <SettingsRow title={label} description={description}>
-        <div>
+        <div className="ctl">
           <SliderRow
             min={0}
             max={maxIdx}
@@ -140,6 +140,9 @@ export function StorageTab({
 
   return (
     <div>
+      {/* Design-reference parity: this group of size/quota/ttl/display-count
+          sliders is labelled "Limits" in the reference markup. */}
+      <SectionHeader label="Limits" />
       <Panel>
         <LimitSliderRow
           label="Max clip text size"
@@ -182,7 +185,7 @@ export function StorageTab({
             void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v }, () => setMaxFileBytes(prev));
           }}
         />
-        <div>
+        <div className="field-note field-note--row">
           Files over ~8&nbsp;MB are kept locally but won&apos;t sync over P2P/cloud — they&apos;re skipped with a warning.
         </div>
         <LimitSliderRow
@@ -232,7 +235,7 @@ export function StorageTab({
             showLimitsMsg("max_items", "Saved", 1500, true);
           }}
         />
-        <div>
+        <div className="field-note field-note--row">
           Limits items shown in the UI only — the daemon stores more and prunes by the byte quota above.
         </div>
       </Panel>
@@ -244,71 +247,67 @@ export function StorageTab({
       />
       <Panel>
         {/* Export row */}
-        <div>
-          <div>
-            <span>Export backup</span>
-            <div>
-              {/* Include-sensitive checkbox with plaintext warning */}
-              <label>
-                <input
-                  type="checkbox"
-                  checked={exportIncludeSensitive}
-                  onChange={(e) => setExportIncludeSensitive(e.target.checked)}
-                  disabled={offline || exportInProgress}
-                />
-                Include sensitive items
-              </label>
-              {exportIncludeSensitive && (
-                <span>
-                  Warning: sensitive items will be exported as plaintext. Keep the file secure and delete it when done.
+        <SettingsRow title="Export backup" fullWidth>
+          <div className="ctl ctl--stack">
+            {/* Include-sensitive checkbox with plaintext warning */}
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={exportIncludeSensitive}
+                onChange={(e) => setExportIncludeSensitive(e.target.checked)}
+                disabled={offline || exportInProgress}
+              />
+              Include sensitive items
+            </label>
+            {exportIncludeSensitive && (
+              <span className="field-note field-note--warn">
+                Warning: sensitive items will be exported as plaintext. Keep the file secure and delete it when done.
+              </span>
+            )}
+            <div className="ctl">
+              {exportMsg !== null && (
+                <span className={`field-note `}>
+                  {exportMsg.text}
                 </span>
               )}
-              <div>
-                {exportMsg !== null && (
-                  <span>
-                    {exportMsg.text}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  disabled={offline || exportInProgress}
-                  onClick={() => void handleExport()}
-                  data-testid="export-button"
-                >
-                  {exportInProgress ? "Exporting…" : "Export…"}
-                </button>
-              </div>
+              <button
+                type="button"
+                className="btn btn--secondary sm"
+                disabled={offline || exportInProgress}
+                onClick={() => void handleExport()}
+                data-testid="export-button"
+              >
+                {exportInProgress ? "Exporting…" : "Export…"}
+              </button>
             </div>
           </div>
-        </div>
+        </SettingsRow>
 
         {/* Import row — bdac.73: renamed "Restore backup" → "Import history" for parity with Android */}
-        <div>
-          <div>
-            <span>Import history</span>
-            <div>
-              {importMsg !== null && (
-                <span>
-                  {importMsg.text}
-                </span>
-              )}
-              {/* Invisible file input driven by the visible button below.
-                  accept="application/json" limits the picker to .json files.
-                  The file is read entirely in-browser via FileReader (no fs
-                  Tauri plugin needed). */}
-              <label>
-                {importInProgress ? "Importing…" : "Import…"}
-                <input
-                  type="file"
-                  accept="application/json"
-                  disabled={offline || importInProgress}
-                  onChange={(e) => void handleImportFile(e)}
-                  data-testid="import-file-input"
-                />
-              </label>
-            </div>
+        <SettingsRow title="Import history">
+          <div className="ctl">
+            {importMsg !== null && (
+              <span className={`field-note `}>
+                {importMsg.text}
+              </span>
+            )}
+            {/* Invisible file input driven by the visible button below.
+                accept="application/json" limits the picker to .json files.
+                The file is read entirely in-browser via FileReader (no fs
+                Tauri plugin needed). */}
+            <label className="btn btn--secondary sm" style={{ cursor: offline || importInProgress ? "not-allowed" : "pointer" }}>
+              {importInProgress ? "Importing…" : "Import…"}
+              <input
+                type="file"
+                accept="application/json"
+                disabled={offline || importInProgress}
+                onChange={(e) => void handleImportFile(e)}
+                data-testid="import-file-input"
+                hidden
+              />
+            </label>
           </div>
-        </div>
+        </SettingsRow>
       </Panel>
 
       <SectionHeader label="Data" />
@@ -317,7 +316,7 @@ export function StorageTab({
             Falls back gracefully when db_stats is not available (older daemon). */}
         {dbStats !== null && (
           <SettingsRow title="Database">
-            <span>
+            <span className="field-note field-note--dim">
               {dbStats.item_count} item{dbStats.item_count === 1 ? "" : "s"}
               {" — "}
               {dbStats.size_bytes < 1024
@@ -330,14 +329,15 @@ export function StorageTab({
         )}
         {/* gq51: Vacuum button — compacts the SQLite WAL to reclaim disk space */}
         <SettingsRow title="Compact database">
-          <div>
+          <div className="ctl">
             {vacuumMsg !== null && (
-              <span>
+              <span className={`field-note `}>
                 {vacuumMsg.text}
               </span>
             )}
             <button
               type="button"
+              className="btn btn--secondary sm"
               disabled={offline || vacuumBusy}
               onClick={() => void handleVacuum()}
             >
@@ -346,15 +346,16 @@ export function StorageTab({
           </div>
         </SettingsRow>
         <SettingsRow title="Clear clipboard history">
-          <div>
+          <div className="ctl">
             {deleteMsg !== null && (
-              <span>
+              <span className={`field-note `}>
                 {deleteMsg.text}
               </span>
             )}
             {/* w6xc: replaced misclick-prone inline Yes/No with a proper modal */}
             <button
               type="button"
+              className="btn btn--danger sm"
               disabled={offline}
               onClick={() => setDeleteConfirm(true)}
             >

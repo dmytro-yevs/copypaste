@@ -7,6 +7,7 @@
 // Click outside to close.
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
+import { Info } from "lucide-react";
 
 export function InfoPopover({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -47,6 +48,7 @@ export function InfoPopover({ text }: { text: string }) {
         // getBoundingClientRect so the popover anchors correctly (kept per de-style pass).
         <div
           ref={popoverRef}
+          className="srow__s"
           style={{
             position: "fixed",
             top: pos.top,
@@ -65,10 +67,13 @@ export function InfoPopover({ text }: { text: string }) {
       <button
         ref={btnRef}
         type="button"
+        className="iconbtn"
         aria-label="More info"
         aria-expanded={open}
         onClick={handleToggle}
-      />
+      >
+        <Info aria-hidden="true" />
+      </button>
       {popoverEl}
     </div>
   );

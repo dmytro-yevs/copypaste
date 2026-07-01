@@ -253,10 +253,9 @@ export const HistoryRow = React.memo(function HistoryRow({
         <div className="row__right" onClick={(e) => e.stopPropagation()}>
           {entry.too_large_to_sync && (
             <span
-              className="iconbtn"
+              className="iconbtn txt-warn"
               title="Too large to sync"
               aria-label="Too large to sync"
-              style={{ color: "var(--warn)" }}
             >
               <AlertTriangle aria-hidden="true" />
             </span>
