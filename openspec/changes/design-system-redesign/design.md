@@ -230,3 +230,22 @@ gives consistent stroke-width/viewBox for free and avoids maintaining ~40 hand-c
    local component state so browsing all 12 combinations doesn't change the user's actual saved
    preference? Recommend local state scoped to the gallery view; flagging for confirmation since it
    changes the gallery's implementation shape (task estimate).
+
+## Resolved Decisions (user, 2026-07-01)
+
+1. **Translucency — SHIP the toggle.** The heavy Liquid-Glass system stays removed, but the
+   controlled translucency set from the design sources IS in scope: base `--scrim` +
+   `.scrim { backdrop-filter: blur(2px) }` on modals, blur-masked sensitive data (both baseline,
+   always on), and an **optional "Translucency" (frosted surfaces on/off) toggle** in
+   `DisplayTab.tsx` per STYLEGUIDE.md §2, defaulting to on. (User confirmed they want the glass
+   effect that the styleguide specifies; final nod pending their file review.)
+2. **Content-type coverage — gallery demonstrates ALL 11 kinds** (text/url/email/phone/code/json/
+   number/color/path/file/secret) as the design canvas. During implementation, verify which kinds
+   the real `HistoryEntry.kind` enum emits today and annotate gallery-only kinds; no styling is
+   gated on backend reachability.
+3. **Source-app icon — reserve the slot + fallback.** The row/popup-row anatomy reserves visual
+   space for a source-app icon and renders it when available; when the source app / icon is
+   unavailable, show a **fallback** (type-glyph / generic app placeholder) so the layout is stable
+   and no second layout pass is needed when daemon `source_bundle_id` lands.
+4. **Gallery state — LOCAL only.** The gallery's theme×accent switcher uses local React state
+   (data-theme/data-accent on the gallery wrapper); it never writes the user's real `UIPrefs`.
