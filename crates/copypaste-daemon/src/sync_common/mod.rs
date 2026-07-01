@@ -26,12 +26,16 @@
 //! - [`rebuild`] — local rebuild (download side).
 //! - [`storage`] — atomic LWW replace-by-`item_id`.
 //! - [`wifi_gate`] — shared "Wi-Fi only" outbound gate.
+//! - [`local_crypto`] — shared local-v2 at-rest encrypt glue (ADR-017
+//!   Wave-2, CopyPaste-vp63.52), reused by `rebuild`, `sync_orch::rekey`,
+//!   `daemon::capture::text`, and `ipc::handlers_transfer`.
 //!
 //! # Security
 //! Never logs plaintext, key bytes, or ciphertext.
 
 mod decrypt;
 mod envelope;
+mod local_crypto;
 mod rebuild;
 mod storage;
 mod wifi_gate;
@@ -45,6 +49,7 @@ pub(crate) const SYNC_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::f
 
 pub(crate) use decrypt::{decrypt_item_plaintext, decrypt_item_plaintext_blocking};
 pub(crate) use envelope::{decode_payload_ct, wrap_and_check_cloud_upload_plaintext};
+pub(crate) use local_crypto::encrypt_v2_for_local_storage;
 // `decode_cloud_file_payload` / `encode_cloud_file_payload` / the
 // `CLOUD_FILE_*` constants are additionally re-exported here (beyond
 // `decode_payload_ct` / `wrap_and_check_cloud_upload_plaintext` above) for

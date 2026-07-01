@@ -106,7 +106,13 @@ pub(super) fn evict_peer_local(peer_fp: &str, live_peers: Option<&PairedPeers>) 
     // Normalise stored colon-hex fingerprints before comparing, because the
     // P2P layer reports colon-free hex (the canonical form used here).
     let canonical_target = peer_fp.to_ascii_lowercase();
-    peers.retain(|p| crate::ipc::canonical_fingerprint(&p.fingerprint) != canonical_target);
+    // CopyPaste-vp63.52: shared with `ipc::pairing_ops_persist` via
+    // `crate::peers::retain_not_fingerprint` instead of hand-rolling the
+    // identical `canonical_fingerprint(&p.fingerprint) != target` predicate.
+    // `peer_fp` is already colon-free canonical hex (see above), so
+    // `canonical_fingerprint(peer_fp)` inside the helper is a no-op
+    // idempotent re-normalisation — byte-identical to `canonical_target`.
+    crate::peers::retain_not_fingerprint(&mut peers, peer_fp);
     let removed = peers.len() < before;
     if let Err(e) = crate::peers::save_peers(&peers_path, &peers) {
         tracing::warn!(

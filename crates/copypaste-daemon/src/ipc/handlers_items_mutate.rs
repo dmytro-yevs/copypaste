@@ -4,18 +4,12 @@ use super::*;
 
 impl IpcServer {
     pub(crate) async fn handle_delete(&self, req: Request) -> Response {
-        let id = match req.params.get("id").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
-            // clients can classify the error rather than getting a bare
-            // untyped error string.
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: id",
-                )
-            }
+        // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
+        // clients can classify the error rather than getting a bare
+        // untyped error string.
+        let id = match extract_str_param(&req.params, req.id.clone(), "id", "missing param: id") {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
         if uuid::Uuid::parse_str(&id).is_err() {
             return Response::err_with_code(
@@ -122,17 +116,11 @@ impl IpcServer {
 
     pub(crate) async fn handle_pin(&self, req: Request) -> Response {
         // Pin an item (remove expiry so it's never auto-deleted)
-        let id = match req.params.get("id").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
-            // machine clients can classify the error (follow-up of 8u2b).
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: id",
-                )
-            }
+        // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
+        // machine clients can classify the error (follow-up of 8u2b).
+        let id = match extract_str_param(&req.params, req.id.clone(), "id", "missing param: id") {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
         if uuid::Uuid::parse_str(&id).is_err() {
             return Response::err_with_code(

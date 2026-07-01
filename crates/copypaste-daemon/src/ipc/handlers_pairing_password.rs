@@ -20,15 +20,14 @@ impl IpcServer {
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD;
 
-        let peer_fingerprint = match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing peer_fingerprint",
-                )
-            }
+        let peer_fingerprint = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "peer_fingerprint",
+            "missing peer_fingerprint",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
 
         if !is_valid_fingerprint(&peer_fingerprint) {
@@ -48,15 +47,14 @@ impl IpcServer {
 
         match step.as_str() {
             "initiate" => {
-                let password = match req.params.get("password").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing password",
-                        )
-                    }
+                let password = match extract_str_param(
+                    &req.params,
+                    req.id.clone(),
+                    "password",
+                    "missing password",
+                ) {
+                    Ok(s) => s,
+                    Err(resp) => return resp,
                 };
 
                 if password.chars().count() < 6 {
@@ -101,25 +99,23 @@ impl IpcServer {
             }
 
             "finish" => {
-                let session_id = match req.params.get("session_id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing session_id for step=finish",
-                        )
-                    }
+                let session_id = match extract_str_param(
+                    &req.params,
+                    req.id.clone(),
+                    "session_id",
+                    "missing session_id for step=finish",
+                ) {
+                    Ok(s) => s,
+                    Err(resp) => return resp,
                 };
-                let msg2_b64 = match req.params.get("message2_b64").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing message2_b64 for step=finish",
-                        )
-                    }
+                let msg2_b64 = match extract_str_param(
+                    &req.params,
+                    req.id.clone(),
+                    "message2_b64",
+                    "missing message2_b64 for step=finish",
+                ) {
+                    Ok(s) => s,
+                    Err(resp) => return resp,
                 };
 
                 let msg2_bytes = match b64.decode(&msg2_b64) {
@@ -279,25 +275,23 @@ impl IpcServer {
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD;
 
-        let session_id = match req.params.get("session_id").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing session_id",
-                )
-            }
+        let session_id = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "session_id",
+            "missing session_id",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
-        let msg3_b64 = match req.params.get("message3_b64").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing message3_b64",
-                )
-            }
+        let msg3_b64 = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "message3_b64",
+            "missing message3_b64",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
 
         let msg3_bytes = match b64.decode(&msg3_b64) {

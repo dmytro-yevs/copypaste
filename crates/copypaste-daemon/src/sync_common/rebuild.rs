@@ -6,13 +6,11 @@
 //! — moved verbatim, no behavior change.
 
 use copypaste_core::{
-    build_item_aad_v2, derive_v2, encrypt_item_with_aad, is_sensitive_for_autowipe, ClipboardItem,
-    ItemId, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
+    derive_v2, is_sensitive_for_autowipe, ClipboardItem, ITEM_KEY_VERSION_CURRENT,
 };
 
-use super::envelope::{
-    decode_cloud_file_payload, CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME,
-};
+use super::envelope::{decode_cloud_file_payload, CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME};
+use super::local_crypto::encrypt_v2_for_local_storage;
 
 /// Build a local [`ClipboardItem`] from decrypted plaintext by re-encrypting
 /// it with the daemon's local key (v2 HKDF path, `key_version = 2`).
@@ -58,16 +56,8 @@ pub(crate) fn build_local_item(
     }
     let v1_key: [u8; 32] = **local_key;
     let v2_key = derive_v2(&v1_key);
-    // ITEM_KEY_VERSION_CURRENT is i64 (storage convention); build_item_aad_v2
-    // takes u32 and ClipboardItem.key_version is u8 — cast explicitly.
-    // Value is 2 (v2 HKDF key), which fits both u32 and u8.
-    let aad = build_item_aad_v2(
-        &ItemId::from(item_id),
-        AAD_SCHEMA_VERSION_V4,
-        ITEM_KEY_VERSION_CURRENT as u32,
-    );
     let (nonce, ciphertext) =
-        encrypt_item_with_aad(plaintext, &v2_key, &aad).map_err(|e| e.to_string())?;
+        encrypt_v2_for_local_storage(item_id, plaintext, &v2_key).map_err(|e| e.to_string())?;
 
     // Fix CLOUD-SENSITIVE: run the same auto-wipe gate as the clipboard capture
     // path (daemon handle_text) so cross-device sensitive items are flagged for
@@ -304,11 +294,8 @@ mod tests {
 
         let local_key = zeroize::Zeroizing::new([0x44u8; 32]);
         let raw_body = b"the actual file bytes";
-        let wrapped = super::super::envelope::encode_cloud_file_payload(
-            "notes.txt",
-            "text/plain",
-            raw_body,
-        );
+        let wrapped =
+            super::super::envelope::encode_cloud_file_payload("notes.txt", "text/plain", raw_body);
 
         let item = build_local_item(
             "row-2",
@@ -339,6 +326,9 @@ mod tests {
         let file_id = crate::clipboard::image_content_hash(raw_body);
         let chunks = chunks_from_blob(item.content.as_ref().expect("content")).expect("chunks");
         let decoded = decode_file(&chunks, &v1_key, &file_id).expect("decode_file");
-        assert_eq!(decoded, raw_body, "file body must survive header-strip + re-chunk");
+        assert_eq!(
+            decoded, raw_body,
+            "file body must survive header-strip + re-chunk"
+        );
     }
 }

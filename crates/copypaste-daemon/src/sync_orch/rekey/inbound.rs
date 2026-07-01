@@ -5,10 +5,7 @@
 //! Split out of the former flat `rekey.rs` (ADR-017, CopyPaste-vp63.9) — moved
 //! verbatim, no behavior change.
 
-use copypaste_core::{
-    build_item_aad_v2, decrypt_from_cloud, encode_image_with_limit, encrypt_item_with_aad,
-    ClipboardItem, ItemId, SyncKey, AAD_SCHEMA_VERSION_V4,
-};
+use copypaste_core::{decrypt_from_cloud, encode_image_with_limit, ClipboardItem, SyncKey};
 // c7fp: encrypt_chunks / IMAGE_CHUNK_SIZE / ImageMeta are only used in
 // `rewrap_inbound_blob` and `read_png_dimensions` which are macOS-only
 // (`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`).  Allow the
@@ -106,14 +103,17 @@ pub(in super::super) fn rekey_inbound(
     //
     // AAD-BINDING INVARIANT (CopyPaste-vp63.9 characterization, security-critical):
     // this tuple (item_id, AAD_SCHEMA_VERSION_V4, key_version=2) MUST stay
-    // textually adjacent to `local.key_version = 2` below — do NOT replace the
-    // hardcoded `2` with a variable that could drift out of sync.
-    let aad = build_item_aad_v2(
-        &ItemId::from(wire.item_id.as_str()),
-        AAD_SCHEMA_VERSION_V4,
-        2,
-    );
-    let (nonce, ciphertext) = match encrypt_item_with_aad(&plaintext, &crypto.v2_key, &aad) {
+    // textually adjacent to `local.key_version = 2` below. CopyPaste-vp63.52:
+    // moved into the shared `sync_common::encrypt_v2_for_local_storage` helper
+    // (reused by `sync_common::build_local_item`, `daemon::capture::text`, and
+    // `ipc::handlers_transfer`), which builds this SAME AAD tuple internally
+    // via the canonical `ITEM_KEY_VERSION_CURRENT` constant (== 2) — not a
+    // hardcoded literal that could drift out of sync.
+    let (nonce, ciphertext) = match crate::sync_common::encrypt_v2_for_local_storage(
+        wire.item_id.as_str(),
+        &plaintext,
+        &crypto.v2_key,
+    ) {
         Ok(out) => out,
         Err(e) => {
             warn!(item_id = %wire.item_id, "sync_orch: rekey_inbound local-encrypt failed: {e}");
@@ -386,6 +386,7 @@ pub(super) fn parse_file_name_mime(meta_json: &str) -> Option<(String, String)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use copypaste_core::{build_item_aad_v2, encrypt_item_with_aad, ItemId, AAD_SCHEMA_VERSION_V4};
 
     /// Characterization test (CopyPaste-vp63.9): pins the exact AAD tuple
     /// `(item_id, AAD_SCHEMA_VERSION_V4, key_version=2)` built by

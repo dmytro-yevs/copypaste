@@ -20,6 +20,11 @@ mod store;
 mod updates;
 
 pub use model::PairedDevice;
+// CopyPaste-vp63.52: re-export the canonical-fingerprint find/retain helpers
+// so sibling modules (`p2p::unpair`, `ipc::pairing_ops_persist`) can reuse the
+// SAME implementation instead of hand-rolling the identical
+// `canonical_fingerprint(&p.fingerprint) == target` predicate.
+pub(crate) use model::{find_mut_by_fingerprint, retain_not_fingerprint};
 pub use pending_unpair::{
     load_pending_unpairs, pending_unpair_path_for, queue_pending_unpair, remove_pending_unpair,
     save_pending_unpairs, PendingUnpair,

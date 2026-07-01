@@ -44,15 +44,14 @@ impl IpcServer {
             .and_then(|v| v.as_str())
             .unwrap_or("application/octet-stream")
             .to_string();
-        let data_b64 = match req.params.get("data_b64").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: data_b64",
-                )
-            }
+        let data_b64 = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "data_b64",
+            "missing param: data_b64",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
 
         use base64::Engine as _;

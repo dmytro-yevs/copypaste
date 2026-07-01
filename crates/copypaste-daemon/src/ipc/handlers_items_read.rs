@@ -25,18 +25,13 @@ impl IpcServer {
     }
 
     pub(crate) async fn handle_search(&self, req: Request) -> Response {
-        let query = match req.params.get("query").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
-            // machine clients can classify the error (follow-up of 8u2b).
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: query",
-                )
-            }
-        };
+        // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
+        // machine clients can classify the error (follow-up of 8u2b).
+        let query =
+            match extract_str_param(&req.params, req.id.clone(), "query", "missing param: query") {
+                Ok(s) => s,
+                Err(resp) => return resp,
+            };
         // Clamp to MAX_PAGE like `list` / `history_page` so an oversized
         // `limit` cannot make `search_items` allocate/scan unbounded rows.
         let limit = (req

@@ -215,15 +215,14 @@ impl IpcServer {
     // sufficient revocation when relay-sync is active.
     #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     pub(crate) async fn handle_revoke_and_rotate(&self, req: Request) -> Response {
-        let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: fingerprint",
-                )
-            }
+        let fingerprint = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "fingerprint",
+            "missing param: fingerprint",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
         if !is_valid_fingerprint(&fingerprint) {
             return Response::err_with_code(
@@ -258,72 +257,13 @@ impl IpcServer {
             }
         };
 
-        // ── Revoke (same as the `revoke_peer` body) ──
-        let (removed, captured_name) = match load_peers() {
-            Ok(mut peers) => {
-                let before_len = peers.len();
-                // Normalise both sides so colon-hex display fingerprints
-                // and bare-hex canonical fingerprints both match
-                // (CopyPaste-qvn: raw string compare missed cross-format).
-                let fp_canonical = canonical_fingerprint(&fingerprint);
-                let name = peers
-                    .iter()
-                    .find(|p| {
-                        p.get("fingerprint")
-                            .and_then(|v| v.as_str())
-                            .map(|f| canonical_fingerprint(f) == fp_canonical)
-                            .unwrap_or(false)
-                    })
-                    .and_then(|p| p.get("name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                peers.retain(|p| {
-                    p.get("fingerprint")
-                        .and_then(|v| v.as_str())
-                        .map(|f| canonical_fingerprint(f) != fp_canonical)
-                        .unwrap_or(true)
-                });
-                if let Err(e) = save_peers(&peers) {
-                    return Response::err(req.id, format!("failed to save peers: {e}"));
-                }
-                (peers.len() < before_len, name)
-            }
-            Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
-        };
-
-        let db_arc = self.db.clone();
-        let fp_for_db = fingerprint.clone();
-        let name_for_db = captured_name.clone();
-        let join = tokio::task::spawn_blocking(move || {
-            let db = db_arc.blocking_lock();
-            revoke_device(db.conn(), &fp_for_db, &name_for_db)
-        })
-        .await;
-
-        let revoked_at = match join {
-            Ok(Ok(ts)) => {
-                // Evict from the live mTLS allowlist immediately.
-                if let Some(ref peers) = self.p2p_peers {
-                    peers.remove(&canonical_fingerprint(&fingerprint));
-                }
-                ts
-            }
-            Ok(Err(e)) => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INTERNAL_ERROR,
-                    format!("failed to record revocation: {e}"),
-                )
-            }
-            Err(e) => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INTERNAL_ERROR,
-                    format!("revoke task join error: {e}"),
-                )
-            }
-        };
+        // ── Revoke (shared core, CopyPaste-vp63.52: `revoke_peer_inner`,
+        // same body as `handle_revoke_peer` in handlers_pairing_revoke.rs) ──
+        let (removed, _captured_name, _captured_addr, revoked_at) =
+            match self.revoke_peer_inner(req.id.clone(), &fingerprint).await {
+                Ok(v) => v,
+                Err(resp) => return resp,
+            };
 
         // ── Rotate the sync key (cuts off cloud/relay for the revoked
         // device; remaining devices must re-provision). ──

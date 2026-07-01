@@ -5,17 +5,11 @@ use super::*;
 impl IpcServer {
     /// Shared body for the "copy" and "paste" verbs (identical behaviour).
     pub(crate) async fn handle_copy_or_paste(&self, req: Request) -> Response {
-        let id = match req.params.get("id").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
-            // clients can classify the error.
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: id",
-                )
-            }
+        // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
+        // clients can classify the error.
+        let id = match extract_str_param(&req.params, req.id.clone(), "id", "missing param: id") {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
         if uuid::Uuid::parse_str(&id).is_err() {
             return Response::err_with_code(

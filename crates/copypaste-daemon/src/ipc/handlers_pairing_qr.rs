@@ -205,25 +205,23 @@ impl IpcServer {
             return self.pair_accept_qr_network(req.id.clone(), &qr).await;
         }
 
-        let message1_b64 = match req.params.get("message1_b64").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing message1_b64",
-                )
-            }
+        let message1_b64 = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "message1_b64",
+            "missing message1_b64",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
-        let peer_fingerprint = match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing peer_fingerprint",
-                )
-            }
+        let peer_fingerprint = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "peer_fingerprint",
+            "missing peer_fingerprint",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
 
         if !is_valid_fingerprint(&peer_fingerprint) {

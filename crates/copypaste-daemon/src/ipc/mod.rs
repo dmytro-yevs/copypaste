@@ -142,6 +142,12 @@ use pasteboard::{lazy_backfill_thumbnail, parse_image_thumb_dims, PasteboardErro
 #[cfg(target_os = "macos")]
 use pasteboard::map_content_type_to_uti;
 
+// ── params (CopyPaste-vp63.52 dedup) ────────────────────────────────────────
+mod params;
+// Helper used in impl IpcServer dispatch code across handlers_items /
+// handlers_pairing / handlers_sync (non-test):
+use params::extract_str_param;
+
 // ── consts (CopyPaste-vp63.19) ──────────────────────────────────────────────
 mod consts;
 // pub items re-exported so external `crate::ipc::X` call sites keep resolving

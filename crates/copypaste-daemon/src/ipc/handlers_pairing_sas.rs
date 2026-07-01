@@ -11,15 +11,14 @@ impl IpcServer {
     /// bootstrap TLS), and runs `run_initiator_with_confirm` with a
     /// callback wired into the pairing state machine.
     pub(crate) async fn handle_pair_with_discovered(&self, req: Request) -> Response {
-        let device_id = match req.params.get("device_id").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: device_id",
-                )
-            }
+        let device_id = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "device_id",
+            "missing param: device_id",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
         };
         self.pair_with_discovered(req.id.clone(), &device_id).await
     }

@@ -105,34 +105,27 @@ impl IpcServer {
         }
     }
 
-    /// T4 (v0.3) — manual peer revocation. Atomic with respect to the
-    /// user: a single click both (a) removes the peer from the local
-    /// JSON peer store so future sync attempts won't re-discover the
-    /// device by name, and (b) writes a row to the SQLite
-    /// `revoked_devices` audit table. The v1.0 cryptographic
-    /// revocation protocol will later consume that table to broadcast
-    /// revocation markers. For v0.3 the audit row is the only durable
-    /// record — mTLS rejection on unknown fingerprint is what blocks
-    /// the revoked peer from continuing to sync.
-    pub(crate) async fn handle_revoke_peer(&self, req: Request) -> Response {
-        let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
-            Some(s) => s.to_string(),
-            None => {
-                return Response::err_with_code(
-                    req.id,
-                    ERR_CODE_INVALID_ARGUMENT,
-                    "missing param: fingerprint",
-                )
-            }
-        };
-        if !is_valid_fingerprint(&fingerprint) {
-            return Response::err_with_code(
-                req.id,
-                ERR_CODE_INVALID_ARGUMENT,
-                format!("invalid fingerprint format: {fingerprint}"),
-            );
-        }
-
+    /// Shared core of peer revocation (CopyPaste-vp63.52 dedup): remove the
+    /// peer record from the local JSON peer store, write the SQLite
+    /// `revoked_devices` audit row, and evict the peer from the live
+    /// in-memory mTLS allowlist. Extracted VERBATIM from the identical
+    /// bodies of `handle_revoke_peer` and `handle_revoke_and_rotate`
+    /// (`handlers_sync_keys.rs`) — every error `Response` this returns is
+    /// byte-for-byte what each caller built inline before this split.
+    ///
+    /// Returns `(removed, captured_name, captured_addr, revoked_at)` on
+    /// success, or `Err(response)` (bound to `req_id`) on any failure — the
+    /// caller must `return` that response unchanged.
+    ///
+    /// NOT included here (left to each caller, because the two callers
+    /// diverge): the mutual-unpair signal + durable pending-unpair queue
+    /// (`handle_revoke_peer` only) and sync-key rotation
+    /// (`handle_revoke_and_rotate` only).
+    pub(crate) async fn revoke_peer_inner(
+        &self,
+        req_id: String,
+        fingerprint: &str,
+    ) -> Result<(bool, String, Option<String>, u64), Response> {
         // Capture the peer's display name *before* deleting so the
         // audit row preserves the human-readable label. Falls back
         // to an empty string if the peer wasn't in the store
@@ -141,7 +134,7 @@ impl IpcServer {
         let (removed, captured_name, captured_addr) = match load_peers() {
             Ok(mut peers) => {
                 let before_len = peers.len();
-                let fp_canonical = canonical_fingerprint(&fingerprint);
+                let fp_canonical = canonical_fingerprint(fingerprint);
                 let matched = peers.iter().find(|p| {
                     p.get("fingerprint")
                         .and_then(|v| v.as_str())
@@ -166,11 +159,11 @@ impl IpcServer {
                         .unwrap_or(true)
                 });
                 if let Err(e) = save_peers(&peers) {
-                    return Response::err(req.id, format!("failed to save peers: {e}"));
+                    return Err(Response::err(req_id, format!("failed to save peers: {e}")));
                 }
                 (peers.len() < before_len, name, addr)
             }
-            Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+            Err(e) => return Err(Response::err(req_id, format!("failed to load peers: {e}"))),
         };
 
         // Write the audit row. Done on the blocking thread pool
@@ -178,7 +171,7 @@ impl IpcServer {
         // duration of the two short statements inside
         // `revoke_device`.
         let db_arc = self.db.clone();
-        let fp_for_db = fingerprint.clone();
+        let fp_for_db = fingerprint.to_string();
         let name_for_db = captured_name.clone();
         let join = tokio::task::spawn_blocking(move || {
             let db = db_arc.blocking_lock();
@@ -186,99 +179,121 @@ impl IpcServer {
         })
         .await;
 
-        match join {
-            Ok(Ok(revoked_at)) => {
+        let revoked_at = match join {
+            Ok(Ok(ts)) => {
                 // Fix CRITICAL #1: remove the peer from the live in-memory
                 // mTLS allowlist so the revoked peer's existing (or new)
                 // mTLS session is rejected immediately — without waiting
                 // for a daemon restart. Normalise to canonical lowercase
                 // hex (strip colons) to match PairedPeers' key format.
                 if let Some(ref peers) = self.p2p_peers {
-                    peers.remove(&canonical_fingerprint(&fingerprint));
+                    peers.remove(&canonical_fingerprint(fingerprint));
                 }
-                // Mutual unpair: best-effort signal the peer if it is
-                // currently connected over P2P.
-                send_unpair_signal_if_connected(
-                    &self.live_peer_sinks,
-                    &canonical_fingerprint(&fingerprint),
+                ts
+            }
+            Ok(Err(e)) => {
+                return Err(Response::err_with_code(
+                    req_id,
+                    ERR_CODE_INTERNAL_ERROR,
+                    format!("failed to record revocation: {e}"),
+                ))
+            }
+            Err(e) => {
+                return Err(Response::err_with_code(
+                    req_id,
+                    ERR_CODE_INTERNAL_ERROR,
+                    format!("revoke task join error: {e}"),
+                ))
+            }
+        };
+
+        Ok((removed, captured_name, captured_addr, revoked_at))
+    }
+
+    /// T4 (v0.3) — manual peer revocation. Atomic with respect to the
+    /// user: a single click both (a) removes the peer from the local
+    /// JSON peer store so future sync attempts won't re-discover the
+    /// device by name, and (b) writes a row to the SQLite
+    /// `revoked_devices` audit table. The v1.0 cryptographic
+    /// revocation protocol will later consume that table to broadcast
+    /// revocation markers. For v0.3 the audit row is the only durable
+    /// record — mTLS rejection on unknown fingerprint is what blocks
+    /// the revoked peer from continuing to sync.
+    pub(crate) async fn handle_revoke_peer(&self, req: Request) -> Response {
+        let fingerprint = match extract_str_param(
+            &req.params,
+            req.id.clone(),
+            "fingerprint",
+            "missing param: fingerprint",
+        ) {
+            Ok(s) => s,
+            Err(resp) => return resp,
+        };
+        if !is_valid_fingerprint(&fingerprint) {
+            return Response::err_with_code(
+                req.id,
+                ERR_CODE_INVALID_ARGUMENT,
+                format!("invalid fingerprint format: {fingerprint}"),
+            );
+        }
+
+        let (removed, captured_name, captured_addr, revoked_at) =
+            match self.revoke_peer_inner(req.id.clone(), &fingerprint).await {
+                Ok(v) => v,
+                Err(resp) => return resp,
+            };
+
+        // Mutual unpair: best-effort signal the peer if it is
+        // currently connected over P2P.
+        send_unpair_signal_if_connected(
+            &self.live_peer_sinks,
+            &canonical_fingerprint(&fingerprint),
+        );
+        // Gap A: durable pending-unpair for offline delivery.
+        if removed {
+            queue_unpair_for_offline_delivery(
+                &fingerprint,
+                captured_addr.as_deref(),
+                &captured_name,
+            );
+        }
+        // FIX (CopyPaste-gbo): when cloud-sync or relay-sync is
+        // compiled in AND a sync key is currently installed,
+        // automatically rotate it to a fresh random key so the
+        // revoked device is ALSO cut off from cloud/relay sync —
+        // without requiring a passphrase from the user.
+        //
+        // Security rationale: the revoked device holds the OLD
+        // shared sync key and can use it to decrypt items
+        // encrypted under that key (XChaCha20-Poly1305 auth tags
+        // only reject ciphertexts produced under a DIFFERENT key).
+        // Rotating to a fresh random key means:
+        //   • all items produced AFTER revocation are encrypted
+        //     under the new key — the revoked device cannot
+        //     decrypt them (auth-tag rejection);
+        //   • the relay inbox id (HKDF of the sync key) diverges,
+        //     so the revoked device's inbox token is now stale.
+        //
+        // Distribution: remaining paired devices must re-provision
+        // (re-scan the pairing QR or accept the next P2P
+        // bootstrap push) to receive the new key.  This is the
+        // same requirement as `revoke_and_rotate`, but WITHOUT
+        // manual passphrase entry.
+        //
+        // When no sync key is currently installed (sync not yet
+        // configured), the rotation is skipped — there is nothing
+        // to rotate — and the response reflects that.
+        #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+        {
+            let key_was_active = self.sync_key.lock().await.is_some();
+            if key_was_active {
+                let new_key = SyncKey::random();
+                self.persist_and_install_sync_key(new_key).await;
+                tracing::info!(
+                    fingerprint = %fingerprint,
+                    "revoke_peer: P2P revoked + sync key auto-rotated (random); \
+                     remaining devices must re-provision to keep syncing",
                 );
-                // Gap A: durable pending-unpair for offline delivery.
-                if removed {
-                    queue_unpair_for_offline_delivery(
-                        &fingerprint,
-                        captured_addr.as_deref(),
-                        &captured_name,
-                    );
-                }
-                // FIX (CopyPaste-gbo): when cloud-sync or relay-sync is
-                // compiled in AND a sync key is currently installed,
-                // automatically rotate it to a fresh random key so the
-                // revoked device is ALSO cut off from cloud/relay sync —
-                // without requiring a passphrase from the user.
-                //
-                // Security rationale: the revoked device holds the OLD
-                // shared sync key and can use it to decrypt items
-                // encrypted under that key (XChaCha20-Poly1305 auth tags
-                // only reject ciphertexts produced under a DIFFERENT key).
-                // Rotating to a fresh random key means:
-                //   • all items produced AFTER revocation are encrypted
-                //     under the new key — the revoked device cannot
-                //     decrypt them (auth-tag rejection);
-                //   • the relay inbox id (HKDF of the sync key) diverges,
-                //     so the revoked device's inbox token is now stale.
-                //
-                // Distribution: remaining paired devices must re-provision
-                // (re-scan the pairing QR or accept the next P2P
-                // bootstrap push) to receive the new key.  This is the
-                // same requirement as `revoke_and_rotate`, but WITHOUT
-                // manual passphrase entry.
-                //
-                // When no sync key is currently installed (sync not yet
-                // configured), the rotation is skipped — there is nothing
-                // to rotate — and the response reflects that.
-                #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-                {
-                    let key_was_active = self.sync_key.lock().await.is_some();
-                    if key_was_active {
-                        let new_key = SyncKey::random();
-                        self.persist_and_install_sync_key(new_key).await;
-                        tracing::info!(
-                            fingerprint = %fingerprint,
-                            "revoke_peer: P2P revoked + sync key auto-rotated (random); \
-                             remaining devices must re-provision to keep syncing",
-                        );
-                        Response::ok(
-                            req.id,
-                            serde_json::json!({
-                                "ok": true,
-                                "removed": removed,
-                                "revoked_at": revoked_at,
-                                "fingerprint": fingerprint,
-                                "sync_key_rotated": true,
-                            }),
-                        )
-                    } else {
-                        // No sync key installed — P2P-only revocation is
-                        // the complete action; nothing to rotate.
-                        tracing::info!(
-                            fingerprint = %fingerprint,
-                            "revoke_peer: P2P-only revocation (no sync key installed); \
-                             cloud/relay sync was not active",
-                        );
-                        Response::ok(
-                            req.id,
-                            serde_json::json!({
-                                "ok": true,
-                                "removed": removed,
-                                "revoked_at": revoked_at,
-                                "fingerprint": fingerprint,
-                                "sync_key_rotated": false,
-                            }),
-                        )
-                    }
-                }
-                #[cfg(not(any(feature = "cloud-sync", feature = "relay-sync")))]
-                // P2P-only build: mTLS denylist is sufficient revocation.
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -286,20 +301,40 @@ impl IpcServer {
                         "removed": removed,
                         "revoked_at": revoked_at,
                         "fingerprint": fingerprint,
+                        "sync_key_rotated": true,
+                    }),
+                )
+            } else {
+                // No sync key installed — P2P-only revocation is
+                // the complete action; nothing to rotate.
+                tracing::info!(
+                    fingerprint = %fingerprint,
+                    "revoke_peer: P2P-only revocation (no sync key installed); \
+                     cloud/relay sync was not active",
+                );
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "ok": true,
+                        "removed": removed,
+                        "revoked_at": revoked_at,
+                        "fingerprint": fingerprint,
+                        "sync_key_rotated": false,
                     }),
                 )
             }
-            Ok(Err(e)) => Response::err_with_code(
-                req.id,
-                ERR_CODE_INTERNAL_ERROR,
-                format!("failed to record revocation: {e}"),
-            ),
-            Err(e) => Response::err_with_code(
-                req.id,
-                ERR_CODE_INTERNAL_ERROR,
-                format!("revoke task join error: {e}"),
-            ),
         }
+        #[cfg(not(any(feature = "cloud-sync", feature = "relay-sync")))]
+        // P2P-only build: mTLS denylist is sufficient revocation.
+        Response::ok(
+            req.id,
+            serde_json::json!({
+                "ok": true,
+                "removed": removed,
+                "revoked_at": revoked_at,
+                "fingerprint": fingerprint,
+            }),
+        )
     }
 
     /// T5.x — revoke ALL paired peers in one call (Settings →

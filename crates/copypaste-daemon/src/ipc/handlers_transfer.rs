@@ -203,14 +203,17 @@ impl IpcServer {
                         // origin" sentinel; sync will reassign on first push.
                         let item_id =
                             copypaste_core::ItemId::from(uuid::Uuid::new_v4().to_string());
-                        let aad = copypaste_core::build_item_aad_v2(
-                            &item_id,
-                            copypaste_core::AAD_SCHEMA_VERSION_V4,
-                            copypaste_core::ITEM_KEY_VERSION_CURRENT as u32,
-                        );
+                        // CopyPaste-vp63.52: AAD-building moved into the shared
+                        // `sync_common::encrypt_v2_for_local_storage` helper
+                        // (reused by `sync_common::build_local_item`,
+                        // `sync_orch::rekey::rekey_inbound`, and
+                        // `daemon::capture::text::encrypt_text_for_storage`).
                         let (nonce, ciphertext) =
-                            match copypaste_core::encrypt_item_with_aad(&item.bytes, &v2_key, &aad)
-                            {
+                            match crate::sync_common::encrypt_v2_for_local_storage(
+                                item_id.as_str(),
+                                &item.bytes,
+                                &v2_key,
+                            ) {
                                 Ok(v) => v,
                                 Err(e) => {
                                     return Err::<

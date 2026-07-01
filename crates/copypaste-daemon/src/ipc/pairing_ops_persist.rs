@@ -68,14 +68,19 @@ impl IpcServer {
             let mut peers = crate::peers::load_peers(&path);
             // Preserve any existing first/last-sync stamps across a re-pair so the
             // "first sync" history is not reset when the peer is re-paired.
-            let (prior_first_sync, prior_last_sync) = peers
-                .iter()
-                .find(|p| canonical_fingerprint(&p.fingerprint) == peer_fp_canonical)
-                .map(|p| (p.first_sync_at, p.last_sync_at))
-                .unwrap_or((None, None));
+            // CopyPaste-vp63.52: shared with `p2p::unpair` via
+            // `crate::peers::find_mut_by_fingerprint` / `retain_not_fingerprint`
+            // instead of hand-rolling the identical
+            // `canonical_fingerprint(&p.fingerprint) == target` predicate.
+            // `peer_fp_canonical` is already canonical (colon-free lowercase
+            // hex), so the helper's internal re-normalisation is a no-op.
+            let (prior_first_sync, prior_last_sync) =
+                crate::peers::find_mut_by_fingerprint(&mut peers, &peer_fp_canonical)
+                    .map(|p| (p.first_sync_at, p.last_sync_at))
+                    .unwrap_or((None, None));
             // Drop any prior record for the same peer (canonical compare) so a
             // re-pair refreshes the address/name instead of duplicating the entry.
-            peers.retain(|p| canonical_fingerprint(&p.fingerprint) != peer_fp_canonical);
+            crate::peers::retain_not_fingerprint(&mut peers, &peer_fp_canonical);
             // Populate `name` from the in-band device name received over the
             // bootstrap channel. Falls back to empty string when not provided
             // (e.g. discovery-initiated pairs that predate the device_name field).

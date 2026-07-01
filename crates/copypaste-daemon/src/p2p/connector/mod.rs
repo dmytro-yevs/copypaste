@@ -36,12 +36,6 @@ use pending_unpair::deliver_pending_unpairs;
 // Re-established at the exact reach the flat `connector.rs` file had
 // (`pub(super)`, i.e. visible to `p2p`), now that these helpers live one
 // directory level deeper — mirrors the same pattern used for `sync_orch/rekey`.
-// `dialable_peers_from_path` (bare re-export) is only reached from the p2p
-// unit tests (`p2p/mod.rs`'s `#[cfg(test)] mod tests`); production code goes
-// through `DialablePeersCache` instead. Gate to avoid an unused-import
-// warning in non-test builds.
-#[cfg(test)]
-pub(in crate::p2p) use dialable::dialable_peers_from_path;
 pub(in crate::p2p) use discovery_resolve::resolve_addr_from_discovery;
 use discovery_resolve::{refresh_peer_meta_from_discovery, resolve_addr_from_discovery_by_ip};
 

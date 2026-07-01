@@ -2,14 +2,14 @@
 //! ingest handler (dedup-by-hash, lamport stamping, sensitive detection).
 
 use copypaste_core::{
-    build_item_aad_v2, bump_item_recency, derive_v2, encrypt_item_with_aad, find_recent_by_hash,
-    get_item_by_id, insert_item_with_fts, is_sensitive_for_autowipe, AppConfig, ClipboardItem,
-    Database, ItemId, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
+    bump_item_recency, derive_v2, find_recent_by_hash, get_item_by_id, insert_item_with_fts,
+    is_sensitive_for_autowipe, AppConfig, ClipboardItem, Database,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use super::cleanup::prune_history;
+use crate::sync_common::encrypt_v2_for_local_storage;
 
 /// Encrypt a freshly-captured text payload for at-rest storage, producing a
 /// ciphertext that the read path (`ipc::write_to_pasteboard`) can decrypt.
@@ -38,24 +38,12 @@ pub(crate) fn encrypt_text_for_storage(
     item_id: &str,
 ) -> Result<([u8; copypaste_core::NONCE_SIZE], Vec<u8>), copypaste_core::EncryptError> {
     let v2_key = derive_v2(local_key);
-    let aad = build_item_aad_v2(
-        &ItemId::from(item_id),
-        AAD_SCHEMA_VERSION_V4,
-        ITEM_KEY_VERSION_CURRENT_U32,
-    );
-    encrypt_item_with_aad(plaintext, &v2_key, &aad)
+    // CopyPaste-vp63.52: AAD-building moved into the shared
+    // `sync_common::encrypt_v2_for_local_storage` helper (reused by
+    // `sync_common::build_local_item`, `sync_orch::rekey::rekey_inbound`, and
+    // `ipc::handlers_transfer`'s import handler).
+    encrypt_v2_for_local_storage(item_id, plaintext, &v2_key)
 }
-
-/// `key_version` stamped into newly-inserted rows, cast from the canonical
-/// `copypaste_core::ITEM_KEY_VERSION_CURRENT` (i64) to `u32` as required by
-/// `build_item_aad_v2`. A compile-time assertion keeps them in sync.
-const ITEM_KEY_VERSION_CURRENT_U32: u32 = ITEM_KEY_VERSION_CURRENT as u32;
-// Compile-time guard: if core ever bumps ITEM_KEY_VERSION_CURRENT the cast
-// above silently changes too, but this assert documents the expected value.
-const _: () = assert!(
-    ITEM_KEY_VERSION_CURRENT == 2,
-    "ITEM_KEY_VERSION_CURRENT changed — review encrypt_text_for_storage AAD"
-);
 
 pub(crate) async fn handle_text(
     text: String,
