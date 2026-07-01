@@ -178,56 +178,56 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
 
 ## Slice 3 — History + Popup via shared clipboard-presentation units
 
-- [ ] 3.1 Add `@layer patterns` CSS for `.row`/`.row__body`/`.row__title`/`.row__meta`/
+- [x] 3.1 Add `@layer patterns` CSS for `.row`/`.row__body`/`.row__title`/`.row__meta`/
       `.row__right`, `.del`/`.star-btn`, `.chk`, `.grouphead`, `.bulkbar`, plus `filtered`/
       `removing`/`copied`/`pinned`/`sel` state classes (expressed as `data-state`/native states
       per design.md Decision 3/C1) and their keyframes.
-- [ ] 3.2 Implement `src/lib/clip/normalizeContentKind.ts`: case/alias normalization, `kind`-wins-
+- [x] 3.2 Implement `src/lib/clip/normalizeContentKind.ts`: case/alias normalization, `kind`-wins-
       over-`content_type` precedence (falling back to `content_type` when `kind` is absent),
       `PATH`/`FILE`→`file` and `PHONE`/`NUMBER`→`num` mappings, `"unknown"` fallback for any
       unrecognized or `undefined` value, and the image-MIME-with-absent-kind→`"image"` rule
       (design.md Decision 8/A3/A4). Add unit tests: unknown string, `undefined`, a future
       hypothetical kind, both alias pairs, and the image-MIME case.
-- [ ] 3.3 Implement the typed `KIND_PRESENTATION` map (token/icon/label per normalized kind,
+- [x] 3.3 Implement the typed `KIND_PRESENTATION` map (token/icon/label per normalized kind,
       including an explicit `unknown` entry) and the shared `ContentTile`, `ClipPreview`, and
       `ClipMetadata` components (design.md Decision 8), including the source-app fallback
       contract: always render the generic type-glyph fallback (no daemon `source_bundle_id` yet),
       reserve the slot's layout space unconditionally on every row, and set the accessible label
       from the existing source-app name field (design.md Decision 8/C5).
-- [ ] 3.4 Wire `HistoryRow.tsx` to `.row` + `ContentTile`/`ClipPreview`/`ClipMetadata` for all 11
+- [x] 3.4 Wire `HistoryRow.tsx` to `.row` + `ContentTile`/`ClipPreview`/`ClipMetadata` for all 11
       content kinds + unknown; wire `PopupRow.tsx` to the same shared units in its condensed
       layout — the two components remain separate layout wrappers (design.md Decision 8).
-- [ ] 3.5 Wire `HistoryView.tsx`/`VirtualList.tsx` list container, search field, and filter chips
+- [x] 3.5 Wire `HistoryView.tsx`/`VirtualList.tsx` list container, search field, and filter chips
       to `.list`/`.field`/`.filters`/`.chip`; runtime-computed item offsets stay inline
       style/CSS-var per design.md Decision 12 (S1) — not replaced with tokens.
-- [ ] 3.6 Wire `BulkActionBar.tsx` to `.bulkbar`.
-- [ ] 3.7 Wire `EmptyState.tsx` to `.empty`/`.empty__ic`/`.empty__t`/`.empty__s` and verify all
+- [x] 3.6 Wire `BulkActionBar.tsx` to `.bulkbar`.
+- [x] 3.7 Wire `EmptyState.tsx` to `.empty`/`.empty__ic`/`.empty__t`/`.empty__s` and verify all
       documented History empty-state call sites (no items, no search results) render correctly.
-- [ ] 3.8 Wire `DetailsModal.tsx` and `HistoryView`'s bulk-delete `ConfirmModal` usage to the
+- [x] 3.8 Wire `DetailsModal.tsx` and `HistoryView`'s bulk-delete `ConfirmModal` usage to the
       `Dialog`-backed `.scrim`/`.modal` pattern from slice 2.
-- [ ] 3.9 Implement the sensitive-masking contract exactly per design.md Decision 9 (X6):
+- [x] 3.9 Implement the sensitive-masking contract exactly per design.md Decision 9 (X6):
       `.mask` styling occupies the real rendered width (no length masking, documented
       trade-off); copy/paste reads from item data, never the masked DOM text; the accessible
       name is masked (placeholder text) until revealed — this fixes the existing P0 gap where
       the accessible name leaks plaintext while blurred; text selection stays unrestricted;
       auto-re-mask on window blur is unchanged (`useSensitiveReveal`); add the optional
       reveal-timeout as a new, off-by-default preference.
-- [ ] 3.10 Add tests for the sensitive-masking contract: accessible name is the placeholder while
+- [x] 3.10 Add tests for the sensitive-masking contract: accessible name is the placeholder while
       masked and updates to the real value on reveal; copy while masked returns the real item
       value; window-blur re-masks (existing behavior, now regression-tested against this
       contract); reveal-timeout preference off by default and functions when enabled.
-- [ ] 3.11 Add hover-revealed row actions (pin/delete) per design.md Decision 13 (X4): visible on
+- [x] 3.11 Add hover-revealed row actions (pin/delete) per design.md Decision 13 (X4): visible on
       fine-pointer `:hover` and `:focus-within`; always-visible under `(hover: none)`; replaced by
       the checkbox in selection mode; never focusable while visually hidden.
-- [ ] 3.12 Verify popup's 4 empty states (offline / starting up / no matches / nothing copied yet
+- [x] 3.12 Verify popup's 4 empty states (offline / starting up / no matches / nothing copied yet
       — design.md/F4 corrected count) each render via `EmptyState`, and document whether
       startup/offline share the same component API as the other two (they do — same `EmptyState`
       props contract).
-- [ ] 3.13 Wire `GlideHighlight.tsx`'s overlay to `--dur`/`--ease` tokens (runtime-computed
+- [x] 3.13 Wire `GlideHighlight.tsx`'s overlay to `--dur`/`--ease` tokens (runtime-computed
       position stays inline style/CSS var, design.md Decision 12) and confirm it no-ops under
       `prefers-reduced-motion: reduce`.
-- [ ] 3.14 Wire `HighlightedText.tsx`'s fuzzy-match spans to the accent-tinted highlight token.
-- [ ] 3.15 Add `aria-expanded`/keyboard-order regression tests for History/Popup rows per
+- [x] 3.14 Wire `HighlightedText.tsx`'s fuzzy-match spans to the accent-tinted highlight token.
+- [x] 3.15 Add `aria-expanded`/keyboard-order regression tests for History/Popup rows per
       design.md Decision 13 (X5): 200% zoom/text-scaling reflow, no required 2D scroll, minimum
       target size (or documented desktop exception) for row actions.
 
