@@ -5,18 +5,14 @@
  * Includes micro-components: PinIndicator, SyncBlockedIndicator.
  * And helpers: parseUrl, parseFilename.
  */
-import React, { useState, useEffect } from "react";
+import React, { useEffect } from "react";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
 import { applySpanMasking, maskPlaceholder, shouldMask } from "../../lib/masking";
 import { formatRelativeTime } from "../../lib/time";
-import { COPY_FLASH_MS } from "../../lib/motion-tokens";
 import { ImageThumb } from "../../components/ImageThumb";
-import { AppIcon } from "../../components/AppIcon";
 import { FileChip } from "../../components/FileChip";
-import { KindChip } from "../../components/ContentIcon";
 import { DeviceBadge } from "../../components/DeviceBadge";
-import { IconActionButton } from "../../components/IconActionButton";
 
 // ---------------------------------------------------------------------------
 // Pin indicator (filled amber star — dm51: ★ styleguide §pin)
@@ -163,9 +159,6 @@ export const HistoryRow = React.memo(function HistoryRow({
     return () => clearTimeout(t);
   }, [revealed]);
 
-  // §8 copy-success flash: true for ~90ms after a successful copy.
-  const [copyFlash, setCopyFlash] = useState(false);
-
   // Whether this row should be visually blurred right now.
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
 
@@ -199,12 +192,6 @@ export const HistoryRow = React.memo(function HistoryRow({
     } else {
       onSelect();
       onCopy();
-      // §8 (crh3.20): flash duration = COPY_FLASH_MS (180ms = --mo-base) so the JS
-      // timer matches the .copy-flash CSS animation exactly — single source of truth
-      // via lib/motion-tokens.ts. The class is cleared after the animation finishes
-      // so a subsequent copy can re-trigger the flash.
-      setCopyFlash(true);
-      setTimeout(() => setCopyFlash(false), COPY_FLASH_MS);
     }
   };
 
@@ -337,20 +324,18 @@ export const HistoryRow = React.memo(function HistoryRow({
           </span>
         )}
 
-        {/* .meta sub-row: KindChip label + timestamp + device badge + app chip. */}
+        {/* .meta sub-row: timestamp + device badge + app chip. */}
         <div>
-          <KindChip contentType={entry.content_type} kind={entry.kind} />
           <span>
             {formatRelativeTime(entry.wall_time, "long")}
           </span>
           {/* Origin-device badge */}
           <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} originName={entry.origin_device_name} />
-          {/* Source-app icon + label chip; only rendered when present */}
+          {/* Source-app label chip; only rendered when present */}
           {entry.app_bundle_id && (() => {
             const appLabel = sourceAppLabel(entry.app_bundle_id);
             return appLabel ? (
               <span title={entry.app_bundle_id ?? undefined}>
-                <AppIcon bundleId={entry.app_bundle_id} size={14} />
                 {appLabel}
               </span>
             ) : null;
@@ -358,35 +343,34 @@ export const HistoryRow = React.memo(function HistoryRow({
         </div>
       </div>
 
-      {/* Right-side slot: icon action buttons (on hover only). */}
+      {/* Right-side slot: action buttons (on hover only). */}
       <div onClick={(e) => e.stopPropagation()}>
-        {/* Icon action buttons.
+        {/* Action buttons.
             No "Copy" button: row-click copies instead. */}
         {!selectionMode && (
           <div>
             {/* M10: Eye — show details modal */}
-            <IconActionButton
+            <button
               aria-label="Preview"
               title="Preview"
               onClick={onPreview}
             >
-              {null}
-            </IconActionButton>
-            <IconActionButton
+              Preview
+            </button>
+            <button
               aria-label={entry.pinned ? "Unpin" : "Pin"}
               title={entry.pinned ? "Unpin" : "Pin"}
               onClick={onPin}
             >
-              {null}
-            </IconActionButton>
-            <IconActionButton
+              {entry.pinned ? "Unpin" : "Pin"}
+            </button>
+            <button
               aria-label="Delete"
               title="Delete"
-              danger
               onClick={onDelete}
             >
-              {null}
-            </IconActionButton>
+              Delete
+            </button>
           </div>
         )}
       </div>

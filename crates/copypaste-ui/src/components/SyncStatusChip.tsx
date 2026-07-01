@@ -172,19 +172,6 @@ function buildTooltip(info: SyncInfo): string {
   return parts.join(" · ");
 }
 
-// ---------------------------------------------------------------------------
-// Dot colours — keyed to the ide-* Tailwind color map (CMP-7: all six states)
-// ---------------------------------------------------------------------------
-
-const DOT_CLASS: Record<SyncState, string> = {
-  synced:        "bg-ide-success",  // green — recent successful exchange
-  syncing:       "bg-ide-success",  // green — in-flight (same visual as synced)
-  idle:          "bg-ide-faint",    // grey  — configured but no recent activity
-  misconfigured: "bg-ide-faint",    // grey  — incomplete setup (amber chip shows detail)
-  offline:       "bg-ide-danger",   // red   — IPC socket rejected (daemon down)
-  error:         "bg-ide-danger",   // red   — backend auth/RLS/relay error
-};
-
 /**
  * CMP-7: "connected" in the old 3-state model (synced|syncing → green).
  * Used by the pulse-on-connect logic: we want to pulse when transitioning
@@ -325,7 +312,6 @@ export function SyncStatusChip() {
     <div
       title={tooltip}
       aria-label={`Sync: ${info.state}. ${tooltip}`}
-      className="flex items-center gap-1.5 cursor-default select-none"
     >
       {/* Coloured status dot; one-shot .online-pulse on transition INTO a green state (VISM-12).
           CMP-7: green states are "synced" and "syncing" (isConnectedState).
@@ -336,19 +322,12 @@ export function SyncStatusChip() {
           brief overlap at connect-time, online-pulse (forwards) takes visual
           precedence then ends, leaving syncing-dot if still syncing. */}
       <span
-        className={[
-          "h-2 w-2 shrink-0 rounded-full",
-          DOT_CLASS[info.state],
-          pulsing ? "online-pulse" : "",
-          info.state === "syncing" && !pulsing ? "syncing-dot" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        data-pulsing={pulsing}
         onAnimationEnd={() => setPulsing(false)}
       />
       {/* Device count — only shown when at least one peer is paired */}
       {info.deviceCount > 0 && (
-        <span className="text-[10.5px] leading-none text-ide-faint tabular-nums">
+        <span>
           {info.deviceCount}
         </span>
       )}
@@ -360,7 +339,6 @@ export function SyncStatusChip() {
       {info.cloudMisconfig && (
         <span
           aria-label="Cloud sync misconfigured"
-          className="shrink-0 rounded-full border border-ide-warning/30 bg-ide-warning/14 px-1.5 py-0.5 text-[10.5px] font-medium text-ide-warning"
         >
           Misconfig
         </span>

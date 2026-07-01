@@ -78,6 +78,9 @@ export function AccessibilityBanner({
         role="status"
         aria-live="polite"
         data-testid="granted-banner"
+        // 5917.103: fade-out phase flag preserved as a data hook for the redesign
+        // to animate the transient-confirmation cue (styling was stripped; logic kept).
+        data-fading={grantedFading}
         // Inform assistive tech that the confirmation will disappear shortly.
         aria-label="Accessibility permission granted — closing shortly"
       >

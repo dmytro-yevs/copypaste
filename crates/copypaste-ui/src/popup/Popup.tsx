@@ -317,20 +317,17 @@ export function Popup() {
       {error ? (
         error === "daemon_offline" ? (
           <EmptyState
-            icon={undefined}
             title="Clipboard service offline"
             body="The background service is not running. Restart it from Settings."
             action={<RestartDaemonButton onRestarted={() => void refresh()} />}
           />
         ) : error === "ipc_not_ready" ? (
           <EmptyState
-            icon={undefined}
             title="Starting up…"
             body="The clipboard service is initialising. It will be ready in a moment."
           />
         ) : (
           <EmptyState
-            icon={undefined}
             title="Something went wrong"
             body="The clipboard service could not be reached. Please try again."
           />
@@ -338,13 +335,11 @@ export function Popup() {
       ) : filtered.length === 0 ? (
         showQuery ? (
           <EmptyState
-            icon={undefined}
             title={`No matches for "${showQuery}"`}
             body="Try a different search term."
           />
         ) : (
           <EmptyState
-            icon={undefined}
             title="Nothing copied yet"
             body="Copy something and it will appear here."
           />

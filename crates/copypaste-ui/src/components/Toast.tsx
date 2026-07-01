@@ -31,23 +31,6 @@ export interface ToastMessage {
 // Internal GlassToastItem — one rendered toast bubble
 // ---------------------------------------------------------------------------
 
-const KIND_CLS: Record<ToastKind, string> = {
-  info:    "text-ide-text",
-  success: "text-ide-success",
-  error:   "text-ide-danger",
-  warning: "text-ide-warning",
-};
-
-// VISM-11: semantic colour dot for each kind — mirrors the HistoryView toast
-// spec and the Android GlassToast leading indicator. Dot is purely presentational
-// so it carries aria-hidden="true"; the KIND_CLS text colour already conveys kind.
-const DOT_CLS: Record<ToastKind, string> = {
-  info:    "bg-ide-text",
-  success: "bg-ide-success",
-  error:   "bg-ide-danger",
-  warning: "bg-ide-warning",
-};
-
 function GlassToastItem({
   msg,
   onDismiss,
@@ -56,7 +39,6 @@ function GlassToastItem({
   onDismiss: (id: string) => void;
 }) {
   const duration = msg.duration ?? 3000;
-  const kind = msg.kind ?? "info";
 
   // Auto-dismiss timer
   useEffect(() => {
@@ -70,32 +52,17 @@ function GlassToastItem({
     <div
       role="status"
       aria-live="polite"
-      style={{
-        borderRadius: "var(--r-card)",
-        boxShadow: "var(--sh1)",
-      }}
-      className={[
-        "min-w-[200px] max-w-[340px] px-4 py-2.5",
-        "flex items-center gap-3",
-        KIND_CLS[kind],
-      ].join(" ")}
     >
       {/* VISM-11: leading semantic colour dot — visual consistency with HistoryView toasts */}
       <span
         aria-hidden="true"
-        className={["h-2 w-2 shrink-0 rounded-full", DOT_CLS[kind]].join(" ")}
       />
-      <span className="flex-1 text-[13px] leading-snug">{msg.text}</span>
+      <span>{msg.text}</span>
       <button
         type="button"
         aria-label="Dismiss"
         onClick={() => onDismiss(msg.id)}
-        className="shrink-0 text-ide-faint hover:text-ide-dim transition-colors"
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-          <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
-        </svg>
-      </button>
+      />
     </div>
   );
 }
@@ -111,12 +78,11 @@ function ToastContainer({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismi
       // Stack at bottom-center, same as iOS toast convention. z-40 keeps it
       // below modals (z-50) but above regular content. Mirrors the undo-toast
       // in HistoryView (SCRH-12) — transient notifications must not occlude dialogs.
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-2 items-center pointer-events-none"
       aria-live="polite"
       aria-atomic="false"
     >
       {toasts.map((msg) => (
-        <div key={msg.id} className="pointer-events-auto">
+        <div key={msg.id}>
           <GlassToastItem msg={msg} onDismiss={onDismiss} />
         </div>
       ))}

@@ -34,8 +34,6 @@ export function RevokeConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: "var(--scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="revoke-modal-title"
@@ -47,24 +45,22 @@ export function RevokeConfirmDialog({
           modal-card-enter: approved motion entrance (§MO-1). */}
       <div
         ref={dialogRef}
-        className="w-full max-w-sm p-5"
-        style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh3)" }}
       >
-        <p id="revoke-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
+        <p id="revoke-modal-title">
           Revoke &ldquo;{name}&rdquo;
         </p>
-        <p className="mb-3 text-[12px] leading-relaxed text-ide-dim">
+        <p>
           Revoking removes this device from P2P. To also cut off cloud/relay
           sync, rotate the sync key — remaining devices must re-scan the
           pairing QR (or re-enter the new passphrase) to keep syncing. Rotate
           now?
         </p>
 
-        <label className="mb-1 block text-[11px] font-medium text-ide-faint">
+        <label>
           New sync passphrase (for rotation)
           {/* CopyPaste-5917.25: clarify this field is only used by Revoke & rotate,
               not by the plain Revoke only action. */}
-          <span className="ml-1.5 font-normal text-ide-faint/70">— only used by "Revoke &amp; rotate"</span>
+          <span>— only used by "Revoke &amp; rotate"</span>
         </label>
         <input
           type="password"
@@ -73,24 +69,18 @@ export function RevokeConfirmDialog({
           placeholder="At least 8 characters"
           autoComplete="new-password"
           disabled={revokeBusy}
-          className="mb-3 w-full border border-ide-border bg-ide-panel/60 px-2.5 py-1.5 text-[12px] text-ide-text placeholder:text-ide-faint focus:border-ide-accent/60 focus:outline-none disabled:opacity-40"
-          style={{ borderRadius: "var(--r-ctl)" }}
         />
 
-        <div className="flex items-center justify-end gap-2">
+        <div>
           <button
             onClick={onCancel}
             disabled={revokeBusy}
-            className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--r-ctl)" }}
           >
             Cancel
           </button>
           <button
             onClick={() => onRevoke(fingerprint)}
             disabled={revokeBusy}
-            className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--r-ctl)" }}
           >
             Revoke only
           </button>
@@ -106,8 +96,6 @@ export function RevokeConfirmDialog({
             // action even when the visible text is replaced by "..." when busy.
             aria-label="Revoke and rotate sync key"
             // puf4: solid-danger variant for primary destructive action (Revoke & rotate)
-            className="bg-ide-danger px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--r-ctl)" }}
           >
             {/* bdac.83: aligned to Android label "Revoke & rotate key" for platform parity */}
             {revokeBusy ? "…" : "Revoke & rotate key"}

@@ -265,8 +265,6 @@ export function SasPairingModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: "var(--scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="sas-modal-title"
@@ -279,16 +277,14 @@ export function SasPairingModal({
           modal-card-enter: approved motion entrance (§MO-1). */}
       <div
         ref={modalRef}
-        className="w-full max-w-sm p-5"
-        style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh3)" }}
       >
-        <p id="sas-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
+        <p id="sas-modal-title">
           {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
         </p>
 
         {/* Peer metadata (responder path, or when daemon provides it) */}
         {(status.peer_model || status.peer_os || status.peer_app_version || status.peer_ip) && (
-          <div className="mt-1 mb-2 space-y-0.5">
+          <div>
             <MetaRow label="Model" value={status.peer_model} />
             <MetaRow label="OS" value={status.peer_os} />
             <MetaRow label="Version" value={status.peer_app_version} />
@@ -298,10 +294,10 @@ export function SasPairingModal({
 
         {/* Connecting / initiating */}
         {!ended && status.state === "initiating" && error === null && (
-          <div className="flex items-center gap-2 py-4">
+          <div>
             {/* animate-spin + motion-reduce:animate-none — respects reduced-motion (MOT-18) */}
-            <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent" />
-            <p className="text-[12px] text-ide-dim">Connecting…</p>
+            <span />
+            <p>Connecting…</p>
           </div>
         )}
 
@@ -317,25 +313,23 @@ export function SasPairingModal({
           status.state !== "rejected" &&
           status.state !== "aborted" &&
           status.state !== "timed_out" && (
-            <div className="flex items-center gap-2 py-4">
+            <div>
               {/* animate-spin + motion-reduce:animate-none — respects reduced-motion (MOT-18) */}
-              <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent" />
-              <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
+              <span />
+              <p>Waiting for the other device…</p>
             </div>
           )}
 
         {/* Awaiting SAS — show the code prominently */}
         {!ended && status.state === "awaiting_sas" && status.sas !== undefined && (
-          <div className="py-2">
-            <p className="mb-2 text-[12px] text-ide-dim">
+          <div>
+            <p>
               Confirm this code matches the one shown on the other device.
             </p>
             {/* Security: SAS code is display-only. userSelect:none + no click-to-copy
                 prevents any clipboard reader from grabbing the live PAKE secret.
                 (bd CopyPaste-1jms.1) */}
             <div
-              className="surface-card mx-auto block px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text text-center"
-              style={{ borderRadius: "var(--r-ctl)", userSelect: "none" }}
               aria-label={`Security code: ${status.sas}`}
               data-testid="sas-code-display"
             >
@@ -348,7 +342,7 @@ export function SasPairingModal({
             {(status.peer_device_name ??
               status.peer_ip_addrs?.length ??
               status.peer_fingerprint) && (
-              <div className="surface-card mt-3 px-3 py-2" style={{ borderRadius: "var(--r-card)" }}>
+              <div>
                 <MetaRow label="Name" value={status.peer_device_name} />
                 <MetaRow
                   label="Addresses"
@@ -357,12 +351,10 @@ export function SasPairingModal({
                 <MetaRow label="Fingerprint" value={status.peer_fingerprint} />
               </div>
             )}
-            <div className="mt-4 flex items-center justify-end gap-2">
+            <div>
               <button
                 onClick={() => void handleConfirm(false)}
                 disabled={confirmPending}
-                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Doesn't match
               </button>
@@ -374,11 +366,9 @@ export function SasPairingModal({
                 onClick={() => void handleConfirm(true)}
                 disabled={confirmPending}
                 aria-label="Codes match — confirm pairing"
-                className="inline-flex items-center gap-1.5 bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 {confirmPending && (
-                  <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-white/40 border-t-white" />
+                  <span />
                 )}
                 {confirmPending ? "Confirming…" : "Match"}
               </button>
@@ -388,10 +378,10 @@ export function SasPairingModal({
 
         {/* Waiting after the user accepted, for the peer to also accept */}
         {!ended && status.state === "awaiting_sas" && status.sas === undefined && (
-          <div className="flex items-center gap-2 py-4">
+          <div>
             {/* animate-spin + motion-reduce:animate-none — respects reduced-motion (MOT-18) */}
-            <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent" />
-            <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
+            <span />
+            <p>Waiting for the other device…</p>
           </div>
         )}
 
@@ -399,13 +389,11 @@ export function SasPairingModal({
             state machine, unblocking a subsequent LAN pairing attempt.
             (bd CopyPaste-1jms.12) */}
         {status.state === "confirmed" && (
-          <div className="py-3">
-            <p className="text-[13px] font-medium text-ide-success">Paired ✓</p>
-            <div className="mt-3 flex justify-end">
+          <div>
+            <p>Paired ✓</p>
+            <div>
               <button
                 onClick={handleClose}
-                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Close
               </button>
@@ -419,19 +407,17 @@ export function SasPairingModal({
         {(status.state === "rejected" ||
           status.state === "aborted" ||
           status.state === "timed_out") && (
-          <div className="py-3">
-            <p className="text-[13px] text-ide-danger">
+          <div>
+            <p>
               {status.state === "timed_out"
                 ? "Pairing timed out."
                 : status.state === "rejected"
                   ? "Pairing was rejected."
                   : "Pairing was cancelled."}
             </p>
-            <div className="mt-3 flex justify-end">
+            <div>
               <button
                 onClick={handleClose}
-                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Close
               </button>
@@ -444,15 +430,13 @@ export function SasPairingModal({
             error: the pairing simply ended (likely resolved on the other
             device). */}
         {ended && (
-          <div className="py-3">
-            <p className="text-[13px] text-ide-dim">
+          <div>
+            <p>
               Pairing ended — check the other device.
             </p>
-            <div className="mt-3 flex justify-end">
+            <div>
               <button
                 onClick={handleClose}
-                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Close
               </button>
@@ -462,15 +446,14 @@ export function SasPairingModal({
 
         {/* Transient poll/confirm error (non-terminal) */}
         {error !== null && !terminal && (
-          <p className="mt-2 text-[11px] text-ide-danger">{error}</p>
+          <p>{error}</p>
         )}
 
         {/* Cancel affordance for the non-terminal states (Connecting / awaiting) */}
         {!terminal && (
-          <div className="mt-4 border-t border-ide-divider pt-3 text-right">
+          <div>
             <button
               onClick={handleClose}
-              className="text-[11px] text-ide-faint hover:text-ide-dim"
             >
               Cancel
             </button>

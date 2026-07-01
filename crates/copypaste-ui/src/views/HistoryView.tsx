@@ -750,7 +750,6 @@ export function HistoryViewInner() {
   } else if (loadState === "offline") {
     body = (
       <EmptyState
-        icon={null}
         title="Clipboard service offline"
         body="The background service is not running."
         action={<div><RestartDaemonButton onRestarted={() => void load()} /></div>}
@@ -761,7 +760,6 @@ export function HistoryViewInner() {
     // instead of the error/degraded state. No errorDetail is ever set here.
     body = (
       <EmptyState
-        icon={null}
         title="Starting up…"
         body="The clipboard service is initialising. History will appear in a moment."
       />
@@ -803,7 +801,6 @@ export function HistoryViewInner() {
   } else if (filtered.length === 0 && items.length === 0) {
     body = (
       <EmptyState
-        icon={null}
         title={isPrivateMode ? "Private mode is on" : "Nothing copied yet"}
         body={isPrivateMode ? "Clipboard is not recorded while private mode is active." : "Copy something and it will appear here."}
       />
@@ -811,7 +808,6 @@ export function HistoryViewInner() {
   } else if (filtered.length === 0) {
     body = (
       <EmptyState
-        icon={null}
         title={`No results for "${search}"`}
         body="Try a different search term."
       />
@@ -844,13 +840,12 @@ export function HistoryViewInner() {
           if (!isTruncated) return null;
           return (
             <div
-              className="shrink-0 border-b border-ide-divider/40 px-3 py-1 text-[11px] text-ide-faint text-center"
               aria-live="polite"
               data-testid="history-display-limit-hint"
             >
               Showing first {limit.toLocaleString()} of {filtered.length.toLocaleString()} results
               {" — "}
-              <span className="text-ide-dim">adjust the display limit in Settings › Storage</span>
+              <span>adjust the display limit in Settings › Storage</span>
             </div>
           );
         })()}
@@ -965,20 +960,13 @@ export function HistoryViewInner() {
         on the inner label so the Tauri drag event fires on the webview, not
         on a React element.
       */}
-      <div className="relative h-full">
+      <div>
         {fileDragOver && (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-ide-accent bg-ide-accent/5"
-            style={{ borderRadius: "var(--r-card)" }}
           >
-            <div className="flex flex-col items-center gap-2 text-ide-accent">
-              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              <span className="text-[13px] font-medium">Drop to add to clipboard</span>
+            <div>
+              <span>Drop to add to clipboard</span>
             </div>
           </div>
         )}
@@ -994,25 +982,12 @@ export function HistoryViewInner() {
           // (Previously z-[9999] rendered this toast on top of everything.)
           // CopyPaste-bdac.58: padding now via Tailwind classes (pl-2.5 pr-3.5 py-1.5)
           // instead of hardcoded inline "6px 14px 6px 10px" so density tokens apply.
-          className="fixed bottom-3 left-1/2 z-40 pointer-events-auto flex items-center gap-2.5 whitespace-nowrap pl-2.5 pr-3.5 py-1.5"
           role="status"
           aria-live="polite"
-          style={{
-            transform: "translateX(-50%)",
-            borderRadius: "var(--r-card)",
-          }}
         >
           <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              flexShrink: 0,
-              // uhed: spec error/destructive token (§3.6 --err = #E5645F dark / #D64545 light).
-              background: "var(--err)",
-            }}
           />
-          <span className="text-[12px] text-ide-text">
+          <span>
             Deleted &ldquo;
             {undoPending.preview.length > 40
               ? `${undoPending.preview.slice(0, 40)}…`
@@ -1021,14 +996,6 @@ export function HistoryViewInner() {
           </span>
           <button
             onClick={handleUndo}
-            className="text-[12px] font-semibold text-ide-accent"
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-              flexShrink: 0,
-            }}
           >
             Undo
           </button>

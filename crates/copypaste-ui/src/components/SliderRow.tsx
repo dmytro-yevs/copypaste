@@ -31,10 +31,6 @@ export function SliderRow({
   disabled,
   tickStepCount,
 }: SliderRowProps) {
-  // HW-M4: compute fill % for the accent-colored track. Since appearance:none
-  // disables native accent-color, we drive the gradient via a CSS custom prop.
-  const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
-
   // Generate a stable id for the datalist when tick marks are requested.
   // We use the min/max/step combo as a cheap content-stable key.
   const datalistId =
@@ -49,7 +45,7 @@ export function SliderRow({
       : [];
 
   return (
-    <div className="flex items-center gap-2">
+    <div>
       <input
         type="range"
         min={min}
@@ -62,8 +58,6 @@ export function SliderRow({
         onMouseUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
         onTouchEnd={(e) => onRelease?.(Number((e.currentTarget as HTMLInputElement).value))}
         onKeyUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
-        className="w-28 disabled:opacity-40 disabled:cursor-not-allowed"
-        style={{ ["--_fill" as string]: `${pct}%` }}
       />
       {/* §6.5: datalist provides step tick marks rendered by the browser */}
       {datalistId !== undefined && (
@@ -74,7 +68,7 @@ export function SliderRow({
         </datalist>
       )}
       {/* §6.4: w-[80px] (was w-[52px]) so longer labels like "Unlimited" fit */}
-      <span className="w-[80px] text-right text-[13px] text-ide-text">{formatValue(value)}</span>
+      <span>{formatValue(value)}</span>
     </div>
   );
 }
