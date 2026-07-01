@@ -177,8 +177,10 @@ ARIA state).
 `accent: "indigo" | "blue" | "teal" | "green" | "amber" | "rose"` (default `"indigo"`), and
 `translucency: boolean` (default `true`), persisted in the existing `UIPrefs` object at the current
 key `copypaste-ui-prefs-v4`. Both `index.html` and
-`popup.html` inline a small **synchronous** `<script>` (not `type="module"`, runs before any
-deferred/module script and before the first paint of app content) that:
+`popup.html` load a small **synchronous, same-origin EXTERNAL classic script**
+(`<script src="/theme-bootstrap.js"></script>` — a build-emitted `'self'` asset, **NOT an inline
+`<script>`**; see the CSP note below for why), placed **before** any `type="module"` app script so it
+runs before the first paint of app content. It:
 1. Reads `localStorage["copypaste-ui-prefs-v4"]` (falling back to defaults on missing/malformed
    JSON — a defensive read only; the React store is the authoritative loader on mount).
 2. Validates `theme`/`accent`/`translucency` against their known enum/boolean values individually;
@@ -196,29 +198,42 @@ the persisted theme/accent/translucency **every time it opens** (it reads the sa
 so the popup is never wrong for more than the lifetime of one already-open session. Live propagation
 to an *already-open* popup is best-effort on top of that: the writer emits a Tauri
 `emit("ui-prefs-changed", …)` and, where the two windows share a `localStorage` partition, the
-`storage` event also fires; each window's listener re-applies the bootstrap logic. **Open question to
-settle in slice 1, not assumed:** whether Tauri's two `WebviewWindow`s actually share one
-`localStorage` partition. If they do NOT, (a) the `storage` event won't cross windows and the Tauri
-event is the sole live channel, and (b) more importantly the popup must still read the *same*
-persisted prefs on open — slice 1 verifies the popup gets the user's theme at open time and picks
-the Tauri-event channel accordingly. If neither live channel reaches an open popup, it simply
-corrects on its next open; that is acceptable per the directive. Best-effort acceptance: change theme
-in Settings with the popup open and observe it update live where the channel exists; in all cases the
-popup shows the correct theme after reopening.
-**CSP compatibility (resolves part of B1):** the bootstrap script is a same-origin inline script
-with no `eval`/`Function` usage and no external network access, compatible with Tauri's default CSP
-(`script-src 'self'` plus the existing `'unsafe-inline'`/nonce configuration already required for
-Vite's dev-mode module scripts); it performs no DOM mutation beyond the three `dataset.*` writes on
-`<html>`, so it does not need additional CSP relaxation beyond what the dev/build pipeline already
-requires. This is verified as an explicit task (slice 1), not assumed.
+`storage` event also fires; each window's listener re-applies the bootstrap logic. **Persistence is
+NOT a new architecture (resolves B2's persistence concern):** the app already persists ALL of
+`UIPrefs` to `localStorage[PREFS_KEY]` via `loadPrefs()`/`savePrefs()`, and the popup **already reads
+those same prefs today** (e.g. `previewLinesPopup` via `useUI(s => s.prefs)` in `Popup.tsx`). Theme /
+accent / translucency are just three more fields in that same object, so their cross-window sharing is
+**identical to how every existing pref is already shared in the shipped app** — whatever partitioning
+Tauri uses is the status quo, not something this change introduces or must re-solve. **Contract
+(single, non-contradictory): next-open correctness is REQUIRED** (the popup applies persisted prefs
+on every open, exactly as it already does for existing prefs); **live update to an already-open popup
+is BEST-EFFORT** (Tauri `ui-prefs-changed` event, plus `storage` event where partitions are shared) —
+if a live channel doesn't reach an open popup it corrects on next open. The `design-tokens`
+capability spec is worded to match this exactly (required next-open, best-effort live) — it does not
+`SHALL`-mandate live update, removing the round-1/round-2 contradiction. Acceptance: (required) the
+popup always shows the correct theme when opened; (best-effort) a Settings change updates an open
+popup live where the channel exists.
+**CSP compatibility (resolves B1) — corrected factual statement:** the checked-in Tauri CSP in
+`crates/copypaste-ui/src-tauri/tauri.conf.json` is
+`script-src 'self'` (verified: no `'unsafe-inline'`, no nonce, no hash on `script-src`; only
+`style-src` carries `'unsafe-inline'`). An **inline** `<script>` is therefore **blocked** — `'self'`
+does not authorize inline scripts. The prior draft's claim that inline is CSP-compatible was wrong.
+Resolution: the bootstrap is an **external same-origin classic script** (`/theme-bootstrap.js`,
+authorized by `script-src 'self'`), authored as a tiny source file emitted by Vite to a stable
+`'self'` path and referenced before the module entry. We do **not** weaken CSP to `'unsafe-inline'`
+just to avoid a theme flash. Verification is a **packaged-Tauri** test (not only a Vite dev-mode
+test), because dev and packaged builds enforce materially different CSP — the packaged app must load
+`/theme-bootstrap.js` and apply `data-theme`/`data-accent`/`data-translucency` before first paint
+without a CSP violation in the packaged runtime.
 **Rationale (resolves B1):** a React `useEffect` runs after the browser paints, so a user with a
 persisted `light` theme would see one frame (or more, depending on hydration timing) of the static
 dark theme baked into `index.html`/`popup.html` before the effect corrects it — a visible flash and
-a spec contradiction (`design-tokens` spec already required pre-paint application). The inline
-script removes that gap by applying the real preference before any content is visible.
+a spec contradiction (`design-tokens` spec already required pre-paint application). The external
+same-origin bootstrap script removes that gap by applying the real preference before any content is
+visible, while staying within `script-src 'self'`.
 **Alternative considered:** a `<meta>`-driven or CSS-only "no-flash" trick (e.g. `visibility:hidden`
 until a class is added). Rejected — it still requires the same synchronous read/validate/write logic
-and adds an extra visibility toggle to get right cross-browser; the inline script is simpler and
+and adds an extra visibility toggle to get right cross-browser; the external bootstrap script is simpler and
 directly sets the attributes the CSS already keys off.
 
 ### 5. Shared `Dialog` primitive composes existing focus-trap/portal behavior — not new scope
@@ -253,13 +268,17 @@ stays a `Record<ProductionViewId, …>` — the gallery is **never** a static en
 `import.meta.env.DEV && MOCK` is true and the current view is `"gallery"`, `App.tsx` renders a
 component obtained via `const { GalleryView } = await import("./views/GalleryView")` (a dynamic
 import, mirroring `transport.ts`'s existing `await import("../mockIpc")` pattern exactly), gated
-behind the same `DEV`/`MOCK` check that already tree-shakes `mockIpc.ts` out of production. The
-persisted `view` field in the Zustand store is typed as `DevViewId` at the type level, but
-`setView("gallery")` is a no-op (falls back to `"history"`) unless `import.meta.env.DEV && MOCK` —
-this defines the stale-state recovery behavior: if a production build somehow has `"gallery"`
-persisted (e.g. a user downgraded from a dev build sharing the same `localStorage`), the app treats
-it as unknown and resets to `"history"` rather than attempting to render a module that was never
-bundled.
+behind the same `DEV`/`MOCK` check that already tree-shakes `mockIpc.ts` out of production.
+**Factual correction (resolves B3): `view` is NOT persisted.** The Zustand `view` field is in-memory
+only — only `UIPrefs` is written to `localStorage` (verified: `store.ts` has no `persist`/`partialize`
+of `view`). So there is no "downgrade leaves `gallery` persisted" case to recover from; that premise
+was false. The narrowing we keep is purely **defensive runtime validation of in-memory / URL-derived
+`view` input**: `setView(v)` accepts `"gallery"` only when `import.meta.env.DEV && MOCK`, otherwise it
+falls back to `"history"` — this guards against an invalid value arriving from code or a `?view=`
+query param, not from persistence. **`DevViewId` does not pollute the production store type**: rather
+than typing the global store's `view` as `DevViewId`, the gallery is a **dev-only navigation branch**
+— production `view` stays `ProductionViewId`; the DEV/MOCK gallery path is handled outside the
+production `Record<ProductionViewId, …>` so no production state type gains a `"gallery"` member.
 **Verification beyond a string match (resolves B2):** in addition to the existing bundle-content
 string assertion (task 8.7's `rg` check), the build verification also inspects the emitted Rollup
 chunk graph (`vite build --mode production` then reading the generated manifest/chunk list) to
@@ -511,6 +530,17 @@ natively since Safari 16.2. This is stated as a non-functional requirement (supp
 matrix) rather than left implicit; no `color-mix()` fallback (e.g. precomputed static color
 fallback layer) is required for this change. Linux daemon-only builds have no UI surface affected by
 this change. Windows is frozen per `ADR-012` and out of scope.
+**Packaged targets vs. build config (resolves B4):** the **product** support matrix for the packaged
+desktop UI is **macOS 13+** — established from repository/release policy: `CLAUDE.md` names macOS as
+the primary target, `ADR-012` freezes Windows (homebrew-only), and Linux is **daemon-only** (no Tauri
+UI is shipped). The browser `?mock=1` surface is a **private dev/QA harness only** (not a shipped
+product) driven by a single Chromium engine via Playwright — its engine is stated separately from the
+packaged-app OS matrix and carries no public browser-compatibility contract. **Known mismatch to
+reconcile (flagged, app-code not spec):** `crates/copypaste-ui/src-tauri/tauri.conf.json` currently
+sets `bundle.targets: "all"` and ships Windows icons — this contradicts the macOS-only product matrix
+and is NOT a support signal; a follow-up narrows `targets` to macOS (or documents why `"all"` is
+retained). This change does not use the macOS-only floor to waive compatibility work while the build
+config claims otherwise — it names the discrepancy explicitly.
 **Rationale (resolves S2):** the prior draft assumed `color-mix()` "just works" without stating what
 "works" is scoped to; stating the floor explicitly turns an assumption into a verifiable non-goal
 for fallback work.
