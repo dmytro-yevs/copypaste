@@ -5,16 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-// CopyPaste-5917.23: Outlined variant for consistency with app-wide icon styleguide.
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material3.Icon
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -29,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
@@ -38,18 +30,14 @@ import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IdeSwitch
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_LABELS
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_LABELS
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
-import com.copypaste.android.ui.theme.RadiusChip
-import com.copypaste.android.ui.theme.RadiusControl
 import com.copypaste.android.ui.theme.SectionLabel
 import com.copypaste.android.ui.theme.SteppedSliderRow
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.ideTextFieldColors
 
 // ─────────────────────────────────────────────────────────────────────────────
 // C-P1-1 step arrays — BINARY MiB units (* 1024 * 1024) to match the Rust core
@@ -81,7 +69,6 @@ internal fun ExcludedAppsRow(
     excludedApps: List<String>,
     onExcludedAppsChange: (List<String>) -> Unit,
 ) {
-    val c = LocalCpColors.current
     var newApp by rememberSaveable { mutableStateOf("") }
 
     val addCurrent: () -> Unit = {
@@ -92,33 +79,20 @@ internal fun ExcludedAppsRow(
         newApp = ""
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.setting_excluded_apps_subtitle),
-            style = MaterialTheme.typography.bodySmall,
-            color = c.dim,
-            modifier = Modifier.padding(top = 2.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedTextField(
                 value = newApp,
                 onValueChange = { newApp = it },
-                placeholder = {
-                    Text("com.example.app", style = MaterialTheme.typography.bodySmall)
-                },
+                placeholder = { Text("com.example.app") },
                 singleLine = true,
-                // bo95: RadiusControl (9dp) per styleguide --radius-ctl.
-                shape = RadiusControl,
-                colors = ideTextFieldColors(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { addCurrent() }),
                 modifier = Modifier.weight(1f),
@@ -128,32 +102,19 @@ internal fun ExcludedAppsRow(
                 onClick = addCurrent,
                 variant = ButtonVariant.PRIMARY,
                 enabled = newApp.trim().isNotEmpty(),
-                modifier = Modifier.padding(start = 8.dp),
             ) {
                 Text(stringResource(R.string.action_add))
             }
         }
         if (excludedApps.isNotEmpty()) {
-            FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            FlowRow(modifier = Modifier.fillMaxWidth()) {
                 excludedApps.forEach { bundleId ->
                     InputChip(
                         selected = false,
                         onClick = { onExcludedAppsChange(excludedApps.filterNot { it == bundleId }) },
+                        // CopyPaste-g5u1: dropped trailing close icon — label conveys the
+                        // remove action via the chip's onClick (icon beside text removed).
                         label = { Text(bundleId) },
-                        // pjis: RadiusChip (7dp) per styleguide --radius-chip (was Material 8dp).
-                        shape = RadiusChip,
-                        trailingIcon = {
-                            Icon(
-                                imageVector = Icons.Outlined.Close,
-                                contentDescription = stringResource(R.string.action_remove),
-                            )
-                        },
                     )
                 }
             }
@@ -190,10 +151,10 @@ internal fun StorageTab(
     // Null → not yet available (no FFI vacuum entry point on Android yet).
     onVacuumDatabase: (() -> Unit)? = null,
 ) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column {
         SectionLabel(stringResource(R.string.section_storage_limits))
         SettingsCard {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            Column {
                 SteppedSliderRow(
                     label = stringResource(R.string.setting_max_text_size_label),
                     stepValues = TEXT_SIZE_STEP_VALUES,
@@ -254,9 +215,7 @@ internal fun StorageTab(
                 )
                 Text(
                     text = stringResource(R.string.setting_max_items_subtitle),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = LocalCpColors.current.dim,
-                    modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -337,30 +296,23 @@ internal fun StorageTab(
         }
         SectionLabel(stringResource(R.string.section_data))
         SettingsCard {
-            val c = LocalCpColors.current
             // CopyPaste-8jx8: Export history — produces a JSON file with text items
             // via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
             // CopyPaste-crh3.40: Include-sensitive-items toggle (parity with macOS).
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = stringResource(R.string.setting_export_history_label),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = c.text,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             text = stringResource(R.string.setting_export_history_subtitle),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = c.dim,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     CopyPasteButton(
@@ -372,17 +324,14 @@ internal fun StorageTab(
                 }
                 // Include-sensitive toggle row — mirrors macOS "Include sensitive items" checkbox.
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
                         text = stringResource(R.string.setting_export_include_sensitive_label),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = c.dim,
-                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
                     )
                     IdeSwitch(
                         checked = includeSensitiveExport,
@@ -394,9 +343,7 @@ internal fun StorageTab(
                 if (includeSensitiveExport) {
                     Text(
                         text = stringResource(R.string.setting_export_include_sensitive_warning),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = c.warn,
-                        modifier = Modifier.padding(top = 4.dp),
+                        color = MaterialTheme.colorScheme.tertiary,
                     )
                 }
             }
@@ -404,22 +351,18 @@ internal fun StorageTab(
             // CopyPaste-8jx8: Import history — reads a previously exported JSON file
             // and inserts new items (deduplication by ID, re-encrypted with device key).
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.setting_import_history_label),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = c.text,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = stringResource(R.string.setting_import_history_subtitle),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = c.dim,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 CopyPasteButton(
@@ -431,16 +374,13 @@ internal fun StorageTab(
             }
             SettingsCardDivider()
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
                     text = stringResource(R.string.setting_clear_history_label),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.text,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 CopyPasteButton(
                     onClick = { showClearHistoryConfirm = true },
@@ -454,22 +394,18 @@ internal fun StorageTab(
             // Wipes the entire clipboard store including pinned items. Intended as a
             // last resort when the DB is corrupted and normal operations fail.
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.setting_reset_db_label),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = c.text,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = stringResource(R.string.setting_reset_db_subtitle),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = c.dim,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 CopyPasteButton(
@@ -485,22 +421,18 @@ internal fun StorageTab(
             // onVacuumDatabase is null until the FFI exposes a vacuum entry point;
             // in that case the button is shown as disabled with an explanatory note.
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.setting_compact_db_label),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = LocalCpColors.current.text,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = stringResource(R.string.setting_compact_db_subtitle),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LocalCpColors.current.dim,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 CopyPasteButton(
@@ -512,6 +444,5 @@ internal fun StorageTab(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }

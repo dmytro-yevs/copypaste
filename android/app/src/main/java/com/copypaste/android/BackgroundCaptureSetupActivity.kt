@@ -54,9 +54,8 @@ import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalCpColors
 
 /**
  * "Background Capture" setup wizard — implements the ClipCascade-style combo
@@ -134,7 +133,7 @@ class BackgroundCaptureSetupActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 val trigger by refreshTrigger
                 @Suppress("UNUSED_EXPRESSION") trigger // force Compose to track this state
 
@@ -254,8 +253,6 @@ fun BackgroundCaptureSetupScreen(
     oemHint: String? = null,
     onOemHintConsumed: () -> Unit = {},
 ) {
-    // ANDO-3: read the active ramp (light/dark) instead of hardcoding dark Ide* constants.
-    val c = LocalCpColors.current
     val ctx = LocalContext.current
 
     val toastState = remember { GlassToastState() }
@@ -295,7 +292,7 @@ fun BackgroundCaptureSetupScreen(
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        containerColor = c.bg,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_bg_capture_setup),
@@ -385,7 +382,7 @@ fun BackgroundCaptureSetupScreen(
                 )
             } else {
                 // Stock Android / Pixel: no OEM power-management layer present.
-                CopyPasteCard(accent = c.border) {
+                CopyPasteCard {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -394,12 +391,12 @@ fun BackgroundCaptureSetupScreen(
                             Icon(
                                 imageVector = Icons.Outlined.PhonelinkSetup,
                                 contentDescription = null,
-                                tint = c.dim,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
                                 text = stringResource(R.string.bg_capture_oem_title),
                                 style = MaterialTheme.typography.titleMedium,
-                                color = c.text,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -407,14 +404,14 @@ fun BackgroundCaptureSetupScreen(
                         Text(
                             text = stringResource(R.string.bg_capture_oem_not_needed),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = c.dim,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
 
             // ── Step 4: Final instruction (text-only) ──────────────────────────
-            CopyPasteCard(accent = c.border) {
+            CopyPasteCard {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -423,12 +420,12 @@ fun BackgroundCaptureSetupScreen(
                         Icon(
                             imageVector = Icons.Outlined.PlayArrow,
                             contentDescription = null,
-                            tint = c.warn,
+                            tint = MaterialTheme.colorScheme.tertiary,
                         )
                         Text(
                             text = stringResource(R.string.bg_capture_restart_title),
                             style = MaterialTheme.typography.titleMedium,
-                            color = c.text,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -436,7 +433,7 @@ fun BackgroundCaptureSetupScreen(
                     Text(
                         text = stringResource(R.string.bg_capture_restart_desc),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = c.dim,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
@@ -473,16 +470,7 @@ private fun BgCaptureCard(
     onAcknowledge: (() -> Unit)? = null,
     acknowledgeLabel: String? = null,
 ) {
-    // ANDO-3: use LocalCpColors.current so the card renders correctly in light themes.
-    val c = LocalCpColors.current
-
-    val borderColor = when {
-        granted == true              -> c.ok
-        granted == false && required -> c.err
-        else                         -> c.border
-    }
-
-    CopyPasteCard(accent = borderColor) {
+    CopyPasteCard {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -491,19 +479,19 @@ private fun BgCaptureCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted == true) c.ok else c.dim,
+                    tint = if (granted == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = c.text,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = stringResource(R.string.label_required),
                         style = MaterialTheme.typography.labelSmall,
-                        color = c.err,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
@@ -523,7 +511,7 @@ private fun BgCaptureCard(
                         imageVector = if (granted) Icons.Outlined.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
-                        tint = if (granted) c.ok else c.err,
+                        tint = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     )
                     Text(
                         text = if (granted)
@@ -531,7 +519,7 @@ private fun BgCaptureCard(
                         else
                             stringResource(R.string.status_not_granted),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) c.ok else c.err,
+                        color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -540,7 +528,7 @@ private fun BgCaptureCard(
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = c.dim,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(8.dp))
             CopyPasteButton(

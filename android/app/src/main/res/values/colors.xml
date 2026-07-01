@@ -1,35 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive launcher icon background (white, icon motif carries the brand color) -->
+    <!-- Adaptive launcher icon background (the launcher icon needs this). -->
     <color name="ic_launcher_background">#FFFFFF</color>
-
-    <!--
-        Graphite Mist palette §0 ramp (c48e Liquid-Glass refresh) — single source of
-        truth for the pre-Compose window background (splash/launch frame). Updated
-        from Design System v2 dark (#13141A) to Graphite Mist bg0 (#07090F) so the
-        launch/windowBackground matches the new default palette exactly.
-
-        The original DS-v2 colours are kept with _legacy suffix for Liquid Blue palette
-        (still available for switching; they are not used by the default AppCompat theme).
-    -->
-    <!-- Graphite Mist default (c48e): bg0 #07090F, accent #9DB7DF -->
-    <color name="ide_bg">#07090F</color>
-    <color name="ide_panel">#141924</color>
-    <color name="ide_raised">#2A2E3C</color>
-    <color name="ide_border">#29FFFFFF</color>
-    <color name="ide_text">#F8FAFF</color>
-    <color name="ide_accent">#9DB7DF</color>
-    <color name="ide_accent_dark">#8AABDA</color>
-
-    <!--
-        Light-mode launch background — EDF2F8 matches CloudSilver.bg0.
-        Used by values/themes.xml windowBackground so the window launch frame
-        is light when ThemeMode.LIGHT is active (CopyPaste-7em1).
-    -->
-    <color name="ide_bg_light">#EDF2F8</color>
-
-    <!-- Legacy DS-v2 dark ramp (Liquid Blue palette fallback) -->
-    <color name="ide_bg_legacy">#13141A</color>
-    <color name="ide_accent_legacy">#3D8BFF</color>
-    <color name="ide_accent_dark_legacy">#2E6FD6</color>
 </resources>

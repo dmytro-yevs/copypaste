@@ -9,7 +9,7 @@
     • jetbrains_mono_medium.ttf   (weight 500)
   into android/app/src/main/res/font/ before building.
 
-  Used by Type.kt MonoFontFamily for mono/code text roles.
+  Used for mono/code text roles (history item previews, log viewer).
 -->
 <font-family xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">

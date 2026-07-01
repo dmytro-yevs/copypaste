@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-accent="indigo">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CopyPaste — Design Reference</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ===== LAYER 1 — TOKENS (lift verbatim to tokens.css) ===== */
+:root, :root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E0F14; --panel:#16181F; --elevated:#1E2027; --card:#1E2027; --raised:#282B33; --raised-2:#33373F;
+  --border:#33363F; --divider:#24262D;
+  --text:#E7E9EE; --dim:#9CA1AC; --faint:#7E838E; --mute:#5C616B;
+  --hover:rgba(255,255,255,.045); --pressed:rgba(255,255,255,.075);
+  --selected:color-mix(in srgb,var(--accent) 16%,transparent); --scrim:rgba(0,0,0,.55);
+  --ok:#4FB866; --warn:#E0A33F; --err:#E5645F; --info:#5B9DFF;
+  --c-text:#8B93A5; --c-url:#34D1BF; --c-code:#A78BFA; --c-image:#E879C6; --c-mail:#4ED98A;
+  --c-color:#F5A524; --c-num:#5CC1CE; --c-path:#5B9DFF; --c-file:#5B9DFF; --c-json:#FB7B53; --c-secret:#F2616B;
+  --sh1:0 1px 2px rgba(0,0,0,.30); --sh2:0 8px 24px -6px rgba(0,0,0,.45); --sh3:0 24px 64px -12px rgba(0,0,0,.60);
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#F5F6F8; --panel:#FFFFFF; --elevated:#FFFFFF; --card:#FFFFFF; --raised:#EFF1F4; --raised-2:#E2E5EA;
+  --border:#E1E4E9; --divider:#ECEEF1;
+  --text:#1A1C22; --dim:#565B66; --faint:#767B86; --mute:#A2A7B1;
+  --hover:rgba(15,18,26,.045); --pressed:rgba(15,18,26,.075);
+  --selected:color-mix(in srgb,var(--accent) 12%,transparent); --scrim:rgba(20,22,30,.28);
+  --ok:#1FA85B; --warn:#C77F1A; --err:#D64545; --info:#2563EB;
+  --c-text:#6A7282; --c-url:#0E9E8C; --c-code:#7C5CE6; --c-image:#C44BA0; --c-mail:#1FA85B;
+  --c-color:#C77F1A; --c-num:#1C8B9B; --c-path:#2F6FE0; --c-file:#2F6FE0; --c-json:#DC5A2E; --c-secret:#D64545;
+  --sh1:0 1px 2px rgba(20,22,30,.06); --sh2:0 8px 24px -8px rgba(20,22,30,.12); --sh3:0 24px 64px -12px rgba(20,22,30,.18);
+}
+:root[data-accent="indigo"]{--accent:#6E5BFF;--accent-2:#9C8FFF;--on-accent:#fff}
+:root[data-accent="blue"]  {--accent:#3B82F6;--accent-2:#7CB0FF;--on-accent:#fff}
+:root[data-accent="teal"]  {--accent:#13B8A6;--accent-2:#5FE0D2;--on-accent:#06302C}
+:root[data-accent="green"] {--accent:#46C56A;--accent-2:#84E29A;--on-accent:#062A12}
+:root[data-accent="amber"] {--accent:#F5A524;--accent-2:#FFC56B;--on-accent:#2A1B05}
+:root[data-accent="rose"]  {--accent:#F43F7E;--accent-2:#FF85AC;--on-accent:#fff}
+:root[data-theme="light"][data-accent="indigo"]{--accent:#5B49E0}
+:root[data-theme="light"][data-accent="blue"]  {--accent:#2563EB}
+:root[data-theme="light"][data-accent="teal"]  {--accent:#0E9E8C;--on-accent:#fff}
+:root[data-theme="light"][data-accent="green"] {--accent:#1FA85B;--on-accent:#fff}
+:root[data-theme="light"][data-accent="amber"] {--accent:#C77F1A;--on-accent:#fff}
+:root[data-theme="light"][data-accent="rose"]  {--accent:#E11D6B}
+:root{
+  --f-ui:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  --f-mono:'JetBrains Mono',ui-monospace,'SF Mono','Cascadia Mono','Roboto Mono',Menlo,monospace;
+  --r-chip:7px; --r-pill:999px; --r-ctl:8px; --r-input:9px; --r-card:13px; --r-window:12px;
+  --s-1:2px;--s-2:4px;--s-3:6px;--s-4:8px;--s-5:11px;--s-6:14px;--s-7:16px;--s-8:20px;--s-9:24px;
+  --dur-fast:120ms; --dur:200ms; --dur-theme:300ms; --ease:cubic-bezier(.2,.8,.2,1);
+}
+@media (prefers-reduced-motion: reduce){ :root{--dur-fast:0ms;--dur:0ms;--dur-theme:0ms} *{animation-duration:.001ms!important;animation-iteration-count:1!important} }
+
+/* ===== LAYER 2 — BASE (one consistent type system) ===== */
+*{box-sizing:border-box;margin:0;padding:0}
+html{overflow-x:clip}
+body{background:var(--bg);color:var(--text);font-family:var(--f-ui);font-size:14px;font-weight:450;line-height:1.5;letter-spacing:-.006em;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"cv11","ss01";
+  transition:background var(--dur-theme) var(--ease),color var(--dur-theme) var(--ease)}
+svg{width:1em;height:1em;flex:none;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round;display:block}
+button{font:inherit;letter-spacing:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input{font:inherit;letter-spacing:inherit}
+a{color:var(--accent);text-decoration:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+::selection{background:color-mix(in srgb,var(--accent) 30%,transparent)}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-thumb{background:var(--raised-2);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:var(--mute)}
+.mono{font-family:var(--f-mono);font-weight:450;letter-spacing:0;font-variant-numeric:tabular-nums}
+
+/* ===== LAYER 3 — PRIMITIVES ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s-3);border-radius:var(--r-ctl);
+  border:1px solid transparent;font-weight:550;font-size:13px;letter-spacing:-.01em;padding:7px 13px;white-space:nowrap;
+  transition:background var(--dur-fast) var(--ease),border-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease)}
+.btn:active{transform:scale(.97)}
+.btn svg{font-size:15px}
+.btn:disabled{opacity:.45;pointer-events:none}
+.btn.sm{padding:5px 10px;font-size:11.5px;gap:var(--s-2)}
+.btn.block{width:100%}
+.btn--primary{background:var(--accent);color:var(--on-accent)}
+.btn--primary:hover{filter:brightness(1.08)}
+.btn--secondary{background:var(--elevated);color:var(--text);border-color:var(--border)}
+.btn--secondary:hover{background:var(--raised)}
+.btn--ghost{color:var(--dim)}
+.btn--ghost:hover{color:var(--text);background:var(--hover)}
+.btn--danger{color:var(--err);border-color:color-mix(in srgb,var(--err) 40%,transparent);background:color-mix(in srgb,var(--err) 9%,transparent)}
+.btn--danger:hover{background:color-mix(in srgb,var(--err) 16%,transparent)}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--r-ctl);
+  color:var(--dim);font-size:16px;transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease),transform var(--dur-fast) var(--ease)}
+.iconbtn:hover{color:var(--text);background:var(--hover)}
+.iconbtn:active{transform:scale(.9)}
+.iconbtn.danger:hover{color:var(--err);background:color-mix(in srgb,var(--err) 12%,transparent)}
+.toggle{position:relative;width:38px;height:22px;border-radius:var(--r-pill);background:var(--accent);flex:none;transition:background var(--dur) var(--ease)}
+.toggle::after{content:"";position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:all var(--dur) var(--ease);box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.toggle.off{background:var(--raised-2)}
+.toggle.off::after{right:auto;left:2px;background:var(--faint)}
+.seg{display:inline-flex;background:var(--card);border:1px solid var(--border);border-radius:var(--r-ctl);padding:2px;gap:2px}
+.seg button{font-size:12px;font-weight:550;letter-spacing:-.01em;padding:5px 12px;border-radius:var(--r-chip);color:var(--dim);display:flex;align-items:center;gap:6px;transition:all var(--dur-fast) var(--ease)}
+.seg button svg{font-size:14px}
+.seg button.on{background:var(--raised);color:var(--text)}
+.field{display:flex;align-items:center;gap:9px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--r-input);padding:8px 11px;transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
+.field:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 15%,transparent)}
+.field svg{font-size:15px;color:var(--faint)}
+.field input{flex:1;min-width:0;border:none;background:none;outline:none;color:var(--text);font-size:13px;font-weight:450}
+.field input::placeholder{color:var(--faint)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:500;padding:3px 9px;border-radius:var(--r-pill);border:1px solid var(--border);color:var(--dim);background:var(--elevated);white-space:nowrap;transition:all var(--dur-fast) var(--ease)}
+.chip:hover{color:var(--text)}
+.chip .dot{width:7px;height:7px;border-radius:2px;flex:none}
+.chip.on{color:var(--on-accent);background:var(--accent);border-color:transparent}
+.chip--ct{color:var(--ct);border-color:color-mix(in srgb,var(--ct) 32%,transparent);background:color-mix(in srgb,var(--ct) 12%,transparent);font-family:var(--f-mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.tpill{font-family:var(--f-mono);font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:var(--r-pill);flex:none}
+.tpill--p2p{color:var(--c-url);background:color-mix(in srgb,var(--c-url) 14%,transparent);border:1px solid color-mix(in srgb,var(--c-url) 32%,transparent)}
+.tpill--cloud{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);border:1px solid color-mix(in srgb,var(--accent) 32%,transparent)}
+.tpill--this{color:var(--accent-2);background:color-mix(in srgb,var(--accent) 14%,transparent);border:1px solid color-mix(in srgb,var(--accent) 38%,transparent)}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:500;padding:2px 7px;border-radius:var(--r-chip)}
+.badge--verified{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent);border:1px solid color-mix(in srgb,var(--ok) 32%,transparent)}
+.badge--verified .d{width:5px;height:5px;border-radius:50%;background:var(--ok)}
+.badge--count{color:var(--faint);background:var(--elevated);border:1px solid var(--border);font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.tile{width:34px;height:34px;flex:none;border-radius:var(--r-chip);display:flex;align-items:center;justify-content:center;
+  background:color-mix(in srgb,var(--ct,var(--c-text)) 14%,transparent);font-size:17px;color:var(--ct,var(--c-text))}
+.tile--swatch{box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.tile--thumb{background:linear-gradient(135deg,color-mix(in srgb,var(--c-image) 45%,var(--card)),color-mix(in srgb,var(--c-file) 28%,var(--card)));position:relative;overflow:hidden}
+.tile--thumb::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 30% 28%,rgba(255,255,255,.22),transparent 60%)}
+.dot-stat{width:8px;height:8px;border-radius:50%;flex:none;background:var(--ok)}
+.dot-stat.off{background:var(--err)}
+@media (prefers-reduced-motion: no-preference){ .dot-stat:not(.off){animation:pulse 2.4s var(--ease) infinite} }
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 50%,transparent)}50%{box-shadow:0 0 0 4px transparent}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--sh1)}
+.divider{height:1px;background:var(--divider);border:0}
+.spinner{width:16px;height:16px;border:2px solid var(--raised-2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.kbd{font-family:var(--f-mono);font-size:11px;font-weight:500;min-width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;color:var(--dim);background:var(--elevated);border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;padding:0 5px}
+.kbd svg{font-size:13px}
+
+/* ===== LAYER 4 — PATTERNS ===== */
+.row{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:10px;position:relative;max-height:74px;
+  transition:background var(--dur-fast) var(--ease),max-height var(--dur) var(--ease),opacity var(--dur) var(--ease),padding var(--dur) var(--ease),margin var(--dur) var(--ease)}
+.row:hover{background:var(--hover)}
+.row.sel{background:var(--selected)}
+.row.sel::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.row.copied{animation:flash .65s var(--ease)}
+.row.filtered,.row.removing{max-height:0;opacity:0;padding-top:0;padding-bottom:0;margin-top:0;margin-bottom:0;pointer-events:none;overflow:hidden}
+@keyframes flash{from{background:color-mix(in srgb,var(--accent) 22%,transparent)}to{background:transparent}}
+.row__body{flex:1;min-width:0}
+.row__title{font-size:14px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row__title.mono{font-family:var(--f-mono);font-size:12.5px;letter-spacing:0}
+.row__title .host{font-weight:600}.row__title .rest{color:var(--dim)}
+.row__title .mask{background:var(--c-secret);color:transparent;border-radius:3px;padding:0 5px;user-select:none;cursor:pointer}
+.row__title .mask:hover{filter:brightness(1.1)}
+.row__meta{font-size:11.5px;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row__meta .ty{color:var(--ct,var(--c-text));font-weight:550}
+.row__right{display:flex;align-items:center;gap:2px;flex:none}
+.del{opacity:0;transition:opacity var(--dur-fast) var(--ease)}
+.star-btn{opacity:0;color:var(--faint);transition:opacity var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
+.star-btn svg{font-size:15px}
+.row:hover .del,.row:hover .star-btn{opacity:1}
+.row.pinned .star-btn{opacity:1;color:var(--c-color)}
+.star-btn.on svg,.row.pinned .star-btn svg{fill:currentColor}
+.star-btn.pop svg{animation:pop .32s var(--ease)}
+@keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.4)}100%{transform:scale(1)}}
+.chk{display:none;width:18px;height:18px;border-radius:5px;border:1.5px solid var(--mute);flex:none;align-items:center;justify-content:center;color:transparent;font-size:11px;transition:all var(--dur-fast) var(--ease)}
+.chk.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.list.selecting .chk{display:flex}
+.list.selecting .row__right{display:none}
+.list.selecting .row{cursor:pointer}
+.grouphead{font-family:var(--f-mono);font-size:10px;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);padding:10px 10px 5px;position:sticky;top:0;background:var(--panel);z-index:2;transition:max-height var(--dur) var(--ease),opacity var(--dur) var(--ease),padding var(--dur) var(--ease)}
+.grouphead.filtered{max-height:0;opacity:0;padding:0;overflow:hidden}
+.bulkbar{display:none;align-items:center;gap:12px;padding:8px 10px 10px}
+.bulkbar.show{display:flex;animation:slideDown var(--dur) var(--ease)}
+@keyframes slideDown{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.bulkbar__n{font-size:12.5px;color:var(--dim);font-weight:550}
+.devcard{background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--sh1);padding:15px;display:flex;flex-direction:column}
+.devcard.this{border-color:color-mix(in srgb,var(--accent) 42%,transparent)}
+.devcard__head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.devcard__name{font-weight:600;font-size:13px;color:var(--text)}
+.devcard .badge--verified{align-self:flex-start;margin-top:9px}
+.dmeta{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;align-items:baseline;margin:11px 0 0}
+.dmeta dt{font-size:11px;color:var(--dim);white-space:nowrap}
+.dmeta dd{font-size:11px;color:var(--faint);font-family:var(--f-mono);font-variant-numeric:tabular-nums;word-break:break-all}
+.dmeta dd.fp{display:flex;align-items:center;gap:6px;cursor:pointer}
+.dmeta dd.fp:hover{color:var(--accent)}
+.dmeta dd.fp svg{font-size:11px;opacity:.5}
+.devcard__foot{display:flex;gap:8px;margin-top:auto;padding-top:13px;border-top:1px solid var(--divider)}
+.devcard__foot .btn{flex:1}
+.devcard__spacer{margin-top:auto}
+/* device list — one device = one row, expandable, every field tap-to-copy */
+.dev-hint{font-size:11px;color:var(--faint);padding:2px 14px 8px;display:flex;align-items:center;gap:6px}
+.dev-hint svg{font-size:13px;opacity:.7}
+.dev-list{padding:4px 12px 14px;display:flex;flex-direction:column;gap:8px}
+.devrow{border:1px solid var(--border);border-radius:var(--r-card);background:var(--card);overflow:hidden;transition:border-color var(--dur-fast) var(--ease),opacity var(--dur) var(--ease),transform var(--dur) var(--ease)}
+.devrow.this{border-color:color-mix(in srgb,var(--accent) 38%,transparent)}
+.devrow.removing{opacity:0;transform:scale(.98)}
+.devrow__head{display:flex;align-items:center;gap:9px;width:100%;padding:12px 14px;text-align:left;cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+.devrow__head:hover{background:var(--hover)}
+.devrow__name{font-weight:600;font-size:13.5px;color:var(--text);flex:none}
+.devrow__sum{flex:1;min-width:0;font-size:11.5px;color:var(--faint);font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.devrow__chev{font-size:16px;color:var(--faint);flex:none;margin-left:auto;transition:transform var(--dur) var(--ease)}
+.devrow.open .devrow__chev{transform:rotate(90deg)}
+.devrow__body{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--dur) var(--ease)}
+.devrow.open .devrow__body{grid-template-rows:1fr}
+.devrow__body>div{overflow:hidden;min-height:0}
+.cfields{display:grid;grid-template-columns:1fr 1fr;gap:1px;padding:5px 8px 4px;border-top:1px solid var(--divider)}
+.cfield{display:flex;align-items:baseline;gap:10px;padding:7px 9px;border-radius:8px;text-align:left;width:100%;cursor:pointer;transition:background var(--dur-fast) var(--ease)}
+.cfield:hover{background:var(--hover)}
+.cfield:active{background:var(--pressed)}
+.cfield.copied{animation:flash .65s var(--ease)}
+.cfield__k{font-size:11px;color:var(--dim);width:70px;flex:none}
+.cfield__v{font-size:12px;color:var(--text);font-family:var(--f-mono);font-variant-numeric:tabular-nums;word-break:break-all;flex:1}
+.devrow__foot{display:flex;gap:8px;padding:3px 13px 13px}
+.devrow__foot .btn{flex:none}
+.pbody .cfields{grid-template-columns:1fr;gap:0;padding:4px 6px 4px}
+.pbody .dev-list{padding:6px 0 0;gap:10px}
+@media(max-width:600px){.cfields{grid-template-columns:1fr}}
+.mtoast{position:absolute;left:50%;bottom:86px;transform:translateX(-50%) translateY(10px);background:var(--text);color:var(--bg);font-size:11.5px;font-weight:550;padding:7px 14px;border-radius:var(--r-pill);box-shadow:var(--sh2);opacity:0;pointer-events:none;z-index:11;display:flex;align-items:center;gap:6px;white-space:nowrap;transition:opacity var(--dur) var(--ease),transform var(--dur) var(--ease)}
+.mtoast.show{opacity:1;transform:translateX(-50%)}
+.mtoast svg{font-size:13px}
+.banner{display:flex;align-items:center;gap:11px;padding:11px 14px;border-radius:var(--r-card);font-size:12.5px;border:1px solid transparent}
+.banner svg{font-size:16px;flex:none}
+.banner__x{flex:1;min-width:0}
+.banner__act{display:flex;gap:7px;flex:none}
+.banner--warn{background:color-mix(in srgb,var(--warn) 11%,transparent);border-color:color-mix(in srgb,var(--warn) 32%,transparent);color:var(--warn)}
+.banner--err{background:color-mix(in srgb,var(--err) 11%,transparent);border-color:color-mix(in srgb,var(--err) 32%,transparent);color:var(--err)}
+.banner--info{background:color-mix(in srgb,var(--info) 11%,transparent);border-color:color-mix(in srgb,var(--info) 32%,transparent);color:var(--info)}
+.banner--ok{background:color-mix(in srgb,var(--ok) 11%,transparent);border-color:color-mix(in srgb,var(--ok) 32%,transparent);color:var(--ok)}
+.banner b{color:var(--text)}
+.empty{min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;padding:30px}
+.list .empty{display:none}.list .empty.show{display:flex;animation:viewIn var(--dur) var(--ease)}
+.empty__ic{width:54px;height:54px;border-radius:16px;display:flex;align-items:center;justify-content:center;background:var(--elevated);color:var(--faint);font-size:24px;margin-bottom:8px}
+.empty__t{font-size:14px;font-weight:600;color:var(--dim)}
+.empty__s{font-size:12.5px;color:var(--faint);max-width:280px}
+.scrim{position:absolute;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:24px;z-index:40;opacity:0;pointer-events:none;transition:opacity var(--dur) var(--ease);backdrop-filter:blur(2px)}
+.scrim.open{opacity:1;pointer-events:auto}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--sh3);width:340px;max-width:100%;padding:22px;text-align:center;transform:translateY(10px) scale(.97);transition:transform var(--dur) var(--ease)}
+.scrim.open .modal{transform:none}
+.modal__t{font-size:15px;font-weight:600;margin-bottom:6px}
+.modal__s{font-size:12.5px;color:var(--dim);margin-bottom:18px;line-height:1.5}
+.modal__act{display:flex;gap:8px}.modal__act .btn{flex:1}
+.qr{width:150px;height:150px;margin:4px auto 14px;border-radius:12px;background:#fff;padding:12px;display:grid;grid-template-columns:repeat(11,1fr);grid-template-rows:repeat(11,1fr);gap:2px}
+.qr i{background:#000;border-radius:1px}.qr i.o{background:transparent}
+.sas{display:flex;gap:7px;justify-content:center;margin:6px 0 16px}
+.sas span{width:34px;height:42px;border-radius:9px;background:var(--elevated);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-family:var(--f-mono);font-size:20px;font-weight:600;color:var(--accent-2)}
+.toast{position:absolute;bottom:18px;left:50%;transform:translateX(-50%) translateY(12px);background:var(--text);color:var(--bg);font-size:12.5px;font-weight:550;padding:8px 15px;border-radius:var(--r-pill);box-shadow:var(--sh2);opacity:0;pointer-events:none;z-index:60;display:flex;align-items:center;gap:7px;transition:opacity var(--dur) var(--ease),transform var(--dur) var(--ease)}
+.toast.show{opacity:1;transform:translateX(-50%)}
+.toast svg{font-size:14px}
+
+/* ===== LAYER 5 — APP SHELL ===== */
+.page{max-width:1180px;margin:0 auto;padding:0 clamp(16px,4vw,40px) 80px}
+.topbar{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;padding:12px clamp(16px,4vw,40px)}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;font-size:15px;letter-spacing:-.02em}
+.brand__logo{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px}
+.topbar__spacer{flex:1}
+.tnav{display:flex;gap:2px}
+.tnav a{font-size:12.5px;color:var(--dim);padding:6px 11px;border-radius:7px;font-weight:500}
+.tnav a:hover{color:var(--text);background:var(--hover)}
+.ctl-group{display:flex;align-items:center;gap:8px}
+.swatches{display:flex;gap:5px}
+.swatch{width:20px;height:20px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:transform var(--dur-fast) var(--ease)}
+.swatch:hover{transform:scale(1.12)}
+.swatch[aria-pressed="true"]{border-color:var(--text)}
+.section{padding:46px 0 8px;scroll-margin-top:64px}
+.eyebrow{font-family:var(--f-mono);font-size:11px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-2);margin-bottom:8px}
+.h2{font-size:23px;font-weight:700;letter-spacing:-.025em;margin-bottom:8px}
+.lede{font-size:14.5px;color:var(--dim);max-width:680px;line-height:1.6}
+.lede b{color:var(--text);font-weight:600}
+.cap{font-size:12px;color:var(--faint);margin-top:10px}.cap b{color:var(--dim);font-weight:600}
+.win{position:relative;border:1px solid var(--border);border-radius:var(--r-window);overflow:hidden;box-shadow:var(--sh3);background:var(--panel);margin-top:18px}
+.win__bar{height:38px;display:flex;align-items:center;gap:8px;padding:0 14px;background:var(--panel);border-bottom:1px solid var(--divider)}
+.traffic{display:flex;gap:7px}.traffic i{width:11px;height:11px;border-radius:50%}
+.traffic i:nth-child(1){background:#FF5F57}.traffic i:nth-child(2){background:#FEBC2E}.traffic i:nth-child(3){background:#28C840}
+.win__title{font-size:12px;color:var(--faint);font-weight:500}
+.app{display:flex;background:var(--bg);padding:8px;gap:8px}
+.sb{width:174px;flex:none;background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);padding:8px;display:flex;flex-direction:column}
+.sb__item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;color:var(--dim);font-size:13px;font-weight:550;letter-spacing:-.01em;width:100%;text-align:left;position:relative;transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
+.sb__item svg{font-size:17px}
+.sb__item:hover{background:var(--hover);color:var(--text)}
+.sb__item.on{background:var(--selected);color:var(--text)}
+.sb__item.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.sb__foot{margin-top:auto;padding:10px 8px 4px;border-top:1px solid var(--divider);display:flex;align-items:center;gap:8px;font-size:11px;color:var(--faint)}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);overflow:hidden}
+.view{display:none;flex-direction:column}
+.view.on{display:flex;animation:viewIn var(--dur) var(--ease)}
+@keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.vhead{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--divider)}
+.vhead .field{flex:1}
+.vtitle{font-size:14px;font-weight:600}
+.vsub{font-size:11.5px;color:var(--faint);font-family:var(--f-mono)}
+.list{padding:4px 6px 8px;min-height:360px}
+.filters{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--divider);overflow-x:auto;scrollbar-width:none}
+.filters::-webkit-scrollbar{display:none}
+.dev-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px;border-bottom:1px solid var(--divider);flex-wrap:wrap}
+.dev-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(252px,1fr));gap:12px;padding:14px;align-items:stretch}
+.set-tabs{display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid var(--divider);overflow-x:auto;scrollbar-width:none}
+.set-tabs::-webkit-scrollbar{display:none}
+.set-tab{font-size:12.5px;font-weight:550;padding:8px 11px;color:var(--dim);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.set-tab svg{font-size:15px}
+.set-tab:hover{color:var(--text)}
+.set-tab.on{color:var(--text);border-bottom-color:var(--accent)}
+.set-body{padding:18px 20px}
+.set-pane{display:none}.set-pane.on{display:block;animation:viewIn var(--dur) var(--ease)}
+.set-grp{margin-bottom:22px}
+.set-grp__h{font-family:var(--f-mono);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin-bottom:8px}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--divider)}
+.srow:last-child{border-bottom:0}
+.srow__l{font-size:13.5px;color:var(--text)}
+.srow__s{font-size:11.5px;color:var(--faint);margin-top:2px;max-width:340px}
+.srow__c{flex:none;display:flex;align-items:center;gap:9px}
+.statusrow{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim)}
+.logs{padding:6px 4px;font-family:var(--f-mono);font-size:12px}
+.logline{display:flex;gap:10px;padding:4px 10px;border-radius:6px}
+.logline:hover{background:var(--hover)}
+.logline .t{color:var(--faint);flex:none}
+.logline .lvl{flex:none;font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:4px;height:fit-content;text-transform:uppercase}
+.lvl.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.lvl.info{color:var(--info);background:color-mix(in srgb,var(--info) 12%,transparent)}
+.lvl.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent)}
+.lvl.err{color:var(--err);background:color-mix(in srgb,var(--err) 12%,transparent)}
+.logline .m{color:var(--dim)}.logline .m b{color:var(--text)}
+.about{padding:34px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:3px}
+.about__logo{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;color:#fff;font-size:34px;margin-bottom:10px;box-shadow:var(--sh2)}
+.about__name{font-size:19px;font-weight:700;letter-spacing:-.02em}
+.about__ver{font-size:12.5px;color:var(--faint);font-family:var(--f-mono)}
+.about__grid{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin:18px 0;font-size:12px;text-align:left}
+.about__grid dt{color:var(--dim)}.about__grid dd{color:var(--faint);font-family:var(--f-mono)}
+.about__links{display:flex;gap:8px;margin-top:4px}
+
+/* ===== LAYER 5b — GALLERY ===== */
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:20px}
+.gal__card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);padding:16px}
+.gal__h{font-size:11px;font-family:var(--f-mono);font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--faint);margin-bottom:13px}
+.gal__row{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+.gal__row+.gal__row{margin-top:11px}
+.tok-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:8px;margin-top:20px}
+.tok{border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:10.5px}
+.tok__sw{height:46px}
+.tok__b{padding:6px 8px;background:var(--panel)}
+.tok__n{color:var(--text);font-weight:500}
+.tok__v{color:var(--faint);font-family:var(--f-mono);font-size:9.5px}
+.type-spec{display:flex;flex-direction:column;gap:14px;margin-top:18px}
+.type-spec>div{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--divider);padding-bottom:12px}
+.type-spec .tk{font-family:var(--f-mono);font-size:10px;color:var(--faint);width:120px;flex:none}
+
+/* ===== LAYER 6 — MOBILE (tab bar switches screens) ===== */
+.phone-grid{display:flex;gap:40px;flex-wrap:wrap;justify-content:center;margin-top:20px}
+.phone-wrap{display:flex;flex-direction:column;align-items:center}
+.phone{width:286px;flex:none;border-radius:40px;border:1px solid var(--border);background:#000;box-shadow:var(--sh3);padding:8px;position:relative}
+.pscreen{border-radius:33px;overflow:hidden;background:var(--bg);height:600px;display:flex;flex-direction:column;position:relative}
+.pcam{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:7px;height:7px;border-radius:50%;background:#000;border:1px solid #1a1a1a;z-index:12}
+.statusbar{height:34px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 18px 0 22px;font-size:12px;font-weight:600;color:var(--text);z-index:5}
+.statusbar .r{display:flex;align-items:center;gap:5px;font-size:13px}
+.pbody{flex:1;min-height:0;position:relative;overflow:hidden}
+.pscr{position:absolute;inset:0;display:none;flex-direction:column}
+.pscr.on{display:flex;animation:mscrIn var(--dur) var(--ease)}
+@keyframes mscrIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.mtop{flex:none;padding:6px 16px 8px;display:flex;align-items:center;gap:6px}
+.mtop__t{font-size:21px;font-weight:700;letter-spacing:-.025em;flex:1}
+.mtop .iconbtn{width:36px;height:36px;border-radius:50%}
+.mfilters{flex:none;display:flex;gap:6px;padding:0 16px 8px;overflow-x:auto;scrollbar-width:none}.mfilters::-webkit-scrollbar{display:none}
+.mlist{flex:1;overflow-y:auto;overflow-x:hidden;padding:2px 8px 100px;scrollbar-width:none}.mlist::-webkit-scrollbar{display:none}
+.mdevscroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:4px 14px 104px;scrollbar-width:none}.mdevscroll::-webkit-scrollbar{display:none}
+.msetscroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:2px 14px 104px;scrollbar-width:none}.msetscroll::-webkit-scrollbar{display:none}
+.mset-grp{margin-top:14px}
+.mset-grp__h{font-family:var(--f-mono);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin:0 4px 6px}
+.mset-card{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.msrow{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 14px}
+.msrow+.msrow{border-top:1px solid var(--divider)}
+.msrow__l{font-size:13.5px;color:var(--text)}.msrow__s{font-size:11px;color:var(--faint);margin-top:2px}
+.msrow__c{flex:none;display:flex;align-items:center;gap:8px}
+.mchev{color:var(--faint);width:16px;height:16px;flex:none}
+.mtabbar{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;height:56px;border-radius:28px;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(22px);border:1px solid var(--border);box-shadow:var(--sh2);display:flex;align-items:center;gap:4px;padding:0 8px;z-index:10}
+.mtab{flex:none;display:flex;align-items:center;justify-content:center;height:100%}
+.mtab__i{width:50px;height:38px;border-radius:19px;display:flex;align-items:center;justify-content:center;font-size:21px;color:var(--faint);transition:background var(--dur) var(--ease),color var(--dur) var(--ease),transform var(--dur-fast) var(--ease)}
+.mtab.on .mtab__i{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+.mtab:active .mtab__i{transform:scale(.9)}
+.mfade{position:absolute;left:0;right:0;bottom:0;height:104px;background:linear-gradient(transparent,var(--bg) 64%);pointer-events:none;z-index:8}
+.qp-bg{position:absolute;inset:0;background:linear-gradient(160deg,#1a1430,#0c1626);z-index:1}
+.qp-bg::after{content:"";position:absolute;inset:0;background:var(--scrim)}
+.qp-home{position:absolute;inset:0;display:grid;grid-template-columns:repeat(4,1fr);gap:18px;padding:54px 28px;align-content:start;z-index:1;opacity:.5}
+.qp-home i{aspect-ratio:1;border-radius:14px;background:rgba(255,255,255,.12)}
+.qp-card{position:absolute;left:14px;right:14px;bottom:16px;z-index:3;background:var(--panel);border:1px solid var(--border);border-radius:22px;box-shadow:var(--sh3);overflow:hidden}
+.qp-handle{width:36px;height:4px;border-radius:2px;background:var(--border);margin:9px auto 4px}
+.qp-search{display:flex;align-items:center;gap:10px;padding:8px 16px 12px}
+.qp-search svg{font-size:17px;color:var(--faint)}.qp-search .ph{font-size:15px;color:var(--faint)}
+.qp-list{padding:0 8px 10px}
+
+@media(max-width:920px){
+  .app{flex-direction:column}.sb{width:100%;flex-direction:row;overflow-x:auto}.sb__foot{display:none}
+  .sb__item{flex-direction:column;gap:3px;font-size:10px;padding:7px 10px}.sb__item.on::before{display:none}
+  .tnav{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="brand__logo">⌘</span> CopyPaste</div>
+  <nav class="tnav"><a href="#app">App</a><a href="#components">Components</a><a href="#mobile">Mobile</a><a href="#states">States</a></nav>
+  <div class="topbar__spacer"></div>
+  <div class="ctl-group">
+    <button class="seg" id="themeSeg" aria-label="Theme">
+      <button data-theme-val="light" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</button>
+      <button data-theme-val="dark" class="on" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>Dark</button>
+    </button>
+    <div class="swatches" id="accents" role="group" aria-label="Accent color"></div>
+  </div>
+</header>
+
+<main class="page">
+
+<!-- ░░░░ INTERACTIVE DESKTOP APP ░░░░ -->
+<section class="section" id="app">
+  <div class="eyebrow">macOS · live</div>
+  <h2 class="h2">The application</h2>
+  <p class="lede">A working app, not a slideshow. <b>Type to filter, click a clip to copy, pin or delete, enter select mode, run pairing.</b> States emerge from real use — exactly what they do in the product. Theme &amp; accent flip everything live.</p>
+
+  <div class="win">
+    <div class="win__bar"><div class="traffic"><i></i><i></i><i></i></div><span class="win__title">CopyPaste</span></div>
+    <div class="app">
+      <nav class="sb" id="sidebar" aria-label="Primary">
+        <button class="sb__item on" data-view="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="5" width="14" height="16" rx="2.5"/><rect x="9" y="3" width="6" height="4" rx="1.5"/><path d="M9 12h6M9 16h4"/></svg>History</button>
+        <button class="sb__item" data-view="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="13" height="11" rx="2.5"/><rect x="14" y="10" width="7" height="10" rx="2.5"/></svg>Devices</button>
+        <button class="sb__item" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h11M18 6h3"/><circle cx="16" cy="6" r="2"/><path d="M3 12h3M10 12h11"/><circle cx="8" cy="12" r="2"/><path d="M3 18h7M14 18h7"/><circle cx="12" cy="18" r="2"/></svg>Settings</button>
+        <button class="sb__item" data-view="logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Logs</button>
+        <button class="sb__item" data-view="about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>About</button>
+        <div class="sb__foot"><span class="dot-stat"></span>Synced · v0.7.5</div>
+      </nav>
+
+      <div class="main">
+        <section class="view on" data-view="history">
+          <div class="vhead">
+            <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input id="histSearch" placeholder="Search clipboard…" aria-label="Search clipboard"></div>
+            <button class="btn sm btn--secondary" id="selectBtn">Select</button>
+          </div>
+          <div class="bulkbar" id="bulkbar">
+            <button class="iconbtn" id="selDone" title="Done" aria-label="Exit selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            <span class="bulkbar__n"><span id="selCount">0</span> selected</span>
+            <span style="flex:1"></span>
+            <button class="btn sm btn--secondary" id="bulkPin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg>Pin</button>
+            <button class="btn sm btn--danger" id="bulkDel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg>Delete</button>
+          </div>
+          <div class="filters" id="histFilters">
+            <span class="chip on" data-filter="all">All</span>
+            <span class="chip" data-filter="code"><span class="dot" style="background:var(--c-code)"></span>Code</span>
+            <span class="chip" data-filter="link"><span class="dot" style="background:var(--c-url)"></span>Links</span>
+            <span class="chip" data-filter="image"><span class="dot" style="background:var(--c-image)"></span>Images</span>
+            <span class="chip" data-filter="secret"><span class="dot" style="background:var(--c-secret)"></span>Secrets</span>
+          </div>
+          <div class="list" id="histList">
+            <div class="grouphead">Pinned</div>
+            <div class="row pinned" data-kind="text" style="--ct:var(--c-text)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span><div class="row__body"><div class="row__title">Standup notes — shipped pairing, next: relay backoff</div><div class="row__meta"><span class="ty">Text</span> · Telegram · 2h · MacBook Pro</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn on" aria-label="Unpin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+            <div class="row pinned" data-kind="code" style="--ct:var(--c-code)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m16 18 4-4-4-4M8 6l-4 4 4 4"/></svg></span><div class="row__body"><div class="row__title mono">docker compose up -d --build</div><div class="row__meta"><span class="ty">Code</span> · Terminal · 5h</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn on" aria-label="Unpin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+
+            <div class="grouphead">Today</div>
+            <div class="row" data-kind="code" style="--ct:var(--c-code)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m16 18 4-4-4-4M8 6l-4 4 4 4"/></svg></span><div class="row__body"><div class="row__title mono">pub async fn migrate(db: &amp;Pool) -&gt; Result&lt;()&gt;</div><div class="row__meta"><span class="ty">Code</span> · VS Code · 12m</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+            <div class="row" data-kind="link" style="--ct:var(--c-url)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="row__body"><div class="row__title"><span class="host">github.com</span><span class="rest">/tauri-apps/tauri/releases</span></div><div class="row__meta"><span class="ty">Link</span> · Chrome · 38m</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+            <div class="row" data-kind="color" style="--ct:var(--c-color)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile tile--swatch" style="background:#6E5BFF"></span><div class="row__body"><div class="row__title mono">#6E5BFF</div><div class="row__meta"><span class="ty">Color</span> · Figma · 1h</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+            <div class="row" data-kind="image" style="--ct:var(--c-image)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile tile--thumb"></span><div class="row__body"><div class="row__title">Screenshot 2026-06-28 at 14.02.png</div><div class="row__meta"><span class="ty">Image</span> · Shottr · 2h · 2840×1632</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+            <div class="row" data-kind="json" style="--ct:var(--c-json)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 3a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2M16 3a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2"/></svg></span><div class="row__body"><div class="row__title mono">{"protocol":18,"transport":"p2p"}</div><div class="row__meta"><span class="ty">JSON</span> · VS Code · 3h</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+            <div class="row" data-kind="secret" style="--ct:var(--c-secret)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><div class="row__body"><div class="row__title mono">Authorization: Bearer <span class="mask" data-real="eyJhbGciOiJIUzI1NiIs">eyJhbGci0iJIs</span></div><div class="row__meta"><span class="ty">Secret</span> · tap to reveal · Terminal · 3h</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+
+            <div class="grouphead">Yesterday</div>
+            <div class="row" data-kind="mail" style="--ct:var(--c-mail)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><div class="row__body"><div class="row__title">dmytro@briorx.com</div><div class="row__meta"><span class="ty">Email</span> · Mail · 1d</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+            <div class="row" data-kind="path" style="--ct:var(--c-file)"><span class="chk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 3v5h5M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/></svg></span><div class="row__body"><div class="row__title mono">~/dev/copypaste/crates/copypaste-core</div><div class="row__meta"><span class="ty">Path</span> · Finder · 1d · Mac mini</div></div><div class="row__right"><button class="iconbtn del danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn star-btn" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button></div></div>
+
+            <div class="empty" id="histEmpty"><div class="empty__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M8 11h6"/></svg></div><div class="empty__t" id="emptyT">No matches</div><div class="empty__s" id="emptyS">Try a different term or clear the filter.</div></div>
+          </div>
+        </section>
+
+        <section class="view" data-view="devices">
+          <div class="dev-head"><div><div class="vtitle">Devices</div><div class="vsub">3 paired · 2 online</div></div><button class="btn btn--primary" id="pairBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>Pair device</button></div>
+          <div class="dev-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>Tap a device to expand · tap any value to copy</div>
+          <div class="dev-list" id="devList">
+            <div class="devrow this open">
+              <button class="devrow__head" type="button"><span class="dot-stat"></span><span class="devrow__name">MacBook Pro</span><span class="tpill tpill--this">This Mac</span><span class="devrow__sum">macOS 15.3 · 192.168.1.24</span><svg class="devrow__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg></button>
+              <div class="devrow__body"><div><div class="cfields">
+                <button class="cfield" type="button"><span class="cfield__k">Model</span><span class="cfield__v">MacBook Pro (M4 Pro)</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">OS</span><span class="cfield__v">macOS 15.3</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Version</span><span class="cfield__v">0.7.5</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Local IP</span><span class="cfield__v">192.168.1.24</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Public IP</span><span class="cfield__v">203.0.113.42</span></button>
+              </div></div></div>
+            </div>
+            <div class="devrow">
+              <button class="devrow__head" type="button"><span class="dot-stat"></span><span class="devrow__name">Pixel 9 Pro</span><span class="badge badge--verified"><span class="d"></span>Verified</span><span class="tpill tpill--p2p">P2P</span><span class="devrow__sum">Android 16 · 192.168.1.37</span><svg class="devrow__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg></button>
+              <div class="devrow__body"><div><div class="cfields">
+                <button class="cfield" type="button"><span class="cfield__k">Model</span><span class="cfield__v">Pixel 9 Pro</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">OS</span><span class="cfield__v">Android 16</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Version</span><span class="cfield__v">0.7.5</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Local IP</span><span class="cfield__v">192.168.1.37</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Public IP</span><span class="cfield__v">203.0.113.42</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Paired</span><span class="cfield__v">Jun 12, 2026</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Last sync</span><span class="cfield__v">2m ago</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">RTT</span><span class="cfield__v">14 ms</span></button>
+              </div><div class="devrow__foot"><button class="btn sm btn--danger">Unpair</button><button class="btn sm btn--danger">Revoke</button></div></div></div>
+            </div>
+            <div class="devrow">
+              <button class="devrow__head" type="button"><span class="dot-stat off"></span><span class="devrow__name">Mac mini</span><span class="badge badge--verified"><span class="d"></span>Verified</span><span class="tpill tpill--cloud">Cloud</span><span class="devrow__sum">macOS 15.1 · 192.168.1.51</span><svg class="devrow__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg></button>
+              <div class="devrow__body"><div><div class="cfields">
+                <button class="cfield" type="button"><span class="cfield__k">Model</span><span class="cfield__v">Mac mini (M2)</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">OS</span><span class="cfield__v">macOS 15.1</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Version</span><span class="cfield__v">0.7.4</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Local IP</span><span class="cfield__v">192.168.1.51</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Public IP</span><span class="cfield__v">91.198.45.12</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Paired</span><span class="cfield__v">Mar 3, 2026</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">Last sync</span><span class="cfield__v">2d ago</span></button>
+                <button class="cfield" type="button"><span class="cfield__k">RTT</span><span class="cfield__v">—</span></button>
+              </div><div class="devrow__foot"><button class="btn sm btn--danger">Unpair</button><button class="btn sm btn--danger">Revoke</button></div></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" data-view="settings">
+          <div class="set-tabs" id="setTabs">
+            <button class="set-tab on" data-tab="general"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h11M18 6h3"/><circle cx="16" cy="6" r="2"/><path d="M3 12h3M10 12h11"/><circle cx="8" cy="12" r="2"/><path d="M3 18h7M14 18h7"/><circle cx="12" cy="18" r="2"/></svg>General</button>
+            <button class="set-tab" data-tab="shortcuts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M8 14h8"/></svg>Shortcuts</button>
+            <button class="set-tab" data-tab="appearance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17" cy="13" r="2.5"/><path d="M12 2a10 10 0 1 0 0 20c1 0 1.5-.8 1.5-1.5 0-1.5-1.5-2-1.5-3.5"/></svg>Appearance</button>
+            <button class="set-tab" data-tab="storage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>Storage</button>
+            <button class="set-tab" data-tab="sync"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12.5a7 7 0 0 1 14 0M2 9a11 11 0 0 1 20 0M8.5 16a3.5 3.5 0 0 1 7 0M12 19.5h.01"/></svg>Sync</button>
+            <button class="set-tab" data-tab="privacy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Privacy</button>
+          </div>
+          <div class="set-body" id="setBody">
+            <div class="set-pane on" data-tab="general">
+              <div class="set-grp"><div class="set-grp__h">Background service</div>
+                <div class="srow"><div class="srow__l">Status</div><div class="srow__c"><span class="statusrow"><span class="dot-stat"></span>Running</span><button class="btn sm btn--secondary">Restart</button></div></div>
+                <div class="srow"><div><div class="srow__l">Launch at login</div><div class="srow__s">Start the background service when you log in</div></div><div class="srow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="srow"><div><div class="srow__l">Auto-apply synced clipboard</div><div class="srow__s">Replace your clipboard when another device copies</div></div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+              </div>
+              <div class="set-grp"><div class="set-grp__h">Behaviour</div>
+                <div class="srow"><div class="srow__l">Paste as plain text</div><div class="srow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="srow"><div class="srow__l">Group by device</div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+                <div class="srow"><div class="srow__l">Play sound on capture</div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+              </div>
+            </div>
+            <div class="set-pane" data-tab="shortcuts">
+              <div class="set-grp"><div class="set-grp__h">Global shortcuts</div>
+                <div class="srow"><div class="srow__l">Open quick paste</div><div class="srow__c"><span class="kbd">⌘</span><span class="kbd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5L5 11.5H9V17h6v-5.5h4Z"/></svg></span><span class="kbd">V</span></div></div>
+                <div class="srow"><div class="srow__l">Open main window</div><div class="srow__c"><span class="kbd">⌘</span><span class="kbd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5L5 11.5H9V17h6v-5.5h4Z"/></svg></span><span class="kbd">C</span></div></div>
+                <div class="srow"><div class="srow__l">Paste plain text</div><div class="srow__c"><span class="kbd">⌘</span><span class="kbd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h5l6 12h5M15 6h5"/></svg></span><span class="kbd">V</span></div></div>
+                <div class="srow"><div class="srow__l">Clear history</div><div class="srow__c"><span style="font-size:12px;color:var(--faint)">Not set</span></div></div>
+              </div>
+            </div>
+            <div class="set-pane" data-tab="appearance">
+              <div class="set-grp"><div class="set-grp__h">Theme</div>
+                <div class="srow"><div class="srow__l">Color theme</div><div class="srow__c"><span class="seg" id="setThemeSeg"><button data-theme-val="light">Light</button><button data-theme-val="dark" class="on">Dark</button></span></div></div>
+                <div class="srow"><div><div class="srow__l">Accent color</div><div class="srow__s">Highlights, selection, primary actions</div></div><div class="srow__c"><div class="swatches" id="setAccents"></div></div></div>
+                <div class="srow"><div><div class="srow__l">Translucency</div><div class="srow__s">Frosted toolbars and sheets</div></div><div class="srow__c"><button class="toggle" data-toggle></button></div></div>
+              </div>
+              <div class="set-grp"><div class="set-grp__h">List</div>
+                <div class="srow"><div class="srow__l">Preview lines</div><div class="srow__c"><span class="seg"><button>1</button><button class="on">2</button><button>3</button></span></div></div>
+                <div class="srow"><div class="srow__l">Reduce motion</div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+              </div>
+            </div>
+            <div class="set-pane" data-tab="storage">
+              <div class="set-grp"><div class="set-grp__h">Limits</div>
+                <div class="srow"><div><div class="srow__l">History display limit</div><div class="srow__s">Older items are pruned automatically</div></div><div class="srow__c"><span class="seg"><button>200</button><button class="on">500</button><button>1k</button></span></div></div>
+                <div class="srow"><div class="srow__l">Local database</div><div class="srow__c"><span class="statusrow mono">38.2 MB / 250 MB</span></div></div>
+                <div class="srow"><div class="srow__l">Image quality</div><div class="srow__c"><span class="seg"><button>Low</button><button class="on">Std</button><button>High</button></span></div></div>
+              </div>
+              <div class="set-grp"><div class="set-grp__h">Maintenance</div>
+                <div class="srow"><div class="srow__l">Compact &amp; vacuum database</div><div class="srow__c"><button class="btn sm btn--secondary">Run now</button></div></div>
+                <div class="srow"><div class="srow__l">Import from file</div><div class="srow__c"><button class="btn sm btn--secondary">Choose…</button></div></div>
+              </div>
+            </div>
+            <div class="set-pane" data-tab="sync">
+              <div class="set-grp"><div class="set-grp__h">Sync</div>
+                <div class="srow"><div><div class="srow__l">Enable sync</div><div class="srow__s">End-to-end encrypted · XChaCha20-Poly1305</div></div><div class="srow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="srow"><div><div class="srow__l">LAN visibility</div><div class="srow__s">Discoverable over mDNS for direct P2P</div></div><div class="srow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="srow"><div class="srow__l">Sync on Wi-Fi only</div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+              </div>
+              <div class="set-grp"><div class="set-grp__h">Cloud · Supabase</div>
+                <div class="srow"><div class="srow__l">Account</div><div class="srow__c"><span class="statusrow"><span class="dot-stat"></span>dmytro@briorx.com</span></div></div>
+                <div class="srow"><div class="srow__l">Connection</div><div class="srow__c"><button class="btn sm btn--secondary">Test connection</button></div></div>
+              </div>
+            </div>
+            <div class="set-pane" data-tab="privacy">
+              <div class="set-grp"><div class="set-grp__h">Sensitive data</div>
+                <div class="srow"><div><div class="srow__l">Mask sensitive data</div><div class="srow__s">Blur passwords, tokens, and keys in the list</div></div><div class="srow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="srow"><div class="srow__l">Warn before revealing</div><div class="srow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="srow"><div><div class="srow__l">Auto-wipe sensitive items</div><div class="srow__s">After 1 hour</div></div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+              </div>
+              <div class="set-grp"><div class="set-grp__h">Capture</div>
+                <div class="srow"><div><div class="srow__l">Private mode</div><div class="srow__s">Pause capture entirely</div></div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+                <div class="srow"><div class="srow__l">Allow screenshots of the app</div><div class="srow__c"><button class="toggle off" data-toggle></button></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" data-view="logs">
+          <div class="vhead"><div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input id="logSearch" placeholder="Filter logs…" aria-label="Filter logs"></div><div style="display:flex;gap:5px"><span class="chip on">All</span><span class="chip"><span class="dot" style="background:var(--info)"></span>Info</span><span class="chip"><span class="dot" style="background:var(--warn)"></span>Warn</span><span class="chip"><span class="dot" style="background:var(--err)"></span>Error</span></div></div>
+          <div class="logs" id="logList">
+            <div class="logline"><span class="t">14:02:09.331</span><span class="lvl ok">OK</span><span class="m">daemon started · protocol <b>v18</b> · socket ready</span></div>
+            <div class="logline"><span class="t">14:02:09.402</span><span class="lvl info">INFO</span><span class="m">clipboard monitor attached · backend <b>NSPasteboard</b></span></div>
+            <div class="logline"><span class="t">14:02:11.118</span><span class="lvl info">INFO</span><span class="m">mDNS discovery · 2 peers on _copypaste._tcp</span></div>
+            <div class="logline"><span class="t">14:02:11.640</span><span class="lvl ok">OK</span><span class="m">P2P handshake with <b>Pixel 9 Pro</b> · mTLS verified · RTT 14ms</span></div>
+            <div class="logline"><span class="t">14:03:42.009</span><span class="lvl info">INFO</span><span class="m">captured text · 248 bytes · kind=<b>CODE</b> · synced to 2 peers</span></div>
+            <div class="logline"><span class="t">14:05:18.771</span><span class="lvl warn">WARN</span><span class="m">Mac mini unreachable over P2P · falling back to relay</span></div>
+            <div class="logline"><span class="t">14:05:19.330</span><span class="lvl ok">OK</span><span class="m">relay queue flushed · 3 items delivered</span></div>
+            <div class="logline"><span class="t">14:08:55.412</span><span class="lvl info">INFO</span><span class="m">captured image · 4.1 MB · downscaled to 1.2 MB for sync</span></div>
+          </div>
+        </section>
+
+        <section class="view" data-view="about">
+          <div class="about">
+            <div class="about__logo">⌘</div><div class="about__name">CopyPaste</div>
+            <div class="about__ver">Version 0.7.5 (build 412) · protocol v18</div>
+            <dl class="about__grid"><dt>Platform</dt><dd>macOS 15.3 · arm64</dd><dt>Encryption</dt><dd>XChaCha20-Poly1305</dd><dt>Transports</dt><dd>P2P · Relay · Cloud</dd><dt>Paired devices</dt><dd>3</dd></dl>
+            <div class="about__links"><button class="btn sm btn--secondary">Release notes</button><button class="btn sm btn--secondary">Check for updates</button></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="scrim" id="pairModal" role="dialog" aria-modal="true" aria-label="Pair device">
+      <div class="modal">
+        <div data-pair-step="qr">
+          <div class="modal__t">Pair a new device</div>
+          <div class="modal__s">Scan this code in CopyPaste on your other device, or enter it manually.</div>
+          <div class="qr" id="qr" aria-hidden="true"></div>
+          <button class="btn btn--primary block" id="pairNext">I’ve scanned it</button>
+        </div>
+        <div data-pair-step="sas" style="display:none">
+          <div class="modal__t">Confirm it’s you</div>
+          <div class="modal__s">Check that the same digits appear on <b>Pixel 9 Pro</b>.</div>
+          <div class="sas"><span>4</span><span>2</span><span>9</span><span>1</span><span>7</span><span>3</span></div>
+          <div class="modal__act"><button class="btn btn--ghost" data-pair-close>Cancel</button><button class="btn btn--primary" id="pairDone">They match</button></div>
+        </div>
+        <div data-pair-step="done" style="display:none">
+          <div class="empty__ic" style="margin:0 auto 12px;color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <div class="modal__t">Paired &amp; verified</div>
+          <div class="modal__s"><b>Pixel 9 Pro</b> is now syncing securely.</div>
+          <button class="btn btn--primary block" data-pair-close>Done</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </div>
+  <p class="cap"><b>Try it:</b> type in search, click a clip to copy, hover for pin/delete, hit Select for multi-select, or Pair a device.</p>
+</section>
+
+<!-- ░░░░ COMPONENTS GALLERY ░░░░ -->
+<section class="section" id="components">
+  <div class="eyebrow">Primitives · the transfer surface</div>
+  <h2 class="h2">Component library</h2>
+  <p class="lede">Every atom in every state, plus the raw token swatches. A developer styles a screen by composing these — never by reaching for a hex value. Everything re-themes with the controls above.</p>
+
+  <div class="gal">
+    <div class="gal__card"><div class="gal__h">Buttons</div>
+      <div class="gal__row"><button class="btn btn--primary">Primary</button><button class="btn btn--secondary">Secondary</button><button class="btn btn--ghost">Ghost</button><button class="btn btn--danger">Danger</button></div>
+      <div class="gal__row"><button class="btn sm btn--primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>With icon</button><button class="btn sm btn--secondary">Small</button><button class="btn btn--primary" disabled>Disabled</button></div>
+    </div>
+    <div class="gal__card"><div class="gal__h">Icon buttons · toggles</div>
+      <div class="gal__row"><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button><button class="iconbtn danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="12" r="1.6"/></svg></button><span style="width:14px"></span><button class="toggle" data-toggle></button><button class="toggle off" data-toggle></button></div>
+    </div>
+    <div class="gal__card"><div class="gal__h">Segmented · field</div>
+      <div class="gal__row"><span class="seg"><button class="on">Dark</button><button>Light</button></span><span class="seg"><button>1</button><button class="on">2</button><button>3</button></span></div>
+      <div class="gal__row"><div class="field" style="flex:1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input placeholder="Search…"><span class="kbd">⌘F</span></div></div>
+    </div>
+    <div class="gal__card"><div class="gal__h">Chips · pills · badges</div>
+      <div class="gal__row"><span class="chip on">All</span><span class="chip"><span class="dot" style="background:var(--c-code)"></span>Code</span><span class="chip"><span class="dot" style="background:var(--c-url)"></span>Links</span></div>
+      <div class="gal__row"><span class="tpill tpill--p2p">P2P</span><span class="tpill tpill--cloud">Cloud</span><span class="tpill tpill--this">This Mac</span></div>
+      <div class="gal__row"><span class="badge badge--verified"><span class="d"></span>Verified</span><span class="badge badge--count">12</span></div>
+    </div>
+    <div class="gal__card"><div class="gal__h">Content-type tiles</div>
+      <div class="gal__row" id="tileRow"></div>
+    </div>
+    <div class="gal__card"><div class="gal__h">Status · feedback</div>
+      <div class="gal__row"><span class="statusrow"><span class="dot-stat"></span>Online</span><span class="statusrow"><span class="dot-stat off"></span>Offline</span><span class="spinner"></span></div>
+      <div class="gal__row"><span class="kbd">⌘</span><span class="kbd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5L5 11.5H9V17h6v-5.5h4Z"/></svg></span><span class="kbd">V</span><span class="mono" style="font-size:11px;color:var(--faint)">tabular 0123456789</span></div>
+    </div>
+  </div>
+
+  <h3 style="font-size:14px;font-weight:600;margin:34px 0 0;color:var(--dim)">Color tokens</h3>
+  <p class="cap" style="margin-top:4px">Surfaces, text ramp, status, content-type — all flip with theme; accent swaps independently.</p>
+  <div class="tok-grid" id="tokSurfaces"></div>
+  <div class="tok-grid" id="tokContent" style="margin-top:8px"></div>
+
+  <h3 style="font-size:14px;font-weight:600;margin:34px 0 0;color:var(--dim)">Type scale</h3>
+  <div class="type-spec">
+    <div><span class="tk">Title · 700</span><span style="font-size:22px;font-weight:700;letter-spacing:-.025em">Clipboard, synced</span></div>
+    <div><span class="tk">Section · 600</span><span style="font-size:14px;font-weight:600">Devices &amp; sync</span></div>
+    <div><span class="tk">Body · 450</span><span style="font-size:14px">Standup notes — shipped pairing</span></div>
+    <div><span class="tk">Mono body · 450</span><span class="mono" style="font-size:12.5px">pub async fn migrate(db: &amp;Pool)</span></div>
+    <div><span class="tk">Meta · 450</span><span style="font-size:11.5px;color:var(--faint)">Code · VS Code · 12m · MacBook Pro</span></div>
+    <div><span class="tk">Micro · 500</span><span class="mono" style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint)">Today</span></div>
+  </div>
+
+  <h3 style="font-size:14px;font-weight:600;margin:34px 0 0;color:var(--dim)">Radius &amp; elevation</h3>
+  <div class="gal__row" style="margin-top:14px;gap:16px">
+    <div style="text-align:center"><div style="width:64px;height:46px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--r-chip)"></div><div class="cap" style="margin-top:6px">chip 7</div></div>
+    <div style="text-align:center"><div style="width:64px;height:46px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--r-ctl)"></div><div class="cap" style="margin-top:6px">ctl 8</div></div>
+    <div style="text-align:center"><div style="width:64px;height:46px;background:var(--elevated);border:1px solid var(--border);border-radius:var(--r-card)"></div><div class="cap" style="margin-top:6px">card 13</div></div>
+    <div style="text-align:center"><div style="width:64px;height:46px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--sh1)"></div><div class="cap" style="margin-top:6px">sh1</div></div>
+    <div style="text-align:center"><div style="width:64px;height:46px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--sh2)"></div><div class="cap" style="margin-top:6px">sh2</div></div>
+    <div style="text-align:center"><div style="width:64px;height:46px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-card);box-shadow:var(--sh3)"></div><div class="cap" style="margin-top:6px">sh3</div></div>
+  </div>
+</section>
+
+<!-- ░░░░ MOBILE / ANDROID (interactive) ░░░░ -->
+<section class="section" id="mobile">
+  <div class="eyebrow">Android · parity</div>
+  <h2 class="h2">The same system, on a phone</h2>
+  <p class="lede">One design language. <b>Tap the floating bar to switch screens</b> — Clips, Devices, Settings — each reusing the exact primitives (tiles, rows, device cards, tokens). The bar is icon-only and hugs its content. Theme &amp; accent flow through here too.</p>
+
+  <div class="phone-grid">
+    <!-- interactive phone -->
+    <div class="phone-wrap">
+      <div class="phone"><div class="pscreen"><span class="pcam"></span>
+        <div class="statusbar"><span>9:41</span><span class="r"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="14" width="3" height="6" rx="1"/><rect x="7" y="10" width="3" height="10" rx="1"/><rect x="12" y="6" width="3" height="14" rx="1"/><rect x="17" y="3" width="3" height="17" rx="1" opacity=".4"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13a10 10 0 0 1 14 0M8.5 16.5a5 5 0 0 1 7 0M2 9.5a15 15 0 0 1 20 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="18" height="10" rx="2"/><rect x="4" y="9" width="11" height="6" rx="1" fill="currentColor"/><path d="M22 10v4"/></svg></span></div>
+        <div class="pbody">
+          <div class="pscr on" data-mscr="clips">
+            <div class="mtop"><span class="mtop__t">Clips</span><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button></div>
+            <div class="mfilters"><span class="chip on">All</span><span class="chip"><span class="dot" style="background:var(--c-code)"></span>Code</span><span class="chip"><span class="dot" style="background:var(--c-url)"></span>Links</span><span class="chip"><span class="dot" style="background:var(--c-image)"></span>Images</span></div>
+            <div class="mlist">
+              <div class="grouphead" style="position:static">Today</div>
+              <div class="row" style="--ct:var(--c-code)"><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m16 18 4-4-4-4M8 6l-4 4 4 4"/></svg></span><div class="row__body"><div class="row__title mono">docker compose up -d</div><div class="row__meta"><span class="ty">Code</span> · just now</div></div></div>
+              <div class="row" style="--ct:var(--c-url)"><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></span><div class="row__body"><div class="row__title"><span class="host">github.com</span><span class="rest">/tauri-apps</span></div><div class="row__meta"><span class="ty">Link</span> · Chrome · 14m</div></div></div>
+              <div class="row" style="--ct:var(--c-color)"><span class="tile tile--swatch" style="background:#6E5BFF"></span><div class="row__body"><div class="row__title mono">#6E5BFF</div><div class="row__meta"><span class="ty">Color</span> · 22m</div></div></div>
+              <div class="row" style="--ct:var(--c-image)"><span class="tile tile--thumb"></span><div class="row__body"><div class="row__title">Screenshot_20260628.png</div><div class="row__meta"><span class="ty">Image</span> · 1h · 1080×2340</div></div></div>
+              <div class="row" style="--ct:var(--c-text)"><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span><div class="row__body"><div class="row__title">Thanks — sent it for review</div><div class="row__meta"><span class="ty">Text</span> · Telegram · 2h</div></div></div>
+              <div class="row" style="--ct:var(--c-secret)"><span class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><div class="row__body"><div class="row__title mono"><span class="mask" style="cursor:default">sk-proj-aR9k</span></div><div class="row__meta"><span class="ty">Secret</span> · 3h</div></div></div>
+            </div>
+          </div>
+          <div class="pscr" data-mscr="devices">
+            <div class="mtop"><span class="mtop__t">Devices</span><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg></button></div>
+            <div class="mdevscroll">
+              <div class="dev-list">
+                <div class="devrow open">
+                  <button class="devrow__head" type="button"><span class="dot-stat"></span><span class="devrow__name">MacBook Pro</span><span class="tpill tpill--p2p">P2P</span><svg class="devrow__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg></button>
+                  <div class="devrow__body"><div><div class="cfields">
+                    <button class="cfield" type="button"><span class="cfield__k">Model</span><span class="cfield__v">MacBook Pro (M4 Pro)</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">OS</span><span class="cfield__v">macOS 15.3</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">Version</span><span class="cfield__v">0.7.5</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">Local IP</span><span class="cfield__v">192.168.1.24</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">Public IP</span><span class="cfield__v">203.0.113.42</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">Last sync</span><span class="cfield__v">2m ago</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">RTT</span><span class="cfield__v">14 ms</span></button>
+                  </div><div class="devrow__foot"><button class="btn sm btn--danger">Unpair</button><button class="btn sm btn--danger">Revoke</button></div></div></div>
+                </div>
+                <div class="devrow this">
+                  <button class="devrow__head" type="button"><span class="dot-stat"></span><span class="devrow__name">Pixel 9 Pro</span><span class="tpill tpill--this">This phone</span><svg class="devrow__chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg></button>
+                  <div class="devrow__body"><div><div class="cfields">
+                    <button class="cfield" type="button"><span class="cfield__k">Model</span><span class="cfield__v">Pixel 9 Pro</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">OS</span><span class="cfield__v">Android 16</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">Version</span><span class="cfield__v">0.7.5</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">Local IP</span><span class="cfield__v">192.168.1.37</span></button>
+                    <button class="cfield" type="button"><span class="cfield__k">Public IP</span><span class="cfield__v">203.0.113.42</span></button>
+                  </div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="pscr" data-mscr="settings">
+            <div class="mtop"><span class="mtop__t">Settings</span></div>
+            <div class="msetscroll">
+              <div class="mset-grp"><div class="mset-grp__h">Appearance</div><div class="mset-card">
+                <div class="msrow"><div class="msrow__l">Color theme</div><div class="msrow__c"><span class="seg" style="transform:scale(.9);transform-origin:right"><button>Light</button><button class="on">Dark</button></span></div></div>
+                <div class="msrow"><div class="msrow__l">Accent</div><div class="msrow__c"><span class="swatch" style="background:#6E5BFF;border-color:var(--text)" aria-pressed="true"></span><span class="swatch" style="background:#13B8A6;opacity:.4"></span><span class="swatch" style="background:#F43F7E;opacity:.4"></span><svg class="mchev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg></div></div>
+                <div class="msrow"><div class="msrow__l">Translucency</div><div class="msrow__c"><button class="toggle" data-toggle></button></div></div>
+              </div></div>
+              <div class="mset-grp"><div class="mset-grp__h">Sync</div><div class="mset-card">
+                <div class="msrow"><div><div class="msrow__l">Enable sync</div><div class="msrow__s">End-to-end encrypted</div></div><div class="msrow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="msrow"><div><div class="msrow__l">Cloud · Supabase</div><div class="msrow__s">dmytro@briorx.com</div></div><div class="msrow__c"><span class="statusrow"><span class="dot-stat"></span><span style="font-size:12px;color:var(--ok)">On</span></span></div></div>
+                <div class="msrow"><div class="msrow__l">Wi-Fi only</div><div class="msrow__c"><button class="toggle off" data-toggle></button></div></div>
+              </div></div>
+              <div class="mset-grp"><div class="mset-grp__h">Privacy &amp; capture</div><div class="mset-card">
+                <div class="msrow"><div class="msrow__l">Mask sensitive data</div><div class="msrow__c"><button class="toggle" data-toggle></button></div></div>
+                <div class="msrow"><div><div class="msrow__l">Background capture</div><div class="msrow__s">Accessibility service · on</div></div><div class="msrow__c"><svg class="mchev" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m9 18 6-6-6-6"/></svg></div></div>
+              </div></div>
+            </div>
+          </div>
+          <div class="mfade"></div>
+          <div class="mtoast"></div>
+          <nav class="mtabbar" aria-label="Sections">
+            <button class="mtab on" data-mscr="clips" aria-label="Clips"><span class="mtab__i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="5" y="5" width="14" height="16" rx="2.5"/><rect x="9" y="3" width="6" height="4" rx="1.5"/><path d="M9 12h6M9 16h4"/></svg></span></button>
+            <button class="mtab" data-mscr="devices" aria-label="Devices"><span class="mtab__i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="13" height="11" rx="2.5"/><rect x="14" y="10" width="7" height="10" rx="2.5"/></svg></span></button>
+            <button class="mtab" data-mscr="settings" aria-label="Settings"><span class="mtab__i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 6h11M18 6h3"/><circle cx="16" cy="6" r="2"/><path d="M3 12h3M10 12h11"/><circle cx="8" cy="12" r="2"/><path d="M3 18h7M14 18h7"/><circle cx="12" cy="18" r="2"/></svg></span></button>
+          </nav>
+        </div>
+      </div></div>
+      <div class="cap"><b>Tap the bar →</b> screens switch with animation.</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ░░░░ STATES / FEEDBACK / EDGE ░░░░ -->
+<section class="section" id="states">
+  <div class="eyebrow">Feedback · edge cases</div>
+  <h2 class="h2">States &amp; messaging</h2>
+  <p class="lede">The surfaces that only appear at the edges — banners, destructive confirms, detail, empties, first run. Defined once so they never get improvised. Color carries meaning here, and nowhere does it shout.</p>
+
+  <div style="display:flex;flex-direction:column;gap:10px;margin-top:20px">
+    <div class="banner banner--ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><path d="M22 4 12 14.1l-3-3"/></svg><div class="banner__x"><b>All devices synced.</b> Last activity 2 minutes ago over P2P.</div></div>
+    <div class="banner banner--info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg><div class="banner__x"><b>Version 0.7.6 is available.</b> Relay backoff fixes and faster image sync.</div><div class="banner__act"><button class="btn sm btn--secondary">Later</button><button class="btn sm btn--primary">Update</button></div></div>
+    <div class="banner banner--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg><div class="banner__x"><b>Mac mini hasn’t synced in 2 days.</b> It may be offline or paused.</div><div class="banner__act"><button class="btn sm btn--secondary">Retry</button></div></div>
+    <div class="banner banner--err"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></svg><div class="banner__x"><b>Pairing failed.</b> The verification codes didn’t match — start over to keep the channel secure.</div><div class="banner__act"><button class="btn sm btn--danger">Try again</button></div></div>
+  </div>
+
+  <div class="gal" style="margin-top:18px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))">
+    <div>
+      <div class="cap" style="margin:0 0 8px"><b>Destructive confirm</b></div>
+      <div style="position:relative;border-radius:var(--r-card);overflow:hidden;border:1px solid var(--border);background:var(--panel);min-height:300px;display:flex;align-items:center;justify-content:center;padding:22px">
+        <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+        <div class="modal" style="position:relative;width:300px">
+          <div class="empty__ic" style="margin:0 auto 12px;color:var(--err);background:color-mix(in srgb,var(--err) 12%,transparent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg></div>
+          <div class="modal__t">Unpair Pixel 9 Pro?</div>
+          <div class="modal__s">It will stop syncing and must be paired again. Existing clips on that device aren’t deleted.</div>
+          <div class="modal__act"><button class="btn btn--secondary">Cancel</button><button class="btn btn--danger">Unpair</button></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="cap" style="margin:0 0 8px"><b>Clip detail</b></div>
+      <div style="position:relative;border-radius:var(--r-card);overflow:hidden;border:1px solid var(--border);background:var(--panel);min-height:300px;display:flex;align-items:center;justify-content:center;padding:22px">
+        <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+        <div class="modal" style="position:relative;width:300px;text-align:left;padding:18px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:13px"><span class="tile" style="--ct:var(--c-code)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m16 18 4-4-4-4M8 6l-4 4 4 4"/></svg></span><span class="chip chip--ct" style="--ct:var(--c-code)">Code</span><span style="flex:1"></span><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+          <pre class="mono" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r-ctl);padding:11px;font-size:11.5px;color:var(--text);white-space:pre-wrap;word-break:break-all;margin-bottom:13px">pub async fn migrate(db: &amp;Pool)
+  -&gt; Result&lt;(), Error&gt; {
+    sqlx::migrate!().run(db).await
+}</pre>
+          <dl class="dmeta" style="margin:0 0 14px"><dt>Source</dt><dd>VS Code</dd><dt>Captured</dt><dd>12m ago</dd><dt>Device</dt><dd>MacBook Pro</dd><dt>Size</dt><dd>248 B</dd></dl>
+          <div class="modal__act"><button class="btn btn--ghost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2.5 9.6 8.2 3.5 8.8l4.6 4-1.4 6 5.3-3.2 5.3 3.2-1.4-6 4.6-4-6.1-.6Z"/></svg></button><button class="btn btn--ghost" style="color:var(--err)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M9 7V4.5h6V7m-8 0 .8 13h8.4L19 7"/></svg></button><button class="btn btn--primary" style="flex:1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></svg>Copy</button></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="cap" style="margin:0 0 8px"><b>No search results</b></div>
+      <div style="border:1px solid var(--border);border-radius:var(--r-card);background:var(--panel);min-height:300px">
+        <div class="empty" style="display:flex"><div class="empty__ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3M8 11h6"/></svg></div><div class="empty__t">No matches for “kuber”</div><div class="empty__s">Try a different term, or clear the filter to see everything.</div><button class="btn sm btn--secondary" style="margin-top:12px">Clear search</button></div>
+      </div>
+    </div>
+    <div>
+      <div class="cap" style="margin:0 0 8px"><b>No devices</b></div>
+      <div style="border:1px solid var(--border);border-radius:var(--r-card);background:var(--panel);min-height:300px">
+        <div class="empty" style="display:flex"><div class="empty__ic" style="color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="13" height="11" rx="2.5"/><rect x="14" y="10" width="7" height="10" rx="2.5"/></svg></div><div class="empty__t">No devices paired</div><div class="empty__s">Pair your phone or another Mac to sync your clipboard — end-to-end encrypted.</div><button class="btn btn--primary" style="margin-top:12px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14"/></svg>Pair device</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cap" style="margin:22px 0 8px"><b>First run</b></div>
+  <div style="position:relative;border-radius:var(--r-card);overflow:hidden;border:1px solid var(--border);background:var(--panel);min-height:340px;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="position:absolute;inset:0;background:var(--scrim)"></div>
+    <div class="modal" style="position:relative;width:380px;padding:26px">
+      <div class="about__logo" style="margin:0 auto 14px;width:56px;height:56px;font-size:30px">⌘</div>
+      <div class="modal__t" style="font-size:18px">Welcome to CopyPaste</div>
+      <div class="modal__s">Your clipboard, everywhere — private by default.</div>
+      <div style="display:flex;flex-direction:column;gap:12px;text-align:left;margin:6px 0 20px">
+        <div style="display:flex;gap:11px;align-items:flex-start"><span class="tile" style="--ct:var(--c-url);width:30px;height:30px;font-size:15px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12.5a7 7 0 0 1 14 0M2 9a11 11 0 0 1 20 0M8.5 16a3.5 3.5 0 0 1 7 0"/></svg></span><div><div style="font-size:13px;font-weight:550">Sync across devices</div><div style="font-size:11.5px;color:var(--faint)">P2P on your network, relay or cloud when away.</div></div></div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><span class="tile" style="--ct:var(--c-secret);width:30px;height:30px;font-size:15px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><div><div style="font-size:13px;font-weight:550">End-to-end encrypted</div><div style="font-size:11.5px;color:var(--faint)">XChaCha20-Poly1305 — keys never leave your devices.</div></div></div>
+        <div style="display:flex;gap:11px;align-items:flex-start"><span class="tile" style="--ct:var(--c-code);width:30px;height:30px;font-size:15px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="m16 18 4-4-4-4M8 6l-4 4 4 4"/></svg></span><div><div style="font-size:13px;font-weight:550">Understands your content</div><div style="font-size:11.5px;color:var(--faint)">Code, links, colors, secrets — detected and labeled.</div></div></div>
+      </div>
+      <button class="btn btn--primary block">Get started</button>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  var CHECK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>';
+
+  /* ---- accent + theme ---- */
+  var ACCENTS=[['indigo','#6E5BFF'],['blue','#3B82F6'],['teal','#13B8A6'],['green','#46C56A'],['amber','#F5A524'],['rose','#F43F7E']];
+  function buildAccents(host){ if(!host)return; ACCENTS.forEach(function(a){ var b=document.createElement('button'); b.className='swatch'; b.style.background=a[1]; b.dataset.accentVal=a[0]; b.setAttribute('aria-label',a[0]); b.setAttribute('aria-pressed',a[0]===root.dataset.accent); host.appendChild(b); }); }
+  buildAccents(document.getElementById('accents')); buildAccents(document.getElementById('setAccents'));
+  function setAccent(v){ root.dataset.accent=v; document.querySelectorAll('.swatch').forEach(function(s){ if(s.dataset.accentVal) s.setAttribute('aria-pressed',s.dataset.accentVal===v); }); }
+  function setTheme(v){ root.dataset.theme=v; document.querySelectorAll('[data-theme-val]').forEach(function(b){ b.classList.toggle('on',b.dataset.themeVal===v); b.setAttribute('aria-pressed',b.dataset.themeVal===v); }); }
+
+  /* ---- toast ---- */
+  var toastEl=document.getElementById('toast'), toastTimer;
+  function toast(msg,icon){ toastEl.innerHTML=(icon||'')+'<span>'+msg+'</span>'; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(function(){toastEl.classList.remove('show');},1500); }
+
+  /* ---- gallery tiles + tokens ---- */
+  var TILES=[['Text','--c-text','<path d="M4 7h16M4 12h16M4 17h10"/>'],['Link','--c-url','<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>'],['Email','--c-mail','<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>'],['Phone','--c-num','<path d="M5 4h4l2 5-3 2a12 12 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"/>'],['Code','--c-code','<path d="m16 18 4-4-4-4M8 6l-4 4 4 4"/>'],['JSON','--c-json','<path d="M8 3a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2M16 3a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2"/>'],['Number','--c-num','<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>'],['Path','--c-file','<path d="M14 3v5h5M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/>'],['Secret','--c-secret','<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>']];
+  var tr=document.getElementById('tileRow');
+  if(tr){ TILES.forEach(function(t){ var w=document.createElement('div'); w.style.textAlign='center'; w.innerHTML='<span class="tile" style="--ct:var('+t[1]+')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor">'+t[2]+'</svg></span><div class="cap" style="margin-top:5px">'+t[0]+'</div>'; tr.appendChild(w); });
+    var sw=document.createElement('div'); sw.style.textAlign='center'; sw.innerHTML='<span class="tile tile--swatch" style="background:#6E5BFF"></span><div class="cap" style="margin-top:5px">Color</div>'; tr.appendChild(sw);
+    var th=document.createElement('div'); th.style.textAlign='center'; th.innerHTML='<span class="tile tile--thumb"></span><div class="cap" style="margin-top:5px">Image</div>'; tr.appendChild(th); }
+  function tok(host,list){ if(!host)return; list.forEach(function(v){ var el=document.createElement('div'); el.className='tok'; el.innerHTML='<div class="tok__sw" style="background:var('+v+')"></div><div class="tok__b"><div class="tok__n">'+v.replace('--','')+'</div><div class="tok__v">var('+v+')</div></div>'; host.appendChild(el); }); }
+  tok(document.getElementById('tokSurfaces'),['--bg','--panel','--elevated','--raised','--border','--text','--dim','--faint','--accent','--ok','--warn','--err','--info']);
+  tok(document.getElementById('tokContent'),['--c-text','--c-url','--c-code','--c-image','--c-mail','--c-color','--c-num','--c-file','--c-json','--c-secret']);
+
+  /* ---- HISTORY: live search / filter / select / pin / delete / reveal ---- */
+  var list=document.getElementById('histList'), search=document.getElementById('histSearch'),
+      emptyEl=document.getElementById('histEmpty'), emptyT=document.getElementById('emptyT'), emptyS=document.getElementById('emptyS'),
+      selectBtn=document.getElementById('selectBtn'), bulkbar=document.getElementById('bulkbar'), selCount=document.getElementById('selCount');
+  var activeFilter='all';
+  function rowMatches(r){ var okF=activeFilter==='all'||r.dataset.kind===activeFilter; var q=(search.value||'').trim().toLowerCase(); var okT=!q||r.querySelector('.row__title').textContent.toLowerCase().indexOf(q)>=0; return okF&&okT; }
+  function refresh(){
+    var vis=0;
+    list.querySelectorAll('.row').forEach(function(r){ var m=rowMatches(r); r.classList.toggle('filtered',!m); if(m)vis++; });
+    list.querySelectorAll('.grouphead').forEach(function(h){ var any=false,n=h.nextElementSibling; while(n&&!n.classList.contains('grouphead')&&n!==emptyEl){ if(n.classList.contains('row')&&!n.classList.contains('filtered'))any=true; n=n.nextElementSibling; } h.classList.toggle('filtered',!any); });
+    if(vis===0){ var q=(search.value||'').trim(); if(q){ emptyT.textContent='No matches for \u201C'+q+'\u201D'; emptyS.textContent='Try a different term or clear the filter.'; } else { emptyT.textContent='Nothing here'; emptyS.textContent='Copy something or change the filter.'; } emptyEl.classList.add('show'); } else emptyEl.classList.remove('show');
+  }
+  search.addEventListener('input',refresh);
+  function updateBulk(){ selCount.textContent=list.querySelectorAll('.row.sel').length; }
+  selectBtn.addEventListener('click',function(){ var on=list.classList.toggle('selecting'); bulkbar.classList.toggle('show',on); selectBtn.textContent=on?'Done':'Select'; if(!on){ list.querySelectorAll('.row.sel').forEach(function(r){ r.classList.remove('sel'); r.querySelector('.chk').classList.remove('on'); }); } });
+  document.getElementById('selDone').addEventListener('click',function(){ selectBtn.click(); });
+  function pin(r,state){ var p=(state!==undefined)?state:!r.classList.contains('pinned'); r.classList.toggle('pinned',p); var s=r.querySelector('.star-btn'); s.classList.toggle('on',p); s.setAttribute('aria-label',p?'Unpin':'Pin'); s.classList.add('pop'); setTimeout(function(){s.classList.remove('pop');},340); }
+  function del(r){ r.classList.add('removing'); setTimeout(function(){ r.remove(); refresh(); },240); }
+  list.addEventListener('click',function(e){
+    var row=e.target.closest('.row'); if(!row)return;
+    if(list.classList.contains('selecting')){ var sel=row.classList.toggle('sel'); row.querySelector('.chk').classList.toggle('on',sel); updateBulk(); return; }
+    if(e.target.closest('.del')){ del(row); toast('Deleted'); return; }
+    if(e.target.closest('.star-btn')){ var willPin=!row.classList.contains('pinned'); pin(row); toast(willPin?'Pinned':'Unpinned'); return; }
+    var mask=e.target.closest('.mask'); if(mask&&mask.dataset.real){ mask.textContent=mask.dataset.real; mask.classList.remove('mask'); toast('Revealed'); return; }
+    row.classList.add('copied'); setTimeout(function(){row.classList.remove('copied');},650); toast('Copied to clipboard',CHECK);
+  });
+  document.getElementById('bulkPin').addEventListener('click',function(){ var s=list.querySelectorAll('.row.sel'); if(!s.length)return; s.forEach(function(r){ pin(r,true); r.classList.remove('sel'); r.querySelector('.chk').classList.remove('on'); }); toast(s.length+' pinned'); updateBulk(); });
+  document.getElementById('bulkDel').addEventListener('click',function(){ var s=list.querySelectorAll('.row.sel'); if(!s.length)return; var n=s.length; s.forEach(function(r){ del(r); }); toast(n+' deleted'); selectBtn.click(); });
+  document.getElementById('histFilters').addEventListener('click',function(e){ var c=e.target.closest('[data-filter]'); if(!c)return; this.querySelectorAll('.chip').forEach(function(x){x.classList.toggle('on',x===c);}); activeFilter=c.dataset.filter; refresh(); });
+
+  /* ---- generic delegated: theme / accent / view / settings-tab / toggle ---- */
+  document.addEventListener('click',function(e){
+    var t=e.target.closest('[data-accent-val],[data-theme-val],[data-view],[data-toggle]');
+    if(t){
+      if(t.dataset.accentVal!==undefined){ setAccent(t.dataset.accentVal); return; }
+      if(t.dataset.themeVal!==undefined){ setTheme(t.dataset.themeVal); return; }
+      if(t.dataset.toggle!==undefined){ t.classList.toggle('off'); return; }
+      if(t.dataset.view!==undefined){ document.querySelectorAll('#sidebar .sb__item').forEach(function(i){i.classList.toggle('on',i===t);}); document.querySelectorAll('.main > .view').forEach(function(v){v.classList.toggle('on',v.dataset.view===t.dataset.view);}); return; }
+    }
+    var st=e.target.closest('#setTabs .set-tab');
+    if(st){ document.querySelectorAll('#setTabs .set-tab').forEach(function(i){i.classList.toggle('on',i===st);}); document.querySelectorAll('#setBody .set-pane').forEach(function(p){p.classList.toggle('on',p.dataset.tab===st.dataset.tab);}); return; }
+    var sgb=e.target.closest('.seg button');
+    if(sgb && sgb.dataset.themeVal===undefined){ var sg=sgb.closest('.seg'); if(sg && sg.id!=='themeSeg' && sg.id!=='setThemeSeg'){ sg.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===sgb);}); } }
+  });
+
+  /* ---- logs live filter ---- */
+  var logSearch=document.getElementById('logSearch'), logList=document.getElementById('logList');
+  if(logSearch){ logSearch.addEventListener('input',function(){ var q=this.value.trim().toLowerCase(); logList.querySelectorAll('.logline').forEach(function(l){ l.style.display=(!q||l.textContent.toLowerCase().indexOf(q)>=0)?'':'none'; }); }); }
+
+  /* ---- mobile: tab bar switches screens ---- */
+  document.querySelectorAll('.mtabbar').forEach(function(bar){ bar.addEventListener('click',function(e){ var tab=e.target.closest('.mtab'); if(!tab)return; var body=bar.closest('.pbody'); body.querySelectorAll('.pscr').forEach(function(s){s.classList.toggle('on',s.dataset.mscr===tab.dataset.mscr);}); bar.querySelectorAll('.mtab').forEach(function(t){t.classList.toggle('on',t===tab);}); }); });
+
+  /* ---- devices: expand row + tap any field to copy ---- */
+  var devList=document.getElementById('devList');
+  if(devList){ devList.addEventListener('click',function(e){
+    var fb=e.target.closest('.devrow__foot .btn');
+    if(fb){ var dr=fb.closest('.devrow'); var nm=dr.querySelector('.devrow__name').textContent; dr.classList.add('removing'); setTimeout(function(){dr.remove();},240); toast(fb.textContent.trim()+' · '+nm); return; }
+    var cf=e.target.closest('.cfield');
+    if(cf){ var k=cf.querySelector('.cfield__k').textContent.trim(); cf.classList.add('copied'); setTimeout(function(){cf.classList.remove('copied');},650); toast('Copied '+k,CHECK); return; }
+    var h=e.target.closest('.devrow__head'); if(h){ h.closest('.devrow').classList.toggle('open'); }
+  }); }
+
+  /* ---- mobile: tap-to-copy clips, expand devices, in-phone toast ---- */
+  function mtoast(scope,msg,icon){ var t=scope.querySelector('.mtoast'); if(!t)return; t.innerHTML=(icon||'')+'<span>'+msg+'</span>'; t.classList.add('show'); clearTimeout(t._tm); t._tm=setTimeout(function(){t.classList.remove('show');},1300); }
+  document.querySelectorAll('.pbody').forEach(function(body){ body.addEventListener('click',function(e){
+    if(e.target.closest('.mtabbar'))return;
+    var fb=e.target.closest('.devrow__foot .btn');
+    if(fb){ var dr=fb.closest('.devrow'); dr.classList.add('removing'); setTimeout(function(){dr.remove();},240); mtoast(body,fb.textContent.trim()); return; }
+    var cf=e.target.closest('.cfield');
+    if(cf){ var k=cf.querySelector('.cfield__k').textContent.trim(); cf.classList.add('copied'); setTimeout(function(){cf.classList.remove('copied');},650); mtoast(body,'Copied '+k,CHECK); return; }
+    var h=e.target.closest('.devrow__head'); if(h){ h.closest('.devrow').classList.toggle('open'); return; }
+    var row=e.target.closest('.row'); if(row){ row.classList.add('copied'); setTimeout(function(){row.classList.remove('copied');},650); mtoast(body,'Copied',CHECK); return; }
+  }); });
+
+  /* ---- pairing flow ---- */
+  var pm=document.getElementById('pairModal');
+  function step(s){ pm.querySelectorAll('[data-pair-step]').forEach(function(d){ d.style.display=d.dataset.pairStep===s?'':'none'; }); }
+  document.getElementById('pairBtn').addEventListener('click',function(){ step('qr'); pm.classList.add('open'); });
+  document.getElementById('pairNext').addEventListener('click',function(){ step('sas'); });
+  document.getElementById('pairDone').addEventListener('click',function(){ step('done'); });
+  function closePair(){ pm.classList.remove('open'); }
+  pm.addEventListener('click',function(e){ if(e.target===pm||e.target.closest('[data-pair-close]'))closePair(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape')closePair(); });
+
+  /* ---- decorative QR ---- */
+  (function(){ var qr=document.getElementById('qr'); if(!qr)return; var seed=7; for(var i=0;i<121;i++){ seed=(seed*1103515245+12345)&0x7fffffff; var on=(seed>>16&1); var corner=(i<3||(i>7&&i<11)||(i%11<3&&i<33)||(i%11>7&&i<33)||(i>87&&i%11<3)); var cell=document.createElement('i'); if(!(on||corner))cell.className='o'; qr.appendChild(cell); } })();
+})();
+</script>
+</body>
+</html>

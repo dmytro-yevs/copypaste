@@ -1,36 +1,19 @@
 package com.copypaste.android
 
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CheckBox
-import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Star
-import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
-import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.GlassTier
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.TranslucentSurface
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.rememberTranslucency
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Confirmation dialog enum
@@ -57,91 +40,69 @@ internal fun SelectionTopBar(
     // g3z4: bulk-copy action — joins selected text items and puts them in the clipboard.
     onCopySelected: () -> Unit,
 ) {
-    val c = LocalCpColors.current
-    val translucent = rememberTranslucency()
-    val dark = isDarkTheme()
-    // w67o: wrap in TranslucentSurface (tier GLASS = .surface-glass, frosted, parity styleguide
-    // bulk/selection bars = tier-1 surface-glass at L362). TopAppBar container → transparent so
-    // the glass surface shows through. Matches the main History header pattern at L783.
-    TranslucentSurface(
+    val c = MaterialTheme.colorScheme
+    // w67o: plain Material Surface. TopAppBar container → transparent so the
+    // surface fill shows through. Matches the main History header pattern.
+    Surface(
         shape = RectangleShape,
-        translucent = translucent,
-        dark = dark,
-        solid = MaterialTheme.colorScheme.surface,
-        contentColor = c.text,
-        tier = GlassTier.GLASS,
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = c.onSurface,
     ) {
         TopAppBar(
             title = {
                 // CopyPaste-mpp6: headlineSmall to match CopyPasteTopBar hierarchy.
                 Text(
                     text = stringResource(R.string.selection_count, selectedCount),
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = c.text,
+                    color = c.onSurface,
                 )
             },
             navigationIcon = {
                 IconButton(onClick = onClose) {
-                    Icon(
-                        Icons.Outlined.Close,
-                        contentDescription = stringResource(R.string.cd_close_selection),
-                        tint = c.dim,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    Text(stringResource(R.string.cd_close_selection))
                 }
             },
             actions = {
                 val allSelected = selectedCount == totalCount && totalCount > 0
                 IconButton(onClick = onSelectAll) {
-                    Icon(
-                        if (allSelected) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
-                        contentDescription = stringResource(R.string.cd_select_all),
-                        tint = if (allSelected) accentFill() else c.dim,
-                        modifier = Modifier.size(18.dp),
+                    Text(
+                        stringResource(R.string.cd_select_all),
+                        color = if (allSelected) c.primary else c.onSurfaceVariant,
                     )
                 }
                 if (selectedCount > 0) {
                     // g3z4: bulk-copy — joins selected text items and puts them in the clipboard.
                     IconButton(onClick = onCopySelected) {
-                        Icon(
-                            Icons.Outlined.ContentCopy,
-                            contentDescription = stringResource(R.string.action_copy_selected),
-                            tint = c.dim,
-                            modifier = Modifier.size(18.dp),
+                        Text(
+                            stringResource(R.string.action_copy_selected),
+                            color = c.onSurfaceVariant,
                         )
                     }
                     IconButton(onClick = onPinSelected) {
-                        Icon(
-                            Icons.Outlined.Star,
-                            contentDescription = stringResource(R.string.action_pin_selected),
-                            tint = accentFill(),
-                            modifier = Modifier.size(18.dp),
+                        Text(
+                            stringResource(R.string.action_pin_selected),
+                            color = c.primary,
                         )
                     }
                     IconButton(onClick = onUnpinSelected) {
-                        Icon(
-                            Icons.Outlined.StarBorder,
-                            contentDescription = stringResource(R.string.action_unpin_selected),
-                            tint = c.dim,
-                            modifier = Modifier.size(18.dp),
+                        Text(
+                            stringResource(R.string.action_unpin_selected),
+                            color = c.onSurfaceVariant,
                         )
                     }
                     IconButton(onClick = onDeleteSelected) {
-                        Icon(
-                            Icons.Outlined.Delete,
-                            contentDescription = stringResource(R.string.action_delete_selected),
-                            tint = c.err,
-                            modifier = Modifier.size(18.dp),
+                        Text(
+                            stringResource(R.string.action_delete_selected),
+                            color = c.error,
                         )
                     }
                 }
             },
-            // w67o: Transparent container — TranslucentSurface supplies the fill/blur.
+            // w67o: Transparent container — the Surface above supplies the fill.
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor             = Color.Transparent,
-                titleContentColor          = c.text,
-                actionIconContentColor     = c.dim,
-                navigationIconContentColor = c.dim,
+                titleContentColor          = c.onSurface,
+                actionIconContentColor     = c.onSurfaceVariant,
+                navigationIconContentColor = c.onSurfaceVariant,
             ),
             windowInsets = TopAppBarDefaults.windowInsets,
         )
@@ -159,7 +120,7 @@ internal fun ConfirmationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val c = LocalCpColors.current
+    val c = MaterialTheme.colorScheme
     val title = when (action) {
         ConfirmAction.CLEAR_UNPINNED -> stringResource(R.string.dialog_clear_unpinned_title)
         ConfirmAction.CLEAR_ALL -> stringResource(R.string.dialog_clear_all_title)
@@ -183,8 +144,8 @@ internal fun ConfirmationDialog(
     // confirm for the destructive action. Logic (onConfirm/onDismiss) unchanged.
     GlassAlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, color = c.text) },
-        text = { Text(message, color = c.dim) },
+        title = { Text(title, color = c.onSurface) },
+        text = { Text(message, color = c.onSurfaceVariant) },
         // CopyPaste-bdac.8: use canonical CopyPasteButton (was TextButton — wrong radius/ripple).
         confirmButton = {
             CopyPasteButton(onClick = onConfirm, variant = ButtonVariant.DANGER) {

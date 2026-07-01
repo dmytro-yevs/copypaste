@@ -1,7 +1,6 @@
 package com.copypaste.android
 
 import android.util.Log
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -28,11 +26,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontFamily
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.MonoFontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,7 +51,6 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 private fun SasPeerMetadataCard(status: PairStatus) {
-    val c = LocalCpColors.current
     // Pre-resolve string resources outside buildList (stringResource is @Composable;
     // it cannot be called inside a non-@Composable lambda like buildList).
     val labelModel = stringResource(R.string.meta_label_model)
@@ -83,7 +79,6 @@ private fun SasPeerMetadataCard(status: PairStatus) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(c.elevated, RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -121,7 +116,6 @@ internal fun SasPairingDialog(
     onClose: () -> Unit,
     onPaired: () -> Unit,
 ) {
-    val c = LocalCpColors.current
     val scope = rememberCoroutineScope()
 
     // Current pairing status; starts optimistically at "initiating".
@@ -387,14 +381,12 @@ internal fun SasPairingDialog(
                     ended -> {
                         Text(
                             "Pairing ended — check the other device.",
-                            color = c.dim,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                     status.state == "confirmed" -> {
                         Text(
                             "Paired ✓",
-                            color = c.ok,
                             style = MaterialTheme.typography.titleSmall,
                         )
                     }
@@ -405,7 +397,6 @@ internal fun SasPairingDialog(
                                 "rejected" -> "Pairing was rejected."
                                 else -> "Pairing was cancelled."
                             },
-                            color = c.err,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -416,7 +407,6 @@ internal fun SasPairingDialog(
                         SasPeerMetadataCard(status = status)
                         Text(
                             stringResource(R.string.sas_confirm_prompt),
-                            color = c.dim,
                             style = MaterialTheme.typography.bodySmall,
                         )
                         // §10 SAS per-digit cells — styleguide .sas: each digit in its
@@ -442,8 +432,7 @@ internal fun SasPairingDialog(
                                 ) {
                                     Text(
                                         text = digit.toString(),
-                                        color = c.text,
-                                        fontFamily = MonoFontFamily,
+                                        fontFamily = FontFamily.Monospace,
                                         fontSize = 28.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         letterSpacing = 1.1.sp,
@@ -465,7 +454,6 @@ internal fun SasPairingDialog(
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
                                 stringResource(R.string.sas_waiting_other),
-                                color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -479,7 +467,6 @@ internal fun SasPairingDialog(
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
                                 stringResource(R.string.sas_connecting),
-                                color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -487,7 +474,7 @@ internal fun SasPairingDialog(
                 }
                 error?.let { msg ->
                     if (!terminal) {
-                        Text(msg, color = c.err, style = MaterialTheme.typography.labelSmall)
+                        Text(msg, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

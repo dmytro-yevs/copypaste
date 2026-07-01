@@ -4,20 +4,12 @@ import android.util.Log
 import java.text.DateFormat
 import java.util.Date
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.MonoFontFamily
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §7 Liquid Glass Devices parity — pure logic helpers (testable without SDK)
@@ -166,8 +158,8 @@ internal fun shouldStartOneShotPulse(
  * enum rather than a CompositionLocal value makes the invariant unit-testable on a
  * plain JVM without a Compose runtime.
  *
- *  ONLINE  → success green  (c.ok)
- *  OFFLINE → danger red     (c.err)
+ *  ONLINE  → success green
+ *  OFFLINE → danger red
  *
  * Both the ring [Modifier.background] and the dot [Modifier.background] in
  * [PulseDot] derive their colour from [dotColor], which maps to [PulseDotColorRole]
@@ -250,58 +242,26 @@ fun unpairPeer(settings: Settings, fingerprint: String) {
 }
 
 /**
- * Fixed width of the label column in the two-column metadata table.
- * Sized to fit the longest label ("Local IP" / "Public IP") at 11 sp so
- * values in all three row types (Own, Peer, Discovered) start at the same
- * horizontal position regardless of which row they appear in.
- */
-internal val META_LABEL_WIDTH: Dp = 72.dp
-
-/**
- * Single 1dp hairline between rows in the grouped inset device list
- * (PARITY-SPEC §4 / §8 — kills the former 0.5dp mix). Inset on the leading edge
- * to read as an Apple grouped-list separator.
+ * Single hairline between rows in the grouped inset device list.
  */
 @Composable
 internal fun RowDivider() {
-    val c = LocalCpColors.current
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 16.dp),
-        color = c.divider,
-        thickness = 1.dp,
-    )
+    HorizontalDivider()
 }
 
 /**
- * Two-column aligned table row used in device rows.
- *
- * The label column is [META_LABEL_WIDTH] wide (fixed) so all labels in
- * OwnDeviceRow, PeerRow, and DiscoveredPeerRow start at the same horizontal
- * offset. Both text nodes are vertically centred within the row
- * (verticalAlignment = Alignment.CenterVertically) so multi-line values don't
- * cause the label to sit misaligned — fixing the former "Mac" misalignment in
- * the Model row.
+ * Two-column-ish table row used in device rows: a label followed by a value.
  */
 // CopyPaste-jkbo: promoted from private to internal so future screens can reuse.
 @Composable
 internal fun MetaRow(label: String, value: String) {
-    val c = LocalCpColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = c.dim,
-            fontSize = 11.sp,
-            modifier = Modifier.width(META_LABEL_WIDTH),
-        )
+        Text(text = label)
         Text(
             text = value,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = c.text,
-            fontSize = 11.sp,
             modifier = Modifier.weight(1f),
         )
     }

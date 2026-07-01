@@ -1,128 +1,23 @@
 package com.copypaste.android
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import android.view.WindowManager
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import android.app.Activity
-import android.view.WindowManager
-import com.copypaste.android.ui.theme.AccentColor
 import com.copypaste.android.ui.theme.ContinuousSliderRow
-import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SectionLabel
-import com.copypaste.android.ui.theme.isDarkTheme
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Appearance helpers — accent picker (STYLEGUIDE §2/§11)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** "INDIGO" → "Indigo". */
-internal fun accentDisplayLabel(accent: AccentColor): String =
-    accent.name.lowercase().replaceFirstChar { it.uppercaseChar() }
 
 /**
- * Accent picker — a horizontal flow of six swatch circles, one per [AccentColor].
- * The swatch is filled with the accent's resolved base colour and is ringed when
- * it matches the persisted accent.
- *
- * Tapping a swatch writes [Settings.accent] immediately (not deferred to Save —
- * accent is an immediate-effect pref, like themeMode) and calls [Activity.recreate]
- * so the whole app rethemes.
+ * Display settings tab — only functional display settings remain (no appearance pickers).
  */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun AccentPicker(
-    activeAccent: AccentColor,
-    settings: Settings,
-    ctx: android.content.Context,
-) {
-    val c = LocalCpColors.current
-    val dark = isDarkTheme()
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Text(
-            text = stringResource(R.string.setting_accent_label),
-            style = MaterialTheme.typography.bodyMedium,
-            color = c.dim,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            AccentColor.entries.forEach { accent ->
-                AccentSwatchItem(
-                    accent = accent,
-                    isActive = accent == activeAccent,
-                    swatchColor = accent.base(dark),
-                    onClick = {
-                        settings.accent = accent
-                        (ctx as? android.app.Activity)?.recreate()
-                    },
-                )
-            }
-        }
-    }
-}
-
-/** A single 36dp swatch for [accent]; an active ring marks the selected hue. */
-@Composable
-internal fun AccentSwatchItem(
-    accent: AccentColor,
-    isActive: Boolean,
-    swatchColor: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit,
-) {
-    val c = LocalCpColors.current
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(androidx.compose.foundation.shape.CircleShape)
-            .clickable(onClick = onClick)
-            .semantics {
-                role = Role.Button
-                contentDescription = accentDisplayLabel(accent)
-            }
-            .background(swatchColor)
-            .then(
-                if (isActive)
-                    Modifier.border(2.dp, c.text.copy(alpha = 0.8f), androidx.compose.foundation.shape.CircleShape)
-                else
-                    Modifier.border(1.dp, c.divider, androidx.compose.foundation.shape.CircleShape)
-            ),
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun DisplayTab(
     showWarnings: Boolean,
@@ -142,49 +37,9 @@ internal fun DisplayTab(
     settings: Settings,
     ctx: android.content.Context,
 ) {
-    val c = LocalCpColors.current
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column {
 
-        // ── APPEARANCE — two axes only: Theme + Accent (STYLEGUIDE §2) ──────
-        SectionLabel(stringResource(R.string.section_appearance))
-        SettingsCard {
-            // ── Theme mode (Light / Dark — no System axis, STYLEGUIDE §2) ──
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text(
-                    text = stringResource(R.string.setting_color_scheme_label),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.dim,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                val themeModes = listOf(ThemeMode.LIGHT, ThemeMode.DARK)
-                val themeLabels = listOf(
-                    stringResource(R.string.theme_light),
-                    stringResource(R.string.theme_dark),
-                )
-                val currentTheme = remember { settings.themeMode }
-                var selectedTheme by remember { mutableStateOf(currentTheme) }
-                IdeSegmentedControl(
-                    options = themeLabels,
-                    selectedIndex = themeModes.indexOf(selectedTheme).coerceAtLeast(0),
-                    onSelect = { idx ->
-                        val chosen = themeModes[idx]
-                        selectedTheme = chosen
-                        settings.themeMode = chosen
-                        (ctx as? android.app.Activity)?.recreate()
-                    },
-                )
-            }
-            SettingsCardDivider()
-            // ── Accent swatches (6 hues) ──────────────────────────────────
-            val activeAccent = remember { settings.accent }
-            AccentPicker(
-                activeAccent = activeAccent,
-                settings = settings,
-                ctx = ctx,
-            )
-        }
-
-        // ── DISPLAY section card ──────────────────────────────────────────
+        // ── DISPLAY section ───────────────────────────────────────────────────
         SectionLabel(stringResource(R.string.section_display))
         SettingsCard {
             SettingsRow(
@@ -209,7 +64,7 @@ internal fun DisplayTab(
             )
             SettingsCardDivider()
             // Privacy: FLAG_SECURE toggle, applied immediately to the current window.
-            val screenshotActivity = LocalContext.current as? Activity
+            val screenshotActivity = LocalContext.current as? android.app.Activity
             var allowScreenshots by remember { mutableStateOf(settings.allowScreenshots) }
             SettingsRow(
                 title = stringResource(R.string.setting_allow_screenshots_title),
@@ -233,10 +88,10 @@ internal fun DisplayTab(
             )
         }
 
-        // ── IMAGE & PREVIEW sliders ───────────────────────────────────────
+        // ── IMAGE & PREVIEW sliders ───────────────────────────────────────────
         SectionLabel(stringResource(R.string.section_image_preview))
         SettingsCard {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            Column {
                 ContinuousSliderRow(
                     label = stringResource(R.string.setting_image_max_height_label),
                     value = imageMaxHeight,
@@ -270,6 +125,5 @@ internal fun DisplayTab(
                 )
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }

@@ -67,8 +67,8 @@ import kotlinx.coroutines.launch
  * - [SkinBackground] token is not applicable: there is no backdrop canvas to gate.
  * - [SkinRowTreatment] / [SkinTokens.rowGap] tokens are not applicable: there are no
  *   item rows.
- * - [TranslucentSurface] / [CopyPasteCard] material adaptation (Components.kt) is not
- *   applicable: no Compose surface is composed here.
+ * - [CopyPasteCard] material adaptation (Components.kt) is not applicable: no
+ *   Compose surface is composed here.
  * All skins therefore produce byte-identical behaviour — Classic is trivially preserved.
  * Token gaps reported per §3 rule (report rather than add to shared files):
  *   MISSING_SURFACE_HOOK: no Compose host → background/rowTreatment/rowGap inapplicable.

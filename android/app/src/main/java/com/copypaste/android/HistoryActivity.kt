@@ -52,7 +52,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
@@ -69,23 +68,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
-import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.screenCanvas
-import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.rememberReducedMotion
-// PARITY-SPEC §1: read the ACTIVE (light-first) ramp via LocalCpColors.current.*
-// instead of the hardcoded dark Ide* constants, so the whole History screen
-// themes light/dark in lockstep with CopyPasteTheme. The CpColors holder is
-// passed into non-composable helpers (e.g. the chip color table) by value.
-import com.copypaste.android.ui.theme.CpColors
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.Motion
-// Two-axis theme: motionDuration helper (STYLEGUIDE §6, reduced-motion aware).
-import com.copypaste.android.ui.theme.motionDuration
-// A-C1: skin axis tokens for screen-level treatment (background, row, nav).
+import androidx.compose.animation.core.FastOutSlowInEasing
+import com.copypaste.android.ui.theme.SecureWindowChrome
+// PARITY-SPEC §1: read the ACTIVE (light-first) ramp via MaterialTheme.colorScheme.*
+// so the whole History screen themes light/dark in lockstep with SecureWindowChrome.
 import kotlinx.coroutines.delay
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -111,7 +97,7 @@ class HistoryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
-        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        // SecureWindowChrome applies FLAG_SECURE centrally when allowScreenshots=false (the default).
         // The old hardcoded setFlags(FLAG_SECURE) is removed so the user's pref is honoured.
         applyScreenshotPolicy(Settings(this))
         enableEdgeToEdge()
@@ -125,7 +111,7 @@ class HistoryActivity : ComponentActivity() {
         }
 
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 HistoryScreen(
                     viewModel = viewModel,
                     onBack = { finish() }
@@ -182,14 +168,8 @@ fun HistoryScreen(
     val repository = remember { ClipboardRepository(ctx) }
     // PARITY-SPEC §1: the active (light-first) ramp — read once at screen scope and
     // reuse for every token below so the chrome (scaffold, top bar, dialogs) themes
-    // light/dark in lockstep with CopyPasteTheme.
-    val c = LocalCpColors.current
-    // §8 a11y: skip animated transitions when the user has requested reduced motion
-    // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
-    val reducedMotion = rememberReducedMotion()
-    // §2/P0: glass pref + theme for the frosted header (TranslucentSurface).
-    val translucent = rememberTranslucency()
-    val dark = isDarkTheme()
+    // light/dark in lockstep with SecureWindowChrome.
+    val c = MaterialTheme.colorScheme
     // CopyPaste-7m6r: loadErrorTemplate / clearAllErrorTemplate removed — error strings
     // are now routed through ErrorMessages.friendlyOperationError (no raw-msg formatting).
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
@@ -549,8 +529,8 @@ fun HistoryScreen(
     Scaffold(
         // Calm screen backdrop (STYLEGUIDE §6). When embedded in
         // MainShell (paintCanvasBackdrop=false) the shell already paints it.
-        modifier = if (paintCanvasBackdrop && translucent) modifier.screenCanvas(dark) else modifier,
-        containerColor = if (translucent) Color.Transparent else c.bg,
+        modifier = modifier,
+        containerColor = c.background,
         topBar = {
             if (selectionMode) {
                 val bulkCopiedMsg = stringResource(R.string.snackbar_bulk_copied)
@@ -631,9 +611,6 @@ fun HistoryScreen(
             } else {
                 HistoryNormalTopBar(
                     c = c,
-                    translucent = translucent,
-                    dark = dark,
-                    reducedMotion = reducedMotion,
                     totalCount = totalCount,
                     showBackButton = showBackButton,
                     onBack = onBack,
@@ -1093,14 +1070,11 @@ private fun HistoryList(
     val settings = remember { Settings(ctx) }
     val repository = remember { ClipboardRepository(ctx) }
     val scope = rememberCoroutineScope()
-    // CopyPaste-998 (jank): pull the active ramp ONCE at list scope and pass it into
-    // every row, so each row body does NOT touch the CompositionLocal during scroll
-    // recomposition. LocalCpColors is staticCompositionLocalOf (changes only on a
-    // full theme switch / activity recreate), so a single read here is stable for
-    // the list's lifetime.
-    val c = LocalCpColors.current
-    // §8 a11y: skip animated transitions when the user has requested reduced motion.
-    val reducedMotion = rememberReducedMotion()
+    // CopyPaste-998 (jank): pull the active color scheme ONCE at list scope and pass
+    // it into every row, so each row body does NOT touch MaterialTheme.colorScheme
+    // during scroll recomposition. A single read here is stable for the list's
+    // lifetime.
+    val c = MaterialTheme.colorScheme
     // E: hoist settings reads via a version token so they're re-read once per
     // settings-change event rather than on every recomposition frame.
     // A DisposableEffect observes the settings SharedPreferences and increments
@@ -1273,12 +1247,9 @@ private fun HistoryList(
         if (shouldLoadMore) onLoadMore()
     }
 
-    // §1: let the Scaffold's canvas backdrop show through the list when
-    // translucency is on. c.bg fill only in the solid (non-translucent) mode.
-    val listTranslucent = rememberTranslucency()
     // Hoist entrance duration once at list scope so it is NOT recomputed per row
     // inside itemsIndexed (avoids per-item composition state entries).
-    val rowEnterDurMs = motionDuration(Motion.Base)
+    val rowEnterDurMs = 300
     // STYLEGUIDE §9.5: rows are divider-separated (LINE), no inset gap.
     val rowGap = 0.dp
     val isInset = false
@@ -1287,7 +1258,7 @@ private fun HistoryList(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .background(if (listTranslucent) Color.Transparent else c.bg)
+            .background(c.background)
             .padding(padding),
         contentPadding = PaddingValues(
             // A-C1 INSET: add top+bottom content padding equal to rowGap so the first and
@@ -1305,29 +1276,28 @@ private fun HistoryList(
             // (same id, same data) are already mounted and should skip animation.
             val isNewMount = !mountedIds.contains(item.id)
             if (isNewMount) mountedIds.add(item.id)
-            // CopyPaste-z89 (stagger): ~20ms step, cap 10 rows (was Motion.Fast=130ms,
+            // CopyPaste-z89 (stagger): ~20ms step, cap 10 rows (was 150ms,
             // i.e. up to 1.3s — far too slow). Matches PARITY-SPEC §11 (18–20ms / cap 10).
             val mountDelay = if (isNewMount)
                 (index * ROW_STAGGER_STEP_MS).coerceAtMost(10 * ROW_STAGGER_STEP_MS)
             else 0
-            // §8 a11y: suppress entrance animation entirely when reduced-motion is active.
             // Styleguide .listItemIn: translateX(-12px) → 0, 0.55s out-expo — horizontal
             // slide from left matches the web parity spec. rowEnterDurMs is hoisted at
-            // list scope (motionDuration is @Composable — per-item call adds state entries).
+            // list scope to avoid per-item composition state entries.
             AnimatedVisibility(
                 visible = true,
-                enter = if (reducedMotion || !isNewMount) androidx.compose.animation.EnterTransition.None
+                enter = if (!isNewMount) androidx.compose.animation.EnterTransition.None
                         else fadeIn(
                             animationSpec = tween(
                                 durationMillis = rowEnterDurMs,
                                 delayMillis = mountDelay,
-                                easing = EaseOutExpo,
+                                easing = FastOutSlowInEasing,
                             )
                         ) + slideInHorizontally(
                             animationSpec = tween(
                                 durationMillis = rowEnterDurMs,
                                 delayMillis = mountDelay,
-                                easing = EaseOutExpo,
+                                easing = FastOutSlowInEasing,
                             ),
                             // Styleguide: translateX(-12px) — small left-offset entrance.
                             initialOffsetX = { -it / 5 },
@@ -1377,7 +1347,7 @@ private fun HistoryList(
                     )
                     // STYLEGUIDE §9.5 / §3.2: a single hairline row divider.
                     HorizontalDivider(
-                        color = c.divider,
+                        color = c.outlineVariant,
                         thickness = 1.dp,
                     )
                 }
@@ -1393,7 +1363,7 @@ private fun HistoryList(
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator(
-                        color = accentFill().copy(alpha = 0.5f),
+                        color = c.primary.copy(alpha = 0.5f),
                         strokeWidth = 1.5.dp,
                         modifier = Modifier.size(16.dp),
                     )

@@ -5,23 +5,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,30 +26,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
-import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.EaseStandard
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.screenCanvas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -66,16 +53,13 @@ import kotlinx.coroutines.launch
  * AND3: Settings are split into tabs matching macOS panel tabs.
  * Draft model: changes are staged in local Compose state and persisted only
  * when the user taps the sticky Save button (CopyPaste-u30t).
- *
- * Styled per PARITY-SPEC §7 (segmented controls), §8 (grouped rows / cards),
- * §3 (grey section labels), §1 (LocalCpColors theme-adaptive tokens).
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 SettingsScreen(
                     showBackButton = true,
                     onBack = { finish() },
@@ -125,7 +109,6 @@ fun SettingsScreen(
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
-    val c = LocalCpColors.current
 
     // ── Draft dirty flag — true once any setting is changed, reset to false after save ──
     var dirty by remember { mutableStateOf(false) }
@@ -271,9 +254,6 @@ fun SettingsScreen(
             notifyOnCopy = notifyOnCopy,
             soundOnCopy = soundOnCopy,
             logcatCaptureEnabled = logcatEnabled,
-            // Accent is written immediately on picker select; pass the persisted
-            // value so the batch write keeps a consistent snapshot.
-            accent = settings.accent,
         )
         settings.maxFileSizeBytes = maxFileSizeBytes
         settings.sensitiveTtlSecs = sensitiveTtlSecs
@@ -298,8 +278,6 @@ fun SettingsScreen(
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Sync", "Storage", "Notifications")
-
-    val dark = isDarkTheme()
 
     // ── Discard-changes confirmation dialog ──
     if (showDiscardDialog) {
@@ -393,12 +371,9 @@ fun SettingsScreen(
         )
     }
 
-    // Calm solid backdrop (STYLEGUIDE §6). When translucent, glass surfaces frost
-    // over the screen-canvas gradient; otherwise the bg is opaque.
-    val scaffoldModifier = if (translucency && paintCanvasBackdrop) modifier.screenCanvas(dark) else modifier
     Scaffold(
-        modifier = scaffoldModifier,
-        containerColor = if (translucency && paintCanvasBackdrop) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
@@ -414,7 +389,6 @@ fun SettingsScreen(
                         onClick = { doSave() },
                         variant = ButtonVariant.PRIMARY,
                         enabled = dirty,
-                        modifier = Modifier.padding(end = 8.dp),
                     ) {
                         Text(text = stringResource(R.string.btn_save))
                     }
@@ -428,57 +402,24 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.Top,
+                .padding(innerPadding),
         ) {
         CopyPasteCard(
             modifier = Modifier.fillMaxSize(),
             translucent = translucency,
         ) {
-            // AND3: Tab row with §8 animated underline (180ms EaseStandard).
+            // AND3 / CopyPaste-g5u1: bare ScrollableTabRow — default M3 indicator,
+            // no custom animation/offset/width.
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
-                // Transparent over the screen canvas; opaque c.bg when translucency off.
-                containerColor = if (translucency) androidx.compose.ui.graphics.Color.Transparent else c.bg,
-                edgePadding = 0.dp,
-                indicator = { tabPositions ->
-                    // Animate tab indicator position/width with tween(180, EaseStandard)
-                    // matching the §8 base-duration "standard transitions" token.
-                    val currentTabPosition = tabPositions[selectedTab]
-                    val indicatorOffset by animateDpAsState(
-                        targetValue = currentTabPosition.left,
-                        animationSpec = tween(
-                            durationMillis = 180,
-                            easing = EaseStandard,
-                        ),
-                        label = "tab_underline_offset",
-                    )
-                    val indicatorWidth by animateDpAsState(
-                        targetValue = currentTabPosition.width,
-                        animationSpec = tween(
-                            durationMillis = 180,
-                            easing = EaseStandard,
-                        ),
-                        label = "tab_underline_width",
-                    )
-                    // 764n: indicator color → accentFill() per styleguide active-accent token.
-                    TabRowDefaults.SecondaryIndicator(
-                        modifier = Modifier
-                            .wrapContentSize(Alignment.BottomStart)
-                            .offset(x = indicatorOffset)
-                            .width(indicatorWidth),
-                        color = accentFill(),
-                    )
-                },
+                containerColor = MaterialTheme.colorScheme.surface,
             ) {
-                // 764n: map tab text to ide tokens — selected → accentFill(), unselected → c.faint.
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        selectedContentColor = accentFill(),
-                        unselectedContentColor = c.faint,
+                        selectedContentColor = MaterialTheme.colorScheme.primary,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         text = { Text(title) },
                     )
                 }

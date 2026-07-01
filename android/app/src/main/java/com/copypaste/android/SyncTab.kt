@@ -23,7 +23,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
-import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SectionLabel
 import java.text.DateFormat
 import java.util.Date
@@ -63,7 +62,6 @@ internal fun SyncTab(
     // Null → not yet available (no backend reachability probe on Android).
     onTestConnection: (() -> Unit)? = null,
 ) {
-    val c = LocalCpColors.current
     val ctx = LocalContext.current
     // CopyPaste-26zi: self-contained Settings handle for the independent transport
     // toggles. These apply immediately (like a Switch) and are read by the runtime
@@ -82,9 +80,9 @@ internal fun SyncTab(
             androidx.compose.material3.Card(
                 colors = androidx.compose.material3.CardDefaults.cardColors(
                     containerColor = if (syncErrorIsUnauthorized)
-                        c.err.copy(alpha = 0.12f)
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
                     else
-                        c.elevated,
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -94,7 +92,7 @@ internal fun SyncTab(
                     Text(
                         text = if (syncErrorIsUnauthorized) "Sync: authentication failed" else "Sync error",
                         style = MaterialTheme.typography.labelMedium,
-                        color = c.err,
+                        color = MaterialTheme.colorScheme.error,
                     )
                     Text(
                         text = if (syncErrorIsUnauthorized)
@@ -102,7 +100,7 @@ internal fun SyncTab(
                         else
                             syncError,
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.text,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -158,13 +156,13 @@ internal fun SyncTab(
                 Text(
                     text = stringResource(R.string.setting_sync_transports_title),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = c.dim,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
                 Text(
                     text = stringResource(R.string.setting_sync_transports_subtitle),
                     style = MaterialTheme.typography.bodySmall,
-                    color = c.dim,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             SettingsRow(
@@ -241,7 +239,7 @@ internal fun SyncTab(
             if (detectCloudAccountMismatch(localAccountId, peerAccountIds)) {
                 androidx.compose.material3.Card(
                     colors = androidx.compose.material3.CardDefaults.cardColors(
-                        containerColor = c.warn.copy(alpha = 0.12f),
+                        containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -251,12 +249,12 @@ internal fun SyncTab(
                         Text(
                             text = stringResource(R.string.setting_cloud_account_mismatch_title),
                             style = MaterialTheme.typography.labelMedium,
-                            color = c.warn,
+                            color = MaterialTheme.colorScheme.tertiary,
                         )
                         Text(
                             text = stringResource(R.string.setting_cloud_account_mismatch_body),
                             style = MaterialTheme.typography.bodySmall,
-                            color = c.text,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -267,7 +265,7 @@ internal fun SyncTab(
                     Text(
                         text = stringResource(R.string.setting_supabase_account_note),
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.dim,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
                     // CopyPaste-otb7: "signed in" must reflect an ACTUAL backend session
@@ -286,12 +284,12 @@ internal fun SyncTab(
                         else
                             stringResource(R.string.setting_supabase_account_anon),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = c.text,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = stringResource(R.string.setting_supabase_account_same_warning),
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.err,
+                        color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -357,12 +355,12 @@ internal fun SyncTab(
                     Text(
                         text = stringResource(R.string.setting_test_connection_label),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = LocalCpColors.current.text,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = stringResource(R.string.setting_test_connection_subtitle),
                         style = MaterialTheme.typography.bodySmall,
-                        color = LocalCpColors.current.dim,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 CopyPasteButton(
@@ -400,14 +398,19 @@ private fun SyncDiagnosticsCard(
     supabaseAnonKey: String,
     relayUrl: String,
 ) {
-    val c = LocalCpColors.current
-
     // Backend op results — the AUTHORITATIVE per-backend health source (otb7).
     val supabaseOp by DevicesOnlineState.supabaseOpResult.collectAsState()
     val relayOp by DevicesOnlineState.relayOpResult.collectAsState()
     // P2P peer presence — SEPARATE signal, shown in its own row; never used to
     // derive backend Connection state.
     val liveOnlineCount by DevicesOnlineState.onlineCount.collectAsState()
+
+    // Precompute theme colors here (composable context) so the plain Kotlin
+    // helper functions below can reference them as captured values.
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val errorColor = MaterialTheme.colorScheme.error
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVariantColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     val nowMs = System.currentTimeMillis()
     val supaState = deriveBackendConnState(
@@ -424,10 +427,10 @@ private fun SyncDiagnosticsCard(
     )
 
     fun stateLabelColor(s: BackendConnState): Pair<String, androidx.compose.ui.graphics.Color> = when (s) {
-        BackendConnState.Connected -> "Connected" to c.ok
-        BackendConnState.Error     -> "Error (check config)" to c.err
-        BackendConnState.Idle      -> "Idle (no recent sync)" to c.faint
-        BackendConnState.Unknown   -> "Not reporting yet" to c.dim
+        BackendConnState.Connected -> "Connected" to primaryColor
+        BackendConnState.Error     -> "Error (check config)" to errorColor
+        BackendConnState.Idle      -> "Idle (no recent sync)" to onSurfaceVariantColor
+        BackendConnState.Unknown   -> "Not reporting yet" to onSurfaceVariantColor
     }
 
     fun lastSyncLabel(lastSuccessMs: Long): String = if (lastSuccessMs <= 0L) {
@@ -471,36 +474,35 @@ private fun SyncDiagnosticsCard(
             // Supabase backend row (only when enabled).
             if (supabaseEnabled) {
                 val (label, color) = stateLabelColor(supaState)
-                DiagnosticsRow("Supabase", label, color, c)
-                DiagnosticsDivider(c)
-                DiagnosticsRow("Supabase last sync", lastSyncLabel(supabaseOp.lastSuccessMs), c.text, c)
+                DiagnosticsRow("Supabase", label, color)
+                DiagnosticsDivider()
+                DiagnosticsRow("Supabase last sync", lastSyncLabel(supabaseOp.lastSuccessMs), onSurfaceColor)
                 first = false
             }
             // Relay backend row (only when enabled).
             if (relayEnabled) {
-                if (!first) DiagnosticsDivider(c)
+                if (!first) DiagnosticsDivider()
                 val (label, color) = stateLabelColor(relayState)
-                DiagnosticsRow("Relay", label, color, c)
-                DiagnosticsDivider(c)
-                DiagnosticsRow("Relay last sync", lastSyncLabel(relayOp.lastSuccessMs), c.text, c)
+                DiagnosticsRow("Relay", label, color)
+                DiagnosticsDivider()
+                DiagnosticsRow("Relay last sync", lastSyncLabel(relayOp.lastSuccessMs), onSurfaceColor)
                 first = false
             }
             // P2P peer presence — SEPARATE from backend status (otb7).
-            if (!first) DiagnosticsDivider(c)
+            if (!first) DiagnosticsDivider()
             val peerCount = if (liveOnlineCount >= 0) liveOnlineCount else 0
             DiagnosticsRow(
                 label = "Peers online (P2P)",
                 value = peerCount.toString(),
-                valueColor = if (peerCount > 0) c.ok else c.faint,
-                c = c,
+                valueColor = if (peerCount > 0) primaryColor else onSurfaceVariantColor,
             )
             // Misconfig hints — one per enabled transport with a detected issue.
             for (hint in listOfNotNull(supabaseHint, relayHint)) {
-                DiagnosticsDivider(c)
+                DiagnosticsDivider()
                 Text(
                     text = hint,
                     style = MaterialTheme.typography.bodySmall,
-                    color = c.err,
+                    color = errorColor,
                 )
             }
         }
@@ -513,22 +515,21 @@ private fun DiagnosticsRow(
     label: String,
     value: String,
     valueColor: androidx.compose.ui.graphics.Color,
-    c: com.copypaste.android.ui.theme.CpColors,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = c.dim)
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(text = value, style = MaterialTheme.typography.bodyMedium, color = valueColor)
     }
 }
 
 /** A standard divider with vertical breathing room between diagnostics rows. */
 @Composable
-private fun DiagnosticsDivider(c: com.copypaste.android.ui.theme.CpColors) {
+private fun DiagnosticsDivider() {
     Spacer(modifier = Modifier.height(8.dp))
-    HorizontalDivider(color = c.divider, thickness = 1.dp)
+    HorizontalDivider(thickness = 1.dp)
     Spacer(modifier = Modifier.height(8.dp))
 }

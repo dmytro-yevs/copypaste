@@ -33,10 +33,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.accentTint
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.SectionLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -107,7 +103,6 @@ private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap =
  */
 @Composable
 internal fun OwnQrSection(settings: Settings) {
-    val c = LocalCpColors.current
     val scope = rememberCoroutineScope()
     var qr by remember { mutableStateOf<PairingQrResult?>(null) }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -191,7 +186,6 @@ internal fun OwnQrSection(settings: Settings) {
             Text(
                 text = "Let another device scan this to pair",
                 style = MaterialTheme.typography.bodySmall,
-                color = c.dim,
                 textAlign = TextAlign.Center,
             )
 
@@ -204,7 +198,6 @@ internal fun OwnQrSection(settings: Settings) {
                     loading -> {
                         CircularProgressIndicator(
                             modifier = Modifier.size(32.dp),
-                            color = accentFill(),
                             strokeWidth = 2.dp,
                         )
                     }
@@ -244,23 +237,18 @@ internal fun OwnQrSection(settings: Settings) {
                                     modifier = Modifier.size(DEVICES_QR_IMAGE_DP.dp),
                                 )
                             }
-                            // CopyPaste-5917.40: reveal overlay — accent pill matching PairActivity
-                            // pattern (was bare Text with c.text, no background). Now uses
-                            // accentDim container + RadiusChip shape, accent text colour.
+                            // CopyPaste-5917.40: reveal overlay pill matching PairActivity pattern.
                             if (qrBlurred) {
                                 Box(
                                     modifier = Modifier
-                                        .size(DEVICES_QR_SLOT_DP.dp)
-                                        .background(accentTint(), RoundedCornerShape(12.dp)),
+                                        .size(DEVICES_QR_SLOT_DP.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
                                         text = "Tap to reveal",
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = accentFill(),
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier
-                                            .background(accentTint(), RadiusChip)
                                             .padding(horizontal = 12.dp, vertical = 5.dp),
                                     )
                                 }
@@ -272,7 +260,6 @@ internal fun OwnQrSection(settings: Settings) {
                         Text(
                             text = "Refreshing…",
                             style = MaterialTheme.typography.bodySmall,
-                            color = c.dim,
                         )
                     }
                 }
@@ -288,22 +275,20 @@ internal fun OwnQrSection(settings: Settings) {
                 Text(
                     text = stringResource(R.string.pair_token_expires_in_seconds, remainingSeconds),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (urgent) c.warn else c.faint,
+                    color = if (urgent) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // §10 QR countdown drain bar: 2dp track, mute@35%; fill drains over TTL.
+                // §10 QR countdown drain bar: 2dp track; fill drains over TTL.
                 // Static fill (no pulse) — progress-bar pulse removed for calm UI.
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(2.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(c.mute.copy(alpha = 0.35f)),
+                        .clip(RoundedCornerShape(999.dp)),
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS))
-                            .height(2.dp)
-                            .background(if (urgent) c.warn else accentFill()),
+                            .height(2.dp),
                     )
                 }
             }
@@ -315,7 +300,6 @@ internal fun OwnQrSection(settings: Settings) {
                 Text(
                     text = sanitizedMsg,
                     style = MaterialTheme.typography.bodySmall,
-                    color = c.err,
                     textAlign = TextAlign.Center,
                 )
             }

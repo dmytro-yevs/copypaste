@@ -53,22 +53,17 @@ import com.copypaste.android.ui.GlassToastState
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.MonoFontFamily
-import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.screenCanvas
-import com.copypaste.android.ui.theme.rememberTranslucency
 
 /**
  * Standalone "Permissions" screen reachable from Settings.
@@ -129,7 +124,7 @@ class PermissionsSettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 val trigger by refreshTrigger
                 @Suppress("UNUSED_EXPRESSION") trigger // read so Compose tracks it
                 PermissionsScreen(
@@ -268,20 +263,9 @@ fun PermissionsScreen(
     val hasOemScreen = OemAutoStartHelper.hasOemScreen(ctx)
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
 
-    // Two-axis theme (STYLEGUIDE §2): isDark × accent only. Translucency is an optional
-    // boolean toggle; no skin/palette system. Frosted glass when translucent, opaque otherwise.
-    val translucent = rememberTranslucency()
-    val c = LocalCpColors.current
-    val dark = isDarkTheme()
-
-    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
-    val scaffoldModifier: Modifier = if (translucent) Modifier.screenCanvas(dark) else Modifier
-    val scaffoldContainerColor: Color = if (translucent) Color.Transparent else c.bg
-
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        modifier = scaffoldModifier,
-        containerColor = scaffoldContainerColor,
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_permissions),
@@ -395,21 +379,23 @@ private fun BgCaptureStatusCard(
     overlayGranted: Boolean,
     onToastRequest: (String) -> Unit = {},
 ) {
-    // CopyPaste-xi8h: use LocalCpColors so colors adapt to light/dark palettes.
-    val c = LocalCpColors.current
-    val borderColor = if (readLogsGranted && overlayGranted) c.ok else c.border
+    val borderColor = if (readLogsGranted && overlayGranted) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.outline
+    }
     CopyPasteCard(accent = borderColor) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.bg_adb_section_title),
                 style = MaterialTheme.typography.titleMedium,
-                color = c.text,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.bg_adb_explainer),
                 style = MaterialTheme.typography.bodyMedium,
-                color = c.dim,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -419,7 +405,8 @@ private fun BgCaptureStatusCard(
                     else
                         stringResource(R.string.bg_adb_status_read_logs_no),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (readLogsGranted) c.ok else c.dim,
+                    color = if (readLogsGranted) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     text = if (overlayGranted)
@@ -427,7 +414,8 @@ private fun BgCaptureStatusCard(
                     else
                         stringResource(R.string.bg_adb_status_overlay_no),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (overlayGranted) c.ok else c.dim,
+                    color = if (overlayGranted) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -472,8 +460,6 @@ internal fun AdbCommandBlock(
     onToastRequest: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    // CopyPaste-xi8h: use LocalCpColors so colors adapt to light/dark palettes.
-    val c = LocalCpColors.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -482,13 +468,13 @@ internal fun AdbCommandBlock(
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = c.dim,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = command,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = c.text,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
@@ -521,14 +507,12 @@ private fun PermissionStatusCard(
     required: Boolean,
     infoOnly: Boolean = false,
 ) {
-    // CopyPaste-xi8h: use LocalCpColors so colors adapt to light/dark palettes.
-    val c = LocalCpColors.current
-    // Status-colored hairline border: green = granted, red = missing+required,
-    // neutral grey = unknown / optional. Matches the restrained macOS look.
+    // Status-colored hairline border: primary = granted, error = missing+required,
+    // neutral outline = unknown / optional. Matches the restrained macOS look.
     val borderColor = when {
-        granted == true              -> c.ok
-        granted == false && required -> c.err
-        else                         -> c.border
+        granted == true              -> MaterialTheme.colorScheme.primary
+        granted == false && required -> MaterialTheme.colorScheme.error
+        else                         -> MaterialTheme.colorScheme.outline
     }
 
     CopyPasteCard(accent = borderColor) {
@@ -540,19 +524,20 @@ private fun PermissionStatusCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted == true) c.ok else c.dim
+                    tint = if (granted == true) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = c.text,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = "required",
                         style = MaterialTheme.typography.labelSmall,
-                        color = c.err
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
             }
@@ -568,12 +553,14 @@ private fun PermissionStatusCard(
                         imageVector = if (granted) Icons.Outlined.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
-                        tint = if (granted) c.ok else c.err,
+                        tint = if (granted) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
                     )
                     Text(
                         text = if (granted) "Granted" else "Not granted",
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) c.ok else c.err,
+                        color = if (granted) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -582,7 +569,7 @@ private fun PermissionStatusCard(
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = c.dim
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             if (!infoOnly) {

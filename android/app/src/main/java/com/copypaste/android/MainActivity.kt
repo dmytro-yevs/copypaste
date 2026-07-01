@@ -26,12 +26,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import com.copypaste.android.ui.theme.NavIcons
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.onAccent
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -52,23 +47,12 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
-import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.GlassTier
-import com.copypaste.android.ui.theme.TranslucentSurface
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.glassFloatShadow
-import com.copypaste.android.ui.theme.glassFloatShadowExplicit
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.screenCanvas
-import com.copypaste.android.ui.theme.rememberReducedMotion
-import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.SecureWindowChrome
+import androidx.compose.material3.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -145,7 +129,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
-        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        // SecureWindowChrome applies FLAG_SECURE centrally when allowScreenshots=false (the default).
         // The old hardcoded setFlags(FLAG_SECURE) is removed so the user's pref is honoured.
         applyScreenshotPolicy(Settings(this))
         // Edge-to-edge: the bottom NavigationBar and each tab's TopAppBar apply
@@ -196,7 +180,7 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 MainShell(viewModel = viewModel)
             }
         }
@@ -258,13 +242,10 @@ class MainActivity : ComponentActivity() {
 // `labelRes` is the bottom-nav label string resource. HB-6: the DEVICES tab now
 // reads R.string.title_devices ("Devices") instead of the old hardcoded "Pair",
 // matching the Devices screen title — pairing lives INSIDE that screen now.
-internal enum class NavTab(@StringRes val labelRes: Int, val icon: ImageVector) {
-    // CopyPaste-dm51 (NavIcons.kt): bespoke SF-like thin-stroke ImageVectors
-    // matching web NavIcons.tsx (clock.arrow.circlepath / laptopcomputer.and.iphone / gear).
-    // Previously used Icons.Outlined.History/Hub/Settings (thicker Material icons).
-    CLIPS(R.string.title_history, NavIcons.History),
-    DEVICES(R.string.title_devices, NavIcons.Devices),
-    SETTINGS(R.string.title_settings, NavIcons.Settings),
+internal enum class NavTab(@StringRes val labelRes: Int) {
+    CLIPS(R.string.title_history),
+    DEVICES(R.string.title_devices),
+    SETTINGS(R.string.title_settings),
 }
 
 @Composable
@@ -279,13 +260,6 @@ private fun MainShell(viewModel: ClipboardViewModel) {
         mutableStateOf<((proceed: () -> Unit) -> Unit)?>(null)
     }
 
-    // §3 Translucency: read once at the shell level so the pref is consistent
-    // across the floating tab bar and all child screens. CopyPasteTopBar and
-    // CopyPasteCard read it independently via rememberTranslucency() for
-    // screens rendered without MainShell (standalone activities).
-    val c = LocalCpColors.current
-    val translucent = rememberTranslucency()
-    val dark = isDarkTheme()
     val density = LocalDensity.current
 
     // Styleguide floating tab bar geometry:
@@ -305,16 +279,11 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     var tabBarHeightDp by remember { mutableStateOf(74.dp) }
     val contentBottomPadding = tabBarHeightDp + 10.dp + navBarInsetDp
 
-    // Calm screen backdrop (STYLEGUIDE §6): a neutral gradient behind
-    // the whole shell so the glass surfaces (tab bar, cards) frost over real colour.
-    // Only when translucent — otherwise keep the opaque c.bg.
     Box(
-        modifier = Modifier.fillMaxSize().then(
-            if (translucent) Modifier.screenCanvas(dark) else Modifier
-        ),
+        modifier = Modifier.fillMaxSize(),
     ) {
         Scaffold(
-            containerColor = if (translucent) Color.Transparent else c.bg,
+            containerColor = MaterialTheme.colorScheme.background,
             // Zero all Scaffold insets: the TOP inset is handled by each screen's own
             // TopAppBar, and the BOTTOM is handled by explicit content padding below so
             // the list clears the floating tab bar. Applying insets here would double-
@@ -372,8 +341,6 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                     tabBarHeightDp = with(density) { size.height.toDp() }
                 },
             selectedTab = selectedTab,
-            translucent = translucent,
-            dark = dark,
             tabBarShape = tabBarShape,
             navBarBottomPadding = navBarInsetDp,
             onTabSelected = { index ->
@@ -394,29 +361,23 @@ private fun MainShell(viewModel: ClipboardViewModel) {
 }
 
 /**
- * Floating glass tab bar (styleguide `.tabbar` floating treatment).
+ * Floating tab bar (styleguide `.tabbar` floating treatment).
  *
  * Detached from the screen edge — sits 10 dp above the system navigation bar,
- * with 12 dp side margins and a 28 dp corner radius. The glass surface is
- * [GlassTier.GLASS] (blur 28dp, saturate 180%, per-tier white gradient fill +
- * hairline rim). Soft float shadow (0 18dp 45dp rgb(0,0,0/.20)) sits behind it.
+ * with 12 dp side margins and a 28 dp corner radius.
  *
- * Active tab: accent-tinted pill background (accent@75%) + [onAccent()] icon/label
- * + a spring pop scale (0.94 → 1.06 → 1.0) gated by [motionDuration].
- * Inactive: [c.faint] icon/label, no background.
+ * Active tab: accent-tinted pill background + primary-colored icon/label
+ * + a spring pop scale (0.94 → 1.06 → 1.0).
+ * Inactive: onSurfaceVariant icon/label, no background.
  */
 @Composable
 private fun FloatingTabBar(
     modifier: Modifier = Modifier,
     selectedTab: Int,
-    translucent: Boolean,
-    dark: Boolean,
     tabBarShape: RoundedCornerShape,
     navBarBottomPadding: androidx.compose.ui.unit.Dp,
     onTabSelected: (Int) -> Unit,
 ) {
-    val c = LocalCpColors.current
-    val reducedMotion = rememberReducedMotion()
     // Spring spec for the active-tab scale pop: stiffness Low → smooth spring,
     // dampingRatio NoBouncy → one clean overshoot then settle.
     val springSpec = spring<Float>(
@@ -424,31 +385,15 @@ private fun FloatingTabBar(
         stiffness = Spring.StiffnessMedium,
     )
 
-    TranslucentSurface(
+    Surface(
         shape = tabBarShape,
-        translucent = translucent,
-        dark = dark,
-        solid = c.panel,
-        tier = GlassTier.GLASS,
-        // The hairline glass rim gives the pill its edge definition.
-        hairline = true,
-        // CopyPaste-r3qq: fillMaxWidth MUST come BEFORE padding so the horizontal
-        // padding actually bites into the full width (previously padding came first,
-        // then fillMaxWidth ignored it and expanded to full parent width).
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 10.dp)
-            .padding(bottom = navBarBottomPadding)
-            // VISA-12: styleguide floating-pill shadow is 0 18dp 45dp rgba(0,0,0/.20).
-            // GlassTier.GLASS defaults are 8dp/24dp (chrome chrome), which is too subtle
-            // for a detached pill — use glassFloatShadowExplicit with the spec values.
-            .then(if (translucent) Modifier.glassFloatShadowExplicit(yOffset = 18.dp, blurRadius = 45.dp, radius = 28.dp) else Modifier),
+            .padding(bottom = navBarBottomPadding),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp)
-                .padding(bottom = 4.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -458,59 +403,34 @@ private fun FloatingTabBar(
 
                 // Spring pop on selection: 0.94 → 1.06 → 1.0 (matches web activeTabPop
                 // keyframes @0%:scale(.94), @60%:scale(1.06), @100%:scale(1)).
-                // Gated: reducedMotion → instant snap to 1.0f, no animation.
                 val scale by animateFloatAsState(
                     targetValue = if (isSelected) 1.0f else 0.97f,
-                    animationSpec = if (reducedMotion) spring(stiffness = Spring.StiffnessHigh) else springSpec,
+                    animationSpec = springSpec,
                     label = "tabScale_$index",
                 )
 
-                // Active tab pill (STYLEGUIDE §9.12): icon in an accent@18% rounded
-                // "ti" pill, label + icon in the accent. Inactive tabs are faint.
-                val activeIconColor = accentFill()
-                val iconColor = if (isSelected) activeIconColor else c.faint
-                val textColor = if (isSelected) activeIconColor else c.faint
-                val pillColor = if (isSelected) accentFill().copy(alpha = 0.18f) else Color.Transparent
+                val activeTextColor = MaterialTheme.colorScheme.primary
+                val textColor = if (isSelected) activeTextColor else MaterialTheme.colorScheme.onSurfaceVariant
+                val pillColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent
 
-                // Fixed active-pill radius (STYLEGUIDE §5 --r-chip 7dp).
-                val pillRadius = 7.dp
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .scale(scale)
-                        .clip(RoundedCornerShape(pillRadius))
+                        .clip(RoundedCornerShape(7.dp))
                         .background(pillColor)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             role = Role.Tab,
                             onClick = { onTabSelected(index) },
-                        )
-                        .padding(vertical = 8.dp),
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                    ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            // CopyPaste-n7ff: null — the visible label already names the tab;
-                            // describing the icon too makes TalkBack announce the name twice.
-                            contentDescription = null,
-                            tint = iconColor,
-                            modifier = Modifier.size(22.dp),
-                        )
-                        Text(
-                            text = label,
-                            color = textColor,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.W700,
-                                letterSpacing = 0.sp,
-                            ),
-                        )
-                    }
+                    Text(
+                        text = label,
+                        color = textColor,
+                    )
                 }
             }
         }

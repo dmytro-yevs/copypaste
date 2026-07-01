@@ -45,14 +45,10 @@ import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SectionLabel
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.screenCanvas
-import com.copypaste.android.ui.theme.rememberTranslucency
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -88,12 +84,12 @@ class DevicesActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
-        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        // SecureWindowChrome applies FLAG_SECURE centrally when allowScreenshots=false (the default).
         applyScreenshotPolicy(Settings(this))
         enableEdgeToEdge()
         val autoOpenSas = intent?.getBooleanExtra(EXTRA_AUTO_OPEN_SAS, false) ?: false
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 DevicesScreen(
                     showBackButton = true,
                     onBack = { finish() },
@@ -123,13 +119,9 @@ fun DevicesScreen(
     paintCanvasBackdrop: Boolean = true,
 ) {
     val ctx = LocalContext.current
-    val c = LocalCpColors.current
     val settings = remember { Settings(ctx) }
     val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
-    // Calm screen backdrop (glass surfaces frost over real colour).
-    val translucent = rememberTranslucency()
-    val dark = isDarkTheme()
 
     // ── Direct camera scan launcher (Deliverable 2) ───────────────────────────
     // The scan button on this screen launches the ZXing scanner directly —
@@ -465,14 +457,12 @@ fun DevicesScreen(
                         "${target.displayName()} will no longer connect over P2P and a " +
                         "revocation record is kept.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = c.text,
                     )
                     Text(
                         "A revoked device that still knows the sync passphrase can " +
                         "keep reading new relay and cloud items. To close that gap, " +
                         "choose “Revoke & rotate key” below.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.dim,
                     )
                 }
             },
@@ -574,7 +564,6 @@ fun DevicesScreen(
                         "Enter a new passphrase to rotate the sync key. All trusted " +
                         "devices will need to re-enter this passphrase to keep syncing.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.dim,
                     )
                     // Passphrase text field — skin-aware surface colors, password masking.
                     OutlinedTextField(
@@ -590,7 +579,6 @@ fun DevicesScreen(
                         Text(
                             "Passphrase must be at least 8 characters.",
                             style = MaterialTheme.typography.labelSmall,
-                            color = c.err,
                         )
                     }
                 }
@@ -792,14 +780,8 @@ fun DevicesScreen(
         )
     }
 
-    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent
-    // and this screen owns its backdrop (standalone, not embedded in MainShell).
-    val paintCanvas = shouldPaintCanvas(translucent, paintCanvasBackdrop)
-    val scaffoldModifier = if (paintCanvas) modifier.screenCanvas(dark) else modifier
-
     Scaffold(
-        modifier = scaffoldModifier,
-        containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        modifier = modifier,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_devices),
@@ -911,7 +893,6 @@ fun DevicesScreen(
                                 Text(
                                     text = stringResource(R.string.no_devices_nearby),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = c.faint,
                                 )
                             }
                         }
@@ -930,7 +911,7 @@ fun DevicesScreen(
             }
 
             if (deviceRows.isNotEmpty()) {
-                CopyPasteCard(accent = c.border) {
+                CopyPasteCard {
                     // STYLEGUIDE §3.2: rows separated by a single hairline divider.
                     deviceRows.forEachIndexed { index, row ->
                         if (index > 0) {
@@ -952,7 +933,6 @@ fun DevicesScreen(
                 discoverError?.let { msg ->
                     Text(
                         text = msg,
-                        color = c.err,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

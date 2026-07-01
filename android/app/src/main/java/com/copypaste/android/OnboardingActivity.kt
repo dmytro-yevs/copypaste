@@ -18,34 +18,20 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Battery5Bar
-import androidx.compose.material.icons.outlined.BugReport
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.PhonelinkSetup
-import androidx.compose.material.icons.outlined.Tune
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.accentTint
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -64,9 +50,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -77,17 +60,8 @@ import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.MonoFontFamily
-import com.copypaste.android.ui.theme.Motion
-import com.copypaste.android.ui.theme.RadiusChip
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.screenCanvas
-import com.copypaste.android.ui.theme.motionDuration
-import com.copypaste.android.ui.theme.rememberReducedMotion
-import com.copypaste.android.ui.theme.rememberTranslucency
 import android.content.ClipData
 import android.content.ClipboardManager
 
@@ -155,7 +129,7 @@ class OnboardingActivity : ComponentActivity() {
         val crashedLastRun = CrashHandler.consumeCrashedLastRun(this)
 
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 val trigger by refreshTrigger
                 @Suppress("UNUSED_EXPRESSION") trigger // read so Compose tracks it
 
@@ -344,12 +318,8 @@ fun OnboardingScreen(
     onOemHintConsumed: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    val c = LocalCpColors.current
-    val dark = isDarkTheme()
-    val translucent = rememberTranslucency()
-    val reduced = rememberReducedMotion()
-    val slowDur = motionDuration(Motion.Slow)
-    val baseDur = motionDuration(Motion.Base)
+    val slowDur = 450
+    val baseDur = 300
 
     val toastState = remember { GlassToastState() }
     val toastScope = rememberCoroutineScope()
@@ -392,14 +362,9 @@ fun OnboardingScreen(
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
 
-    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
-    val scaffoldContainerColor = if (translucent) Color.Transparent else c.bg
-    val scaffoldModifier: Modifier = if (translucent) Modifier.screenCanvas(dark) else Modifier
-
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        containerColor = scaffoldContainerColor,
-        modifier = scaffoldModifier,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CopyPasteTopBar(title = stringResource(R.string.onboarding_setup_title))
         }
@@ -409,33 +374,29 @@ fun OnboardingScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars),
         ) {
             // Intro text
             val introAlpha by animateFloatAsState(
                 targetValue = if (entered) 1f else 0f,
-                animationSpec = tween(if (reduced) 0 else slowDur),
+                animationSpec = tween(slowDur),
                 label = "onboardIntroAlpha",
             )
             Text(
                 text = stringResource(R.string.onboarding_intro),
-                style = MaterialTheme.typography.bodyLarge,
-                color = c.text,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.alpha(introAlpha),
             )
 
             // 1. Notification permission
             PermissionCard(
-                icon = Icons.Outlined.Notifications,
                 title = stringResource(R.string.onboarding_notifications_title),
                 description = stringResource(R.string.onboarding_notifications_desc),
                 granted = notifGranted,
                 buttonLabel = if (notifGranted) stringResource(R.string.status_granted) else stringResource(R.string.btn_grant),
                 onClick = onRequestNotification,
                 required = true,
-                enterDelayMs = if (reduced) 0 else (baseDur / 4),
+                enterDelayMs = baseDur / 4,
                 entered = entered,
             )
 
@@ -445,7 +406,7 @@ fun OnboardingScreen(
                 overlayGranted = overlayGranted,
                 onRequestOverlay = onRequestOverlay,
                 ctx = ctx,
-                enterDelayMs = if (reduced) 0 else (baseDur / 2),
+                enterDelayMs = baseDur / 2,
                 entered = entered,
                 onToastRequest = { msg ->
                     toastScope.launch { toastState.show(msg, GlassToastKind.SUCCESS) }
@@ -454,14 +415,13 @@ fun OnboardingScreen(
 
             // 3. Battery Optimization
             PermissionCard(
-                icon = Icons.Outlined.Battery5Bar,
                 title = stringResource(R.string.onboarding_battery_title),
                 description = stringResource(R.string.onboarding_battery_desc),
                 granted = batteryExempt,
                 buttonLabel = if (batteryExempt) stringResource(R.string.btn_exempt) else stringResource(R.string.btn_request_exemption),
                 onClick = onRequestBattery,
                 required = false,
-                enterDelayMs = if (reduced) 0 else (baseDur * 3 / 4),
+                enterDelayMs = baseDur * 3 / 4,
                 entered = entered,
             )
 
@@ -474,7 +434,6 @@ fun OnboardingScreen(
                     oemBaseDesc
                 }
                 PermissionCard(
-                    icon = Icons.Outlined.PhonelinkSetup,
                     title = stringResource(R.string.onboarding_oem_title),
                     description = oemDesc,
                     // CopyPaste-crh3.113: we cannot reliably detect whether
@@ -486,21 +445,20 @@ fun OnboardingScreen(
                     onClick = onOpenOemAutoStart,
                     required = false,
                     alwaysShowButton = true,
-                    enterDelayMs = if (reduced) 0 else baseDur,
+                    enterDelayMs = baseDur,
                     entered = entered,
                 )
             }
 
             // 5. Foreground service (install-time)
             PermissionCard(
-                icon = Icons.Outlined.Tune,
                 title = stringResource(R.string.onboarding_fg_service_title),
                 description = stringResource(R.string.onboarding_fg_service_desc),
                 granted = true,
                 buttonLabel = stringResource(R.string.status_granted),
                 onClick = {},
                 required = false,
-                enterDelayMs = if (reduced) 0 else (baseDur * 5 / 4),
+                enterDelayMs = baseDur * 5 / 4,
                 entered = entered,
             )
 
@@ -511,36 +469,26 @@ fun OnboardingScreen(
             val logsAlpha by animateFloatAsState(
                 targetValue = if (entered) 1f else 0f,
                 animationSpec = tween(
-                    durationMillis = if (reduced) 0 else slowDur,
-                    delayMillis = if (reduced) 0 else (baseDur * 6 / 4),
+                    durationMillis = slowDur,
+                    delayMillis = baseDur * 6 / 4,
                 ),
                 label = "onboardLogsAlpha",
             )
             CopyPasteCard(modifier = Modifier.alpha(logsAlpha)) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.BugReport,
-                            contentDescription = null,
-                            tint = c.dim,
-                        )
                         Text(
                             text = stringResource(R.string.log_export_button),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = c.text,
+                            color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = stringResource(R.string.log_export_description),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = c.dim,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
                     CopyPasteButton(
                         onClick = onExportLogs,
                         variant = ButtonVariant.SECONDARY,
@@ -551,14 +499,12 @@ fun OnboardingScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
             // Primary CTA — full-width, PRIMARY variant when all done; SECONDARY ghost skip when not
             val ctaAlpha by animateFloatAsState(
                 targetValue = if (entered) 1f else 0f,
                 animationSpec = tween(
-                    durationMillis = if (reduced) 0 else slowDur,
-                    delayMillis = if (reduced) 0 else (baseDur * 7 / 4),
+                    durationMillis = slowDur,
+                    delayMillis = baseDur * 7 / 4,
                 ),
                 label = "onboardCtaAlpha",
             )
@@ -591,7 +537,6 @@ fun OnboardingScreen(
 
 @Composable
 private fun PermissionCard(
-    icon: ImageVector,
     title: String,
     description: String,
     // CopyPaste-crh3.113: nullable — null means "indeterminate" (e.g. OEM
@@ -607,88 +552,53 @@ private fun PermissionCard(
     enterDelayMs: Int = 0,
     entered: Boolean = true,
 ) {
-    val c = LocalCpColors.current
-    val reduced = rememberReducedMotion()
-    val slowDur = motionDuration(Motion.Slow)
+    val slowDur = 450
 
     // Status-colored hairline border: granted → success; explicitly-missing +
     // required → danger; null (indeterminate) or optional → neutral.
     val borderColor = when {
-        granted == true               -> c.ok
-        granted == false && required  -> c.err
-        else                          -> c.border
+        granted == true               -> MaterialTheme.colorScheme.primary
+        granted == false && required  -> MaterialTheme.colorScheme.error
+        else                          -> MaterialTheme.colorScheme.outline
     }
 
     val alpha by animateFloatAsState(
         targetValue = if (entered) 1f else 0f,
         animationSpec = tween(
-            durationMillis = if (reduced) 0 else slowDur,
+            durationMillis = slowDur,
             delayMillis = enterDelayMs,
         ),
         label = "permCard_$title",
     )
 
     CopyPasteCard(accent = borderColor, modifier = Modifier.alpha(alpha)) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Icon with status tint — success-colored circle when granted
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (granted == true) c.ok.copy(alpha = 0.12f) else accentTint()
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (granted == true) {
-                        Icon(
-                            imageVector = Icons.Outlined.Check,
-                            contentDescription = null,
-                            tint = c.ok,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    } else {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = accentFill(),
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = c.text,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     // Required badge — accent-tinted chip pill
                     Box(
                         modifier = Modifier
-                            .background(c.err.copy(alpha = 0.12f), RadiusChip)
-                            .border(0.5.dp, c.err.copy(alpha = 0.35f), RadiusChip)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                            .border(0.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(8.dp)),
                     ) {
                         Text(
                             text = "required",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = c.err,
+                            color = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = c.dim,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(10.dp))
             CopyPasteButton(
                 onClick = onClick,
                 enabled = granted != true || alwaysShowButton,
@@ -721,38 +631,32 @@ private fun AdbBackgroundCaptureCard(
     entered: Boolean = true,
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalCpColors.current
-    val reduced = rememberReducedMotion()
-    val slowDur = motionDuration(Motion.Slow)
+    val slowDur = 450
 
-    val borderColor = if (readLogsGranted && overlayGranted) c.ok else c.border
+    val borderColor = if (readLogsGranted && overlayGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
 
     val alpha by animateFloatAsState(
         targetValue = if (entered) 1f else 0f,
         animationSpec = tween(
-            durationMillis = if (reduced) 0 else slowDur,
+            durationMillis = slowDur,
             delayMillis = enterDelayMs,
         ),
         label = "adbCard",
     )
 
     CopyPasteCard(accent = borderColor, modifier = Modifier.alpha(alpha)) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
             Text(
                 text = stringResource(R.string.bg_adb_section_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = c.text,
+                color = MaterialTheme.colorScheme.onSurface,
             )
-            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.bg_adb_explainer),
-                style = MaterialTheme.typography.bodyMedium,
-                color = c.dim,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.height(10.dp))
 
             // Status row — pills instead of plain text labels
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row {
                 StatusPill(
                     text = if (readLogsGranted)
                         stringResource(R.string.bg_adb_status_read_logs_ok)
@@ -768,7 +672,6 @@ private fun AdbBackgroundCaptureCard(
                     ok = overlayGranted,
                 )
             }
-            Spacer(modifier = Modifier.height(10.dp))
 
             // Command 1
             AdbCommandRow(
@@ -778,7 +681,6 @@ private fun AdbBackgroundCaptureCard(
                 ctx = ctx,
                 onToastRequest = onToastRequest,
             )
-            Spacer(modifier = Modifier.height(6.dp))
             // Command 2
             AdbCommandRow(
                 label = stringResource(R.string.bg_adb_cmd2_label),
@@ -787,7 +689,6 @@ private fun AdbBackgroundCaptureCard(
                 ctx = ctx,
                 onToastRequest = onToastRequest,
             )
-            Spacer(modifier = Modifier.height(6.dp))
             // Command 3
             AdbCommandRow(
                 label = stringResource(R.string.bg_adb_cmd3_label),
@@ -797,7 +698,6 @@ private fun AdbBackgroundCaptureCard(
                 onToastRequest = onToastRequest,
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
             // Overlay button — can be granted without ADB on Android M+
             if (!overlayGranted) {
                 CopyPasteButton(
@@ -815,21 +715,18 @@ private fun AdbBackgroundCaptureCard(
 /** Status badge pill — green on granted, muted otherwise. */
 @Composable
 private fun StatusPill(text: String, ok: Boolean) {
-    val c = LocalCpColors.current
     Box(
         modifier = Modifier
-            .background(if (ok) c.ok.copy(alpha = 0.12f) else accentTint(), RadiusChip)
+            .background(if (ok) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
             .border(
                 0.5.dp,
-                if (ok) c.ok.copy(alpha = 0.35f) else c.border.copy(alpha = 0.35f),
-                RadiusChip,
-            )
-            .padding(horizontal = 7.dp, vertical = 2.dp),
+                if (ok) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                RoundedCornerShape(8.dp),
+            ),
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (ok) c.ok else c.dim,
+            color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -843,17 +740,14 @@ private fun AdbCommandRow(
     ctx: android.content.Context,
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalCpColors.current
     Column {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = c.dim,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
             text = command,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = c.text,
+            color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
                 .fillMaxWidth()
                 // CopyPaste-n7ff: announce as a Button with a "Copy command" action
@@ -864,8 +758,7 @@ private fun AdbCommandRow(
                         as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", command))
                     onToastRequest(toastText)
-                }
-                .padding(vertical = 4.dp),
+                },
         )
     }
 }

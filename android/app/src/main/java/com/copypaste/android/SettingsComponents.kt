@@ -3,19 +3,12 @@ package com.copypaste.android
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
@@ -23,34 +16,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.ButtonVariant
-import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.MonoFontFamily
-import com.copypaste.android.ui.theme.RadiusControl
 import com.copypaste.android.ui.theme.SharedSettingsNavRow
 import com.copypaste.android.ui.theme.SharedSettingsRow
-import com.copypaste.android.ui.theme.ideTextFieldColors
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grouped-card primitives (spec §8 — Apple grouped-inset style)
@@ -60,14 +42,9 @@ import com.copypaste.android.ui.theme.ideTextFieldColors
 // canonical SectionLabel from Components.kt (start=16.dp, aligned with other screens).
 
 /**
- * Apple grouped-inset card container (§8). Holds a vertical list of rows with
- * [SettingsCardDivider]s between them.
- *
- * 8l9v/lr9p: replaced the flat double-nested Box (c.elevated, no glass, no border)
- * with [CopyPasteCard] — the canonical styleguide .surface-card (14dp RadiusCard,
- * backdrop-filter blur 28, per-tier white-alpha gradient fill, bright .5px white
- * glass-rim hairline, soft tinted float shadow). The hairline is inherent to
- * TranslucentSurface(hairline=true) inside CopyPasteCard, so lr9p is resolved here.
+ * Grouped-inset card container. Holds a vertical list of rows with
+ * [SettingsCardDivider]s between them. Delegates to [CopyPasteCard] for a
+ * plain Material3 surface — no custom glass/skin treatment.
  */
 @Composable
 internal fun SettingsCard(content: @Composable () -> Unit) {
@@ -77,27 +54,20 @@ internal fun SettingsCard(content: @Composable () -> Unit) {
 }
 
 /**
- * Hairline divider between rows inside a [SettingsCard] — ide-divider colour,
- * 1 dp (not 0.5 dp mix; spec §4 "kill the 0.5 dp mix").
+ * Hairline divider between rows inside a [SettingsCard] — bare Material3
+ * default divider, no custom thickness/inset.
  */
 @Composable
 internal fun SettingsCardDivider() {
-    val c = LocalCpColors.current
-    HorizontalDivider(
-        color = c.divider,
-        thickness = 1.dp,
-        modifier = Modifier.padding(horizontal = 0.dp),
-    )
+    HorizontalDivider()
 }
 
 /**
  * iOS-style segmented control (§7). Bespoke Row+Box implementation matching the
- * web SettingsView div/button pattern. Avoids M3 SingleChoiceSegmentedButtonRow
- * which has: (1) per-segment border-mess (inactiveBorderColor=Transparent leaves
- * dangling active strokes), (2) icon-slot reserving space even when icon={},
- * (3) 48dp min-height (too tall for Liquid Glass styleguide look ~26dp).
+ * web SettingsView div/button pattern.
  *
  * CopyPaste-o97j: replaced M3 row with bespoke Row/Box per §7 spec.
+ * CopyPaste-g5u1: de-styled — bare Material primitives, no custom shape/border/padding.
  *
  * @param options List of label strings, one per segment.
  * @param selectedIndex Currently selected segment index.
@@ -110,48 +80,26 @@ internal fun IdeSegmentedControl(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalCpColors.current
-    // Fixed control radius (STYLEGUIDE §5 --r-ctl 8dp) — no skin.
-    val ctlRadius = 8.dp
-    val outerShape = RoundedCornerShape(ctlRadius)
-    // Inner pill: outer radius - 2dp padding (mirrors web control's border-radius shrink).
-    val innerShape = RoundedCornerShape((ctlRadius - 2.dp).coerceAtLeast(0.dp))
-    // Outer container: mute@.18 fill + 0.5dp hairline border.
-    // 2dp inner padding matches the web control's p-0.5 padding.
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(color = c.mute.copy(alpha = 0.18f), shape = outerShape)
-            .border(width = 0.5.dp, color = c.border, shape = outerShape)
-            .padding(2.dp),
-    ) {
+    Row(modifier = modifier.fillMaxWidth()) {
         options.forEachIndexed { index, label ->
             val isSelected = index == selectedIndex
-            // Inner pill: tok.radiusControl - 2dp (skin-adaptive, per §4 shrink rule).
-            // Selected → c.elevated fill; unselected → transparent over the track.
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .weight(1f)
-                    .clip(innerShape)
                     .then(
-                        if (isSelected) Modifier.background(c.elevated) else Modifier
+                        if (isSelected) Modifier.background(MaterialTheme.colorScheme.surface) else Modifier
                     )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
-                        indication = null, // suppress ripple — pill bg is the selection indicator
+                        indication = null, // suppress ripple — bg fill is the selection indicator
                         onClick = { onSelect(index) },
-                    )
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                    ),
             ) {
                 Text(
                     text = label,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                        fontSize = 12.sp,
-                    ),
-                    color = if (isSelected) accentFill() else c.dim,
-                    textAlign = TextAlign.Center,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
             }
@@ -171,32 +119,14 @@ internal fun SettingsTextField(
     onValueChange: (String) -> Unit,
     password: Boolean = false,
 ) {
-    val c = LocalCpColors.current
-    // u1ad: track focus so we can render the 2dp accent focus ring.
-    val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
-
     // AND4: No onCommit — values are buffered until Save is pressed.
-    // u1ad: shape = RadiusControl (9dp, styleguide --radius-ctl); 2dp solid accent@.5
-    // focus ring drawn as an outer border overlay when the field is focused (web
-    // `.field:focus-visible { outline: 2px solid rgba(accent/.5); outline-offset: 1px }`).
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
-        placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
+        placeholder = { Text(hint) },
         singleLine = true,
-        shape = RadiusControl,
-        colors = ideTextFieldColors(),
-        interactionSource = interactionSource,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .then(
-                // 2dp accent outer ring when focused — mirrors the 2px outline-offset ring.
-                if (focused) Modifier.border(2.dp, accentFill().copy(alpha = 0.5f), RadiusControl)
-                else Modifier
-            ),
+        modifier = Modifier.fillMaxWidth(),
         visualTransformation = if (password) PasswordVisualTransformation()
             else VisualTransformation.None,
         keyboardOptions = if (password) KeyboardOptions(
@@ -231,9 +161,6 @@ internal fun SettingsNavRow(
 /**
  * A row with a description and an action button — used in the Diagnostics
  * section for log export and similar non-toggle actions.
- *
- * §5 fixed comfortable spacing (10dp + bodyLarge) — density modes removed
- * (CopyPaste-xruv, §2/§12).
  */
 @Composable
 internal fun DiagnosticsNavRow(
@@ -242,23 +169,14 @@ internal fun DiagnosticsNavRow(
     buttonLabel: String,
     onClick: () -> Unit,
 ) {
-    val c = LocalCpColors.current
-    val vertPad = 10.dp
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = vertPad)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = c.text,
+            color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
             text = subtitle,
-            style = MaterialTheme.typography.bodySmall,
-            color = c.dim,
-            modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         CopyPasteButton(
             onClick = onClick,
@@ -300,7 +218,6 @@ internal fun AdbCaptureStatusLine(
     logcatStatus: LogcatCaptureStatus,
     ctx: android.content.Context,
 ) {
-    val c = LocalCpColors.current
     val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
     val overlayGranted: Boolean = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
         android.provider.Settings.canDrawOverlays(ctx)
@@ -308,37 +225,33 @@ internal fun AdbCaptureStatusLine(
 
     val (captureText, captureColor) = when (logcatStatus) {
         LogcatCaptureStatus.WORKING ->
-            stringResource(R.string.bg_adb_status_capture_working) to c.ok
+            stringResource(R.string.bg_adb_status_capture_working) to MaterialTheme.colorScheme.primary
         LogcatCaptureStatus.DISABLED, LogcatCaptureStatus.NOT_GRANTED ->
-            stringResource(R.string.bg_adb_status_capture_inactive) to c.dim
+            stringResource(R.string.bg_adb_status_capture_inactive) to MaterialTheme.colorScheme.onSurfaceVariant
         LogcatCaptureStatus.GRANTED_NOT_WORKING ->
-            stringResource(R.string.bg_adb_status_capture_inactive) to c.warn
+            stringResource(R.string.bg_adb_status_capture_inactive) to MaterialTheme.colorScheme.tertiary
     }
 
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column {
+        Row {
             Text(
                 text = if (readLogsGranted)
                     stringResource(R.string.bg_adb_status_read_logs_ok)
                 else
                     stringResource(R.string.bg_adb_status_read_logs_no),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (readLogsGranted) c.ok else c.err,
+                color = if (readLogsGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
             Text(
                 text = if (overlayGranted)
                     stringResource(R.string.bg_adb_status_overlay_ok)
                 else
                     stringResource(R.string.bg_adb_status_overlay_no),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (overlayGranted) c.ok else c.dim,
+                color = if (overlayGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         Text(
             text = captureText,
-            style = MaterialTheme.typography.bodySmall,
             color = captureColor,
-            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }
@@ -356,11 +269,9 @@ internal fun AdbCaptureCommandRows(
         stringResource(R.string.bg_adb_cmd2_label) to stringResource(R.string.bg_adb_cmd2),
         stringResource(R.string.bg_adb_cmd3_label) to stringResource(R.string.bg_adb_cmd3),
     )
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+    Column {
         AdbCmdRow(label = commands[0].first, cmd = commands[0].second, toastText = toastText, ctx = ctx, onToastRequest = onToastRequest)
-        Spacer(modifier = Modifier.height(6.dp))
         AdbCmdRow(label = commands[1].first, cmd = commands[1].second, toastText = toastText, ctx = ctx, onToastRequest = onToastRequest)
-        Spacer(modifier = Modifier.height(6.dp))
         AdbCmdRow(label = commands[2].first, cmd = commands[2].second, toastText = toastText, ctx = ctx, onToastRequest = onToastRequest)
     }
 }
@@ -376,16 +287,13 @@ internal fun AdbCmdRow(
     // the unstyled OS-native black pill. Callers pass a lambda that routes to GlassToastHost.
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalCpColors.current
     Text(
         text = label,
-        style = MaterialTheme.typography.labelSmall,
-        color = c.dim,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Text(
         text = cmd,
-        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-        color = accentFill(),
+        color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .fillMaxWidth()
             // CopyPaste-n7ff: announce as a Button with a "Copy command" action.
@@ -396,7 +304,6 @@ internal fun AdbCmdRow(
                 cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", cmd))
                 // CopyPaste-5917.17: route feedback through GlassToastHost, not OS Toast.
                 onToastRequest(toastText)
-            }
-            .padding(top = 2.dp, bottom = 4.dp),
+            },
     )
 }

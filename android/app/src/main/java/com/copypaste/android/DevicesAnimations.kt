@@ -7,11 +7,7 @@ import androidx.compose.animation.core.repeatable
 import androidx.compose.animation.core.tween
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,13 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.accentTint
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.RadiusChip
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §7 Liquid Glass Devices parity — Compose helpers
@@ -70,11 +59,7 @@ internal fun rememberReducedMotion(): Boolean {
  */
 @Composable
 internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
-    val c = LocalCpColors.current
     val reducedMotion = rememberReducedMotion()
-    // PG-37 parity: offline status dot uses danger (red) to match the macOS
-    // DeviceCard offline indicator (was c.faint/grey, which diverged).
-    val dotColor = if (online) c.ok else c.err
 
     // Fixed presence-ping duration (STYLEGUIDE §6 — no palette motion scale).
     val pingDurationMs = 2400
@@ -109,7 +94,7 @@ internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
                         targetValue = 1.8f,
                         animationSpec = repeatable(
                             iterations = 1,
-                            animation = tween(durationMillis = pingDurationMs, easing = EaseOutExpo),
+                            animation = tween(durationMillis = pingDurationMs, easing = FastOutSlowInEasing),
                             repeatMode = RepeatMode.Restart,
                         ),
                     )
@@ -139,34 +124,25 @@ internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
         // Expanding ring — driven by Animatable values; invisible at rest (alpha = 0).
         Box(
             modifier = Modifier
-                .size(10.dp)
                 .graphicsLayer {
                     alpha = pulseAlpha.value
                     scaleX = pulseScale.value
                     scaleY = pulseScale.value
                 }
-                .clip(CircleShape)
-                // CopyPaste-bdac.102: ring must match the dot colour so an offline (red)
-                // dot does not produce a green ring.  dotColor already encodes online/offline.
-                .background(dotColor),
+                .clip(CircleShape),
         )
         // Solid dot always on top.
         Box(
             modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(dotColor),
+                .clip(CircleShape),
         )
     }
 }
 
 /**
- * Transport chip pill: 10 sp label in a tinted rounded pill.
- * P2P = info teal; Relay = warning amber; Cloud = accent blue (theme-adaptive
- * via [LocalCpColors]). Label casing matches web's DevicesView ("P2P" / "Relay"
- * / "Cloud").
- * CopyPaste-crh3.30: Relay is rendered amber (c.warn) at parity with macOS
- * DeviceCard.tsx, distinguishing the relay route from Supabase ("Cloud").
+ * Transport chip pill: 10 sp label, color-coded by transport (secondary/tertiary/
+ * primary via MaterialTheme.colorScheme). Label casing matches web's DevicesView
+ * ("P2P" / "Relay" / "Cloud").
  * Defensive: never crashes on absent transport info — callers derive [chip]
  * via [transportChipFor] which is always non-null.
  *
@@ -175,24 +151,15 @@ internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
  */
 @Composable
 internal fun TransportChipLabel(chip: TransportChip) {
-    val c = LocalCpColors.current
-    val (text, fg, bg) = when (chip) {
-        TransportChip.P2P -> Triple("P2P", c.info, c.info.copy(alpha = 0.12f))
-        TransportChip.Relay -> Triple("Relay", c.warn, c.warn.copy(alpha = 0.12f))
-        TransportChip.Cloud -> Triple("Cloud", accentFill(), accentTint())
+    val (text, fg) = when (chip) {
+        TransportChip.P2P -> "P2P" to MaterialTheme.colorScheme.secondary
+        TransportChip.Relay -> "Relay" to MaterialTheme.colorScheme.tertiary
+        TransportChip.Cloud -> "Cloud" to MaterialTheme.colorScheme.primary
     }
 
     // Badge float animation removed — static chip is calmer.
-    // CopyPaste-sry7: RadiusChip (7dp) pill + 0.5dp hairline tinted border.
     Text(
         text = text,
         color = fg,
-        fontSize = 10.sp,
-        letterSpacing = 0.6.sp,
-        style = MaterialTheme.typography.labelSmall,
-        modifier = Modifier
-            .background(bg, RadiusChip)
-            .border(0.5.dp, fg.copy(alpha = 0.35f), RadiusChip)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }

@@ -1,6 +1,7 @@
 package com.copypaste.android.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -41,22 +42,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.Motion
-import com.copypaste.android.ui.theme.TranslucentSurface
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.rememberReducedMotion
-import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
 // ---------------------------------------------------------------------------
-// GlassToast — bespoke "Liquid Glass" toast (PARITY-SPEC §8, audit #5).
+// GlassToast — Material toast (PARITY-SPEC §8, audit #5).
 //
-// Mirrors the web Toast (HistoryView.tsx): a glass surface, a leading
-// semantic-colored dot, message text, slide-up entrance (180ms EaseOutExpo),
+// Mirrors the web Toast (HistoryView.tsx): a Material surface, a leading
+// semantic-colored dot, message text, slide-up entrance,
 // auto-dismiss, bottom-center, ONE at a time. Replaces the Material
 // Snackbar / SnackbarHost on Android so copy/undo/file feedback reads as the
 // same notification layer the desktop app shows.
@@ -149,23 +142,17 @@ class GlassToastState {
 }
 
 /**
- * Renders the [state]'s current toast bottom-center with a glass surface, a
- * leading semantic dot, and a slide-up 180ms EaseOutExpo entrance
- * (PARITY-SPEC §8). Place inside a `Box(Modifier.fillMaxSize())` that overlays
- * the screen content so the toast floats above the list.
- *
- * Respects reduced-motion: the slide is suppressed when the user disabled
- * animations. Honours the translucency pref via [TranslucentSurface] so the
- * toast is the §2 frosted glass (or an opaque elevated surface when off).
+ * Renders the [state]'s current toast bottom-center with a Material surface, a
+ * leading semantic dot, and a slide-up entrance (PARITY-SPEC §8). Place inside a
+ * `Box(Modifier.fillMaxSize())` that overlays the screen content so the toast
+ * floats above the list.
  */
 @Composable
 fun GlassToastHost(
     state: GlassToastState,
     modifier: Modifier = Modifier,
-    translucent: Boolean = rememberTranslucency(),
 ) {
     val data = state.current
-    val reducedMotion = rememberReducedMotion()
     // Retain the last non-null toast so the exit animation can still render its
     // content after `current` flips to null (AnimatedVisibility keeps the node
     // mounted until the exit transition completes). Held in composition state —
@@ -183,18 +170,14 @@ fun GlassToastHost(
         // absent → fade/slide out. visible is derived from data != null.
         AnimatedVisibility(
             visible = data != null,
-            enter = if (reducedMotion) {
-                fadeIn(tween(Motion.Base))
-            } else {
-                // §8 slide-up: rises from below, EaseOutExpo, 180ms.
-                slideInVertically(
-                    animationSpec = tween(Motion.Base, easing = EaseOutExpo),
-                    initialOffsetY = { it / 2 },
-                ) + fadeIn(tween(Motion.Base, easing = EaseOutExpo))
-            },
-            exit = fadeOut(tween(Motion.Fast)) +
+            // §8 slide-up: rises from below, 300ms.
+            enter = slideInVertically(
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                initialOffsetY = { it / 2 },
+            ) + fadeIn(tween(300, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(150)) +
                 slideOutVertically(
-                    animationSpec = tween(Motion.Fast),
+                    animationSpec = tween(150),
                     targetOffsetY = { it / 3 },
                 ),
             modifier = Modifier.padding(bottom = 12.dp),
@@ -202,45 +185,38 @@ fun GlassToastHost(
             // Keep the last non-null data during the exit animation so the
             // content doesn't blank out mid-transition.
             val shown = data ?: lastShown
-            if (shown != null) GlassToastContent(shown, translucent)
+            if (shown != null) GlassToastContent(shown)
         }
     }
 }
 
 @Composable
-private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
-    val c = LocalCpColors.current
-    val dark = isDarkTheme()
-
+private fun GlassToastContent(data: GlassToastData) {
     // Fixed toast geometry (STYLEGUIDE §5 --r-card 13dp + §5 --sh2 float).
     val shadowElevationDp = 6.dp
     val toastShape = RoundedCornerShape(13.dp)
 
     val dotColor: Color = when (data.kind) {
-        GlassToastKind.SUCCESS -> c.ok
-        GlassToastKind.DANGER -> c.err
-        GlassToastKind.INFO -> c.info
-        GlassToastKind.ACCENT -> accentFill()
+        GlassToastKind.SUCCESS -> MaterialTheme.colorScheme.primary
+        GlassToastKind.DANGER -> MaterialTheme.colorScheme.error
+        GlassToastKind.INFO -> MaterialTheme.colorScheme.secondary
+        GlassToastKind.ACCENT -> MaterialTheme.colorScheme.primary
     }
 
     // f6x0: DANGER toasts get a danger-tinted hairline border (alert tonization) so
     // they read as distinctly critical vs. neutral toasts. Other kinds keep the
-    // standard glass-rim grey border.
+    // standard rim grey border.
     val borderColor: Color = if (data.kind == GlassToastKind.DANGER) {
-        c.err.copy(alpha = 0.55f)
+        MaterialTheme.colorScheme.error.copy(alpha = 0.55f)
     } else {
-        c.border
+        MaterialTheme.colorScheme.outline
     }
 
-    // §2/P0: the Material Surface stays TRANSPARENT and supplies only the §4
-    // shadow + hairline border + shape clip; the real frosted blur + §2 tint
-    // comes from TranslucentSurface (API-31 RenderEffect blur, flat tint < 31),
-    // gated only on the translucency pref.
     Surface(
         // A-C9: skin-aware radius. CLASSIC frozen at 10dp; QUIET 7dp; VAPOR 12dp.
         shape = toastShape,
-        color = Color.Transparent,
-        contentColor = c.text,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
         // §4: single 1dp hairline border (subtle, like CopyPasteCard).
         // f6x0: danger toasts use danger-tinted border for alert tonization.
         border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
@@ -249,56 +225,46 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         shadowElevation = shadowElevationDp,
         modifier = Modifier
             .padding(horizontal = 16.dp)
-            // CopyPaste-fiht: .clip(toastShape) removed — Surface(shape=) + TranslucentSurface
-            // already clip to the shape; the extra .clip was causing redundant overdraw.
             // CopyPaste-n7ff: announce the toast via a polite live region so the
             // message is read even when focus is elsewhere.
             .semantics { liveRegion = LiveRegionMode.Polite },
     ) {
-        TranslucentSurface(
-            shape = toastShape,
-            translucent = translucent,
-            dark = dark,
-            solid = MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = c.text,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
-            ) {
-                // 6dp semantic dot (web parity).
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .drawBehind { drawCircle(dotColor) },
-                )
-                // VISA-14: use bodyLarge (13sp/18sp line-height) so lineHeight is correct.
-                // bodyMedium.copy(fontSize=13.sp) overrides the size but keeps bodyMedium's
-                // shorter lineHeight — bodyLarge carries the matching 18sp lineHeight for 13sp.
-                Text(
-                    text = data.message,
-                    color = c.text,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal,
-                    ),
-                )
-                // Optional action button — rendered after the message when present.
-                if (data.action != null) {
-                    Spacer(Modifier.width(4.dp))
-                    TextButton(onClick = data.action.second) {
-                        // VISA-14: match bodyLarge baseline (13sp/18sp) consistent with message text.
-                        Text(
-                            text = data.action.first,
-                            color = accentFill(),
-                            style = MaterialTheme.typography.bodyLarge.copy(
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Normal,
-                            ),
-                        )
-                    }
+            // 6dp semantic dot (web parity).
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .drawBehind { drawCircle(dotColor) },
+            )
+            // VISA-14: use bodyLarge (13sp/18sp line-height) so lineHeight is correct.
+            // bodyMedium.copy(fontSize=13.sp) overrides the size but keeps bodyMedium's
+            // shorter lineHeight — bodyLarge carries the matching 18sp lineHeight for 13sp.
+            Text(
+                text = data.message,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Normal,
+                ),
+            )
+            // Optional action button — rendered after the message when present.
+            if (data.action != null) {
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = data.action.second) {
+                    // VISA-14: match bodyLarge baseline (13sp/18sp) consistent with message text.
+                    Text(
+                        text = data.action.first,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Normal,
+                        ),
+                    )
                 }
             }
         }

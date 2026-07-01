@@ -31,23 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.CheckBox
-import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.KeyboardArrowUp
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.SaveAlt
-import androidx.compose.material.icons.outlined.Star
-import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,22 +58,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.material3.ColorScheme
 import androidx.core.content.FileProvider
-import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.accentSelection
-import com.copypaste.android.ui.theme.CpColors
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.MonoFontFamily
-import com.copypaste.android.ui.theme.Motion
-import com.copypaste.android.ui.theme.rememberReducedMotion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -120,7 +95,7 @@ import java.io.File
 internal fun SourceAppBadge(
     sourceApp: String?,
     ctx: android.content.Context,
-    colors: CpColors,
+    colors: ColorScheme,
 ) {
     val c = colors
     sourceAppLabel(sourceApp)?.let { appLabel ->
@@ -150,10 +125,9 @@ internal fun SourceAppBadge(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .background(
-                    color = c.elevated.copy(alpha = 0.5f),
+                    color = c.surfaceVariant.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(4.dp),
-                )
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                ),
         ) {
             iconBitmap?.let { iconBmp ->
                 Image(
@@ -161,15 +135,12 @@ internal fun SourceAppBadge(
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .size(14.dp)
                         .clip(RoundedCornerShape(3.dp)),
                 )
-                Spacer(Modifier.width(3.dp))
             }
             Text(
                 text = appLabel,
-                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal),
-                color = c.faint,
+                color = c.onSurfaceVariant,
                 maxLines = 1,
             )
         }
@@ -179,7 +150,7 @@ internal fun SourceAppBadge(
 /**
  * CopyPaste-z89 — per-row mount stagger step (ms). PARITY-SPEC §11: ~18–20ms step,
  * capped at 10 rows (so the last animated row starts ≤200ms in). Previously the
- * step was [Motion.Fast] (130ms), capped at 10 → up to 1.3s of staggered entrance,
+ * step was 150ms, capped at 10 → up to 1.3s of staggered entrance,
  * which read as sluggish on a fresh load.
  */
 internal const val ROW_STAGGER_STEP_MS = 20
@@ -200,9 +171,9 @@ internal const val ROW_STAGGER_STEP_MS = 20
 @Composable
 internal fun HistoryRow(
     item: ClipboardItem,
-    /** CopyPaste-998 (jank): the active ramp, passed in from list scope so the row
-     *  never reads LocalCpColors during scroll recomposition. */
-    colors: CpColors,
+    /** CopyPaste-998 (jank): the active color scheme, passed in from list scope so the
+     *  row never reads MaterialTheme.colorScheme during scroll recomposition. */
+    colors: ColorScheme,
     repository: ClipboardRepository,
     maskSensitive: Boolean,
     imageMaxHeightDp: Int,
@@ -246,8 +217,6 @@ internal fun HistoryRow(
     // snippet renders BLURRED (web parity: blur + reveal, not a bullet substitution);
     // tapping flips this true to unblur. Keyed on item.id so a recycled row re-masks.
     var revealed by remember(item.id) { mutableStateOf(false) }
-    // §8 a11y: skip animated transitions when the user has requested reduced motion.
-    val reducedMotion = rememberReducedMotion()
 
     var expanded by remember(item.id) { mutableStateOf(false) }
     // Key on (item.id, expanded) so the coroutine is cancelled and restarted whenever
@@ -263,28 +232,25 @@ internal fun HistoryRow(
         if (selectionMode) expanded = false
     }
 
-    // §5/§8 Copy-success flash: 90ms c.ok.copy(alpha = 0.12f) background overlay on copy.
-    // copyFlashTrigger increments on each copy; animateColorAsState fades from
-    // c.ok.copy(alpha = 0.12f) → Transparent in Motion.Instant (90ms) and then resets the trigger
+    // §5/§8 Copy-success flash: 100ms colors.primary.copy(alpha = 0.12f) background overlay
+    // on copy. copyFlashTrigger increments on each copy; animateColorAsState fades from
+    // colors.primary.copy(alpha = 0.12f) → Transparent in 100ms and then resets the trigger
     // via finishedListener so the next copy can fire again.
-    // Gated by reducedMotion: when true, durationMillis=0 means the color jumps
-    // to transparent instantly (no visible flash, but the state still clears).
     var copyFlashTrigger by remember(item.id) { mutableStateOf(0) }
     val copyFlashColor by animateColorAsState(
-        targetValue = if (copyFlashTrigger > 0) colors.ok.copy(alpha = 0.12f) else Color.Transparent,
-        animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant),
+        targetValue = if (copyFlashTrigger > 0) colors.primary.copy(alpha = 0.12f) else Color.Transparent,
+        animationSpec = tween(durationMillis = 100),
         label = "copyFlash",
         finishedListener = { copyFlashTrigger = 0 },
     )
 
     // §8 press-scale: 0.992 on press (approved motion spec), instant out-expo spring back.
     // 0.992 vs old 0.98: subtler squeeze — keeps content readable during tap feedback.
-    // When reduced-motion is active we hold the scale at 1f (no animation).
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val rowScale by animateFloatAsState(
-        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.992f else 1.0f,
-        animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant, easing = EaseOutExpo),
+        targetValue = if (isPressed) 0.992f else 1.0f,
+        animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
         label = "rowPressScale",
     )
 
@@ -365,16 +331,16 @@ internal fun HistoryRow(
 
     // §5 row background: selection > expanded > sensitive tint > transparent
     val rowBg = when {
-        isSelected        -> accentSelection()
-        expanded          -> colors.elevated
-        detectedSensitive -> colors.err.copy(alpha = 0.07f)
-        item.pinned       -> colors.warn.copy(alpha = 0.16f)
+        isSelected        -> colors.primaryContainer
+        expanded          -> colors.surfaceVariant
+        detectedSensitive -> colors.error.copy(alpha = 0.07f)
+        item.pinned       -> colors.tertiary.copy(alpha = 0.16f)
         else              -> Color.Transparent
     }
 
     // Left accent bar color: visible amber when pinned and no stronger state is active.
     val pinnedAccentColor = if (item.pinned && !isSelected && !expanded && !detectedSensitive)
-        colors.warn.copy(alpha = 0.72f)
+        colors.tertiary.copy(alpha = 0.72f)
     else
         Color.Transparent
 
@@ -398,8 +364,8 @@ internal fun HistoryRow(
             }
             .scale(rowScale)
             .background(rowBg)
-            // §5/§8 Copy-success flash overlay: animates from c.ok.copy(alpha = 0.12f) → transparent
-            // in 90ms (Motion.Instant).  Layered on top of rowBg so selection/pinned
+            // §5/§8 Copy-success flash overlay: animates from colors.primary.copy(alpha = 0.12f) → transparent
+            // in 100ms. Layered on top of rowBg so selection/pinned
             // tints are still visible underneath while the flash fades.
             .background(color = copyFlashColor)
             .drawBehind {
@@ -466,7 +432,7 @@ internal fun HistoryRow(
                         stringResource(R.string.cd_checkbox_deselect)
                     else
                         stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) accentFill() else c.dim.copy(alpha = 0.4f),
+                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
@@ -478,7 +444,7 @@ internal fun HistoryRow(
                     Icon(
                         imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.warn.copy(alpha = 0.9f),
+                        tint = c.tertiary.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
@@ -498,13 +464,13 @@ internal fun HistoryRow(
                             .widthIn(max = 340.dp)
                             .heightIn(max = imageMaxHeightDp.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(c.err.copy(alpha = 0.12f)),
+                            .background(c.error.copy(alpha = 0.12f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Lock,
                             contentDescription = stringResource(R.string.sensitive_preview_mask),
-                            tint = c.err,
+                            tint = c.error,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -517,7 +483,7 @@ internal fun HistoryRow(
                             .widthIn(max = 340.dp)
                             .heightIn(max = imageMaxHeightDp.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(c.elevated)
+                            .background(c.surfaceVariant)
                             // CopyPaste-44rq.42: blur on API 31+ when sensitive + masked;
                             // unmasked images render at full quality.
                             .then(
@@ -535,7 +501,7 @@ internal fun HistoryRow(
                         fontWeight = FontWeight.Normal,
                         fontFeatureSettings = "tnum",
                     ),
-                    color = c.faint,
+                    color = c.onSurfaceVariant,
                     maxLines = 1,
                 )
                 // CopyPaste-9uyk: source-app icon badge for image rows.
@@ -555,7 +521,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) accentFill() else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -563,8 +529,8 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) accentFill()
-                                       else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
+                                       else c.onSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -579,7 +545,7 @@ internal fun HistoryRow(
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.warn else c.dim,
+                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -589,7 +555,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.err,
+                                tint = c.error,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -613,20 +579,20 @@ internal fun HistoryRow(
                         stringResource(R.string.cd_checkbox_deselect)
                     else
                         stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) accentFill() else c.dim.copy(alpha = 0.4f),
+                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
                 Spacer(Modifier.width(8.dp))
-                // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
+                // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
                 ContentIconTile(chipLabel = chipLabel, colors = c)
                 Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
                         imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.warn.copy(alpha = 0.9f),
+                        tint = c.tertiary.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
@@ -641,7 +607,7 @@ internal fun HistoryRow(
                     Text(
                         text = item.snippet,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = c.text,
+                        color = c.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -658,7 +624,7 @@ internal fun HistoryRow(
                                 fontWeight = FontWeight.Normal,
                                 fontFeatureSettings = "tnum",
                             ),
-                            color = c.faint,
+                            color = c.onSurfaceVariant,
                             maxLines = 1,
                         )
                         SourceAppBadge(sourceApp = item.sourceApp, ctx = ctx, colors = c)
@@ -679,7 +645,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) accentFill() else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -687,8 +653,8 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) accentFill()
-                                       else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
+                                       else c.onSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -698,7 +664,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
                                 contentDescription = stringResource(R.string.cd_open_file),
-                                tint = accentFill(),
+                                tint = c.primary,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -707,7 +673,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.SaveAlt,
                                 contentDescription = stringResource(R.string.action_save_file),
-                                tint = accentFill(),
+                                tint = c.primary,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -719,7 +685,7 @@ internal fun HistoryRow(
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.warn else c.dim,
+                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -727,7 +693,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.err,
+                                tint = c.error,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -754,13 +720,13 @@ internal fun HistoryRow(
                         stringResource(R.string.cd_checkbox_deselect)
                     else
                         stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) accentFill() else c.dim.copy(alpha = 0.4f),
+                    tint = if (isSelected) c.primary else c.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
                 Spacer(Modifier.width(8.dp))
-                // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
+                // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
                 // lbnp: for COLOR rows, replace the tile with an inline color swatch square.
                 if (chipLabel == "COLOR") {
                     ColorSwatchOrTile(snippet = display, colors = c)
@@ -772,7 +738,7 @@ internal fun HistoryRow(
                     Icon(
                         imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.warn.copy(alpha = 0.9f),
+                        tint = c.tertiary.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
@@ -784,13 +750,13 @@ internal fun HistoryRow(
                     // audit #13: URL rows render bold host + dim path (web parity).
                     if (urlParts != null && !detectedSensitive) {
                         val (host, path) = urlParts
-                        val annotated = remember(host, path, c.text, c.dim) {
+                        val annotated = remember(host, path, c.onSurface, c.onSurfaceVariant) {
                             buildAnnotatedString {
-                                withStyle(SpanStyle(color = c.text, fontWeight = FontWeight.SemiBold)) {
+                                withStyle(SpanStyle(color = c.onSurface, fontWeight = FontWeight.SemiBold)) {
                                     append(host)
                                 }
                                 if (path.isNotEmpty()) {
-                                    withStyle(SpanStyle(color = c.dim)) { append(path) }
+                                    withStyle(SpanStyle(color = c.onSurfaceVariant)) { append(path) }
                                 }
                             }
                         }
@@ -801,7 +767,7 @@ internal fun HistoryRow(
                             overflow = TextOverflow.Ellipsis,
                         )
                     } else {
-                        // 0lis: CODE/COLOR/NUMBER/PATH/JSON → MonoFontFamily 12sp (parity .preview.mono)
+                        // 0lis: CODE/COLOR/NUMBER/PATH/JSON → monospace 12sp (parity .preview.mono)
                         val isMonoKind = chipLabel in setOf("CODE", "COLOR", "NUMBER", "PATH", "JSON")
                         // CopyPaste-ojsh: use span-masked text when available (non-sensitive item
                         // with sensitive sub-strings). Falls back to `display` when no span masking
@@ -811,14 +777,14 @@ internal fun HistoryRow(
                             text = previewText,
                             style = if (isMonoKind) {
                                 TextStyle(
-                                    fontFamily = MonoFontFamily,
+                                    fontFamily = FontFamily.Monospace,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Normal,
                                 )
                             } else {
                                 MaterialTheme.typography.bodyLarge
                             },
-                            color = if (detectedSensitive) c.dim else c.text,
+                            color = if (detectedSensitive) c.onSurfaceVariant else c.onSurface,
                             maxLines = previewLines,
                             overflow = TextOverflow.Ellipsis,
                             // PG-61: blur radius 6dp (parity macOS blur(6px)).
@@ -859,7 +825,7 @@ internal fun HistoryRow(
                                 fontWeight = FontWeight.Normal,
                                 fontFeatureSettings = "tnum",
                             ),
-                            color = c.faint,
+                            color = c.onSurfaceVariant,
                             maxLines = 1,
                         )
                         // CopyPaste-9uyk: source-app icon + label chip (text rows).
@@ -887,7 +853,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) accentFill() else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) c.primary else c.onSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -895,8 +861,8 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) accentFill()
-                                       else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex < pinnedCount - 1) c.primary
+                                       else c.onSurfaceVariant.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -910,7 +876,7 @@ internal fun HistoryRow(
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.warn else c.dim,
+                                tint = if (item.pinned) c.tertiary else c.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -918,7 +884,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.err,
+                                tint = c.error,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -942,13 +908,11 @@ internal fun ScaleIconButton(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    // §8 a11y: suppress press-scale when reduced-motion is active.
-    val reducedMotion = rememberReducedMotion()
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.992f else 1.0f,
-        animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant, easing = EaseOutExpo),
+        targetValue = if (isPressed) 0.992f else 1.0f,
+        animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
         label = "btnScale",
     )
     IconButton(

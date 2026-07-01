@@ -1,8 +1,6 @@
 package com.copypaste.android
 
 import android.os.Build
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,12 +24,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.ButtonVariant
-import com.copypaste.android.ui.theme.accentFill
-import com.copypaste.android.ui.theme.accentTint
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.RadiusChip
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grouped inset list rows (PARITY-SPEC §8)
@@ -67,61 +61,35 @@ internal fun PeerRow(
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
-    val c = LocalCpColors.current
     // PG-37 parity: offline status dot uses danger (red) to match the macOS
     // DeviceCard offline indicator (was c.faint/grey, which diverged).
-    val dotColor = if (online) c.ok else c.err
+    val dotColor = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
     val chip = transportChipFor(peer, cloudTransport)
 
-    // Row content only — the enclosing CopyPasteCard provides the glass surface,
-    // 12dp radius, and 1dp hairline border (PARITY-SPEC §8 grouped inset list).
-    Column(modifier = Modifier.padding(16.dp)) {
+    // Row content only — the enclosing CopyPasteCard provides the surface.
+    Column {
         // ── Header row: pulse dot + name + status + transport chip ───────
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // §7 online pulse ring (replaces plain dot).
-            PulseDot(online = online, modifier = Modifier.size(10.dp))
+            PulseDot(online = online)
             Text(
                 text = peer.name.ifBlank { "Paired device" },
-                color = c.text,
-                style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f, fill = false),
             )
             Text(
                 text = if (online) "Online" else "Offline",
                 color = dotColor,
-                style = MaterialTheme.typography.labelMedium,
             )
             // §7 transport chip: P2P (info) or Cloud (accent).
             TransportChipLabel(chip = chip)
         }
 
-        Spacer(Modifier.height(6.dp))
-
         // mgkr (NG-3): Verified trust badge — all persisted peers completed SAS
         // confirmation before roster insertion. Surface this explicitly via a
-        // green "Verified" chip using success token colours + RadiusChip shape
-        // (4 dp — PARITY-SPEC §4 chip radius) so it adapts across skins without
-        // hard-coding a value. Parity with the web DeviceCard trust badge.
-        Text(
-            text = trustLabel(peer),
-            color = c.ok,
-            fontSize = 10.sp,
-            letterSpacing = 0.4.sp,
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier
-                .background(c.ok.copy(alpha = 0.14f), RadiusChip)
-                .border(
-                    width = 1.dp,
-                    color = c.ok.copy(alpha = 0.30f),
-                    shape = RadiusChip,
-                )
-                .padding(horizontal = 6.dp, vertical = 2.dp),
-        )
-
-        Spacer(Modifier.height(8.dp))
+        // "Verified" chip. Parity with the web DeviceCard trust badge.
+        Text(text = trustLabel(peer))
 
         // ── Two-column aligned table ─────────────────────────────────────
         // Label column is [META_LABEL_WIDTH] wide; value column takes the
@@ -139,7 +107,7 @@ internal fun PeerRow(
             }
         } else null
 
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column {
             peer.peerModel?.takeIf { it.isNotBlank() }?.let {
                 MetaRow(label = "Model", value = it)
             }
@@ -185,13 +153,7 @@ internal fun PeerRow(
             }
         }
 
-        // CopyPaste-g4ze: reduce divider gap (vertical 12dp → top 10 / bottom 8) to avoid
-        // disproportionate spacing between the metadata table and the action buttons.
-        HorizontalDivider(
-            modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
-            color = c.divider,
-            thickness = 1.dp,
-        )
+        HorizontalDivider()
 
         // ── Actions ─────────────────────────────────────────────────────
         // CopyPaste-jkbo: replaced raw M3 Button/ButtonDefaults with shared
@@ -199,7 +161,6 @@ internal fun PeerRow(
         // fg=danger recipe automatically (matching web spec §7).
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             CopyPasteButton(
                 onClick = onUnpair,
@@ -221,67 +182,19 @@ internal fun PeerRow(
 
 @Composable
 internal fun NoPeerCard(onPair: () -> Unit) {
-    val c = LocalCpColors.current
-    CopyPasteCard(accent = c.border) {
+    CopyPasteCard {
         Row(
-            modifier = Modifier.padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Discovery rings icon — concentric ping rings around the network symbol.
-            // Mirrors styleguide `networkRing` keyframe: scale .78→1.35, opacity .5→0,
-            // 2.7 s × motionScale loop; second ring delayed by 1.1 s × motionScale.
-            DiscoveryRingsIcon(size = 52.dp)
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "No device paired",
-                    color = c.dim,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Text(
-                    text = "Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.",
-                    color = c.faint,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            // Discovery icon removed (de-style pass) — text-only empty state.
+            Column {
+                Text(text = "No device paired")
+                Text(text = "Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.")
                 // CopyPaste-jkbo: replaced raw M3 Button with CopyPasteButton(PRIMARY).
                 CopyPasteButton(onClick = onPair, variant = ButtonVariant.PRIMARY) {
                     Text("Pair a device")
                 }
             }
-        }
-    }
-}
-
-/**
- * Network icon with two concentric discovery-ping rings animated outward.
- * Mirrors the styleguide `.empty-icon::before/::after` + `networkRing` keyframe:
- *   scale 0.78 → 1.35, opacity 0.5 → 0, ease-out, 2.7 s × motionScale loop.
- * The second ring is delayed by 1.1 s × motionScale to stagger the pulses.
- * Both rings are tinted [accent2] (styleguide `.empty-icon::before` uses accent-2).
- * Gated on system reduced-motion.
- */
-@Composable
-internal fun DiscoveryRingsIcon(size: Dp = 58.dp) {
-    val c = LocalCpColors.current
-    // Discovery rings removed — static icon is calmer (no idle loop animation).
-    Box(
-        modifier = Modifier.size(size),
-        contentAlignment = Alignment.Center,
-    ) {
-        // Icon surface — glass-tinted rounded square with network symbol (text).
-        Box(
-            modifier = Modifier
-                .size(size)
-                .clip(RoundedCornerShape(size / 3.5f))
-                .background(accentTint()),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "⊕",
-                color = accentFill(),
-                fontSize = (size.value * 0.45f).sp,
-            )
         }
     }
 }
@@ -306,7 +219,6 @@ internal fun OwnDeviceRow(
     // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
-    val c = LocalCpColors.current
     val model = Build.MODEL.orEmpty().ifBlank { "Android" }
     val osVersion = "Android " + Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
@@ -319,47 +231,27 @@ internal fun OwnDeviceRow(
 
     // Badge float removed — static badge is calmer and more professional.
 
-    // Row content only — the enclosing CopyPasteCard provides the glass surface
-    // (PARITY-SPEC §8 grouped inset list).
-    Column(modifier = Modifier.padding(16.dp)) {
+    // Row content only — the enclosing CopyPasteCard provides the surface.
+    Column {
         // Header: §7 pulse dot (always online) + model name + "Online"
         // + §7 "This Device" accent badge (parity with macOS "This Mac").
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // Own device is always online — pulse ring always animates (unless
             // reduced motion is enabled).
-            PulseDot(online = true, modifier = Modifier.size(10.dp))
+            PulseDot(online = true)
             Text(
                 text = model,
-                color = c.text,
-                style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            Text(
-                text = "Online",
-                color = c.ok,
-                style = MaterialTheme.typography.labelMedium,
-            )
+            Text(text = "Online")
             // §7 "This Device" accent badge — static (float animation removed).
-            // CopyPaste-5917.44: was RoundedCornerShape(4.dp); canonical chip token is RadiusChip (7dp).
-            Text(
-                text = "This Device",
-                color = accentFill(),
-                fontSize = 10.sp,
-                letterSpacing = 0.4.sp,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier
-                    .background(accentTint(), RadiusChip)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+            Text(text = "This Device")
         }
 
-        Spacer(Modifier.height(10.dp))
-
-        // Two-column aligned table — same [META_LABEL_WIDTH] as PeerRow.
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Two-column-ish table — same rows as PeerRow.
+        Column {
             MetaRow(label = "Model", value = model)
             MetaRow(label = "OS", value = osVersion)
             MetaRow(label = "Version", value = appVersion)
@@ -391,7 +283,6 @@ internal fun DiscoveredPeerRow(
     busy: Boolean,
     onPair: () -> Unit,
 ) {
-    val c = LocalCpColors.current
     // v1 peers (no bootstrap port) cannot do SAS pairing → disable Pair.
     val pairable = peer.bport != null
     // CopyPaste-cnmw: show ALL discovered IPs (macOS merges/shows all) instead of
@@ -415,7 +306,6 @@ internal fun DiscoveredPeerRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = peer.displayName(),
-                    color = c.text,
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Spacer(Modifier.height(4.dp))
@@ -442,7 +332,6 @@ internal fun DiscoveredPeerRow(
         if (!pairable) {
             Text(
                 text = "This device does not support secure pairing.",
-                color = c.faint,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
             )

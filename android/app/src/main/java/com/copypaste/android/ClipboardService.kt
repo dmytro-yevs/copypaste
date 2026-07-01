@@ -21,11 +21,9 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
-import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
-import com.copypaste.android.ui.theme.IdeAccent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -2097,7 +2095,6 @@ class ClipboardService : Service() {
                 .setContentTitle(title)
                 .setContentText(content)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setColor(IdeAccent.toArgb())
                 .setOngoing(true)
                 .setShowWhen(false)
                 .setOnlyAlertOnce(true)

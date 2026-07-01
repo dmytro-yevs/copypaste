@@ -24,8 +24,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -48,18 +50,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.R
 import com.copypaste.android.RECENT_SYNC_MS
 import com.copypaste.android.Settings
-import com.copypaste.android.ui.theme.GlassTier
-import com.copypaste.android.ui.theme.TranslucentSurface
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.rememberTranslucency
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
@@ -105,13 +101,13 @@ internal fun rememberReducedMotion(): Boolean {
  * online peers.
  *
  * Dot colour (PARITY-SPEC §9 — CopyPaste-5qbe 4-state display model → 3 colours):
- *   - SUCCESS ([CpColors.success]) when at least one peer is live-online AND the
+ *   - SUCCESS (primary) when at least one peer is live-online AND the
  *     most-recent sync is within [RECENT_SYNC_MS] (PG-11 recency gate — mirrors
  *     macOS SyncStatusChip).
- *   - FAINT ([CpColors.faint]) when online but no peers connected, or when all
+ *   - FAINT (onSurfaceVariant) when online but no peers connected, or when all
  *     peers are stale (last sync > 5 min ago) — maps to [SyncBadgeState.Idle].
  *     Previously this incorrectly showed DANGER red; now grey to match macOS idle.
- *   - DANGER ([CpColors.danger]) when the device itself is offline (no OS network →
+ *   - DANGER (error) when the device itself is offline (no OS network →
  *     [SyncBadgeState.NetworkOffline]) OR when an authoritative IPC badge_state of
  *     OFFLINE/ERROR indicates a hard sync failure ([SyncBadgeState.DaemonUnreachable]).
  *
@@ -145,15 +141,8 @@ internal fun rememberReducedMotion(): Boolean {
 fun SyncStatusBadge(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
-    val c = LocalCpColors.current
 
-    val translucent = rememberTranslucency()
-    // Transparent when the user pref is on → sheet scrim shows through.
-    val sheetContainerColor = if (syncSheetEffectiveTranslucent(translucent)) {
-        Color.Transparent
-    } else {
-        c.bg
-    }
+    val sheetContainerColor = MaterialTheme.colorScheme.background
 
     // Live count from DevicesScreen (IP-correlation + lastSyncMs). Updated
     // every ~1 s while the Devices tab is active. -1 means not yet computed.
@@ -254,12 +243,12 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     }
 
     val connected = badgeState is SyncBadgeState.Connected
-    // CopyPaste-5qbe: Idle is grey (c.faint), matching macOS "idle" grey dot.
+    // CopyPaste-5qbe: Idle is grey (onSurfaceVariant), matching macOS "idle" grey dot.
     val dotColor = when (badgeState) {
-        SyncBadgeState.Connected         -> c.ok
-        SyncBadgeState.Idle              -> c.faint
+        SyncBadgeState.Connected         -> MaterialTheme.colorScheme.primary
+        SyncBadgeState.Idle              -> MaterialTheme.colorScheme.onSurfaceVariant
         SyncBadgeState.NetworkOffline,
-        SyncBadgeState.DaemonUnreachable -> c.err
+        SyncBadgeState.DaemonUnreachable -> MaterialTheme.colorScheme.error
     }
 
     // CopyPaste-5917.13 (A11Y-5): gate the pulse on the system reduce-motion preference.
@@ -344,7 +333,7 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
             val footerLabel = if (count > 0) "CopyPaste · $count devices" else "CopyPaste"
             Text(
                 text = footerLabel,
-                color = c.faint,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.5.sp,
                 modifier = Modifier.padding(start = 6.dp),
             )
@@ -357,17 +346,17 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .padding(start = 6.dp)
                         .clip(RoundedCornerShape(50))
-                        .background(c.warn.copy(alpha = 0.14f))
+                        .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.14f))
                         .border(
                             width = 1.dp,
-                            color = c.warn.copy(alpha = 0.30f),
+                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.30f),
                             shape = RoundedCornerShape(50),
                         )
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
                     Text(
                         text = "Misconfig",
-                        color = c.warn,
+                        color = MaterialTheme.colorScheme.tertiary,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
                     )
@@ -382,17 +371,13 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         ModalBottomSheet(
             onDismissRequest = { showSheet = false },
             sheetState = sheetState,
-            // A-C9: skin-aware — transparent for glass skins (TranslucentSurface
-            // inside SyncStatusSheet provides the frosted fill); opaque for Quiet.
             containerColor = sheetContainerColor,
         ) {
             SyncStatusSheet(
                 count = count,
                 lastActivityMs = lastActivityMs,
                 settings = settings,
-                // CopyPaste-ohki: pass translucent so SyncStatusSheet can wrap its
-                // Column in TranslucentSurface for glass skins. Mirrors GlassAlertDialog.
-                translucent = syncSheetEffectiveTranslucent(translucent),
+                translucent = syncSheetEffectiveTranslucent(false),
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             )
             // Bottom spacing so the sheet content clears system gesture bar.
@@ -415,19 +400,15 @@ private fun SyncStatusSheet(
     count: Int,
     lastActivityMs: Long,
     settings: Settings,
-    // CopyPaste-ohki: when true (glass skin + user pref on), the content is wrapped in
-    // TranslucentSurface(STRONG) to match the frosted sheet container. When false
-    // (FLAT/Quiet skin or pref off), the plain Column on the opaque container is correct.
+    // CopyPaste-ohki: when true the content is wrapped in a plain [Surface] to match
+    // the sheet container shape. When false the plain Column on the opaque container
+    // is correct.
     translucent: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalCpColors.current
-    val dark = isDarkTheme()
     val nowMs = System.currentTimeMillis()
 
     // ModalBottomSheet default top-corner radius is 28.dp (Material3 spec).
-    // TranslucentSurface clips to this shape so the frosted fill matches the sheet
-    // geometry and the glass rim sits flush with the sheet's rounded top edge.
     val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
     // Relative last-sync label matching the DevicesScreen PeerRow format exactly.
@@ -451,19 +432,14 @@ private fun SyncStatusSheet(
     val maskedEmail: String? = settings.supabaseEmail.takeIf { it.isNotBlank() }
         ?.let { maskEmail(it) }
 
-    // CopyPaste-ohki: glass skins (translucent=true) wrap the content in a
-    // TranslucentSurface(STRONG) so the frosted fill covers the transparent
-    // sheet container. FLAT/Quiet (translucent=false) leaves the Column on the
-    // opaque c.bg container — same as before. Mirrors GlassAlertDialog.
+    // CopyPaste-ohki: when translucent=true, wrap the content in a plain Surface so
+    // it matches the sheet's rounded shape. When false, leave the Column on the
+    // opaque background container — same as before.
     if (translucent) {
-        TranslucentSurface(
+        Surface(
             shape = sheetShape,
-            translucent = true,
-            dark = dark,
-            solid = c.bg,
+            color = MaterialTheme.colorScheme.background,
             modifier = Modifier.fillMaxSize(),
-            tier = syncSheetGlassTier(),
-            hairline = false, // sheet frame already has a rim; no double border
         ) {
             SheetContent(
                 count = count,
@@ -490,13 +466,12 @@ private fun SheetContent(
     maskedEmail: String?,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalCpColors.current
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(0.dp)) {
         Text(
             text = "Sync status",
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
-            color = c.text,
+            color = MaterialTheme.colorScheme.onSurface,
         )
 
         Spacer(Modifier.height(16.dp))
@@ -505,7 +480,7 @@ private fun SheetContent(
 
         HorizontalDivider(
             modifier = Modifier.padding(vertical = 8.dp),
-            color = c.divider,
+            color = MaterialTheme.colorScheme.outlineVariant,
             thickness = 1.dp,
         )
 
@@ -514,7 +489,7 @@ private fun SheetContent(
         if (maskedEmail != null) {
             HorizontalDivider(
                 modifier = Modifier.padding(vertical = 8.dp),
-                color = c.divider,
+                color = MaterialTheme.colorScheme.outlineVariant,
                 thickness = 1.dp,
             )
             SheetRow(label = "Account", value = maskedEmail)
@@ -525,7 +500,6 @@ private fun SheetContent(
 /** Single label/value row for the sync status sheet. */
 @Composable
 private fun SheetRow(label: String, value: String) {
-    val c = LocalCpColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -535,12 +509,12 @@ private fun SheetRow(label: String, value: String) {
     ) {
         Text(
             text = label,
-            color = c.dim,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp,
         )
         Text(
             text = value,
-            color = c.text,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 13.sp,
         )
     }
@@ -575,7 +549,7 @@ sealed interface SyncBadgeState {
     /**
      * Sync is configured but no recent activity — the equivalent of macOS "idle" grey dot
      * (CopyPaste-5qbe). Not a hard failure: peers may simply be offline or quiescent.
-     * Grey dot — same as [CpColors.faint].
+     * Grey dot — same as the onSurfaceVariant icon/label tone used elsewhere.
      */
     data object Idle : SyncBadgeState
     /**
@@ -805,18 +779,6 @@ internal fun buildSyncTooltip(
 
     return parts.joinToString(" · ")
 }
-
-/**
- * Glass tier used by [SyncStatusSheet] when wrapping in [TranslucentSurface] (CopyPaste-ohki).
- *
- * Uses [GlassTier.STRONG] — the same tier as [GlassAlertDialog] — because the bottom
- * sheet is a modal surface: styleguide `.surface-strong` (blur 40dp, light fill flat .92,
- * dark fill 0.86). This ensures the sheet stands out over the dimmed scrim and text
- * stays legible, matching the web's modal glass recipe.
- *
- * Pure function — usable in JVM unit tests (no Compose runtime needed).
- */
-internal fun syncSheetGlassTier(): GlassTier = GlassTier.STRONG
 
 /**
  * Returns `true` when the sync-status bottom sheet should use a transparent

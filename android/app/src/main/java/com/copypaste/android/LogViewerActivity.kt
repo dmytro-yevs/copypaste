@@ -4,31 +4,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.Description
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.KeyboardArrowUp
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Share
-import androidx.compose.material.icons.outlined.SearchOff
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.accentFill
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -42,25 +30,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
-import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.EmptyStateCard
-import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.ideTextFieldColors
-import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.screenCanvas
-import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,11 +67,11 @@ class LogViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
-        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        // SecureWindowChrome applies FLAG_SECURE centrally when allowScreenshots=false (the default).
         applyScreenshotPolicy(Settings(this))
         enableEdgeToEdge()
         setContent {
-            CopyPasteTheme {
+            SecureWindowChrome {
                 LogViewerScreen(onBack = { finish() })
             }
         }
@@ -107,11 +87,6 @@ fun LogViewerScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState: LazyListState = rememberLazyListState()
-
-    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
-    val translucent = rememberTranslucency()
-    val dark = isDarkTheme()
-    val paintCanvas = translucent
 
     // ── State ──────────────────────────────────────────────────────────────
     val toastState = remember { GlassToastState() }
@@ -162,8 +137,6 @@ fun LogViewerScreen(onBack: () -> Unit) {
         }
     }
 
-    val c = LocalCpColors.current
-
     // ── Clear-logs confirmation dialog ──────────────────────────────────────
     if (showClearDialog) {
         GlassAlertDialog(
@@ -171,16 +144,14 @@ fun LogViewerScreen(onBack: () -> Unit) {
             title = {
                 Text(
                     text = "Clear Logs",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = c.text,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
             },
             text = {
                 Text(
                     text = "Delete all log files (app.log, app.log.1, crash_*.txt)? " +
                         "This cannot be undone.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.dim,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             },
             confirmButton = {
@@ -213,12 +184,9 @@ fun LogViewerScreen(onBack: () -> Unit) {
         }
     }
 
-    val scaffoldModifier = if (paintCanvas) Modifier.screenCanvas(dark) else Modifier
-
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        modifier = scaffoldModifier,
-        containerColor = if (paintCanvas) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CopyPasteTopBar(
                 title = "Logs",
@@ -232,20 +200,11 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     IconButton(onClick = {
                         atBottom = !atBottom
                     }) {
-                        Icon(
-                            imageVector = if (atBottom) Icons.Outlined.KeyboardArrowUp
-                                          else Icons.Outlined.KeyboardArrowDown,
-                            contentDescription = if (atBottom) "Scroll to top" else "Scroll to bottom",
-                            tint = c.dim,
-                        )
+                        Text(if (atBottom) "Top" else "Bottom")
                     }
                     // Refresh
                     IconButton(onClick = { loadLogs() }) {
-                        Icon(
-                            imageVector = Icons.Outlined.Refresh,
-                            contentDescription = "Refresh logs",
-                            tint = c.dim,
-                        )
+                        Text("Refresh")
                     }
                     // Share / Export
                     IconButton(onClick = {
@@ -253,19 +212,11 @@ fun LogViewerScreen(onBack: () -> Unit) {
                             scope.launch { toastState.show(msg, GlassToastKind.DANGER) }
                         })
                     }) {
-                        Icon(
-                            imageVector = Icons.Outlined.Share,
-                            contentDescription = "Export logs",
-                            tint = c.dim,
-                        )
+                        Text("Export")
                     }
                     // Clear logs
                     IconButton(onClick = { showClearDialog = true }) {
-                        Icon(
-                            imageVector = Icons.Outlined.Delete,
-                            contentDescription = "Clear logs",
-                            tint = c.err,
-                        )
+                        Text("Clear")
                     }
                 },
             )
@@ -281,10 +232,9 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
-                    color = c.faint,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(c.panel)
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
@@ -294,10 +244,9 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 Text(
                     text = "Showing last ${TAIL_BYTES / 1024} KB — older lines omitted to avoid OOM.",
                     style = MaterialTheme.typography.labelSmall,
-                    color = c.warn,
+                    color = MaterialTheme.colorScheme.tertiary,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(c.panel)
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
@@ -310,7 +259,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     Text(
                         "Filter lines…",
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.faint,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 },
                 singleLine = true,
@@ -333,7 +282,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                             imageVector = if (isFilter) Icons.Outlined.SearchOff
                                           else Icons.Outlined.Description,
                             contentDescription = null,
-                            tint = if (errorMsg != null) c.err else accentFill(),
+                            tint = if (errorMsg != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(26.dp),
                         )
                     },
@@ -355,8 +304,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(c.bg),
+                            .fillMaxSize(),
                     ) {
                         itemsIndexed(displayLines) { _, line ->
                             LogLine(line)
@@ -386,31 +334,31 @@ fun LogViewerScreen(onBack: () -> Unit) {
  */
 @Composable
 private fun LogLine(line: String) {
-    val c = LocalCpColors.current
+    val colorScheme = MaterialTheme.colorScheme
     val color = when {
         // Level codes come after the timestamp: "... E/Tag:" or "... W/Tag:"
         // Uses file-level precompiled regexes to avoid allocation on every recomposition.
         RE_LEVEL_ANY.containsMatchIn(line) -> {
             when {
-                RE_LEVEL_E.containsMatchIn(line) -> c.err
-                RE_LEVEL_W.containsMatchIn(line) -> c.warn
-                RE_LEVEL_I.containsMatchIn(line) -> c.text
-                RE_LEVEL_D.containsMatchIn(line) -> c.dim
-                else -> c.dim
+                RE_LEVEL_E.containsMatchIn(line) -> colorScheme.error
+                RE_LEVEL_W.containsMatchIn(line) -> colorScheme.tertiary
+                RE_LEVEL_I.containsMatchIn(line) -> colorScheme.onSurface
+                RE_LEVEL_D.containsMatchIn(line) -> colorScheme.onSurfaceVariant
+                else -> colorScheme.onSurfaceVariant
             }
         }
         // Stack trace lines
-        line.trimStart().startsWith("at ") -> c.faint
+        line.trimStart().startsWith("at ") -> colorScheme.onSurfaceVariant
         // Crash report header lines (=== ... ===)
-        line.startsWith("=") -> accentFill()
-        else -> c.dim
+        line.startsWith("=") -> colorScheme.primary
+        else -> colorScheme.onSurfaceVariant
     }
 
     // A6: soft-wrap long lines so everything is visible without horizontal scrolling
     Text(
         text = line,
         style = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = MonoFontFamily,
+            fontFamily = FontFamily.Monospace,
             fontSize = 11.sp,
             lineHeight = 16.sp,
         ),

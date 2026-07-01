@@ -1,18 +1,10 @@
 package com.copypaste.android
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -22,7 +14,6 @@ import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.LocalCpColors
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Post-pairing success popup
@@ -46,71 +37,43 @@ internal fun PairedSuccessPopup(
     peer: PairedPeer,
     onDismiss: () -> Unit,
 ) {
-    // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
-    val c = LocalCpColors.current
     GlassAlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                text = "Paired successfully",
-                style = MaterialTheme.typography.titleMedium,
-                // voyf: theme-adaptive success token.
-                color = c.ok,
-            )
+            Text(text = "Paired successfully")
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column {
                 // ── Avatar + name + status row ────────────────────────────────
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    // lclr: 38dp avatar tile in success-tint (peer is now online/paired).
+                    // lclr: avatar tile in success-tint (peer is now online/paired).
                     val displayName = peer.name.ifBlank { "Paired device" }
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(c.ok.copy(alpha = 0.12f)),
+                            .clip(RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = displayName.take(1).uppercase(),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = c.ok,
-                        )
+                        Text(text = displayName.take(1).uppercase())
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Column {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            // prld: status dot 8dp (not 10dp), success color for paired state.
+                            // prld: status dot, success state.
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(c.ok),
+                                    .clip(CircleShape),
                             )
-                            Text(
-                                text = displayName,
-                                style = MaterialTheme.typography.titleSmall,
-                                // voyf: theme-adaptive text token.
-                                color = c.text,
-                            )
+                            Text(text = displayName)
                         }
-                        Text(
-                            text = "Paired ✓",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = c.ok,
-                        )
+                        Text(text = "Paired ✓")
                     }
                 }
 
-                Spacer(Modifier.height(4.dp))
-
                 // ── Device metadata rows (only non-blank fields) ─────────────
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column {
                     peer.peerModel?.takeIf { it.isNotBlank() }?.let {
                         PopupMetaRow(label = "Model", value = it)
                     }
@@ -138,21 +101,8 @@ internal fun PairedSuccessPopup(
 /** Single label+value row for [PairedSuccessPopup]. */
 @Composable
 private fun PopupMetaRow(label: String, value: String) {
-    // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
-    val c = LocalCpColors.current
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            // voyf: theme-adaptive dim token.
-            color = c.dim,
-            modifier = Modifier.width(72.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            // voyf: theme-adaptive text token.
-            color = c.text,
-        )
+    Row {
+        Text(text = label)
+        Text(text = value)
     }
 }

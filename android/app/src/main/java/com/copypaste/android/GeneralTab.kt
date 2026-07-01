@@ -2,17 +2,10 @@ package com.copypaste.android
 
 import android.content.Intent
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.NavIcons
 import com.copypaste.android.ui.theme.SectionLabel
 
 @Composable
@@ -33,8 +26,7 @@ internal fun GeneralTab(
     // Called with a human-readable message; the caller (SettingsScreen) routes it to GlassToastHost.
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalCpColors.current
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column {
         // ── GENERAL section card ──────────────────────────────────────────
         SectionLabel(stringResource(R.string.section_general))
         SettingsCard {
@@ -110,7 +102,6 @@ internal fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.log_viewer_button),
                 subtitle = stringResource(R.string.log_viewer_description),
-                leadingIcon = NavIcons.Logs,
                 onClick = {
                     ctx.startActivity(Intent(ctx, LogViewerActivity::class.java))
                 }
@@ -132,9 +123,7 @@ internal fun GeneralTab(
             // Explainer
             Text(
                 text = stringResource(R.string.bg_adb_explainer),
-                style = MaterialTheme.typography.bodySmall,
-                color = c.dim,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             // Live status line
             AdbCaptureStatusLine(logcatStatus = logcatStatus, ctx = ctx)
@@ -154,20 +143,16 @@ internal fun GeneralTab(
         }
 
         // ── ABOUT (last General entry) ────────────────────────────────────
-        // CopyPaste-5917.77: NavIcons.About (info.circle SF-like icon) — parity with macOS About tab.
         // Android intentionally routes About via Settings rather than a bottom-nav tab;
         // see NavTabTest which asserts the 3-tab (Clips/Devices/Settings) nav is canonical.
-        Spacer(modifier = Modifier.height(8.dp))
         SettingsCard {
             SettingsNavRow(
                 title = stringResource(R.string.title_about),
                 subtitle = stringResource(R.string.about_tagline),
-                leadingIcon = NavIcons.About,
                 onClick = {
                     ctx.startActivity(Intent(ctx, AboutActivity::class.java))
                 }
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }

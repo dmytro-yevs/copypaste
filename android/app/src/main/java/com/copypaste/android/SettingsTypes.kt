@@ -9,23 +9,6 @@ enum class SyncBackend {
 }
 
 /**
- * App theme mode — the dark/light appearance axis (STYLEGUIDE §2).
- *
- * There is NO "system" mode: §2 defines exactly two theme values, dark
- * (default) and light, matching the web store (`store.ts` is dark-first, no
- * system axis). The accent hue is the independent CHROMA axis ([AccentColor]).
- */
-enum class ThemeMode {
-    LIGHT, // force light
-    DARK;  // force dark (default)
-
-    companion object {
-        /** STYLEGUIDE §2: dark-first — default is DARK, matching web store.ts. */
-        val DEFAULT = DARK
-    }
-}
-
-/**
  * CopyPaste-gkgp: thrown by [Settings.loadOrCreateKey] when the AndroidKeyStore
  * KEK can no longer unwrap the persisted encryption key (e.g. after a factory
  * reset, keystore wipe, or device restore to a different device).

@@ -6,7 +6,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
-import com.copypaste.android.ui.theme.AccentColor
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.UUID
@@ -15,7 +14,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-// SyncBackend, ThemeMode, EncryptionKeyLostException → SettingsTypes.kt
+// SyncBackend, EncryptionKeyLostException → SettingsTypes.kt
 // PairedPeer, P2pIdentity → PeerRoster.kt
 // rememberSkin, applyScreenshotPolicy → SettingsComposables.kt
 
@@ -576,7 +575,7 @@ class Settings(context: Context) {
      * (default — SECURE), we set WindowManager FLAG_SECURE on every app window
      * so the clipboard contents cannot be screenshotted / recorded / shown in
      * the recents preview. When true (user opt-in) screenshots work normally.
-     * Applied centrally in CopyPasteTheme; toggling recreates the activity so
+     * Applied centrally in SecureWindowChrome; toggling recreates the activity so
      * the flag change takes effect (same pattern as the palette/theme switch).
      *
      * SECURITY: default must remain false (SECURE) so a first-install or
@@ -643,36 +642,6 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("sort_by_device", v).apply()
 
     /**
-     * App theme mode — Light / Dark, default DARK (STYLEGUIDE §2).
-     *
-     * The app is **dark-first** (matching the web store): the default is
-     * [ThemeMode.DARK]. There is no "system" mode — §2 removed it; a stored
-     * legacy "SYSTEM" (or any unknown value) resolves to DARK here and is
-     * rewritten to "DARK" by [migrateThemeForTwoAxis]. The Settings control
-     * drives this; [com.copypaste.android.ui.theme.CopyPasteTheme] reads it via
-     * [com.copypaste.android.ui.theme.rememberThemeMode].
-     */
-    var themeMode: ThemeMode
-        get() = when (prefs.getString("theme_mode", ThemeMode.DEFAULT.name)) {
-            ThemeMode.LIGHT.name -> ThemeMode.LIGHT
-            ThemeMode.DARK.name  -> ThemeMode.DARK
-            // Unknown / absent / legacy "SYSTEM": fall back to the §2 default (DARK).
-            else -> ThemeMode.DEFAULT
-        }
-        set(v) = prefs.edit().putString("theme_mode", v.name).apply()
-
-    /**
-     * Active accent hue (STYLEGUIDE §2/§11) — one of the six [AccentColor] hues.
-     *
-     * The accent is one of the two appearance axes (the other is [themeMode]).
-     * Stored as the [AccentColor] enum name string (key "accent"); unrecognised
-     * or absent values fall back to [AccentColor.DEFAULT] (indigo).
-     */
-    var accent: AccentColor
-        get() = AccentColor.fromName(prefs.getString("accent", AccentColor.DEFAULT.name))
-        set(v) = prefs.edit().putString("accent", v.name).apply()
-
-    /**
      * One-time migration to the two-axis theme (STYLEGUIDE §11/§12): drops the
      * stale Liquid-Glass appearance keys (palette / skin / density / motion /
      * contrast) so the new isDark × accent defaults apply cleanly. The user's
@@ -686,12 +655,9 @@ class Settings(context: Context) {
             .remove("density")
             .remove("motion_reduced")
             .remove("contrast")
+            .remove("theme_mode")
+            .remove("accent")
             .putBoolean("theme_migrated_2axis", true)
-        // §2 / web store v4: the removed "SYSTEM" theme value maps to DARK so a
-        // stored legacy value never silently follows the OS again.
-        if (prefs.getString("theme_mode", null) == "SYSTEM") {
-            edit.putString("theme_mode", ThemeMode.DARK.name)
-        }
         edit.apply()
     }
 
@@ -1578,8 +1544,6 @@ class Settings(context: Context) {
         notifyOnCopy: Boolean,
         soundOnCopy: Boolean,
         logcatCaptureEnabled: Boolean,
-        /** Accent hue axis (STYLEGUIDE §11); default indigo. */
-        accent: AccentColor = AccentColor.DEFAULT,
     ) {
         // Clamp the size/quota knobs through the SAME native clampConfig the macOS
         // daemon uses so a force-stop-safe batch write can never persist a
@@ -1614,7 +1578,6 @@ class Settings(context: Context) {
             .putBoolean("notify_on_copy", notifyOnCopy)
             .putBoolean("sound_on_copy", soundOnCopy)
             .putBoolean("logcat_capture_enabled", logcatCaptureEnabled)
-            .putString("accent", accent.name)  // STYLEGUIDE §11 accent axis (default indigo)
             .commit() // synchronous: survives an immediate force-stop (SIGKILL)
     }
 

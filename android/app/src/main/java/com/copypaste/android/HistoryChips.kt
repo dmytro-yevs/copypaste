@@ -3,14 +3,9 @@ package com.copypaste.android
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.WarningAmber
-import androidx.compose.material3.Icon
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -18,16 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.copypaste.android.ui.theme.CpColors
-import com.copypaste.android.ui.theme.LocalCpColors
-import com.copypaste.android.ui.theme.contentIconFor
-import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
-import androidx.compose.material.icons.outlined.Lock
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §6 Content-type chip — CANONICAL kind→color table (PARITY-SPEC §6).
@@ -46,22 +32,22 @@ import androidx.compose.material.icons.outlined.Lock
  * the row can pre-derive the chip color once and never re-evaluate the `when` on
  * scroll recompositions.
  */
-internal fun chipColorFor(kind: String, c: CpColors): Color = when (kind) {
+internal fun chipColorFor(kind: String, c: ColorScheme): Color = when (kind) {
     // 5917.80: TEXT→faint (grey), not accent (blue) — parity with macOS KindChip fallback.
     // IMAGE→violet (1jms.14 PARITY-SPEC §6), FILE→faint (styleguide .b-file = --ide-faint).
-    "TEXT"    -> c.faint
-    "URL"     -> c.info
-    "EMAIL"   -> c.ok
-    "PHONE"   -> c.ok
-    "COLOR"   -> c.warn
-    "NUMBER"  -> c.warn
-    "PATH"    -> c.warn
-    "JSON"    -> c.err
-    "CODE"    -> c.cCode
-    "IMAGE"   -> c.cCode  // 1jms.14: PARITY-SPEC §6 canonical: IMAGE → violet (not sky/info)
-    "FILE"    -> c.dim     // CopyPaste-crh3.41: PARITY-SPEC §6 + macOS = dim (izio's faint diverged)
-    "PRIVATE" -> c.err
-    else      -> c.faint   // unknown text kinds default to the TEXT slot
+    "TEXT"    -> c.onSurfaceVariant
+    "URL"     -> c.secondary
+    "EMAIL"   -> c.primary
+    "PHONE"   -> c.primary
+    "COLOR"   -> c.tertiary
+    "NUMBER"  -> c.tertiary
+    "PATH"    -> c.tertiary
+    "JSON"    -> c.error
+    "CODE"    -> c.secondary
+    "IMAGE"   -> c.secondary  // 1jms.14: PARITY-SPEC §6 canonical: IMAGE → violet (not sky/info)
+    "FILE"    -> c.onSurfaceVariant     // CopyPaste-crh3.41: PARITY-SPEC §6 + macOS = dim (izio's faint diverged)
+    "PRIVATE" -> c.error
+    else      -> c.onSurfaceVariant   // unknown text kinds default to the TEXT slot
 }
 
 /**
@@ -99,16 +85,10 @@ internal fun ContentTypeChip(label: String, color: Color) {
                 width = 1.dp,
                 color = color.copy(alpha = 0.45f),
                 shape = RoundedCornerShape(7.dp),
-            )
-            .padding(horizontal = 5.dp, vertical = 2.dp),
+            ),
     ) {
         Text(
             text = label,
-            style = TextStyle(
-                fontSize = 10.sp,                // vzfn: was 9sp, now 10sp (styleguide 10px)
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.4.sp,
-            ),
             color = color,
             maxLines = 1,
         )
@@ -118,29 +98,27 @@ internal fun ContentTypeChip(label: String, color: Color) {
 /**
  * Small warning-tinted indicator shown on a row whose payload exceeds the sync size
  * cap ([ClipboardRepository.SYNC_MAX_BLOB_BYTES], 8 MiB) and therefore will not be
- * propagated to other devices. Sized (12.dp) and tinted with the active warning
- * token to match the adjacent pin indicator. §7: the single "too large" glyph is
- * the warning triangle. Caller is responsible for the `!selectionMode` gating.
+ * propagated to other devices. §7: the single "too large" glyph is the warning
+ * triangle (de-styled to its label text). Caller is responsible for the
+ * `!selectionMode` gating.
  */
 @Composable
 internal fun TooLargeBadge() {
-    val c = LocalCpColors.current
-    Spacer(Modifier.width(4.dp))
-    Icon(
-        imageVector = Icons.Outlined.WarningAmber,
-        contentDescription = stringResource(R.string.cd_too_large_sync),
-        tint = c.warn.copy(alpha = 0.9f),
-        modifier = Modifier.size(12.dp),
+    val c = MaterialTheme.colorScheme
+    Text(
+        text = stringResource(R.string.cd_too_large_sync),
+        color = c.tertiary.copy(alpha = 0.9f),
+        maxLines = 1,
     )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// egsf — 26dp icon-tile: rounded RadiusChip(7) box, kind-tinted glyph inside.
-// Mirrors web .ci tile (liquid-glass-styleguide.html L250): 26x26, radius 7,
-// bg --ide-mute/.16, glyph --ide-faint 12px. Placed as the leading element of
-// each text/file row, before the ContentTypeChip.
+// egsf — icon-tile: rounded RoundedCornerShape(7.dp) box, kind-tinted glyph inside.
+// Mirrors web .ci tile (liquid-glass-styleguide.html L250): bg --ide-mute/.16,
+// glyph --ide-faint. Placed as the leading element of each text/file row, before
+// the ContentTypeChip.
 //
-// lbnp — COLOR-kind rows: instead of the icon tile, render a 14dp swatch square
+// lbnp — COLOR-kind rows: instead of the icon tile, render a swatch square
 // filled with the parsed color value from the snippet. See parseHexColor().
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -167,9 +145,9 @@ internal fun parseHexColor(snippet: String): Color? {
 }
 
 /**
- * egsf: 26dp kind-tinted icon tile — styleguide .ci (L250).
- * Background = c.mute@0.16, glyph = c.faint, icon size = 12dp, radius = 7dp.
- * The icon is chosen by [chipLabel] to match the content kind.
+ * egsf: kind-tinted icon tile — styleguide .ci (L250).
+ * Background = c.mute@0.16, glyph = c.faint. The label shown is [chipLabel]
+ * (de-styled — was a glyph chosen by content kind via contentIconFor()/NavIcons).
  *
  * PG-64 parity: the macOS `.icon-float` @keyframes animation was removed on
  * macOS (s7ia). Android previously translated it as a subtle scale pulse
@@ -177,55 +155,38 @@ internal fun parseHexColor(snippet: String): Color? {
  * static, matching the macOS treatment.
  */
 @Composable
-internal fun ContentIconTile(chipLabel: String, colors: CpColors) {
-    // CopyPaste-5917.84: delegate to contentIconFor() (NavIcons.kt — single source of truth).
-    // PATH=FolderOpen, NUMBER=Tag — previously PATH mapped to AttachFile (wrong icon).
-    // Android-only extras not in the canonical set are handled first:
-    //   URL     → OpenInNew  (launch icon, vs Link in the canonical web set)
-    //   FILE    → InsertDriveFile (synced file item, not a text type)
-    //   PRIVATE → Lock       (sensitive/private item guard)
-    val icon = when (chipLabel) {
-        "URL"     -> Icons.AutoMirrored.Outlined.OpenInNew
-        "FILE"    -> Icons.AutoMirrored.Outlined.InsertDriveFile
-        "PRIVATE" -> Icons.Outlined.Lock
-        else      -> contentIconFor(chipLabel)   // canonical: PATH=FolderOpen, NUMBER=Tag, etc.
-    }
-
+internal fun ContentIconTile(chipLabel: String, colors: ColorScheme) {
     Box(
         modifier = Modifier
-            .size(26.dp)
             .background(
-                color = colors.mute.copy(alpha = 0.16f),
+                color = colors.surfaceVariant.copy(alpha = 0.16f),
                 shape = RoundedCornerShape(7.dp),
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            // CopyPaste-5917.15: announce content kind to TalkBack (was null).
-            contentDescription = chipLabel,
-            tint = colors.faint,
-            modifier = Modifier.size(12.dp),
+        // CopyPaste-5917.15: announce content kind to TalkBack (was null).
+        Text(
+            text = chipLabel,
+            color = colors.onSurfaceVariant,
         )
     }
 }
 
 /**
  * lbnp: Inline color swatch for COLOR-kind rows — styleguide .swatch-inline (L257).
- * 14dp square, radius 4dp, 0.5dp hairline border. Renders the actual parsed color.
- * Falls back to the icon tile when the hex color cannot be parsed.
+ * Renders the actual parsed color. Falls back to the icon tile when the hex
+ * color cannot be parsed.
  */
 @Composable
-internal fun ColorSwatchOrTile(snippet: String, colors: CpColors) {
+internal fun ColorSwatchOrTile(snippet: String, colors: ColorScheme) {
     val parsed = remember(snippet) { parseHexColor(snippet) }
     if (parsed != null) {
         Box(
             modifier = Modifier
-                .size(14.dp)
                 .background(color = parsed, shape = RoundedCornerShape(4.dp))
                 .border(
                     width = 0.5.dp,
-                    color = colors.border.copy(alpha = 0.6f),
+                    color = colors.outline.copy(alpha = 0.6f),
                     shape = RoundedCornerShape(4.dp),
                 ),
         )
