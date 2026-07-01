@@ -8,7 +8,7 @@ import {
   type DiscoveredDevice,
   type PairSasStatus,
 } from "../../lib/ipc";
-import { useFocusTrap } from "../../lib/useFocusTrap";
+import { Dialog } from "../../lib/dialog/Dialog";
 
 /**
  * How often to poll `pair_get_sas` while the SAS pairing modal is open.
@@ -88,10 +88,6 @@ export function SasPairingModal({
     unmountedRef.current = false;
     return () => { unmountedRef.current = true; };
   }, []);
-  // modalRef and copiedTimer are declared here; useFocusTrap is called after
-  // handleClose is defined below (it depends on handleClose for the onEscape option).
-  const modalRef = useRef<HTMLDivElement>(null);
-
   const terminal =
     ended ||
     status.state === "confirmed" ||
@@ -209,12 +205,9 @@ export function SasPairingModal({
     onClose();
   }, [onClose]);
 
-  // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
-  // A11Y-3 / CopyPaste-5917.6: Escape key closes the modal (matching ConfirmModal pattern).
-  // A11Y-11 / CopyPaste-5917.30: onEscape wired through useFocusTrap so no separate listener needed.
-  // Declared here (after handleClose) because useFocusTrap stores onEscape in a ref internally
-  // so the hook always sees the latest value without re-registering the listener.
-  useFocusTrap(modalRef, { onEscape: handleClose });
+  // Focus trap + Escape/backdrop dismissal now come from the shared Dialog
+  // primitive (task 2.9); onClose=handleClose preserves the pairAbort-on-close
+  // behavior (A11Y-3/A11Y-11).
 
   const handleConfirm = useCallback(
     async (accept: boolean) => {
@@ -264,21 +257,8 @@ export function SasPairingModal({
   const isResponder = status.role === "responder";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="sas-modal-title"
-      // A11Y-3 / CopyPaste-5917.6: Escape dismisses; backdrop click cancels
-      // (matching the ConfirmModal pattern).
-      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
-      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); handleClose(); } }}
-    >
-      {/* surface-glass-strong = floating frosted-glass pairing dialog.
-          modal-card-enter: approved motion entrance (§MO-1). */}
-      <div
-        ref={modalRef}
-      >
-        <p id="sas-modal-title">
+    <Dialog labelledBy="sas-modal-title" onClose={handleClose}>
+        <p id="sas-modal-title" className="modal__t">
           {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
         </p>
 
@@ -351,8 +331,10 @@ export function SasPairingModal({
                 <MetaRow label="Fingerprint" value={status.peer_fingerprint} />
               </div>
             )}
-            <div>
+            <div className="modal__act">
               <button
+                type="button"
+                className="btn btn--secondary"
                 onClick={() => void handleConfirm(false)}
                 disabled={confirmPending}
               >
@@ -363,12 +345,14 @@ export function SasPairingModal({
                   5917.16: use an inline spinner (animate-spin) instead of "..." text so
                   there is a clear loading indicator during the pending state. */}
               <button
+                type="button"
+                className="btn btn--primary"
                 onClick={() => void handleConfirm(true)}
                 disabled={confirmPending}
                 aria-label="Codes match — confirm pairing"
               >
                 {confirmPending && (
-                  <span />
+                  <span className="spinner" />
                 )}
                 {confirmPending ? "Confirming…" : "Match"}
               </button>
@@ -391,10 +375,8 @@ export function SasPairingModal({
         {status.state === "confirmed" && (
           <div>
             <p>Paired ✓</p>
-            <div>
-              <button
-                onClick={handleClose}
-              >
+            <div className="modal__act">
+              <button type="button" className="btn btn--secondary" onClick={handleClose}>
                 Close
               </button>
             </div>
@@ -415,10 +397,8 @@ export function SasPairingModal({
                   ? "Pairing was rejected."
                   : "Pairing was cancelled."}
             </p>
-            <div>
-              <button
-                onClick={handleClose}
-              >
+            <div className="modal__act">
+              <button type="button" className="btn btn--secondary" onClick={handleClose}>
                 Close
               </button>
             </div>
@@ -434,10 +414,8 @@ export function SasPairingModal({
             <p>
               Pairing ended — check the other device.
             </p>
-            <div>
-              <button
-                onClick={handleClose}
-              >
+            <div className="modal__act">
+              <button type="button" className="btn btn--secondary" onClick={handleClose}>
                 Close
               </button>
             </div>
@@ -451,15 +429,12 @@ export function SasPairingModal({
 
         {/* Cancel affordance for the non-terminal states (Connecting / awaiting) */}
         {!terminal && (
-          <div>
-            <button
-              onClick={handleClose}
-            >
+          <div className="modal__act">
+            <button type="button" className="btn btn--secondary" onClick={handleClose}>
               Cancel
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </Dialog>
   );
 }

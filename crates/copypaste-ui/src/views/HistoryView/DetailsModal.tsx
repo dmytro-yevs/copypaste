@@ -11,7 +11,7 @@ import { useState, useRef, useEffect } from "react";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { api, isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
 import { shouldMask, maskPlaceholder } from "../../lib/masking";
-import { useFocusTrap } from "../../lib/useFocusTrap";
+import { Dialog } from "../../lib/dialog/Dialog";
 import { FileChip } from "../../components/FileChip";
 
 /**
@@ -134,39 +134,20 @@ export function DetailsModal({
   });
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
 
-  // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
-  const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef);
-
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
-
+  // Focus trap, Escape + backdrop dismissal, and scroll-lock now come from the
+  // shared Dialog primitive (task 2.9). onClose preserves the close behavior.
   const modalTitle = isImage ? "Image preview" : isFile ? "File details" : "Text preview";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="details-modal-title"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div
-        ref={modalRef}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog labelledBy="details-modal-title" onClose={onClose} className="modal--wide">
         {/* Header */}
         <div>
-          <span id="details-modal-title">
+          <span id="details-modal-title" className="modal__t">
             {modalTitle}
           </span>
           <button
             type="button"
+            className="iconbtn"
             aria-label="Close"
             onClick={onClose}
           />
@@ -265,7 +246,6 @@ export function DetailsModal({
             <span>{new Date(entry.wall_time).toLocaleString()}</span>
           )}
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

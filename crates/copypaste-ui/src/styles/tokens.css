@@ -128,6 +128,9 @@
     --sz-toggle-w:38px; --sz-toggle-h:22px; --sz-toggle-knob:18px;
     --sz-tile:34px; --sz-dot:8px; --sz-spinner:16px;
     --sz-kbd:22px; --sz-chip-dot:7px; --sz-badge-dot:5px;
+
+    /* Modal (shared Dialog primitive). */
+    --modal-w:340px; --modal-w-wide:560px; --pad-modal:22px; --gap-modal-sub:18px;
   }
 
   /* ===================================================================== *
@@ -150,16 +153,20 @@
   .theme-scope {
     --frost-filter: none;
     --chrome-bg: var(--panel);
+    --scrim-blur: none;
   }
 
   /* Frost chrome only where backdrop-filter is supported AND translucency=on.
      On engines without backdrop-filter this @supports block is inert, so the
-     solid baseline above wins — no explicit "unsupported" fallback needed. */
+     solid baseline above wins — no explicit "unsupported" fallback needed.
+     --scrim-blur is the modal scrim's subtler backdrop treatment (a chrome
+     surface per design.md B4), gated on the same conditions. */
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     :root[data-translucency="on"],
     .theme-scope[data-translucency="on"] {
       --frost-filter: saturate(180%) blur(20px);
       --chrome-bg: color-mix(in srgb, var(--panel) 72%, transparent);
+      --scrim-blur: blur(2px);
     }
   }
 
@@ -173,6 +180,7 @@
     .theme-scope[data-translucency="on"] {
       --frost-filter: none;
       --chrome-bg: var(--panel);
+      --scrim-blur: none;
     }
   }
 }

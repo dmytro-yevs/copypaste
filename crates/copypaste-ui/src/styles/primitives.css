@@ -300,4 +300,44 @@
     padding: var(--pad-kbd);
   }
   .kbd svg { font-size: var(--fs-md); }
+
+  /* --- Modal (shared Dialog primitive) -------------------------------------- */
+  /* Portaled to document.body, so `position: fixed` (not the reference's
+     `absolute`, which assumed a positioned app container) covers the viewport.
+     The scrim's backdrop blur is translucency-gated (--scrim-blur, design.md B4). */
+  .scrim {
+    position: fixed;
+    inset: 0;
+    background: var(--scrim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s-9);
+    z-index: 40;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease);
+    backdrop-filter: var(--scrim-blur);
+    -webkit-backdrop-filter: var(--scrim-blur);
+  }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+  .modal {
+    background: var(--panel);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-card);
+    box-shadow: var(--sh3);
+    width: var(--modal-w);
+    max-width: 100%;
+    padding: var(--pad-modal);
+    text-align: center;
+    transform: translateY(10px) scale(0.97);
+    transition: transform var(--dur) var(--ease);
+  }
+  .scrim.open .modal { transform: none; }
+  /* Wide, left-aligned variant for preview/detail dialogs (e.g. DetailsModal). */
+  .modal--wide { width: var(--modal-w-wide); max-width: 92vw; text-align: left; padding: var(--s-8); }
+  .modal__t { font-size: var(--fs-lg); font-weight: var(--fw-strong); margin-bottom: var(--s-3); }
+  .modal__s { font-size: var(--fs-md); color: var(--dim); margin-bottom: var(--gap-modal-sub); line-height: var(--lh-normal); }
+  .modal__act { display: flex; gap: var(--s-4); }
+  .modal__act .btn { flex: 1; }
 }
