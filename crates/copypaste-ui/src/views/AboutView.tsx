@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { Clipboard } from "lucide-react";
+import { Clipboard, ExternalLink } from "lucide-react";
 import { SectionHeader } from "../components/SectionHeader";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { appVersion, probeStatus, type StatusProbe } from "../lib/ipc";
@@ -150,7 +150,7 @@ export function AboutContent() {
               window.open(GITHUB_BASE, "_blank")
             }
           >
-            github.com/dmytro-yevs/copypaste ↗
+            github.com/dmytro-yevs/copypaste <ExternalLink aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -159,7 +159,7 @@ export function AboutContent() {
               window.open(`${GITHUB_BASE}/blob/main/CHANGELOG.md`, "_blank")
             }
           >
-            Changelog ↗
+            Changelog <ExternalLink aria-hidden="true" />
           </button>
           <button
             type="button"
@@ -171,7 +171,7 @@ export function AboutContent() {
               )
             }
           >
-            Privacy policy ↗
+            Privacy policy <ExternalLink aria-hidden="true" />
           </button>
         </div>
       </div>
