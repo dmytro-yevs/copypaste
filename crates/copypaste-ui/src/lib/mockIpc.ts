@@ -17,30 +17,26 @@ import type {
   HistoryEntry,
   AppSettings,
   SyncStatus,
-  PairedDevice,
-  OwnDeviceInfo,
   PairSasStatus,
-  DiscoveredDevice,
   CloudTestResult,
   IpcReply,
 } from "./ipc";
-
-// ---------------------------------------------------------------------------
-// Timing helpers
-// ---------------------------------------------------------------------------
-
-const NOW = Date.now();
-const mins = (n: number) => NOW - n * 60_000;
-const hours = (n: number) => NOW - n * 3_600_000;
-const days = (n: number) => NOW - n * 86_400_000;
-
-// ---------------------------------------------------------------------------
-// Fixture: own device
-// ---------------------------------------------------------------------------
-
-const OWN_DEVICE_ID = "aabbccdd-1234-5678-abcd-ef0011223344";
-const OWN_FINGERPRINT =
-  "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+// Shared fixture factories (design.md Decision 7/G3, task 6.5) — the single
+// source of truth for entity-shaped sample data, also consumed by
+// GalleryView/**. See fixtures/index.ts for the import-boundary rule this
+// module is one of the two allowed consumers of.
+import {
+  makeHistoryEntry,
+  makeDevice,
+  makeDiscoveredDevice,
+  makeOwnDeviceInfo,
+  makePairStatus,
+  FIXTURE_OWN_DEVICE_ID as OWN_DEVICE_ID,
+  FIXTURE_OWN_FINGERPRINT as OWN_FINGERPRINT,
+  mins,
+  hours,
+  days,
+} from "./fixtures";
 
 // ---------------------------------------------------------------------------
 // Fixture: clipboard history — 14 items covering every kind
@@ -48,7 +44,7 @@ const OWN_FINGERPRINT =
 
 const HISTORY_ITEMS: HistoryEntry[] = [
   // 1. Pinned — plain text, just now, local
-  {
+  makeHistoryEntry({
     id: "item-001",
     content_type: "text",
     preview: "Meeting at 3 PM — don't forget to bring the Q3 report.",
@@ -59,10 +55,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.apple.Notes",
-  },
+  }),
 
   // 2. URL, 5 minutes ago, from Chrome
-  {
+  makeHistoryEntry({
     id: "item-002",
     content_type: "text",
     preview: "https://github.com/gastownhall/copypaste/pull/142",
@@ -73,10 +69,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.google.Chrome",
-  },
+  }),
 
   // 3. Email address, 12 minutes ago
-  {
+  makeHistoryEntry({
     id: "item-003",
     content_type: "text",
     preview: "alice.wonderland@example.com",
@@ -87,10 +83,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.apple.mail",
-  },
+  }),
 
   // 4. Phone number, sensitive, 20 minutes ago
-  {
+  makeHistoryEntry({
     id: "item-004",
     content_type: "text",
     preview: "+1 (555) 867-5309",
@@ -102,10 +98,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.apple.MobileSMS",
-  },
+  }),
 
   // 5. Hex colour, 35 minutes ago
-  {
+  makeHistoryEntry({
     id: "item-005",
     content_type: "text",
     preview: "#6C47FF",
@@ -116,10 +112,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.figma.Desktop",
-  },
+  }),
 
   // 6. Number / amount, 1 hour ago
-  {
+  makeHistoryEntry({
     id: "item-006",
     content_type: "text",
     preview: "42_000_000",
@@ -130,10 +126,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: null,
-  },
+  }),
 
   // 7. File path, 2 hours ago
-  {
+  makeHistoryEntry({
     id: "item-007",
     content_type: "text",
     preview:
@@ -145,10 +141,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.microsoft.VSCode",
-  },
+  }),
 
   // 8. JSON blob, 3 hours ago
-  {
+  makeHistoryEntry({
     id: "item-008",
     content_type: "text",
     preview:
@@ -160,10 +156,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.microsoft.VSCode",
-  },
+  }),
 
   // 9. Code snippet, 5 hours ago
-  {
+  makeHistoryEntry({
     id: "item-009",
     content_type: "text",
     preview:
@@ -175,10 +171,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.microsoft.VSCode",
-  },
+  }),
 
   // 10. Long multiline text, 1 day ago
-  {
+  makeHistoryEntry({
     id: "item-010",
     content_type: "text",
     preview:
@@ -192,10 +188,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.apple.Safari",
-  },
+  }),
 
   // 11. Image — from another device (MacBook Pro)
-  {
+  makeHistoryEntry({
     id: "item-011",
     content_type: "image/png",
     preview: "[image]",
@@ -206,10 +202,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: "bbccddee-aaaa-bbbb-cccc-ddeeff001122",
     origin_device_name: "MacBook Pro",
     app_bundle_id: null,
-  },
+  }),
 
   // 12. File attachment — from iPhone
-  {
+  makeHistoryEntry({
     id: "item-012",
     content_type: "file",
     preview: "[file: Q3_Report_2026.pdf]",
@@ -221,10 +217,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_name: "iPhone 16 Pro",
     app_bundle_id: null,
     too_large_to_sync: false,
-  },
+  }),
 
   // 13. Sensitive/private item with sensitive spans, 3 days ago
-  {
+  makeHistoryEntry({
     id: "item-013",
     content_type: "text",
     preview: "Password: Hunter2!@#  (internal wiki)",
@@ -236,10 +232,10 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_id: OWN_DEVICE_ID,
     origin_device_name: null,
     app_bundle_id: "com.1password.1password-7",
-  },
+  }),
 
   // 14. API key — sensitive, 4 days ago
-  {
+  makeHistoryEntry({
     id: "item-014",
     content_type: "text",
     preview: "sk-proj-AAABBBCCCDDDEEEFFFGGGHHHIIIJJJKKKLLL",
@@ -252,15 +248,15 @@ const HISTORY_ITEMS: HistoryEntry[] = [
     origin_device_name: null,
     app_bundle_id: "com.openai.chat",
     too_large_to_sync: false,
-  },
+  }),
 ];
 
 // ---------------------------------------------------------------------------
 // Fixture: paired devices
 // ---------------------------------------------------------------------------
 
-const PAIRED_DEVICES: PairedDevice[] = [
-  {
+const PAIRED_DEVICES = [
+  makeDevice({
     fingerprint:
       "bbccddee112233445566778899aabbccddeeff0011223344556677889900aabb",
     name: "MacBook Pro",
@@ -277,8 +273,8 @@ const PAIRED_DEVICES: PairedDevice[] = [
     online: true,
     last_seen_secs: 4,
     latency_ms: 12,
-  },
-  {
+  }),
+  makeDevice({
     fingerprint:
       "ccddeeff223344556677889900aabbccddeeff001122334455667788990011cc",
     name: "iPhone 16 Pro",
@@ -295,8 +291,8 @@ const PAIRED_DEVICES: PairedDevice[] = [
     online: false,
     last_seen_secs: 29_200,
     latency_ms: undefined,
-  },
-  {
+  }),
+  makeDevice({
     fingerprint:
       "ddeeff334455667788990011aabbccddeeff0011223344556677889900ddeeff",
     name: "iPad Pro",
@@ -313,15 +309,15 @@ const PAIRED_DEVICES: PairedDevice[] = [
     online: true,
     last_seen_secs: 18,
     latency_ms: 28,
-  },
+  }),
 ];
 
 // ---------------------------------------------------------------------------
 // Fixture: discovered LAN devices
 // ---------------------------------------------------------------------------
 
-const DISCOVERED_DEVICES: DiscoveredDevice[] = [
-  {
+const DISCOVERED_DEVICES = [
+  makeDiscoveredDevice({
     device_id:
       "eeff005566778899aabbccddeeff001122334455667788990011aabb00eeff11",
     device_name: "Dmytro's Mac mini",
@@ -329,8 +325,8 @@ const DISCOVERED_DEVICES: DiscoveredDevice[] = [
     port: 7878,
     bport: 7879,
     paired: false,
-  },
-  {
+  }),
+  makeDiscoveredDevice({
     device_id:
       "ff00116677889900aabbccddeeff001122334455667788990011aabbccff0022",
     device_name: "Work MacBook Air",
@@ -338,7 +334,7 @@ const DISCOVERED_DEVICES: DiscoveredDevice[] = [
     port: 7878,
     bport: null, // v1 peer — Pair button should be disabled
     paired: false,
-  },
+  }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -397,7 +393,7 @@ const SYNC_STATUS: SyncStatus = {
 // Fixture: own device info
 // ---------------------------------------------------------------------------
 
-const OWN_DEVICE_INFO: OwnDeviceInfo = {
+const OWN_DEVICE_INFO = makeOwnDeviceInfo({
   fingerprint: OWN_FINGERPRINT,
   device_name: "Dmytro's MacBook Air",
   device_model: "MacBook Air 15-inch (M3)",
@@ -405,15 +401,13 @@ const OWN_DEVICE_INFO: OwnDeviceInfo = {
   app_version: "0.7.1",
   local_ip: "192.168.1.50",
   public_ip: "203.0.113.42",
-};
+});
 
 // ---------------------------------------------------------------------------
 // Fixture: SAS pairing state (idle — no modal on load)
 // ---------------------------------------------------------------------------
 
-const SAS_STATUS: PairSasStatus = {
-  state: "idle",
-};
+const SAS_STATUS: PairSasStatus = makePairStatus();
 
 // ---------------------------------------------------------------------------
 // Fixture: cloud test

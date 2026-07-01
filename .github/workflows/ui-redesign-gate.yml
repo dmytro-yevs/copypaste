@@ -1,0 +1,174 @@
+# UI Redesign Gate — design-system-redesign tasks 6.13/6.14/6.17
+# (bd CopyPaste-g27b.13 / CopyPaste-g27b.13.2).
+#
+# This workflow is the REQUIRED CI gate for the design-system-redesign change.
+# It replaces the "manual verification only" / "manual spot-check" posture
+# called out in tasks.md 6.13/6.14 and proposal.md with two automated layers:
+#
+#   1. browser-playwright  — the `?mock=1` Playwright suite (visual regression,
+#      accent/contrast matrix, modal keyboard/focus, reduced-motion, gallery
+#      production-exclusion, token-contrast, and an @axe-core/playwright
+#      accessibility scan). Runs against Chromium via the Vite dev server —
+#      fast, deterministic, no packaged build required. Mirrors
+#      visual-regression.yml's job shape.
+#
+#   2. tauri-packaged-smoke — the PRODUCT RELEASE GATE (design.md Decision
+#      13/N5): builds the actual release binaries + the packaged Tauri .app
+#      and runs `pnpm test:tauri-smoke --build` against it (see
+#      crates/copypaste-ui/e2e/tauri-smoke/run.mjs for exactly what is
+#      asserted vs. stubbed). The browser suite above supplements this but
+#      does NOT replace it — packaged-WebView behavior (CSP, IPC bootstrap,
+#      daemon spawn) can differ from a browser tab.
+#
+# Release scope (design-system-redesign tasks.md 6.17, round-5 M4): macOS
+# only. This workflow intentionally has no Windows/Linux job — non-macOS
+# Tauri artifacts are not release artifacts for this change (the
+# `bundle.targets: "all"` mismatch in tauri.conf.json is tracked separately
+# in CopyPaste-4w1a). macos-14 is used to match release.yml's build-macos
+# runner (CopyPaste-d41w.21 precedent in ci.yml: CI must run on the same OS
+# image the shipping artifact is built on).
+name: UI Redesign Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/copypaste-ui/**"
+      - ".github/workflows/ui-redesign-gate.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/copypaste-ui/**"
+      - ".github/workflows/ui-redesign-gate.yml"
+
+concurrency:
+  group: ui-redesign-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── Layer 1: browser Playwright suite (visual + a11y + contrast + motion) ──
+  browser-playwright:
+    name: Browser Playwright (visual + @axe-core a11y)
+    runs-on: macos-14
+
+    defaults:
+      run:
+        working-directory: crates/copypaste-ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: crates/copypaste-ui/pnpm-lock.yaml
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser Playwright suite (visual + a11y + contrast + motion)
+        # test:visual runs the full crates/copypaste-ui/e2e/visual suite —
+        # main/popup dark+light, accent/contrast matrix, modal keyboard/focus,
+        # reduced-motion, gallery production-exclusion, token-contrast, and
+        # the @axe-core/playwright accessibility scan (tasks.md 6.13).
+        run: pnpm test:visual
+        env:
+          CI: "true"
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-gate-playwright-report-${{ github.run_id }}
+          path: crates/copypaste-ui/playwright-report/
+          retention-days: 30
+
+      - name: Upload snapshot/a11y diffs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-gate-test-results-${{ github.run_id }}
+          path: crates/copypaste-ui/test-results/
+          retention-days: 14
+
+  # ── Layer 2: packaged-Tauri smoke gate — the product release gate ─────────
+  tauri-packaged-smoke:
+    name: Packaged Tauri smoke gate (macOS release gate)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ui-redesign-gate-tauri-smoke
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: crates/copypaste-ui/pnpm-lock.yaml
+
+      - name: Build release binaries (CLI, daemon, relay)
+        # test:tauri-smoke --build injects these into the packaged app's
+        # Contents/MacOS/ (see run.mjs's injectSiblingBinaries) — without
+        # them the app-owned daemon (src-tauri/src/daemon_lifecycle.rs) can't
+        # start, and the packaged smoke's IPC checks would fail for a reason
+        # unrelated to the UI itself. Same crate set as release.yml's
+        # build-macos job; cloud-sync/relay-sync features kept for parity
+        # with the shipped daemon shape (no CI secrets required — Supabase
+        # creds are read at runtime from the app bundle's config, not compiled in).
+        run: |
+          cargo build --release \
+            -p copypaste-cli \
+            -p copypaste-daemon --features copypaste-daemon/cloud-sync,copypaste-daemon/relay-sync \
+            -p copypaste-relay
+
+      - name: Install JS dependencies
+        working-directory: crates/copypaste-ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Packaged-Tauri smoke gate (build + launch + probe)
+        # --build runs `pnpm tauri build`, injects the sibling binaries built
+        # above, launches the packaged .app in an isolated env (own
+        # socket/DB/dirs, ephemeral key — never touches the real Keychain or
+        # user data), and probes it. See
+        # crates/copypaste-ui/e2e/tauri-smoke/run.mjs's header comment for the
+        # exact asserted-vs-stubbed breakdown; a REAL-check failure here fails
+        # this job.
+        working-directory: crates/copypaste-ui
+        run: pnpm test:tauri-smoke --build
+
+      - name: Upload packaged app on failure (for local repro)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-gate-tauri-smoke-app-${{ github.run_id }}
+          path: target/release/bundle/macos/CopyPaste.app
+          retention-days: 7
+          if-no-files-found: warn

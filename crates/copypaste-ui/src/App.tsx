@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { AlertTriangle, ServerCrash } from "lucide-react";
 import { useUI, type ViewId } from "./store";
+import { resolveView } from "./lib/resolveView";
 import { applyAppearanceToRoot } from "./lib/theme/applyTheme";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -79,7 +80,12 @@ function galleryActive(): boolean {
 }
 
 export default function App() {
-  const view = useUI((s) => s.view);
+  // task 6.3: defensive `view` narrowing — VIEWS is a Record<ViewId, …> with no
+  // "gallery" entry, so an unnarrowed value would throw on lookup. resolveView()
+  // maps anything unrecognized (including "gallery") to "history". In-memory
+  // only — see resolveView.ts for why this is not persisted-state recovery.
+  const rawView = useUI((s) => s.view);
+  const view = resolveView(rawView);
   const setView = useUI((s) => s.setView);
   const { Component: View, label } = VIEWS[view];
 

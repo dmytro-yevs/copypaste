@@ -2,12 +2,29 @@ import { useState } from "react";
 import { ActionButton } from "../../components/ActionButton";
 import { Toggle } from "../../components/Toggle";
 import { ConfirmModal } from "../../components/ConfirmModal";
+import { DeviceBadge } from "../../components/DeviceBadge";
+import { FIXTURE_OWN_DEVICE_ID } from "../../lib/fixtures";
 import {
   ACCENT_VALUES,
   THEME_VALUES,
   type AccentValue,
   type ThemeValue,
 } from "../../lib/theme/prefsSchema";
+import { IconButtonsSection } from "./sections/IconButtonsSection";
+import { SegmentedSection } from "./sections/SegmentedSection";
+import { TilesSection } from "./sections/TilesSection";
+import { ForcedStateSection } from "./sections/ForcedStateSection";
+import { HistoryRowsSection } from "./sections/HistoryRowsSection";
+import { DeviceRowsSection } from "./sections/DeviceRowsSection";
+import { BannersSection } from "./sections/BannersSection";
+import { EmptyStatesSection } from "./sections/EmptyStatesSection";
+import { SidebarSection } from "./sections/SidebarSection";
+import { SyncStatusSection } from "./sections/SyncStatusSection";
+import { SettingsSection } from "./sections/SettingsSection";
+import { PopupSection } from "./sections/PopupSection";
+import { FileChipSection } from "./sections/FileChipSection";
+import { MatrixSection } from "./sections/MatrixSection";
+import { LongTextSection } from "./sections/LongTextSection";
 import "../../styles/gallery.css";
 
 // ---------------------------------------------------------------------------
@@ -129,8 +146,19 @@ export function GalleryView() {
           <span className="spinner" aria-label="Loading" />
           <span className="kbd">⌘</span>
           <span className="kbd">1</span>
+          {/* DeviceBadge — own vs. remote origin-device chip (not currently
+              mounted anywhere in production; ClipMetadata uses its exported
+              deviceLabel() helper directly, so the gallery is this
+              component's only live example). */}
+          <DeviceBadge originId={FIXTURE_OWN_DEVICE_ID} ownId={FIXTURE_OWN_DEVICE_ID} />
+          <DeviceBadge originId="ccddeeff-bbbb-cccc-dddd-eeff00112233" ownId={FIXTURE_OWN_DEVICE_ID} originName="iPhone 16 Pro" />
         </div>
       </section>
+
+      <IconButtonsSection />
+      <SegmentedSection />
+      <TilesSection />
+      <ForcedStateSection />
 
       <section id="gallery-dialog">
         <h2>Dialog</h2>
@@ -148,6 +176,18 @@ export function GalleryView() {
           onCancel={() => setConfirmOpen(false)}
         />
       </section>
+
+      <HistoryRowsSection />
+      <DeviceRowsSection />
+      <FileChipSection />
+      <BannersSection />
+      <EmptyStatesSection />
+      <SidebarSection />
+      <SyncStatusSection />
+      <SettingsSection />
+      <PopupSection />
+      <MatrixSection />
+      <LongTextSection />
     </div>
   );
 }

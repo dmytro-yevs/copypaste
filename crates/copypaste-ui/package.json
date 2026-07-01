@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
+    "test:tauri-smoke": "node e2e/tauri-smoke/run.mjs",
     "tauri": "tauri",
     "lint": "eslint src"
   },
@@ -23,6 +24,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@eslint/js": "^9.28.0",
     "@tauri-apps/cli": "^2",
     "@testing-library/dom": "^10.4.1",

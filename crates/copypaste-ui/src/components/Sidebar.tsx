@@ -1,5 +1,6 @@
 import {
   Clock,
+  FlaskConical,
   Info,
   MonitorSmartphone,
   ScrollText,
@@ -7,10 +8,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useUI, type ViewId } from "../store";
+import { MOCK } from "../lib/ipc";
 import { SyncStatusChip } from "./SyncStatusChip";
 
 // Redesign wiring (Slice 5 / CopyPaste-g27b.12): .sb / .sb__item / .sb__foot
-// (shell.css). Gallery nav item wiring happens in slice 6 — do not add it here.
+// (shell.css). The dev-only Gallery nav item (task 6.4) is wired below,
+// outside the production NAV/ViewId registry — see navigateToGallery().
 
 type NavItem = {
   id: ViewId;
@@ -25,6 +28,18 @@ const NAV: NavItem[] = [
   { id: "about",    label: "About",    icon: Info },
   { id: "logs",     label: "Logs",     icon: ScrollText },
 ];
+
+// Dev-only: activate the gallery branch (App.tsx's `galleryActive()`) by
+// setting `?view=gallery` on the current URL and navigating there. The
+// gallery branch is read fresh from the URL on every App render — it is NOT
+// store state (design.md Decision 6) — so a full navigation is the simplest
+// way to flip it reliably without adding routing plumbing to this dev-only
+// affordance. Existing query params (e.g. `?mock=1`) are preserved.
+function navigateToGallery(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", "gallery");
+  window.location.href = url.toString();
+}
 
 export function Sidebar() {
   const view = useUI((s) => s.view);
@@ -49,6 +64,23 @@ export function Sidebar() {
             </button>
           );
         })}
+
+        {/* Dev-only component gallery entry (design.md Decision 6, task 6.4).
+            Gated on the SAME import.meta.env.DEV && MOCK check that already
+            tree-shakes GalleryView's dynamic import (App.tsx) and mockIpc.ts
+            (lib/ipc/transport.ts) out of production — this item never renders
+            in a production build even if other DEV tooling leaks in. */}
+        {import.meta.env.DEV && MOCK && (
+          <button
+            type="button"
+            className="sb__item"
+            onClick={navigateToGallery}
+            data-testid="sidebar-gallery-item"
+          >
+            <FlaskConical aria-hidden="true" />
+            <span>Gallery</span>
+          </button>
+        )}
 
         <div className="sb__foot">
           <span>CopyPaste</span>
