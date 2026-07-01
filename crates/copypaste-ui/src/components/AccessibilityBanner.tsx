@@ -11,7 +11,7 @@
  * every 3 s while the banner is visible.
  */
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Settings, X } from "lucide-react";
 
 interface AccessibilityBannerProps {
   /** True once checkAccessibilityPermission() returned true. */
@@ -117,9 +117,11 @@ export function AccessibilityBanner({
       {/* Dismissible: renders a Dismiss .btn (design.md Decision 13/X5). */}
       <span className="banner__act">
         <button type="button" className="btn btn--secondary" onClick={onOpenSettings}>
+          <Settings aria-hidden="true" />
           Open Settings
         </button>
         <button type="button" className="btn" onClick={onDismiss}>
+          <X aria-hidden="true" />
           Dismiss
         </button>
       </span>

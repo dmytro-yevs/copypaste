@@ -1,5 +1,5 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { AlertTriangle, ServerCrash } from "lucide-react";
+import { AlertTriangle, ServerCrash, X } from "lucide-react";
 import { useUI, type ViewId } from "./store";
 import { resolveView } from "./lib/resolveView";
 import { applyAppearanceToRoot } from "./lib/theme/applyTheme";
@@ -326,9 +326,7 @@ export default function App() {
                   type="button"
                   className="btn"
                   onClick={() => setMismatchDismissed(true)}
-                >
-                  Dismiss
-                </button>
+                ><X aria-hidden="true" />Dismiss</button>
               </span>
             </div>
           )}
@@ -353,9 +351,7 @@ export default function App() {
                   type="button"
                   className="btn"
                   onClick={() => setDismissed(true)}
-                >
-                  Dismiss
-                </button>
+                ><X aria-hidden="true" />Dismiss</button>
               </span>
             </div>
           )}

@@ -1,6 +1,7 @@
 // GeneralTab.tsx
 // Extracted from SettingsView.tsx renderGeneral() (CopyPaste-g06m.14 split) — cut/paste only.
 import { SectionHeader } from "../../../components/SectionHeader";
+import { Plus } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
@@ -282,9 +283,7 @@ export function GeneralTab({
               className="btn btn--secondary sm"
               disabled={offline || newExcludedApp.trim() === ""}
               onClick={() => void addExcludedApp()}
-            >
-              Add
-            </button>
+            ><Plus aria-hidden="true" />Add</button>
           </div>
           {excludedApps.length > 0 && (
             <div className="ctl ctl--wrap">

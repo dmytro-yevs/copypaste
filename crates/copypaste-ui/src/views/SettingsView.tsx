@@ -1,9 +1,10 @@
 // SettingsView.tsx — thin composition root (CopyPaste-g06m.35)
 // State/effects/handlers: SettingsView/hooks/useSettingsState.ts
 // Tabs: SettingsView/tabs/  Banners: SettingsView/components/
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ViewShell } from "../components/ViewShell";
+import { ToastProvider, useToast } from "../components/Toast";
 import { useSettingsState, BTN_CLS, BTN_STYLE, INPUT_CLS } from "./SettingsView/hooks/useSettingsState";
 import { TabBar, type TabId } from "./SettingsView/components/TabBar";
 import { StatusBanners } from "./SettingsView/components/StatusBanners";
@@ -15,13 +16,31 @@ import { StorageTab, type StorageTabProps } from "./SettingsView/tabs/StorageTab
 import { AboutContent } from "./AboutView";
 import { LogContent } from "./LogView";
 
+// Route settings save/action confirmations to the shared bottom-centre toast —
+// per the design request, "saved / done" notices are a popup at the bottom of
+// the app, not inline text. Each transition to a truthy message shows one toast.
+function SettingsToaster({ s }: { s: ReturnType<typeof useSettingsState> }) {
+  const { show } = useToast();
+  useEffect(() => { if (s.savedMsg) show("Settings saved", { kind: "success" }); }, [s.savedMsg, show]);
+  useEffect(() => { if (s.passphraseSavedMsg) show(s.passphraseSavedMsg, { kind: "success" }); }, [s.passphraseSavedMsg, show]);
+  useEffect(() => { if (s.shortcutMsg) show(s.shortcutMsg.text, { kind: s.shortcutMsg.isError ? "error" : "success" }); }, [s.shortcutMsg, show]);
+  useEffect(() => { if (s.exportMsg) show(s.exportMsg.text, { kind: s.exportMsg.isError ? "error" : "success" }); }, [s.exportMsg, show]);
+  useEffect(() => { if (s.importMsg) show(s.importMsg.text, { kind: s.importMsg.isError ? "error" : "success" }); }, [s.importMsg, show]);
+  useEffect(() => { if (s.vacuumMsg) show(s.vacuumMsg.text, { kind: s.vacuumMsg.isError ? "error" : "success" }); }, [s.vacuumMsg, show]);
+  useEffect(() => { if (s.deleteMsg) show(s.deleteMsg.text, { kind: s.deleteMsg.isError ? "error" : "success" }); }, [s.deleteMsg, show]);
+  useEffect(() => { if (s.saveError) show(s.saveError, { kind: "error" }); }, [s.saveError, show]);
+  return null;
+}
+
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<TabId>("general");
   const s = useSettingsState();
   const onRetry = () => s.setReloadKey((k) => k + 1);
 
   return (
+    <ToastProvider>
     <ViewShell title="Settings">
+      <SettingsToaster s={s} />
       <StatusBanners loadState={s.loadState} staleDaemon={s.staleDaemon} degradedReason={s.degradedReason} onRetry={onRetry} />
 
       {s.loadState === "loading" && (
@@ -147,6 +166,7 @@ export function SettingsView() {
         onCancel={() => s.setImportPending(null)}
       />
     </ViewShell>
+    </ToastProvider>
   );
 }
 

@@ -1,6 +1,7 @@
 // SyncTab.tsx
 // Extracted from SettingsView.tsx renderSync() (CopyPaste-g06m.14 split) — cut/paste only.
 import { SectionHeader } from "../../../components/SectionHeader";
+import { Key, Plug, Save } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
@@ -366,9 +367,7 @@ export function SyncTab({
                 className="btn btn--secondary sm"
                 disabled={offline || passphrase.trim() === ""}
                 onClick={() => void handleSetPassphrase()}
-              >
-                Set passphrase
-              </button>
+              ><Key aria-hidden="true" />Set passphrase</button>
             </div>
             {passphraseSavedMsg !== null && (
               <span className="field-note field-note--dim">
@@ -395,16 +394,14 @@ export function SyncTab({
             disabled={offline || testing}
             onClick={() => void handleTestConnection()}
           >
-            {testing ? "Testing…" : "Test connection"}
+            <Plug aria-hidden="true" />{testing ? "Testing…" : "Test connection"}
           </button>
           <button
             type="button"
             className="btn btn--primary sm"
             disabled={offline}
             onClick={() => void handleSaveConfig()}
-          >
-            Save
-          </button>
+          ><Save aria-hidden="true" />Save</button>
         </div>
       </Panel>
 

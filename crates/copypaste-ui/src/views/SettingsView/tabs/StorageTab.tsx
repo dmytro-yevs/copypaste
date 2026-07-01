@@ -1,6 +1,7 @@
 // StorageTab.tsx
 // Extracted from SettingsView.tsx renderStorage() (CopyPaste-g06m.14 split) — cut/paste only.
 import { SectionHeader } from "../../../components/SectionHeader";
+import { Download, Sparkles, Trash2, Upload } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Panel } from "../../../components/Panel";
 import { SliderRow } from "../../../components/SliderRow";
@@ -277,7 +278,7 @@ export function StorageTab({
                 onClick={() => void handleExport()}
                 data-testid="export-button"
               >
-                {exportInProgress ? "Exporting…" : "Export…"}
+                <Download aria-hidden="true" />{exportInProgress ? "Exporting…" : "Export…"}
               </button>
             </div>
           </div>
@@ -296,7 +297,7 @@ export function StorageTab({
                 The file is read entirely in-browser via FileReader (no fs
                 Tauri plugin needed). */}
             <label className="btn btn--secondary sm" style={{ cursor: offline || importInProgress ? "not-allowed" : "pointer" }}>
-              {importInProgress ? "Importing…" : "Import…"}
+              <Upload aria-hidden="true" />{importInProgress ? "Importing…" : "Import…"}
               <input
                 type="file"
                 accept="application/json"
@@ -341,7 +342,7 @@ export function StorageTab({
               disabled={offline || vacuumBusy}
               onClick={() => void handleVacuum()}
             >
-              {vacuumBusy ? "Vacuuming…" : "Vacuum"}
+              <Sparkles aria-hidden="true" />{vacuumBusy ? "Vacuuming…" : "Vacuum"}
             </button>
           </div>
         </SettingsRow>
@@ -358,9 +359,7 @@ export function StorageTab({
               className="btn btn--danger sm"
               disabled={offline}
               onClick={() => setDeleteConfirm(true)}
-            >
-              Clear history…
-            </button>
+            ><Trash2 aria-hidden="true" />Clear history…</button>
           </div>
         </SettingsRow>
       </Panel>

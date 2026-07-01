@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpDown, FilePlus, Search } from "lucide-react";
+import { ArrowUpDown, FilePlus, Search, Trash2, Undo2 } from "lucide-react";
 // h97m: listen for cross-view "history-refresh" events emitted after a
 // successful backup import so HistoryView re-fetches immediately.
 import { ViewShell } from "../components/ViewShell";
@@ -743,9 +743,7 @@ export function HistoryViewInner() {
           aria-label="Clear all"
           disabled={clearAllBusy}
           onClick={() => setClearAllConfirmOpen(true)}
-        >
-          Clear all
-        </button>
+        ><Trash2 aria-hidden="true" />Clear all</button>
       )}
     </>
   );
@@ -805,9 +803,7 @@ export function HistoryViewInner() {
               type="button"
               className="btn btn--danger sm"
               onClick={() => setResetConfirm(true)}
-            >
-              Reset database (erases local history)
-            </button>
+            ><Trash2 aria-hidden="true" />Reset database (erases local history)</button>
           </>
         )}
         {!degraded && (
@@ -1020,9 +1016,7 @@ export function HistoryViewInner() {
             type="button"
             className="btn btn--secondary sm"
             onClick={handleUndo}
-          >
-            Undo
-          </button>
+          ><Undo2 aria-hidden="true" />Undo</button>
         </div>
       )}
       {/* M10: Details modal */}

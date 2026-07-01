@@ -1,7 +1,7 @@
 // StatusBanners.tsx — extracted from SettingsView.tsx (CopyPaste-g06m.35)
 // Renders the stale-daemon, not-ready, offline, degraded, and error banners
 // that appear above the tab content in SettingsView.
-import { AlertTriangle, Info, XCircle } from "lucide-react";
+import { AlertTriangle, Info, RotateCcw, XCircle } from "lucide-react";
 import { RestartDaemonButton } from "../../../components/RestartDaemonButton";
 import type { LoadState } from "../hooks/useSettingsState";
 
@@ -45,6 +45,7 @@ export function StatusBanners({
           <span className="banner__x">Clipboard service is starting up — settings will be available in a moment.</span>
           <span className="banner__act">
             <button type="button" className="btn btn--secondary" onClick={onRetry}>
+              <RotateCcw aria-hidden="true" />
               Retry
             </button>
           </span>
@@ -63,6 +64,7 @@ export function StatusBanners({
               onRestarted={onRetry}
             />
             <button type="button" className="btn btn--secondary" onClick={onRetry}>
+              <RotateCcw aria-hidden="true" />
               Retry
             </button>
           </span>
@@ -80,6 +82,7 @@ export function StatusBanners({
           </span>
           <span className="banner__act">
             <button type="button" className="btn btn--secondary" onClick={onRetry}>
+              <RotateCcw aria-hidden="true" />
               Retry
             </button>
             <RestartDaemonButton onRestarted={onRetry} />
@@ -98,6 +101,7 @@ export function StatusBanners({
               onRestarted={onRetry}
             />
             <button type="button" className="btn btn--secondary" onClick={onRetry}>
+              <RotateCcw aria-hidden="true" />
               Retry
             </button>
           </span>
