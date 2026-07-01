@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-01
+
+- **Cloud sync (security):** per-account cloud sync key with a single, purpose-
+  separated derivation — no cross-account key reuse (CopyPaste-jdq5, CopyPaste-wg4w).
+- **macOS install fix:** the Homebrew cask now runs a postflight that strips the
+  Gatekeeper quarantine bit and ad-hoc re-signs the bundle, so the app launches
+  without an Apple Developer account / notarization (CopyPaste-d7wy). Tradeoff is
+  documented in [ADR-010](docs/adr/ADR-010-codesigning-ad-hoc.md).
+
 ## [0.3.1] - 2026-06-29
 
 Audit hardening release — correctness, security, and cross-platform parity fixes.
