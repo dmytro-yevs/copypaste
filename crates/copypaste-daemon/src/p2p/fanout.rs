@@ -227,3 +227,32 @@ pub(super) async fn push_catchup(
         }
     }
 }
+
+/// Spawn [`outbound_loop`] as a background task.
+///
+/// Thin glue extracted from `start_p2p` (ADR-017, CopyPaste-vp63.2) — every
+/// argument is already the exact clone `start_p2p` used to build before
+/// spawning inline, so this call is behaviourally identical to the former
+/// inline `tokio::spawn` block. CopyPaste-716: `sync_crypto` lets
+/// `outbound_loop` re-encrypt once per peer under that peer's pairwise key
+/// inside `fanout_to_peers`.
+pub(super) fn spawn_outbound_loop(
+    new_item_rx: broadcast::Receiver<ClipboardItem>,
+    outbound_rx: mpsc::Receiver<WireItem>,
+    peer_sinks: PeerSinks,
+    sync_crypto: Option<crate::sync_orch::SyncCrypto>,
+    core_config: std::sync::Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    shutdown: CancellationToken,
+) {
+    tokio::spawn(async move {
+        outbound_loop(
+            new_item_rx,
+            outbound_rx,
+            peer_sinks,
+            sync_crypto,
+            core_config,
+            shutdown,
+        )
+        .await;
+    });
+}

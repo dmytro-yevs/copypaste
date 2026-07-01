@@ -151,3 +151,231 @@ pub(super) fn stamp_peer_sync(peers_path: &std::path::Path, peer_fp: &DeviceFing
         tracing::debug!(%peer_fp, "failed to stamp peer sync times: {e}");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    // ── Mutual unpair ─────────────────────────────────────────────────────────
+
+    /// Gap B (pure unit): `evict_peer_local` with a live `PairedPeers` supplied
+    /// must remove the fingerprint from BOTH `peers.json` and the live allowlist.
+    #[test]
+    fn gap_b_evict_peer_local_unit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("peers.json");
+        crate::peers::save_peers(
+            &path,
+            &[crate::peers::PairedDevice {
+                fingerprint: "aa:bb:cc".to_string(),
+                name: "Alice".to_string(),
+                added_at: 1_000,
+                address: Some("10.0.0.1:1111".to_string()),
+                sync_key_b64: None,
+                model: None,
+                os_version: None,
+                app_version: None,
+                local_ip: None,
+                public_ip: None,
+                first_sync_at: None,
+                last_sync_at: None,
+                password_file_b64: None,
+                password_file_enc: None,
+                supabase_account_id: None,
+            }],
+        )
+        .unwrap();
+
+        let live = PairedPeers::new();
+        live.add("aabbcc", "Alice");
+        assert!(
+            live.is_known("aabbcc"),
+            "precondition: live allowlist has Alice"
+        );
+
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        evict_peer_local("aabbcc", Some(&live));
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        // File: Alice removed.
+        let loaded = crate::peers::load_peers(&path);
+        assert!(
+            loaded.is_empty(),
+            "Gap B: peers.json must no longer contain Alice"
+        );
+        // Live allowlist: Alice removed.
+        assert!(
+            !live.is_known("aabbcc"),
+            "Gap B: live PairedPeers must no longer contain Alice"
+        );
+    }
+
+    /// `evict_peer_local` removes the matching peer from `peers.json` and
+    /// leaves all other records intact.  The eviction is keyed to the
+    /// mTLS-authenticated fingerprint (canonical, colon-free hex); the function
+    /// must not touch any other record even when the stored form uses colon-hex.
+    #[test]
+    fn evict_peer_local_removes_only_the_authenticated_peer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("peers.json");
+
+        // Store two peers in colon-hex form (the standard peers.json format).
+        crate::peers::save_peers(
+            &path,
+            &[
+                crate::peers::PairedDevice {
+                    fingerprint: "aa:bb:cc".to_string(),
+                    name: "Alice".to_string(),
+                    added_at: 1_000,
+                    address: Some("10.0.0.1:1111".to_string()),
+                    sync_key_b64: None,
+                    model: None,
+                    os_version: None,
+                    app_version: None,
+                    local_ip: None,
+                    public_ip: None,
+                    first_sync_at: None,
+                    last_sync_at: None,
+                    password_file_b64: None,
+                    password_file_enc: None,
+                    supabase_account_id: None,
+                },
+                crate::peers::PairedDevice {
+                    fingerprint: "dd:ee:ff".to_string(),
+                    name: "Bob".to_string(),
+                    added_at: 2_000,
+                    address: None,
+                    sync_key_b64: None,
+                    model: None,
+                    os_version: None,
+                    app_version: None,
+                    local_ip: None,
+                    public_ip: None,
+                    first_sync_at: None,
+                    last_sync_at: None,
+                    password_file_b64: None,
+                    password_file_enc: None,
+                    supabase_account_id: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Set up the env so `evict_peer_local` resolves to our temp dir.
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        // Evict Alice using the canonical (colon-free) form of her fingerprint,
+        // exactly as the mTLS layer would provide it.
+        evict_peer_local("aabbcc", None);
+
+        // Restore env before any assertions that might panic.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        let loaded = crate::peers::load_peers(&path);
+        assert_eq!(loaded.len(), 1, "Alice must have been removed");
+        assert_eq!(
+            loaded[0].name, "Bob",
+            "Bob must remain untouched after Alice's eviction"
+        );
+    }
+
+    /// Receiving an `Unpair` signal from a peer whose fingerprint does NOT
+    /// match any stored record is a no-op: `peers.json` is unchanged and the
+    /// call does not panic.
+    #[test]
+    fn evict_peer_local_unknown_fp_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("peers.json");
+        crate::peers::save_peers(
+            &path,
+            &[crate::peers::PairedDevice {
+                fingerprint: "aa:bb:cc".to_string(),
+                name: "Alice".to_string(),
+                added_at: 1_000,
+                address: None,
+                sync_key_b64: None,
+                model: None,
+                os_version: None,
+                app_version: None,
+                local_ip: None,
+                public_ip: None,
+                first_sync_at: None,
+                last_sync_at: None,
+                password_file_b64: None,
+                password_file_enc: None,
+                supabase_account_id: None,
+            }],
+        )
+        .unwrap();
+
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        // "deadbeef" has no stored record — must be a silent no-op.
+        evict_peer_local("deadbeef", None);
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        let loaded = crate::peers::load_peers(&path);
+        assert_eq!(loaded.len(), 1, "Alice must be untouched");
+        assert_eq!(loaded[0].name, "Alice");
+    }
+
+    /// `send_unpair_and_close_session` returns `false` and is a no-op when the
+    /// peer has no live session (already disconnected or offline).
+    #[tokio::test]
+    async fn send_unpair_and_close_session_noop_when_offline() {
+        let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
+        let result = send_unpair_and_close_session(&peer_sinks, "deadbeef").await;
+        assert!(
+            !result,
+            "CopyPaste-qw1k: must return false when peer has no live session"
+        );
+        assert!(
+            peer_sinks.lock().await.is_empty(),
+            "map must remain empty after noop call"
+        );
+    }
+}

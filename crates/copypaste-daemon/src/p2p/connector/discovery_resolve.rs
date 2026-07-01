@@ -133,3 +133,93 @@ pub(in crate::p2p) fn refresh_peer_meta_from_discovery(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── mDNS address refresh (P2P audit P2 #3) ───────────────────────────────
+
+    /// `resolve_addr_from_discovery` returns `None` when the discovery service
+    /// has no matching peer (empty).
+    #[test]
+    fn resolve_addr_from_discovery_returns_none_when_empty() {
+        let discovery = DiscoveryService::new();
+        let result = resolve_addr_from_discovery(&discovery, "aabbccdd");
+        assert!(
+            result.is_none(),
+            "empty discovery must yield None for any fingerprint"
+        );
+    }
+
+    /// `resolve_addr_from_discovery` returns `None` when no discovered peer
+    /// has a matching `device_id` (fingerprint).
+    #[test]
+    fn resolve_addr_from_discovery_returns_none_for_unknown_peer() {
+        use copypaste_p2p::discovery::PeerInfo;
+
+        let discovery = DiscoveryService::new();
+        // Manually inject a peer with a different fingerprint via on_peer_found
+        // callback simulation: insert directly into known_peers (test-internal).
+        discovery.inject_peer_for_test(
+            "bob.local.",
+            PeerInfo {
+                device_id: "1122334455".to_string(),
+                device_name: "Bob".to_string(),
+                ip_addrs: vec!["192.168.1.10".parse().unwrap()],
+                port: 51000,
+                bport: None,
+            },
+        );
+        let result = resolve_addr_from_discovery(&discovery, "aabbccdd");
+        assert!(result.is_none(), "non-matching peer must yield None");
+    }
+
+    /// `resolve_addr_from_discovery` returns a valid `SocketAddr` when a
+    /// discovered peer's `device_id` matches the queried fingerprint and it has
+    /// at least one routable IP address.
+    #[test]
+    fn resolve_addr_from_discovery_returns_addr_for_matching_peer() {
+        use copypaste_p2p::discovery::PeerInfo;
+
+        let discovery = DiscoveryService::new();
+        discovery.inject_peer_for_test(
+            "alice.local.",
+            PeerInfo {
+                device_id: "aabbccdd".to_string(),
+                device_name: "Alice".to_string(),
+                ip_addrs: vec!["192.168.1.99".parse().unwrap()],
+                port: 51515,
+                bport: None,
+            },
+        );
+        let result = resolve_addr_from_discovery(&discovery, "aabbccdd");
+        assert!(result.is_some(), "matching peer must yield Some addr");
+        let addr = result.unwrap();
+        assert_eq!(addr.port(), 51515);
+        assert_eq!(addr.ip().to_string(), "192.168.1.99");
+    }
+
+    /// `resolve_addr_from_discovery` prefers IPv4 over IPv6 when both are
+    /// present (IPv4 is listed first after the sort in `peer_from_resolved`).
+    #[test]
+    fn resolve_addr_from_discovery_prefers_ipv4() {
+        use copypaste_p2p::discovery::PeerInfo;
+
+        let discovery = DiscoveryService::new();
+        discovery.inject_peer_for_test(
+            "carol.local.",
+            PeerInfo {
+                device_id: "ccddee".to_string(),
+                device_name: "Carol".to_string(),
+                ip_addrs: vec!["192.168.2.5".parse().unwrap(), "::1".parse().unwrap()],
+                port: 9000,
+                bport: None,
+            },
+        );
+        let result = resolve_addr_from_discovery(&discovery, "ccddee");
+        assert!(result.is_some());
+        let addr = result.unwrap();
+        assert!(!addr.ip().is_ipv6(), "must prefer IPv4 when available");
+    }
+}

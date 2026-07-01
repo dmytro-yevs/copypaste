@@ -279,3 +279,118 @@ pub(super) async fn run_peer_connection_framed<S>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    /// Build a minimal `WireItem` for use in tests.
+    fn test_wire_item(id: &str) -> WireItem {
+        WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
+            id: id.to_string(),
+            item_id: id.to_string(),
+            content_type: "text".to_string(),
+            content: Some(b"hello".to_vec()),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 1,
+            wall_time: 0,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "test-device".to_string(),
+            key_version: 2,
+            file_name: None,
+            mime: None,
+        }
+    }
+
+    /// A stream that accepts reads/writes but never makes progress: reads stay
+    /// `Pending` (no EOF, no data) and writes stay `Pending` (the kernel send
+    /// buffer is "full"). Models a half-closed / wedged peer socket so a
+    /// `framed.send().await` blocks indefinitely.
+    struct StuckStream;
+
+    impl tokio::io::AsyncRead for StuckStream {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    impl tokio::io::AsyncWrite for StuckStream {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            std::task::Poll::Pending
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Pending
+        }
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    /// A stuck writer (half-closed peer) must not park the pump forever: the
+    /// write timeout fires, the task returns, and `peer_rx` is dropped so the
+    /// per-peer sink `Sender` reports closed — which is what unblocks both the
+    /// connector re-dial and the accept loop's duplicate guard.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn stuck_writer_drops_sink_within_write_timeout() {
+        let framed = tokio_util::codec::Framed::new(
+            StuckStream,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+        let (peer_tx, peer_rx) = mpsc::channel::<PeerFrame>(8);
+        let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
+
+        // Queue an outbound item so the pump enters the write arm and blocks.
+        peer_tx
+            .send(PeerFrame::Data(test_wire_item("a")))
+            .await
+            .unwrap();
+
+        let pending: PendingPings = Arc::new(Mutex::new(HashMap::new()));
+        let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+        let handle = tokio::spawn(run_peer_connection_framed(
+            framed,
+            peer_rx,
+            incoming_tx,
+            copypaste_p2p::DeviceFingerprint("testpeer".to_string()),
+            None,
+            pending,
+            rtt_ms,
+        ));
+
+        // The sink Sender must close once the pump tears down on write timeout.
+        // With paused time the timer advances automatically when the runtime is
+        // otherwise idle, so a generous bound keeps the test instant yet robust.
+        tokio::time::timeout(WRITE_TIMEOUT * 2, handle)
+            .await
+            .expect("pump task must return after write timeout, not block forever")
+            .expect("pump task must not panic");
+
+        assert!(
+            peer_tx.is_closed(),
+            "peer sink Sender must be closed after the pump tears down a stuck writer"
+        );
+    }
+}

@@ -130,3 +130,135 @@ pub(super) async fn ping_loop(
         tracing::trace!(peer = %peer_fp, nonce, "RTT: sent Ping");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    // ── RTT ping/pong unit tests ───────────────────────────────────────────────
+
+    /// `ControlMsg::Ping` and `ControlMsg::Pong` must round-trip through serde
+    /// with the `nonce` field intact, and their serialised form must carry the
+    /// `"control"` tag (so old peers that don't know these variants log a
+    /// warning rather than mis-routing the frame).
+    #[test]
+    fn ping_pong_serde_round_trip() {
+        use copypaste_sync::protocol::{ControlMsg, PeerFrame};
+
+        let nonce = 0xDEAD_BEEF_CAFE_1234u64;
+
+        // Serialise Ping.
+        let ping_frame = PeerFrame::Control(ControlMsg::Ping { nonce });
+        let ping_json = serde_json::to_string(&ping_frame).expect("serialise Ping");
+        assert!(
+            ping_json.contains("\"control\""),
+            "Ping serialisation must contain the 'control' tag key: {ping_json}"
+        );
+        assert!(
+            ping_json.contains("\"ping\""),
+            "Ping serialisation must contain 'ping' as the control value: {ping_json}"
+        );
+        assert!(
+            ping_json.contains(&nonce.to_string()),
+            "Ping serialisation must include the nonce: {ping_json}"
+        );
+
+        // Round-trip Ping.
+        let de_ping: PeerFrame = serde_json::from_str(&ping_json).expect("deserialise Ping");
+        assert_eq!(
+            de_ping,
+            PeerFrame::Control(ControlMsg::Ping { nonce }),
+            "Ping must survive a serde round-trip"
+        );
+
+        // Serialise Pong.
+        let pong_frame = PeerFrame::Control(ControlMsg::Pong { nonce });
+        let pong_json = serde_json::to_string(&pong_frame).expect("serialise Pong");
+        assert!(
+            pong_json.contains("\"pong\""),
+            "Pong serialisation must contain 'pong' as the control value: {pong_json}"
+        );
+
+        // Round-trip Pong.
+        let de_pong: PeerFrame = serde_json::from_str(&pong_json).expect("deserialise Pong");
+        assert_eq!(
+            de_pong,
+            PeerFrame::Control(ControlMsg::Pong { nonce }),
+            "Pong must survive a serde round-trip"
+        );
+
+        // Ping and Pong must produce different serialisations (different control values).
+        assert_ne!(
+            ping_json, pong_json,
+            "Ping and Pong must not serialise identically"
+        );
+    }
+
+    /// The RTT record: after inserting a nonce + Instant into the pending-pings
+    /// map and then simulating a Pong response (remove the nonce, compute
+    /// elapsed), the RTT map must contain a non-zero entry for the peer.
+    ///
+    /// This tests the state-machine logic in `run_peer_connection_framed` that
+    /// handles `ControlMsg::Pong` — isolated from the network layer.
+    #[tokio::test]
+    async fn rtt_record_written_on_pong() {
+        let pending_pings: PendingPings = Arc::new(Mutex::new(HashMap::new()));
+        let peer_rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+        let peer_fp = "aabbccddee".to_string();
+        let nonce = 42u64;
+
+        // Record a send time just before "now".
+        let sent_at = Instant::now() - Duration::from_millis(15);
+        pending_pings.lock().await.insert(nonce, sent_at);
+
+        // Simulate receiving the Pong (the code path in run_peer_connection_framed).
+        let resolved = {
+            let mut map = pending_pings.lock().await;
+            map.remove(&nonce)
+        };
+        assert!(resolved.is_some(), "nonce must be found in pending_pings");
+
+        let rtt_ms = resolved.unwrap().elapsed().as_millis() as u32;
+        peer_rtt_ms
+            .lock()
+            .await
+            .insert(copypaste_p2p::DeviceFingerprint(peer_fp.clone()), rtt_ms);
+
+        let stored = peer_rtt_ms.lock().await.get(peer_fp.as_str()).copied();
+        assert!(
+            stored.is_some(),
+            "RTT map must contain an entry for the peer after Pong processing"
+        );
+        assert!(
+            stored.unwrap() >= 15,
+            "recorded RTT must be at least 15 ms (our simulated delay), got {stored:?}"
+        );
+    }
+
+    /// After a Pong is processed the pending-pings map must be empty (the
+    /// nonce is removed so it doesn't contribute to stale-nonce accumulation).
+    #[tokio::test]
+    async fn pending_ping_removed_on_pong() {
+        let pending_pings: PendingPings = Arc::new(Mutex::new(HashMap::new()));
+        let nonce = 99u64;
+
+        pending_pings.lock().await.insert(nonce, Instant::now());
+        assert_eq!(
+            pending_pings.lock().await.len(),
+            1,
+            "precondition: one pending ping"
+        );
+
+        // Simulate Pong processing: remove the nonce.
+        let _ = pending_pings.lock().await.remove(&nonce);
+
+        assert_eq!(
+            pending_pings.lock().await.len(),
+            0,
+            "pending_pings must be empty after Pong processing removes the nonce"
+        );
+    }
+}

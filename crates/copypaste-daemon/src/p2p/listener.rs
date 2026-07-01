@@ -236,3 +236,39 @@ pub(super) async fn accept_loop(
         }
     }
 }
+
+/// Spawn [`accept_loop`] as a background task.
+///
+/// Thin glue extracted from `start_p2p` (ADR-017, CopyPaste-vp63.2) — every
+/// argument is already the exact clone `start_p2p` used to build before
+/// spawning inline, so this call is behaviourally identical to the former
+/// inline `tokio::spawn` block.
+#[allow(clippy::too_many_arguments)] // mirrors accept_loop's own attribute
+pub(super) fn spawn_accept_loop(
+    listener: TcpListener,
+    shutdown: CancellationToken,
+    transport: Arc<PeerTransport>,
+    peer_sinks: PeerSinks,
+    incoming_tx: mpsc::Sender<WireItem>,
+    catchup: CatchupProvider,
+    live_peers: PairedPeers,
+    peer_rtt_ms: PeerRttMs,
+    peer_event_tx: broadcast::Sender<PeerEvent>,
+    public_ip_cache: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
+) {
+    tokio::spawn(async move {
+        accept_loop(
+            listener,
+            shutdown,
+            transport,
+            peer_sinks,
+            incoming_tx,
+            catchup,
+            live_peers,
+            peer_rtt_ms,
+            peer_event_tx,
+            public_ip_cache,
+        )
+        .await;
+    });
+}

@@ -91,3 +91,91 @@ pub(super) fn load_peers_from_path_into(path: &std::path::Path, peers: &PairedPe
     }
     loaded
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// `init` must build a `P2pState` end-to-end without panicking and without
+    /// requiring any I/O beyond cert generation + mDNS registration (which
+    /// does not bind sockets yet — `start()` does).
+    #[test]
+    fn p2p_state_initializes_without_panic() {
+        let state = init(0, "test-device-id", "Test Device").expect("init must succeed");
+        // own fingerprint should be populated (hex SHA-256 of cert DER).
+        assert!(
+            !state.transport.fingerprint().is_empty(),
+            "transport must expose a non-empty fingerprint after init"
+        );
+    }
+
+    /// Before any peer is discovered via mDNS, `list_peers` must return an
+    /// empty slice — never panic, never block.
+    #[test]
+    fn list_peers_returns_empty_initially() {
+        let state = init(0, "test-device-id", "Test Device").expect("init must succeed");
+        let peers = list_peers(&state);
+        assert!(
+            peers.is_empty(),
+            "fresh P2pState must have zero known peers"
+        );
+    }
+
+    /// `get_own_fingerprint` must match `keychain::own_fingerprint` exactly —
+    /// this protects against the surface drifting away from the single source
+    /// of truth used by the rest of the daemon.
+    #[test]
+    fn get_own_fingerprint_matches_keychain() {
+        let pk = [0u8; 32];
+        assert_eq!(get_own_fingerprint(&pk), keychain::own_fingerprint(&pk));
+    }
+
+    /// fix/p2p-c-review #2 — a peer persisted in `peers.json` is loaded into the
+    /// live `PairedPeers` allowlist at `start_p2p` time and accepted by
+    /// `is_known` (normalised to the canonical lowercase, colon-free hex the
+    /// mTLS verifier uses).
+    #[test]
+    fn persisted_peer_is_known_after_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+
+        // Two records in the colon-hex form the IPC pairing handlers write,
+        // one with a display name and one (PAKE responder side) without.
+        let fp_colon = std::iter::repeat_n("aa", 32).collect::<Vec<_>>().join(":");
+        let fp_canonical = crate::ipc::canonical_fingerprint(&fp_colon);
+        let json = format!(
+            r#"[{{"fingerprint":"{fp_colon}","name":"Alice's Mac","added_at":1700000000}},
+                {{"fingerprint":"bb:bb","added_at":1700000001}}]"#
+        );
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(json.as_bytes()).unwrap();
+        drop(f);
+
+        let peers = PairedPeers::new();
+        assert!(
+            !peers.is_known(&fp_canonical),
+            "precondition: empty allowlist"
+        );
+
+        let loaded = load_peers_from_path_into(&path, &peers);
+        assert_eq!(loaded, 2, "both persisted peers loaded");
+
+        assert!(
+            peers.is_known(&fp_canonical),
+            "persisted peer must be accepted by is_known after loading"
+        );
+        // The lean (name-less) record is also honoured, normalised.
+        assert!(peers.is_known("bbbb"), "name-less peer also loaded");
+    }
+
+    /// A missing `peers.json` loads zero peers and never errors.
+    #[test]
+    fn missing_peers_file_loads_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.json");
+        let peers = PairedPeers::new();
+        assert_eq!(load_peers_from_path_into(&path, &peers), 0);
+        assert_eq!(peers.active_count(), 0);
+    }
+}

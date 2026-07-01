@@ -307,3 +307,193 @@ pub(super) async fn standing_pairing_responder_loop(
         }
     }
 }
+
+/// Bind a probe bootstrap listener on an OS-assigned port so `start_p2p` learns
+/// the port before advertising it in the mDNS `bport` TXT key, then drop the
+/// probe so [`standing_pairing_responder_loop`] can re-bind the SAME port for
+/// its first accept. A listening socket is dropped (not connected) between
+/// iterations, so it never enters TIME_WAIT and the immediate re-bind succeeds.
+///
+/// Best-effort: on any failure (bind or `local_addr`) returns `None`, in which
+/// case the caller advertises mDNS as v1 (no `bport`) and discovery pairing is
+/// simply unavailable on this instance — QR pairing is unaffected.
+pub(super) async fn probe_bootstrap_port(cert_der: Vec<u8>, key_der: Vec<u8>) -> Option<u16> {
+    match copypaste_p2p::bootstrap::BootstrapResponder::bind_on(0, cert_der, key_der).await {
+        Ok(probe) => match probe.local_addr() {
+            Ok(addr) => {
+                // Drop the probe listener so the responder loop can re-bind
+                // the same port for its first accept.
+                let p = addr.port();
+                drop(probe);
+                Some(p)
+            }
+            Err(e) => {
+                tracing::warn!("LAN/SAS: bootstrap listener local_addr failed: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!("LAN/SAS: failed to bind bootstrap listener: {e}");
+            None
+        }
+    }
+}
+
+/// Spawn [`standing_pairing_responder_loop`] when both `lan_visibility` is
+/// enabled AND a bootstrap port was successfully probed. Thin glue extracted
+/// from `start_p2p` (ADR-017, CopyPaste-vp63.2) — every clone below is
+/// identical to what `start_p2p` built before spawning inline.
+///
+/// CopyPaste-1htb: gate on `lan_visibility`. When the user sets
+/// lan_visibility=false the device must be fully invisible on the LAN — no
+/// mDNS advertising AND no inbound pairing listener. The mTLS sync listener
+/// (already-paired peers) continues to run because it requires a pre-shared
+/// cert fingerprint and never surfaces a SAS dialog; only the unauthenticated
+/// bootstrap bport is suppressed here.
+#[allow(clippy::too_many_arguments)] // mirrors standing_pairing_responder_loop's own attribute
+pub(super) fn spawn_standing_responder_if_visible(
+    lan_visibility: bool,
+    bootstrap_port: Option<u16>,
+    bootstrap_cert_der: Vec<u8>,
+    bootstrap_key_der: Vec<u8>,
+    peers: PairedPeers,
+    pairing: Arc<crate::pairing_sm::PairingCoordinator>,
+    own_sync_addr: Arc<std::sync::Mutex<Option<String>>>,
+    public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
+    sync_crypto: Option<crate::sync_orch::SyncCrypto>,
+    device_id: uuid::Uuid,
+    cloud_account_id: Option<Arc<std::sync::Mutex<Option<String>>>>,
+    shutdown_token: CancellationToken,
+) {
+    if lan_visibility {
+        if let Some(bport) = bootstrap_port {
+            let peers_for_responder = peers;
+            let pairing_for_responder = pairing;
+            let own_sync_addr_for_responder = own_sync_addr;
+            let public_ip_cache_for_responder = public_ip_cache;
+            let cert_der = bootstrap_cert_der;
+            let key_der = bootstrap_key_der;
+            let responder_shutdown = shutdown_token;
+            // CopyPaste-1w7: clone the SyncCrypto handle (all clones share the
+            // same Arc<Mutex<…>> backing store) so the responder can call
+            // reload_sync_key after a successful button-pair without a restart.
+            let sync_crypto_for_responder = sync_crypto;
+            // Thread our own device UUID so the responder advertises it in-band,
+            // allowing the peer to match clipboard origin_device_id to a name.
+            let local_device_id_for_responder = Some(device_id.to_string());
+            // CopyPaste-yw2k: clone the account-id arc so the responder can
+            // include our supabase_account_id in PeerMeta (non-secret, not a token).
+            let cloud_account_id_for_responder = cloud_account_id;
+            tokio::spawn(async move {
+                standing_pairing_responder_loop(
+                    bport,
+                    cert_der,
+                    key_der,
+                    peers_for_responder,
+                    pairing_for_responder,
+                    own_sync_addr_for_responder,
+                    public_ip_cache_for_responder,
+                    sync_crypto_for_responder,
+                    local_device_id_for_responder,
+                    cloud_account_id_for_responder,
+                    responder_shutdown,
+                )
+                .await;
+            });
+        }
+    } else {
+        tracing::info!(
+            "lan_visibility=false: bootstrap pairing listener suppressed \
+             (CopyPaste-1htb: device fully invisible on LAN)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BUG F1 (verification follow-up): the `standing_pairing_responder_loop`
+    /// must exit promptly on token cancel. It binds an ephemeral bootstrap port
+    /// (`bport = 0`, a passive loopback TCP listener — no multicast) and then
+    /// parks inside `run_with_confirm` awaiting an inbound pairing connection
+    /// that never arrives, raced against cancellation. Cancelling must drop the
+    /// in-flight accept future and break the loop. Fully hermetic.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancellation_token_stops_standing_responder_loop() {
+        let token = CancellationToken::new();
+        let handle = {
+            let cert = copypaste_p2p::cert::SelfSignedCert::generate("f1-responder").unwrap();
+            let peers = PairedPeers::new();
+            let pairing = Arc::new(crate::pairing_sm::PairingCoordinator::new());
+            let own_sync_addr = Arc::new(std::sync::Mutex::new(Some("127.0.0.1:0".to_string())));
+            let public_ip_cache = Arc::new(tokio::sync::RwLock::new(None));
+            let token = token.clone();
+            tokio::spawn(async move {
+                standing_pairing_responder_loop(
+                    0, // ephemeral bootstrap port — passive loopback listener
+                    cert.cert_der,
+                    cert.key_der,
+                    peers,
+                    pairing,
+                    own_sync_addr,
+                    public_ip_cache,
+                    None, // sync_crypto — not needed for cancellation test
+                    None, // local_device_id — not needed for cancellation test
+                    None, // cloud_account_id — not needed for cancellation test
+                    token,
+                )
+                .await;
+            })
+        };
+
+        // Give the loop a moment to reach its `run_with_confirm` accept await,
+        // then cancel; it must break out well within the bound.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        token.cancel();
+        let joined = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        assert!(
+            joined.is_ok(),
+            "BUG F1: standing_pairing_responder_loop must exit promptly on token cancel"
+        );
+        joined.unwrap().unwrap();
+    }
+
+    // ── CopyPaste-1hw5: per-fingerprint rate limit in standing_pairing_responder_loop ──
+
+    /// Verify that the per-fingerprint `MdnsRateLimiter` inside
+    /// `standing_pairing_responder_loop` behaves correctly in isolation: a fresh
+    /// fingerprint is admitted, and after the burst budget is exhausted the same
+    /// fingerprint is rejected.
+    ///
+    /// This exercises the rate-limiting logic path (layer 2) without a real PAKE
+    /// exchange — we test `MdnsRateLimiter` directly since the confirm closure in
+    /// `standing_pairing_responder_loop` uses the same `try_admit_key` call.
+    #[test]
+    fn standing_responder_rate_limiter_admits_then_throttles() {
+        use copypaste_p2p::rate_limit::{MdnsRateLimiter, BURST_CAPACITY};
+
+        let rl = MdnsRateLimiter::new();
+        let fp = "aa:bb:cc:dd:ee:ff:00:11:22:33";
+
+        // A fresh fingerprint should be admitted up to the burst capacity.
+        let mut admitted = 0u32;
+        for _ in 0..BURST_CAPACITY {
+            if rl.try_admit_key(fp) {
+                admitted += 1;
+            }
+        }
+        assert_eq!(
+            admitted, BURST_CAPACITY,
+            "fresh fingerprint should be admitted up to BURST_CAPACITY"
+        );
+
+        // Beyond burst: should be rejected (rate limited).
+        let beyond = rl.try_admit_key(fp);
+        assert!(
+            !beyond,
+            "CopyPaste-1hw5: fingerprint must be rejected after burst capacity exhausted"
+        );
+        assert!(rl.total_drops() > 0, "rate limiter must record the drop");
+    }
+}

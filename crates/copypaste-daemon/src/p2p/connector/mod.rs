@@ -391,3 +391,124 @@ pub(super) async fn peer_connector_loop(
         }
     }
 }
+
+/// Spawn [`peer_connector_loop`] as a background task.
+///
+/// Thin glue extracted from `start_p2p` (ADR-017, CopyPaste-vp63.2) — every
+/// argument is already the exact clone `start_p2p` used to build before
+/// spawning inline, so this call is behaviourally identical to the former
+/// inline `tokio::spawn` block.
+#[allow(clippy::too_many_arguments)] // mirrors peer_connector_loop's own attribute
+pub(super) fn spawn_connector_loop(
+    transport: Arc<PeerTransport>,
+    peer_sinks: PeerSinks,
+    incoming_tx: mpsc::Sender<WireItem>,
+    own_fp: DeviceFingerprint,
+    catchup: CatchupProvider,
+    discovery: Arc<DiscoveryService>,
+    shutdown: CancellationToken,
+    live_peers: PairedPeers,
+    peer_rtt_ms: PeerRttMs,
+    peer_event_tx: broadcast::Sender<PeerEvent>,
+    public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
+) {
+    tokio::spawn(async move {
+        peer_connector_loop(
+            transport,
+            peer_sinks,
+            incoming_tx,
+            own_fp,
+            catchup,
+            discovery,
+            shutdown,
+            live_peers,
+            peer_rtt_ms,
+            peer_event_tx,
+            public_ip_cache,
+        )
+        .await;
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// BUG F1 (verification follow-up): the `peer_connector_loop` must exit
+    /// promptly when its cloned token is cancelled. With an empty peers file the
+    /// loop has nothing to dial and parks on its inter-tick sleep select (which
+    /// already races cancellation); the new mid-dial select arm covers the case
+    /// where a dial is in flight. We pin `COPYPASTE_CONFIG_DIR` at an empty
+    /// tempdir (under the process-wide env lock) so `peers_file_path()` resolves
+    /// to a non-existent `peers.json` and the loop never reaches a real dial —
+    /// keeping the test hermetic (no network / no multicast).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancellation_token_stops_connector_loop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let token = CancellationToken::new();
+        // Hold the process-wide env lock only while we set the override, spawn the
+        // loop, and cancel it — never across an await (clippy::await_holding_lock).
+        // The loop is cancelled before the lock is released, so it performs at most
+        // one peers.json read against our empty tempdir.
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK; restored before the lock drops.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        let handle = {
+            let cert = copypaste_p2p::cert::SelfSignedCert::generate("f1-connector").unwrap();
+            let transport = Arc::new(PeerTransport::from_cert(
+                cert.cert_der,
+                cert.key_der,
+                PairedPeers::new(),
+            ));
+            let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
+            let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
+            let own_fp = transport.fingerprint().to_string();
+            let catchup: CatchupProvider = Arc::new(|_fp: &str| Vec::new());
+            let discovery = Arc::new(DiscoveryService::new());
+            let token = token.clone();
+            let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+            let (event_tx, _) = broadcast::channel::<PeerEvent>(4);
+            tokio::spawn(async move {
+                peer_connector_loop(
+                    transport,
+                    peer_sinks,
+                    incoming_tx,
+                    DeviceFingerprint(own_fp),
+                    catchup,
+                    discovery,
+                    token,
+                    PairedPeers::new(),
+                    rtt_ms,
+                    event_tx,
+                    Arc::new(tokio::sync::RwLock::new(None)), // crh3.109: no public IP in test
+                )
+                .await;
+            })
+        };
+
+        // Loop is parked on its tick select; cancel before releasing the env lock.
+        token.cancel();
+        // SAFETY: still holding TEST_ENV_LOCK; restore the prior value, then drop
+        // the guard so the subsequent await holds no std mutex guard.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        let joined = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        assert!(
+            joined.is_ok(),
+            "BUG F1: peer_connector_loop must exit promptly on token cancel"
+        );
+        joined.unwrap().unwrap();
+    }
+}
