@@ -147,7 +147,7 @@ internal fun parseHexColor(snippet: String): Color? {
 /**
  * egsf: kind-tinted icon tile — styleguide .ci (L250).
  * Background = c.mute@0.16, glyph = c.faint. The label shown is [chipLabel]
- * (de-styled — was a glyph chosen by content kind via contentIconFor()/NavIcons).
+ * (de-styled — was a glyph chosen by content kind via contentIconFor()/LucideIcons).
  *
  * PG-64 parity: the macOS `.icon-float` @keyframes animation was removed on
  * macOS (s7ia). Android previously translated it as a subtle scale pulse
