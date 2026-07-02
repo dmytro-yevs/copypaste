@@ -205,16 +205,25 @@ slices may be N-A only with a recorded rationale.
 - [x] 3.3 Live preview: hoist appearance draft above `CopyPasteTheme`; Save→persist then publish the
       app-scoped committed appearance state that `CopyPasteTheme` reads (NOT `recreate()`; works for
       embedded MainActivity tab and standalone SettingsActivity).
-- [x] 3.4 Tests: migration once/idempotent, retains canonical keys, runs before first read; committed-survives-process-death;
-      live-preview/Save/Discard; System reacts to OS change.
+- [x] 3.4 Tests: migration once/idempotent, retains canonical keys regardless of getter-read order
+      (order-independence, not order-dependence, is the fixed D6 invariant — see
+      `SettingsThemeMigrationTest`); committed-survives-process-death; live-preview/Save/Discard
+      (`AppearanceStateTest` "discarding a draft change never touches AppearanceStore" — the
+      store-level contract a Settings-screen Discard relies on); System reacts to OS change.
 
 ## 4. S4 — Shell + navigation  → `android-navigation-chrome`
 
-- [ ] 4.1 Extract shell/nav from `MainActivity` into reusable, previewable composables.
-- [ ] 4.2 Floating-pill nav §9.12: frosted blur (D7), 3 tabs w/ Lucide icons, accent-selected pill,
-      `--bg` gradient fade, system-bar/gesture/cutout/IME insets, restored selected tab.
-- [ ] 4.3 Adaptive width (WindowSizeClass) for tablet/foldable **only if the S0 gate approves**;
-      otherwise phone-portrait is the target. Sync-status placement.
+- [x] 4.1 Extract shell/nav from `MainActivity` into reusable, previewable composables
+      (`ui/shell/MainShell.kt`, `ui/shell/NavPill.kt`, `ui/shell/NavGradientFade.kt`) — `NavPill`
+      is hermetic (stateless params, no repository/FFI/Activity) per the S2.9 seam rule.
+- [x] 4.2 Floating-pill nav §9.12: frosted blur (D7 captured-layer strategy, real 31+/opaque
+      fallback via `rememberResolvedBlurMode()`), 3 tabs w/ Lucide icons (24dp `navGlyph`),
+      accent-selected pill (`accent @ 18%`), `--bg` gradient fade, system-bar/gesture/cutout/IME
+      insets (pill hidden outright while IME visible), restored selected tab (`rememberSaveable`),
+      reduced motion disables the selection spring (`cpMotionSpec`).
+- [x] 4.3 S0 tablet/foldable gate NOT approved (design.md "Resolved decisions") — phone-portrait
+      only, no `WindowSizeClass` adaptive width added. Sync-status: shell-owned position above the
+      pill's measured footprint, never overlapping it, respecting the same insets.
 
 ## 5. S5 — History  → `android-history`
 

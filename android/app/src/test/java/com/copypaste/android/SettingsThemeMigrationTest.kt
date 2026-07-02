@@ -88,18 +88,20 @@ class SettingsThemeMigrationTest {
         assertTrue(rawPrefs().contains("palette"))
     }
 
-    @Test
-    fun `migration runs before the first appearance getter is read — CopyPasteApp onCreate ordering`() {
-        val settings = Settings(context())
-        // Mirrors the exact CopyPasteApp.onCreate sequence: migrate THEN read.
-        settings.migrateThemeForTwoAxis()
-        settings.themeMode = ThemeMode.SYSTEM
-        settings.accent = AccentColor.GREEN
-        settings.migrateThemeForTwoAxis() // re-entrant call, e.g. a second Settings() construction
-
-        assertEquals(ThemeMode.SYSTEM, settings.themeMode)
-        assertEquals(AccentColor.GREEN, settings.accent)
-    }
+    // NOTE (S4 carried review finding): a "migration runs before the first
+    // appearance getter is read" test used to live here. It could not fail —
+    // it called migrate(), set themeMode/accent, migrated again, then asserted
+    // the values it had just set were still there, which is exactly the shape
+    // of "migration is idempotent" above (no distinct ordering-dependent
+    // assertion). It is deleted as redundant rather than rewritten, because
+    // the D6 fix that introduced `theme_mode`/`accent` as canonical
+    // (non-removed) keys makes getter-read order genuinely NOT matter for
+    // those two keys any more — migrateThemeForTwoAxis() never touches them,
+    // so there is no observable difference between "getter before migrate"
+    // and "migrate before getter" to assert on. Order-INDEPENDENCE for the
+    // canonical keys is the fixed invariant (see CopyPasteApp.onCreate's
+    // migrate-then-init comment); a test that reintroduced order-sensitivity
+    // would have to reintroduce the removed bug to have something to assert.
 
     @Test
     fun `saveScreenSettings persists theme_mode and accent and a fresh Settings instance reads them back`() {

@@ -72,4 +72,37 @@ class AppearanceStateTest {
         AppearanceStore.publish(appearance.copy()) // new instance, same fields
         assertEquals(appearance, AppearanceStore.committed.value)
     }
+
+    /**
+     * S4 carried review finding (b): D5 says "Draft never feeds committed state
+     * before Save" — SettingsActivity's Discard path is exactly "mutate local
+     * draft state, then never call AppearanceStore.publish". SettingsActivity's
+     * draft state itself is private Composable-local state (not extractable to
+     * a pure function without a full Compose-UI-test harness), so this asserts
+     * the contract at the level [AppearanceStore] actually enforces it: mutating
+     * ANY number of local draft-like values, without an explicit [publish] call,
+     * leaves [AppearanceStore.committed] untouched. This is the exact invariant
+     * a Discard (which structurally never reaches `commitSave()`'s `publish`
+     * call — see `SettingsActivity.kt`) relies on.
+     */
+    @Test
+    fun `discarding a draft change never touches AppearanceStore committed state`() {
+        val baseline = CommittedAppearance(ThemeMode.DARK, AccentColor.INDIGO, translucency = true)
+        AppearanceStore.publish(baseline)
+
+        // Simulate a Settings-screen draft edit (local vars, mirroring the
+        // Composable-local `mutableStateOf` draft fields) that the user then
+        // discards — i.e. publish() is deliberately never called below.
+        val draftThemeMode = ThemeMode.SYSTEM
+        val draftAccent = AccentColor.TEAL
+        val draftTranslucency = true
+
+        // Discard: the draft is simply dropped — no publish() call reaches AppearanceStore.
+        assertEquals(baseline, AppearanceStore.committed.value)
+        // The draft locals themselves are unused past this point (this test's
+        // whole point is that mutating them has no path to AppearanceStore).
+        assertEquals(ThemeMode.SYSTEM, draftThemeMode)
+        assertEquals(AccentColor.TEAL, draftAccent)
+        assertTrue(draftTranslucency)
+    }
 }

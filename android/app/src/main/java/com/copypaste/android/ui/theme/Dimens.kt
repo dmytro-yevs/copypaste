@@ -88,6 +88,9 @@ object CpDimensions {
     /** Floating nav pill clearance above the resolved bottom system-bar/gesture inset. */
     val navBottomClearance: Dp = 12.dp
 
+    /** Floating nav pill inset from the left/right screen edges (STYLEGUIDE §9.12). */
+    val navSideInset: Dp = 12.dp
+
     /** WindowSizeClass breakpoint — below this width is "compact". */
     val widthCompactMax: Dp = 600.dp
 

@@ -1,6 +1,7 @@
 package com.copypaste.android.ui.theme
 
 import android.os.Build
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 
 // ---------------------------------------------------------------------------
@@ -45,3 +46,13 @@ val LocalBlurModeOverride = staticCompositionLocalOf<BlurMode?> { null }
  * without re-threading the flag through every call site.
  */
 val LocalTranslucencyEnabled = staticCompositionLocalOf { true }
+
+/**
+ * The first real production consumer of [resolveBlurMode] (S4 nav pill; later
+ * sheets/modals per D7's "chrome/sheets" scope) — resolves [LocalBlurModeOverride]
+ * first (deterministic golden/preview pin) and falls back to the live
+ * [LocalTranslucencyEnabled]/`Build.VERSION.SDK_INT` resolution otherwise.
+ */
+@Composable
+fun rememberResolvedBlurMode(): BlurMode =
+    LocalBlurModeOverride.current ?: resolveBlurMode(LocalTranslucencyEnabled.current)
