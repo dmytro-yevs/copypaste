@@ -103,8 +103,8 @@ android {
         // local build never produces a lower versionCode than a published one.
         // versionCode must be a monotonically increasing integer; increment it
         // with every Play Store / sideload release regardless of version string.
-        versionName = (project.findProperty("versionName") as String?) ?: "0.3.0"
-        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 300
+        versionName = (project.findProperty("versionName") as String?) ?: "0.4.0"
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 400
         // Instrumented (androidTest) runner for the cross-language crypto
         // conformance test (CryptoConformanceTest.kt). Runs on the emulator via
         // `./gradlew connectedDebugAndroidTest`.
