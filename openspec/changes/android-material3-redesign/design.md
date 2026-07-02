@@ -207,14 +207,58 @@ A read-only code audit (results folded into this change) established the true ba
   local `:app:connectedDebugAndroidTest` run for security-relevant slices (S4, S5/S6, S8, S9/S10,
   S12, S15), backed by Paparazzi/JVM proxies. Nightly instrumented runs become possible only after
   CopyPaste-k1l0 is resolved; no nightly instrumented job exists today.
+- **Lucide icons (B9, spike S0.3 resolved 2026-07-02)** — **NO Maven dependency**: every published
+  Lucide-Compose artifact (`com.composables:icons-lucide-android` 0.0.1/1.0.0/2.2.1 and the
+  `icons-lucide`/`-cmp` variants, verified via Maven Central POMs) requires `kotlin-stdlib >= 2.0`,
+  a hard metadata incompatibility with the project's Kotlin 1.9.23. Decision: **vendor a curated
+  `ImageVector` subset** generated from a pinned tag of `github.com/lucide-icons/lucide` (ISC) via
+  `DevSrSouza/svg-to-compose` (MIT, build-time only): generation script
+  `scripts/generate-lucide-icons.sh` (pins the Lucide SHA in its header), output one-property-per-icon
+  under `android/app/src/main/java/com/copypaste/android/ui/theme/icons/` (R8-shakeable), NOTICE
+  entries for Lucide (ISC) + svg-to-compose (MIT) in a new third-party notice file (none exists in
+  the repo today). Reopen only if the workspace Kotlin toolchain moves to 2.0+.
+- **Paparazzi pin (B10, spike S0.4 resolved 2026-07-02)** — `app.cash.paparazzi:1.3.4` (tested by
+  upstream against AGP 8.3.2 / Kotlin 1.9.24 / Gradle 8.7 — patch-distance from our 8.3.0/1.9.23,
+  exact match on Gradle 8.7). 1.3.5 (needs Kotlin 2.0.21) and 2.0.0-alpha (Gradle 9) rejected.
+  Fallback if the S2 proof render fails: bump AGP 8.3.0→8.3.2 only. Goldens: **direct PNG in git,
+  no LFS** (~100-150 baselines ≈ 15-40 MB; LFS misconfig is a known Paparazzi footgun). Proof test:
+  `android/app/src/test/java/com/copypaste/android/paparazzi/BundledFontSnapshotTest.kt`, Pixel-class
+  API 34 portrait, locale en. Caveats: run with JDK 17 explicitly (machine default is Temurin 26);
+  compileSdk 35 vs SDK-34 layoutlib is benign at our Compose BOM 2024.04.01; append
+  `-x buildCargoNdk` to record/verify defensively.
+- **Robolectric pin (task 0.12)** — `org.robolectric:robolectric:4.15` (SDK 34 `@Config` support
+  starts at 4.14 — 4.13 caps at SDK 33; 4.16 wants JDK 21). Caveat: 4.15 release notes mention
+  Gradle 8.12+ — test-only dependency, expected fine on our 8.7; verified empirically when S2 wires
+  it (`./gradlew :app:testDebugUnitTest`); fallback = 4.14. Used for the S1/S3 window/system-bar
+  appearance matrix tests.
+- **`migrateThemeForTwoAxis()` (D6/M7, task 0.7 resolved)** — call site UNCHANGED:
+  `CopyPasteApp.onCreate` (`CopyPasteApp.kt:88-91`, before any Activity/composition). S3 fixes the
+  body only: stop removing `theme_mode`/`accent` (`Settings.kt:495-496` — latent data-loss once S3
+  adds those getters); keep removing the 5 stale keys (`palette`, `skin`, `density`,
+  `motion_reduced`, `contrast`); version the latch `theme_migrated_2axis` → `theme_migrated_2axis_v2`
+  (never reuse an old latch when migration behaviour changes). S3 tests: idempotence,
+  retains-canonical-keys, ordering-before-first-getter, already-migrated untouched, fresh-install
+  defaults (dark/indigo).
+- **System-bar + first-paint (task 0.10 resolved)** — three parts: (1) `android:windowBackground`
+  on `Theme.CopyPaste` in `values/` + `values-night/` themes.xml pointing at `CpColors.bg`-sourced
+  color resources (paints before Compose runs); (2) `androidx.core:core-splashscreen` +
+  `Theme.CopyPaste.Splash` (`postSplashScreenTheme`, background = same bg color) applied to
+  `MainActivity` only, `installSplashScreen()` before `super.onCreate`; (3) resolved-theme-driven
+  `WindowInsetsControllerCompat.isAppearanceLightStatusBars/NavigationBars` SideEffect inside the
+  new `CopyPasteTheme` composable (S1.2) — NOT in `SecureWindowChrome`, whose two existing
+  SideEffects (`setDecorFitsSystemWindows(false)` + FLAG_SECURE) are preserved as-is. Today NO
+  `isAppearanceLight*` call exists anywhere — forced-Light-over-OS-Dark yields illegible bars
+  (the nav-chrome spec regression scenario). Tests: 3(app theme)×2(OS mode) Robolectric matrix.
+- **`ContentVisualKind` (P0-6, task 0.11 resolved)** — enum of exactly 12:
+  `TEXT, URL, EMAIL, PHONE, CODE, JSON, NUMBER, COLOR, PATH, FILE, IMAGE, SECRET`. Resolver
+  precedence (committed, not re-litigated): isSensitive → SECRET; else IMAGE/FILE by content-type;
+  else `TextKind.classify` mapping; else TEXT. NOTE: SECRET-first is an APPROVED BEHAVIOUR CHANGE —
+  today `chipLabelFor` (`HistoryChips.kt:61-70`, CopyPaste-1b55) deliberately never emits the
+  sensitive label (macOS parity kept the content chip visible, blur carried privacy); under the new
+  resolver a sensitive URL shows the SECRET lock tile. Lands S1.8 (resolver + unit tests), S5.1
+  (`chipColorFor` becomes the single shared color source keyed by the enum).
 
 ## Remaining spikes (S0/S1, before dependent slices are accepted)
-1. **Lucide artifact** — pin the exact Maven coordinate + version (candidate `com.composables:icons-lucide`),
-   verify Kotlin 1.9.23 / Compose compiler 1.5.11 compatibility, record repo/ISC-license/SBOM and
-   APK-size impact; if none acceptable, generate a curated `ImageVector` subset from upstream ISC SVGs
-   with an update script + license notice. (B9)
-2. **Paparazzi version** — pin the exact version compatible with AGP 8.3.0 / Kotlin 1.9.23; a
-   zero-production-code proof task snapshots one bundled-font fixture; decide whether an AGP/Kotlin/
-   Gradle bump is permitted if none fits; decide direct-PNG vs Git LFS baseline storage. (B10)
-3. **Backdrop-blur strategy** — prototype the captured-layer approach (perf/clipping/edge) before S1
-   commits the design system. (B2)
+1. **Backdrop-blur strategy** — prototype the captured-layer approach (perf/clipping/edge) before S1
+   commits the design system. (B2) — prototype in progress (debug-only `BlurSpikeActivity`); device
+   metrics acceptance is manual.

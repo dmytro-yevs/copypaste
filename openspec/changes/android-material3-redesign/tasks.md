@@ -44,41 +44,41 @@ slices may be N-A only with a recorded rationale.
 
 ## 0. S0 — Scope lock, spikes, branch, gate wiring
 
-- [ ] 0.1 Create `android-redesign` off `main` HEAD (the `docs/design/copypaste-app-demo.html`
+- [x] 0.1 Create `android-redesign` off `main` HEAD (the `docs/design/copypaste-app-demo.html`
       deletion, commit `ff1d987d`, is already on `main` — no action needed); no push.
-- [ ] 0.2 Finalize the traceability matrix + state inventory below (verify vs code + `component-inventory.md`).
-- [ ] 0.3 **Spike — Lucide (B9):** pin exact Maven coordinate + version, verify Kotlin 1.9.23 / Compose
+- [x] 0.2 Finalize the traceability matrix + state inventory below (verify vs code + `component-inventory.md`).
+- [x] 0.3 **Spike — Lucide (B9):** pin exact Maven coordinate + version, verify Kotlin 1.9.23 / Compose
       compiler 1.5.11, record ISC-license/SBOM + APK-size; else curate an `ImageVector` subset from
       upstream ISC SVGs with an update script. Gates S2.
-- [ ] 0.4 **Spike — Paparazzi (B10):** pin exact version vs AGP 8.3.0/Kotlin 1.9.23; zero-production-code
+- [x] 0.4 **Spike — Paparazzi (B10):** pin exact version vs AGP 8.3.0/Kotlin 1.9.23; zero-production-code
       proof snapshot of one bundled-font fixture; decide AGP/Kotlin bump-if-needed + direct-PNG vs Git LFS.
-- [ ] 0.5 **Spike — backdrop blur (B2):** prototype the captured-layer strategy with PASS/FAIL metrics
+- [x] 0.5 **Spike — backdrop blur (B2):** prototype the captured-layer strategy with PASS/FAIL metrics
       — target devices/API, frame-time/jank budget, memory/allocation ceiling, clipping cases,
       nested-scroll behaviour, exact fallback trigger. The deterministic golden stand-in does NOT
       validate the device effect → add a manual on-device screenshot acceptance. Blocks S1.
-- [ ] 0.6 Confirm golden device configs + connected-test emulator config (design.md Resolved/Spikes).
-- [ ] 0.7 Confirm & specify `migrateThemeForTwoAxis()` call site/order (D6/M7) — audit/plan only;
+- [x] 0.6 Confirm golden device configs + connected-test emulator config (design.md Resolved/Spikes).
+- [x] 0.7 Confirm & specify `migrateThemeForTwoAxis()` call site/order (D6/M7) — audit/plan only;
       production migration code + tests land in **S3** (not S0).
-- [ ] 0.8 Create bd epic + all slice issues with dependencies + acceptance; pin the exact branch base
+- [x] 0.8 Create bd epic + all slice issues with dependencies + acceptance; pin the exact branch base
       commit SHA for `android-redesign`.
-- [ ] 0.9 **Tablet/foldable scope gate** — NOT yet approved; committed scope = Pixel portrait phone.
+- [x] 0.9 **Tablet/foldable scope gate** — NOT yet approved; committed scope = Pixel portrait phone.
       If approved: add WindowSizeClass breakpoints/max widths + tablet/fold golden configs; else wider
       widths are best-effort non-regression only (no tablet/fold golden SHALL).
-- [ ] 0.10 System-bar + first-paint prototype/decision: resolved-theme status/nav icon appearance,
+- [x] 0.10 System-bar + first-paint prototype/decision: resolved-theme status/nav icon appearance,
       XML window background + Android-12 splash to avoid wrong-theme flash.
-- [ ] 0.11 Content visual-kind decision: `ContentVisualKind` enum + resolver precedence (P0-6);
+- [x] 0.11 Content visual-kind decision: `ContentVisualKind` enum + resolver precedence (P0-6);
       confirm SECRET override is approved new behaviour.
-- [ ] 0.12 CI plan: name workflow file(s) (`.github/workflows/ci-android-build.yml` + optional
+- [x] 0.12 CI plan: name workflow file(s) (`.github/workflows/ci-android-build.yml` + optional
       visual-regression workflow), Paparazzi job + failure/diff artifact upload, hardcoded-text +
       l10n-completeness gates, Robolectric dependency/version, Kotlin + Lint warnings-as-errors config.
       The pre-existing `android-instrumented` job in `ci-android-build.yml` stays
       `continue-on-error: true` (CI advisory-only until CopyPaste-k1l0 is resolved — the managed AVD
       does not boot on arm64 macOS runners); this task does not fix that AVD-boot issue, only wires
       the new Paparazzi/hardcoded-text/l10n gates around it.
-- [ ] 0.13 **Parity freeze (`cross-platform-parity.md`):** confirm the pinned STYLEGUIDE sha256, record
+- [x] 0.13 **Parity freeze (`cross-platform-parity.md`):** confirm the pinned STYLEGUIDE sha256, record
       the desktop redesign base/target commit (pinned: `6960539d`, see `cross-platform-parity.md`),
       and set drift-handling. Prerequisite before S1/S2 close.
-- [ ] 0.14 **Re-pin STYLEGUIDE.md §10/§11:** refresh the fenced token blocks in §10/§11 from the
+- [x] 0.14 **Re-pin STYLEGUIDE.md §10/§11:** refresh the fenced token blocks in §10/§11 from the
       current `crates/copypaste-ui/src/styles/tokens.css` (pinned commit `6960539d`), including the
       additive `--err-strong`/`--info-strong`/`--ok-strong` tokens absent from the current §10/§11
       snapshot, per the Drift rule in `cross-platform-parity.md`.
@@ -113,8 +113,12 @@ slices may be N-A only with a recorded rationale.
 
 ## 2. S2 — Icons + shared components  → `android-iconography` (+ `android-design-system`)
 
-- [ ] 2.1 Add Lucide-Compose dependency; canonical provider, boxed sizes per role, fallback policy.
-- [ ] 2.2 Migrate `NavIcons.kt` + `contentIconFor()` to Lucide; retire `material-icons-extended` use.
+- [ ] 2.1 Vendor the curated Lucide `ImageVector` subset (S0.3 decision — NO Maven dep, all published
+      artifacts need Kotlin 2.0+): `scripts/generate-lucide-icons.sh` (svg-to-compose, pinned Lucide
+      SHA) → `ui/theme/icons/` one-property-per-icon; third-party NOTICE (Lucide ISC +
+      svg-to-compose MIT); canonical provider, boxed sizes per role, fallback policy.
+- [ ] 2.2 Migrate `NavIcons.kt` + `contentIconFor()` to the vendored Lucide set; retire
+      `material-icons-extended` use.
 - [ ] 2.3 Re-base `Components.kt`/`SliderComponents.kt`/`SettingsComponents.kt` on tokens
       (`LocalCpColors`/`LocalAccent`/`CpShapes`/`CpTypography`): buttons §9.1, toggle/segmented §9.2,
       inputs §9.3, chips/badges/tiles §9.4, card §9.7, banner §9.8, modal §9.9, empty §9.10.

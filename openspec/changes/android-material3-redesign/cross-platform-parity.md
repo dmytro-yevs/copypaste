@@ -8,10 +8,11 @@ gestures. Every divergence is named, justified, owned, tested.
 ## Pinned baseline (frozen at S0)
 
 - **Source of truth (human-readable mirror):** root `STYLEGUIDE.md` — sha256
-  `25b9bd052dca7660a437871588ca5241428896ff54445cdda3ffa8ced92184c9`
-  (git blob `ad470fac63f340d7a4abc51ce33a8f96c5ff0c67`). HTML reference is illustrative only. Per the
-  Drift rule below, S0.14 (`tasks.md`) re-pins STYLEGUIDE's §10/§11 fenced token blocks against the
-  current `tokens.css` — STYLEGUIDE is a mirror kept in sync, not itself the machine source.
+  `993d93a7b447c36ee89d32db9ae78ce73106dd6f6decef1ed155b537839bcce4`
+  (git blob `319befc0dcd22492de1b83d7b8414308cfa500c5`)
+  (re-pinned by S0.14 after §10/§11 refresh from tokens.css@6960539d). HTML reference is illustrative
+  only. Per the Drift rule below, S0.14 (`tasks.md`) re-pins STYLEGUIDE's §10/§11 fenced token blocks
+  against the current `tokens.css` — STYLEGUIDE is a mirror kept in sync, not itself the machine source.
 - **Source of truth (machine-readable):** `crates/copypaste-ui/src/styles/tokens.css` — populated
   (232 lines: theme × accent × translucency tokens, additive scale tokens) and executable today.
 - **Desktop base/target commit:** pinned at `6960539d` ("fix(app): redesign a11y/layout/contrast
