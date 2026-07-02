@@ -144,8 +144,8 @@ slices may be N-A only with a recorded rationale.
       `record/verifyPaparazziDebug` + diff threshold + never-auto-accept + LFS decision. From here every
       screen slice adds its own fixtures/baselines. Proof test recorded+verified green
       (`BundledFontSnapshotTest`). **Toolchain fallout (documented, fixed, not silently absorbed):**
-      required AGP 8.3.0→8.3.2 + Kotlin 1.9.23→1.9.24 + Compose Compiler 1.5.13 +
-      `suppressKotlinVersionCompatibilityCheck` (Paparazzi's POM forces kotlin-gradle-plugin 1.9.24 on
+      required AGP 8.3.0→8.3.2 + Kotlin 1.9.23→1.9.24 + Compose Compiler 1.5.14 (the officially
+      blessed pairing for Kotlin 1.9.24 — no suppression flag needed; Paparazzi's POM forces kotlin-gradle-plugin 1.9.24 on
       the plugin classpath); Paparazzi's plugin also disables AGP's `isReturnDefaultValues` mockable
       jar for the whole module, breaking 20 pre-existing JVM tests (confirmed upstream/unresolved:
       cashapp/paparazzi#1908/#1331/#1922) — fixed via a no-op `android.util.Log` shim
@@ -160,7 +160,7 @@ slices may be N-A only with a recorded rationale.
       job + failure/diff artifact upload; wire the hardcoded-text + l10n-completeness gates into
       `.github/workflows/ci-android-build.yml`. **Partial by design:** Lint warnings-as-errors is live
       (`android.lint { warningsAsErrors = true }` + committed `app/lint-baseline.xml` grandfathering
-      242 pre-existing warnings). Kotlin compiler `allWarningsAsErrors` was **deliberately NOT enabled**
+      261 pre-existing warnings). Kotlin compiler `allWarningsAsErrors` was **deliberately NOT enabled**
       — kotlinc has no baseline/suppression mechanism, and ~25 pre-existing warnings live in files
       outside this slice's scope; enabling it now would force out-of-scope edits. Tracked as follow-up.
 - [x] 2.8 **Remove `material-icons-extended` dependency** (not just imports); publish the exact icon-role

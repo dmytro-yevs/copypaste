@@ -8,8 +8,9 @@
 # 1.5.11 requires Kotlin 1.9.23 but found 1.9.24") until pinned to match.
 # This IS the S0.4-documented fallback ("bump AGP 8.3.0->8.3.2 only if the S2
 # proof render fails") plus the coupled Kotlin/Compose-compiler bump Paparazzi
-# actually forces. Compose Compiler 1.5.12 is the version paired with Kotlin
-# 1.9.24 in the official androidx compose-kotlin compatibility map.
+# actually forces. Compose Compiler 1.5.14 is the officially blessed version
+# paired with Kotlin 1.9.24 (developer.android.com/jetpack/androidx/releases/
+# compose-kotlin) — 1.5.13 pairs only with Kotlin 1.9.23.
 agp = "8.3.2"
 kotlin = "1.9.24"
 minSdk = "26"
@@ -20,8 +21,8 @@ appcompat = "1.6.1"
 material = "1.11.0"
 coroutines = "1.8.0"
 # Jetpack Compose — beta-bonus history/pair/settings screens.
-# Compose Compiler 1.5.12 pairs with Kotlin 1.9.24 (see the agp/kotlin comment above).
-composeCompiler = "1.5.13"
+# Compose Compiler 1.5.14 pairs with Kotlin 1.9.24 (see the agp/kotlin comment above).
+composeCompiler = "1.5.14"
 composeBom = "2024.04.01"
 activityCompose = "1.8.2"
 lifecycleViewModelCompose = "2.7.0"

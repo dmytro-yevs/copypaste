@@ -373,4 +373,5 @@ jobs:
   # tokens the desktop redesign introduced. Replaced by parity/tokens.json +
   # TokenParityTest (android/app/src/test/java/com/copypaste/android/parity/
   # TokenParityTest.kt), generated via scripts/gen-parity-tokens.mjs and run as
-  # part of `:app:testDebugUnitTest` — see cross-platform-parity.md.
+  # part of `:app:testDebugUnitTestPreExisting` (invoked here via the aggregate
+  # `:app:test` task, see ci-android-build.yml) — see cross-platform-parity.md.

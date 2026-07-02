@@ -267,17 +267,9 @@ android {
         // plugin-classpath resolution (highest-version-wins) elevates to the
         // effective Kotlin compiler version for this module regardless of the
         // `kotlin` version in libs.versions.toml (also 1.9.24, matching what
-        // actually resolves). The Compose Compiler Gradle plugin's own
-        // hardcoded known-good list doesn't include 1.9.24 for any 1.5.x
-        // release, so it hard-fails compileDebugKotlin unless suppressed.
-        // 1.9.23->1.9.24 is a Kotlin PATCH release (bugfix-only); this is the
-        // officially documented escape hatch for exactly this one-patch drift
-        // (S0.4/S2.5 Paparazzi proof-render fallback), not a version-safety
-        // bypass of anything semantically risky.
-        freeCompilerArgs += listOf(
-            "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:suppressKotlinVersionCompatibilityCheck=1.9.24",
-        )
+        // actually resolves). Compose Compiler 1.5.14 is the officially
+        // blessed pairing for Kotlin 1.9.24 (developer.android.com/jetpack/
+        // androidx/releases/compose-kotlin) — no suppression flag needed.
     }
     // Jetpack Compose (beta-bonus history / pair / settings screens).
     buildFeatures {
@@ -293,7 +285,7 @@ android {
     }
     lint {
         // android-material3-redesign task 2.7 "Lint warnings-as-errors". A
-        // bare `warningsAsErrors = true` would fail on the ~242 pre-existing
+        // bare `warningsAsErrors = true` would fail on the 261 pre-existing
         // lint warnings across files this slice does not own (out of S2
         // scope to mass-edit — see tasks.md's "scope the strictness" landmine
         // guidance). `baseline` grandfathers everything present the first

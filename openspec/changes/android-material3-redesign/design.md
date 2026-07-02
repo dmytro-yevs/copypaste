@@ -220,7 +220,19 @@ A read-only code audit (results folded into this change) established the true ba
 - **Paparazzi pin (B10, spike S0.4 resolved 2026-07-02)** — `app.cash.paparazzi:1.3.4` (tested by
   upstream against AGP 8.3.2 / Kotlin 1.9.24 / Gradle 8.7 — patch-distance from our 8.3.0/1.9.23,
   exact match on Gradle 8.7). 1.3.5 (needs Kotlin 2.0.21) and 2.0.0-alpha (Gradle 9) rejected.
-  Fallback if the S2 proof render fails: bump AGP 8.3.0→8.3.2 only. Goldens: **direct PNG in git,
+  **What the S2 proof render actually required** (the documented fallback did trigger): Paparazzi
+  1.3.4's own POM pins `kotlin-gradle-plugin` 1.9.24 and `com.android.tools.build:gradle` 8.3.2 as
+  `runtime`-scope dependencyManagement, so Gradle's plugin-classpath resolution elevated the
+  effective Kotlin/AGP version regardless of what `libs.versions.toml` requested — bumping
+  AGP 8.3.0→8.3.2 + Kotlin 1.9.23→1.9.24 was required, plus the coupled Compose Compiler bump to
+  **1.5.14**, the officially blessed CC↔Kotlin pairing for Kotlin 1.9.24
+  (developer.android.com/jetpack/androidx/releases/compose-kotlin; 1.5.13 pairs only with 1.9.23) —
+  no `suppressKotlinVersionCompatibilityCheck` escape hatch needed once on the blessed pair.
+  Paparazzi's plugin also disables AGP's `isReturnDefaultValues` mockable jar for the whole module,
+  breaking pre-existing JVM tests; fixed via a no-op `android.util.Log` shim
+  (`src/androidLogStub/`) plus a test-source-set split: `:app:testDebugUnitTest` now runs only the
+  Paparazzi golden suite (`com.copypaste.android.paparazzi.*`), and a new
+  `:app:testDebugUnitTestPreExisting` task runs everything else. Goldens: **direct PNG in git,
   no LFS** (~100-150 baselines ≈ 15-40 MB; LFS misconfig is a known Paparazzi footgun). Proof test:
   `android/app/src/test/java/com/copypaste/android/paparazzi/BundledFontSnapshotTest.kt`, Pixel-class
   API 34 portrait, locale en. Caveats: run with JDK 17 explicitly (machine default is Temurin 26);

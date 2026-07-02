@@ -2,11 +2,13 @@
  * kotlin-parser.mjs — Shared Kotlin palette parser for CopyPaste design-token scripts.
  *
  * Parses Android Palette.kt (+ optionally Color.kt) and extracts per-palette color data
- * needed by both parity-check.mjs and check-contrast.mjs.
+ * needed by check-contrast.mjs.
  *
- * Single source of truth for the palette name maps — previously duplicated across three
- * locations (ideColorsToPaletteName, auroraToPaletteName in parity-check.mjs and
- * ideColorsMap/auroraMap in parseKotlinPalettes in check-contrast.mjs).
+ * Single source of truth for the palette name maps — previously duplicated across two
+ * locations (ideColorsMap/auroraMap in parseKotlinPalettes in check-contrast.mjs, and the
+ * equivalent maps in the since-deleted parity-check.mjs, retired by
+ * android-material3-redesign task 2.11a in favor of parity/tokens.json +
+ * scripts/gen-parity-tokens.mjs + TokenParityTest).
  *
  * Exported:
  *   IDECOLORS_MAP   — { KotlinVarName → palette-key }   (IdeColors constructors)
@@ -116,7 +118,9 @@ export function resolveColorExpr(expr, symbols) {
 }
 
 // ---------------------------------------------------------------------------
-// Full Kotlin parser (for parity-check.mjs — accent, bg, semantic fields)
+// Full Kotlin parser (accent, bg, semantic fields). Originally fed the since-
+// deleted parity-check.mjs; currently unused by any script (kept exported —
+// parseKotlinPalettes below is the one consumed today, by check-contrast.mjs).
 // ---------------------------------------------------------------------------
 
 /**
