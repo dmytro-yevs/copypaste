@@ -3,12 +3,15 @@ package com.copypaste.android
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
@@ -19,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -28,11 +32,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpShapes
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SharedSettingsNavRow
 import com.copypaste.android.ui.theme.SharedSettingsRow
+import com.copypaste.android.ui.theme.ideTextFieldColors
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grouped-card primitives (spec §8 — Apple grouped-inset style)
@@ -59,15 +68,14 @@ internal fun SettingsCard(content: @Composable () -> Unit) {
  */
 @Composable
 internal fun SettingsCardDivider() {
-    HorizontalDivider()
+    HorizontalDivider(color = LocalCpColors.current.divider)
 }
 
 /**
- * iOS-style segmented control (§7). Bespoke Row+Box implementation matching the
- * web SettingsView div/button pattern.
- *
- * CopyPaste-o97j: replaced M3 row with bespoke Row/Box per §7 spec.
- * CopyPaste-g5u1: de-styled — bare Material primitives, no custom shape/border/padding.
+ * Segmented control — STYLEGUIDE §9.2: container `--card` + `--border`, 2dp
+ * inset; active segment `--raised` + `--text`(500 weight), inactive `--dim`.
+ * Radius `--r-ctl` (container) / `--r-chip` (segments). Used for the Theme
+ * (Light/Dark) switch (S3).
  *
  * @param options List of label strings, one per segment.
  * @param selectedIndex Currently selected segment index.
@@ -80,26 +88,36 @@ internal fun IdeSegmentedControl(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier.fillMaxWidth()) {
+    val cp = LocalCpColors.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(CpShapes.ctl))
+            .background(cp.card)
+            .border(1.dp, cp.border, RoundedCornerShape(CpShapes.ctl))
+            .padding(2.dp),
+    ) {
         options.forEachIndexed { index, label ->
             val isSelected = index == selectedIndex
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .weight(1f)
+                    .clip(RoundedCornerShape(CpShapes.chip))
                     .then(
-                        if (isSelected) Modifier.background(MaterialTheme.colorScheme.surface) else Modifier
+                        if (isSelected) Modifier.background(cp.raised) else Modifier,
                     )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null, // suppress ripple — bg fill is the selection indicator
                         onClick = { onSelect(index) },
-                    ),
+                    )
+                    .padding(vertical = 6.dp),
             ) {
                 Text(
                     text = label,
-                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = if (isSelected) CpTypography.bodyEmphasis else CpTypography.body,
+                    color = if (isSelected) cp.text else cp.dim,
                     maxLines = 1,
                 )
             }
@@ -111,6 +129,7 @@ internal fun IdeSegmentedControl(
 // Shared composables
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** STYLEGUIDE §9.3 input: `--elevated` fill, `--border`->accent on focus, `--r-input` — see [ideTextFieldColors]. */
 @Composable
 internal fun SettingsTextField(
     label: String,
@@ -127,6 +146,8 @@ internal fun SettingsTextField(
         placeholder = { Text(hint) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(CpShapes.input),
+        colors = ideTextFieldColors(),
         visualTransformation = if (password) PasswordVisualTransformation()
             else VisualTransformation.None,
         keyboardOptions = if (password) KeyboardOptions(
@@ -147,7 +168,7 @@ internal fun SettingsNavRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    // CopyPaste-5917.77: optional leading icon (NavIcons.About / NavIcons.Logs).
+    // CopyPaste-5917.77: optional leading icon (LucideIcons.NavAbout / LucideIcons.NavLogs).
     leadingIcon: ImageVector? = null,
 ) {
     SharedSettingsNavRow(
@@ -169,14 +190,17 @@ internal fun DiagnosticsNavRow(
     buttonLabel: String,
     onClick: () -> Unit,
 ) {
+    val cp = LocalCpColors.current
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = title,
-            color = MaterialTheme.colorScheme.onSurface,
+            style = CpTypography.body,
+            color = cp.text,
         )
         Text(
             text = subtitle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = CpTypography.meta,
+            color = cp.faint,
         )
         CopyPasteButton(
             onClick = onClick,
@@ -218,18 +242,22 @@ internal fun AdbCaptureStatusLine(
     logcatStatus: LogcatCaptureStatus,
     ctx: android.content.Context,
 ) {
+    val cp = LocalCpColors.current
     val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
     val overlayGranted: Boolean = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
         android.provider.Settings.canDrawOverlays(ctx)
     } else true
 
+    // Status text is never color-only signal (android-iconography "Icons render only
+    // through token colors" + STYLEGUIDE §7): each status also carries a distinct
+    // localized word ("working"/"inactive"), not just a tint swap.
     val (captureText, captureColor) = when (logcatStatus) {
         LogcatCaptureStatus.WORKING ->
-            stringResource(R.string.bg_adb_status_capture_working) to MaterialTheme.colorScheme.primary
+            stringResource(R.string.bg_adb_status_capture_working) to cp.okStrong
         LogcatCaptureStatus.DISABLED, LogcatCaptureStatus.NOT_GRANTED ->
-            stringResource(R.string.bg_adb_status_capture_inactive) to MaterialTheme.colorScheme.onSurfaceVariant
+            stringResource(R.string.bg_adb_status_capture_inactive) to cp.faint
         LogcatCaptureStatus.GRANTED_NOT_WORKING ->
-            stringResource(R.string.bg_adb_status_capture_inactive) to MaterialTheme.colorScheme.tertiary
+            stringResource(R.string.bg_adb_status_capture_inactive) to cp.warn
     }
 
     Column {
@@ -239,18 +267,21 @@ internal fun AdbCaptureStatusLine(
                     stringResource(R.string.bg_adb_status_read_logs_ok)
                 else
                     stringResource(R.string.bg_adb_status_read_logs_no),
-                color = if (readLogsGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                style = CpTypography.meta,
+                color = if (readLogsGranted) cp.okStrong else cp.errStrong,
             )
             Text(
                 text = if (overlayGranted)
                     stringResource(R.string.bg_adb_status_overlay_ok)
                 else
                     stringResource(R.string.bg_adb_status_overlay_no),
-                color = if (overlayGranted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = CpTypography.meta,
+                color = if (overlayGranted) cp.okStrong else cp.faint,
             )
         }
         Text(
             text = captureText,
+            style = CpTypography.meta,
             color = captureColor,
         )
     }
@@ -287,12 +318,17 @@ internal fun AdbCmdRow(
     // the unstyled OS-native black pill. Callers pass a lambda that routes to GlassToastHost.
     onToastRequest: (String) -> Unit = {},
 ) {
+    val cp = LocalCpColors.current
     Text(
         text = label,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = CpTypography.meta,
+        color = cp.faint,
     )
     Text(
         text = cmd,
+        // Mono font — machine-shaped input (STYLEGUIDE §9.3 "Mono font when the
+        // field holds machine input").
+        style = CpTypography.bodyMono,
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .fillMaxWidth()

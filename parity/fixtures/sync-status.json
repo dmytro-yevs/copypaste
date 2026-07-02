@@ -1,0 +1,12 @@
+{
+  "fixture": "sync-status",
+  "schemaNote": "Sync status badge + sheet states (idle/syncing/error/degraded). Owning slice: android-feedback-states (S11) — ui/SyncStatusBadge.kt exists pre-redesign but is not yet re-based on tokens; schema-only scaffolding for the redesigned structural fixture.",
+  "android": { "component": "ui/SyncStatusBadge.kt", "status": "Deferred", "owner": "android-feedback-states (S11)" },
+  "desktop": { "component": "SyncStatusBadge (shared status model)", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    { "state": "idle", "label": "Synced", "icon": "check-circle" },
+    { "state": "syncing", "label": "Syncing…", "icon": "history" },
+    { "state": "error", "label": "Sync error", "icon": "alert-circle" },
+    { "state": "degraded", "label": "Degraded — tap to reset", "icon": "alert-triangle" }
+  ]
+}

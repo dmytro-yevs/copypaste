@@ -1,0 +1,10 @@
+# l10n-translatable-false-allowlist.txt — every res/values/strings.xml key
+# with translatable="false" MUST be listed here with a reason
+# (android-material3-redesign task 2.6, POST_UPDATE_REVIEW.md M2).
+#
+# Format: <string-name>  # reason
+#
+# Empty today — android/app/src/main/res/values/strings.xml currently has
+# zero translatable="false" entries (verified via
+# `node scripts/check-l10n-completeness.mjs`, 2026-07-02). Populate this file
+# in the same change that adds the first translatable="false" resource.

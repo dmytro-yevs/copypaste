@@ -153,11 +153,19 @@ fun CopyPasteTheme(
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
-            val controller = WindowInsetsControllerCompat(window, view)
-            val light = systemBarsAreLight(isDark)
-            controller.isAppearanceLightStatusBars = light
-            controller.isAppearanceLightNavigationBars = light
+            // Paparazzi seam (android-visual-regression task 2.9): golden/preview
+            // hosts (Paparazzi's BridgeContext, Compose tooling previews) are not
+            // an Activity — there is no real window to drive system-bar
+            // appearance for. Skip gracefully instead of crashing every golden
+            // that renders through CopyPasteTheme; real Activity hosts are
+            // unaffected (identical behaviour to the previous unconditional cast).
+            val window = (view.context as? Activity)?.window
+            if (window != null) {
+                val controller = WindowInsetsControllerCompat(window, view)
+                val light = systemBarsAreLight(isDark)
+                controller.isAppearanceLightStatusBars = light
+                controller.isAppearanceLightNavigationBars = light
+            }
         }
     }
 

@@ -33,7 +33,15 @@ enum class ContentVisualKind {
             return fromTextKindLabel(label)
         }
 
-        private fun fromTextKindLabel(label: String): ContentVisualKind = when (label) {
+        /**
+         * `internal` (not `private`) so [ContentVisualKindFromTextKindLabelTest] can exercise
+         * all 8 non-TEXT branches directly — [resolve] alone cannot reach them from a JVM unit
+         * test because `TextKind.classify` always returns TEXT there (its native classifier
+         * lib is absent on the JVM), so a text-kind fixture built through `resolve()` can never
+         * produce URL/EMAIL/PHONE/COLOR/JSON/CODE/NUMBER/PATH on this test target (carried
+         * review finding, closed in S2).
+         */
+        internal fun fromTextKindLabel(label: String): ContentVisualKind = when (label) {
             TextKind.Kind.URL.label -> URL
             TextKind.Kind.EMAIL.label -> EMAIL
             TextKind.Kind.PHONE.label -> PHONE

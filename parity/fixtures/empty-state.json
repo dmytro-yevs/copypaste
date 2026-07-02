@@ -1,0 +1,11 @@
+{
+  "fixture": "empty-state",
+  "schemaNote": "STYLEGUIDE §9.10 empty states — line icon + one-line headline + one-line hint. Matches EmptyStateCard (Components.kt, rebased on tokens in S2) 1:1.",
+  "android": { "component": "EmptyStateCard", "status": "Verified", "owner": "android-material3-redesign S2" },
+  "desktop": { "component": "EmptyState primitive", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    { "icon": "inbox", "title": "No clips yet", "subtitle": "Copy something to get started" },
+    { "icon": "inbox", "title": "No results", "subtitle": "Try a different search term" },
+    { "icon": "monitor-smartphone", "title": "No paired devices", "subtitle": "Pair a device to start syncing" }
+  ]
+}

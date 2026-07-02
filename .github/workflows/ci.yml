@@ -367,26 +367,10 @@ jobs:
       - name: cargo test --workspace --all-features
         run: cargo test --workspace --all-features
 
-  # Two-axis token-parity + WCAG AA contrast gate (Phase 7, CopyPaste-2hfj.8).
-  # Checks that:
-  #   1. Token NAMES in tokens.css map 1:1 to CpColors fields and AccentColor variants
-  #      (STYLEGUIDE §11). Fails on any name mismatch — no more 10-palette comparison.
-  #   2. The §3.3 text ramp (--text / --dim / --faint on --panel) meets WCAG AA in
-  #      both dark and light themes (covered by the vitest suite: tokens.parity.test.ts).
-  # The script is dependency-light (Node only) and runs from the repo root.
-  token-parity-contrast:
-    name: Two-axis token-parity + WCAG AA gate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Token-name parity (tokens.css ↔ CpColors/AccentColor)
-        # Asserts every CpColors field maps to a CSS custom property and every
-        # AccentColor variant maps to a data-accent= value (STYLEGUIDE §11).
-        # Fails if names drift between platforms.
-        run: node scripts/parity-check.mjs --verbose
+  # token-parity-contrast (scripts/parity-check.mjs + .github/workflows/parity.yml)
+  # retired by android-material3-redesign task 2.11a: the script hardcoded the
+  # pre-redesign CpColors field set and cannot map the ~35 additive non-color
+  # tokens the desktop redesign introduced. Replaced by parity/tokens.json +
+  # TokenParityTest (android/app/src/test/java/com/copypaste/android/parity/
+  # TokenParityTest.kt), generated via scripts/gen-parity-tokens.mjs and run as
+  # part of `:app:testDebugUnitTest` — see cross-platform-parity.md.

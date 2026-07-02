@@ -1,0 +1,11 @@
+{
+  "fixture": "settings-group",
+  "schemaNote": "A representative Settings card group (STYLEGUIDE grouped-inset style) — SettingsCard/SettingsRow/SettingsNavRow (SettingsComponents.kt, rebased on tokens in S2) with a toggle row, a nav row, and a dirty/validation-error row.",
+  "android": { "component": "SettingsCard + SettingsRow/SettingsNavRow", "status": "Verified (component tokens only — screen wiring is S9)", "owner": "android-design-system S2 / android-settings S9" },
+  "desktop": { "component": "SettingsView group", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    { "type": "toggle", "title": "Sync clipboard", "subtitle": "Share clips across paired devices", "checked": true },
+    { "type": "nav", "title": "Notifications", "subtitle": "Manage alert channels", "icon": "settings-2" },
+    { "type": "toggle", "title": "Mask sensitive content", "subtitle": "Blur secrets in the history list", "checked": true, "state": "dirty" }
+  ]
+}

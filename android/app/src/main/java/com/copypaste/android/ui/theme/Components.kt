@@ -2,6 +2,11 @@
 
 package com.copypaste.android.ui.theme
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,51 +19,63 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.copypaste.android.ui.theme.icons.LucideIcons
 
 // ---------------------------------------------------------------------------
-// Neutral Material-default component wrappers (design-strip pass).
-// All glass / palette / shim color and accent tokens removed.
-// Same function names preserved so call sites compile without import changes.
+// Shared components re-based on the two-axis token system (android-material3-
+// redesign task 2.3): every color/shape/type value below reads from
+// LocalCpColors/LocalAccent/CpShapes/CpTypography/CpDimensions (or the
+// equivalent resolved MaterialTheme.colorScheme role — S1.7's explicit role
+// table already carries the accent-on-accent resolution) — no raw hex.
+// Function names/signatures are preserved so existing call sites (owned by
+// later slices, not touched here) keep compiling unchanged.
 // ---------------------------------------------------------------------------
 
+/** STYLEGUIDE §9.1 button variants. DANGER_SOLID is an Android-only addition (filled destructive) — not in the 4-row web table, kept for existing call-site compatibility. */
 enum class ButtonVariant { PRIMARY, SECONDARY, DANGER, DANGER_SOLID, GHOST }
 
 /**
- * Standard top bar — thin wrapper over Material TopAppBar.
- * [translucent] is accepted but ignored (kept for call-site compat).
+ * Standard top bar — Material TopAppBar with token colors.
+ * [translucent] is accepted but ignored (real blur lands in S4's chrome surfaces per D7).
  */
 @Composable
 fun CopyPasteTopBar(
@@ -70,42 +87,58 @@ fun CopyPasteTopBar(
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
     translucent: Boolean = false,
 ) {
+    val cp = LocalCpColors.current
     TopAppBar(
-        title = { Text(title) },
+        title = { Text(title, style = CpTypography.section, color = cp.text) },
         navigationIcon = {
             if (showBackButton) {
                 IconButton(onClick = onBack) {
                     Icon(
-                        Icons.AutoMirrored.Outlined.ArrowBack,
+                        LucideIcons.NavBack,
                         contentDescription = backContentDescription,
+                        tint = cp.text,
                     )
                 }
             }
         },
         actions = actions,
         windowInsets = windowInsets,
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = cp.panel,
+            titleContentColor = cp.text,
+            navigationIconContentColor = cp.text,
+            actionIconContentColor = cp.text,
+        ),
     )
 }
 
 /**
- * Card wrapper — Material Card with full width.
- * [accent] and [translucent] are accepted but ignored.
+ * Card wrapper — STYLEGUIDE §9.7 card anatomy: `--card` fill, `--border`,
+ * `--r-card`, `--sh1`. [accent] overrides the border color (e.g. a selected
+ * device card); [translucent] is accepted but ignored (D7 chrome-only blur).
  */
 @Composable
 fun CopyPasteCard(
     modifier: Modifier = Modifier,
-    accent: Color = MaterialTheme.colorScheme.outline,
+    accent: Color = LocalCpColors.current.border,
     translucent: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
+    val cp = LocalCpColors.current
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(CpShapes.card),
+        colors = CardDefaults.cardColors(containerColor = cp.card, contentColor = cp.text),
+        border = BorderStroke(1.dp, accent),
+        elevation = CardDefaults.cardElevation(defaultElevation = CpElevation.sh1),
+    ) {
         Column(content = content)
     }
 }
 
 /**
- * Alert dialog — Material AlertDialog.
- * [translucent] is accepted but ignored.
+ * Modal / confirm dialog — STYLEGUIDE §9.9: `--panel`, `--border`, `--r-card`,
+ * `--sh3`, over `--scrim`. [translucent] is accepted but ignored (D7).
  */
 @Composable
 fun GlassAlertDialog(
@@ -118,6 +151,7 @@ fun GlassAlertDialog(
     translucent: Boolean = false,
     properties: DialogProperties = DialogProperties(),
 ) {
+    val cp = LocalCpColors.current
     AlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = confirmButton,
@@ -126,11 +160,20 @@ fun GlassAlertDialog(
         title = title,
         text = text,
         properties = properties,
+        shape = RoundedCornerShape(CpShapes.card),
+        containerColor = cp.panel,
+        titleContentColor = cp.text,
+        textContentColor = cp.dim,
+        tonalElevation = CpElevation.sh3,
     )
 }
 
 /**
- * Toggle switch — Material Switch.
+ * Toggle switch — STYLEGUIDE §9.2: 38x22 pill (`CpDimensions.toggleW/H`),
+ * track `--accent`(on)/`--raised-2`(off), 18dp knob (`CpDimensions.toggleKnob`),
+ * `--dur-fast` slide. Knob fill is a fixed white (`tokens.css --knob-fill:#fff`
+ * — a literal in the CSS source of truth, not a theme-mapped semantic token;
+ * off-state knob uses `--faint` per `primitives.css .toggle.off > span`).
  * [name] is used as contentDescription for a11y.
  */
 @Composable
@@ -141,30 +184,64 @@ fun IdeSwitch(
     enabled: Boolean = true,
     name: String? = null,
 ) {
-    val a11yMod = Modifier.semantics {
-        stateDescription = if (checked) "On" else "Off"
-        if (name != null) contentDescription = name
-    }
-    Switch(
-        checked = checked,
-        onCheckedChange = onCheckedChange ?: {},
-        modifier = modifier.then(a11yMod),
-        enabled = enabled,
+    val cp = LocalCpColors.current
+    val reduced = rememberCpMotionReduced()
+    val trackColor = if (checked) MaterialTheme.colorScheme.primary else cp.raised2
+    val knobColor = if (checked) Color.White else cp.faint
+    val inset = 2.dp
+    val travel = CpDimensions.toggleW - CpDimensions.toggleKnob - inset * 2
+    val knobOffset by animateDpAsState(
+        targetValue = if (checked) inset + travel else inset,
+        animationSpec = tween(cpMotionDuration(CpMotion.FAST_MS, reduced)),
+        label = "toggleKnobOffset",
     )
+    Box(
+        modifier = modifier
+            .size(width = CpDimensions.touchMin, height = CpDimensions.touchMin),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = CpDimensions.toggleW, height = CpDimensions.toggleH)
+                .toggleable(
+                    value = checked,
+                    onValueChange = { onCheckedChange?.invoke(it) },
+                    enabled = enabled,
+                    role = Role.Switch,
+                )
+                .semantics {
+                    stateDescription = if (checked) "On" else "Off"
+                    if (name != null) contentDescription = name
+                }
+                .alpha(if (enabled) 1f else DISABLED_ALPHA)
+                .clip(RoundedCornerShape(CpShapes.pill))
+                .background(trackColor),
+        ) {
+            Box(
+                modifier = Modifier
+                    .offset(x = knobOffset)
+                    .align(Alignment.CenterStart)
+                    .size(CpDimensions.toggleKnob)
+                    .clip(CircleShape)
+                    .background(knobColor),
+            )
+        }
+    }
 }
 
 /**
- * Section header label — uppercase text.
+ * Section header label — micro type, uppercase mono per STYLEGUIDE §9.6-adjacent micro-type rule.
  */
 @Composable
 fun SectionLabel(
     text: String,
     modifier: Modifier = Modifier,
 ) {
+    val cp = LocalCpColors.current
     Text(
         text = text.uppercase(),
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = CpTypography.micro,
+        color = cp.faint,
         modifier = modifier
             .semantics { heading() }
             .padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
@@ -172,8 +249,9 @@ fun SectionLabel(
 }
 
 /**
- * Button — dispatches to Material Button (PRIMARY/DANGER_SOLID), TextButton (GHOST),
- * or outlined-style Button (SECONDARY/DANGER).
+ * Button — STYLEGUIDE §9.1 variant table (fill/text/border per variant),
+ * `--r-ctl` radius, default padding 7/13. DANGER_SOLID (Android-only) is a
+ * filled destructive button using the same onError pin as the M3 role table.
  */
 @Composable
 fun CopyPasteButton(
@@ -184,14 +262,87 @@ fun CopyPasteButton(
     translucent: Boolean = false,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val cp = LocalCpColors.current
+    val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(CpShapes.ctl)
+    val contentPadding = PaddingValues(horizontal = 13.dp, vertical = 7.dp)
     when (variant) {
-        ButtonVariant.GHOST -> TextButton(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
-        else -> Button(onClick = onClick, modifier = modifier, enabled = enabled, content = content)
+        ButtonVariant.PRIMARY -> Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = contentPadding,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = scheme.primary,
+                contentColor = scheme.onPrimary,
+                disabledContainerColor = scheme.primary.copy(alpha = DISABLED_ALPHA),
+                disabledContentColor = scheme.onPrimary.copy(alpha = DISABLED_ALPHA),
+            ),
+            content = content,
+        )
+        ButtonVariant.SECONDARY -> Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = contentPadding,
+            border = BorderStroke(1.dp, cp.border),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = cp.elevated,
+                contentColor = cp.text,
+                disabledContainerColor = cp.elevated,
+                disabledContentColor = cp.disabledForeground(),
+            ),
+            content = content,
+        )
+        ButtonVariant.GHOST -> TextButton(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = contentPadding,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = cp.dim,
+                disabledContentColor = cp.disabledForeground(),
+            ),
+            content = content,
+        )
+        ButtonVariant.DANGER -> Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = contentPadding,
+            border = BorderStroke(1.dp, cp.err.copy(alpha = 0.40f)),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = cp.err.copy(alpha = 0.09f),
+                contentColor = cp.errStrong,
+                disabledContainerColor = cp.err.copy(alpha = 0.09f),
+                disabledContentColor = cp.disabledForeground(),
+            ),
+            content = content,
+        )
+        ButtonVariant.DANGER_SOLID -> Button(
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            shape = shape,
+            contentPadding = contentPadding,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = cp.err,
+                contentColor = scheme.onError,
+                disabledContainerColor = cp.err.copy(alpha = DISABLED_ALPHA),
+                disabledContentColor = scheme.onError,
+            ),
+            content = content,
+        )
     }
 }
 
 /**
- * Icon-only button — Material IconButton.
+ * Icon-only button — 48dp minimum touch target (`CpDimensions.touchMin`) kept
+ * separate from the caller-supplied icon's own visual box.
  */
 @Composable
 fun CopyPasteIconButton(
@@ -200,21 +351,27 @@ fun CopyPasteIconButton(
     icon: @Composable () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    hitTarget: Dp = 44.dp,
+    hitTarget: Dp = CpDimensions.touchMin,
 ) {
     IconButton(
         onClick = onClick,
         modifier = modifier
             .size(hitTarget)
-            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription!! } else Modifier)
-            .alpha(if (enabled) 1f else 0.40f),
+            .then(
+                if (contentDescription != null) {
+                    Modifier.semantics { this.contentDescription = contentDescription }
+                } else {
+                    Modifier
+                },
+            )
+            .alpha(if (enabled) 1f else DISABLED_ALPHA),
         enabled = enabled,
         content = { icon() },
     )
 }
 
 /**
- * Settings toggle row — Row with title/subtitle and a Switch.
+ * Settings toggle row — Row with title/subtitle and a token-styled [IdeSwitch].
  */
 @Composable
 fun SharedSettingsRow(
@@ -224,6 +381,7 @@ fun SharedSettingsRow(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val cp = LocalCpColors.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -235,17 +393,18 @@ fun SharedSettingsRow(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(end = 12.dp)
+                .padding(end = 12.dp),
         ) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall)
+            Text(text = title, style = CpTypography.body, color = cp.text)
+            Text(text = subtitle, style = CpTypography.meta, color = cp.faint)
         }
         IdeSwitch(checked = checked, onCheckedChange = onCheckedChange, name = title)
     }
 }
 
 /**
- * Settings navigation row — Row with title/subtitle and optional leading icon.
+ * Settings navigation row — Row with title/subtitle and optional leading icon
+ * (STYLEGUIDE §9.4 `iconMeta` sizing for the leading glyph).
  */
 @Composable
 fun SharedSettingsNavRow(
@@ -253,8 +412,9 @@ fun SharedSettingsNavRow(
     subtitle: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    leadingIcon: ImageVector? = null,
 ) {
+    val cp = LocalCpColors.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -264,22 +424,23 @@ fun SharedSettingsNavRow(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         if (leadingIcon != null) {
-            Icon(imageVector = leadingIcon, contentDescription = null, modifier = Modifier.size(20.dp))
+            Icon(imageVector = leadingIcon, contentDescription = null, tint = cp.faint, modifier = Modifier.size(CpDimensions.iconMeta))
             Spacer(modifier = Modifier.width(12.dp))
         }
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(end = 12.dp)
+                .padding(end = 12.dp),
         ) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
-            Text(text = subtitle, style = MaterialTheme.typography.bodySmall)
+            Text(text = title, style = CpTypography.body, color = cp.text)
+            Text(text = subtitle, style = CpTypography.meta, color = cp.faint)
         }
     }
 }
 
 /**
- * Empty-state card — Card with icon, title, subtitle.
+ * Empty-state card — STYLEGUIDE §9.10: centered, generous, `--faint`, a line
+ * icon + one-line headline + one-line hint.
  */
 @Composable
 fun EmptyStateCard(
@@ -290,6 +451,7 @@ fun EmptyStateCard(
     modifier: Modifier = Modifier,
     reducedMotion: Boolean = false,
 ) {
+    val cp = LocalCpColors.current
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -307,8 +469,8 @@ fun EmptyStateCard(
                     icon()
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(text = title, style = MaterialTheme.typography.bodyLarge)
-                    Text(text = subtitle, style = MaterialTheme.typography.bodyMedium)
+                    Text(text = title, style = CpTypography.body, color = cp.text)
+                    Text(text = subtitle, style = CpTypography.bodyMono, color = cp.faint)
                 }
             }
         }
@@ -316,7 +478,68 @@ fun EmptyStateCard(
 }
 
 /**
- * Returns default OutlinedTextField colors (no design tokens).
+ * STYLEGUIDE §9.3 input colors — `--elevated` fill, `--border` (focus color
+ * applied by the caller via `OutlinedTextField`'s own focus/error slots).
  */
 @Composable
-fun ideTextFieldColors() = androidx.compose.material3.OutlinedTextFieldDefaults.colors()
+fun ideTextFieldColors(): androidx.compose.material3.TextFieldColors {
+    val cp = LocalCpColors.current
+    val accent = MaterialTheme.colorScheme.primary
+    return androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+        focusedContainerColor = cp.elevated,
+        unfocusedContainerColor = cp.elevated,
+        disabledContainerColor = cp.elevated,
+        focusedBorderColor = accent,
+        unfocusedBorderColor = cp.border,
+        focusedTextColor = cp.text,
+        unfocusedTextColor = cp.text,
+        cursorColor = accent,
+        focusedPlaceholderColor = cp.faint,
+        unfocusedPlaceholderColor = cp.faint,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// New in S2 (component-inventory.md "Transport/Verified/This-device pill" —
+// today plain Text; STYLEGUIDE §9.4 pill/chip row). A single parametrized
+// primitive covers all three roles (transport P2P/Cloud, "This device",
+// Verified) since they share one anatomy: `--r-pill` (or `--r-chip` for
+// Verified), hairline border, `color @14%` fill, `color` text, optional
+// leading dot (Verified only). Consumed by S7 (Devices).
+// ---------------------------------------------------------------------------
+
+/**
+ * STYLEGUIDE §9.4 pill/chip badge — [color] drives border/fill(@14%)/text.
+ * [pill] selects `--r-pill` (fully round, the default — transport/cloud/
+ * this-device) vs `--r-chip` (Verified). [showDot] draws a small leading
+ * status dot in [color] (Verified's "hairline + dot" anatomy).
+ */
+@Composable
+fun CpBadgeChip(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    pill: Boolean = true,
+    showDot: Boolean = false,
+) {
+    val shape = if (pill) RoundedCornerShape(CpShapes.pill) else RoundedCornerShape(CpShapes.chip)
+    Row(
+        modifier = modifier
+            .clip(shape)
+            .background(color.copy(alpha = 0.14f))
+            .border(1.dp, color.copy(alpha = 0.4f), shape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (showDot) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(color),
+            )
+        }
+        Text(text = text, style = CpTypography.micro, color = color)
+    }
+}

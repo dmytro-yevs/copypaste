@@ -10,10 +10,12 @@ import org.junit.Test
  * contracts.
  *
  * [TextKind.classify] returns "TEXT" in stub/no-native-lib test mode, so the
- * "falls through to subtype" scenario is exercised via the resolver's own
- * subtype-mapping branch ([ContentVisualKind]'s private label mapper) rather
- * than a live FFI classification — this test asserts the mapping/precedence
- * contract, not the Rust classifier itself (owned by copypaste-core).
+ * "falls through to subtype" scenario via [ContentVisualKind.resolve] alone
+ * can never reach the 8 non-TEXT branches on this JVM test target. S2 closed
+ * that gap by widening [ContentVisualKind.fromTextKindLabel] to `internal`
+ * (a testable seam, not a resolver contract change) so
+ * `text subtype label mapper covers every non-TEXT branch` below exercises
+ * all 8 branches directly.
  */
 class ContentVisualKindTest {
 
@@ -57,6 +59,21 @@ class ContentVisualKindTest {
     fun `url content type is treated as text for resolution purposes`() {
         // contentTypeIsText treats "url" as text; classification then decides the subtype.
         assertEquals(ContentVisualKind.TEXT, ContentVisualKind.resolve("url", isSensitive = false, snippet = "https://example.com"))
+    }
+
+    @Test
+    fun `text subtype label mapper covers every non-TEXT branch`() {
+        assertEquals(ContentVisualKind.URL, ContentVisualKind.fromTextKindLabel(TextKind.Kind.URL.label))
+        assertEquals(ContentVisualKind.EMAIL, ContentVisualKind.fromTextKindLabel(TextKind.Kind.EMAIL.label))
+        assertEquals(ContentVisualKind.PHONE, ContentVisualKind.fromTextKindLabel(TextKind.Kind.PHONE.label))
+        assertEquals(ContentVisualKind.COLOR, ContentVisualKind.fromTextKindLabel(TextKind.Kind.COLOR.label))
+        assertEquals(ContentVisualKind.JSON, ContentVisualKind.fromTextKindLabel(TextKind.Kind.JSON.label))
+        assertEquals(ContentVisualKind.CODE, ContentVisualKind.fromTextKindLabel(TextKind.Kind.CODE.label))
+        assertEquals(ContentVisualKind.NUMBER, ContentVisualKind.fromTextKindLabel(TextKind.Kind.NUMBER.label))
+        assertEquals(ContentVisualKind.PATH, ContentVisualKind.fromTextKindLabel(TextKind.Kind.PATH.label))
+        // TEXT label and any unrecognised label both fall back to TEXT.
+        assertEquals(ContentVisualKind.TEXT, ContentVisualKind.fromTextKindLabel(TextKind.Kind.TEXT.label))
+        assertEquals(ContentVisualKind.TEXT, ContentVisualKind.fromTextKindLabel("NOT_A_REAL_LABEL"))
     }
 
     @Test
