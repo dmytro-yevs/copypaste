@@ -54,6 +54,7 @@ class HistoryScreenState internal constructor(
     sortByDeviceState: MutableState<Boolean>,
     previewItemIdState: MutableState<String?>,
     previewPhaseState: MutableState<PreviewPhase>,
+    isDegradedState: MutableState<Boolean>,
 ) {
     var searchQuery by searchQueryState
     // HW-A8: icon-toggle search bar — expanded state + last-5 recent queries.
@@ -82,6 +83,20 @@ class HistoryScreenState internal constructor(
     // Long-press peek preview state.
     var previewItemId by previewItemIdState
     var previewPhase by previewPhaseState
+
+    /**
+     * android-history 5.3 — NEW persistent error/degraded presentation state
+     * (S5-owned plumbing, no repository/IPC change). `ClipboardViewModel.errors`
+     * is a one-shot/transient LiveData (HistoryScreen clears it right after
+     * showing the toast), so it cannot alone satisfy spec.md's "a persistent
+     * error/degraded state is shown in the list surface itself ... not
+     * communicated solely via a transient toast". This flag is set the moment
+     * an error is observed and cleared only once a load subsequently succeeds
+     * with data (see [clearsDegradedState]) — NOT `rememberSaveable`, since a
+     * fresh `loadItems()` always fires on screen entry/recreation and will
+     * re-derive the true state from scratch.
+     */
+    var isDegraded by isDegradedState
 }
 
 /**
@@ -132,6 +147,7 @@ fun rememberHistoryScreenState(settings: Settings): HistoryScreenState {
             },
         )
     ) { mutableStateOf<PreviewPhase>(PreviewPhase.Idle) }
+    val isDegradedState = remember { mutableStateOf(false) }
 
     return remember {
         HistoryScreenState(
@@ -148,9 +164,23 @@ fun rememberHistoryScreenState(settings: Settings): HistoryScreenState {
             sortByDeviceState = sortByDeviceState,
             previewItemIdState = previewItemIdState,
             previewPhaseState = previewPhaseState,
+            isDegradedState = isDegradedState,
         )
     }
 }
+
+/**
+ * android-history 5.3 — the pure decision behind [HistoryScreenState.isDegraded]'s
+ * recovery: a load cycle that finishes (`loading` false) WITH data
+ * (`hasItems` true) proves the data source is reachable again. A load that
+ * finishes with zero items after an error stays degraded (a real "cleared
+ * history" and a still-failing daemon connection are indistinguishable from
+ * `items`/`loading` alone) until the user explicitly retries — a documented,
+ * conservative limitation (CopyPaste-myh8.5 bd notes) rather than a richer
+ * explicit backend "degraded" signal, which would require a ClipboardViewModel/
+ * IPC change out of this slice's scope.
+ */
+internal fun clearsDegradedState(loading: Boolean, hasItems: Boolean): Boolean = !loading && hasItems
 
 /**
  * §5/CopyPaste-un29 — sort items for the history list: pinned first (in

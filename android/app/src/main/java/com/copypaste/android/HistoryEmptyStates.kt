@@ -13,17 +13,26 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.core.FastOutSlowInEasing
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.LocalCpColors
+import com.copypaste.android.ui.theme.icons.LucideIcons
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Loading state
@@ -175,6 +184,67 @@ internal fun EmptySearchState(padding: PaddingValues, query: String) {
                             color = c.onSurfaceVariant,
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// android-history 5.3 — error/degraded state (NEW). spec.md "List Display
+// States": "a persistent error/degraded state is shown in the list surface
+// itself" and "the error is not communicated solely via a transient toast".
+// Distinct from [EmptyHistoryState]/[EmptySearchState] both in copy (this is a
+// failure, not "nothing here yet") and in offering an explicit retry action
+// wired straight to `viewModel.loadItems()` (no new repository/IPC surface).
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+internal fun HistoryErrorState(padding: PaddingValues, onRetry: () -> Unit) {
+    val cp = LocalCpColors.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(cp.bg)
+            .padding(padding),
+        contentAlignment = Alignment.Center,
+    ) {
+        CopyPasteCard(
+            modifier = Modifier.widthIn(max = 400.dp),
+            accent = cp.err.copy(alpha = 0.4f),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    imageVector = LucideIcons.StatusErr,
+                    contentDescription = null,
+                    tint = cp.err,
+                    modifier = Modifier.size(28.dp),
+                )
+                Text(
+                    text = stringResource(R.string.history_error_title),
+                    color = cp.text,
+                    style = CpTypography.body,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+                Text(
+                    text = stringResource(R.string.history_error_subtitle),
+                    color = cp.faint,
+                    style = CpTypography.meta,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                CopyPasteButton(
+                    onClick = onRetry,
+                    variant = ButtonVariant.SECONDARY,
+                    modifier = Modifier
+                        .wrapContentWidth()
+                        .padding(top = 14.dp),
+                ) {
+                    Text(text = stringResource(R.string.history_error_retry))
                 }
             }
         }

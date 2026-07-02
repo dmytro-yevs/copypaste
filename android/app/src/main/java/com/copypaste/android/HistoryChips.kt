@@ -3,8 +3,10 @@ package com.copypaste.android
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -13,24 +15,40 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.theme.CpBadgeChip
+import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.CpDimensions
+import com.copypaste.android.ui.theme.CpShapes
+import com.copypaste.android.ui.theme.contentIconFor
+import com.copypaste.android.ui.theme.forContentKind
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §6 Content-type chip — CANONICAL kind→color table (PARITY-SPEC §6).
+// §9.4/§3.7 Content-type chip + tile — android-history "Shared Content-Type
+// Color Source" / "Content-Type Tile Rendering" requirements: ONE color/glyph
+// resolution shared by the History list AND the full-screen Preview (S6), so
+// the two surfaces can never diverge again (PreviewChrome.kt's
+// `previewChipColor` — S6-owned, not touched this wave — currently DOES
+// diverge; S6 should switch to [chipColorFor]\(ContentVisualKind, CpColors\)
+// below; see this slice's bd notes).
 //
-//   TEXT=accent  URL=info  EMAIL=success  PHONE=success  COLOR=warning
-//   NUMBER=warning  PATH=warning  JSON=danger  CODE=violet  IMAGE=violet
-//   FILE=dim  PRIVATE/sensitive=danger
-//
-// Filled tint + 1dp tinted BORDER, 9sp semibold uppercase, radius 4 (§6/§4).
+// [chipColorFor]\(kind: String, c: ColorScheme\) is the PRE-EXISTING signature —
+// kept byte-for-byte working (android-material3-redesign wave rule: additive
+// overloads only, no breaking changes to a signature another parallel slice
+// may depend on). The new [chipColorFor]\(ContentVisualKind, CpColors\) overload
+// is the canonical D2 single source (12 kinds -> 10 c-* colors,
+// PHONE->cNum/PATH->cFile) and is what [HistoryRow] now actually renders with —
+// it is a thin, divergence-proof forward to the already-established
+// [CpColors.forContentKind] (S1.8).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Resolve the canonical foreground color for a content-type chip [kind] label
- * against the active ramp [c]. Single source of truth for the §6 table; the
- * chip derives its tinted fill and border from this one color. Non-composable so
- * the row can pre-derive the chip color once and never re-evaluate the `when` on
- * scroll recompositions.
+ * PRE-EXISTING signature (kept working — see file header). Resolves the
+ * canonical foreground color for a content-type chip [kind] label against the
+ * legacy M3 [ColorScheme]. Not used by [HistoryRow] any more (it now resolves
+ * colors via [CpColors.forContentKind] through the overload below), retained
+ * for signature/behaviour stability across the parallel S6 wave.
  */
 internal fun chipColorFor(kind: String, c: ColorScheme): Color = when (kind) {
     // 5917.80: TEXT→faint (grey), not accent (blue) — parity with macOS KindChip fallback.
@@ -46,53 +64,58 @@ internal fun chipColorFor(kind: String, c: ColorScheme): Color = when (kind) {
     "CODE"    -> c.secondary
     "IMAGE"   -> c.secondary  // 1jms.14: PARITY-SPEC §6 canonical: IMAGE → violet (not sky/info)
     "FILE"    -> c.onSurfaceVariant     // CopyPaste-crh3.41: PARITY-SPEC §6 + macOS = dim (izio's faint diverged)
-    "PRIVATE" -> c.error
+    // android-history D2/ContentVisualKind: isSensitive overrides the text-kind
+    // label to SECRET (approved new behaviour) — added for defensive parity
+    // with the [ContentVisualKind] overload below; additive, non-breaking.
+    "SECRET", "PRIVATE" -> c.error
     else      -> c.onSurfaceVariant   // unknown text kinds default to the TEXT slot
 }
 
 /**
- * Pick the canonical chip label for an item: IMAGE/FILE by content-type, or the
- * classified text kind (URL/EMAIL/CODE/…) for text. Sensitive items show their
- * CONTENT-TYPE label (not "PRIVATE") — matching macOS which keeps the kind chip
- * visible even when the preview is blurred (CopyPaste-1b55 macOS parity).
- * Pure function so [HistoryRow] can `remember` it per item id instead of
+ * android-history "Shared Content-Type Color Source" — the CANONICAL single
+ * source: 12 [ContentVisualKind] values resolve onto the 10 STYLEGUIDE §3.7
+ * `c-*` tokens (PHONE→cNum, PATH→cFile — no distinct cPath) via the
+ * already-established [CpColors.forContentKind] (S1.8). [HistoryRow] and
+ * (once S6 adopts it) the full-screen Preview both call this SAME function —
+ * that shared call site is what "kills the divergence" the spec requires,
+ * not a second independent color table.
+ */
+internal fun chipColorFor(kind: ContentVisualKind, colors: CpColors): Color = colors.forContentKind(kind)
+
+/**
+ * Pick the canonical chip label for an item: SECRET when sensitive (the
+ * android-history / [ContentVisualKind] "isSensitive -> SECRET" precedence —
+ * approved new behaviour that intentionally supersedes the older CopyPaste-1b55
+ * "keep the content-type label even when sensitive" choice), else IMAGE/FILE by
+ * content-type, or the classified text kind (URL/EMAIL/CODE/…) for text. Pure
+ * function so [HistoryRow] can `remember` it per item id instead of
  * recomputing the classification on every recomposition.
  */
-internal fun chipLabelFor(contentType: String, @Suppress("UNUSED_PARAMETER") isSensitive: Boolean, snippet: String): String = when {
-    // CopyPaste-1b55: macOS keeps the content-type chip even for sensitive items.
-    // Android was forcing "PRIVATE" which diverged from macOS. Align by always
-    // deriving the label from content-type/snippet, letting the row's blur/mask
-    // handle the privacy signal instead of the chip label.
-    contentTypeIsImage(contentType)  -> "IMAGE"
-    contentTypeIsText(contentType)   ->
+// NOTE (not fixed here — S13 scope): every branch below, including the new
+// "SECRET" one, returns a hardcoded English identifier that doubles as BOTH
+// the internal kind key (chipColorFor/contentIconFor `when` lookups) and the
+// literal text ContentTypeChip displays — a pre-existing localization gap
+// (TEXT/URL/EMAIL/… were never externalized) this change does not widen or
+// narrow; a real fix needs separating the kind key from its display label,
+// out of this slice's scope.
+internal fun chipLabelFor(contentType: String, isSensitive: Boolean, snippet: String): String = when {
+    isSensitive -> "SECRET"
+    contentTypeIsImage(contentType) -> "IMAGE"
+    contentTypeIsText(contentType) ->
         if (snippet.isNotBlank()) TextKind.classify(snippet) else "TEXT"
-    else                             -> "FILE"
+    else -> "FILE"
 }
 
 /**
- * Content-type chip. Pass the pre-derived [label] (see [chipLabelFor]) and
- * [color] (see [chipColorFor]) so the chip never re-runs classification or the
- * color `when` on scroll — the row hoists both behind a `remember` keyed on the
- * item + active ramp.
+ * Content-type chip — STYLEGUIDE §9.4 pill/chip anatomy. Delegates to the
+ * shared [CpBadgeChip] primitive (`pill = false` selects the tighter `--r-chip`
+ * radius used by this meta-line badge) instead of hand-rolling its own
+ * tint/border/text, so the chip visual treatment can never drift from every
+ * other pill/badge in the app.
  */
 @Composable
 internal fun ContentTypeChip(label: String, color: Color) {
-    // vzfn: radius 7dp (was 4dp) + 10sp (was 9sp) — parity styleguide .badge --radius-chip/10px
-    Box(
-        modifier = Modifier
-            .background(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(7.dp))
-            .border(
-                width = 1.dp,
-                color = color.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(7.dp),
-            ),
-    ) {
-        Text(
-            text = label,
-            color = color,
-            maxLines = 1,
-        )
-    }
+    CpBadgeChip(text = label, color = color, pill = false)
 }
 
 /**
@@ -113,10 +136,14 @@ internal fun TooLargeBadge() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// egsf — icon-tile: rounded RoundedCornerShape(7.dp) box, kind-tinted glyph inside.
-// Mirrors web .ci tile (liquid-glass-styleguide.html L250): bg --ide-mute/.16,
-// glyph --ide-faint. Placed as the leading element of each text/file row, before
-// the ContentTypeChip.
+// egsf — icon-tile: rounded box, kind-tinted background + a REAL Lucide glyph
+// at full content-color strength inside (android-history "Content-Type Tile
+// Rendering" — "tinted background at 14% of the content color with a
+// full-strength glyph"). Previously this tile rendered the raw [chipLabel]
+// STRING as its own content (a stand-in that was never replaced with a real
+// icon) — that gap is what this rewrite closes; [contentIconFor] +
+// `LucideIcons.forKey` already had a "SECRET" -> lock-glyph entry ready and
+// unused.
 //
 // lbnp — COLOR-kind rows: instead of the icon tile, render a swatch square
 // filled with the parsed color value from the snippet. See parseHexColor().
@@ -145,53 +172,61 @@ internal fun parseHexColor(snippet: String): Color? {
 }
 
 /**
- * egsf: kind-tinted icon tile — styleguide .ci (L250).
- * Background = c.mute@0.16, glyph = c.faint. The label shown is [chipLabel]
- * (de-styled — was a glyph chosen by content kind via contentIconFor()/LucideIcons).
- *
- * PG-64 parity: the macOS `.icon-float` @keyframes animation was removed on
- * macOS (s7ia). Android previously translated it as a subtle scale pulse
- * (1f→1.04f infinite). The pulse is now removed for parity — the icon is
- * static, matching the macOS treatment.
+ * egsf: kind-tinted icon tile — STYLEGUIDE §9.4/§3.7: background = the
+ * resolved content color at 14% alpha, glyph = the SAME color at full
+ * strength (android-history "Standard kind tile" scenario). [kind] drives the
+ * color via [chipColorFor]\(ContentVisualKind, CpColors\); [chipLabel] drives
+ * the glyph via [contentIconFor] (same label the meta-line chip shows, so the
+ * icon and the text stay in lockstep for any future label change).
  */
 @Composable
-internal fun ContentIconTile(chipLabel: String, colors: ColorScheme) {
+internal fun ContentIconTile(
+    kind: ContentVisualKind,
+    chipLabel: String,
+    colors: CpColors,
+    size: Dp = CpDimensions.tileMd,
+) {
+    val tint = chipColorFor(kind, colors)
     Box(
         modifier = Modifier
-            .background(
-                color = colors.surfaceVariant.copy(alpha = 0.16f),
-                shape = RoundedCornerShape(7.dp),
-            ),
+            .size(size)
+            .background(color = tint.copy(alpha = 0.14f), shape = RoundedCornerShape(CpShapes.chip)),
         contentAlignment = Alignment.Center,
     ) {
-        // CopyPaste-5917.15: announce content kind to TalkBack (was null).
-        Text(
-            text = chipLabel,
-            color = colors.onSurfaceVariant,
+        // CopyPaste-5917.15: decorative — the row's own semantics already
+        // announces content kind (meta-line chip text); a redundant
+        // per-glyph contentDescription would double-announce to TalkBack.
+        Icon(
+            imageVector = contentIconFor(chipLabel),
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(CpDimensions.glyphBox),
         )
     }
 }
 
 /**
  * lbnp: Inline color swatch for COLOR-kind rows — styleguide .swatch-inline (L257).
- * Renders the actual parsed color. Falls back to the icon tile when the hex
- * color cannot be parsed.
+ * Renders the actual parsed color. Falls back to the icon tile (COLOR kind, so
+ * the fallback still gets the correct §3.7 `cColor` tint) when the hex color
+ * cannot be parsed.
  */
 @Composable
-internal fun ColorSwatchOrTile(snippet: String, colors: ColorScheme) {
+internal fun ColorSwatchOrTile(snippet: String, colors: CpColors, size: Dp = CpDimensions.tileMd) {
     val parsed = remember(snippet) { parseHexColor(snippet) }
     if (parsed != null) {
         Box(
             modifier = Modifier
+                .size(size)
                 .background(color = parsed, shape = RoundedCornerShape(4.dp))
                 .border(
                     width = 0.5.dp,
-                    color = colors.outline.copy(alpha = 0.6f),
+                    color = colors.border,
                     shape = RoundedCornerShape(4.dp),
                 ),
         )
     } else {
-        // No parseable hex — fall back to the icon tile at reduced size
-        ContentIconTile(chipLabel = "COLOR", colors = colors)
+        // No parseable hex — fall back to the icon tile at the standard size.
+        ContentIconTile(kind = ContentVisualKind.COLOR, chipLabel = "COLOR", colors = colors, size = size)
     }
 }

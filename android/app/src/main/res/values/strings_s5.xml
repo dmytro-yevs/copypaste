@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CopyPaste-myh8.5 — S5 (History) new user-facing strings. Kept in a dedicated
+  file per the wave's file-ownership partition (this slice owns
+  strings_s5.xml; the shared strings.xml stays untouched this wave).
+-->
+<resources>
+    <!-- §9.6 date-group headers -->
+    <string name="date_header_pinned">PINNED</string>
+    <string name="date_header_today">TODAY</string>
+    <string name="date_header_yesterday">YESTERDAY</string>
+    <string name="date_header_earlier">EARLIER</string>
+
+    <!-- History list error/degraded state (NEW presentation state, S5 5.3) —
+         persistent list-surface copy, distinct from the transient load-failure
+         toast already shown via GlassToast. -->
+    <string name="history_error_title">History is unavailable</string>
+    <string name="history_error_subtitle">Could not load your clipboard history. Check the daemon connection and try again.</string>
+    <string name="history_error_retry">Retry</string>
+</resources>

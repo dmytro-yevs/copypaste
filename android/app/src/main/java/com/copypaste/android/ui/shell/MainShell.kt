@@ -141,25 +141,49 @@ fun MainShell(viewModel: ClipboardViewModel) {
                 // the list clears the floating pill.
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
             ) { innerPadding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .padding(bottom = reservedBottomSpace),
-                ) {
-                    when (NavTab.entries[selectedTab]) {
-                        NavTab.CLIPS -> HistoryScreen(
+                // D7 edge-to-edge backdrop (S5 carried task): CLIPS renders with NO
+                // outer bottom padding — its own list threads [reservedBottomSpace]
+                // down as `HistoryScreen.bottomContentPadding`, which HistoryList
+                // applies as LazyColumn `contentPadding` (not a Modifier.padding
+                // that would shrink the composable's own drawable bounds). That
+                // means History's real content pixels are laid out and scroll BEHIND
+                // the floating pill, so the pill's backdrop blur samples real
+                // content instead of an empty gradient-only gap.
+                //
+                // DEVICES/SETTINGS are NOT owned by this wave/slice (S7/S9) and keep
+                // the PRE-EXISTING behaviour verbatim: an outer `Modifier.padding`
+                // that shrinks their bounds above the reserved space. Adopting the
+                // same contentPadding-based pattern for those two screens is tracked
+                // as a follow-up for their owning slices (CopyPaste-myh8.5 bd notes).
+                when (NavTab.entries[selectedTab]) {
+                    NavTab.CLIPS -> Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                        HistoryScreen(
                             viewModel = viewModel,
                             showBackButton = false,
                             onBack = {},
                             paintCanvasBackdrop = false,
+                            bottomContentPadding = reservedBottomSpace,
                         )
-                        NavTab.DEVICES -> DevicesScreen(
+                    }
+                    NavTab.DEVICES -> Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .padding(bottom = reservedBottomSpace),
+                    ) {
+                        DevicesScreen(
                             showBackButton = false,
                             onBack = {},
                             paintCanvasBackdrop = false,
                         )
-                        NavTab.SETTINGS -> SettingsScreen(
+                    }
+                    NavTab.SETTINGS -> Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .padding(bottom = reservedBottomSpace),
+                    ) {
+                        SettingsScreen(
                             showBackButton = false,
                             onBack = {},
                             onRegisterNavGuard = { guard -> settingsNavGuard = guard },
