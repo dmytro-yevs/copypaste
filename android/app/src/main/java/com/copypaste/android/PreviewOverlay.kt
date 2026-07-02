@@ -18,24 +18,30 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.animation.core.FastOutSlowInEasing
+import com.copypaste.android.ui.theme.CpMotion
+import com.copypaste.android.ui.theme.CpShapes
+import com.copypaste.android.ui.theme.CpSpacing
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.LocalCpColors
+import com.copypaste.android.ui.theme.cpMotionSpec
+import com.copypaste.android.ui.theme.rememberCpMotionReduced
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -49,7 +55,25 @@ import kotlinx.coroutines.withContext
 //  - PreviewChrome.kt   — PreviewHeader + content-type chip
 //  - PreviewContent.kt  — PreviewTextContent/ImageContent/FileContent renderers
 //  - PreviewActionRow.kt — pinned-mode action row + relativeTimePreview
+//
+// android-preview S6: re-based on tokens (LocalCpColors/CpTypography/
+// CpShapes/CpSpacing/CpMotion) and now owns the `revealed` state (spec.md
+// "Preview Reveal (NEW)") threaded down to PreviewTextContent/
+// PreviewImageContent/PreviewActionRow, plus the image loading/success/
+// failure tri-state (spec.md "Image Preview Loading States").
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * spec.md "Image Preview Loading States": distinct loading/success/failure —
+ * a nullable bitmap alone cannot distinguish "still decoding" from "decode
+ * failed", which previously left a permanent spinner on failure instead of
+ * the required explanatory failure state.
+ */
+sealed class PreviewImageLoadState {
+    object Loading : PreviewImageLoadState()
+    data class Success(val bitmap: ImageBitmap) : PreviewImageLoadState()
+    object Failure : PreviewImageLoadState()
+}
 
 /**
  * Full-screen overlay rendered as a sibling of the list inside the Scaffold
@@ -82,15 +106,25 @@ fun PreviewOverlay(
 ) {
     if (phase == PreviewPhase.Idle || item == null) return
 
+    val cp = LocalCpColors.current
     val pinned = phase == PreviewPhase.Pinned
+
+    // spec.md "Preview Reveal (NEW)": keyed by item.id, mirroring HistoryRow's
+    // `revealed by remember(item.id)` — resets to false whenever a different
+    // item is previewed ("Reveal state resets per item").
+    var revealed by remember(item.id) { mutableStateOf(false) }
 
     // Dismiss pinned via system back
     BackHandler(enabled = pinned) { onDismiss() }
 
+    val reducedMotion = rememberCpMotionReduced()
+
     // Scale-in animation for the card.
     val cardScale by animateFloatAsState(
         targetValue = if (phase == PreviewPhase.Idle) 0.85f else 1f,
-        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        animationSpec = cpMotionSpec(reducedMotion) {
+            tween(durationMillis = CpMotion.THEME_MS, easing = CpMotion.Ease)
+        },
         label = "previewCardScale",
     )
 
@@ -109,9 +143,12 @@ fun PreviewOverlay(
         }
     }
 
-    // Full-res bitmap loaded lazily — decode at ≤1080px to bound memory
-    val fullBitmapState by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
-        initialValue = null,
+    // Full-res bitmap loaded lazily — decode at ≤1080px to bound memory.
+    // spec.md "Image Preview Loading States": Loading/Success/Failure, not a
+    // bare nullable bitmap, so a decode failure surfaces an explicit state
+    // instead of an indefinite spinner.
+    val fullImageState by produceState<PreviewImageLoadState>(
+        initialValue = PreviewImageLoadState.Loading,
         key1 = item.id,
         key2 = phase,
     ) {
@@ -131,7 +168,12 @@ fun PreviewOverlay(
                         bytes, 0, bytes.size,
                         BitmapFactory.Options().apply { inSampleSize = sample },
                     )?.asImageBitmap()
-                }.getOrNull()
+                }.fold(
+                    onSuccess = { bmp ->
+                        if (bmp != null) PreviewImageLoadState.Success(bmp) else PreviewImageLoadState.Failure
+                    },
+                    onFailure = { PreviewImageLoadState.Failure },
+                )
             }
         }
     }
@@ -161,7 +203,10 @@ fun PreviewOverlay(
             .fillMaxSize()
             // Apply status-bar inset: card will never be drawn behind the status bar
             .padding(top = statusBarTop)
-            .background(Color.Black.copy(alpha = if (pinned) 0.55f else 0.45f))
+            // The scrim keeps the phase-driven depth cue (pinned is darker than
+            // peeking) but now derives its hue from the token ramp (cp.scrim)
+            // instead of a raw Color.Black literal.
+            .background(cp.scrim.copy(alpha = if (pinned) 0.55f else 0.45f))
             .then(
                 if (pinned) Modifier.clickable(
                     indication = null,
@@ -176,12 +221,12 @@ fun PreviewOverlay(
             modifier = Modifier
                 .widthIn(max = 560.dp)
                 .heightIn(max = if (pinned) 700.dp else 480.dp)
-                .padding(horizontal = 20.dp, vertical = if (pinned) 24.dp else 40.dp)
+                .padding(horizontal = CpSpacing.s8, vertical = if (pinned) CpSpacing.s9 else 40.dp)
                 .graphicsLayer {
                     scaleX = cardScale
                     scaleY = cardScale
                 }
-                .background(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = RoundedCornerShape(16.dp))
+                .background(color = cp.card, shape = RoundedCornerShape(CpShapes.card))
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() },
@@ -191,7 +236,7 @@ fun PreviewOverlay(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .padding(CpSpacing.s7),
             ) {
                 PreviewHeader(
                     item = item,
@@ -200,15 +245,16 @@ fun PreviewOverlay(
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 10.dp),
-                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                    color = cp.divider,
                     thickness = 0.5.dp,
                 )
                 Box(modifier = Modifier.weight(1f)) {
                     when {
                         item.isImage -> PreviewImageContent(
-                            bitmap = fullBitmapState,
+                            state = fullImageState,
                             isSensitive = item.isSensitive,
                             maskSensitive = maskSensitive,
+                            revealed = revealed,
                             pinned = pinned,
                             imageScale = imageScale,
                             imagePanX = imagePanX,
@@ -228,30 +274,33 @@ fun PreviewOverlay(
                             item = item,
                             fullText = fullTextState,
                             maskSensitive = maskSensitive,
+                            revealed = revealed,
                             pinned = pinned,
                         )
                     }
                 }
                 if (!pinned) {
                     HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                        modifier = Modifier.padding(vertical = CpSpacing.s4),
+                        color = cp.divider,
                         thickness = 0.5.dp,
                     )
                     Text(
                         text = stringResource(R.string.preview_drag_up_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = CpTypography.micro,
+                        color = cp.dim,
                         modifier = Modifier.align(Alignment.CenterHorizontally),
                     )
                 } else {
                     HorizontalDivider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = CpSpacing.s4),
+                        color = cp.divider,
                         thickness = 0.5.dp,
                     )
                     PreviewActionRow(
                         item = item,
+                        revealed = revealed,
+                        onReveal = { revealed = true },
                         onCopy = onCopy,
                         onSetPinned = onSetPinned,
                         onDelete = onDelete,

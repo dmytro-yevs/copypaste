@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CopyPaste-myh8.6 — S6 (Full-screen preview) new user-facing strings. Kept in
+  a dedicated file per the wave's file-ownership partition (this slice owns
+  strings_s6.xml; the shared strings.xml stays untouched this wave).
+-->
+<resources>
+    <!-- spec.md "Preview Reveal (NEW)": Reveal action contentDescription — new
+         control, PreviewActionRow had no Reveal action before this slice. -->
+    <string name="action_reveal">Reveal</string>
+
+    <!-- spec.md "Preview Masking Parity": a11y replacement description for
+         masked text/image content while unrevealed — clearAndSetSemantics
+         swaps the real content for this string so no plaintext reaches the
+         accessibility tree. Distinct from HistoryRow's sensitive_hidden_a11y
+         (which says "tap to reveal" — accurate for the row's tap gesture, but
+         Preview reveals via the toolbar Reveal action, not a content tap). -->
+    <string name="preview_masked_content_a11y">Sensitive content hidden. Use Reveal to view.</string>
+
+    <!-- spec.md "Image Preview Loading States — Scenario: Image load failure":
+         explicit failure message shown instead of an indefinite spinner or a
+         blank/broken image when decode fails. -->
+    <string name="preview_image_load_failed">Couldn\'t load this image.</string>
+</resources>
