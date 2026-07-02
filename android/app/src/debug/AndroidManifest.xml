@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest fragment (merged into the debug build type only — never
+  ships in release). Registers the S0.5 backdrop-blur spike (CopyPaste-myh8,
+  B2) so it is reachable via `adb shell am start` without adding a launcher
+  entry point or touching src/main/.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".spike.BlurSpikeActivity"
+            android:exported="false"
+            android:label="Blur spike"
+            android:theme="@style/Theme.CopyPaste" />
+    </application>
+</manifest>
