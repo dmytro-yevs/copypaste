@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CopyPaste-myh8.7 — S7 (Devices) new user-facing strings. Kept in a dedicated
+  file per the wave's file-ownership partition (this slice owns
+  strings_s7.xml; the shared strings.xml stays untouched this wave). Copy that
+  already existed as an unused strings.xml resource with matching wording is
+  reused directly from strings.xml instead of being duplicated here.
+-->
+<resources>
+    <!-- Fingerprint tap-to-copy (android-devices spec "Fingerprint tap-to-copy
+         parity") — NEW behaviour for the own-device card AND every paired-peer
+         card on this screen (S7); accessibility action name + copy-feedback
+         toast. Fix round: the accessibility-action-name key duplicated the
+         pre-existing strings.xml `cd_copy_fingerprint` (same "Copy fingerprint"
+         wording) — dropped here in favor of that key (PeerRow.kt call sites
+         updated); only the copy-feedback toast string is new. -->
+    <string name="devices_fingerprint_copied">Fingerprint copied</string>
+
+    <!-- android-devices spec "Unpair/Revoke warning copy remains visible" —
+         both the Unpair and Revoke confirmation dialogs state this action
+         sends no signal to the peer device. -->
+    <string name="devices_local_only_notice">This is a local action only — the other device isn\'t notified.</string>
+
+    <!-- Revoke confirmation dialog body (CopyPaste-8qcm two-path dialog).
+         strings.xml's dialog_revoke_body describes an older Settings-based
+         rotate flow that no longer matches this dialog's actual in-dialog
+         "Revoke & rotate key" path, so this slice defines fresh copy here
+         instead of reusing that stale resource. -->
+    <string name="devices_revoke_body_primary">%1$s will no longer connect over P2P and a revocation record is kept.</string>
+    <string name="devices_revoke_body_secondary">A revoked device that still knows the sync passphrase can keep reading new relay and cloud items. To close that gap, choose “Revoke &amp; rotate key” below.</string>
+    <string name="devices_btn_revoke_rotate">Revoke &amp; rotate key</string>
+    <string name="devices_btn_revoke_only">Revoke only</string>
+
+    <!-- Revoke + rotate passphrase dialog (CopyPaste-8qcm). -->
+    <string name="devices_rotate_title">Set new sync passphrase</string>
+    <string name="devices_rotate_body">Enter a new passphrase to rotate the sync key. All trusted devices will need to re-enter this passphrase to keep syncing.</string>
+    <string name="devices_rotate_passphrase_label">New passphrase (min 8 chars)</string>
+    <string name="devices_rotate_passphrase_error">Passphrase must be at least 8 characters.</string>
+    <string name="devices_btn_confirm_revoke_rotate">Confirm revoke &amp; rotate</string>
+
+    <!-- "Revoke all" (CopyPaste-crh3.34) — shared by the top-bar trigger
+         button and the confirmation dialog's primary action (same label). -->
+    <string name="devices_revoke_all_title">Revoke all paired devices?</string>
+    <string name="devices_btn_revoke_all_confirm">Revoke all</string>
+
+    <!-- Generic acknowledgement dialogs (revoke-error / scanner-unavailable)
+         had no shared "OK" resource. -->
+    <string name="devices_dialog_ok">OK</string>
+</resources>

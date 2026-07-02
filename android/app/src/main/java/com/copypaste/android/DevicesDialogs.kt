@@ -6,16 +6,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.GlassAlertDialog
+import com.copypaste.android.ui.theme.LocalCpColors
+import com.copypaste.android.ui.theme.ideTextFieldColors
 
 /**
  * The Devices screen's dialog set — unpair confirm, the two-path revoke
@@ -44,28 +48,37 @@ fun DevicesDialogs(controller: DevicesController, settings: Settings) {
 @Composable
 private fun UnpairConfirmDialog(controller: DevicesController) {
     val target = controller.revoke.unpairTarget ?: return
-    // §8 glass dialog (audit #10) — appearance only; unpair logic unchanged.
+    val cp = LocalCpColors.current
+    // §9.9 destructive-modal dialog — appearance only; unpair logic unchanged.
     GlassAlertDialog(
         onDismissRequest = { controller.revoke.unpairTarget = null },
         // CopyPaste-bdac.51: standardized to "Unpair" — was "Forget" (terminology conflict).
-        title = { Text("Unpair device?") },
+        title = { Text(stringResource(R.string.dialog_forget_device_title)) },
         text = {
-            Text(
-                "This device will no longer sync with ${target.displayName()} over P2P. " +
-                "You can re-pair at any time by scanning a new QR code."
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.dialog_forget_device_body, target.displayName()),
+                    style = CpTypography.body,
+                )
+                // android-devices spec "Unpair/Revoke warning copy remains visible".
+                Text(
+                    stringResource(R.string.devices_local_only_notice),
+                    style = CpTypography.meta,
+                    color = cp.faint,
+                )
+            }
         },
         confirmButton = {
             CopyPasteButton(
                 onClick = { controller.revoke.confirmUnpair(target) },
                 variant = ButtonVariant.DANGER,
-            ) { Text("Unpair") }
+            ) { Text(stringResource(R.string.dialog_forget_btn)) }
         },
         dismissButton = {
             CopyPasteButton(
                 onClick = { controller.revoke.unpairTarget = null },
                 variant = ButtonVariant.GHOST,
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.dialog_cancel)) }
         },
     )
 }
@@ -80,21 +93,26 @@ private fun UnpairConfirmDialog(controller: DevicesController) {
 @Composable
 private fun RevokeConfirmDialog(controller: DevicesController) {
     val target = controller.revoke.revokeTarget ?: return
+    val cp = LocalCpColors.current
     GlassAlertDialog(
         onDismissRequest = { controller.revoke.revokeTarget = null },
-        title = { Text("Revoke pairing?") },
+        title = { Text(stringResource(R.string.dialog_revoke_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "${target.displayName()} will no longer connect over P2P and a " +
-                    "revocation record is kept.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    stringResource(R.string.devices_revoke_body_primary, target.displayName()),
+                    style = CpTypography.body,
                 )
                 Text(
-                    "A revoked device that still knows the sync passphrase can " +
-                    "keep reading new relay and cloud items. To close that gap, " +
-                    "choose “Revoke & rotate key” below.",
-                    style = MaterialTheme.typography.bodySmall,
+                    stringResource(R.string.devices_revoke_body_secondary),
+                    style = CpTypography.meta,
+                    color = cp.dim,
+                )
+                // android-devices spec "Unpair/Revoke warning copy remains visible".
+                Text(
+                    stringResource(R.string.devices_local_only_notice),
+                    style = CpTypography.meta,
+                    color = cp.faint,
                 )
             }
         },
@@ -105,7 +123,7 @@ private fun RevokeConfirmDialog(controller: DevicesController) {
                 onClick = { controller.revoke.openRevokeRotate(target) },
                 variant = ButtonVariant.DANGER,
             ) {
-                Text("Revoke & rotate key")
+                Text(stringResource(R.string.devices_btn_revoke_rotate))
             }
         },
         dismissButton = {
@@ -114,12 +132,12 @@ private fun RevokeConfirmDialog(controller: DevicesController) {
                 CopyPasteButton(
                     onClick = { controller.revoke.revokeOnly(target) },
                     variant = ButtonVariant.DANGER,
-                ) { Text("Revoke only") }
+                ) { Text(stringResource(R.string.devices_btn_revoke_only)) }
 
                 CopyPasteButton(
                     onClick = { controller.revoke.revokeTarget = null },
                     variant = ButtonVariant.GHOST,
-                ) { Text("Cancel") }
+                ) { Text(stringResource(R.string.dialog_cancel)) }
             }
         },
     )
@@ -131,32 +149,34 @@ private fun RevokeConfirmDialog(controller: DevicesController) {
 @Composable
 private fun RevokeRotateDialog(controller: DevicesController) {
     val target = controller.revoke.revokeRotateTarget ?: return
+    val cp = LocalCpColors.current
     GlassAlertDialog(
         onDismissRequest = { controller.revoke.cancelRevokeRotate() },
-        title = { Text("Set new sync passphrase") },
+        title = { Text(stringResource(R.string.devices_rotate_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Enter a new passphrase to rotate the sync key. All trusted " +
-                    "devices will need to re-enter this passphrase to keep syncing.",
-                    style = MaterialTheme.typography.bodySmall,
+                    stringResource(R.string.devices_rotate_body),
+                    style = CpTypography.body,
                 )
                 // Passphrase text field — skin-aware surface colors, password masking.
                 OutlinedTextField(
                     value = controller.revoke.revokePassphrase,
                     onValueChange = { controller.revoke.revokePassphrase = it },
-                    label = { Text("New passphrase (min 8 chars)") },
+                    label = { Text(stringResource(R.string.devices_rotate_passphrase_label)) },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     enabled = !controller.revoke.revokeRotateInFlight,
+                    colors = ideTextFieldColors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (!isValidRotatePassphrase(controller.revoke.revokePassphrase) &&
                     controller.revoke.revokePassphrase.isNotEmpty()
                 ) {
                     Text(
-                        "Passphrase must be at least 8 characters.",
-                        style = MaterialTheme.typography.labelSmall,
+                        stringResource(R.string.devices_rotate_passphrase_error),
+                        style = CpTypography.meta,
+                        color = cp.err,
                     )
                 }
             }
@@ -169,9 +189,13 @@ private fun RevokeRotateDialog(controller: DevicesController) {
                 variant = ButtonVariant.DANGER,
             ) {
                 if (controller.revoke.revokeRotateInFlight) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = LocalContentColor.current,
+                    )
                 } else {
-                    Text("Confirm revoke & rotate")
+                    Text(stringResource(R.string.devices_btn_confirm_revoke_rotate))
                 }
             }
         },
@@ -180,7 +204,7 @@ private fun RevokeRotateDialog(controller: DevicesController) {
                 enabled = !controller.revoke.revokeRotateInFlight,
                 onClick = { controller.revoke.cancelRevokeRotate() },
                 variant = ButtonVariant.GHOST,
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.dialog_cancel)) }
         },
     )
 }
@@ -191,13 +215,13 @@ private fun RevokeErrorDialog(controller: DevicesController) {
     val msg = controller.revoke.revokeError ?: return
     GlassAlertDialog(
         onDismissRequest = { controller.revoke.dismissRevokeError() },
-        title = { Text("Revocation incomplete") },
-        text = { Text(msg) },
+        title = { Text(stringResource(R.string.dialog_revoke_incomplete_title)) },
+        text = { Text(msg, style = CpTypography.body) },
         confirmButton = {
             CopyPasteButton(
                 onClick = { controller.revoke.dismissRevokeError() },
                 variant = ButtonVariant.GHOST,
-            ) { Text("OK") }
+            ) { Text(stringResource(R.string.devices_dialog_ok)) }
         },
     )
 }
@@ -210,8 +234,8 @@ private fun RevokeAllConfirmDialog(controller: DevicesController) {
     if (!controller.revoke.revokeAllConfirmOpen) return
     GlassAlertDialog(
         onDismissRequest = { controller.revoke.dismissRevokeAllConfirm() },
-        title = { Text("Revoke all paired devices?") },
-        text = { Text(revokeAllConfirmBody()) },
+        title = { Text(stringResource(R.string.devices_revoke_all_title)) },
+        text = { Text(revokeAllConfirmBody(), style = CpTypography.body) },
         confirmButton = {
             CopyPasteButton(
                 enabled = !controller.revoke.revokeAllInFlight,
@@ -221,9 +245,13 @@ private fun RevokeAllConfirmDialog(controller: DevicesController) {
                 variant = ButtonVariant.DANGER,
             ) {
                 if (controller.revoke.revokeAllInFlight) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = LocalContentColor.current,
+                    )
                 } else {
-                    Text("Revoke all")
+                    Text(stringResource(R.string.devices_btn_revoke_all_confirm))
                 }
             }
         },
@@ -232,7 +260,7 @@ private fun RevokeAllConfirmDialog(controller: DevicesController) {
                 enabled = !controller.revoke.revokeAllInFlight,
                 onClick = { controller.revoke.dismissRevokeAllConfirm() },
                 variant = ButtonVariant.GHOST,
-            ) { Text("Cancel") }
+            ) { Text(stringResource(R.string.dialog_cancel)) }
         },
     )
 }
@@ -255,10 +283,12 @@ private fun ScanErrorDialog(controller: DevicesController) {
     val msg = controller.scanError ?: return
     GlassAlertDialog(
         onDismissRequest = { controller.dismissScanError() },
-        title = { Text("Scanner unavailable") },
-        text = { Text(msg) },
+        title = { Text(stringResource(R.string.dialog_scanner_unavailable_title)) },
+        text = { Text(msg, style = CpTypography.body) },
         confirmButton = {
-            CopyPasteButton(onClick = { controller.dismissScanError() }, variant = ButtonVariant.GHOST) { Text("OK") }
+            CopyPasteButton(onClick = { controller.dismissScanError() }, variant = ButtonVariant.GHOST) {
+                Text(stringResource(R.string.devices_dialog_ok))
+            }
         },
     )
 }

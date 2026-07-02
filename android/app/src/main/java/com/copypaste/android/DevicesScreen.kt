@@ -2,6 +2,7 @@ package com.copypaste.android
 
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,21 +12,29 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SectionLabel
+import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Composable screen (also embedded in MainShell's DEVICES tab)
@@ -67,11 +76,28 @@ fun DevicesScreen(
         deviceKeyStore = deviceKeyStore,
         autoOpenSasOnEntry = autoOpenSasOnEntry,
     )
+    val cp = LocalCpColors.current
+
+    // android-devices spec "Fingerprint tap-to-copy parity" — mirrors
+    // PairScreen's copyFingerprint()/GlassToastHost pattern (S8): PeerRow/
+    // OwnDeviceRow have no LocalClipboardManager dependency of their own, so
+    // the actual clipboard write + toast lives here, one level up.
+    val scope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
+    val toastState = remember { GlassToastState() }
+    val copiedMessage = stringResource(R.string.devices_fingerprint_copied)
+    fun copyFingerprint(fingerprint: String) {
+        clipboardManager.setText(AnnotatedString(fingerprint))
+        scope.launch {
+            toastState.show(copiedMessage, GlassToastKind.ACCENT)
+        }
+    }
 
     // The full dialog set (unpair/revoke/revoke-rotate/revoke-error/revoke-all/
     // SAS pairing/scan error) — data-driven off [controller]'s state.
     DevicesDialogs(controller = controller, settings = settings)
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -90,7 +116,7 @@ fun DevicesScreen(
                         enabled = revokeAllEnabled(controller.peers.size) && !controller.revoke.revokeAllInFlight,
                         modifier = Modifier.padding(end = 8.dp),
                     ) {
-                        Text("Revoke all")
+                        Text(stringResource(R.string.devices_btn_revoke_all_confirm))
                     }
                 },
             )
@@ -126,7 +152,7 @@ fun DevicesScreen(
             // CopyPaste-9ln4: renamed from "Devices" to "Paired devices" — avoids
             // duplicate with the TopBar title and matches the web SectionLabel fix.
             // bdac.48: sentence case to match all other section headers on this screen.
-            SectionLabel("Paired devices")
+            SectionLabel(stringResource(R.string.devices_section_paired))
 
             // CopyPaste-crh3.30: the device's active secondary (non-P2P) transport,
             // mirroring the macOS daemon's relay>supabase priority. Read from the
@@ -147,6 +173,7 @@ fun DevicesScreen(
                             identity = identity,
                             nowMs = controller.nowMs,
                             ownPublicIp = controller.ownPublicIp,
+                            onCopyFingerprint = ::copyFingerprint,
                         )
                     }
                 }
@@ -161,6 +188,7 @@ fun DevicesScreen(
                             cloudTransport = cloudTransport,
                             onUnpair = { controller.revoke.unpairTarget = peer },
                             onRevoke = { controller.revoke.revokeTarget = peer },
+                            onCopyFingerprint = ::copyFingerprint,
                         )
                     }
                 }
@@ -173,12 +201,14 @@ fun DevicesScreen(
                     add {
                         // 1jms.20: use SectionLabel for visual consistency with all other
                         // section headers (Paired Devices, Your QR code, etc.).
-                        SectionLabel("Discovered on your network")
+                        SectionLabel(stringResource(R.string.devices_discovered_section))
                     }
                     if (controller.discovered.isEmpty()) {
                         // CopyPaste-0nd4: add DiscoveryRingsIcon + text in a Row so the
                         // empty-state has an icon anchor and visual breathing room, matching
                         // the macOS .network-rings icon + text pattern in DevicesView.tsx.
+                        // "Scanning" state (android-devices spec) — distinct from the
+                        // no-paired-peers empty state rendered below via [NoPeerCard].
                         add {
                             Row(
                                 modifier = Modifier
@@ -189,7 +219,8 @@ fun DevicesScreen(
                             ) {
                                 Text(
                                     text = stringResource(R.string.no_devices_nearby),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = CpTypography.meta,
+                                    color = cp.faint,
                                 )
                             }
                         }
@@ -217,8 +248,14 @@ fun DevicesScreen(
                         row()
                     }
                 }
-            } else {
-                // Empty state — no own-device row to anchor the list.
+            }
+            // §9.10 empty state — driven purely by the paired-roster count, NOT
+            // by [deviceRows] (which also carries the own-device row and the
+            // unrelated LAN-discovery section). android-devices spec "Empty
+            // state when no peers are paired": renders alongside the own-device
+            // card above when present, and stands alone (old fallback shape)
+            // when [DevicesController.ownIdentity] is also unresolved.
+            if (controller.peers.isEmpty()) {
                 NoPeerCard(
                     onPair = {
                         ctx.startActivity(Intent(ctx, PairActivity::class.java))
@@ -230,7 +267,8 @@ fun DevicesScreen(
                 controller.discoverError?.let { msg ->
                     Text(
                         text = msg,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = CpTypography.meta,
+                        color = cp.err,
                     )
                 }
             }
@@ -251,5 +289,8 @@ fun DevicesScreen(
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+    // android-devices spec "Fingerprint tap-to-copy parity" — copy feedback.
+    GlassToastHost(state = toastState)
     }
 }
