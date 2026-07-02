@@ -120,6 +120,11 @@
   .vtitle { font-size: var(--fs-base); font-weight: var(--fw-strong); }
   .vsub { font-size: var(--fs-sm); color: var(--faint); font-family: var(--f-mono); }
 
+  /* Settings status banners (offline/degraded/error/stale) — inset from the pane
+     edges and spaced off the title above and the tab bar below, so a banner
+     never sits flush against adjacent chrome. */
+  .set-banners { display: flex; flex-direction: column; gap: var(--s-4); padding: var(--s-4) var(--s-5) var(--s-2); }
+
   /* --- Settings tabs / groups / rows ---------------------------------------- */
   /* CopyPaste-g27b.31: at the app's real minWidth (720px, tauri.conf.json)
      the 7 sub-tabs no longer fit in one row (scrollWidth 629 > clientWidth
@@ -164,18 +169,30 @@
     color: var(--faint);
     margin-bottom: var(--s-4);
   }
+  /* One cohesive section: rows inside a Panel are separated by rhythm, NOT a
+     hairline between every field (which read as N boxed sub-sections instead of
+     one settings group). */
   .srow {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--s-7);
-    padding: 11px 0;
-    border-bottom: var(--stroke-1) solid var(--divider);
+    padding: 9px 0;
   }
-  .srow:last-child { border-bottom: 0; }
-  .srow__l { font-size: 13.5px; color: var(--text); }
-  .srow__s { font-size: var(--fs-sm); color: var(--faint); margin-top: var(--s-1); max-width: 340px; }
+  .srow__l { font-size: 13.5px; color: var(--text); min-width: 0; }
+  /* Secondary text spans the row width instead of clamping at a narrow column
+     (which forced premature wrapping even with plenty of horizontal space). */
+  .srow__s { font-size: var(--fs-sm); color: var(--faint); margin-top: var(--s-1); }
   .srow__c { flex: none; display: flex; align-items: center; gap: var(--gap-field); }
+  /* Credential/text-input rows: fixed-width label column so every input's left
+     edge lines up (Supabase URL / Anon key / Email / Password / Relay URL), and
+     the control column fills the rest. */
+  .srow:has(.field--grow-full) { align-items: center; }
+  .srow:has(.field--grow-full) .srow__l { flex: 0 0 132px; }
+  /* Inputs and their sibling buttons share one control height so a text field
+     never towers over the Add/Save/Test button beside it. */
+  .set-body .field { min-height: 32px; }
+  .set-body .btn.sm { min-height: 32px; }
   /* g27b.32: rows whose control is a full-width field (Sync credential inputs)
      must let the control column GROW — the default flex:none sizes it to the
      input's ~146px intrinsic width, hiding long values. This override lives in
@@ -286,6 +303,10 @@
     margin-bottom: var(--s-5);
     box-shadow: var(--sh2);
   }
+  /* Everything in the About column is centered — section labels included (the
+     shared .set-grp__h is left-aligned by default, which left the "Features"
+     heading hanging off to the side of an otherwise centered column). */
+  .about .set-grp__h { text-align: center; }
   .about__name { font-size: 19px; font-weight: var(--fw-bold); letter-spacing: -0.02em; }
   .about__ver { font-size: var(--fs-125); color: var(--faint); font-family: var(--f-mono); }
   .about__grid {
@@ -324,6 +345,29 @@
     left: var(--s-1);
     color: var(--accent);
   }
+
+  /* Devices content scrolls inside the (overflow:hidden) view body — otherwise
+     an expanded device card's metadata/actions extend past the viewport with no
+     way to scroll down to them (History scrolls via its virtualiser; Devices had
+     no scroll container of its own). */
+  .dev-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+
+  /* Excluded-apps: each bundle id on its own full-width row (not inline-wrapped
+     chips that ran together). */
+  .xapps { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-4); }
+  .xapp {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-4);
+    padding: 7px 11px;
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-ctl);
+    background: var(--elevated);
+    font-size: var(--fs-smd);
+    font-family: var(--f-mono);
+  }
+  .xapp__id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
   /* --- Devices view header (device rows live in patterns) ------------------- */
   .dev-head {

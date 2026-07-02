@@ -61,6 +61,15 @@ const ICONS = [
   ["FileText", "file-text"],
   ["Clock", "clock"],
   ["CircleDashed", "circle-dashed"],
+  // CopyPaste-myh8.8 (S8, hand-appended when QrCode.kt was vendored — added
+  // here now for regeneration parity, per that file's header note).
+  ["QrCode", "qr-code"],
+  // S6/S7 fix round (CopyPaste-myh8.6/.7): 4 new glyphs migrating the last
+  // material-icons-extended call sites in PreviewChrome.kt/PreviewActionRow.kt.
+  ["X", "x"],
+  ["ExternalLink", "external-link"],
+  ["Download", "download"],
+  ["Bookmark", "bookmark"],
 ];
 
 const RAW_BASE = `https://raw.githubusercontent.com/lucide-icons/lucide/${LUCIDE_SHA}/icons`;

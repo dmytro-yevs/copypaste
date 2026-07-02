@@ -2276,17 +2276,6 @@
 
     <issue
         id="UnusedResources"
-        message="The resource `R.string.dialog_revoke_body` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_revoke_body&quot;>%1$s will no longer connect over P2P, and a revocation record is kept. But a revoked device that still holds the shared sync key can keep reading cloud and relay items until you rotate the sync key. To rotate it, change the Sync Passphrase in Settings — every device must then re-enter the new passphrase (or re-pair) to keep syncing.&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="455"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
         message="The resource `R.string.dialog_revoke_incomplete_title` appears to be unused"
         errorLine1="    &lt;string name=&quot;dialog_revoke_incomplete_title&quot;>Revocation incomplete&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">

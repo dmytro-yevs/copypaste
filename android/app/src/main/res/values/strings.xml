@@ -452,7 +452,6 @@
     <string name="dialog_forget_device_body">This device will no longer sync with %1$s over P2P. You can re-pair at any time by scanning a new QR code.</string>
     <string name="dialog_forget_btn">Unpair</string>
     <string name="dialog_revoke_title">Revoke pairing?</string>
-    <string name="dialog_revoke_body">%1$s will no longer connect over P2P, and a revocation record is kept. But a revoked device that still holds the shared sync key can keep reading cloud and relay items until you rotate the sync key. To rotate it, change the Sync Passphrase in Settings — every device must then re-enter the new passphrase (or re-pair) to keep syncing.</string>
     <string name="dialog_revoke_incomplete_title">Revocation incomplete</string>
     <string name="dialog_scanner_unavailable_title">Scanner unavailable</string>
 

@@ -4,7 +4,11 @@
    authored @layer: the gallery is a dev tool, not part of the app cascade. */
 
 .gallery {
-  min-height: 100vh;
+  /* Bounded height so the gallery's own overflow-y actually scrolls — with only
+     min-height it grew unbounded inside the app shell (which clips its own
+     overflow), so long gallery content was cut off with no way to scroll. */
+  height: 100vh;
+  max-height: 100vh;
   background: var(--bg);
   color: var(--text);
   padding: var(--s-9);

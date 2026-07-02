@@ -22,15 +22,30 @@
 //
 // Usage: node scripts/check-l10n-completeness.mjs
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "..");
-const STRINGS_EN = join(REPO_ROOT, "android/app/src/main/res/values/strings.xml");
+const VALUES_DIR = join(REPO_ROOT, "android/app/src/main/res/values");
+const STRINGS_EN = join(VALUES_DIR, "strings.xml");
 const STRINGS_UK = join(REPO_ROOT, "android/app/src/main/res/values-uk/strings.xml");
 const ALLOWLIST_PATH = join(SCRIPT_DIR, "l10n-translatable-false-allowlist.txt");
+
+// Fix round (S6/S7/S8 file-ownership partition): each redesign slice adds its
+// NEW strings to its own res/values/strings_s<N>.xml file instead of the
+// shared strings.xml (to avoid merge collisions during the parallel wave —
+// see e.g. strings_s7.xml's header). Android resource merging treats every
+// res/values/*.xml file as one combined pool at build time, so this gate must
+// scan the same pool or it silently misses every slice-owned key.
+function stringsSliceFiles() {
+  if (!existsSync(VALUES_DIR)) return [];
+  return readdirSync(VALUES_DIR)
+    .filter((f) => /^strings_s\d+\.xml$/.test(f))
+    .sort()
+    .map((f) => join(VALUES_DIR, f));
+}
 
 function parseStringKeys(path) {
   if (!existsSync(path)) return { keys: new Set(), nonTranslatable: new Set() };
@@ -60,6 +75,11 @@ function loadAllowlist() {
 }
 
 const en = parseStringKeys(STRINGS_EN);
+for (const sliceFile of stringsSliceFiles()) {
+  const slice = parseStringKeys(sliceFile);
+  for (const k of slice.keys) en.keys.add(k);
+  for (const k of slice.nonTranslatable) en.nonTranslatable.add(k);
+}
 const uk = parseStringKeys(STRINGS_UK);
 const allowlist = loadAllowlist();
 

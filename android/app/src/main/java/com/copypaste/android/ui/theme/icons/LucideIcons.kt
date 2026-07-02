@@ -87,11 +87,29 @@ object LucideIcons {
 
     val EmptyState: ImageVector get() = Inbox
 
+    /** Own-QR loading placeholder (S8 pairing) — replaces material-icons-extended's `Icons.Filled.QrCode`. */
+    val PairingQr: ImageVector get() = QrCode
+
     /**
      * Top-bar back chevron. Not RTL-mirrored yet (S13 owns the "no hardcoded
      * left/right" RTL/pseudo-locale audit — STYLEGUIDE §4/§7); LTR-correct today.
      */
     val NavBack: ImageVector get() = ArrowLeft
+
+    // --- fix round (S6/S7): the 4 glyphs that close out PreviewChrome.kt's and
+    // PreviewActionRow.kt's material-icons-extended migration ---
+
+    /** Preview header dismiss glyph — replaces `Icons.Outlined.Close` (PreviewChrome.kt). */
+    val ActionClose: ImageVector get() = X
+
+    /** "Open with default app" — replaces `Icons.Outlined.OpenInNew` (PreviewActionRow.kt). */
+    val ActionOpenExternal: ImageVector get() = ExternalLink
+
+    /** "Save file" — replaces `Icons.Outlined.SaveAlt` (PreviewActionRow.kt). */
+    val ActionDownload: ImageVector get() = Download
+
+    /** Vendored ahead of a wired consumer (no bookmark/save-item affordance exists yet). */
+    val ActionBookmark: ImageVector get() = Bookmark
 
     /** Never a blank composable or a crash — see android-iconography "Fallback for a missing glyph". */
     val Fallback: ImageVector get() = CircleDashed

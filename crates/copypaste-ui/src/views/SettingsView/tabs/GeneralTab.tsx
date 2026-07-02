@@ -1,7 +1,7 @@
 // GeneralTab.tsx
 // Extracted from SettingsView.tsx renderGeneral() (CopyPaste-g06m.14 split) — cut/paste only.
 import { SectionHeader } from "../../../components/SectionHeader";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
@@ -82,14 +82,6 @@ export function GeneralTab({
         {/* bdac.104: InfoPopover moved to info= slot (label column) for all rows */}
         <SettingsRow
           title="Enable sync"
-          // 7set: warn as a row subtitle (not a far-right control-cluster span)
-          // when the daemon doesn't acknowledge sync_enabled so the user knows
-          // the toggle may have no effect on this daemon version.
-          description={
-            syncEnabledStub && !offline
-              ? "Sync control unavailable — please update the CopyPaste background service to enable this setting."
-              : undefined
-          }
           info={<InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />}
         >
           <div className="ctl">
@@ -102,6 +94,13 @@ export function GeneralTab({
             />
           </div>
         </SettingsRow>
+        {/* 7set: full-width warning when the daemon doesn't acknowledge
+            sync_enabled, so the user knows the toggle may have no effect. */}
+        {syncEnabledStub && !offline && (
+          <div className="field-note field-note--warn">
+            Sync control unavailable — update the CopyPaste background service to enable this setting.
+          </div>
+        )}
         {/* bdac.47: InfoPopover added — Private mode had no description */}
         {/* bdac.107: Title Case — "Private Mode" matches all other row titles */}
         <SettingsRow
@@ -280,32 +279,26 @@ export function GeneralTab({
             </div>
             <button
               type="button"
-              className="btn btn--secondary sm"
+              className="btn btn--primary sm"
               disabled={offline || newExcludedApp.trim() === ""}
               onClick={() => void addExcludedApp()}
             ><Plus aria-hidden="true" />Add</button>
           </div>
           {excludedApps.length > 0 && (
-            <div className="ctl ctl--wrap">
+            <div className="xapps">
               {excludedApps.map((bundleId) => (
-                <span
-                  key={bundleId}
-                  className="chip"
-                  title={bundleId}
-                >
-                  {/* g27b.34: wrap the id so a very long bundle id truncates
-                      with an ellipsis inside the card instead of overflowing. */}
-                  <span className="chip__label">{bundleId}</span>
+                <div key={bundleId} className="xapp">
+                  <span className="xapp__id" title={bundleId}>{bundleId}</span>
                   <button
                     type="button"
-                    className="chip__x"
+                    className="iconbtn danger"
                     aria-label={`Remove ${bundleId}`}
                     disabled={offline}
                     onClick={() => void removeExcludedApp(bundleId)}
                   >
-                    ×
+                    <X aria-hidden="true" />
                   </button>
-                </span>
+                </div>
               ))}
             </div>
           )}
@@ -315,19 +308,13 @@ export function GeneralTab({
       <SectionHeader label="Background service" />
       <Panel>
         {/* bdac.107: description added for Version row (Background service section) */}
-        <SettingsRow
-          title="Version"
-          description="Current daemon and app version."
-        >
+        <SettingsRow title="Version">
           <span className="field-note field-note--dim field-note--mono">
             {offline ? "Not running" : (daemonVersion ?? "unknown")}
           </span>
         </SettingsRow>
-        {/* bdac.107: "Restart" → "Restart service" — unambiguous; description added */}
-        <SettingsRow
-          title="Restart service"
-          description="Restart the background clipboard service."
-        >
+        {/* bdac.107: "Restart" → "Restart service" — unambiguous */}
+        <SettingsRow title="Restart service">
           <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
         </SettingsRow>
       </Panel>

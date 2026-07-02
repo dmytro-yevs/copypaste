@@ -1,12 +1,11 @@
 // SyncTab.tsx
 // Extracted from SettingsView.tsx renderSync() (CopyPaste-g06m.14 split) — cut/paste only.
 import { SectionHeader } from "../../../components/SectionHeader";
-import { Key, Plug, Save } from "lucide-react";
+import { AlertTriangle, Check, Key, Plug, Save } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
 import { InfoPopover } from "../components/InfoPopover";
-import { StatusRow } from "../components/StatusRow";
 import { CloudAccountMismatchBanner } from "../components/CloudAccountMismatchBanner";
 import { LimitsMsg } from "../components/LimitsMsg";
 import { formatSyncTime } from "../../../lib/time";
@@ -114,6 +113,16 @@ export function SyncTab({
   cloudAccountMismatch,
   localSupabaseAccountId,
 }: SyncTabProps) {
+  // Q2: one consolidated status instead of 3 raw status rows.
+  const syncBlocker =
+    syncStatus === null
+      ? null
+      : !syncStatus.passphrase_set
+        ? "Sync passphrase not set"
+        : syncStatus.supabase_configured && !syncStatus.signed_in
+          ? "Not signed in to your cloud account"
+          : null;
+
   return (
     <div>
       {/* crh3.15: single canonical signed-in banner — surface-card only.
@@ -128,6 +137,23 @@ export function SyncTab({
             <span className="txt-faint">— All devices must use this same account to sync.</span>
           </div>
         )}
+
+      {/* Q2: single consolidated sync status banner. */}
+      {syncStatus !== null && (
+        syncBlocker === null ? (
+          <div className="banner banner--ok">
+            <Check aria-hidden="true" />
+            <span className="banner__x">
+              Sync ready{syncStatus.last_sync_ms ? ` · last synced ${formatLastSync(syncStatus.last_sync_ms)}` : ""}
+            </span>
+          </div>
+        ) : (
+          <div className="banner banner--warn">
+            <AlertTriangle aria-hidden="true" />
+            <span className="banner__x">{syncBlocker}</span>
+          </div>
+        )
+      )}
 
       {/* ── General sync ── */}
       {/* bdac.78: "Sync on Wi-Fi only" and "Auto-apply synced clipboard" apply
@@ -159,28 +185,13 @@ export function SyncTab({
           info={<InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />}
         >
           <div className="ctl">
-            {/* wrfv: visible inline notice so the user knows synced clips will
-                silently overwrite the active clipboard (the actual write is
-                daemon-side; this is the UI surface for the setting). */}
-            {autoApplySyncedClip && (
-              <span
-                data-testid="auto-apply-notice"
-                role="note"
-                className="field-note"
-              >
-                Synced clips will overwrite the active clipboard automatically.
-                Turn off to keep clipboard intact and paste manually from history.
-              </span>
-            )}
-            <div className="ctl">
-              <LimitsMsg field="auto_apply_synced_clip" limitsMsg={limitsMsg} />
-              <Toggle
-                checked={autoApplySyncedClip}
-                onChange={(v) => void handleAutoApplySyncedClipToggle(v)}
-                disabled={offline || !syncEnabled}
-                aria-label="Auto-apply synced clipboard"
-              />
-            </div>
+            <LimitsMsg field="auto_apply_synced_clip" limitsMsg={limitsMsg} />
+            <Toggle
+              checked={autoApplySyncedClip}
+              onChange={(v) => void handleAutoApplySyncedClipToggle(v)}
+              disabled={offline || !syncEnabled}
+              aria-label="Auto-apply synced clipboard"
+            />
           </div>
         </SettingsRow>
       </Panel>
@@ -411,27 +422,6 @@ export function SyncTab({
           ><Save aria-hidden="true" />Save</button>
         </div>
       </Panel>
-
-      {/* Sync status detail */}
-      {syncStatus !== null && (
-        <>
-          <SectionHeader label="Status" />
-          <Panel>
-            <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
-            <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
-            <StatusRow label="Signed in" ok={syncStatus.signed_in} />
-            {/* i2sr (PG-40): hybrid relative/absolute format + "Synced " prefix
-                to match Android parity. Relative when ≤24 h ago; absolute beyond. */}
-            <SettingsRow title="Last sync">
-              <span className="field-note field-note--dim">
-                {syncStatus.last_sync_ms
-                  ? `Synced ${formatLastSync(syncStatus.last_sync_ms)}`
-                  : "Never"}
-              </span>
-            </SettingsRow>
-          </Panel>
-        </>
-      )}
     </div>
   );
 }

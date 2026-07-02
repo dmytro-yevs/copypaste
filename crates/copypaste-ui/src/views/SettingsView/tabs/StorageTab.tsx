@@ -1,10 +1,12 @@
 // StorageTab.tsx
 // Extracted from SettingsView.tsx renderStorage() (CopyPaste-g06m.14 split) — cut/paste only.
+import { useState } from "react";
 import { SectionHeader } from "../../../components/SectionHeader";
 import { Download, Sparkles, Trash2, Upload } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Panel } from "../../../components/Panel";
 import { SliderRow } from "../../../components/SliderRow";
+import { ConfirmModal } from "../../../components/ConfirmModal";
 import {
   TEXT_SIZE_STEPS_BYTES, TEXT_SIZE_LABELS,
   IMAGE_SIZE_STEPS_BYTES, IMAGE_SIZE_LABELS,
@@ -17,6 +19,7 @@ import {
 } from "../lib/settingsSliders";
 import type { UIPrefs } from "../../../store";
 import { LimitsMsg } from "../components/LimitsMsg";
+import { InfoPopover } from "../components/InfoPopover";
 
 export type StorageTabProps = {
   offline: boolean;
@@ -93,7 +96,7 @@ export function StorageTab({
   // onRelease fires only on mouse-up/touch-end to avoid hammering the IPC on drag.
   function LimitSliderRow<T extends number>({
     label,
-    description,
+    info,
     field,
     steps,
     labels,
@@ -102,7 +105,7 @@ export function StorageTab({
     onRelease,
   }: {
     label: string;
-    description?: string;
+    info?: React.ReactNode;
     field: string;
     steps: readonly T[];
     labels: readonly string[];
@@ -114,7 +117,7 @@ export function StorageTab({
     const idx = steps.indexOf(value);
     const safeIdx = idx < 0 ? 0 : idx;
     return (
-      <SettingsRow title={label} description={description}>
+      <SettingsRow title={label} info={info}>
         <div className="ctl">
           <SliderRow
             min={0}
@@ -138,6 +141,10 @@ export function StorageTab({
     MAX_ITEMS_STEPS as unknown as readonly number[],
     prefs.historyDisplayLimit ?? DEFAULT_MAX_ITEMS
   );
+
+  // #12: Export now opens a confirmation modal instead of an inline
+  // checkbox + warning + button cluster.
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   return (
     <div>
@@ -175,6 +182,7 @@ export function StorageTab({
         />
         <LimitSliderRow
           label="Max clip file size"
+          info={<InfoPopover text="Files over ~8 MB are kept locally but won't sync over P2P/cloud — they're skipped with a warning." />}
           field="max_file_size_bytes"
           steps={FILE_SIZE_STEPS_BYTES as unknown as readonly number[]}
           labels={FILE_SIZE_LABELS}
@@ -186,9 +194,6 @@ export function StorageTab({
             void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v }, () => setMaxFileBytes(prev));
           }}
         />
-        <div className="field-note field-note--row">
-          Files over ~8&nbsp;MB are kept locally but won&apos;t sync over P2P/cloud — they&apos;re skipped with a warning.
-        </div>
         <LimitSliderRow
           label="Local storage limit"
           field="storage_quota_bytes"
@@ -221,7 +226,7 @@ export function StorageTab({
             Sentinel 100000 → "Unlimited". */}
         <LimitSliderRow
           label="History display limit"
-          description="Display filter only — does not delete stored items. Daemon stores until byte quota."
+          info={<InfoPopover text="Display filter only — does not delete stored items. The daemon stores more and prunes by the byte quota above." />}
           field="max_items"
           steps={MAX_ITEMS_STEPS as unknown as readonly number[]}
           labels={MAX_ITEMS_LABELS}
@@ -236,9 +241,6 @@ export function StorageTab({
             showLimitsMsg("max_items", "Saved", 1500, true);
           }}
         />
-        <div className="field-note field-note--row">
-          Limits items shown in the UI only — the daemon stores more and prunes by the byte quota above.
-        </div>
       </Panel>
 
       {/* 85n9: Backup / Restore panel */}
@@ -247,40 +249,23 @@ export function StorageTab({
         hint="Export your clipboard history as a JSON file, or restore it from a previous backup."
       />
       <Panel>
-        {/* Export row */}
-        <SettingsRow title="Export backup" fullWidth>
-          <div className="ctl ctl--stack">
-            {/* Include-sensitive checkbox with plaintext warning */}
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={exportIncludeSensitive}
-                onChange={(e) => setExportIncludeSensitive(e.target.checked)}
-                disabled={offline || exportInProgress}
-              />
-              Include sensitive items
-            </label>
-            {exportIncludeSensitive && (
-              <span className="field-note field-note--warn">
-                Warning: sensitive items will be exported as plaintext. Keep the file secure and delete it when done.
+        {/* Export row — Q3: clicking opens a confirmation modal (see below) */}
+        <SettingsRow title="Export backup">
+          <div className="ctl">
+            {exportMsg !== null && (
+              <span className={`field-note `}>
+                {exportMsg.text}
               </span>
             )}
-            <div className="ctl">
-              {exportMsg !== null && (
-                <span className={`field-note `}>
-                  {exportMsg.text}
-                </span>
-              )}
-              <button
-                type="button"
-                className="btn btn--secondary sm"
-                disabled={offline || exportInProgress}
-                onClick={() => void handleExport()}
-                data-testid="export-button"
-              >
-                <Download aria-hidden="true" />{exportInProgress ? "Exporting…" : "Export…"}
-              </button>
-            </div>
+            <button
+              type="button"
+              className="btn btn--secondary sm"
+              disabled={offline || exportInProgress}
+              onClick={() => setExportModalOpen(true)}
+              data-testid="export-button"
+            >
+              <Download aria-hidden="true" />{exportInProgress ? "Exporting…" : "Export…"}
+            </button>
           </div>
         </SettingsRow>
 
@@ -363,6 +348,35 @@ export function StorageTab({
           </div>
         </SettingsRow>
       </Panel>
+
+      {/* #12: Export confirmation modal — hosts the include-sensitive checkbox
+          and plaintext warning that used to live inline in the row. */}
+      <ConfirmModal
+        open={exportModalOpen}
+        title="Export backup"
+        body={
+          <>
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={exportIncludeSensitive}
+                onChange={(e) => setExportIncludeSensitive(e.target.checked)}
+                disabled={offline || exportInProgress}
+              />
+              Include sensitive items
+            </label>
+            {exportIncludeSensitive && (
+              <span className="field-note field-note--warn">
+                Sensitive items will be exported as plaintext. Keep the file secure and delete it when done.
+              </span>
+            )}
+          </>
+        }
+        confirmLabel="Export"
+        danger={false}
+        onConfirm={() => { setExportModalOpen(false); void handleExport(); }}
+        onCancel={() => setExportModalOpen(false)}
+      />
     </div>
   );
 }

@@ -26,9 +26,9 @@ android/app/src/main/java/com/copypaste/android/DevicesDialogs.kt:62
 android/app/src/main/java/com/copypaste/android/DevicesDialogs.kt:68
 android/app/src/main/java/com/copypaste/android/DevicesDialogs.kt:85
 android/app/src/main/java/com/copypaste/android/DevicesScreen.kt:93
-android/app/src/main/java/com/copypaste/android/HistoryRow.kt:248
-android/app/src/main/java/com/copypaste/android/HistoryRow.kt:259
-android/app/src/main/java/com/copypaste/android/HistoryRow.kt:751
+android/app/src/main/java/com/copypaste/android/HistoryRow.kt:255
+android/app/src/main/java/com/copypaste/android/HistoryRow.kt:266
+android/app/src/main/java/com/copypaste/android/HistoryRow.kt:846
 android/app/src/main/java/com/copypaste/android/LogViewerActivity.kt:168
 android/app/src/main/java/com/copypaste/android/LogViewerActivity.kt:173
 android/app/src/main/java/com/copypaste/android/LogViewerActivity.kt:195
@@ -72,11 +72,7 @@ android/app/src/main/java/com/copypaste/android/PermissionsSettingsActivity.kt:2
 android/app/src/main/java/com/copypaste/android/PermissionsSettingsActivity.kt:317
 android/app/src/main/java/com/copypaste/android/PermissionsSettingsActivity.kt:342
 android/app/src/main/java/com/copypaste/android/PermissionsSettingsActivity.kt:355
-android/app/src/main/java/com/copypaste/android/PreviewOverlay.kt:94
-android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:377
-android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:485
-android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:505
-android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:508
+android/app/src/main/java/com/copypaste/android/PreviewOverlay.kt:128
 android/app/src/main/java/com/copypaste/android/Settings.kt:568
 android/app/src/main/java/com/copypaste/android/SettingsComponents.kt:409
 android/app/src/main/java/com/copypaste/android/StorageTab.kt:94

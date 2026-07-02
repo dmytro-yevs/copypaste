@@ -163,13 +163,19 @@ list, and the redesign SHALL NOT wire up or activate the cloud-account-mismatch 
 - **THEN** no cloud-account-mismatch banner is shown, because `peer_supabase_account_id` is `None` and
   the mismatch detector receives an empty list
 
-### Requirement: Device presentation models are introduced by this change
+### Requirement: Device presentation reuses the existing roster/identity models
 
-The `OwnDeviceInfo` and `PairedDevice` names used above SHALL be introduced by S7 as presentation
-DTOs adapting the existing `PairedPeer` roster model and the own-device info source; they are not
-pre-existing types, and no spec SHALL assume they already exist.
+The redesign SHALL present devices by reading the existing `PairedPeer` roster model
+(`PeerRoster.kt`) and `P2pIdentity` (own-device identity) DIRECTLY, and SHALL NOT introduce a new
+`OwnDeviceInfo`/`PairedDevice` presentation-DTO layer. Fix round (S6-S8 review): this requirement
+originally proposed those two names as NEW presentation DTOs that S7 would introduce; S7 instead
+built the STYLEGUIDE §9.7 grid straight from `PairedPeer`/`P2pIdentity` with no adapter/DTO layer in
+between (reuse-first: composables such as `DevicesRevokeActions`/`DevicesUtils`/`PeerRow` take
+`PairedPeer` as their parameter type) — this requirement is retained to record that decision, not
+to describe types that exist.
 
-#### Scenario: Presentation DTOs are constructed in S7
+#### Scenario: Devices screen renders directly from PairedPeer/P2pIdentity
 - **WHEN** the Devices screen is implemented
-- **THEN** `OwnDeviceInfo`/`PairedDevice` are built in S7 from `PairedPeer` and the own-device
-  source, mapping their fields onto the STYLEGUIDE §9.7 grid
+- **THEN** the paired-device grid and own-device card are built in S7 directly from `PairedPeer`
+  and `P2pIdentity`, mapping their existing fields onto the STYLEGUIDE §9.7 grid
+- **AND** no new `OwnDeviceInfo`/`PairedDevice` presentation DTO is introduced

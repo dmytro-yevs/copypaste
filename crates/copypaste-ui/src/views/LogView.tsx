@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Download, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, Download, RefreshCw, Search } from "lucide-react";
 import { readLogs, logDirPath, IpcError } from "../lib/ipc";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
+import { EmptyState } from "../components/EmptyState";
 
 const MAX_LINES = 500;
 
@@ -194,28 +195,28 @@ export function LogContent() {
         {/* Content */}
         <div className="fill-col">
           {loading ? (
-            <div>
-              <span aria-label="Loading logs…" />
-            </div>
+            <EmptyState title="Loading logs…" body="" />
           ) : error ? (
             /* bdac.96: RestartDaemonButton added to error state so users can recover
                without navigating away — consistent with HistoryView / DevicesView. */
-            <div>
-              <p>{error}</p>
-              <RestartDaemonButton
-                label="Restart background service"
-                onRestarted={() => {
-                  setLoading(true);
-                  void load();
-                }}
-              />
-            </div>
+            <EmptyState
+              icon={<AlertTriangle aria-hidden="true" />}
+              title="Couldn't load logs"
+              body={error}
+              action={
+                <RestartDaemonButton
+                  label="Restart background service"
+                  onRestarted={() => {
+                    setLoading(true);
+                    void load();
+                  }}
+                />
+              }
+            />
           ) : isEmpty ? (
             // bdac.63: proper empty state instead of "(no log entries)" sentinel.
-            <div>
-              <p data-testid="log-empty-state">
-                No log entries yet
-              </p>
+            <div data-testid="log-empty-state">
+              <EmptyState title="No log entries yet" body="" />
             </div>
           ) : (
             // Scrollable log area — select-text preserved so users can still copy lines.

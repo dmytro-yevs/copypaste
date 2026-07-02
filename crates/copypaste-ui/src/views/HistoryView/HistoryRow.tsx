@@ -275,7 +275,9 @@ export const HistoryRow = React.memo(function HistoryRow({
       />
 
       <div className="row__body">
-        {isImage ? null : isFile ? (
+        {isImage ? (
+          <div className="row__title" style={titleStyle}>Image</div>
+        ) : isFile ? (
           <div className="row__title" style={titleStyle}>{parseFilename(entry.preview)}</div>
         ) : blurred ? (
           <ClipPreview entry={entry} masked onReveal={() => setRevealed(true)} mono={mono} />

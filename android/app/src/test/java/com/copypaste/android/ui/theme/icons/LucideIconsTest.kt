@@ -40,8 +40,11 @@ class LucideIconsTest {
             LucideIcons.ActionPin, LucideIcons.ActionDelete, LucideIcons.ActionCopy, LucideIcons.ActionReveal,
             LucideIcons.ActionUnpair, LucideIcons.ActionRevoke,
             LucideIcons.EmptyState, LucideIcons.Fallback,
+            LucideIcons.PairingQr, LucideIcons.NavBack,
+            LucideIcons.ActionClose, LucideIcons.ActionOpenExternal,
+            LucideIcons.ActionDownload, LucideIcons.ActionBookmark,
         )
-        assertEquals(28, roles.size)
+        assertEquals(34, roles.size)
         roles.forEach { assertNotSame(null, it) }
     }
 

@@ -41,7 +41,8 @@ present a scan-review card summarizing the discovered peer before proceeding to 
 
 #### Scenario: Scan-review requires explicit confirmation
 - **WHEN** the scan-review card is shown for a discovered peer
-- **THEN** the user must explicitly confirm before the flow proceeds to SAS verification
+- **THEN** the user must explicitly confirm (full-fingerprint verification) before the flow proceeds
+  to bootstrap
 
 ### Requirement: SAS confirmation is the six-digit code (fingerprint is supplemental)
 
@@ -49,7 +50,12 @@ The Short Authentication String (SAS) confirmation step SHALL present the **six-
 the primary match decision, with Match / Doesn't-match actions, and SHALL preserve the existing
 polling (`SAS_POLL_MS`), watchdog/timeout (`SAS_WATCHDOG_MS`), waiting, and terminal states. The full
 64-hex fingerprint MAY be shown as supplemental metadata but SHALL NOT replace or obscure the SAS
-code. Neither the SAS code nor any pairing token SHALL be written to logs or notifications.
+code. Neither the SAS code nor any pairing token SHALL be written to logs or notifications. SAS is
+SCOPED to the **mDNS-discovery pairing flow** (Devices screen), which carries no pre-shared secret
+and therefore requires an out-of-band match decision; the **QR/deep-link flow intentionally does not
+use SAS** (product decision, 2026-07-02) — the scanned QR payload already carries the PAKE password,
+so possession of the QR is itself the MITM defense, and the scan-review card's explicit
+full-fingerprint confirmation is that flow's equivalent verification step.
 
 #### Scenario: Six-digit SAS is primary
 - **WHEN** the SAS state is `awaiting_sas` with a code
