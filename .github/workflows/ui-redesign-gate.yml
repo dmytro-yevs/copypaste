@@ -1,24 +1,37 @@
 # UI Redesign Gate — design-system-redesign tasks 6.13/6.14/6.17
-# (bd CopyPaste-g27b.13 / CopyPaste-g27b.13.2).
+# (bd CopyPaste-g27b.13 / CopyPaste-g27b.13.2 / CopyPaste-g27b.13.3).
 #
 # This workflow is the REQUIRED CI gate for the design-system-redesign change.
 # It replaces the "manual verification only" / "manual spot-check" posture
 # called out in tasks.md 6.13/6.14 and proposal.md with two automated layers:
 #
-#   1. browser-playwright  — the `?mock=1` Playwright suite (visual regression,
-#      accent/contrast matrix, modal keyboard/focus, reduced-motion, gallery
-#      production-exclusion, token-contrast, and an @axe-core/playwright
-#      accessibility scan). Runs against Chromium via the Vite dev server —
-#      fast, deterministic, no packaged build required. Mirrors
-#      visual-regression.yml's job shape.
+#   1. browser-playwright  — the `?mock=1` Playwright suite, including
+#      e2e/visual/layout-invariants.spec.ts (assertive no-overflow /
+#      no-clipped-text / no-spill geometry probe across a width×theme matrix
+#      + an @axe-core/playwright WCAG scan — this is the REAL regression net
+#      called out in CopyPaste-g27b.13.2; it replaced the pixel-diff-only
+#      gate that had shipped real layout bugs as "green"), plus the existing
+#      visual-regression / accent-contrast-matrix / modal-keyboard-focus /
+#      reduced-motion / gallery-production-exclusion / token-contrast specs.
+#      Runs against Chromium via the Vite dev server — fast, deterministic,
+#      no packaged build required. Mirrors visual-regression.yml's job shape.
+#      REQUIRED STATUS CHECK: this job ("Browser Playwright (visual +
+#      @axe-core a11y)" in workflow "UI Redesign Gate") is the check that
+#      should be marked Required in GitHub's branch-protection settings for
+#      `main` (Settings → Branches — an out-of-band repo-admin action; it
+#      cannot be expressed from a workflow YAML file). It has no
+#      `continue-on-error`, so any layout/a11y regression fails the job.
 #
 #   2. tauri-packaged-smoke — the PRODUCT RELEASE GATE (design.md Decision
 #      13/N5): builds the actual release binaries + the packaged Tauri .app
 #      and runs `pnpm test:tauri-smoke --build` against it (see
-#      crates/copypaste-ui/e2e/tauri-smoke/run.mjs for exactly what is
-#      asserted vs. stubbed). The browser suite above supplements this but
-#      does NOT replace it — packaged-WebView behavior (CSP, IPC bootstrap,
-#      daemon spawn) can differ from a browser tab.
+#      crates/copypaste-ui/e2e/tauri-smoke/run.mjs's header comment for the
+#      exact Tier-1 [process/filesystem, real here] vs. Tier-2 [WebDriver
+#      WebView-introspection, `skip`s here — tauri-driver has no macOS
+#      backend upstream, see run.mjs for the citation] breakdown). The
+#      browser suite above supplements this but does NOT replace it —
+#      packaged-WebView behavior (CSP, IPC bootstrap, daemon spawn) can
+#      differ from a browser tab.
 #
 # Release scope (design-system-redesign tasks.md 6.17, round-5 M4): macOS
 # only. This workflow intentionally has no Windows/Linux job — non-macOS
@@ -159,8 +172,9 @@ jobs:
         # socket/DB/dirs, ephemeral key — never touches the real Keychain or
         # user data), and probes it. See
         # crates/copypaste-ui/e2e/tauri-smoke/run.mjs's header comment for the
-        # exact asserted-vs-stubbed breakdown; a REAL-check failure here fails
-        # this job.
+        # exact Tier-1 (real here) vs. Tier-2 (WebDriver-gated, `skip`s here —
+        # tauri-driver has no macOS backend upstream) breakdown; a REAL-check
+        # failure here fails this job.
         working-directory: crates/copypaste-ui
         run: pnpm test:tauri-smoke --build
 
