@@ -524,6 +524,17 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
 
+    <!-- android-appearance S3: Theme segmented control (Dark/Light/System) + accent swatch row -->
+    <string name="setting_theme_label">Theme</string>
+    <string name="theme_mode_system">System</string>
+    <string name="accent_name_indigo">Indigo</string>
+    <string name="accent_name_blue">Blue</string>
+    <string name="accent_name_teal">Teal</string>
+    <string name="accent_name_green">Green</string>
+    <string name="accent_name_amber">Amber</string>
+    <string name="accent_name_rose">Rose</string>
+    <string name="toast_settings_save_failed">Save failed — try again</string>
+
     <!-- CopyPaste-bdac.61: SettingsActivity — Image &amp; preview section -->
     <string name="section_image_preview">Image &amp; preview</string>
 

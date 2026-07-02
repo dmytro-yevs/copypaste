@@ -2,6 +2,7 @@ package com.copypaste.android
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.copypaste.android.ui.theme.AccentColor
 import java.util.UUID
 
 // SyncBackend, EncryptionKeyLostException → SettingsTypes.kt
@@ -468,6 +469,31 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("translucency", v).apply()
 
     /**
+     * Theme axis (design.md D4) — Dark / Light / System. Persisted key
+     * `theme_mode`. Default [ThemeMode.DARK] (D4 fresh-install default).
+     * Corrupt/unknown persisted values fall back to the default via
+     * [ThemeMode.fromName] (android-design-system "invalid/corrupt
+     * persisted-enum fallback to defaults").
+     *
+     * android-appearance D6: `theme_mode` is a CANONICAL key — the pre-S3
+     * [migrateThemeForTwoAxis] latch used to delete it on every fresh
+     * install/upgrade before this getter/setter existed. That bug is fixed;
+     * see [migrateThemeForTwoAxis]'s kdoc.
+     */
+    var themeMode: ThemeMode
+        get() = ThemeMode.fromName(prefs.getString("theme_mode", null))
+        set(v) = prefs.edit().putString("theme_mode", v.name).apply()
+
+    /**
+     * Accent hue — one of six (design.md D4). Persisted key `accent`.
+     * Default [AccentColor.DEFAULT] (indigo). See [themeMode] for the
+     * D6 canonical-key note.
+     */
+    var accent: AccentColor
+        get() = AccentColor.fromName(prefs.getString("accent", null))
+        set(v) = prefs.edit().putString("accent", v.name).apply()
+
+    /**
      * CopyPaste-un29: When true, the history list groups items by their origin device
      * (own device first, then peers alphabetically) instead of the default
      * pinned-first/recency sort. Mirrors the macOS HistoryView "Sort by device" toggle.
@@ -483,19 +509,30 @@ class Settings(context: Context) {
      * stale Liquid-Glass appearance keys (palette / skin / density / motion /
      * contrast) so the new isDark × accent defaults apply cleanly. The user's
      * later choices then persist. Latches a flag so this runs only once.
+     *
+     * android-appearance D6/R5 (versioned latch, `theme_migrated_2axis` ->
+     * `theme_migrated_2axis_v2`): the ORIGINAL migration also removed
+     * `theme_mode`/`accent` — harmless while [Settings] exposed no
+     * getter/setter for either key, but a latent data-loss bug once S3 added
+     * [themeMode]/[accent] (every launch would silently wipe the user's saved
+     * theme/accent back to defaults on the FIRST read after upgrade, since
+     * this migration runs before any appearance getter — see
+     * `CopyPasteApp.onCreate`). `theme_mode`/`accent` are the CANONICAL
+     * two-axis keys and are no longer removed; only the five genuinely stale
+     * Liquid-Glass-era keys are. The latch is renamed (never reused) because
+     * the migration's behaviour changed — an install that already ran the OLD
+     * latch must run this fixed version once more to reach a consistent state.
      */
     fun migrateThemeForTwoAxis() {
-        if (prefs.getBoolean("theme_migrated_2axis", false)) return
-        val edit = prefs.edit()
+        if (prefs.getBoolean(KEY_THEME_MIGRATED_2AXIS_V2, false)) return
+        prefs.edit()
             .remove("palette")
             .remove("skin")
             .remove("density")
             .remove("motion_reduced")
             .remove("contrast")
-            .remove("theme_mode")
-            .remove("accent")
-            .putBoolean("theme_migrated_2axis", true)
-        edit.apply()
+            .putBoolean(KEY_THEME_MIGRATED_2AXIS_V2, true)
+            .apply()
     }
 
     /**
@@ -814,6 +851,12 @@ class Settings(context: Context) {
      * express. They are also `apply()`-based, but losing a just-typed secret on
      * an immediate force-stop is far less surprising than a flipped toggle, and
      * folding them in would require restructuring the keystore path.
+     *
+     * android-appearance D5/R17: returns the underlying `commit()` result so
+     * the caller (SettingsScreen) can gate the app-scoped committed-appearance
+     * publish on an ACTUAL successful write — the committed-appearance state
+     * MUST NOT diverge from a failed preference commit — and keep the dirty
+     * flag set / surface an error instead of silently reporting success.
      */
     fun saveScreenSettings(
         captureEnabled: Boolean,
@@ -825,6 +868,9 @@ class Settings(context: Context) {
         notifyOnSensitiveSkip: Boolean,
         maskSensitiveContent: Boolean,
         translucency: Boolean,
+        /** android-appearance D4/D5: theme + accent join the atomic Save batch. */
+        themeMode: ThemeMode,
+        accent: AccentColor,
         imageMaxHeight: Int,
         previewDelayMs: Long,
         maxTextSizeBytes: Long,
@@ -842,7 +888,7 @@ class Settings(context: Context) {
         notifyOnCopy: Boolean,
         soundOnCopy: Boolean,
         logcatCaptureEnabled: Boolean,
-    ) {
+    ): Boolean {
         // Clamp the size/quota knobs through the SAME native clampConfig the macOS
         // daemon uses so a force-stop-safe batch write can never persist a
         // sub-floor/over-ceiling value (mirrors the per-setter clamp above).
@@ -851,7 +897,7 @@ class Settings(context: Context) {
             maxImageSizeBytes = maxImageSizeBytes,
             storageQuotaBytes = storageQuotaBytes,
         )
-        prefs.edit()
+        return prefs.edit()
             .putBoolean("capture_enabled", captureEnabled)
             .putBoolean("private_mode", privateMode)
             .putBoolean("sync_enabled", syncEnabled)
@@ -860,6 +906,8 @@ class Settings(context: Context) {
             .putBoolean("notify_on_sensitive_skip", notifyOnSensitiveSkip)
             .putBoolean("mask_sensitive_content", maskSensitiveContent)
             .putBoolean("translucency", translucency)
+            .putString("theme_mode", themeMode.name)
+            .putString("accent", accent.name)
             .putInt("image_max_height", imageMaxHeight.coerceIn(1, 200))
             .putLong("preview_delay_ms", previewDelayMs.coerceIn(200L, 100_000L))
             .putLong("max_text_size_bytes", clamped.maxTextSizeBytes.toLong())
@@ -924,6 +972,10 @@ class Settings(context: Context) {
 
         // ── P2P sync ──────────────────────────────────────────────────────────
         const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"
+
+        // ── Appearance (D6) ──────────────────────────────────────────────────
+        /** See [migrateThemeForTwoAxis] kdoc for why this is versioned "_v2". */
+        private const val KEY_THEME_MIGRATED_2AXIS_V2 = "theme_migrated_2axis_v2"
 
         // ── Recent searches ─────────────────────────────────────────────────────
         private const val KEY_RECENT_SEARCHES = "recent_searches"

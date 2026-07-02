@@ -198,14 +198,14 @@ slices may be N-A only with a recorded rationale.
 
 ## 3. S3 — Appearance  → `android-appearance`
 
-- [ ] 3.1 `Settings.themeMode`/`accent` on the canonical keys `theme_mode`/`accent`; version the
+- [x] 3.1 `Settings.themeMode`/`accent` on the canonical keys `theme_mode`/`accent`; version the
       migration latch so it no longer deletes them (D6/M7); fold into `saveScreenSettings`.
-- [ ] 3.2 `DisplayTab`: Theme segmented (Dark/Light/System), Accent swatch row (6, selected ring),
+- [x] 3.2 `DisplayTab`: Theme segmented (Dark/Light/System), Accent swatch row (6, selected ring),
       Translucency, Mask sensitive; delegate to shared components.
-- [ ] 3.3 Live preview: hoist appearance draft above `CopyPasteTheme`; Save→persist then publish the
+- [x] 3.3 Live preview: hoist appearance draft above `CopyPasteTheme`; Save→persist then publish the
       app-scoped committed appearance state that `CopyPasteTheme` reads (NOT `recreate()`; works for
       embedded MainActivity tab and standalone SettingsActivity).
-- [ ] 3.4 Tests: migration once/idempotent, retains canonical keys, runs before first read; committed-survives-process-death;
+- [x] 3.4 Tests: migration once/idempotent, retains canonical keys, runs before first read; committed-survives-process-death;
       live-preview/Save/Discard; System reacts to OS change.
 
 ## 4. S4 — Shell + navigation  → `android-navigation-chrome`

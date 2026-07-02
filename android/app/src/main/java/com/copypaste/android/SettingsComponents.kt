@@ -6,11 +6,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -33,9 +39,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.theme.AccentColor
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpDimensions
 import com.copypaste.android.ui.theme.CpShapes
 import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.LocalCpColors
@@ -75,7 +83,7 @@ internal fun SettingsCardDivider() {
  * Segmented control — STYLEGUIDE §9.2: container `--card` + `--border`, 2dp
  * inset; active segment `--raised` + `--text`(500 weight), inactive `--dim`.
  * Radius `--r-ctl` (container) / `--r-chip` (segments). Used for the Theme
- * (Light/Dark) switch (S3).
+ * (Dark/Light/System) switch (S3).
  *
  * @param options List of label strings, one per segment.
  * @param selectedIndex Currently selected segment index.
@@ -123,6 +131,70 @@ internal fun IdeSegmentedControl(
             }
         }
     }
+}
+
+/**
+ * Accent swatch row — STYLEGUIDE §2 six accent hues, component-inventory.md
+ * "Accent swatch row" (S3, new): 6 swatches, selected ring. Each swatch
+ * renders the accent's own resolved base color; selection is signalled by a
+ * ring (border presence, not fill alone — distinguishable without color) AND
+ * `Role.RadioButton` semantics so TalkBack announces "selected" independent
+ * of color.
+ *
+ * @param isDark Resolved theme (draft-aware — the caller passes the SAME
+ *   resolved value the enclosing `CopyPasteTheme` was built with) so swatch
+ *   colors match what selecting that accent would actually apply.
+ */
+@Composable
+internal fun AccentSwatchRow(
+    selected: AccentColor,
+    isDark: Boolean,
+    onSelect: (AccentColor) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cp = LocalCpColors.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        AccentColor.entries.forEach { accent ->
+            val isSelected = accent == selected
+            val label = stringResource(accentDisplayNameRes(accent))
+            Box(
+                modifier = Modifier
+                    .size(CpDimensions.touchMin)
+                    .selectable(
+                        selected = isSelected,
+                        onClick = { onSelect(accent) },
+                        role = Role.RadioButton,
+                    )
+                    .semantics { contentDescription = label },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(CpDimensions.tileSm)
+                        .clip(CircleShape)
+                        .background(accent.base(isDark))
+                        .then(
+                            if (isSelected) Modifier.border(2.dp, cp.text, CircleShape) else Modifier,
+                        ),
+                )
+            }
+        }
+    }
+}
+
+/** Localized display name for an [AccentColor] — used as the swatch's contentDescription. */
+internal fun accentDisplayNameRes(accent: AccentColor): Int = when (accent) {
+    AccentColor.INDIGO -> R.string.accent_name_indigo
+    AccentColor.BLUE -> R.string.accent_name_blue
+    AccentColor.TEAL -> R.string.accent_name_teal
+    AccentColor.GREEN -> R.string.accent_name_green
+    AccentColor.AMBER -> R.string.accent_name_amber
+    AccentColor.ROSE -> R.string.accent_name_rose
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

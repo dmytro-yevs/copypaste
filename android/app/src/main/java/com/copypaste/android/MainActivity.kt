@@ -51,6 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
+import com.copypaste.android.ui.theme.CommittedCopyPasteTheme
 import com.copypaste.android.ui.theme.SecureWindowChrome
 import androidx.compose.material3.Surface
 import kotlinx.coroutines.Dispatchers
@@ -181,7 +182,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SecureWindowChrome {
-                MainShell(viewModel = viewModel)
+                // android-appearance D5: committed-appearance root — wraps ALL
+                // three tabs (Clips/Devices/Settings) so a Save from the embedded
+                // Settings tab re-themes the whole shell without recreate().
+                CommittedCopyPasteTheme {
+                    MainShell(viewModel = viewModel)
+                }
             }
         }
     }

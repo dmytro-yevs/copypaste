@@ -35,7 +35,7 @@ android/app/src/main/java/com/copypaste/android/LogViewerActivity.kt:195
 android/app/src/main/java/com/copypaste/android/LogViewerActivity.kt:210
 android/app/src/main/java/com/copypaste/android/LogViewerActivity.kt:218
 android/app/src/main/java/com/copypaste/android/LogViewerActivity.kt:222
-android/app/src/main/java/com/copypaste/android/MainActivity.kt:409
+android/app/src/main/java/com/copypaste/android/MainActivity.kt:415
 android/app/src/main/java/com/copypaste/android/NotificationHelper.kt:53
 android/app/src/main/java/com/copypaste/android/OnboardingCards.kt:141
 android/app/src/main/java/com/copypaste/android/OnboardingCards.kt:205
@@ -77,8 +77,8 @@ android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:377
 android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:485
 android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:505
 android/app/src/main/java/com/copypaste/android/SasPairingDialog.kt:508
-android/app/src/main/java/com/copypaste/android/Settings.kt:531
-android/app/src/main/java/com/copypaste/android/SettingsComponents.kt:337
+android/app/src/main/java/com/copypaste/android/Settings.kt:568
+android/app/src/main/java/com/copypaste/android/SettingsComponents.kt:409
 android/app/src/main/java/com/copypaste/android/StorageTab.kt:94
 android/app/src/main/java/com/copypaste/android/SyncTab.kt:206
 android/app/src/main/java/com/copypaste/android/SyncTab.kt:212

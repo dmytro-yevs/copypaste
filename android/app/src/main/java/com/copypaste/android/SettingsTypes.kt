@@ -9,6 +9,32 @@ enum class SyncBackend {
 }
 
 /**
+ * Theme axis — Dark / Light / System (design.md D4). `SYSTEM` resolves via
+ * `isSystemInDarkTheme()` at the Compose layer (see
+ * `com.copypaste.android.ui.theme.resolveIsDark`); [Settings] only persists
+ * the mode itself, never a resolved boolean.
+ */
+enum class ThemeMode {
+    DARK,
+    LIGHT,
+    SYSTEM;
+
+    companion object {
+        /** Default theme mode — dark (D4 fresh-install default). */
+        val DEFAULT = DARK
+
+        /**
+         * Resolves a stored enum name to a [ThemeMode], defaulting to
+         * [DEFAULT] for null/unknown/corrupt persisted values (mirrors
+         * [com.copypaste.android.ui.theme.AccentColor.fromName]'s
+         * invalid/corrupt persisted-enum fallback contract).
+         */
+        fun fromName(name: String?): ThemeMode =
+            entries.firstOrNull { it.name == name } ?: DEFAULT
+    }
+}
+
+/**
  * CopyPaste-gkgp: thrown by [KeystoreSecretStore]'s internal key-load path (via
  * [Settings.encryptionKey]) when the AndroidKeyStore
  * KEK can no longer unwrap the persisted encryption key (e.g. after a factory

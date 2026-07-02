@@ -32,11 +32,16 @@ import androidx.compose.ui.res.stringResource
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
+import com.copypaste.android.ui.theme.AppearanceStore
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CommittedCopyPasteTheme
+import com.copypaste.android.ui.theme.CommittedAppearance
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.resolveIsDark
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
@@ -60,11 +65,17 @@ class SettingsActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             SecureWindowChrome {
-                SettingsScreen(
-                    showBackButton = true,
-                    onBack = { finish() },
-                    onSaved = { finish() },
-                )
+                // android-appearance D5: standalone-launch root reads the same
+                // committed-appearance state as the embedded MainActivity tab;
+                // SettingsScreen's own nested CopyPasteTheme (live-preview draft)
+                // shadows this for its own subtree only.
+                CommittedCopyPasteTheme {
+                    SettingsScreen(
+                        showBackButton = true,
+                        onBack = { finish() },
+                        onSaved = { finish() },
+                    )
+                }
             }
         }
     }
@@ -138,6 +149,12 @@ fun SettingsScreen(
     var revealGuard by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var translucency by remember { mutableStateOf(settings.translucency) }
+    // android-appearance D5: live-preview DRAFT — hoisted above the CopyPasteTheme
+    // wrap below so changing these re-themes this screen immediately, without
+    // writing to Settings or AppearanceStore until Save (see commitSave()).
+    var themeMode by remember { mutableStateOf(settings.themeMode) }
+    var accent by remember { mutableStateOf(settings.accent) }
+    val isDark = resolveIsDark(themeMode)
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
     // §3/P1#9: preview lines per history row (mirrors web niApp, 1–6).
@@ -228,16 +245,25 @@ fun SettingsScreen(
 
     // ── Helper: persist ALL settings in one commit (called only on explicit Save) ──
     // Also writes the password/passphrase fields that previously had separate write paths.
-    fun persistAll() {
+    //
+    // android-appearance "Committed persistence, commit-failure handling" (R17):
+    // returns the atomic saveScreenSettings commit() result. On failure NONE of
+    // the trailing non-batched writes below run either — a partial save (some
+    // fields persisted, others silently dropped because the batch failed) would
+    // be a worse, harder-to-diagnose outcome than reporting the whole Save as
+    // failed and leaving the draft dirty for a retry.
+    fun persistAll(): Boolean {
         settings.cloudSyncPassphrase = cloudPassphrase
         settings.supabasePassword = supabasePassword
-        settings.saveScreenSettings(
+        val committed = settings.saveScreenSettings(
             captureEnabled = settings.captureEnabled,
             privateMode = privateMode,
             syncEnabled = syncEnabled,
             notifyOnSensitiveSkip = showWarnings, // CopyPaste-bdac.32: renamed param
             maskSensitiveContent = maskSensitive,
             translucency = translucency,
+            themeMode = themeMode,
+            accent = accent,
             imageMaxHeight = imageMaxHeight,
             previewDelayMs = previewDelay.toLong(),
             maxTextSizeBytes = maxTextSizeBytes,
@@ -255,6 +281,7 @@ fun SettingsScreen(
             soundOnCopy = soundOnCopy,
             logcatCaptureEnabled = logcatEnabled,
         )
+        if (!committed) return false
         settings.maxFileSizeBytes = maxFileSizeBytes
         settings.sensitiveTtlSecs = sensitiveTtlSecs
         // §3/P1#9: preview-lines pref is pref-only (no daemon IPC), like density.
@@ -273,11 +300,18 @@ fun SettingsScreen(
         settings.autoApplySyncedClip = autoApplySyncedClip
         SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
         LogcatCaptureService.syncState(ctx, settings)
+        return true
     }
 
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Sync", "Storage", "Notifications")
+
+    // android-appearance D5: the live-preview DRAFT (themeMode/accent/translucency,
+    // hoisted above this call) re-themes everything below — dialogs and the tab
+    // panel — instantly on change, without touching Settings or AppearanceStore
+    // until Save (commitSave() publishes the SAME draft values on success).
+    CopyPasteTheme(isDark = isDark, accent = accent, translucency = translucency) {
 
     // ── Discard-changes confirmation dialog ──
     if (showDiscardDialog) {
@@ -318,10 +352,21 @@ fun SettingsScreen(
 
     // Shared save action — called from both the header button and the sticky bottom bar.
     // Extracted here so neither call site duplicates the persistence / dirty-reset logic.
+    //
+    // android-appearance "Commit failure keeps dirty state": on a failed commit,
+    // `dirty` stays true, `onSaved()` is not called, and AppearanceStore is never
+    // published (D5/R17 — the app-scoped state must not diverge from a failed
+    // preference commit).
     fun commitSave() {
-        persistAll()
-        dirty = false
-        onSaved()
+        if (persistAll()) {
+            dirty = false
+            AppearanceStore.publish(CommittedAppearance(themeMode, accent, translucency))
+            onSaved()
+        } else {
+            settingsScope.launch {
+                toastState.show(ctx.getString(R.string.toast_settings_save_failed), GlassToastKind.DANGER)
+            }
+        }
     }
 
     // CopyPaste-bdac.88: gate Save behind a confirmation when lowering the
@@ -458,6 +503,11 @@ fun SettingsScreen(
                         onMaskSensitiveChange = { maskSensitive = it; dirty = true },
                         translucency = translucency,
                         onTranslucencyChange = { translucency = it; dirty = true },
+                        themeMode = themeMode,
+                        onThemeModeChange = { themeMode = it; dirty = true },
+                        accent = accent,
+                        onAccentChange = { accent = it; dirty = true },
+                        isDark = isDark,
                         imageMaxHeight = imageMaxHeight,
                         onImageMaxHeightChange = { imageMaxHeight = it; dirty = true },
                         previewDelay = previewDelay,
@@ -693,4 +743,5 @@ fun SettingsScreen(
         // matching the HistoryActivity pattern (replaces Log.i/Log.e-only feedback).
         GlassToastHost(state = toastState)
     }
+    } // end CopyPasteTheme (live-preview draft, android-appearance D5)
 }
