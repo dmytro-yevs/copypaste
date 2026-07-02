@@ -3,12 +3,10 @@
   Bundled Inter font family — DESIGN-SYSTEM-v2 §1 / §10
   Pixel-identical body text across macOS (web) and Android.
 
-  DROP-IN REQUIRED: the .ttf binary files are NOT committed to git.
-  Download from https://github.com/rsms/inter/releases and copy:
-    • inter_regular.ttf  (weight 400)
-    • inter_medium.ttf   (weight 500)
-    • inter_semibold.ttf (weight 600)
-  into android/app/src/main/res/font/ before building.
+  All weight .ttf binaries (400/500/600/700) are committed to git under
+  android/app/src/main/res/font/. Weight 700 (inter_bold.ttf) was added in
+  android-material3-redesign S1.3 to match STYLEGUIDE §4 Title role (Inter
+  700) — see FONT-OFL-NOTICE.txt for provenance/checksum.
 
   The fontFamily="@font/inter" reference in Type.kt is safe when the .ttf
   files are absent at compile time — the app will crash at font-load time if
@@ -41,6 +39,14 @@
         android:fontStyle="normal"
         app:font="@font/inter_semibold"
         app:fontWeight="600"
+        app:fontStyle="normal" />
+
+    <font
+        android:font="@font/inter_bold"
+        android:fontWeight="700"
+        android:fontStyle="normal"
+        app:font="@font/inter_bold"
+        app:fontWeight="700"
         app:fontStyle="normal" />
 
 </font-family>

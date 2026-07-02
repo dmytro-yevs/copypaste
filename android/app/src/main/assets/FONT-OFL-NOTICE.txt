@@ -7,6 +7,7 @@ per DESIGN-SYSTEM-v2 §1/§10 for pixel-consistent typography across platforms:
   inter_regular.ttf      Inter, weight 400
   inter_medium.ttf       Inter, weight 500
   inter_semibold.ttf     Inter, weight 600
+  inter_bold.ttf         Inter, weight 700
   jetbrains_mono_regular.ttf   JetBrains Mono, weight 400
   jetbrains_mono_medium.ttf    JetBrains Mono, weight 500
 
@@ -32,3 +33,9 @@ and "JetBrains Mono" must not be used to promote derivative fonts.
 
 Static per-weight TTFs were obtained from the Fontsource distribution
 (https://fontsource.org), which repackages the upstream OFL releases.
+
+inter_bold.ttf (weight 700) was added in android-material3-redesign S1.3 to
+match STYLEGUIDE §4 Title role (Inter 700, not synthesized/downgraded to 600).
+Fetched from the Fontsource CDN
+(https://cdn.jsdelivr.net/fontsource/fonts/inter@latest/latin-700-normal.ttf),
+67988 bytes, sha256 f4d309afb4777beb63e18eb322f7d721bc6dcd7520922019d2cb14dddf279bb3.

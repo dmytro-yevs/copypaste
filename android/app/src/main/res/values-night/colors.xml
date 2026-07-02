@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Night variant of the first-paint window background (design.md D16 part 1 /
+        android-design-system task 1.7). Value MUST track CpColors.bg
+        (ui/theme/Color.kt DarkColors.bg). See values/colors.xml for the light variant.
+    -->
+    <color name="cp_window_background">#0E0F14</color>
+</resources>

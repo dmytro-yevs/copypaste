@@ -85,30 +85,30 @@ slices may be N-A only with a recorded rationale.
 
 ## 1. S1 — Design-system foundation  → `android-design-system`
 
-- [ ] 1.1 `ui/theme/Color.kt`: `CpColors` — surfaces (bg/panel/elevated/card-alias/raised/raised2),
+- [x] 1.1 `ui/theme/Color.kt`: `CpColors` — surfaces (bg/panel/elevated/card-alias/raised/raised2),
       lines, text ramp, **overlays (hover/pressed/scrim)**, status ok/warn/err/info/errStrong/
       infoStrong/okStrong, and **10** content-type colors (PHONE→cNum, PATH→cFile aliases) Dark+Light,
       values sourced from `crates/copypaste-ui/src/styles/tokens.css` at pinned commit `6960539d`
       (not a stale §11 Markdown copy — see S0.14); `AccentColor` enum;
       central selected(16%/12% from accent) + disabled(mute/45%) derivation.
-- [ ] 1.2 `ui/theme/Theme.kt`: `CopyPasteTheme(isDark, accent, translucency)` → `LocalCpColors`/
+- [x] 1.2 `ui/theme/Theme.kt`: `CopyPasteTheme(isDark, accent, translucency)` → `LocalCpColors`/
       `LocalAccent` + **explicit M3 role table** (container ladder bg/panel/elevated/raised/raised2;
       surfaceTint=Transparent; non-mapped roles unused). Keep both `SecureWindowChrome` SideEffects verbatim.
-- [ ] 1.3 `CpShapes` (§5 radii); `CpTypography` (frozen table; **bundle a real Inter 700 face + license**
+- [x] 1.3 `CpShapes` (§5 radii); `CpTypography` (frozen table; **bundle a real Inter 700 face + license**
       for Title 700 — record upstream version/checksum/license + APK-size impact; other roles use existing
       Inter 400/500/600 + JBM 400/500; tabular figures, wire `res/font`) + **font-resource test** (every
       role → a real bundled face, no synthesis/fallback; paired type fixture proves desktop also renders Inter 700);
       `CpMotion` (§6 + `reduced` from system animator signal) — `reduced` MUST disable the nav spring,
       not just zero durations (§4).
-- [ ] 1.4 Backdrop-blur policy holder per the S0 spike (D7); injectable override for tests/previews.
-- [ ] 1.5 Token + AA-contrast unit tests (post-alpha-compositing) for all 6 accents × themes, incl on-accent.
-- [ ] 1.6 Theme/accent crossfade (`--dur-theme` 300ms) as an explicit transition, collapsed under reduced motion (§4).
-- [ ] 1.7 Full explicit light/dark `ColorScheme` map for **every** consumed M3 role (single strategy —
+- [x] 1.4 Backdrop-blur policy holder per the S0 spike (D7); injectable override for tests/previews.
+- [x] 1.5 Token + AA-contrast unit tests (post-alpha-compositing) for all 6 accents × themes, incl on-accent.
+- [x] 1.6 Theme/accent crossfade (`--dur-theme` 300ms) as an explicit transition, collapsed under reduced motion (§4).
+- [x] 1.7 Full explicit light/dark `ColorScheme` map for **every** consumed M3 role (single strategy —
       no per-component-override alternative) incl. **contrast-safe onError** +
       errorContainer; invalid/corrupt persisted-enum fallback to defaults; `CpSpacing`/`CpElevation`/
       `CpDimensions`; system-bar appearance + XML window-background/splash first-paint tokens (D16).
-- [ ] 1.8 `ContentVisualKind` enum + resolver (precedence: isSensitive→SECRET, image/file, TextKind, TEXT) + unit tests (P0-6).
-- [ ] 1.9 **Implement + value-inspection-test the frozen `CpTypography`/`CpDimensions` tables** (values
+- [x] 1.8 `ContentVisualKind` enum + resolver (precedence: isSensitive→SECRET, image/file, TextKind, TEXT) + unit tests (P0-6).
+- [x] 1.9 **Implement + value-inspection-test the frozen `CpTypography`/`CpDimensions` tables** (values
       are normative in `android-design-system`; no ranges) — S1.9 implements/tests them, it does not decide them.
 
 ## 2. S2 — Icons + shared components  → `android-iconography` (+ `android-design-system`)
