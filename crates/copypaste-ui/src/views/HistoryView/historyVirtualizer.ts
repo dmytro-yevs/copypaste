@@ -25,7 +25,10 @@ export function rowHeightFor(
   entry: HistoryEntry,
   previewSize: number,
   imageMaxHeight: number,
-  density: "comfortable" | "compact" | "spacious" = "comfortable"
+  density: "comfortable" | "compact" | "spacious" = "comfortable",
+  // Preview-lines setting: text rows grow by one line-height per extra line so
+  // the virtualizer's allocated height matches HistoryRow's multi-line clamp.
+  previewLines: number = 1
 ): number {
   const isImage = isImageType(entry.content_type);
   // File rows get a fixed height that fits the FileChip (icon + filename + buttons).
@@ -38,7 +41,16 @@ export function rowHeightFor(
   if (isFile) return 44; // FileChip is taller than a single-line text row
   // §2: spacious = 42px, comfortable = 34px, compact = 28px (floor at 22px).
   const base = density === "spacious" ? 42 : density === "compact" ? 28 : 34;
-  return Math.max(previewSize, base, 22);
+  const single = Math.max(previewSize, base, 22);
+  // Estimate how many lines THIS clip actually needs (explicit newlines +
+  // rough width-agnostic wrap), capped at the previewLines setting — so short
+  // clips stay compact (no dead gap) while long clips grow up to the limit.
+  const LINE_PX = 20;
+  const CHARS_PER_LINE = 120;
+  const explicit = (entry.preview.match(/\n/g)?.length ?? 0) + 1;
+  const wrapped = Math.ceil(entry.preview.length / CHARS_PER_LINE);
+  const estLines = Math.min(previewLines, Math.max(1, explicit, wrapped));
+  return single + Math.max(0, estLines - 1) * LINE_PX;
 }
 
 /**

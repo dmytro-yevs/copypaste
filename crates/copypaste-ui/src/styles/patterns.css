@@ -1,0 +1,558 @@
+@layer patterns {
+  /* LAYER 4 — PATTERNS. Clipboard rows, list, group headers, bulk bar, and empty
+     state, ported from copypaste-design-reference.html Layer 4. Design constants
+     (color/background/border/radius/shadow/padding/gap/margin/duration) go through
+     tokens; state is expressed via classes/data-state driven by React. */
+
+  /* --- Clipboard row -------------------------------------------------------- */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-row);
+    padding: var(--pad-row);
+    border-radius: var(--r-row);
+    position: relative;
+    /* Per-row bound set by HistoryRow (--row-max) so multi-line preview rows and
+       taller image rows aren't clipped; falls back to the single-line default. */
+    max-height: var(--row-max, 74px);
+    transition:
+      background var(--dur-fast) var(--ease),
+      max-height var(--dur) var(--ease),
+      opacity var(--dur) var(--ease),
+      padding var(--dur) var(--ease),
+      margin var(--dur) var(--ease);
+  }
+  .row:hover {
+    background: var(--hover);
+  }
+  .row.sel {
+    background: var(--selected);
+  }
+  .row.sel::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: var(--sel-bar-inset);
+    bottom: var(--sel-bar-inset);
+    width: var(--sel-bar-w);
+    border-radius: 0 var(--sel-bar-r) var(--sel-bar-r) 0;
+    background: var(--accent);
+  }
+  .row.copied {
+    animation: flash 0.65s var(--ease);
+  }
+  .row.filtered,
+  .row.removing {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  @keyframes flash {
+    from {
+      background: color-mix(in srgb, var(--accent) 22%, transparent);
+    }
+    to {
+      background: transparent;
+    }
+  }
+
+  .row__body {
+    flex: 1;
+    min-width: 0;
+  }
+  .row__title {
+    font-size: var(--fs-base);
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row__title.mono {
+    font-family: var(--f-mono);
+    font-size: var(--fs-125);
+    letter-spacing: var(--ls-none);
+  }
+  .row__title .host {
+    font-weight: var(--fw-strong);
+  }
+  .row__title .rest {
+    color: var(--dim);
+  }
+  /* Sensitive mask (design.md Decision 9 / X6): VISUAL blur only. The real text
+     stays (aria-hidden in the DOM), so width is preserved and it's selectable. */
+  .row__title .mask {
+    filter: blur(var(--mask-blur));
+    background: color-mix(in srgb, var(--c-secret) 14%, transparent);
+    border-radius: var(--r-xs);
+    padding: 0 var(--s-2);
+    cursor: pointer;
+  }
+  .row__title .mask:hover {
+    filter: blur(var(--mask-blur)) brightness(1.1);
+  }
+
+  .row__meta {
+    font-size: var(--fs-sm);
+    color: var(--faint);
+    margin-top: var(--s-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row__meta .ty {
+    color: var(--ct, var(--c-text));
+    font-weight: var(--fw-semibold);
+  }
+  .row__right {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    flex: none;
+  }
+
+  /* --- Hover-revealed row actions (design.md Decision 13/X4) ----------------- */
+  .del {
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease);
+  }
+  .star-btn {
+    opacity: 0;
+    color: var(--faint);
+    transition:
+      opacity var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease);
+  }
+  .star-btn svg {
+    font-size: var(--fs-lg);
+  }
+  /* Visible on fine-pointer hover and on keyboard focus-within… */
+  .row:hover .del,
+  .row:hover .star-btn,
+  .row:focus-within .del,
+  .row:focus-within .star-btn {
+    opacity: 1;
+  }
+  /* …and always visible on coarse/touch pointers where hover cannot occur. */
+  @media (hover: none) {
+    .del,
+    .star-btn {
+      opacity: 1;
+    }
+  }
+  .row.pinned .star-btn {
+    opacity: 1;
+    color: var(--c-color);
+  }
+  .star-btn.on svg,
+  .row.pinned .star-btn svg {
+    fill: currentColor;
+  }
+  .star-btn.pop svg {
+    animation: pop 0.32s var(--ease);
+  }
+  @keyframes pop {
+    0% { transform: scale(1); }
+    45% { transform: scale(1.4); }
+    100% { transform: scale(1); }
+  }
+
+  /* --- Selection checkbox --------------------------------------------------- */
+  .chk {
+    display: none;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--r-chk);
+    border: var(--chk-bw) solid var(--mute);
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    font-size: var(--fs-xs);
+    transition: all var(--dur-fast) var(--ease);
+  }
+  .chk.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+  }
+  .list.selecting .chk { display: flex; }
+  .list.selecting .row__right { display: none; }
+  .list.selecting .row { cursor: pointer; }
+
+  /* --- Group header + bulk bar + filters ------------------------------------ */
+  .grouphead {
+    font-family: var(--f-mono);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-medium);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: var(--pad-grouphead);
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    z-index: 2;
+    transition:
+      max-height var(--dur) var(--ease),
+      opacity var(--dur) var(--ease),
+      padding var(--dur) var(--ease);
+  }
+  .grouphead.filtered {
+    max-height: 0;
+    opacity: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .bulkbar {
+    display: none;
+    align-items: center;
+    gap: var(--gap-row);
+    padding: var(--pad-bulkbar);
+  }
+  .bulkbar.show {
+    display: flex;
+    animation: slideDown var(--dur) var(--ease);
+  }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+  }
+  .bulkbar__n {
+    font-size: var(--fs-125);
+    color: var(--dim);
+    font-weight: var(--fw-semibold);
+  }
+  .filters {
+    display: flex;
+    gap: var(--s-3);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  /* --- Empty / offline / error hero (design.md — shared EmptyState) ---------- */
+  .empty {
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: var(--s-2);
+    padding: var(--pad-empty);
+  }
+  .empty__ic {
+    width: 54px;
+    height: 54px;
+    border-radius: var(--r-empty-ic);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--elevated);
+    color: var(--faint);
+    font-size: var(--fs-2xl);
+    margin-bottom: var(--s-4);
+  }
+  .empty__t {
+    font-size: var(--fs-base);
+    font-weight: var(--fw-strong);
+    color: var(--dim);
+  }
+  .empty__s {
+    font-size: var(--fs-125);
+    color: var(--faint);
+    max-width: 280px;
+  }
+
+  /* --- Device rows (slice 4) — disclosure list, tap-to-copy fields ---------- */
+  .dev-hint {
+    font-size: var(--fs-xs);
+    color: var(--faint);
+    padding: 2px 14px 8px;
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+  }
+  .dev-hint svg { font-size: var(--fs-md); opacity: 0.7; }
+  /* CopyPaste-g27b.19: horizontal inset bumped from 12px to var(--s-6) (14px)
+     to exactly match .dev-head's 14px padding (shell.css) — "PAIRED DEVICES",
+     "DISCOVERED…", "PAIR A NEW DEVICE" and the device rows all start at the
+     same x. Top padding widened to var(--s-4) for a consistent gap under the
+     preceding section header row (was a too-tight 4px). */
+  .dev-list { padding: var(--s-4) var(--s-6) var(--s-6); display: flex; flex-direction: column; gap: var(--s-4); }
+  /* --- Devices view body inset (CopyPaste-g27b.19) --------------------------
+     .dev-head (shell.css) already carries the canonical 14px/var(--s-6)
+     horizontal inset. This utility gives every other "naked" section
+     (sub-headers, the pair-a-device CTA, error notes) the same left/right
+     edge, and a consistent vertical rhythm, without touching shell.css. */
+  .dev-body { padding: var(--s-4) var(--s-6); }
+  /* Real divider between "Discovered on your network" and "Pair a new
+     device" — previously an empty unstyled <div/> that rendered no visible
+     line and no reliable gap. */
+  .dev-divider { height: var(--hairline); background: var(--divider); margin: var(--s-5) var(--s-6); }
+  .devrow {
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-card);
+    background: var(--card);
+    overflow: hidden;
+    transition:
+      border-color var(--dur-fast) var(--ease),
+      opacity var(--dur) var(--ease),
+      transform var(--dur) var(--ease);
+  }
+  .devrow.this { border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+  .devrow.removing { opacity: 0; transform: scale(0.98); }
+  .devrow__head {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-field);
+    width: 100%;
+    padding: 12px 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease);
+  }
+  .devrow__head:hover { background: var(--hover); }
+  .devrow__name { font-weight: var(--fw-strong); font-size: 13.5px; color: var(--text); flex: none; }
+  .devrow__sum {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    color: var(--faint);
+    font-family: var(--f-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: right;
+  }
+  .devrow__chev {
+    font-size: var(--icon-md);
+    color: var(--faint);
+    flex: none;
+    margin-left: auto;
+    transition: transform var(--dur) var(--ease);
+  }
+  .devrow.open .devrow__chev,
+  .devrow__head[aria-expanded="true"] .devrow__chev { transform: rotate(90deg); }
+  .devrow__body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur) var(--ease); }
+  .devrow.open .devrow__body { grid-template-rows: 1fr; }
+  .devrow__body > div { overflow: hidden; min-height: 0; }
+  .cfields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    padding: 5px 8px 4px;
+    border-top: var(--stroke-1) solid var(--divider);
+  }
+  .cfield {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s-5);
+    padding: 7px 9px;
+    border-radius: var(--r-ctl);
+    text-align: left;
+    width: 100%;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease);
+  }
+  .cfield:hover { background: var(--hover); }
+  .cfield:active { background: var(--pressed); }
+  .cfield.copied { animation: flash 0.65s var(--ease); }
+  .cfield__k { font-size: var(--fs-xs); color: var(--dim); width: 70px; flex: none; }
+  .cfield__v {
+    font-size: var(--fs-smd);
+    color: var(--text);
+    font-family: var(--f-mono);
+    font-variant-numeric: tabular-nums;
+    word-break: break-all;
+    flex: 1;
+  }
+  /* g27b.19: right-aligned, compact (no flex:1) — Unpair/Revoke read as two
+     distinct, differently-severe actions rather than one giant equal-width bar. */
+  .devrow__foot { display: flex; gap: var(--s-4); padding: 3px 13px 13px; justify-content: flex-end; }
+  @media (max-width: 600px) { .cfields { grid-template-columns: 1fr; } }
+
+  /* --- Warning button variant (g27b.19) — Unpair is destructive-but-reversible
+     (re-pairing is easy), so it gets an amber/warn treatment one notch below
+     .btn--danger (Revoke, which breaks trust immediately). Lives here rather
+     than primitives.css because primitives.css is a shared read-only file for
+     this slice. */
+  .btn--warning {
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+    background: color-mix(in srgb, var(--warn) 9%, transparent);
+  }
+  .btn--warning:hover { background: color-mix(in srgb, var(--warn) 16%, transparent); }
+
+  /* --- SAS pairing (slice 4) — QR must stay literal black/white to scan ----- */
+  .qr {
+    width: 150px;
+    height: 150px;
+    margin: 4px auto 14px;
+    border-radius: var(--r-window);
+    background: #fff;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(11, 1fr);
+    grid-template-rows: repeat(11, 1fr);
+    gap: 2px;
+  }
+  .qr i { background: #000; border-radius: 1px; }
+  .qr i.o { background: transparent; }
+  .sas { display: flex; gap: var(--s-3); justify-content: center; margin: 6px 0 16px; }
+  .sas span {
+    width: 34px;
+    height: 42px;
+    border-radius: 9px;
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--f-mono);
+    font-size: 20px;
+    font-weight: var(--fw-strong);
+    color: var(--accent-2);
+  }
+
+  /* --- Banners (slice 5) — one component, four severities ------------------- */
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: var(--s-5);
+    padding: 11px 14px;
+    border-radius: var(--r-card);
+    font-size: var(--fs-125);
+    border: var(--stroke-1) solid transparent;
+  }
+  .banner svg { font-size: var(--icon-md); flex: none; }
+  .banner__x { flex: 1; min-width: 0; }
+  .banner__act { display: flex; gap: var(--s-3); flex: none; }
+  .banner--warn { background: color-mix(in srgb, var(--warn) 11%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); color: var(--warn); }
+  .banner--err { background: color-mix(in srgb, var(--err) 11%, transparent); border-color: color-mix(in srgb, var(--err) 32%, transparent); color: var(--err); }
+  .banner--info { background: color-mix(in srgb, var(--info) 11%, transparent); border-color: color-mix(in srgb, var(--info) 32%, transparent); color: var(--info); }
+  .banner--ok { background: color-mix(in srgb, var(--ok) 11%, transparent); border-color: color-mix(in srgb, var(--ok) 32%, transparent); color: var(--ok); }
+  .banner b { color: var(--text); }
+
+  /* --- Toast (slice 5) — aria-live status pill ------------------------------ */
+  .toast {
+    position: absolute;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--text);
+    color: var(--bg);
+    font-size: var(--fs-125);
+    font-weight: var(--fw-semibold);
+    padding: 8px 15px;
+    border-radius: var(--r-pill);
+    box-shadow: var(--sh2);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+  .toast svg { font-size: var(--fs-base); }
+
+  /* --- Form controls & inline messages (slice 5 cleanup) -------------------- */
+  /* Reusable clusters/notes that replace repeated inline `display:flex; gap`
+     and `font-size; color` styles across the Settings tabs and status lines. */
+  .ctl { display: flex; align-items: center; gap: var(--s-3); }
+  .ctl--field { gap: var(--gap-field); }
+  .ctl--wide { gap: var(--s-4); }
+  .ctl--tight { gap: var(--s-2); }
+  .ctl--stack { flex-direction: column; align-items: stretch; gap: var(--s-3); }
+  .ctl--col { flex-direction: column; align-items: flex-end; gap: var(--s-2); }
+  .ctl--wrap { flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3); }
+  .check-label { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); }
+  .field-note { font-size: var(--fs-sm); color: var(--faint); }
+  .field-note--err { color: var(--err); }
+  .field-note--ok { color: var(--ok); }
+  .field-note--warn { color: var(--warn); }
+  .field-note--dim { color: var(--dim); }
+  .field-note--mono { font-family: var(--f-mono); }
+  .field-note--row { padding: var(--s-2) 0; }
+  .kbd-capture { display: inline-flex; align-items: center; gap: var(--s-2); cursor: pointer; }
+  /* Search-match highlight (popup HighlightedText). */
+  .hl-match { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); border-radius: var(--r-xs); }
+
+  /* --- QR pairing panel (DevicesView "Pair a new device") ------------------- */
+  .qr-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s-5);
+    padding: var(--s-7);
+    text-align: center;
+  }
+  .qr-wrap { position: relative; width: 150px; height: 150px; }
+  /* QR frame stays literal white so the code is always black-on-white to scan. */
+  .qr-frame {
+    width: 150px;
+    height: 150px;
+    background: #fff;
+    padding: 12px;
+    border-radius: var(--r-window);
+    box-shadow: var(--sh1);
+  }
+  .qr-frame svg,
+  .qr-frame img { width: 100%; height: 100%; display: block; }
+  .qr-reveal {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-window);
+    background: color-mix(in srgb, var(--panel) 55%, transparent);
+    backdrop-filter: blur(8px);
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    cursor: pointer;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .qr-drain { width: 150px; height: 4px; background: var(--divider); border-radius: var(--r-pill); overflow: hidden; }
+  .qr-drain__fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); transition: width 1s linear; }
+  .qr-meta { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+
+  /* Chip remove affordance (e.g. excluded-apps chips). */
+  .chip__x {
+    margin-left: var(--s-2);
+    color: var(--faint);
+    font-size: var(--fs-base);
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--dur-fast) var(--ease);
+  }
+  .chip__x:hover { color: var(--text); }
+  .chip__x:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Image thumb placeholders (loading / failed) — keep the row from collapsing. */
+  .thumb-ph { display: inline-block; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--raised); }
+  .thumb-ph--err { background: transparent; border: var(--stroke-1) dashed var(--border); }
+
+  /* Portaled info popover (settings (i) tooltips). Real card — bg/border/shadow/
+     z-index — so it never floats transparently over the row content. */
+  .popover {
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-ctl);
+    box-shadow: var(--sh2);
+    padding: var(--s-5) var(--s-6);
+    font-size: var(--fs-sm);
+    color: var(--dim);
+    line-height: var(--lh-normal);
+    max-width: 280px;
+    z-index: 80;
+  }
+}

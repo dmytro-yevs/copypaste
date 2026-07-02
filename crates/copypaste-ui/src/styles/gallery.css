@@ -1,0 +1,170 @@
+/* Gallery-only CSS (design.md Decision 2/6). Imported ONLY by the DEV-gated
+   GalleryView module — never part of the production styles/index.css chain, so
+   these selectors never ship in the production stylesheet. Not wrapped in an
+   authored @layer: the gallery is a dev tool, not part of the app cascade. */
+
+.gallery {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  padding: var(--s-9);
+  overflow-y: auto;
+}
+.gallery__title {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  margin-bottom: var(--s-8);
+}
+.gallery__switcher {
+  display: flex;
+  gap: var(--s-6);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--s-9);
+  padding-bottom: var(--s-7);
+  border-bottom: var(--hairline) solid var(--divider);
+}
+.gallery section {
+  margin-block: var(--s-9);
+}
+.gallery h2 {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--dim);
+  margin-bottom: var(--s-6);
+}
+.gallery__row {
+  display: flex;
+  gap: var(--s-5);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.gallery__swatches {
+  display: flex;
+  gap: var(--s-3);
+}
+.gallery__swatch {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: 50%;
+  border: var(--stroke-2) solid transparent;
+  cursor: pointer;
+}
+.gallery__swatch[aria-pressed="true"] {
+  border-color: var(--text);
+}
+.gallery__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+.gallery__note {
+  font-size: var(--fs-sm);
+  color: var(--faint);
+  margin-bottom: var(--s-5);
+}
+.gallery h3 {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--faint);
+  margin: var(--s-6) 0 var(--s-3);
+}
+
+/* --- Tile examples (task 6.6) ---------------------------------------------- */
+.gallery__tile-example {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  width: 92px;
+}
+.gallery__tile-example figcaption {
+  font-size: var(--fs-2xs);
+  color: var(--faint);
+  text-align: center;
+  font-family: var(--f-mono);
+}
+
+/* --- Sidebar frame (task 6.7) ----------------------------------------------- */
+.gallery__sidebar-frame {
+  display: flex;
+  height: 360px;
+}
+
+/* --- Popup frame (task 6.7) ------------------------------------------------- */
+.gallery__popup-frame {
+  position: relative;
+  width: 360px;
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: var(--panel);
+}
+
+/* --- Token/critical-component matrix (task 6.10) ---------------------------- */
+.gallery__matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--s-5);
+}
+.gallery__matrix-cell {
+  background: var(--bg);
+  border: var(--stroke-1) solid var(--border);
+  border-radius: var(--r-card);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+.gallery__matrix-label {
+  font-size: var(--fs-2xs);
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-wide);
+}
+.gallery__matrix-card {
+  padding: var(--s-3);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  width: 100%;
+}
+.gallery__matrix-banner {
+  width: 100%;
+  font-size: var(--fs-xs);
+  padding: var(--s-2) var(--s-3);
+}
+
+/* --- Forced states (task 6.8, design.md Decision 7/G1) ---------------------- *
+ * Each selector below mirrors the REAL pseudo-class rule for the same base
+ * class — declarations MUST stay byte-identical (see
+ * GalleryView/forcedState.parity.test.ts) so a real :hover/:active/
+ * :focus-visible screenshot (task 6.13) can be compared against this static
+ * example. Do not add anything here without a matching parity-test pair. */
+.gallery .btn--primary[data-force-state="hover"] {
+  filter: brightness(1.08);
+}
+.gallery .btn--secondary[data-force-state="hover"] {
+  background: var(--raised);
+}
+.gallery .btn[data-force-state="active"] {
+  transform: scale(0.97);
+}
+.gallery .iconbtn[data-force-state="hover"] {
+  color: var(--text);
+  background: var(--hover);
+}
+.gallery .iconbtn[data-force-state="active"] {
+  transform: scale(0.9);
+}
+.gallery .row[data-force-state="hover"] {
+  background: var(--hover);
+}
+.gallery .chip[data-force-state="hover"] {
+  color: var(--text);
+}
+.gallery [data-force-state="focus"] {
+  outline: var(--focus-ring-width) solid var(--accent);
+  outline-offset: var(--focus-ring-offset);
+  border-radius: 4px;
+}

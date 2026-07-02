@@ -1,12 +1,15 @@
 <!doctype html>
-<!-- data-theme="light" mirrors index.html so the popup's first paint is the
-     light "Liquid Glass" look instead of always-dark. Popup.tsx re-syncs this to
-     the persisted theme pref at runtime (mirrors App.tsx). -->
-<html lang="en" data-theme="light">
+<!-- Static defaults mirror index.html (dark / indigo / translucency on). The
+     pre-paint theme-bootstrap.js applies the persisted appearance before first
+     paint; Popup.tsx re-syncs on mount and on change. -->
+<html lang="en" data-theme="dark" data-accent="indigo" data-translucency="on">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CopyPaste Quick Paste</title>
+    <!-- Pre-paint appearance bootstrap — EXTERNAL classic script, relative path,
+         before the module entry (see index.html for the CSP rationale). -->
+    <script src="./theme-bootstrap.js"></script>
   </head>
   <body>
     <div id="popup-root"></div>

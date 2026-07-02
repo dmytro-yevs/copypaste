@@ -23,11 +23,15 @@ export function SectionHeader({ label, hint }: SectionHeaderProps) {
   return (
     <div>
       {/* §3: section labels = grey (text-ide-dim or text-ide-faint), NOT accent blue;
-          11px semibold uppercase matching Components.kt SectionLabel. */}
-      <div>
+          11px semibold uppercase matching Components.kt SectionLabel.
+          crh3.43: faint vs dim is now moot — .set-grp__h always renders in
+          var(--faint) per shell.css, so the faint prop has no visual axis left. */}
+      <div className="set-grp__h">
         {label}
       </div>
-      {hint && <div>{hint}</div>}
+      {/* No dedicated contract class for a group hint — reuse .srow__s (small,
+          faint, max-width text) since it matches this role exactly. */}
+      {hint && <div className="srow__s">{hint}</div>}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { ViewShell } from "../components/ViewShell";
+import { Clipboard, ExternalLink } from "lucide-react";
 import { SectionHeader } from "../components/SectionHeader";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { appVersion, probeStatus, type StatusProbe } from "../lib/ipc";
@@ -26,7 +26,7 @@ type DaemonView =
 // directly to their repo paths since no separate hosted URLs exist.
 const GITHUB_BASE = "https://github.com/dmytro-yevs/copypaste";
 
-export function AboutView() {
+export function AboutContent() {
   const [daemon, setDaemon] = useState<DaemonView>({ kind: "pending" });
   // Real app version, pulled at runtime from the Tauri bundle (tauri.conf.json)
   // instead of a hardcoded string that drifts out of date on every release.
@@ -83,102 +83,97 @@ export function AboutView() {
   }, [checkStatus]);
 
   return (
-    <ViewShell title="About">
-      <div>
+    <div className="about">
+        {/* Identity */}
+        <div className="about__logo">
+          <Clipboard aria-hidden="true" />
+        </div>
+        <h2 className="about__name">CopyPaste</h2>
+        {/* audit P2: hide the line entirely when no version is known instead
+            of rendering a bare "—".
+            bdac.77: Android shows "VERSION_NAME (build VERSION_CODE)". macOS shows
+            only the version name — Tauri's getVersion() / app_version IPC expose no
+            build number, so parity is achieved at the version-name level only. */}
+        {version !== null && (
+          <span className="about__ver">
+            {version}
+          </span>
+        )}
+        {/* bdac.79: canonical short tagline — no platform suffix (matches Android about_tagline). */}
+        <p>
+          Encrypted clipboard manager
+        </p>
+
+        {/* Feature list */}
         <div>
+          <SectionHeader label="Features" />
+          <ul className="about__features">
+            {FEATURES.map((feature) => (
+              <li key={feature}>
+                {feature}
+              </li>
+            ))}
+          </ul>
+        </div>
 
-          {/* Identity */}
-          <div>
-            <h2>CopyPaste</h2>
-            {/* audit P2: hide the line entirely when no version is known instead
-                of rendering a bare "—".
-                bdac.77: Android shows "VERSION_NAME (build VERSION_CODE)". macOS shows
-                only the version name — Tauri's getVersion() / app_version IPC expose no
-                build number, so parity is achieved at the version-name level only. */}
-            {version !== null && (
-              <span>
-                {version}
-              </span>
+        {/* Daemon status — distinct degraded state, never a false green. */}
+        {/* SCRL-5: aria-live="polite" so screen readers announce status changes
+            when the async probe resolves (bd CopyPaste-5917.89). */}
+        <dl className="about__grid">
+          <dt>Background daemon</dt>
+          <dd aria-live="polite">
+            {daemon.kind === "pending" && "Checking…"}
+            {daemon.kind === "connected" && "Connected"}
+            {daemon.kind === "degraded" && (
+              <>Degraded{daemon.reason ? ` (${daemon.reason})` : ""}</>
             )}
-            {/* bdac.79: canonical short tagline — no platform suffix (matches Android about_tagline). */}
-            <p>
-              Encrypted clipboard manager
-            </p>
-          </div>
-
-          {/* Feature list */}
+            {daemon.kind === "offline" && "Offline"}
+          </dd>
+        </dl>
+        {/* bdac.98: offer RestartDaemonButton in degraded/offline states so users
+            can recover without navigating away — consistent with all other views. */}
+        {(daemon.kind === "offline" || daemon.kind === "degraded") && (
           <div>
-            <SectionHeader label="Features" />
-            <ul>
-              {FEATURES.map((feature) => (
-                <li key={feature}>
-                  {feature}
-                </li>
-              ))}
-            </ul>
+            <RestartDaemonButton onRestarted={checkStatus} />
           </div>
+        )}
 
-          {/* Daemon status — distinct degraded state, never a false green. */}
-          {/* SCRL-5: aria-live="polite" so screen readers announce status changes
-              when the async probe resolves (bd CopyPaste-5917.89). */}
-          <div>
-            <div>
-              <span>Background daemon</span>
-              <span aria-live="polite">
-                {daemon.kind === "pending" && "Checking…"}
-                {daemon.kind === "connected" && (
-                  <span>Connected</span>
-                )}
-                {daemon.kind === "degraded" && (
-                  <>Degraded{daemon.reason ? ` (${daemon.reason})` : ""}</>
-                )}
-                {daemon.kind === "offline" && "Offline"}
-              </span>
-            </div>
-            {/* bdac.98: offer RestartDaemonButton in degraded/offline states so users
-                can recover without navigating away — consistent with all other views. */}
-            {(daemon.kind === "offline" || daemon.kind === "degraded") && (
-              <div>
-                <RestartDaemonButton onRestarted={checkStatus} />
-              </div>
-            )}
-          </div>
-
-          {/* External links — SCRL-6: changelog and privacy policy added alongside
-              the GitHub link. Both targets exist in-repo (CHANGELOG.md,
-              docs/privacy/telemetry-policy.md); linked via GitHub since no separate
-              hosted URLs exist. window.open used so Tauri opens the system browser. */}
-          <div>
-            <button
-              type="button"
-              onClick={() =>
-                window.open(GITHUB_BASE, "_blank")
-              }
-            >
-              github.com/dmytro-yevs/copypaste ↗
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                window.open(`${GITHUB_BASE}/blob/main/CHANGELOG.md`, "_blank")
-              }
-            >
-              Changelog ↗
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                window.open(
-                  `${GITHUB_BASE}/blob/main/docs/privacy/telemetry-policy.md`,
-                  "_blank"
-                )
-              }
-            >
-              Privacy policy ↗
-            </button>
-          </div>
+        {/* External links — SCRL-6: changelog and privacy policy added alongside
+            the GitHub link. Both targets exist in-repo (CHANGELOG.md,
+            docs/privacy/telemetry-policy.md); linked via GitHub since no separate
+            hosted URLs exist. window.open used so Tauri opens the system browser. */}
+        <div className="about__links">
+          <button
+            type="button"
+            className="btn sm btn--secondary"
+            onClick={() =>
+              window.open(GITHUB_BASE, "_blank")
+            }
+          >
+            github.com/dmytro-yevs/copypaste <ExternalLink aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="btn sm btn--secondary"
+            onClick={() =>
+              window.open(`${GITHUB_BASE}/blob/main/CHANGELOG.md`, "_blank")
+            }
+          >
+            Changelog <ExternalLink aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="btn sm btn--secondary"
+            onClick={() =>
+              window.open(
+                `${GITHUB_BASE}/blob/main/docs/privacy/telemetry-policy.md`,
+                "_blank"
+              )
+            }
+          >
+            Privacy policy <ExternalLink aria-hidden="true" />
+          </button>
         </div>
       </div>
-    </ViewShell>
   );
 }

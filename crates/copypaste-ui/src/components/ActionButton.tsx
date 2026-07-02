@@ -35,6 +35,7 @@ interface ActionButtonProps {
 }
 
 export function ActionButton({
+  variant = "secondary",
   onClick,
   disabled,
   pending,
@@ -42,11 +43,17 @@ export function ActionButton({
   type = "button",
   title,
   "aria-label": ariaLabel,
+  className,
   children,
+  size,
 }: ActionButtonProps) {
+  const classes = ["btn", `btn--${variant}`];
+  if (size === "sm") classes.push("sm");
+  if (className) classes.push(className);
   return (
     <button
       type={type}
+      className={classes.join(" ")}
       onClick={onClick}
       disabled={disabled ?? pending}
       title={title}

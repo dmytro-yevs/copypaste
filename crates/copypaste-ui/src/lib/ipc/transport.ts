@@ -31,6 +31,14 @@ if (import.meta.env.DEV) {
     (typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).has("mock"));
 
+  // bridge mode: browser talks to the REAL daemon via the DEV /__ipc middleware
+  // (vite-plugin-daemon-bridge). Activated by VITE_BRIDGE=1 or ?bridge=1. Mock
+  // wins if both are set (mock is the hermetic fixture path).
+  const bridgeRequested =
+    (import.meta.env?.VITE_BRIDGE === "1") ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("bridge"));
+
   if (mockRequested) {
     // Dynamic import keeps mockIpc.ts out of the production module graph.
     // Top-level await is valid here: "module": "ESNext" + "moduleResolution":
@@ -41,6 +49,12 @@ if (import.meta.env.DEV) {
     const { mockInvoke } = await import("../mockIpc");
     MOCK = true;
     invoke = (cmd, args) => mockInvoke(cmd, args) as Promise<never>;
+  } else if (bridgeRequested) {
+    // Dynamic import keeps bridgeIpc.ts out of the production module graph,
+    // exactly like mockIpc.ts. Mock wins above if both flags are set.
+    const { bridgeInvoke } = await import("../bridgeIpc");
+    MOCK = false;
+    invoke = (cmd, args) => bridgeInvoke(cmd, args) as Promise<never>;
   } else {
     MOCK = false;
     invoke = tauriInvoke;

@@ -1,4 +1,4 @@
-.PHONY: build release bundle dmg test smoke-test bench check fmt clippy install-daemon install uninstall clean android-so android-docker android-docker-clean-cache
+.PHONY: build release bundle dmg test smoke-test bench check fmt clippy install-daemon install uninstall clean android-so android-docker android-docker-clean-cache ui-dev
 
 build:
 	cargo build --workspace
@@ -97,6 +97,12 @@ android-docker-clean-cache:
 # Run daemon with debug logging
 dev-daemon:
 	RUST_LOG=debug cargo run -p copypaste-daemon
+
+# Live macOS UI loop: real Tauri window with HMR. The agent separately runs
+# `pnpm -C crates/copypaste-ui dev` (Vite + /__ipc bridge) and drives it via
+# Playwright (?bridge=1) against the same daemon.
+ui-dev:
+	cd crates/copypaste-ui && pnpm tauri dev
 
 # CLI shortcuts
 ls:

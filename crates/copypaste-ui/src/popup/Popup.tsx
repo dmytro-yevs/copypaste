@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Search, Settings } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, friendlyIpcError, pasteAsPlainText } from "../lib/ipc";
 import { copyWithFeedback } from "../lib/copyWithFeedback";
 import { useUI } from "../store";
+import { applyAppearanceToRoot } from "../lib/theme/applyTheme";
 import { EmptyState } from "../components/EmptyState";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { GlideHighlight } from "./GlideHighlight";
@@ -36,6 +39,35 @@ export function Popup() {
     // M4: popup now has its own independent preview line count
     previewLinesPopup = 1,
   } = useUI((s) => s.prefs);
+
+  // Next-open correctness for the popup window (task 1.17). The popup is a warm
+  // WebView built once and shown/hidden, so `loadPrefs()` runs only once for its
+  // lifetime — a Settings change in the main window would otherwise never reach
+  // it. Re-read persisted prefs whenever the popup regains focus (i.e. is shown),
+  // mirroring usePopupHistory's onFocusChanged refresh. In the browser harness
+  // (no Tauri) each navigation reloads the module, so the mount read suffices.
+  const reloadPrefs = useUI((s) => s.reloadPrefs);
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+    let cancelled = false;
+    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (!cancelled && focused) reloadPrefs();
+    });
+    return () => {
+      cancelled = true;
+      void unlisten.then((fn) => fn());
+    };
+  }, [reloadPrefs]);
+
+  // Live appearance sync for the popup window (task 1.16/1.17). Applying keyed on
+  // the three axes re-runs on mount and whenever reloadPrefs (above) or a live
+  // change updates them, keeping <html> data-* in step with the current prefs.
+  const theme = useUI((s) => s.prefs.theme);
+  const accent = useUI((s) => s.prefs.accent);
+  const translucency = useUI((s) => s.prefs.translucency);
+  useEffect(() => {
+    applyAppearanceToRoot(document.documentElement, { theme, accent, translucency });
+  }, [theme, accent, translucency]);
 
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -283,6 +315,7 @@ export function Popup() {
 
   return (
     <div
+      className="pop"
       data-popup-root
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -291,7 +324,8 @@ export function Popup() {
       }}
     >
       {/* ── Search bar ─────────────────────────────────────────────────── */}
-      <div>
+      <div className="pop__search">
+        <Search aria-hidden="true" />
         <input
           ref={inputRef}
           type="text"
@@ -304,12 +338,12 @@ export function Popup() {
 
         {/* Right: N of M result count (right-aligned, tabular-nums) */}
         {!loading && filtered.length > 0 && (
-          <span>
+          <span className="pop__count">
             {showQuery ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}` : `${filtered.length}`}
           </span>
         )}
         {loading && (
-          <span>…</span>
+          <span className="pop__count">…</span>
         )}
       </div>
 
@@ -317,20 +351,17 @@ export function Popup() {
       {error ? (
         error === "daemon_offline" ? (
           <EmptyState
-            icon={undefined}
             title="Clipboard service offline"
             body="The background service is not running. Restart it from Settings."
             action={<RestartDaemonButton onRestarted={() => void refresh()} />}
           />
         ) : error === "ipc_not_ready" ? (
           <EmptyState
-            icon={undefined}
             title="Starting up…"
             body="The clipboard service is initialising. It will be ready in a moment."
           />
         ) : (
           <EmptyState
-            icon={undefined}
             title="Something went wrong"
             body="The clipboard service could not be reached. Please try again."
           />
@@ -338,19 +369,17 @@ export function Popup() {
       ) : filtered.length === 0 ? (
         showQuery ? (
           <EmptyState
-            icon={undefined}
             title={`No matches for "${showQuery}"`}
             body="Try a different search term."
           />
         ) : (
           <EmptyState
-            icon={undefined}
             title="Nothing copied yet"
             body="Copy something and it will appear here."
           />
         )
       ) : (
-        <div>
+        <div className="pop__list">
           {/* Glide highlight layer — tracks selectedIdx */}
           <GlideHighlight
             selectedIdx={selectedIdx}
@@ -361,6 +390,7 @@ export function Popup() {
             isScrolling={isScrolling}
           />
           <ul
+            className="list"
             ref={listRef}
             role="listbox"
             aria-label="Clipboard history"
@@ -397,26 +427,26 @@ export function Popup() {
       )}
 
       {/* ── Footer keycap pills ─────────────────────────────────────────── */}
-      <div>
-        <span>
-          <span>↑↓</span>
-          <span>navigate</span>
+      <div className="pop__foot">
+        <span className="pop__hint">
+          <span className="kbd">↑↓</span>
+          navigate
         </span>
-        <div>
-          <span>
-            <span>⏎</span>
-            <span>paste</span>
-            <span>·</span>
-            <span>Esc</span>
-            <span>close</span>
-          </span>
+        <span className="pop__hint">
+          <span className="kbd">⏎</span>
+          paste
+          <span className="kbd">Esc</span>
+          close
           <button
             type="button"
+            className="iconbtn"
             aria-label="Open settings"
             title="Open settings"
             onClick={() => void openSettings()}
-          />
-        </div>
+          >
+            <Settings aria-hidden="true" />
+          </button>
+        </span>
       </div>
     </div>
   );

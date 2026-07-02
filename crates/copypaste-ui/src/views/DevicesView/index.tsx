@@ -3,8 +3,9 @@
 // Extracted hooks: useOwnDevice, usePairedDevices, useDiscoveredDevices, useQrCode.
 // Default export + props unchanged; all data-testids preserved.
 import { useState, useEffect, useCallback } from "react";
+import { Briefcase, Info, QrCode, RefreshCw, Trash2, Wifi, X } from "lucide-react";
 import { ConfirmModal } from "../../components/ConfirmModal";
-import { Briefcase, RefreshCw, Zap, AlertCircle } from "lucide-react";
+import { Dialog } from "../../lib/dialog/Dialog";
 // 5917.19: GlassToast system — routes "Revoke all" confirmation/feedback through
 // the shared toast provider instead of a raw <span> in the actions bar.
 import { useToast, ToastProvider } from "../../components/Toast";
@@ -32,7 +33,7 @@ import { RevokeConfirmDialog } from "./RevokeConfirmDialog";
 import { useOwnDevice } from "./hooks/useOwnDevice";
 import { usePairedDevices } from "./hooks/usePairedDevices";
 import { useDiscoveredDevices } from "./hooks/useDiscoveredDevices";
-import { useQrCode, QR_TTL_SECS } from "./hooks/useQrCode";
+import { useQrCode } from "./hooks/useQrCode";
 
 // ---------------------------------------------------------------------------
 // Main view (inner — requires ToastProvider ancestor)
@@ -129,7 +130,12 @@ function DevicesViewInner({
   }, [incomingPairing]);
 
   // --- QR pairing ---
+  // The useQrCode() hook itself keeps its existing eager-generate-on-mount +
+  // auto-refresh wiring UNCHANGED (CopyPaste-g27b.19 is presentation-only for
+  // this hook) — only the JSX that displays qrState now moves into a modal,
+  // gated by this purely-local open flag.
   const { qrState, qrSecsLeft, qrBlur, handleQrReveal, handleQrRegenerate } = useQrCode();
+  const [qrModalOpen, setQrModalOpen] = useState(false);
 
   // Begin a discovery-initiated SAS pairing, then open the SAS modal.
   const handlePairDiscovered = useCallback(async (device: DiscoveredDevice) => {
@@ -165,14 +171,15 @@ function DevicesViewInner({
   // --- Actions bar ---
   // 5917.19: globalMsg span removed — feedback now goes through GlassToast (showToast above).
   const actions = (
-    <div className="flex items-center gap-2">
+    <div>
       {/* uw45: replaced tiny inline Yes/No with a proper modal confirmation */}
       <button
+        type="button"
+        className="btn btn--danger sm"
         onClick={() => setRevokeAllConfirm(true)}
         disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
-        className="border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
-        style={{ borderRadius: "var(--r-ctl)" }}
       >
+        <Trash2 aria-hidden="true" />
         {revokeAllPending ? "Revoking…" : "Revoke all"}
       </button>
       <ConfirmModal
@@ -181,7 +188,7 @@ function DevicesViewInner({
         body={
           <>
             <p>This will immediately break trust with all paired devices.</p>
-            <p className="mt-1">All devices will need to re-pair before syncing can resume.</p>
+            <p>All devices will need to re-pair before syncing can resume.</p>
           </>
         }
         confirmLabel="Revoke all"
@@ -202,10 +209,9 @@ function DevicesViewInner({
   if (loadState === "loading") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div className="flex h-full items-center justify-center">
+        <div>
           <span
             aria-label="Loading devices…"
-            className="inline-block h-5 w-5 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent"
           />
         </div>
       </ViewShell>
@@ -217,11 +223,9 @@ function DevicesViewInner({
     return (
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
-          className="h-full"
-          icon={<Zap width={28} height={28} strokeWidth={1.5} />}
           title="Clipboard service offline"
           body="The clipboard service is not running."
-          action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
+          action={<div><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
         />
       </ViewShell>
     );
@@ -234,8 +238,6 @@ function DevicesViewInner({
     return (
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
-          className="h-full"
-          icon={<Zap width={28} height={28} strokeWidth={1.5} />}
           title="Starting…"
           body="CopyPaste is starting up. Your devices will appear in a moment."
         />
@@ -248,11 +250,9 @@ function DevicesViewInner({
     return (
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
-          className="h-full"
-          icon={<AlertCircle width={28} height={28} strokeWidth={1.5} className="text-ide-warning" />}
           title="Database degraded"
           body="Device list unavailable. Reset the database in History to recover."
-          action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
+          action={<div><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
         />
       </ViewShell>
     );
@@ -263,11 +263,9 @@ function DevicesViewInner({
     return (
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
-          className="h-full"
-          icon={<AlertCircle width={28} height={28} strokeWidth={1.5} />}
           title="Failed to load devices"
           body="Try restarting the clipboard service."
-          action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
+          action={<div><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
         />
       </ViewShell>
     );
@@ -281,12 +279,15 @@ function DevicesViewInner({
           falls back to peer.online from the last 10 s list_peers poll when the
           store has no entry yet. */}
       {/* zxv2: SectionHeader replaces raw <p> tag.
-          crh3.43: faint removed — PARITY-SPEC §3 canonical colour is text-ide-dim. */}
-      <div className="mb-2 flex items-center justify-between">
+          crh3.43: faint removed — PARITY-SPEC §3 canonical colour is text-ide-dim.
+          CopyPaste-g27b.11: this title+count row doubles as the devices view's
+          header bar (.dev-head — shell.css) — ViewShell's own <header> is wired
+          separately (out of this slice's scope) and stays a plain title above it. */}
+      <div className="dev-head">
         {/* bdac.48: sentence case to match other section headers */}
         <SectionHeader label="Paired devices" />
         {loadState === "ready" && peers.length > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-ide-faint">
+          <span>
             <StatusDot online={true} />
             {peers.filter((p) => {
               const live = presenceOnline[p.fingerprint];
@@ -296,27 +297,31 @@ function DevicesViewInner({
         )}
       </div>
 
+      {/* CopyPaste-g27b.11: educates the user about the new tap-to-expand /
+          tap-to-copy interaction added by the .devrow disclosure pattern. */}
+      <p className="dev-hint">
+        <Info aria-hidden="true" />
+        Tap a device to expand · tap any value to copy
+      </p>
+
       {/* ── Single unified device list (this Mac first, then peers) ── */}
-      <div
-        className="surface-card flex flex-col divide-y divide-ide-divider"
-        style={{ borderRadius: "var(--r-card)" }}
-      >
+      <div className="dev-list">
         {/* This device — always first */}
         {ownState.status === "loading" && (
           /* Skeleton matches ThisDeviceCard layout: avatar block + two text rows.
              animate-pulse communicates loading shape without layout jump (CopyPaste-5917.22). */
-          <div className="flex items-center gap-3 px-3 py-2.5 animate-pulse" aria-busy="true" aria-label="Loading device…">
-            <div className="shrink-0 w-[38px] h-[38px] rounded-xl bg-ide-divider" />
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <div className="h-[13px] w-32 rounded bg-ide-divider" />
-              <div className="h-[11px] w-20 rounded bg-ide-divider" />
+          <div aria-busy="true" aria-label="Loading device…">
+            <div />
+            <div>
+              <div />
+              <div />
             </div>
           </div>
         )}
         {ownState.status === "offline" && (
-          <div className="px-3 py-2.5">
+          <div>
             {/* bdac.34/36: canonical user-facing term is "Clipboard service" — never "Daemon" */}
-            <p className="text-[13px] text-ide-danger">Clipboard service not running.</p>
+            <p>Clipboard service not running.</p>
           </div>
         )}
         {ownState.status === "ready" && (
@@ -326,11 +331,11 @@ function DevicesViewInner({
         {/* Paired peers — loadState is always "ready" here; "loading" returns
             early with a full-page spinner (CopyPaste-bdac.2). */}
         {loadState === "ready" && peers.length === 0 && (
-          <div className="px-3 py-3 flex items-center gap-2">
-            {/* Briefcase icon via lucide-react (§9: replace inline SVGs) */}
-            <Briefcase size={14} strokeWidth={1.5} className="text-ide-faint shrink-0" />
-            <p className="text-[13px] text-ide-dim">No paired devices</p>
-          </div>
+          <EmptyState
+            icon={<Briefcase aria-hidden="true" />}
+            title="No paired devices"
+            body="Pair your phone or another Mac to sync your clipboard — end-to-end encrypted."
+          />
         )}
         {loadState === "ready" &&
           peers.map((peer) => {
@@ -366,33 +371,26 @@ function DevicesViewInner({
       {/* ── Discovered on your network ─────────────────────────── */}
       {/* HB-9: header + Refresh button always render so a manual rescan is
           reachable even when passive polling hasn't surfaced any peer yet. */}
-      {/* zxv2: SectionHeader replaces raw <p> tag. */}
-      <div className="mb-2 mt-5 flex items-center justify-between">
+      {/* zxv2: SectionHeader replaces raw <p> tag.
+          g27b.19: .dev-body adds the same 14px/var(--s-6) horizontal inset as
+          .dev-head (shell.css) so this header lines up with "Paired devices"
+          and the device rows below, instead of sitting flush left. */}
+      <div className="dev-subhead dev-body">
         <SectionHeader label="Discovered on your network" />
         <button
           type="button"
+          className="btn btn--secondary sm"
           onClick={() => void handleRescan()}
           disabled={rescanning}
           aria-label={rescanning ? "Scanning…" : "Rescan local network"}
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
-          style={{ borderRadius: "var(--r-ctl)" }}
           title="Rescan the local network for devices"
         >
-          {/* RefreshCw from lucide-react; spins while rescanning; reduced-motion: static */}
-          <RefreshCw
-            size={11}
-            strokeWidth={2.2}
-            aria-hidden="true"
-            className={rescanning ? "animate-spin motion-reduce:animate-none" : ""}
-          />
+          <RefreshCw aria-hidden="true" />
           {rescanning ? "Scanning…" : "Refresh"}
         </button>
       </div>
       {discovered.length > 0 ? (
-        <div
-          className="surface-card flex flex-col divide-y divide-ide-divider"
-          style={{ borderRadius: "var(--r-card)" }}
-        >
+        <div className="dev-list">
           {discovered.map((device, idx) => (
             <DiscoveredRow
               key={device.device_id}
@@ -405,155 +403,135 @@ function DevicesViewInner({
         </div>
       ) : (
         // reveal-up: section fades up into view; network-rings on icon = expanding discovery rings
-        <div className="reveal-up flex items-center gap-3 py-1">
-          <span
-            aria-hidden="true"
-            className="network-rings shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl text-ide-accent"
-            style={{
-              background: "color-mix(in srgb, var(--accent) 15%, var(--elevated))",
-              border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--border))",
-            }}
-          >
-            {/* Wifi-style discovery icon (inline SVG, lucide signal shape) */}
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M5 12.55a11 11 0 0 1 14.08 0" />
-              <path d="M1.42 9a16 16 0 0 1 21.16 0" />
-              <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
-              <circle cx="12" cy="20" r="1" fill="currentColor" stroke="none" />
-            </svg>
-          </span>
-          <p className="text-[11px] text-ide-faint">No devices found on the network yet.</p>
-        </div>
+        <p className="dev-hint">
+          <Wifi aria-hidden="true" />
+          No devices found on the network yet.
+        </p>
       )}
       {discoverError !== null && (
-        <p className="mt-2 text-[11px] text-ide-danger">{discoverError}</p>
+        <p className="field-note field-note--err dev-body">{discoverError}</p>
       )}
 
-      {/* ── Divider ────────────────────────────────────────────── */}
-      <div className="my-5 border-t border-ide-divider" />
+      {/* ── Divider ── real hairline (was an empty, invisible <div/> that
+          contributed no visible separation and no reliable gap). ────────── */}
+      <div className="dev-divider" />
 
-      {/* ── Pair via QR — full width, compact code ───────────────── */}
-      {/* zxv2: SectionHeader replaces raw <p> tag for consistency */}
-      <div className="reveal-up mb-2">
+      {/* ── Pair via QR — CopyPaste-g27b.19: the panel itself moved into a
+          modal (below); this section is now just a primary button so the
+          Devices list doesn't permanently reserve QR real-estate. ────────── */}
+      {/* zxv2: SectionHeader replaces raw <p> tag for consistency.
+          g27b.19: .dev-body inset matches every other section header/hint/list. */}
+      <div className="dev-body">
         <SectionHeader label="Pair a new device" />
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => setQrModalOpen(true)}
+        >
+          <QrCode aria-hidden="true" />
+          Pair a new device
+        </button>
       </div>
 
-      {/* card-in: glass card entrance (styleguide §device-card). */}
-      <section
-        className="p-4 space-y-3"
-        style={{ borderRadius: "var(--r-card)" }}
-      >
-        {qrState.status === "loading" && (
-          // Static muted text — no animate-pulse (MOT-21)
-          <p className="text-[12px] text-ide-dim">Generating…</p>
-        )}
-
-        {qrState.status === "ready" && (
-          <div className="flex items-start gap-5">
-            {/* QR code — SVG comes from our own Tauri backend and never
-                contains remote markup — dangerouslySetInnerHTML is safe here.
-                Privacy-first: .qr-hidden by default (§MO-7 CSS primitive), revealed
-                only on intentional click (spec §10 / CopyPaste-1jms.2).
-                qrBlur state is INDEPENDENT of QR generation — regenerating the token
-                does NOT reset to hidden so the user's reveal decision is preserved. */}
-            {/* 5917.85: framed/card treatment — surface-card token supplies
-                border + background consistent with other QR surfaces. bg-white
-                is preserved inside so the QR module is always black-on-white. */}
-            <div
-              className={[
-                "relative shrink-0 surface-card p-2 overflow-hidden",
-                qrBlur === "blurred" ? "qr-hidden" : "qr-visible",
-              ].join(" ")}
-              style={{ width: 190, height: 190, borderRadius: "var(--r-card)" }}
+      {/* ── QR pairing modal — mounted only while open (CopyPaste-g27b.19).
+          Contains the exact same qr-panel content/handlers/hook wiring that
+          previously rendered inline; only the JSX's location moved. */}
+      {qrModalOpen && (
+        <Dialog labelledBy="qr-modal-title" onClose={() => setQrModalOpen(false)}>
+          <div className="modal__hd">
+            <p id="qr-modal-title" className="modal__t">Pair a new device</p>
+            <button
+              type="button"
+              className="iconbtn"
+              aria-label="Close"
+              onClick={() => setQrModalOpen(false)}
             >
-              {/* qr-grid: the blurred/revealed target (§MO-7) */}
-              <div
-                className="qr-grid [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
-                style={{ width: "100%", height: "100%" }}
-                // eslint-disable-next-line react/no-danger
-                dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
-              />
-              {/* qr-overlay: backdrop-blur frosted reveal affordance (§MO-7).
-                  Shown only when blurred; fades out on reveal via CSS transition. */}
-              {qrBlur === "blurred" && (
-                <button
-                  type="button"
-                  onClick={handleQrReveal}
-                  className="qr-overlay absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-ide-elevated/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
-                  style={{ borderRadius: "inherit" }}
-                  aria-label="Click to reveal QR code"
-                >
-                  <span className="text-[11px] font-medium text-ide-dim select-none">
-                    Click to reveal
-                  </span>
-                </button>
-              )}
-            </div>
-            <div className="min-w-0 flex-1 space-y-2">
-              {/* CopyPaste-1jms.5: The raw QR payload string (CPPAIR2.* — contains
-                  PAKE password, device cert fingerprint, Supabase anon key) must
-                  NEVER be rendered into the DOM, even when the QR is revealed.
-                  The QR SVG above is the sole canonical pairing channel.
-                  Rendering the payload as text (even with userSelect:none) left it
-                  accessible via element.textContent / browser extensions / a11y APIs.
-                  Fix: remove the <p> block entirely. */}
-              {qrSecsLeft !== null && qrSecsLeft > 0 && (
-                <>
-                  {/* Determinate drain bar: width drains from 100% to 0 as time runs out */}
-                  {(() => {
-                    const ttl = qrState.status === "ready" && qrState.qr.expires_in_secs > 0
-                      ? qrState.qr.expires_in_secs
-                      : QR_TTL_SECS;
-                    const pct = Math.min(100, Math.max(0, (qrSecsLeft / ttl) * 100));
-                    return (
-                      <div className="w-full h-0.5 rounded-full bg-ide-elevated overflow-hidden">
+              <X aria-hidden="true" />
+            </button>
+          </div>
+
+          <section className="qr-panel">
+            {qrState.status === "loading" && (
+              // Static muted text — no animate-pulse (MOT-21)
+              <p className="field-note">Generating…</p>
+            )}
+
+            {qrState.status === "ready" && (
+              <>
+                {/* QR code — SVG comes from our own Tauri backend and never contains
+                    remote markup — dangerouslySetInnerHTML is safe here. Privacy-first:
+                    frosted `.qr-reveal` overlay by default, revealed only on intentional
+                    click (spec §10 / CopyPaste-1jms.2). qrBlur is INDEPENDENT of QR
+                    generation — regenerating the token does NOT reset the reveal state.
+                    The `.qr-frame` keeps a white background so the QR is always
+                    black-on-white and scannable. */}
+                <div className="qr-wrap">
+                  <div
+                    className="qr-frame"
+                    // eslint-disable-next-line react/no-danger
+                    dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
+                  />
+                  {qrBlur === "blurred" && (
+                    <button
+                      type="button"
+                      className="qr-reveal"
+                      onClick={handleQrReveal}
+                      aria-label="Click to reveal QR code"
+                    >
+                      <span>Click to reveal</span>
+                    </button>
+                  )}
+                </div>
+                <div className="qr-meta">
+                  {/* CopyPaste-1jms.5: The raw QR payload string (CPPAIR2.* — contains
+                      PAKE password, device cert fingerprint, Supabase anon key) must
+                      NEVER be rendered into the DOM, even when the QR is revealed. The
+                      QR SVG above is the sole canonical pairing channel. */}
+                  {qrSecsLeft !== null && qrSecsLeft > 0 && (
+                    <>
+                      {/* Determinate drain bar: width drains from 100% to 0 as the
+                          pairing token (300 s TTL) runs out. */}
+                      <div className="qr-drain">
                         <div
+                          className="qr-drain__fill"
                           data-testid="qr-drain-bar"
-                          // progress-pulse: no-op stub (brightness pulse removed, MOT-7); class kept for selector compat
-                          className={[
-                            "progress-pulse h-full rounded-full transition-[width] duration-1000 ease-linear",
-                            qrSecsLeft <= 20 ? "bg-ide-warning" : "bg-ide-accent",
-                          ].join(" ")}
-                          style={{ width: `${pct}%` }}
+                          style={{ width: `${Math.max(0, Math.min(100, (qrSecsLeft / 300) * 100))}%` }}
                         />
                       </div>
-                    );
-                  })()}
-                  <p className="text-[11px] text-ide-dim">
-                    Expires in{" "}
-                    <span className={qrSecsLeft <= 20 ? "text-ide-warning font-medium tabular-nums" : "tabular-nums"}>
-                      {qrSecsLeft}s
-                    </span>
+                      <p className="field-note">
+                        Expires in <span>{qrSecsLeft}s</span>
+                      </p>
+                    </>
+                  )}
+                  <p className="field-note">
+                    Scan from CopyPaste on another device to pair automatically.
                   </p>
-                </>
-              )}
-              <p className="text-[11px] text-ide-faint">
-                Scan from CopyPaste on another device to pair automatically.
-              </p>
-              {/* Explicit regenerate button — separate from reveal so blur state
-                  is not accidentally cleared by a refresh (spec §10). */}
-              <button
-                type="button"
-                onClick={handleQrRegenerate}
-                className="flex items-center gap-1 text-[11px] text-ide-accent hover:text-ide-accent-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent rounded"
-                aria-label="Regenerate pairing QR code"
-              >
-                <RefreshCw size={10} strokeWidth={2} aria-hidden="true" />
-                Regenerate
-              </button>
-            </div>
-          </div>
-        )}
+                  {/* Explicit regenerate button — separate from reveal so blur state
+                      is not accidentally cleared by a refresh (spec §10). */}
+                  <button
+                    type="button"
+                    className="btn btn--secondary sm"
+                    onClick={handleQrRegenerate}
+                    aria-label="Regenerate pairing QR code"
+                  >
+                    <RefreshCw aria-hidden="true" />
+                    Regenerate
+                  </button>
+                </div>
+              </>
+            )}
 
-        {qrState.status === "error" && (
-          <p className="text-[12px] text-ide-danger">{qrState.message}</p>
-        )}
+            {qrState.status === "error" && (
+              <p className="field-note field-note--err">{qrState.message}</p>
+            )}
 
-        {qrState.status === "idle" && (
-          // Static muted text — no animate-pulse (MOT-21)
-          <p className="text-[12px] text-ide-dim">Generating pairing code…</p>
-        )}
-      </section>
+            {qrState.status === "idle" && (
+              // Static muted text — no animate-pulse (MOT-21)
+              <p className="field-note">Generating pairing code…</p>
+            )}
+          </section>
+        </Dialog>
+      )}
 
       {/* ── SAS pairing modal (discovery-initiated, initiator). The responder
           path is handled by the dedicated `responderPairing` modal below,

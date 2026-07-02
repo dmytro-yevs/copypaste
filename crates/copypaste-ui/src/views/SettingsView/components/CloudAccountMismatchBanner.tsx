@@ -12,6 +12,8 @@
 // hidden — no false positives.  The follow-up issue CopyPaste-1jms.35 tracks
 // the peer-account-id plumbing needed to enable actual detection.
 
+import { AlertTriangle } from "lucide-react";
+
 export interface CloudAccountMismatchBannerProps {
   /**
    * True when the local account id differs from at least one paired peer's
@@ -43,17 +45,24 @@ export function CloudAccountMismatchBanner({
   if (!hasMismatch) return null;
 
   return (
-    <div role="alert" data-testid="cloud-account-mismatch-banner">
-      <strong>Supabase account mismatch detected.</strong> Two or more paired
-      devices are using different Supabase accounts or projects. Clipboard items
-      will not sync — Supabase RLS only allows rows owned by the same GoTrue
-      user to be shared. Make sure every device signs in with the same Supabase
-      email and points to the same Supabase project URL.
-      {localAccountId != null && (
-        <span>
-          This device: <code>{localAccountId}</code>
-        </span>
-      )}
+    <div
+      role="alert"
+      data-testid="cloud-account-mismatch-banner"
+      className="banner banner--warn"
+    >
+      <AlertTriangle aria-hidden="true" />
+      <span className="banner__x">
+        <b>Supabase account mismatch detected.</b> Two or more paired
+        devices are using different Supabase accounts or projects. Clipboard items
+        will not sync — Supabase RLS only allows rows owned by the same GoTrue
+        user to be shared. Make sure every device signs in with the same Supabase
+        email and points to the same Supabase project URL.
+        {localAccountId != null && (
+          <span>
+            {" "}This device: <code>{localAccountId}</code>
+          </span>
+        )}
+      </span>
     </div>
   );
 }

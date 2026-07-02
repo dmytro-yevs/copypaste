@@ -1,6 +1,4 @@
-import { useRef } from "react";
-import ReactDOM from "react-dom";
-import { useFocusTrap } from "../lib/useFocusTrap";
+import { Dialog } from "../lib/dialog/Dialog";
 
 /**
  * Shared confirmation modal.
@@ -29,61 +27,50 @@ export interface ConfirmModalProps {
   onCancel: () => void;
 }
 
-function ConfirmModalInner({
+/**
+ * Composes the shared `Dialog` primitive (portal, role/aria-modal, focus trap,
+ * Escape + backdrop dismissal, focus restoration, ref-counted scroll-lock).
+ * Pass `open={false}` to unmount; `open={true}` to render. Behavior-preserving
+ * refactor of the previous inline portal+focus-trap implementation (task 2.8).
+ */
+export function ConfirmModal({
+  open,
   title,
   body,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  danger = true,
   busy = false,
   onConfirm,
   onCancel,
-}: ConfirmModalProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(dialogRef);
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-modal-title"
-      // Clicking the backdrop dismisses the modal.
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
-      // Escape key also cancels.
-      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
-    >
-      <div ref={dialogRef}>
-        <p id="confirm-modal-title">
-          {title}
-        </p>
-        <div>
-          {body}
-        </div>
-        <div>
-          <button type="button" onClick={onCancel} disabled={busy}>
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={busy}
-            data-testid="confirm-modal-confirm-btn"
-          >
-            {busy ? "…" : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Mounted via a React portal so it renders outside the view shell DOM tree.
- * Pass `open={false}` to unmount; pass `open={true}` to render the modal.
- * The modal plays modal-scrim-enter / modal-card-enter on mount.
- */
-export function ConfirmModal(props: ConfirmModalProps & { open: boolean }) {
-  const { open, ...rest } = props;
+}: ConfirmModalProps & { open: boolean }) {
   if (!open) return null;
-  // Use portal so the modal overlays all view shells unconditionally.
-  return ReactDOM.createPortal(<ConfirmModalInner {...rest} />, document.body);
+  return (
+    <Dialog
+      labelledBy="confirm-modal-title"
+      describedBy="confirm-modal-body"
+      onClose={onCancel}
+    >
+      <p id="confirm-modal-title" className="modal__t">
+        {title}
+      </p>
+      <div id="confirm-modal-body" className="modal__s">
+        {body}
+      </div>
+      <div className="modal__act">
+        <button type="button" className="btn btn--ghost" onClick={onCancel} disabled={busy}>
+          {cancelLabel}
+        </button>
+        <button
+          type="button"
+          className={danger ? "btn btn--danger" : "btn btn--primary"}
+          onClick={onConfirm}
+          disabled={busy}
+          data-testid="confirm-modal-confirm-btn"
+        >
+          {busy ? "…" : confirmLabel}
+        </button>
+      </div>
+    </Dialog>
+  );
 }

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { ChevronRight, ShieldOff, Unlink } from "lucide-react";
 import {
   formatWallTime,
   formatEpochSecs,
@@ -7,14 +8,19 @@ import {
 } from "../lib/ipc";
 // i2sr (PG-40): hybrid relative/absolute formatter for last-sync timestamps.
 import { formatSyncTime } from "../lib/time";
-// bdac.14: shared button so danger-tint style comes from one source of truth.
-import { ActionButton } from "./ActionButton";
+// CopyPaste-g27b.11: typed disclosure-header primitive drives the expandable
+// device-row header (aria-expanded/aria-controls) — never a raw .btn.
+import { DisclosureHeader } from "../lib/a11y/DisclosureHeader";
 
 // ---------------------------------------------------------------------------
 // Shared device-card sub-components (CopyPaste-zxv2)
 //
 // Extracted from DevicesView.tsx so they can be reused across screens.
 // All components keep the same visual spec as the originals.
+//
+// CopyPaste-g27b.11: wired to the redesign's .devrow disclosure-list pattern
+// (patterns.css). Presentation only — no IPC calls, handlers, pending flags,
+// or action semantics changed.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -43,23 +49,24 @@ export function StatusDot({
   const title = online
     ? "Online"
     : `Offline · last seen ${formatLastSeen(lastSeenSecs)}`;
+  // .dot-stat carries its own CSS-only pulse (box-shadow keyframes) when
+  // online, so no separate ping/ring child element is needed here.
   return (
-    // relative wrapper so the pulse ring can be absolutely positioned behind the dot
-    // status-ping: adds a CSS ::after expanding ring (styleguide §presence) in addition to
-    // the animate-online-pulse span (MO-5 one-shot, crh3.18 — replaces animate-pulse-ping).
-    <span>
-      {/* Expanding-ring pulse — only when online; respects prefers-reduced-motion */}
-      {online && <span aria-hidden="true" />}
-      <span title={title} aria-label={title} />
-    </span>
+    <span
+      className={online ? "dot-stat" : "dot-stat off"}
+      title={title}
+      aria-label={title}
+    />
   );
 }
 
 // ---------------------------------------------------------------------------
-// MetaRow — aligned two-column table row for device metadata
+// MetaRow — tap-to-copy device metadata field, rendered as a .cfield button
 //
-// Renders as a CSS-grid row so labels always line up vertically across all
-// rows in the card. Hidden when value is absent/empty.
+// Renders as one .cfield grid cell (label + value) inside a .cfields grid.
+// Hidden when value is absent/empty. Clicking copies the value to the system
+// clipboard, matching the FingerprintRow tap-to-copy affordance below (the
+// .cfield/.cfield__k/.cfield__v/.copied contract is shared by all fields).
 // ---------------------------------------------------------------------------
 
 export function MetaRow({
@@ -69,25 +76,37 @@ export function MetaRow({
   label: string;
   value: string | null | undefined;
 }) {
+  const [copied, setCopied] = useState(false);
+
   if (!value) return null;
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      // Reset the "Copied!" feedback after 1.5 s.
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
-    <>
-      <span>{label}</span>
-      <span>{value}</span>
-    </>
+    <button
+      type="button"
+      className={copied ? "cfield copied" : "cfield"}
+      onClick={handleCopy}
+      aria-label={`${label}: ${value} — click to copy`}
+    >
+      <span className="cfield__k">{label}</span>
+      <span className="cfield__v">{copied ? "Copied!" : value}</span>
+    </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// DeviceMetaGrid — wrapper that establishes the aligned two-column grid
+// DeviceMetaGrid — wrapper that establishes the .cfields grid
 // ---------------------------------------------------------------------------
 
 export function DeviceMetaGrid({ children }: { children: React.ReactNode }) {
-  return (
-    <div>
-      {children}
-    </div>
-  );
+  return <div className="cfields">{children}</div>;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,20 +140,19 @@ function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
   };
 
   return (
-    <>
-      <span>Fingerprint</span>
-      {/* Clickable value — copies full fingerprint on click (Android parity).
-          Uses a <button> so it is keyboard-accessible and screen-reader announced. */}
-      <button
-        type="button"
-        data-testid="fingerprint-copy"
-        title={`Copy full fingerprint: ${fingerprint}`}
-        aria-label={`Fingerprint: ${truncated} — click to copy`}
-        onClick={handleCopy}
-      >
-        <span>{copied ? "Copied!" : truncated}</span>
-      </button>
-    </>
+    // Clickable value — copies full fingerprint on click (Android parity).
+    // Uses a <button> so it is keyboard-accessible and screen-reader announced.
+    <button
+      type="button"
+      className={copied ? "cfield copied" : "cfield"}
+      data-testid="fingerprint-copy"
+      title={`Copy full fingerprint: ${fingerprint}`}
+      aria-label={`Fingerprint: ${truncated} — click to copy`}
+      onClick={handleCopy}
+    >
+      <span className="cfield__k">Fingerprint</span>
+      <span className="cfield__v">{copied ? "Copied!" : truncated}</span>
+    </button>
   );
 }
 
@@ -143,31 +161,44 @@ function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
 // ---------------------------------------------------------------------------
 
 export function ThisDeviceCard({ info }: { info: OwnDeviceInfo }) {
+  // Own device row starts expanded (matches the design reference's
+  // `devrow this open`) — purely a local UI toggle, not tied to any IPC state.
+  const [expanded, setExpanded] = useState(true);
+  const bodyId = "devrow-body-own";
+  const summary = [info.os_version, info.local_ip].filter(Boolean).join(" · ");
+
   return (
-    <div>
+    <div className={expanded ? "devrow this open" : "devrow this"}>
       {/* Name + online dot + "This Mac" badge */}
-      <div>
+      <DisclosureHeader
+        expanded={expanded}
+        controls={bodyId}
+        onToggle={() => setExpanded((v) => !v)}
+        className="devrow__head"
+      >
         <StatusDot online={true} />
-        <p>
-          {info.device_name ?? "This Device"}
-        </p>
-        <span>
-          This Mac
-        </span>
-      </div>
+        <span className="devrow__name">{info.device_name ?? "This Device"}</span>
+        <span className="tpill tpill--this">This Mac</span>
+        {summary !== "" && <span className="devrow__sum">{summary}</span>}
+        <ChevronRight aria-hidden="true" className="devrow__chev" />
+      </DisclosureHeader>
 
       {/* Aligned two-column metadata grid */}
-      <DeviceMetaGrid>
-        <MetaRow label="Model" value={info.device_model} />
-        <MetaRow label="OS" value={info.os_version} />
-        <MetaRow label="Version" value={info.app_version} />
-        <MetaRow label="Local IP" value={info.local_ip} />
-        <MetaRow label="Public IP" value={info.public_ip ?? undefined} />
-        {/* wb6s / cg2h: show own-device security fingerprint at parity with Android.
-            Truncated to first8…last8 with tap-to-copy (PG-9 spec).
-            Null when P2P is disabled (no cert generated). */}
-        <FingerprintRow fingerprint={info.fingerprint} />
-      </DeviceMetaGrid>
+      <div className="devrow__body" id={bodyId}>
+        <div>
+          <DeviceMetaGrid>
+            <MetaRow label="Model" value={info.device_model} />
+            <MetaRow label="OS" value={info.os_version} />
+            <MetaRow label="Version" value={info.app_version} />
+            <MetaRow label="Local IP" value={info.local_ip} />
+            <MetaRow label="Public IP" value={info.public_ip ?? undefined} />
+            {/* wb6s / cg2h: show own-device security fingerprint at parity with Android.
+                Truncated to first8…last8 with tap-to-copy (PG-9 spec).
+                Null when P2P is disabled (no cert generated). */}
+            <FingerprintRow fingerprint={info.fingerprint} />
+          </DeviceMetaGrid>
+        </div>
+      </div>
     </div>
   );
 }
@@ -199,10 +230,10 @@ export function extractIp(address: string | null | undefined): string | null {
 // ---------------------------------------------------------------------------
 // PeerRow — one paired device entry (CopyPaste-zxv2 + CopyPaste-g4ze)
 //
-// Layout change from CopyPaste-g4ze:
-// Buttons moved from right-column float (items-start justify-between) to a
-// full-width footer row BELOW the metadata, separated by a hairline border-t.
-// Both buttons are flex-1 equal width — mirrors Android's action Row pattern.
+// CopyPaste-g27b.11: rendered as a .devrow disclosure item. The destructive
+// footer (Unpair/Revoke, Decision 16) lives inside the expandable body, same
+// as the design reference — collapsed by default so the actions require an
+// intentional tap-to-expand first.
 // ---------------------------------------------------------------------------
 
 interface PeerRowProps {
@@ -229,6 +260,8 @@ export function PeerRow({
   liveLastSeenSecs,
   liveOnline,
 }: PeerRowProps) {
+  // Collapsed by default — only the local device row starts open.
+  const [expanded, setExpanded] = useState(false);
   const isPending = rowSt?.pending ?? false;
   const revokedAt = rowSt?.revokedAt ?? null;
   const rowError = rowSt?.error ?? null;
@@ -264,91 +297,103 @@ export function PeerRow({
     const isP2pHeuristic = !!(peer.local_ip || peer.address);
     transportLabel = isP2pHeuristic ? "P2P" : "Cloud";
   }
+  // CopyPaste-g27b.11: the redesign only ships .tpill--p2p/--cloud/--this
+  // (patterns.css/primitives.css) — relay/Supabase keep their own text label
+  // but visually share the "not P2P" cloud treatment. Never colour the row
+  // itself by transport (Decision: transport shown ONLY via this chip).
+  const tpillClass = transportLabel === "P2P" ? "tpill--p2p" : "tpill--cloud";
+
+  const online = liveOnline !== undefined ? liveOnline : peer.online === true;
+  const summary = [peer.os_version, ip].filter(Boolean).join(" · ");
+  const bodyId = `devrow-body-${peer.fingerprint}`;
 
   return (
-    <div>
-      {/* Content area — full width */}
-      <div>
-        {/* Name + online dot + transport chip */}
-        <div>
-          <StatusDot
-            online={liveOnline !== undefined ? liveOnline : peer.online === true}
-            lastSeenSecs={liveLastSeenSecs}
-          />
-          <p>
-            {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
-          </p>
-          <span>
-            {transportLabel}
-          </span>
-        </div>
-
+    <div className={expanded ? "devrow open" : "devrow"}>
+      {/* Name + online dot + trust badge + transport chip */}
+      <DisclosureHeader
+        expanded={expanded}
+        controls={bodyId}
+        onToggle={() => setExpanded((v) => !v)}
+        className="devrow__head"
+      >
+        <StatusDot online={online} lastSeenSecs={liveLastSeenSecs} />
+        <span className="devrow__name">
+          {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
+        </span>
         {/* mgkr (NG-3) / CopyPaste-1jms.30: trust badge derived from peer.trust.
             "verified" → green Verified (SAS-confirmed peer).
-            Any other value or absent → amber Unverified (matches Android trustLabel). */}
+            Any other value or absent → Unverified (matches Android trustLabel). */}
         {peer.trust === "verified" ? (
-          <span data-testid="trust-badge">
-            <span aria-hidden="true" />
+          <span className="badge badge--verified" data-testid="trust-badge">
+            <span className="d" aria-hidden="true" />
             Verified
           </span>
         ) : (
-          <span data-testid="trust-badge">
-            <span aria-hidden="true" />
+          <span className="badge" data-testid="trust-badge">
             Unverified
           </span>
         )}
+        <span className={`tpill ${tpillClass}`}>{transportLabel}</span>
+        {summary !== "" && <span className="devrow__sum">{summary}</span>}
+        <ChevronRight aria-hidden="true" className="devrow__chev" />
+      </DisclosureHeader>
 
-        {/* Aligned two-column metadata grid — labels line up vertically */}
-        <DeviceMetaGrid>
-          <MetaRow label="Model" value={peer.model} />
-          <MetaRow label="OS" value={peer.os_version} />
-          <MetaRow label="Version" value={peer.app_version} />
-          <MetaRow label="Local IP" value={ip} />
-          <MetaRow label="Public IP" value={peer.public_ip} />
-          <MetaRow label="Paired" value={pairedStr} />
-          <MetaRow label="Last sync" value={lastSyncStr} />
-          <MetaRow
-            label="RTT"
-            value={peer.latency_ms !== undefined ? `${peer.latency_ms} ms` : null}
-          />
-        </DeviceMetaGrid>
+      <div className="devrow__body" id={bodyId}>
+        <div>
+          {/* Aligned two-column metadata grid — labels line up vertically */}
+          <DeviceMetaGrid>
+            <MetaRow label="Model" value={peer.model} />
+            <MetaRow label="OS" value={peer.os_version} />
+            <MetaRow label="Version" value={peer.app_version} />
+            <MetaRow label="Local IP" value={ip} />
+            <MetaRow label="Public IP" value={peer.public_ip} />
+            <MetaRow label="Paired" value={pairedStr} />
+            <MetaRow label="Last sync" value={lastSyncStr} />
+            <MetaRow
+              label="RTT"
+              value={peer.latency_ms !== undefined ? `${peer.latency_ms} ms` : null}
+            />
+          </DeviceMetaGrid>
 
-        {/* Revoked / error states — kept on their own line for visual weight */}
-        {revokedAt !== null && (
-          <p>
-            Revoked · {formatWallTime(revokedAt)}
-          </p>
-        )}
-        {rowError !== null && (
-          <p>{rowError}</p>
-        )}
-      </div>
+          {/* Revoked / error states — kept on their own line for visual weight */}
+          {revokedAt !== null && (
+            <p>Revoked · {formatWallTime(revokedAt)}</p>
+          )}
+          {rowError !== null && (
+            <p className="field-note field-note--err">{rowError}</p>
+          )}
 
-      {/* g4ze: Action footer — full-width row below metadata with hairline border-t.
-           Both buttons are flex-1 equal width, matching Android's weight(1f) pattern.
-           bdac.14: use ActionButton(variant="danger") so the danger-tint style comes
-           from a single source of truth in ActionButton.tsx (spec §7). */}
-      <div>
-        <ActionButton
-          variant="danger"
-          size="sm"
-          onClick={() => onUnpair(peer.fingerprint)}
-          disabled={isPending}
-          pending={isPending}
-          aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
-        >
-          Unpair
-        </ActionButton>
-        <ActionButton
-          variant="danger"
-          size="sm"
-          onClick={() => onRevoke(peer.fingerprint)}
-          disabled={isPending}
-          pending={isPending}
-          aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
-        >
-          Revoke
-        </ActionButton>
+          {/* g4ze / g27b.19: Action footer — hairline border-t, right-aligned compact
+               buttons (not full-width — Decision 16 superseded). Unpair and Revoke are
+               two distinct-severity actions, not one destructive bar: Unpair is
+               reversible (re-pair anytime) and uses .btn--warning; Revoke immediately
+               breaks trust and keeps .btn--danger (Revoke & rotate stays inside
+               RevokeConfirmDialog). Rendered as plain buttons (not ActionButton, which
+               only knows primary/secondary/danger/danger-solid/ghost — no warning
+               variant) so ActionButton.tsx (out of this slice's scope) stays untouched. */}
+          <div className="devrow__foot">
+            <button
+              type="button"
+              className="btn btn--warning sm"
+              onClick={() => onUnpair(peer.fingerprint)}
+              disabled={isPending}
+              aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
+            >
+              <Unlink aria-hidden="true" />
+              {isPending ? "…" : "Unpair"}
+            </button>
+            <button
+              type="button"
+              className="btn btn--danger sm"
+              onClick={() => onRevoke(peer.fingerprint)}
+              disabled={isPending}
+              aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
+            >
+              <ShieldOff aria-hidden="true" />
+              {isPending ? "…" : "Revoke"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

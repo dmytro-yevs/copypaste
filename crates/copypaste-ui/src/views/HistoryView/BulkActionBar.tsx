@@ -29,9 +29,9 @@ export function BulkActionBar({
   isBusy,
 }: BulkBarProps) {
   return (
-    <div>
+    <div className="bulkbar show">
       {/* Selection count — neutral text, no amber */}
-      <span>
+      <span className="bulkbar__n">
         {count} selected
       </span>
 

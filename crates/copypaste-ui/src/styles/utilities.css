@@ -1,0 +1,15 @@
+@layer utilities {
+  /* LAYER 6 — UTILITIES. Single-purpose helpers (highest-priority authored
+     layer). Atomic text-color + margin helpers for one-off cases where a
+     semantic pattern class would be overkill. */
+  .txt-faint { color: var(--faint); }
+  .txt-dim { color: var(--dim); }
+  .txt-warn { color: var(--warn); }
+  .txt-err { color: var(--err); }
+  .mt-3 { margin-top: var(--s-3); }
+  .mt-4 { margin-top: var(--s-4); }
+  .mb-4 { margin-bottom: var(--s-4); }
+  /* Scroll-chain helpers: fill a flex parent (column) / own the vertical scroll. */
+  .fill-col { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .scroll-y { flex: 1; min-height: 0; overflow-y: auto; }
+}

@@ -14,7 +14,7 @@ export function HighlightedText({ text, positions }: { text: string; positions: 
       let j = i;
       while (j < text.length && posSet.has(j)) j++;
       nodes.push(
-        <span key={i}>
+        <span key={i} className="hl-match">
           {text.slice(i, j)}
         </span>
       );

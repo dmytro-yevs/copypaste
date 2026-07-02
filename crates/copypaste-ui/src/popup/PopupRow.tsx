@@ -1,15 +1,21 @@
 // ── PopupRow ──────────────────────────────────────────────────────────────────
-import React, { useState } from "react";
+import React, { useState, type CSSProperties } from "react";
+import { Pin } from "lucide-react";
 import type { HistoryEntry } from "../lib/ipc";
-import { isImageType, sourceAppLabel } from "../lib/ipc";
+import { isImageType } from "../lib/ipc";
 import { applySpanMasking, shouldMask } from "../lib/masking";
-import { formatRelativeTime } from "../lib/time";
 import { ImageThumb } from "../components/ImageThumb";
+import { MASKED_A11Y_LABEL } from "../lib/clip/ClipPreview";
+import { ContentTile } from "../lib/clip/ContentTile";
+import { ClipMetadata } from "../lib/clip/ClipMetadata";
+import { normalizeContentKind } from "../lib/clip/normalizeContentKind";
 import { HighlightedText } from "./HighlightedText";
 
-// Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding.
+// Popup rows mirror the History row anatomy (leading content tile + title +
+// compact metadata line: kind · time · source · device), just denser. Reserve a
+// second line of height for the metadata; image rows use imageMaxHeight + pad.
 export function popupRowHeight(isImage: boolean, textH: number, imageMaxH: number): number {
-  return isImage ? Math.max(imageMaxH + 10, 34) : Math.max(textH, 22);
+  return isImage ? Math.max(imageMaxH + 16, 46) : Math.max(textH + 16, 42);
 }
 
 export interface PopupRowProps {
@@ -44,6 +50,7 @@ export const PopupRow = React.memo(function PopupRow({
 }: PopupRowProps) {
   const isImage = isImageType(item.content_type);
   const isSensitive = item.is_sensitive;
+  const kind = normalizeContentKind(item);
 
   // Per-row reveal: user clicks the blurred text to temporarily see it.
   const [revealed, setRevealed] = useState(false);
@@ -68,116 +75,91 @@ export const PopupRow = React.memo(function PopupRow({
     canHighlight = true;
   }
 
-  // Relative time (tabular-nums)
-  const relTime = formatRelativeTime(item.wall_time, "short");
+  // M4 multi-line clamp when previewLines > 1 (mirrors HistoryRow).
+  const titleStyle: CSSProperties | undefined =
+    previewLines > 1
+      ? {
+          display: "-webkit-box",
+          WebkitLineClamp: previewLines,
+          WebkitBoxOrient: "vertical",
+          whiteSpace: "normal",
+          overflow: "hidden",
+        }
+      : undefined;
 
   return (
     <li
       id={`popup-item-${item.id}`}
       role="option"
+      className={selected ? "row sel" : "row"}
       aria-selected={selected}
+      aria-label={blurred ? MASKED_A11Y_LABEL : undefined}
       style={{
         // Functional: matches the geometry GlideHighlight reads via
         // child.offsetHeight to size/position its overlay for this row.
         minHeight: isImage ? Math.max(rowH, 50) : rowH,
-        // Functional: row content must paint above the GlideHighlight
-        // overlay (which uses zIndex 0) so text stays legible.
+        // Functional: row content must paint above the GlideHighlight overlay.
         zIndex: 1,
       }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
-      {/* Primary label / image thumb */}
-      {isImage ? (
-        <ImageThumb id={item.id} maxHeight={imageMaxHeight} />
-      ) : (
-        <span
-          style={{
-            // Functional: M4 multi-line clamp when previewLines > 1,
-            // single-line ellipsis otherwise — implements the previewLines prop.
-            ...(previewLines > 1
-              ? {
-                  display: "-webkit-box",
-                  WebkitLineClamp: previewLines,
-                  WebkitBoxOrient: "vertical" as const,
-                  overflow: "hidden",
-                }
-              : {
-                  whiteSpace: "nowrap" as const,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }),
-          }}
-        >
-          {blurred ? (
-            // Blur reveal: click temporarily shows this row's text.
-            // stopPropagation prevents triggering the row's copy-on-click.
-            <span
-              title="Click to reveal sensitive content"
-              onClick={(e) => {
-                e.stopPropagation();
-                setRevealed(true);
-              }}
-              style={{
-                // Functional: the blur filter itself is the reveal mechanic,
-                // not decoration — without it there is nothing to "reveal".
-                filter: "blur(5px)",
-              }}
-            >
-              {label}
-            </span>
-          ) : canHighlight && matchPositions.length > 0 ? (
-            <HighlightedText text={label} positions={matchPositions} />
-          ) : (
-            label
-          )}
-        </span>
-      )}
+      {/* Leading content-type tile (glyph, colour swatch, or image thumb). */}
+      <ContentTile
+        kind={kind}
+        colorValue={kind === "color" && !isSensitive ? item.preview : undefined}
+        thumb={isImage ? <ImageThumb id={item.id} maxHeight={imageMaxHeight} /> : undefined}
+      />
 
-      {/* Source-app icon + label chip — subtle, right of preview text */}
-      {item.app_bundle_id && (() => {
-        const appLabel = sourceAppLabel(item.app_bundle_id);
-        return appLabel ? (
-          <span title={item.app_bundle_id ?? undefined}>
-            {appLabel}
-          </span>
-        ) : null;
-      })()}
-
-      {/* Right cluster */}
-      <div>
-        {/* Relative time */}
-        <span>
-          {relTime}
-        </span>
-
-        {/* Pin/unpin button. */}
-        <div>
-          {/* Hover pin/unpin button — sits above the at-rest indicator. */}
-          <button
-            type="button"
-            aria-label={item.pinned ? "Unpin" : "Pin"}
-            title={item.pinned ? "Unpin" : "Pin"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onPin();
-            }}
-          />
-        </div>
-
-        {/* ⌘1-9 keycap (first 9 rows, no active query) */}
-        {showKeycap && (
-          <span>
-            ⌘{index + 1}
+      <div className="row__body">
+        {/* Title (image rows show only the tile + metadata). */}
+        {!isImage && (
+          <span className="row__title" style={titleStyle}>
+            {blurred ? (
+              // X6 masking: real text blurred + aria-hidden; click reveals.
+              <span
+                className="mask"
+                aria-hidden="true"
+                title="Click to reveal sensitive content"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRevealed(true);
+                }}
+              >
+                {label}
+              </span>
+            ) : canHighlight && matchPositions.length > 0 ? (
+              <HighlightedText text={label} positions={matchPositions} />
+            ) : (
+              label
+            )}
           </span>
         )}
+
+        {/* Compact metadata: kind · time · source app · device. */}
+        <ClipMetadata entry={item} ownDeviceId={undefined} />
+      </div>
+
+      {/* Right cluster: pin + ⌘-keycap. */}
+      <div className="row__right">
+        <button
+          type="button"
+          className={item.pinned ? "iconbtn star-btn on" : "iconbtn star-btn"}
+          aria-label={item.pinned ? "Unpin" : "Pin"}
+          title={item.pinned ? "Unpin" : "Pin"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPin();
+          }}
+        >
+          <Pin aria-hidden="true" />
+        </button>
+        {showKeycap && <span className="kbd">⌘{index + 1}</span>}
       </div>
     </li>
   );
 // Custom comparator: skip re-render when item data, display settings, and
-// selection state are all unchanged. Handler function references are ignored —
-// they are per-item closures whose effective inputs (item.id, item.pinned, idx)
-// are already covered by the structural checks below.
+// selection state are all unchanged.
 }, (prev, next) => {
   if (prev.item.id !== next.item.id) return false;
   if (prev.item.preview !== next.item.preview) return false;
@@ -193,8 +175,6 @@ export const PopupRow = React.memo(function PopupRow({
   if (prev.maskSensitive !== next.maskSensitive) return false;
   if (prev.previewLines !== next.previewLines) return false;
   if (prev.showKeycap !== next.showKeycap) return false;
-  // matchPositions: compare by length + first element as a cheap heuristic
-  // (positions only change when the query changes, which also changes item order).
   if (prev.matchPositions.length !== next.matchPositions.length) return false;
   if (prev.matchPositions[0] !== next.matchPositions[0]) return false;
   return true;

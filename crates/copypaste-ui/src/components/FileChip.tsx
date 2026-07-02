@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { api } from "../lib/ipc";
 // bdac.20: ActionButton for consistent secondary variant styling.
 import { ActionButton } from "./ActionButton";
@@ -141,8 +141,8 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
 
   return (
     <span ref={mountedRefCallback}>
-      {/* Filename + optional size */}
-      <span>
+      {/* Filename + optional size — file identity chip. */}
+      <span className="chip chip--ct" style={{ "--ct": "var(--c-file)" } as CSSProperties}>
         <span title={filename}>
           {filename}
         </span>
@@ -155,14 +155,14 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
 
       {/* Error message when Save As or Open fails */}
       {saveError !== null && (
-        <span>{saveError}</span>
+        <span className="field-note field-note--err">{saveError}</span>
       )}
       {openError !== null && (
-        <span>{openError}</span>
+        <span className="field-note field-note--err">{openError}</span>
       )}
 
       {/* Action buttons — bdac.20: ActionButton for consistent radius, focus ring, and disabled opacity. */}
-      <span>
+      <span className="ctl ctl--tight">
         {/* Open — write to temp file and open with OS default app (no save dialog) */}
         <ActionButton
           variant="secondary"

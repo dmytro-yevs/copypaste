@@ -1,5 +1,8 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { AlertTriangle, ServerCrash, X } from "lucide-react";
 import { useUI, type ViewId } from "./store";
+import { resolveView } from "./lib/resolveView";
+import { applyAppearanceToRoot } from "./lib/theme/applyTheme";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
@@ -10,8 +13,6 @@ import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPre
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
-import { AboutView } from "./views/AboutView";
-import { LogView } from "./views/LogView";
 
 // audit P1-7: the Tauri event plugin is only present inside the Tauri runtime.
 // In a plain browser / ?mock=1 harness, listen() rejects and logs a console
@@ -34,7 +35,9 @@ export function ViewTransitionWrapper({
   children: ReactNode;
 }) {
   return (
-    <div data-testid="view-transition">
+    // display:contents so this wrapper doesn't break the flex height-chain
+    // between .view-host and the ViewShell .view (scroll regions need it).
+    <div data-testid="view-transition" style={{ display: "contents" }}>
       {children}
     </div>
   );
@@ -63,14 +66,47 @@ const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
   history: { Component: HistoryView, label: "History" },
   devices: { Component: DevicesView, label: "Devices" },
   settings: { Component: SettingsView, label: "Settings" },
-  about: { Component: AboutView, label: "About" },
-  logs: { Component: LogView, label: "Logs" },
 };
 
+// Dev-only component gallery activation (design.md Decision 6). NOT a production
+// ViewId and NOT in the store — a `?view=gallery` URL check, gated by
+// import.meta.env.DEV so Vite dead-code-eliminates the dynamic import (and the
+// gallery chunk) from production builds. Open it at `?mock=1&view=gallery`.
+function galleryActive(): boolean {
+  if (!import.meta.env.DEV || typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("view") === "gallery";
+}
+
 export default function App() {
-  const view = useUI((s) => s.view);
+  // task 6.3: defensive `view` narrowing — VIEWS is a Record<ViewId, …> with no
+  // "gallery" entry, so an unnarrowed value would throw on lookup. resolveView()
+  // maps anything unrecognized (including "gallery") to "history". In-memory
+  // only — see resolveView.ts for why this is not persisted-state recovery.
+  const rawView = useUI((s) => s.view);
+  const view = resolveView(rawView);
   const setView = useUI((s) => s.setView);
   const { Component: View, label } = VIEWS[view];
+
+  // Live appearance sync (task 1.16). The pre-paint bootstrap owns FIRST paint;
+  // this re-applies theme/accent/translucency to <html> on mount and whenever a
+  // Settings change updates prefs, so the running window updates without reload.
+  const theme = useUI((s) => s.prefs.theme);
+  const accent = useUI((s) => s.prefs.accent);
+  const translucency = useUI((s) => s.prefs.translucency);
+  useEffect(() => {
+    applyAppearanceToRoot(document.documentElement, { theme, accent, translucency });
+  }, [theme, accent, translucency]);
+
+  // Dev-only gallery branch (design.md Decision 6). Dynamic-imported behind the
+  // DEV gate so it is tree-shaken from production (mirrors transport.ts's mockIpc
+  // import). The gallery lives OUTSIDE the production view registry above.
+  const galleryOn = galleryActive();
+  const [GalleryComp, setGalleryComp] = useState<ComponentType | null>(null);
+  useEffect(() => {
+    if (import.meta.env.DEV && galleryOn && GalleryComp === null) {
+      void import("./views/GalleryView").then((m) => setGalleryComp(() => m.GalleryView));
+    }
+  }, [galleryOn, GalleryComp]);
 
   // The popup window emits "open-settings" (after showing this main window) when
   // the user clicks its footer gear. Navigate to the Settings view in response.
@@ -251,43 +287,60 @@ export default function App() {
     }
   };
 
+  // Dev-only: render the gallery instead of the app when ?view=gallery is set.
+  // Guarded by import.meta.env.DEV so this whole branch (and the dynamic import
+  // above) is eliminated from production bundles.
+  if (import.meta.env.DEV && galleryOn) {
+    return GalleryComp ? <GalleryComp /> : <div className="empty">Loading gallery…</div>;
+  }
+
   return (
     <ErrorBoundary>
-      <div>
+      <div className="app">
         <Sidebar />
-        <div>
+        <div className="main">
           {daemonError !== null && (
-            <div>
-              <span>Background service error:</span>
-              <span>The background service failed to start. Please reinstall CopyPaste or restart your Mac.</span>
+            <div className="banner banner--err" role="alert">
+              <ServerCrash aria-hidden="true" />
+              <span className="banner__x">
+                <b>Background service error:</b> The background service failed to
+                start. Please reinstall CopyPaste or restart your Mac.
+              </span>
             </div>
           )}
 
           {showMismatchBanner && (
-            <div data-testid="protocol-mismatch-banner">
-              <span>
+            <div
+              className="banner banner--warn"
+              role="alert"
+              data-testid="protocol-mismatch-banner"
+            >
+              <AlertTriangle aria-hidden="true" />
+              <span className="banner__x">
                 CopyPaste app and background service are on incompatible versions
                 {protocolMismatch !== null ? ` (service protocol v${protocolMismatch})` : ""}.
                 Restart the app or the background service to resolve.
               </span>
-              <button
-                type="button"
-                onClick={() => setMismatchDismissed(true)}
-              >
-                Dismiss
-              </button>
+              <span className="banner__act">
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => setMismatchDismissed(true)}
+                ><X aria-hidden="true" />Dismiss</button>
+              </span>
             </div>
           )}
 
           {showStaleBanner && (
-            <div>
-              <span>
+            <div className="banner banner--warn" role="alert">
+              <AlertTriangle aria-hidden="true" />
+              <span className="banner__x">
                 CopyPaste was updated but an older background service is still
                 running
                 {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}.
                 Restart it to use the new version.
               </span>
-              <div>
+              <span className="banner__act">
                 <RestartDaemonButton
                   onRestarted={() => {
                     setStaleDaemon(null);
@@ -296,11 +349,10 @@ export default function App() {
                 />
                 <button
                   type="button"
+                  className="btn"
                   onClick={() => setDismissed(true)}
-                >
-                  Dismiss
-                </button>
-              </div>
+                ><X aria-hidden="true" />Dismiss</button>
+              </span>
             </div>
           )}
 
@@ -311,7 +363,7 @@ export default function App() {
             onOpenSettings={() => { void handleOpenAxSettings(); }}
           />
 
-          <main>
+          <main className="view-host">
             <CrossfadeContainer viewKey={view}>
               <ErrorBoundary label={label}>
                 {view === "devices" ? (

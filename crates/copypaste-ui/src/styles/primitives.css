@@ -1,0 +1,510 @@
+@layer primitives {
+  /* LAYER 3 — PRIMITIVES. Ported from copypaste-design-reference.html's Layer 3,
+     with every design constant expressed through a token (design.md Decision 12).
+     These are the shared visual atoms; typed React primitives (ActionButton,
+     Toggle, Dialog, …) apply these classes. Allowed button-shaped primitives per
+     design.md Decision 3: .btn family (standalone actions), .iconbtn (icon-only),
+     .chip (filter/selection) — tabs/disclosure headers are their own primitives. */
+
+  /* --- Buttons -------------------------------------------------------------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--s-3);
+    border-radius: var(--r-ctl);
+    border: var(--stroke-1) solid transparent;
+    font-weight: var(--fw-semibold);
+    font-size: var(--fs-md);
+    letter-spacing: var(--ls-tight);
+    padding: var(--pad-btn);
+    white-space: nowrap;
+    transition:
+      background var(--dur-fast) var(--ease),
+      border-color var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease),
+      transform var(--dur-fast) var(--ease);
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn svg { font-size: var(--fs-lg); }
+  .btn:disabled { opacity: 0.45; pointer-events: none; }
+  .btn.sm { padding: var(--pad-btn-sm); font-size: var(--fs-sm); gap: var(--s-2); }
+  .btn.block { width: 100%; }
+
+  .btn--primary { background: var(--accent); color: var(--on-accent); }
+  .btn--primary:hover { filter: brightness(1.08); }
+  .btn--secondary { background: var(--elevated); color: var(--text); border-color: var(--border); }
+  .btn--secondary:hover { background: var(--raised); }
+  .btn--ghost { color: var(--dim); }
+  .btn--ghost:hover { color: var(--text); background: var(--hover); }
+  .btn--danger {
+    color: var(--err);
+    border-color: color-mix(in srgb, var(--err) 40%, transparent);
+    background: color-mix(in srgb, var(--err) 9%, transparent);
+  }
+  .btn--danger:hover { background: color-mix(in srgb, var(--err) 16%, transparent); }
+  /* Solid destructive confirm (ActionButton variant="danger-solid"). --knob-fill
+     is the shared pure-white constant for text/icons on a solid colored fill. */
+  .btn--danger-solid { background: var(--err); color: var(--knob-fill); border-color: transparent; }
+  .btn--danger-solid:hover { filter: brightness(1.08); }
+
+  /* --- Icon button ---------------------------------------------------------- */
+  .iconbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--sz-iconbtn);
+    height: var(--sz-iconbtn);
+    border-radius: var(--r-ctl);
+    color: var(--dim);
+    font-size: var(--icon-md);
+    transition:
+      background var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease),
+      transform var(--dur-fast) var(--ease);
+  }
+  .iconbtn:hover { color: var(--text); background: var(--hover); }
+  .iconbtn:active { transform: scale(0.9); }
+  .iconbtn.danger:hover { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
+
+  /* --- Toggle switch -------------------------------------------------------- */
+  .toggle {
+    position: relative;
+    width: var(--sz-toggle-w);
+    height: var(--sz-toggle-h);
+    border-radius: var(--r-pill);
+    background: var(--accent);
+    flex: none;
+    transition: background var(--dur) var(--ease);
+  }
+  /* Knob is a real <span> (Toggle.tsx) — not ::after — so the React component
+     owns it. Off-state keys on aria-checked (React's source of truth) as well as
+     the .off class, so CSS never tracks state that can desync (Decision 3). */
+  .toggle > span {
+    position: absolute;
+    top: var(--s-1);
+    right: var(--s-1);
+    width: var(--sz-toggle-knob);
+    height: var(--sz-toggle-knob);
+    border-radius: 50%;
+    background: var(--knob-fill);
+    transition: all var(--dur) var(--ease);
+    box-shadow: var(--sh-knob);
+  }
+  .toggle.off,
+  .toggle[aria-checked="false"] { background: var(--raised-2); }
+  .toggle.off > span,
+  .toggle[aria-checked="false"] > span { right: auto; left: var(--s-1); background: var(--faint); }
+
+  /* --- Segmented control ---------------------------------------------------- */
+  .seg {
+    display: inline-flex;
+    background: var(--card);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-ctl);
+    padding: var(--s-1);
+    gap: var(--s-1);
+  }
+  .seg button {
+    font-size: var(--fs-smd);
+    font-weight: var(--fw-semibold);
+    letter-spacing: var(--ls-tight);
+    padding: var(--pad-seg-btn);
+    border-radius: var(--r-chip);
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    transition: all var(--dur-fast) var(--ease);
+  }
+  .seg button svg { font-size: var(--fs-base); }
+  .seg button.on { background: var(--raised); color: var(--text); }
+
+  /* --- Field (search / text input) ------------------------------------------ */
+  .field {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-field);
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-input);
+    padding: var(--pad-field);
+    transition:
+      border-color var(--dur-fast) var(--ease),
+      box-shadow var(--dur-fast) var(--ease);
+  }
+  .field:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 var(--stroke-3) color-mix(in srgb, var(--accent) 15%, transparent);
+  }
+  .field svg { font-size: var(--fs-lg); color: var(--faint); }
+  .field input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    outline: none;
+    color: var(--text);
+    font-size: var(--fs-md);
+    font-weight: var(--fw-normal);
+  }
+  .field input::placeholder { color: var(--faint); }
+
+  /* --- Chips ---------------------------------------------------------------- */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s-3);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    padding: var(--pad-chip);
+    border-radius: var(--r-pill);
+    border: var(--stroke-1) solid var(--border);
+    color: var(--dim);
+    background: var(--elevated);
+    white-space: nowrap;
+    transition: all var(--dur-fast) var(--ease);
+  }
+  .chip:hover { color: var(--text); }
+  .chip .dot { width: var(--sz-chip-dot); height: var(--sz-chip-dot); border-radius: var(--r-xs); flex: none; }
+  .chip.on { color: var(--on-accent); background: var(--accent); border-color: transparent; }
+  .chip--ct {
+    color: var(--ct);
+    border-color: color-mix(in srgb, var(--ct) 32%, transparent);
+    background: color-mix(in srgb, var(--ct) 12%, transparent);
+    font-family: var(--f-mono);
+    font-size: var(--fs-2xs);
+    text-transform: uppercase;
+    letter-spacing: var(--ls-wide);
+    font-weight: var(--fw-strong);
+  }
+
+  /* --- Transport / identity pills ------------------------------------------- */
+  .tpill {
+    font-family: var(--f-mono);
+    font-size: var(--fs-3xs);
+    font-weight: var(--fw-strong);
+    text-transform: uppercase;
+    letter-spacing: var(--ls-wider);
+    padding: var(--pad-tpill);
+    border-radius: var(--r-pill);
+    flex: none;
+  }
+  .tpill--p2p {
+    color: var(--c-url);
+    background: color-mix(in srgb, var(--c-url) 14%, transparent);
+    border: var(--stroke-1) solid color-mix(in srgb, var(--c-url) 32%, transparent);
+  }
+  .tpill--cloud {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: var(--stroke-1) solid color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+  .tpill--this {
+    color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: var(--stroke-1) solid color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+
+  /* --- Badges --------------------------------------------------------------- */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap-badge);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-medium);
+    padding: var(--pad-badge);
+    border-radius: var(--r-chip);
+  }
+  .badge--verified {
+    color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 12%, transparent);
+    border: var(--stroke-1) solid color-mix(in srgb, var(--ok) 32%, transparent);
+  }
+  .badge--verified .d { width: var(--sz-badge-dot); height: var(--sz-badge-dot); border-radius: 50%; background: var(--ok); }
+  .badge--count {
+    color: var(--faint);
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    font-family: var(--f-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* --- Content-type tile ---------------------------------------------------- */
+  .tile {
+    width: var(--sz-tile);
+    height: var(--sz-tile);
+    flex: none;
+    border-radius: var(--r-chip);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--ct, var(--c-text)) 14%, transparent);
+    font-size: var(--fs-xl);
+    color: var(--ct, var(--c-text));
+  }
+  .tile--swatch { box-shadow: inset 0 0 0 var(--stroke-1) var(--ring-inset); }
+  .tile--thumb img { display: block; max-width: 100%; border-radius: var(--r-chip); }
+  .tile--thumb {
+    width: auto;
+    height: auto;
+    min-width: var(--sz-tile);
+    max-width: 168px;
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--c-image) 45%, var(--card)),
+      color-mix(in srgb, var(--c-file) 28%, var(--card))
+    );
+    position: relative;
+    overflow: hidden;
+  }
+  .tile--thumb::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 30% 28%, var(--sheen), transparent 60%);
+  }
+
+  /* --- Presence dot --------------------------------------------------------- */
+  .dot-stat { width: var(--sz-dot); height: var(--sz-dot); border-radius: 50%; flex: none; background: var(--ok); }
+  .dot-stat.off { background: var(--err); }
+  @media (prefers-reduced-motion: no-preference) {
+    .dot-stat:not(.off) { animation: pulse 2.4s var(--ease) infinite; }
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); }
+    50% { box-shadow: 0 0 0 var(--s-2) transparent; }
+  }
+
+  /* --- Card / divider / spinner / keycap ------------------------------------ */
+  .card { background: var(--card); border: var(--stroke-1) solid var(--border); border-radius: var(--r-card); box-shadow: var(--sh1); }
+  .divider { height: var(--hairline); background: var(--divider); border: 0; }
+  .spinner {
+    width: var(--sz-spinner);
+    height: var(--sz-spinner);
+    border: var(--stroke-2) solid var(--raised-2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .kbd {
+    font-family: var(--f-mono);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    min-width: var(--sz-kbd);
+    height: var(--sz-kbd);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--dim);
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    border-bottom-width: var(--stroke-2);
+    border-radius: var(--r-sm);
+    padding: var(--pad-kbd);
+  }
+  .kbd svg { font-size: var(--fs-md); }
+
+  /* --- Modal (shared Dialog primitive) -------------------------------------- */
+  /* Portaled to document.body, so `position: fixed` (not the reference's
+     `absolute`, which assumed a positioned app container) covers the viewport.
+     The scrim's backdrop blur is translucency-gated (--scrim-blur, design.md B4). */
+  .scrim {
+    position: fixed;
+    inset: 0;
+    background: var(--scrim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s-9);
+    z-index: 40;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease);
+    backdrop-filter: var(--scrim-blur);
+    -webkit-backdrop-filter: var(--scrim-blur);
+  }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+  .modal {
+    background: var(--panel);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-card);
+    box-shadow: var(--sh3);
+    width: var(--modal-w);
+    max-width: 100%;
+    padding: var(--pad-modal);
+    text-align: center;
+    transform: translateY(10px) scale(0.97);
+    transition: transform var(--dur) var(--ease);
+  }
+  .scrim.open .modal { transform: none; }
+  /* Wide, left-aligned variant for preview/detail dialogs (e.g. DetailsModal). */
+  .modal--wide { width: var(--modal-w-wide); max-width: 92vw; text-align: left; padding: var(--s-8); }
+  .modal__t { font-size: var(--fs-lg); font-weight: var(--fw-strong); margin-bottom: var(--s-3); }
+  .modal__s { font-size: var(--fs-md); color: var(--dim); margin-bottom: var(--gap-modal-sub); line-height: var(--lh-normal); }
+  .modal__act { display: flex; gap: var(--s-4); }
+  .modal__act .btn { flex: 1; }
+  /* Modal header (title + close), body, monospace text, metadata footer. */
+  .modal__hd { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-5); margin-bottom: var(--s-4); }
+  .modal__hd .iconbtn { flex: none; margin: calc(-1 * var(--s-2)) calc(-1 * var(--s-2)) 0 0; }
+  .modal__pre {
+    font-family: var(--f-mono);
+    font-size: var(--fs-md);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 50vh;
+    overflow: auto;
+    color: var(--text);
+    margin: 0;
+  }
+  .modal__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-4);
+    margin-top: var(--s-5);
+    padding-top: var(--s-4);
+    border-top: var(--stroke-1) solid var(--divider);
+    font-size: var(--fs-sm);
+    color: var(--faint);
+  }
+  .modal__meta > span:not(:last-child)::after { content: "·"; margin-left: var(--s-4); color: var(--faint); }
+
+  /* --- Range slider + growable field (slice 5 cleanup) ---------------------- */
+  .field--grow { flex: 1; max-width: 320px; }
+
+  /* CopyPaste-g27b.21: one themed range-slider look shared by every settings
+     slider. SliderRow.tsx sets `--range-fill` inline as a "N%" string derived
+     from (value-min)/(max-min); the gradients below use it to paint an
+     accent-colored filled segment up to the thumb and an unfilled remainder
+     in --border. This is a robust, cross-engine substitute for relying on
+     `accent-color` alone (which only reliably tints the thumb, not a filled
+     track, and paints inconsistently between engines) — accent-color is kept
+     as a same-hue fallback. --range-track-h / --range-thumb-sz are local
+     component metrics (not on the shared token scale) so the track/thumb
+     geometry used by the base element and every vendor pseudo-element below
+     stays in one place.
+     Native tick marks (`list=`/`<datalist>`) are intentionally not wired by
+     SliderRow — see that file's header — so no CSS is needed here to make
+     ticks "uniform"; every slider is simply tick-free. */
+  .range {
+    /* Hit-area height stays thumb-sized (comfortable click/drag target); the
+       *visual* track is the thin, rounded bar painted by the vendor track
+       pseudo-elements below (and, as a Firefox base-element fallback, here). */
+    --range-track-h: var(--stroke-3);
+    --range-thumb-sz: var(--icon-md);
+    flex: 1;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    height: var(--range-thumb-sz);
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+    outline: none;
+    /* Firefox base-element fallback: the same filled gradient the WebKit
+       ::-webkit-slider-runnable-track and ::-moz-range-track rules use, in
+       case an engine paints the element's own background under the thumb. */
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--range-fill, 0%),
+      var(--border) var(--range-fill, 0%),
+      var(--border) 100%
+    );
+    background-size: 100% var(--range-track-h);
+    background-position: center;
+    background-repeat: no-repeat;
+    border-radius: var(--r-pill);
+  }
+  .range:disabled { cursor: not-allowed; opacity: .5; }
+  .range::-webkit-slider-runnable-track {
+    width: 100%;
+    height: var(--range-track-h);
+    border-radius: var(--r-pill);
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--range-fill, 0%),
+      var(--border) var(--range-fill, 0%),
+      var(--border) 100%
+    );
+  }
+  .range::-moz-range-track {
+    width: 100%;
+    height: var(--range-track-h);
+    border: none;
+    border-radius: var(--r-pill);
+    background: linear-gradient(
+      to right,
+      var(--accent) 0%,
+      var(--accent) var(--range-fill, 0%),
+      var(--border) var(--range-fill, 0%),
+      var(--border) 100%
+    );
+  }
+  .range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: var(--range-thumb-sz);
+    height: var(--range-thumb-sz);
+    margin-top: calc((var(--range-track-h) - var(--range-thumb-sz)) / 2);
+    border-radius: var(--r-sm);
+    background: var(--accent);
+    border: var(--stroke-2) solid var(--knob-fill);
+    box-shadow: var(--sh-knob);
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  .range::-moz-range-thumb {
+    box-sizing: border-box;
+    width: var(--range-thumb-sz);
+    height: var(--range-thumb-sz);
+    border-radius: var(--r-sm);
+    background: var(--accent);
+    border: var(--stroke-2) solid var(--knob-fill);
+    box-shadow: var(--sh-knob);
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  /* Kept as separate rules (not comma-grouped): a selector list containing an
+     unsupported vendor pseudo-element can invalidate the whole rule in some
+     engines, so ::-webkit-* and ::-moz-* rules never share a selector list. */
+  .range:hover:not(:disabled)::-webkit-slider-thumb { transform: scale(1.08); }
+  .range:hover:not(:disabled)::-moz-range-thumb { transform: scale(1.08); }
+  .range:focus-visible::-webkit-slider-thumb {
+    outline: var(--focus-ring-width) solid var(--accent);
+    outline-offset: var(--focus-ring-offset);
+  }
+  .range:focus-visible::-moz-range-thumb {
+    outline: var(--focus-ring-width) solid var(--accent);
+    outline-offset: var(--focus-ring-offset);
+  }
+  /* Strip Firefox's dotted inner focus ring so only the ring above shows. */
+  .range::-moz-focus-outer { border: 0; }
+
+  .range__value {
+    min-width: 80px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-sm);
+    color: var(--dim);
+    flex: none;
+  }
+
+  /* Native <select> control (e.g. History device filter) — themed to match .field. */
+  .select {
+    appearance: none;
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-input);
+    color: var(--text);
+    font-size: var(--fs-125);
+    padding: var(--pad-field);
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease);
+  }
+  .select:hover { border-color: var(--border-strong, var(--border)); }
+  .select:focus-visible { border-color: var(--accent); outline: none; }
+}

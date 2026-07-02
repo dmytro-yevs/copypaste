@@ -1,0 +1,30 @@
+schema: spec-driven
+
+context: |
+  Project: CopyPaste — cross-platform clipboard manager (Rust workspace + Tauri 2 desktop UI).
+  UI crate: crates/copypaste-ui — React 19 + TypeScript + Vite 7. Two windows: main
+  (index.html: Sidebar + views History/Devices/Settings/About/Logs) and quick-paste
+  popup (popup.html). Styling is plain CSS via src/index.css imported by both windows;
+  NO Tailwind. The UI was just BARE-STRIPPED (CopyPaste-3sys): components are now bare
+  semantic HTML with zero className/inline-style and no icons — a clean canvas.
+  Browser preview infra exists (CopyPaste-fm0s): run the real app in a browser at
+  localhost:1420 with ?mock=1 (mock data, no daemon) or ?bridge=1 (live daemon).
+  Design source of truth: copypaste-design-reference.html (token-driven design system:
+  theme dark/light + 6 accents, ITCSS-style layers) plus docs/design/STYLEGUIDE.md and
+  docs/design/DESIGN-SYSTEM-v2.md.
+  QUALITY BAR (non-negotiable, user directive): maximally professional; token-driven with
+  ZERO magic numbers/hardcoded colors (all via CSS vars); DRY — any element repeating >=2x
+  MUST be a single reusable component; a11y preserved (role/id/aria + WCAG contrast);
+  cover EVERY surface (main + popup + all views); a REQUIRED deliverable is a ready preview
+  gallery rendering ALL components in the new design, viewable via the ?mock=1 browser infra.
+  Conventional Commits; commit scopes include `app` for the UI.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours

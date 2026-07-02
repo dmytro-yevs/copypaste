@@ -11,6 +11,7 @@
  * every 3 s while the banner is visible.
  */
 import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Settings, X } from "lucide-react";
 
 interface AccessibilityBannerProps {
   /** True once checkAccessibilityPermission() returned true. */
@@ -78,11 +79,18 @@ export function AccessibilityBanner({
         role="status"
         aria-live="polite"
         data-testid="granted-banner"
+        // 5917.103: fade-out phase flag preserved as a data hook for the redesign
+        // to animate the transient-confirmation cue (styling was stripped; logic kept).
+        data-fading={grantedFading}
         // Inform assistive tech that the confirmation will disappear shortly.
         aria-label="Accessibility permission granted — closing shortly"
+        className="banner banner--ok"
       >
+        <CheckCircle2 aria-hidden="true" />
         {/* xn95: positive confirmation so the user sees their action succeeded. */}
-        Accessibility permission granted — global paste shortcut and hotkey capture are active.
+        <span className="banner__x">
+          Accessibility permission granted — global paste shortcut and hotkey capture are active.
+        </span>
       </div>
     );
   }
@@ -98,20 +106,25 @@ export function AccessibilityBanner({
       // confirmation above; warning state is urgent enough to interrupt.
       role="alert"
       aria-live="assertive"
+      className="banner banner--warn"
     >
-      <span>
+      <AlertTriangle aria-hidden="true" />
+      <span className="banner__x">
         Accessibility permission is required for the global paste shortcut
         and hotkey capture. Grant it in System Settings to enable these
         features.
       </span>
-      <div>
-        <button type="button" onClick={onOpenSettings}>
+      {/* Dismissible: renders a Dismiss .btn (design.md Decision 13/X5). */}
+      <span className="banner__act">
+        <button type="button" className="btn btn--secondary" onClick={onOpenSettings}>
+          <Settings aria-hidden="true" />
           Open Settings
         </button>
-        <button type="button" onClick={onDismiss}>
+        <button type="button" className="btn" onClick={onDismiss}>
+          <X aria-hidden="true" />
           Dismiss
         </button>
-      </div>
+      </span>
     </div>
   );
 }

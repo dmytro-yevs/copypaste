@@ -1,0 +1,24 @@
+@layer reset {
+  /* LAYER 0 — RESET. Box model + zeroed margins/padding. Element-level type
+     defaults live in the base layer. */
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    overflow-x: clip;
+  }
+  /* Bounded viewport height so internal scroll regions (virtualized history,
+     settings body, logs) resolve `flex:1`/`height:100%` against a real height
+     instead of collapsing and letting the whole body scroll. */
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    overflow: hidden;
+  }
+}

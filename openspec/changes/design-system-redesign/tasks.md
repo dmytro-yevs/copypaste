@@ -1,0 +1,420 @@
+Six build-independent delivery slices (design.md Decision 1). Each slice is expected to compile,
+pass its own tests, and leave the app in a usable state before the next slice starts. Slice
+boundaries match the `design-tokens` / `component-library` / `preview-gallery` capability specs.
+
+## Slice 1 — Tokens, cascade layers, pre-paint bootstrap, `UIPrefs` additive fields
+
+- [x] 1.1 Create `crates/copypaste-ui/src/styles/reset.css`, `tokens.css`, `base.css`,
+      `primitives.css`, `patterns.css`, `shell.css`, `utilities.css` (empty placeholders except
+      `reset`/`tokens`/`base`, filled in later slices) and `src/styles/index.css` that `@import`s
+      them in order and declares `@layer reset, tokens, base, primitives, patterns, shell,
+      utilities;` up front (design.md Decision 2).
+- [x] 1.2 Populate `tokens.css`'s `@layer tokens` with the `:root`/`:root[data-theme="dark"]`/
+      `:root[data-theme="light"]` blocks copied from `copypaste-design-reference.html` (surfaces,
+      lines, text, overlays, status tokens), plus every selector duplicated under
+      `.theme-scope[data-theme="…"]` so the gallery's scoped wrapper (slice 6) resolves the same
+      tokens without mutating `<html>` (design.md Decision 7 gallery isolation).
+- [x] 1.3 Add the 6 `:root[data-accent="…"]` / `.theme-scope[data-accent="…"]` blocks plus the
+      light-theme accent-value overrides, verbatim from the reference file.
+- [x] 1.4 Add a `data-translucency="on"|"off"` axis: on `.theme-scope`/`:root`, a `--scrim`/frost
+      recipe applied only to chrome surfaces (sidebar, popup container, modal scrim, toast, tab
+      bar) via `backdrop-filter`; content surfaces (cards, rows, fields) always solid; `off` (or
+      `backdrop-filter` unsupported, or `prefers-reduced-transparency: reduce` where the WebView
+      supports that media feature) falls back to fully solid tokens for the chrome surfaces too.
+- [x] 1.5 Add content-type tokens (`--c-text`, `--c-url`, `--c-mail`, `--c-num`, `--c-code`,
+      `--c-json`, `--c-color`, `--c-file`, `--c-image`, `--c-secret`) for both themes.
+- [x] 1.6 Add spacing (`--s-1`…`--s-9`), radius (`--r-chip/pill/ctl/input/card/window`), shadow
+      (`--sh1/2/3`, themed), typography (font stack(s), weight scale, line-height scale,
+      letter-spacing scale — design.md Decision 12/S5), and motion (`--dur-fast`/`--dur`/
+      `--dur-theme`/`--ease`) tokens, plus explicit tokens for focus-ring width/offset
+      (`--focus-ring-width`, `--focus-ring-offset`), hairline width (`--hairline`), icon sizes
+      (`--icon-sm/md/lg`), and control heights (`--ctl-h-sm/md/lg`) — design.md Decision 12 (S1).
+      Include the `@media (prefers-reduced-motion: reduce)` override collapsing `--dur*` to `0ms`.
+- [x] 1.7 Add layout-constraint tokens/documentation: minimum main-window dimensions, popup
+      width, and a note on long/localized-text handling (design.md Decision 12/S5).
+- [x] 1.8 Add a script/test asserting **exact name-and-value parity** between
+      `copypaste-design-reference.html`'s token block and `tokens.css` (design.md Decision 11) —
+      not a name-only diff.
+- [x] 1.9 Add the `2-base` layer (`@layer base`) — box-sizing reset, body/svg/button/input/link/
+      focus-visible/selection/scrollbar base rules — from the reference file's Layer 2.
+- [x] 1.10 In `crates/copypaste-ui/src/store.ts`: add `theme: "dark" | "light"`,
+      `accent: "indigo" | "blue" | "teal" | "green" | "amber" | "rose"`, and
+      `translucency: boolean` to `UIPrefs` as **additive fields** on the current key
+      `copypaste-ui-prefs-v4` — NO version bump, NO migration chain, NO dual-write, NO downgrade
+      handling (design.md Decision 10; back-compat out of scope). The existing
+      `{ ...DEFAULT_PREFS, ...parsed }` merge supplies the new fields' defaults for older blobs.
+      Do NOT add a `"gallery"` member to the store's `view` type — `view` stays the production union
+      and is in-memory only (NOT persisted). The gallery is a dev-only navigation branch handled
+      outside the production view registry (design.md Decision 6/B3); no `DevViewId` in the store.
+- [x] 1.10a REMOVE the existing legacy prefs migration branches in `store.ts` (reads of
+      `copypaste-ui-prefs-v3`/`v2`/`v1` that forward to v4) as an EXPLICIT part of the no-back-compat
+      policy (design.md Decision 10/round-5 B2). **Accepted, documented impact:** a user whose prefs
+      are still under an old v1–v3 key (never re-saved under v4) loses ALL UI prefs (not only
+      appearance) → reset to defaults. This is intentional cleanup — do it deliberately, not by
+      inference. The `v4` key remains the single current key.
+- [x] 1.11 Add per-field runtime validation to the loader (design.md Decision 10): `theme`
+      must be `"dark"`/`"light"` else default; `accent` must be one of the 6 known values else
+      default; `translucency` must be `boolean` else default `true`; an invalid field never
+      discards other valid fields. Log a console warning whenever a validation-fallback path is
+      taken.
+- [x] 1.12 Add validation tests (NO migration tests — there is no migration): malformed JSON →
+      full `DEFAULT_PREFS`; unknown keys dropped; each new field individually invalid → that field
+      defaults while other valid fields are kept; a blob predating the fields → fields default in;
+      normal reload round-trips (design.md Decision 10).
+- [x] 1.13 Add the pre-paint theme bootstrap as an **EXTERNAL same-origin classic script**
+      (NOT inline — the CSP is `script-src 'self'`, which blocks inline; design.md Decision 4/B1).
+      Author it at `crates/copypaste-ui/public/theme-bootstrap.js` (Vite emits `public/` verbatim to
+      a stable un-hashed path) and reference it from both `index.html` and `popup.html` with a
+      `<script src="./theme-bootstrap.js"></script>` placed BEFORE the module entry. Use the
+      **relative** `./theme-bootstrap.js` form (normative — one contract, not root-absolute `/`;
+      round-6 B3), which is safe under Tauri's packaged asset protocol; the packaged-Tauri smoke
+      (1.15) proves it resolves in BOTH windows. It: reads `localStorage["copypaste-ui-prefs-v4"]` defensively (try/catch,
+      missing/malformed → defaults), validates `theme`/`accent`/`translucency` independently, and
+      sets `document.documentElement.dataset.theme`/`.accent`/`.translucency` before any module script
+      runs. It contains NO `import`/`eval`/`Function` (must stay a synchronous classic asset). Delete
+      the stale `data-palette`/`data-density`/`data-motion`/`data-contrast` attributes + comment
+      trails from both HTML files.
+- [x] 1.14 Prevent bootstrap↔store DRIFT (N1): the key name (`copypaste-ui-prefs-v4`), the three
+      field defaults (`dark`/`indigo`/`true`), the allowed enum values, and the dataset mapping are
+      duplicated between `theme-bootstrap.js` and `store.ts`. Either generate `theme-bootstrap.js`
+      from a shared constants module at build time, OR add an exact parity test asserting key /
+      defaults / allowed-values / dataset-mapping match between the two. Both the bootstrap and the
+      store are tested against: malformed JSON, each field individually invalid, missing storage, and
+      a `localStorage` access exception.
+- [x] 1.15 PACKAGED-Tauri verification (not only Vite dev — B1/N2/N5): in a packaged build, confirm
+      `theme-bootstrap.js` loads under the Tauri asset protocol (URL resolution correct for both
+      windows), applies `data-theme`/`data-accent`/`data-translucency` to `<html>` BEFORE first
+      content paint, and produces NO CSP violation. This is a first-class release-gate check, not a
+      dev-only assertion. **Testable ordering mechanism (round-5 M1):** the bootstrap sets
+      `document.documentElement.dataset.themeBootstrapped = "1"` immediately; the React module
+      entry asserts that marker was ALREADY present at startup (proving script order without needing
+      pixel-level paint timing); and the packaged smoke also asserts no stale static
+      `data-palette`/`data-density`/`data-motion`/`data-contrast` attributes remain in the shipped
+      HTML.
+- [x] 1.16 In `src/App.tsx` and `src/popup/Popup.tsx` (or their `main.tsx`), add a `useEffect`
+      that re-applies `prefs.theme`/`.accent`/`.translucency` to `<html>` on mount and on change
+      (live updates after the bootstrap has already handled first paint).
+- [x] 1.17 Cross-window prefs (design.md Decision 4/A5 — required next-open, best-effort live).
+      REQUIRED (release gate, N3): verify in a PACKAGED Tauri build that after a Settings
+      theme/accent/translucency change, opening/recreating the popup shows the current values —
+      because each WebView has a separate JS runtime, "same Zustand module + same key" proves intent,
+      not cross-WebView storage semantics. If packaged next-open FAILS (separate localStorage
+      partitions), switch the popup to read prefs from an authoritative Tauri-side source (a Tauri
+      command / emitted state) instead of assuming localStorage sharing. BEST-EFFORT (SHOULD, not a
+      gate): live-update an already-open popup via a Tauri `ui-prefs-changed` event (+ `storage`
+      event where the partition is shared); if a live channel doesn't reach the popup it corrects on
+      next open.
+- [x] 1.18 Record the pre-change performance baseline AND apply the pre-approved budget policy
+      (design.md Decision 15/M2 — methodology + thresholds are fixed NOW, not chosen after the
+      result). Method: popup open→first-render latency via a `performance.now()` mark around popup
+      mount, **10 runs, warm cache, report p50 and p95**; bundle size measured as **gzip** of the
+      main and popup entry chunks. Budget (release gate, slice 6): popup-open **p95 regression ≤ max(15%, +40ms)**
+      over baseline; **CSS gzip delta ≤ 20 KB** and **JS gzip delta ≤ 30 KB** per entry. Any
+      exception must be documented and justified in the slice-6 PR (approval = reviewer sign-off).
+      Record the concrete baseline numbers alongside.
+- [x] 1.19 State the supported OS/WebView matrix (macOS 13+ / WKWebView Safari 16.2+) as a
+      non-functional requirement; confirm no `color-mix()` fallback is needed (design.md
+      Decision 14/S2).
+- [x] 1.20 Verify: `rg` the repo for `data-palette|data-skin|data-density|data-motion|
+      data-contrast` outside `docs/`/changelog and confirm zero remaining occurrences
+      (STYLEGUIDE.md §12 done-check).
+
+## Slice 2 — Typed primitives + shared Dialog/disclosure a11y foundations
+
+- [x] 2.1 Add the `@layer primitives` CSS section in `primitives.css`: `.btn` (+
+      `--primary/--secondary/--ghost/--danger`, `.sm`, `.block`, `:disabled`), `.iconbtn` (+
+      `.danger`), `.toggle` (+ `.off`), `.seg`, `.field`, `.chip` (+ `.on`, `.chip--ct`), `.tpill`
+      (+ `--p2p/--cloud/--this`), `.badge` (+ `--verified/--count`), `.tile` (+
+      `--swatch/--thumb`), `.dot-stat` (+ `.off` + pulse keyframes), `.card`, `.divider`,
+      `.spinner`, `.kbd` — using the allowed-button-primitives list from design.md Decision 3
+      (C3): `.btn` family is for standalone actions only, not tabs/icon-buttons/disclosure
+      headers/chips/row-actions, each of which is its own documented primitive.
+- [x] 2.2 Wire `ActionButton.tsx` to emit `.btn .btn--<variant>` (+ `.sm` for `size="sm"`); keep
+      all existing props/behavior unchanged.
+- [x] 2.3 Wire `Toggle.tsx` to the `.toggle`/`.off` classes and its knob `<span>`.
+- [ ] 2.4 Wire `SectionHeader.tsx`, `Panel.tsx`, `SettingsRow.tsx`, `SliderRow.tsx` to their
+      corresponding patterns (`.set-grp__h`, `.card`/panel surface, `.srow`, slider track/thumb).
+- [x] 2.5 Wire `SyncStatusChip.tsx`, `DeviceBadge.tsx`, `FileChip.tsx` to `.chip`/`.badge`/
+      `.tpill` primitives as appropriate to each one's semantics.
+- [ ] 2.6 Restore icons via `lucide-react` (the single normative icon source; inline SVG only as
+      a documented fallback when no suitable Lucide icon exists — design.md Decision "icons"/F2)
+      with explicit sizes (`--icon-sm/md/lg`) in every component touched in this section; verify
+      no `<svg>` renders without an explicit width/height.
+- [x] 2.7 Build the shared `Dialog` primitive (`src/lib/dialog/Dialog.tsx`) composing the
+      existing `useFocusTrap` hook: portal to `document.body`, `role="dialog"`/
+      `aria-modal="true"`, caller-supplied `aria-labelledby`/`aria-describedby`, initial focus +
+      focus trap + Escape + backdrop-dismiss (configurable) + focus restoration (all via
+      `useFocusTrap`, unchanged), plus new scroll-lock on the underlying view while open
+      (design.md Decision 5 — the one genuinely new behavior in this primitive).
+- [x] 2.7a Pre-migration behavior recording (round-5 M5 — fill the design.md Decision 5 matrix's
+      "verify current" cells BEFORE refactoring, so consolidation is provably behavior-preserving):
+      read each of `ConfirmModal`, `SasPairingModal`, `RevokeConfirmDialog`, `DetailsModal` and record
+      its CURRENT portal strategy, Escape handling, backdrop-dismiss policy, initial-focus target,
+      pending/async-close behavior, and any existing scroll-lock. This is a checklist artifact, not an
+      inference — the migration tasks below must preserve each recorded behavior.
+- [x] 2.8 Migrate `ConfirmModal.tsx` to compose `Dialog` (behavior-preserving refactor — its
+      existing focus-trap/portal/backdrop/Escape behavior is unchanged, only the shared wrapper
+      changes).
+- [x] 2.9 Migrate `SasPairingModal.tsx`, `RevokeConfirmDialog.tsx`, and `DetailsModal.tsx` to
+      compose `Dialog` (design.md component inventory: `B`/`P` — behavior consolidated onto the
+      shared contract).
+- [x] 2.10 Add a typed disclosure-header primitive (`aria-expanded`/`aria-controls`, no `.btn`
+      styling) for expandable rows, used by Devices in slice 4 and documented in
+      `component-library` spec (design.md Decision 3).
+- [x] 2.11 Add `.set-tab`/tab-list a11y foundations: `role="tablist"`/`role="tab"`, arrow-key
+      navigation, wired later into `TabBar.tsx` in slice 5.
+- [x] 2.12 Add Dialog a11y tests: initial focus lands on the first focusable element (or the
+      container fallback), Tab/Shift+Tab cycle correctly, Escape and backdrop-click dismiss,
+      focus restores to the trigger element on close, and scroll-lock engages/releases correctly.
+      Also assert the shared scroll-lock is **reference-counted** (two stacked dialogs; closing the
+      inner one does NOT restore body scroll while the outer is still open — design.md Decision 5/M5).
+- [x] 2.13 Land a MINIMAL dev-only gallery shell now (design.md Decision 7/S2), not deferred to
+      slice 6: the DEV+MOCK gallery route/branch (dynamic-import, dev-only nav — per 6.1/6.2) plus
+      stories for the slice-2 primitives (buttons, toggle, segmented, field, chips, Dialog) and the
+      production-exclusion chunk-graph check (6.12) wired early. Each later slice (3–5) then ADDS its
+      stories, so every component gains visual/regression coverage as it lands rather than only at
+      slice 6. Keep it intentionally minimal — deterministic rendering/inspection of the real shared
+      components, NOT a parallel browser product or Storybook replacement.
+
+## Slice 3 — History + Popup via shared clipboard-presentation units
+
+- [x] 3.1 Add `@layer patterns` CSS for `.row`/`.row__body`/`.row__title`/`.row__meta`/
+      `.row__right`, `.del`/`.star-btn`, `.chk`, `.grouphead`, `.bulkbar`, plus `filtered`/
+      `removing`/`copied`/`pinned`/`sel` state classes (expressed as `data-state`/native states
+      per design.md Decision 3/C1) and their keyframes.
+- [x] 3.2 Implement `src/lib/clip/normalizeContentKind.ts`: case/alias normalization, `kind`-wins-
+      over-`content_type` precedence (falling back to `content_type` when `kind` is absent),
+      `PATH`/`FILE`→`file` and `PHONE`/`NUMBER`→`num` mappings, `"unknown"` fallback for any
+      unrecognized or `undefined` value, and the image-MIME-with-absent-kind→`"image"` rule
+      (design.md Decision 8/A3/A4). Add unit tests: unknown string, `undefined`, a future
+      hypothetical kind, both alias pairs, and the image-MIME case.
+- [x] 3.3 Implement the typed `KIND_PRESENTATION` map (token/icon/label per normalized kind,
+      including an explicit `unknown` entry) and the shared `ContentTile`, `ClipPreview`, and
+      `ClipMetadata` components (design.md Decision 8), including the source-app fallback
+      contract: always render the generic type-glyph fallback (no daemon `source_bundle_id` yet),
+      reserve the slot's layout space unconditionally on every row, and set the accessible label
+      from the existing source-app name field (design.md Decision 8/C5).
+- [x] 3.4 Wire `HistoryRow.tsx` to `.row` + `ContentTile`/`ClipPreview`/`ClipMetadata` for all 11
+      content kinds + unknown; wire `PopupRow.tsx` to the same shared units in its condensed
+      layout — the two components remain separate layout wrappers (design.md Decision 8).
+- [x] 3.5 Wire `HistoryView.tsx`/`VirtualList.tsx` list container, search field, and filter chips
+      to `.list`/`.field`/`.filters`/`.chip`; runtime-computed item offsets stay inline
+      style/CSS-var per design.md Decision 12 (S1) — not replaced with tokens.
+- [x] 3.6 Wire `BulkActionBar.tsx` to `.bulkbar`.
+- [x] 3.7 Wire `EmptyState.tsx` to `.empty`/`.empty__ic`/`.empty__t`/`.empty__s` and verify all
+      documented History empty-state call sites (no items, no search results) render correctly.
+- [x] 3.8 Wire `DetailsModal.tsx` and `HistoryView`'s bulk-delete `ConfirmModal` usage to the
+      `Dialog`-backed `.scrim`/`.modal` pattern from slice 2.
+- [x] 3.9 Implement the sensitive-masking contract exactly per design.md Decision 9 (X6):
+      `.mask` styling occupies the real rendered width (no length masking, documented
+      trade-off); copy/paste reads from item data, never the masked DOM text; the accessible
+      name is masked (placeholder text) until revealed — this fixes the existing P0 gap where
+      the accessible name leaks plaintext while blurred; text selection stays unrestricted;
+      auto-re-mask on window blur is unchanged (`useSensitiveReveal`); add the optional
+      reveal-timeout as a new, off-by-default preference.
+- [x] 3.10 Add tests for the sensitive-masking contract: accessible name is the placeholder while
+      masked and updates to the real value on reveal; copy while masked returns the real item
+      value; window-blur re-masks (existing behavior, now regression-tested against this
+      contract); reveal-timeout preference off by default and functions when enabled.
+- [x] 3.11 Add hover-revealed row actions (pin/delete) per design.md Decision 13 (X4): visible on
+      fine-pointer `:hover` and `:focus-within`; always-visible under `(hover: none)`; replaced by
+      the checkbox in selection mode; never focusable while visually hidden.
+- [x] 3.12 Verify popup's 4 empty states (offline / starting up / no matches / nothing copied yet
+      — design.md/F4 corrected count) each render via `EmptyState`, and document whether
+      startup/offline share the same component API as the other two (they do — same `EmptyState`
+      props contract).
+- [x] 3.13 Wire `GlideHighlight.tsx`'s overlay to `--dur`/`--ease` tokens (runtime-computed
+      position stays inline style/CSS var, design.md Decision 12) and confirm it no-ops under
+      `prefers-reduced-motion: reduce`.
+- [x] 3.14 Wire `HighlightedText.tsx`'s fuzzy-match spans to the accent-tinted highlight token.
+- [x] 3.15 Add `aria-expanded`/keyboard-order regression tests for History/Popup rows per
+      design.md Decision 13 (X5): 200% zoom/text-scaling reflow, no required 2D scroll, minimum
+      target size (or documented desktop exception) for row actions.
+
+## Slice 4 — Devices
+
+- [ ] 4.1 Add `.devrow`/`.devrow__head`/`.devrow__name`/`.devrow__sum`/`.devrow__chev`/
+      `.devrow__body`/`.cfields`/`.cfield` (+ `.this`/`.open`/`.removing` states) using the
+      disclosure-header primitive from slice 2 (`aria-expanded`/`aria-controls`); document
+      `.devcard`/`.dmeta` in `component-library` spec as gallery-only (design.md Decision
+      7/15/F6) — not wired into `DevicesView` and not shipped in production CSS.
+- [ ] 4.2 Wire `DeviceCard.tsx`'s `StatusDot`, `MetaRow`, `DeviceMetaGrid`, `FingerprintRow`,
+      `ThisDeviceCard`, `PeerRow` to the `.devrow`/`.cfields` pattern.
+- [ ] 4.3 Implement the device action behavior/state table from design.md Decision 16 (C4/M7/N4)
+      exactly, grounded in the REAL three IPC actions — **Unpair** (`unpair_peer`), **Revoke**
+      (`revoke_peer`), and **Revoke & rotate key** (`revoke_and_rotate`, passphrase ≥ 8) — preserving
+      daemon semantics (do NOT redefine what they do): own device (no destructive footer); paired
+      peer online (all three available; Revoke & rotate in the Revoke dialog); paired peer offline
+      (availability UNCHANGED from today — do not newly gate on online state); discovered device
+      (none); pending action (that row's destructive actions disabled with a spinner via the existing
+      `revokeBusy`-style flag); failed action (re-enabled + uniform inline error presentation [NEW
+      visual only], no silent retry — error text/behavior from the IPC error). Only danger styling,
+      equal-width layout, and the inline error presentation are new; the action set, semantics,
+      pending flag, and offline availability are preserved. Tests assert no state renders an invalid
+      destructive action and that offline does not newly disable any action.
+- [ ] 4.4 Wire `DevicesView/index.tsx` list container, header, and "Pair device" button to
+      `.dev-head`/`.dev-hint`/`.dev-list`/`.btn--primary`.
+- [ ] 4.5 Wire `DiscoveredRow.tsx` to the same row pattern with its disabled/hint state for
+      non-pairable devices.
+- [ ] 4.6 Wire `SasPairingModal.tsx` (already `Dialog`-composed, slice 2) to `.qr`/`.sas` (SAS
+      digit pills) patterns.
+- [ ] 4.7 Wire `RevokeConfirmDialog.tsx` (already `Dialog`-composed, slice 2) with danger confirm
+      styling, naming the specific device.
+- [ ] 4.8 Wire the destructive action entry points per Decision 16 (N4/M1): **Unpair** and **Revoke**
+      as equal-width `.btn.btn--danger` row buttons, with **Revoke & rotate key** available inside the
+      Revoke dialog (`RevokeConfirmDialog`, passphrase ≥ 8) — do NOT drop the third action.
+- [ ] 4.9 Wire Devices' empty state ("No devices paired") to `.empty` with the accent-tinted icon
+      variant.
+- [ ] 4.10 Transport shown by `.tpill` chip only, never by row background/border color; add a
+      regression test.
+
+## Slice 5 — Settings + sidebar + About + Logs + banners + toast
+
+- [ ] 5.1 Add `.set-tabs`/`.set-tab`/`.set-body`/`.set-pane`/`.set-grp`/`.set-grp__h` and wire
+      `TabBar.tsx` to the tab-list a11y foundation from slice 2 (`role="tablist"`/`role="tab"`,
+      arrow-key navigation, sliding-underline indicator using measured/runtime position per
+      design.md Decision 12).
+- [ ] 5.2 Wire `SettingsRow.tsx`/`Panel.tsx` usage inside `GeneralTab.tsx`, `SyncTab.tsx`,
+      `StorageTab.tsx`, `DisplayTab.tsx`, `ShortcutsTab.tsx` to `.srow`/`.set-grp`.
+- [ ] 5.3 Rebuild the Appearance section in `DisplayTab.tsx`: Theme segmented control (`.seg`)
+      bound to `prefs.theme`, Accent swatches (`.swatches`/`.swatch`) bound to `prefs.accent`,
+      and a Translucency toggle (`.toggle`) bound to `prefs.translucency`, default on (design.md
+      Decision 4 — no remaining open question here; all three fields are normative).
+- [ ] 5.4 Wire `SliderRow.tsx` (storage limits, preview lines, image height) to the token-driven
+      slider track/thumb/tick-mark styling.
+- [ ] 5.5 Wire `ShortcutCapture.tsx` keycap rendering to `.kbd`.
+- [ ] 5.6 Wire `StatusBanners.tsx`, `CloudAccountMismatchBanner.tsx`, `LimitsMsg.tsx`,
+      `InfoPopover.tsx`, `StatusRow.tsx` to `.banner`/`.srow__s` patterns; non-dismissible
+      banners (daemon-spawn-error) render with no dismiss control, dismissible banners
+      (protocol-mismatch, stale-daemon) each render a Dismiss button.
+- [ ] 5.7 Wire the delete-all/import `ConfirmModal.tsx` usage in `SettingsView.tsx` (already
+      `Dialog`-composed, slice 2) to `.modal`.
+- [ ] 5.8 Add `@layer shell` CSS: `.sb`/`.sb__item`/`.sb__foot`, `.main`, `.vhead`/`.vtitle`/
+      `.vsub`, `.about*`, `.logs`/`.logline`/`.lvl`.
+- [ ] 5.9 Wire `Sidebar.tsx` nav items + active-item accent left-edge + footer sync chip
+      (Gallery nav item wiring happens in slice 6).
+- [ ] 5.10 Wire `AboutView.tsx` to `.about`/`.about__logo`/`.about__grid`/`.about__links`.
+- [ ] 5.11 Wire `LogView.tsx` to `.logs`/`.logline`/`.lvl` (ok/info/warn/err) with the search
+      field.
+- [ ] 5.12 Wire `App.tsx`'s daemon-error/protocol-mismatch/stale-daemon banners and
+      `AccessibilityBanner.tsx` to the shared `.banner` pattern (correct severity per banner).
+- [ ] 5.13 Wire `ErrorBoundary.tsx`'s fallback UI to `.empty`-style centered error block.
+- [ ] 5.14 Wire `ViewShell.tsx`'s draggable header region and title/actions slot.
+- [ ] 5.15 Wire `Toast.tsx` (`GlassToastItem`/`ToastContainer`) to `.toast` pattern with severity
+      dot and an `aria-live` region (design.md Decision 13/X5).
+- [ ] 5.16 Cross-window acceptance with the real Settings Appearance controls (design.md Decision
+      4/A5). REQUIRED (gate): change Theme/Accent/Translucency in Settings, then open/recreate the
+      popup and confirm it shows the current values (next-open correctness, verified in packaged
+      Tauri per 1.15/1.17). BEST-EFFORT (SHOULD, not a gate): with the popup already open, confirm it
+      updates live where the `ui-prefs-changed`/`storage` channel exists; a stale open popup that
+      corrects on next open is acceptable.
+
+## Slice 6 — Gallery + automated visual/accessibility coverage
+
+- [ ] 6.1 Add the gallery as a **dev-only navigation branch outside the production view registry**
+      (design.md Decision 6/B3): do NOT add `"gallery"` to the store's `view` type and do NOT add a
+      `DevViewId` to the store — the production `view` union and `App.tsx`'s
+      `Record<ProductionViewId, …>` stay unchanged. Gallery selection lives in a dev-only state (e.g.
+      a `DEV && MOCK`-gated local flag or a `?view=gallery` URL check), never persisted.
+- [ ] 6.2 Implement the DEV-gated dynamic import in `App.tsx`: when
+      `import.meta.env.DEV && MOCK` and the dev-only gallery branch is active,
+      `await import("./views/GalleryView")` — mirroring `lib/ipc/transport.ts`'s existing
+      `await import("../mockIpc")` pattern exactly.
+- [ ] 6.3 Defensive input narrowing (NOT persisted-state recovery — `view` is in-memory only,
+      design.md Decision 6/B3): guard against an invalid `view` value arriving from code or a
+      `?view=` URL param by treating any unknown/`"gallery"`-in-production value as `"history"`.
+      There is no persisted-`view` downgrade case to recover — do not add persistence to create one.
+- [ ] 6.4 In `Sidebar.tsx`, render the Gallery nav item only when `import.meta.env.DEV && MOCK`.
+- [ ] 6.5 Add `src/lib/fixtures/` typed fixture factories (e.g. `makeHistoryEntry`,
+      `makeDevice`) shared by both `mockIpc.ts` and the gallery, with per-story override support
+      (design.md Decision 7/G3); ensure these are DEV-only and excluded from production.
+      **Import-boundary rule (round-5 M2):** production code MUST NOT import from `src/lib/fixtures/**`
+      — only `src/lib/mockIpc.ts` and `src/views/GalleryView/**` may import it (both already DEV/MOCK
+      dynamic-import-gated). Enforce with BOTH the production chunk-graph check (6.12) AND an
+      `rg`/lint rule failing on any `src/lib/fixtures` import outside those two allowed consumers.
+- [ ] 6.6 Build gallery sections for every primitive: buttons (all variants/sizes/disabled/
+      pending), icon buttons, toggle, segmented control, field, chips/badges/pills, tiles (all 11
+      kinds + unknown) — each section with a deterministic `id` for deep-linking (design.md
+      Decision 7/G2).
+- [ ] 6.7 Build gallery sections for patterns: history row (one per content kind + unknown + one
+      long-text example), device row (own + peer, expanded + collapsed, one example per Decision
+      16 state), banners (all 4 severities), modal/confirm (via `Dialog`), empty states (all 4
+      documented variants), sidebar, settings tab/row, popup row/keycap/glide-highlight.
+- [ ] 6.8 Add debug-only forced-state attributes (`data-force-state="hover"|"active"|"focus"`)
+      with a CSS parity test confirming forced-state selectors match the real pseudo-class's
+      computed styles (design.md Decision 7/G1).
+- [ ] 6.9 Add a gallery-local theme/accent/translucency switcher using component state (never
+      `setPrefs`), rendering inside a `.theme-scope[data-theme][data-accent][data-translucency]`
+      wrapper (design.md Decision 7/A6) — not `<html>` mutation; verify leaving the gallery
+      restores the user's real persisted theme/accent/translucency.
+- [ ] 6.10 Add the compact "token/critical-component matrix" section rendering the full 12
+      theme×accent combinations only for a small critical-component subset (button, card, focus
+      ring, status banner) — not twelve full interactive app copies (design.md Decision 7/G2).
+- [ ] 6.11 Add long-text and empty-state gallery coverage per component whose layout depends on
+      content length (row titles, meta lines, device names, banner messages).
+- [ ] 6.12 Confirm the gallery module is absent from the production bundle two ways: (a) `rg` the
+      built `dist/` output for the gallery view's unique string content, and (b) inspect the
+      emitted Rollup chunk graph/manifest to confirm no production-entry-reachable chunk contains
+      the gallery module's file path (design.md Decision 6/B2) — the string check alone is not
+      sufficient. Also assert the emitted CSS topology from the ACTUAL Vite build (design.md
+      Decision 2/M6): the production main+popup entries emit **one shared project-authored CSS asset**,
+      and **no second project-authored production CSS asset exists unless justified by a documented
+      Vite/Rollup output constraint** (round-5 M3 — since CSS extraction can vary by chunking, acceptance
+      is phrased against the ACTUAL build output, not the source `@import` order); gallery-only CSS
+      appears only in the dev-gated gallery chunk, never in a production entry.
+- [ ] 6.13 Write the automated Playwright suite (design.md Decision 13/G4/G5), replacing the
+      "manual verification only" posture: main window and popup in dark and light theme; the
+      accent/on-accent contrast matrix for the critical-component subset; modal keyboard/focus
+      behavior (trap, Escape, backdrop, focus-restoration); `prefers-reduced-motion: reduce` (no
+      visible animation, covering the full enumerated scope from Decision 13/S3, not only the
+      three duration tokens); long-text overflow (ellipsis, no row-height growth); the production
+      gallery-exclusion check from 6.12; automated token-contrast checks (all 12 theme×accent
+      combinations × normal/large text/non-text UI/focus indicators/on-accent/status
+      surfaces/content-type metadata — design.md Decision 13/X1); and an accessibility scan using
+      **`@axe-core/playwright`** (added as a DEV dependency in this change — the concrete, non-optional
+      tool; design.md Decision 13/M1) run against the gallery + main/popup surfaces. The a11y gate is
+      NOT "run it if a tool happens to be installed" — the tool is specified here.
+- [ ] 6.14 Wire this suite into CI as a required gate for this change — not a stretch goal; update
+      any existing "manual spot-check" task language elsewhere in the repo's CI config/docs that
+      contradicts this.
+- [ ] 6.15 Re-measure popup open/render latency and CSS+JS bundle size against the slice-1
+      baseline (design.md Decision 15); confirm both are within the recorded acceptance
+      thresholds, or document and justify any exception.
+- [ ] 6.16 Confirm zoom/text-scaling (200%), forced-colors fallback for the focus ring, and
+      logical focus order pass across the gallery's critical-component subset (design.md
+      Decision 13/X3/X5).
+- [ ] 6.17 PACKAGED-Tauri smoke/integration checks = the **product release gate** (design.md
+      Decision 13/N5; the browser `?mock=1` Playwright suite supplements but does NOT replace this).
+      In a packaged build, verify: app startup with no CSP violation and no fatal console/runtime
+      error; preferences load and apply; correct theme/accent/translucency on BOTH the main window
+      and the popup (incl. the packaged next-open cross-window check from 1.15/1.17); popup opens and
+      renders; IPC initializes; and modal keyboard/focus behavior works in the packaged WebView
+      (where behavior can differ from Chromium). **Operationalize it (round-4 M5), don't just declare
+      it:** slice 6 adds a concrete `pnpm test:tauri-smoke` script in `crates/copypaste-ui/package.json`
+      that runs `pnpm tauri build` (or reuses the artifact), launches the packaged app, and asserts the
+      checks above (Tauri/WebDriver or launch-and-probe harness), plus a **macOS CI job** (the only
+      runner with Tauri build/entitlement capability) running it as a REQUIRED release gate. The
+      existing `scripts/smoke_test.sh` covers daemon/e2e on a release build; this new script is the
+      packaged-UI smoke. Browser Playwright (6.13/6.14) remains supplemental. **Release scope
+      (round-5 M4):** release CI for this change validates **macOS only**; any generated non-macOS
+      (Windows/Linux) Tauri UI artifacts are NOT treated as release artifacts (this change does not
+      touch packaging; the `bundle.targets: "all"` mismatch is tracked in `CopyPaste-4w1a`).
+
+## Cross-cutting cleanup (applies across slices; verify at the end of slice 6)
+
+- [ ] C.1 Audit `src/styles/*.css` for any component-specific selector that duplicates a
+      primitive instead of reusing its class (semantic DRY per design.md Decision 3) —
+      consolidate duplicates found.
+- [ ] C.2 Audit all restyled files for hardcoded hex colors, raw px shadow/radius/focus-ring
+      values, or raw ms durations outside `tokens.css`, distinguishing legitimate
+      runtime-computed geometry (allowed inline, design.md Decision 12) from design constants
+      (must be tokens) — replace any design-constant literal with a `var(--…)` reference.
+- [ ] C.3 Run the UI lint/format tooling (`npm run lint` in `crates/copypaste-ui`) and fix
+      findings.
+- [ ] C.4 Run the existing UI unit test suite (`npm test` in `crates/copypaste-ui`) and fix any
+      selector-based test breakage caused by restyling — expected to be none, verified via the
+      observable-contract acceptance criteria (design.md Decision 13/X2), not literal-attribute
+      preservation.
+- [ ] C.5 Confirm every icon in the codebase is `lucide-react` (or a documented inline-SVG
+      fallback) with explicit sizing — no unsized `<svg>` anywhere (design.md Decision "icons"/
+      F2 consistency check between proposal.md and design.md).

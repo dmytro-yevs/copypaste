@@ -23,6 +23,8 @@ export interface VirtualListProps {
   previewSize: number;
   imageMaxHeight: number;
   density: "comfortable" | "compact" | "spacious";
+  /** Preview-lines setting — grows text-row height so multi-line clamp fits. */
+  previewLines: number;
   listRef: React.RefObject<HTMLDivElement | null>;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   /**
@@ -45,6 +47,13 @@ export interface VirtualListProps {
    * selection background themselves, so this is the sole selection indicator.
    */
   glideStyle?: { top: number; height: number } | null;
+  /**
+   * CopyPaste redesign (Slice 3, 3.5): class name(s) applied to the scrollable
+   * list container (the root role="listbox" div below). The caller composes
+   * "list" / "list selecting" from its own selectionMode state — VirtualList
+   * only forwards it onto the DOM node it owns.
+   */
+  className?: string;
 }
 
 export function VirtualList({
@@ -52,12 +61,14 @@ export function VirtualList({
   previewSize,
   imageMaxHeight,
   density,
+  previewLines,
   listRef,
   onKeyDown,
   renderRow,
   onNearBottom,
   activeDescendantId,
   glideStyle,
+  className,
 }: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
@@ -67,7 +78,7 @@ export function VirtualList({
   // update scrollTop state) do NOT rebuild the full height table on every frame.
   // Only recomputed when the item list, heights, or density actually change.
   const offsets = useMemo(
-    () => buildOffsets(items.map((it) => rowHeightFor(it, previewSize, imageMaxHeight, density))),
+    () => buildOffsets(items.map((it) => rowHeightFor(it, previewSize, imageMaxHeight, density, previewLines))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       // Stable reference identity: items array changes only when content changes.
@@ -75,6 +86,7 @@ export function VirtualList({
       previewSize,
       imageMaxHeight,
       density,
+      previewLines,
     ]
   );
   const totalH = offsets[items.length] ?? 0;
@@ -131,16 +143,15 @@ export function VirtualList({
   return (
     <div
       ref={listRef}
+      // .scroll-y makes this the bounded scroll container (flex:1; min-height:0;
+      // overflow-y:auto) so the virtualizer's clientHeight/scrollTop math holds.
+      className={`${className} scroll-y`}
       role="listbox"
       aria-label="Clipboard history"
       aria-activedescendant={safeActiveDescendantId}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onScroll={handleScroll}
-      // FUNCTIONAL: height + overflowY required so the container is scrollable
-      // and listRef.clientHeight/scrollTop measurements (used by the
-      // virtualizer's offset math) are correct.
-      style={{ height: "100%", overflowY: "auto" }}
     >
       {/* Spacer establishes the full scroll height; the inner block is offset
           to where the visible window starts. FUNCTIONAL: drives the virtual

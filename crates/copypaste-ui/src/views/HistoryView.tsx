@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUpDown, FilePlus, Search, Trash2, Undo2 } from "lucide-react";
 // h97m: listen for cross-view "history-refresh" events emitted after a
 // successful backup import so HistoryView re-fetches immediately.
 import { ViewShell } from "../components/ViewShell";
@@ -213,9 +214,9 @@ export function HistoryViewInner() {
     if (!el) return;
     let top = 0;
     for (let i = 0; i < selectedIdx; i++) {
-      top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
+      top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density, previewLinesApp);
     }
-    const rowH = _rowHeightFor(filtered[selectedIdx], previewSize, imageMaxHeight, density);
+    const rowH = _rowHeightFor(filtered[selectedIdx], previewSize, imageMaxHeight, density, previewLinesApp);
     const viewTop = el.scrollTop;
     const viewBottom = viewTop + el.clientHeight;
     if (top < viewTop) {
@@ -224,7 +225,7 @@ export function HistoryViewInner() {
       el.scrollTop = top + rowH - el.clientHeight;
     }
     isKeyboardNavRef.current = false;
-  }, [selectedIdx, filtered, previewSize, imageMaxHeight, density]);
+  }, [selectedIdx, filtered, previewSize, imageMaxHeight, density, previewLinesApp]);
 
   // §8 Selection glide: update the glide layer position whenever selection or
   // filtered list changes. Computes the offset from rowHeightFor so it stays
@@ -241,9 +242,9 @@ export function HistoryViewInner() {
       if (idx < 0) { setGlideStyle(null); return; }
       let top = 0;
       for (let i = 0; i < idx; i++) {
-        top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
+        top += _rowHeightFor(filtered[i], previewSize, imageMaxHeight, density, previewLinesApp);
       }
-      const height = _rowHeightFor(filtered[idx], previewSize, imageMaxHeight, density);
+      const height = _rowHeightFor(filtered[idx], previewSize, imageMaxHeight, density, previewLinesApp);
       setGlideStyle({ top, height });
       return;
     }
@@ -254,7 +255,7 @@ export function HistoryViewInner() {
     // class (driven by the `multiSelected` prop on HistoryRow) to highlight only
     // the actually-selected rows.
     setGlideStyle(null);
-  }, [selectedId, multiSelectedIds, filtered, previewSize, imageMaxHeight, density]);
+  }, [selectedId, multiSelectedIds, filtered, previewSize, imageMaxHeight, density, previewLinesApp]);
 
   // Defined before handleKeyDown so the Enter-key path can route copies through
   // it (sound/notification fire on success via the same prefs as row-click copy).
@@ -656,24 +657,42 @@ export function HistoryViewInner() {
 
   const actions = (
     <>
-      {/* D2: hidden file input + attach button */}
+      {/* Search bar (primary; grows to fill the header via `.vhead__actions .field`) */}
+      <div className="field">
+        <Search aria-hidden="true" />
+        <input
+          ref={searchRef}
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter…"
+        />
+      </div>
+
+      {/* D2: hidden file input (triggered via the attach button below) */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
+        hidden
         onChange={(e) => void handleFileInputChange(e)}
         aria-label="Add file to clipboard history"
         tabIndex={-1}
       />
       <button
         type="button"
+        className="iconbtn"
         title="Add file to clipboard history"
         aria-label="Add file"
         onClick={() => fileInputRef.current?.click()}
-      />
+      >
+        <FilePlus aria-hidden="true" />
+      </button>
+
       {/* Device filter dropdown — only shown when more than one device is present. */}
       {knownDeviceIds.length > 1 && (
         <select
+          className="select"
           value={deviceFilter}
           onChange={(e) => setDeviceFilter(e.target.value)}
           aria-label="Filter by device"
@@ -692,10 +711,12 @@ export function HistoryViewInner() {
       {knownDeviceIds.length > 1 && (
         <button
           type="button"
+          className="btn btn--secondary sm"
           title={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           onClick={toggleSortMode}
         >
+          <ArrowUpDown aria-hidden="true" />
           {sortMode === "device" ? "By device" : "By time"}
         </button>
       )}
@@ -704,6 +725,7 @@ export function HistoryViewInner() {
           the loaded slice. Hidden until the first page resolves (totalCount null). */}
       {totalCount !== null && (
         <span
+          className="field-note"
           data-testid="history-total-badge"
           title="Total items in clipboard history"
         >
@@ -716,22 +738,13 @@ export function HistoryViewInner() {
       {totalCount !== null && totalCount > 0 && (
         <button
           type="button"
+          className="btn btn--danger sm"
           title="Clear all clipboard history"
           aria-label="Clear all"
           disabled={clearAllBusy}
           onClick={() => setClearAllConfirmOpen(true)}
-        >
-          Clear all
-        </button>
+        ><Trash2 aria-hidden="true" />Clear all</button>
       )}
-      {/* Search bar */}
-      <input
-        ref={searchRef}
-        type="search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Filter…"
-      />
     </>
   );
 
@@ -750,7 +763,6 @@ export function HistoryViewInner() {
   } else if (loadState === "offline") {
     body = (
       <EmptyState
-        icon={null}
         title="Clipboard service offline"
         body="The background service is not running."
         action={<div><RestartDaemonButton onRestarted={() => void load()} /></div>}
@@ -761,7 +773,6 @@ export function HistoryViewInner() {
     // instead of the error/degraded state. No errorDetail is ever set here.
     body = (
       <EmptyState
-        icon={null}
         title="Starting up…"
         body="The clipboard service is initialising. History will appear in a moment."
       />
@@ -789,10 +800,10 @@ export function HistoryViewInner() {
                 Clicking the button opens the modal; the modal calls handleResetConfirmed
                 only after the user explicitly confirms. */}
             <button
+              type="button"
+              className="btn btn--danger sm"
               onClick={() => setResetConfirm(true)}
-            >
-              Reset database (erases local history)
-            </button>
+            ><Trash2 aria-hidden="true" />Reset database (erases local history)</button>
           </>
         )}
         {!degraded && (
@@ -803,7 +814,6 @@ export function HistoryViewInner() {
   } else if (filtered.length === 0 && items.length === 0) {
     body = (
       <EmptyState
-        icon={null}
         title={isPrivateMode ? "Private mode is on" : "Nothing copied yet"}
         body={isPrivateMode ? "Clipboard is not recorded while private mode is active." : "Copy something and it will appear here."}
       />
@@ -811,7 +821,6 @@ export function HistoryViewInner() {
   } else if (filtered.length === 0) {
     body = (
       <EmptyState
-        icon={null}
         title={`No results for "${search}"`}
         body="Try a different search term."
       />
@@ -819,7 +828,7 @@ export function HistoryViewInner() {
   } else {
     body = (
       // Outer wrapper so the bulk bar and list share the same flex column.
-      <div>
+      <div className="fill-col">
         {/* Bulk action bar — rendered above the list when items are selected */}
         {multiSelectedIds.size > 0 && (
           <BulkActionBar
@@ -834,7 +843,7 @@ export function HistoryViewInner() {
             isBusy={bulkBusy}
           />
         )}
-        <div>
+        <div className="fill-col">
         {/* SCRH-9: Show a subtle hint when the display-limit pref caps the visible list so
             the user isn't confused about why fewer items appear than the total-count badge
             shows. The sentinel value 100000 is used for "Unlimited" in settings. */}
@@ -844,17 +853,20 @@ export function HistoryViewInner() {
           if (!isTruncated) return null;
           return (
             <div
-              className="shrink-0 border-b border-ide-divider/40 px-3 py-1 text-[11px] text-ide-faint text-center"
               aria-live="polite"
               data-testid="history-display-limit-hint"
             >
               Showing first {limit.toLocaleString()} of {filtered.length.toLocaleString()} results
               {" — "}
-              <span className="text-ide-dim">adjust the display limit in Settings › Storage</span>
+              <span>adjust the display limit in Settings › Storage</span>
             </div>
           );
         })()}
         <VirtualList
+          // CopyPaste redesign (Slice 3, 3.5): .list.selecting reveals row
+          // checkboxes and hides row actions (patterns.css) — driven by the
+          // existing selectionMode state, not a new variable.
+          className={selectionMode ? "list selecting" : "list"}
           // Cap the rendered list to the persisted display-limit preference.
           // Sentinel 100000 means "Unlimited" (effectively uncapped for any realistic history).
           // The daemon may hold more items on disk; this is a UI rendering cap only.
@@ -862,6 +874,7 @@ export function HistoryViewInner() {
           previewSize={previewSize}
           imageMaxHeight={imageMaxHeight}
           density={density}
+          previewLines={previewLinesApp}
           glideStyle={glideStyle}
           listRef={listRef}
           onKeyDown={(e) => void handleKeyDown(e)}
@@ -965,20 +978,13 @@ export function HistoryViewInner() {
         on the inner label so the Tauri drag event fires on the webview, not
         on a React element.
       */}
-      <div className="relative h-full">
+      <div className="fill-col">
         {fileDragOver && (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-ide-accent bg-ide-accent/5"
-            style={{ borderRadius: "var(--r-card)" }}
           >
-            <div className="flex flex-col items-center gap-2 text-ide-accent">
-              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              <span className="text-[13px] font-medium">Drop to add to clipboard</span>
+            <div>
+              <span>Drop to add to clipboard</span>
             </div>
           </div>
         )}
@@ -994,25 +1000,12 @@ export function HistoryViewInner() {
           // (Previously z-[9999] rendered this toast on top of everything.)
           // CopyPaste-bdac.58: padding now via Tailwind classes (pl-2.5 pr-3.5 py-1.5)
           // instead of hardcoded inline "6px 14px 6px 10px" so density tokens apply.
-          className="fixed bottom-3 left-1/2 z-40 pointer-events-auto flex items-center gap-2.5 whitespace-nowrap pl-2.5 pr-3.5 py-1.5"
           role="status"
           aria-live="polite"
-          style={{
-            transform: "translateX(-50%)",
-            borderRadius: "var(--r-card)",
-          }}
         >
           <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: "50%",
-              flexShrink: 0,
-              // uhed: spec error/destructive token (§3.6 --err = #E5645F dark / #D64545 light).
-              background: "var(--err)",
-            }}
           />
-          <span className="text-[12px] text-ide-text">
+          <span>
             Deleted &ldquo;
             {undoPending.preview.length > 40
               ? `${undoPending.preview.slice(0, 40)}…`
@@ -1020,18 +1013,10 @@ export function HistoryViewInner() {
             &rdquo;
           </span>
           <button
+            type="button"
+            className="btn btn--secondary sm"
             onClick={handleUndo}
-            className="text-[12px] font-semibold text-ide-accent"
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-              flexShrink: 0,
-            }}
-          >
-            Undo
-          </button>
+          ><Undo2 aria-hidden="true" />Undo</button>
         </div>
       )}
       {/* M10: Details modal */}

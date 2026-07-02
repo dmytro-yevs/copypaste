@@ -27,21 +27,32 @@ interface SettingsRowProps {
   fullWidth?: boolean;
 }
 
-export function SettingsRow({ title, description, info, children }: SettingsRowProps) {
+export function SettingsRow({ title, description, info, children, disabled, fullWidth }: SettingsRowProps) {
   return (
-    <div>
+    <div
+      className="srow"
+      // fullWidth: stacked layout (title on top, control below spanning full
+      // width) for wide controls that don't fit the two-column label/control
+      // layout — no dedicated contract class exists for this variant, so the
+      // stack is expressed inline (design.md's .srow is otherwise row-only).
+      style={
+        fullWidth
+          ? { flexDirection: "column", alignItems: "flex-start", justifyContent: "flex-start", gap: "var(--s-3)" }
+          : undefined
+      }
+    >
       {/* Left/top: title + optional description + optional info icon */}
-      <div>
+      <div className="srow__l" style={disabled ? { opacity: 0.5 } : undefined}>
         {/* W4-3: fixed min-width on label column prevents wrapping on narrow labels */}
         {/* bdac.104: info slot rendered inline after title — stays in label column */}
-        <div>
+        <div className="srow__title">
           <span>{title}</span>
           {info}
         </div>
-        {description && <p>{description}</p>}
+        {description && <p className="srow__s">{description}</p>}
       </div>
       {/* Right/below: control slot */}
-      <div>{children}</div>
+      <div className="srow__c" style={fullWidth ? { width: "100%" } : undefined}>{children}</div>
     </div>
   );
 }
