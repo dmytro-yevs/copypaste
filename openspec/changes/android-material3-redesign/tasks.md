@@ -229,51 +229,51 @@ slices may be N-A only with a recorded rationale.
 
 ## 5. S5 — History  → `android-history`
 
-- [ ] 5.1 Content-type tiles §3.7/§9.4: 12 kinds → 10 c-* colors (PHONE→cNum, PATH→cFile), glyph (Lucide) or swatch(COLOR)/thumb(IMAGE),
+- [x] 5.1 Content-type tiles §3.7/§9.4: 12 kinds → 10 c-* colors (PHONE→cNum, PATH→cFile), glyph (Lucide) or swatch(COLOR)/thumb(IMAGE),
       SECRET lock + c-secret. Single `chipColorFor` shared by list AND preview (kill divergence).
-- [ ] 5.2 Row §9.5 (tile, preview mono/sans per kind incl URL=mono, meta with tinted type word,
+- [x] 5.2 Row §9.5 (tile, preview mono/sans per kind incl URL=mono, meta with tinted type word,
       pin star, actions), date-group headers §9.6, device filter chips as pills, selection/multi.
-- [ ] 5.3 States: loading, populated, empty (normal/private), no-results, **error/degraded** (NEW
+- [x] 5.3 States: loading, populated, empty (normal/private), no-results, **error/degraded** (NEW
       presentation-state — S5 owns the plumbing; NO repository/IPC behaviour change).
-- [ ] 5.4 Masking in list preserved (blur (31+) / geometry-preserving opaque overlay over sanitized
+- [x] 5.4 Masking in list preserved (blur (31+) / geometry-preserving opaque overlay over sanitized
       representation (<31), `clearAndSetSemantics`); bulk-copy excludes
       sensitive; masked contentDescription never leaks. **Partial-span strategy (P0-7):** replace
       sensitive spans with a localized placeholder BEFORE building the `AnnotatedString` (or clear at
       the parent) so plaintext never enters any node; test asserts every plaintext fragment is absent
       from the COMPLETE semantics dump (merged + unmerged), not just the merged contentDescription.
-- [ ] 5.5 Previews (incl masked row) + goldens; semantics test (no plaintext).
+- [x] 5.5 Previews (incl masked row) + goldens; semantics test (no plaintext).
 
 ## 6. S6 — Full-screen preview  → `android-preview`
 
-- [ ] 6.1 Preview chrome/content/actions/gestures on tokens; content-type color = same source as list.
-- [ ] 6.2 **Introduce Reveal (NEW)**: add a Reveal action to `PreviewActionRow` and wire a `revealed`
+- [x] 6.1 Preview chrome/content/actions/gestures on tokens; content-type color = same source as list.
+- [x] 6.2 **Introduce Reveal (NEW)**: add a Reveal action to `PreviewActionRow` and wire a `revealed`
       state (keyed `remember(item.id)`) through `PreviewOverlay`/`PreviewContent`/`PreviewImageContent`,
       mirroring `HistoryRow`'s existing `revealed by remember(item.id)` pattern — today Preview has no
       Reveal control and `PreviewContent` hardcodes `revealed = false`. Also **fix masking a11y gap**:
       `clearAndSetSemantics` on masked text/image; mono per kind.
-- [ ] 6.3 States: text/url/code/json, image loading/success/failure, file meta/open/save failure,
+- [x] 6.3 States: text/url/code/json, image loading/success/failure, file meta/open/save failure,
       masked/revealed, large content. Preview masked-secrecy semantics test.
 
 ## 7. S7 — Devices  → `android-devices`
 
-- [ ] 7.1 Device card §9.7: own-device grid + paired-peer 8-field grid, natural height, labels/values
+- [x] 7.1 Device card §9.7: own-device grid + paired-peer 8-field grid, natural height, labels/values
       mono tabular; fingerprint first16…last8 **tap-to-copy** (copies full); transport/Verified/
       This-device as pills/badges §9.4; footer Unpair+Revoke danger.
-- [ ] 7.2 States: scanning, discovered, offline/reconnecting, no-peers, error; presence dot+label;
+- [x] 7.2 States: scanning, discovered, offline/reconnecting, no-peers, error; presence dot+label;
       reduced-motion presence glow; all `DevicesDialogs` states (unpair/revoke/revoke-rotate/
       revoke-error/revoke-all).
-- [ ] 7.3 PRESERVE: `detectCloudAccountMismatch` inert (`[]`, gldr); revoke ordering (audit-first);
+- [x] 7.3 PRESERVE: `detectCloudAccountMismatch` inert (`[]`, gldr); revoke ordering (audit-first);
       local-only unpair (no peer signal).
 
 ## 8. S8 — Pairing  → `android-pairing`
 
-- [ ] 8.1 QR display (`QrHelper`/`PairQrCard`, lifetime/progress/warning, blur-at-rest), scan launch,
+- [x] 8.1 QR display (`QrHelper`/`PairQrCard`, lifetime/progress/warning, blur-at-rest), scan launch,
       deep-link (`cppair://`), scan-review card (`PairedPeerList.kt`→pairing), **six-digit SAS confirm
       (Match/Doesn't-match; full fingerprint only supplemental; preserve polling/watchdog/waiting/
       terminal; no SAS/token logging)**, `PairSuccessPopup`, connecting/provisioning/errors/cancel/retry.
-- [ ] 8.2 PRESERVE: `PairActivity` unconditional `FLAG_SECURE`; IPC via `PairController`/
+- [x] 8.2 PRESERVE: `PairActivity` unconditional `FLAG_SECURE`; IPC via `PairController`/
       `PairProvisioning`/`PairBootstrapSync`; `peer_supabase_account_id=None`; revoke semantics.
-- [ ] 8.3 `PortraitCaptureActivity`: **set `FLAG_SECURE` before `super.onCreate`/preview init** (P0-1 —
+- [x] 8.3 `PortraitCaptureActivity`: **set `FLAG_SECURE` before `super.onCreate`/preview init** (P0-1 —
       the scanned peer QR is pairing material); own theme/orientation/decoder/lifecycle; ZXing preview
       visuals unskinned. Connected test asserts `FLAG_SECURE` + blocked recents for BOTH `PairActivity`
       and `PortraitCaptureActivity`.
