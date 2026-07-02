@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpDown, FilePlus, Search, Trash2, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpDown, FilePlus, Search, Trash2, Undo2 } from "lucide-react";
 // h97m: listen for cross-view "history-refresh" events emitted after a
 // successful backup import so HistoryView re-fetches immediately.
 import { ViewShell } from "../components/ViewShell";
@@ -767,14 +767,8 @@ export function HistoryViewInner() {
   let body: React.ReactNode;
 
   if (loadState === "loading") {
-    // CopyPaste-bdac.92: replaced plain text with an animated spinner consistent
-    // with DevicesView (animate-spin border ring, motion-reduce-safe). No shared
-    // Spinner component exists; inline pattern mirrors DevicesView exactly.
     body = (
-      <div>
-        <span aria-hidden="true" />
-        Loading…
-      </div>
+      <EmptyState title="Loading…" body="Fetching your clipboard history." />
     );
   } else if (loadState === "offline") {
     body = (
@@ -795,37 +789,29 @@ export function HistoryViewInner() {
     );
   } else if (loadState === "error") {
     body = (
-      <div
-        role="alert"
-        aria-live="assertive"
-      >
-        <div>
-          {degraded ? "Clipboard database can't be opened" : "Failed to load history."}
-        </div>
-        {errorDetail && (
-          <div>{errorDetail}</div>
-        )}
-        {degraded && (
-          <>
-            <div>
-              The local database could not be decrypted (its key no longer matches).
-              You can reset it to recover — this permanently erases this device's
-              clipboard history.
-            </div>
-            {/* 5j9x: replaced misclick-prone inline Yes/No with a ConfirmModal.
-                Clicking the button opens the modal; the modal calls handleResetConfirmed
-                only after the user explicitly confirms. */}
+      <EmptyState
+        icon={<AlertTriangle aria-hidden="true" />}
+        title={degraded ? "Clipboard database can't be opened" : "Failed to load history"}
+        body={
+          degraded
+            ? "The local database could not be decrypted (its key no longer matches). Reset it to recover — this permanently erases this device's clipboard history."
+            : (errorDetail ?? "The background service returned an error.")
+        }
+        action={
+          degraded ? (
+            // 5j9x: replaced misclick-prone inline Yes/No with a ConfirmModal.
+            // Clicking the button opens the modal; the modal calls handleResetConfirmed
+            // only after the user explicitly confirms.
             <button
               type="button"
               className="btn btn--danger sm"
               onClick={() => setResetConfirm(true)}
             ><Trash2 aria-hidden="true" />Reset database (erases local history)</button>
-          </>
-        )}
-        {!degraded && (
-          <RestartDaemonButton label="Restart background service" onRestarted={() => void load()} />
-        )}
-      </div>
+          ) : (
+            <RestartDaemonButton label="Restart background service" onRestarted={() => void load()} />
+          )
+        }
+      />
     );
   } else if (filtered.length === 0 && items.length === 0) {
     body = (

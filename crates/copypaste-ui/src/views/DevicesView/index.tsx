@@ -3,7 +3,7 @@
 // Extracted hooks: useOwnDevice, usePairedDevices, useDiscoveredDevices, useQrCode.
 // Default export + props unchanged; all data-testids preserved.
 import { useState, useEffect, useCallback } from "react";
-import { Briefcase, Info, QrCode, RefreshCw, Trash2, Wifi, X } from "lucide-react";
+import { Briefcase, QrCode, RefreshCw, Trash2, Wifi, X } from "lucide-react";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { Dialog } from "../../lib/dialog/Dialog";
 // 5917.19: GlassToast system — routes "Revoke all" confirmation/feedback through
@@ -179,6 +179,14 @@ function DevicesViewInner({
           other (two coexisting portals). */}
       <button
         type="button"
+        className="btn btn--primary sm"
+        onClick={() => setQrModalOpen(true)}
+      >
+        <QrCode aria-hidden="true" />
+        Pair a new device
+      </button>
+      <button
+        type="button"
         className="btn btn--danger sm"
         onClick={() => {
           setRevokePrompt(null);
@@ -280,6 +288,7 @@ function DevicesViewInner({
 
   return (
     <ViewShell title="Devices" actions={actions}>
+    <div className="dev-scroll">
       {/* ── Devices section header — with online count ──────────── */}
       {/* The online count uses the live presence store when available (updated
           ~every 5 s (idle: 30 s) by App.tsx's startPeerPresencePolling() loop);
@@ -303,13 +312,6 @@ function DevicesViewInner({
           </span>
         )}
       </div>
-
-      {/* CopyPaste-g27b.11: educates the user about the new tap-to-expand /
-          tap-to-copy interaction added by the .devrow disclosure pattern. */}
-      <p className="dev-hint">
-        <Info aria-hidden="true" />
-        Tap a device to expand · tap any value to copy
-      </p>
 
       {/* ── Single unified device list (this Mac first, then peers) ── */}
       <div className="dev-list">
@@ -422,27 +424,7 @@ function DevicesViewInner({
       {discoverError !== null && (
         <p className="field-note field-note--err dev-body">{discoverError}</p>
       )}
-
-      {/* ── Divider ── real hairline (was an empty, invisible <div/> that
-          contributed no visible separation and no reliable gap). ────────── */}
-      <div className="dev-divider" />
-
-      {/* ── Pair via QR — CopyPaste-g27b.19: the panel itself moved into a
-          modal (below); this section is now just a primary button so the
-          Devices list doesn't permanently reserve QR real-estate. ────────── */}
-      {/* zxv2: SectionHeader replaces raw <p> tag for consistency.
-          g27b.19: .dev-body inset matches every other section header/hint/list. */}
-      <div className="dev-body">
-        <SectionHeader label="Pair a new device" />
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => setQrModalOpen(true)}
-        >
-          <QrCode aria-hidden="true" />
-          Pair a new device
-        </button>
-      </div>
+    </div>
 
       {/* ── QR pairing modal — mounted only while open (CopyPaste-g27b.19).
           Contains the exact same qr-panel content/handlers/hook wiring that

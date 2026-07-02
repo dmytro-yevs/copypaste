@@ -35,8 +35,9 @@ export function RestartDaemonButton({
       setMessage("Background service restarted.");
       onRestarted?.();
     } catch (err) {
+      console.error("[RestartDaemonButton] restart failed:", err);
       setPhase("error");
-      setMessage(err instanceof Error ? err.message : "Restart failed.");
+      setMessage("Couldn't restart the background service.");
     }
   }, [onRestarted]);
 

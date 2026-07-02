@@ -391,15 +391,14 @@
   .devrow__body > div { overflow: hidden; min-height: 0; }
   .cfields {
     display: grid;
-    /* g27b.33: reflow on the grid's OWN width, not the viewport. The devices
-       panel is narrower than the viewport (sidebar), so a viewport media query
-       kept 2 columns while the panel was too narrow, cramming values (long
-       fingerprint / OS) into ~14px cells that word-break to one char per line.
-       auto-fit + minmax drops to a single column whenever a column can't hold
-       >=210px, regardless of viewport width. */
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 1px;
-    padding: 5px 8px 4px;
+    /* Equal columns that FILL the full card width (auto-fit + 1fr stretches the
+       tracks), ~4-5 across on a wide window and dropping responsively as the
+       panel narrows. The column min is max(150px, 19%) so it targets ~5 columns
+       on a wide card yet never squeezes below a 150px floor on a narrow one;
+       auto-fit reflows on the grid's OWN width, not the viewport (g27b.33). */
+    grid-template-columns: repeat(auto-fit, minmax(max(150px, 19%), 1fr));
+    gap: 8px 22px;
+    padding: 12px 16px 14px;
     border-top: var(--stroke-1) solid var(--divider);
   }
   .cfield {
@@ -422,8 +421,13 @@
     color: var(--text);
     font-family: var(--f-mono);
     font-variant-numeric: tabular-nums;
-    word-break: break-all;
+    /* Wrap on word boundaries, not mid-word (break-all turned "16-inch (2023)"
+       into "16 / -inch" and a timestamp into "11:4 / 2:38 PM"). anywhere still
+       lets an unbreakable long token wrap rather than overflow the cell. */
+    word-break: normal;
+    overflow-wrap: anywhere;
     flex: 1;
+    min-width: 0;
   }
   /* g27b.19: right-aligned, compact (no flex:1) — Unpair/Revoke read as two
      distinct, differently-severe actions rather than one giant equal-width bar. */
@@ -494,27 +498,36 @@
   .banner b { color: var(--text); }
 
   /* --- Toast (slice 5) — aria-live status pill ------------------------------ */
+  /* A proper themed surface (elevated card + border + shadow), NOT an inverted
+     stark-white/black pill. Enters with a slide-up + fade every time it mounts
+     (toasts render already-`.show`, so the entrance is an animation, not a
+     transition from a never-painted hidden state). */
   .toast {
-    position: absolute;
-    bottom: 18px;
+    position: fixed;
+    bottom: 22px;
     left: 50%;
-    transform: translateX(-50%) translateY(12px);
-    background: var(--text);
-    color: var(--bg);
+    transform: translateX(-50%);
+    background: var(--chrome-bg, var(--elevated));
+    -webkit-backdrop-filter: var(--frost-filter);
+    backdrop-filter: var(--frost-filter);
+    color: var(--text);
+    border: var(--stroke-1) solid var(--border);
     font-size: var(--fs-125);
     font-weight: var(--fw-semibold);
-    padding: 8px 15px;
+    padding: 9px 14px;
     border-radius: var(--r-pill);
-    box-shadow: var(--sh2);
-    opacity: 0;
-    pointer-events: none;
+    box-shadow: var(--sh3);
+    pointer-events: auto;
     z-index: 60;
     display: flex;
     align-items: center;
-    gap: var(--s-3);
-    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+    gap: var(--s-4);
+    animation: toastIn var(--dur) var(--ease);
   }
-  .toast.show { opacity: 1; transform: translateX(-50%); }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(14px); }
+    to { opacity: 1; transform: translateX(-50%); }
+  }
   .toast svg { font-size: var(--fs-base); }
 
   /* --- Form controls & inline messages (slice 5 cleanup) -------------------- */

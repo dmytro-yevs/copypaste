@@ -61,7 +61,7 @@ export const PopupRow = React.memo(function PopupRow({
   let label: string;
   let canHighlight = false;
   if (isImage) {
-    label = "[Image]";
+    label = "Image";
   } else if (isSensitive) {
     // Use actual preview text so the blur reveals real content on click.
     label = item.preview.replace(/\s+/g, " ").trim() || "••••••••";
@@ -121,29 +121,31 @@ export const PopupRow = React.memo(function PopupRow({
       />
 
       <div className="row__body">
-        {/* Title (image rows show only the tile + metadata). */}
-        {!isImage && (
-          <span className="row__title" style={titleStyle}>
-            {blurred ? (
-              // X6 masking: real text blurred + aria-hidden; click reveals.
-              <span
-                className="mask"
-                aria-hidden="true"
-                title="Click to reveal sensitive content"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setRevealed(true);
-                }}
-              >
-                {label}
-              </span>
-            ) : canHighlight && matchPositions.length > 0 ? (
-              <HighlightedText text={label} positions={matchPositions} />
-            ) : (
-              label
-            )}
-          </span>
-        )}
+        {/* Title — image rows get a plain "Image" label (no masking/highlight,
+            which only ever apply to text content); text/sensitive rows keep
+            the existing blur-reveal / search-highlight behavior. */}
+        <span className="row__title" style={titleStyle}>
+          {isImage ? (
+            label
+          ) : blurred ? (
+            // X6 masking: real text blurred + aria-hidden; click reveals.
+            <span
+              className="mask"
+              aria-hidden="true"
+              title="Click to reveal sensitive content"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRevealed(true);
+              }}
+            >
+              {label}
+            </span>
+          ) : canHighlight && matchPositions.length > 0 ? (
+            <HighlightedText text={label} positions={matchPositions} />
+          ) : (
+            label
+          )}
+        </span>
 
         {/* Compact metadata: kind · time · source app · device. */}
         <ClipMetadata entry={item} ownDeviceId={undefined} />

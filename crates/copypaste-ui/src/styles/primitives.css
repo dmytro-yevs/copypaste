@@ -524,6 +524,26 @@
   /* Strip Firefox's dotted inner focus ring so only the ring above shows. */
   .range::-moz-focus-outer { border: 0; }
 
+  /* Slider wrapper + visible step "stops" (SliderRow.tsx renders the ticks when
+     a step count is passed). The ruler sits just beneath the track, inset by half
+     a thumb width on each side so the first/last tick line up with the thumb's
+     extreme centre positions. Filled ticks (up to the current value) take the
+     accent colour; the rest stay muted. */
+  .range-wrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+  .range-wrap .range { flex: 1; }
+  .range-wrap--ticked { padding-bottom: 9px; }
+  .range-ticks {
+    position: absolute;
+    left: calc(var(--range-thumb-sz, 16px) / 2);
+    right: calc(var(--range-thumb-sz, 16px) / 2);
+    bottom: 0;
+    display: flex;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .range-ticks span { width: 2px; height: 6px; border-radius: 1px; background: var(--mute); transition: background var(--dur-fast) var(--ease); }
+  .range-ticks span.on { background: var(--accent); }
+
   .range__value {
     min-width: 80px;
     text-align: right;

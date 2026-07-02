@@ -38,13 +38,14 @@ export function StatusBanners({
         </div>
       )}
 
-      {/* Not-ready banner (daemon alive but still initialising) — informational. */}
+      {/* Not-ready banner (daemon alive but still initialising) — informational.
+          #21: single action (Retry), sized sm to match the other banners. */}
       {notReady && (
         <div role="status" className="banner banner--info">
           <Info aria-hidden="true" />
           <span className="banner__x">Clipboard service is starting up — settings will be available in a moment.</span>
           <span className="banner__act">
-            <button type="button" className="btn btn--secondary" onClick={onRetry}>
+            <button type="button" className="btn btn--secondary sm" onClick={onRetry}>
               <RotateCcw aria-hidden="true" />
               Retry
             </button>
@@ -53,25 +54,22 @@ export function StatusBanners({
       )}
 
       {/* Offline banner — sticky so it stays visible when the user scrolls past it,
-          providing context for why all controls are disabled (bdac.12). */}
+          providing context for why all controls are disabled (bdac.12).
+          #21: single recovery action — RestartDaemonButton only. */}
       {loadState === "offline" && (
         <div role="alert" className="banner banner--err">
           <XCircle aria-hidden="true" />
           <span className="banner__x">Background service not running — clipboard sync paused.</span>
           <span className="banner__act">
             <RestartDaemonButton
-              label="Restart"
+              label="Restart service"
               onRestarted={onRetry}
             />
-            <button type="button" className="btn btn--secondary" onClick={onRetry}>
-              <RotateCcw aria-hidden="true" />
-              Retry
-            </button>
           </span>
         </div>
       )}
 
-      {/* Degraded banner */}
+      {/* Degraded banner — #21: single recovery action — RestartDaemonButton only. */}
       {degraded && (
         <div role="alert" className="banner banner--err">
           <XCircle aria-hidden="true" />
@@ -81,29 +79,22 @@ export function StatusBanners({
             matches. Open History to reset the database and recover.
           </span>
           <span className="banner__act">
-            <button type="button" className="btn btn--secondary" onClick={onRetry}>
-              <RotateCcw aria-hidden="true" />
-              Retry
-            </button>
-            <RestartDaemonButton onRestarted={onRetry} />
+            <RestartDaemonButton label="Restart service" onRestarted={onRetry} />
           </span>
         </div>
       )}
 
-      {/* tk2j: Error banner — daemon is reachable but settings could not be loaded */}
+      {/* tk2j: Error banner — daemon is reachable but settings could not be loaded.
+          #21: single recovery action — RestartDaemonButton only. */}
       {loadState === "error" && (
         <div role="alert" className="banner banner--err">
           <XCircle aria-hidden="true" />
           <span className="banner__x">Failed to load settings — the background service is running but returned an error.</span>
           <span className="banner__act">
             <RestartDaemonButton
-              label="Restart"
+              label="Restart service"
               onRestarted={onRetry}
             />
-            <button type="button" className="btn btn--secondary" onClick={onRetry}>
-              <RotateCcw aria-hidden="true" />
-              Retry
-            </button>
           </span>
         </div>
       )}

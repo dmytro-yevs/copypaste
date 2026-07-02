@@ -69,23 +69,16 @@ export function SliderRow({
   ariaLabel,
 }: SliderRowProps) {
   const rowLabel = useContext(SettingsFieldLabelContext);
-  // Generate a stable id for the datalist when tick marks are requested.
-  // We use the min/max/step combo as a cheap content-stable key.
-  const datalistId =
-    tickStepCount !== undefined ? `slider-ticks-${min}-${max}-${step}` : undefined;
-
-  // Build tick option values for the datalist — one per step index.
-  const tickOptions =
-    datalistId !== undefined
-      ? Array.from({ length: tickStepCount! }, (_, i) =>
-          min + i * ((max - min) / Math.max(tickStepCount! - 1, 1)),
-        )
-      : [];
 
   // Percent of the track that should render as "filled" (accent-colored),
   // clamped defensively in case a caller passes an out-of-range value.
   const fillPct =
     max > min ? Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100)) : 0;
+
+  // Visible step "stops": when a caller passes a step count, render an evenly
+  // spaced tick ruler beneath the track so the discrete stops are legible
+  // (native <datalist> ticks paint inconsistently across engines — see header).
+  const tickCount = tickStepCount ?? 0;
 
   return (
     // Slider layout/theming lives in primitives.css: `.range` paints the
@@ -93,30 +86,30 @@ export function SliderRow({
     // the thumb, and keeps `accent-color` as a fallback; `.range__value`
     // sizes the readout. The row is a token-driven `.ctl` cluster.
     <div className="ctl ctl--field">
-      <input
-        type="range"
-        className="range"
-        aria-label={ariaLabel ?? rowLabel}
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        style={{ "--range-fill": `${fillPct}%` } as CSSProperties}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onMouseUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
-        onTouchEnd={(e) => onRelease?.(Number((e.currentTarget as HTMLInputElement).value))}
-        onKeyUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
-      />
-      {/* Not wired via `list=` (see file header) — kept so the datalist
-          generation logic/id stays stable if tick marks are ever reinstated. */}
-      {datalistId !== undefined && (
-        <datalist id={datalistId}>
-          {tickOptions.map((v) => (
-            <option key={v} value={v} />
-          ))}
-        </datalist>
-      )}
+      <div className={tickCount > 1 ? "range-wrap range-wrap--ticked" : "range-wrap"}>
+        <input
+          type="range"
+          className="range"
+          aria-label={ariaLabel ?? rowLabel}
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          style={{ "--range-fill": `${fillPct}%` } as CSSProperties}
+          onChange={(e) => onChange(Number(e.target.value))}
+          onMouseUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
+          onTouchEnd={(e) => onRelease?.(Number((e.currentTarget as HTMLInputElement).value))}
+          onKeyUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
+        />
+        {tickCount > 1 && (
+          <div className="range-ticks" aria-hidden="true">
+            {Array.from({ length: tickCount }, (_, i) => (
+              <span key={i} className={i <= Math.round((fillPct / 100) * (tickCount - 1)) ? "on" : undefined} />
+            ))}
+          </div>
+        )}
+      </div>
       {/* §6.4: min-width 80px (was 52px) so longer labels like "Unlimited" fit */}
       <span className="range__value">
         {formatValue(value)}

@@ -113,53 +113,6 @@ export function DeviceMetaGrid({ children }: { children: React.ReactNode }) {
 }
 
 // ---------------------------------------------------------------------------
-// FingerprintRow — truncated security fingerprint with tap-to-copy (cg2h)
-//
-// PG-9 spec: show first 8 + "…" + last 8 chars of the 64-char hex SHA-256
-// fingerprint, matching the Android style. The full value is never displayed
-// to avoid truncation at the CSS level — we truncate explicitly at the data
-// level. Clicking copies the full fingerprint to the system clipboard.
-// ---------------------------------------------------------------------------
-
-function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
-  const [copied, setCopied] = useState(false);
-
-  if (!fingerprint) return null;
-
-  // bdac.52: PARITY-SPEC §7 canonical format = first 16 chars + "…" + last 8 chars
-  // (matches Android DevicesActivity.kt: fp.take(16) + "…" + fp.takeLast(8)).
-  // Previous macOS format was 8+8 (16 chars total); canonical is 16+8 (24 chars).
-  const truncated =
-    fingerprint.length > 24
-      ? `${fingerprint.slice(0, 16)}…${fingerprint.slice(-8)}`
-      : fingerprint;
-
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(fingerprint).then(() => {
-      setCopied(true);
-      // Reset the "Copied!" feedback after 1.5 s.
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
-  return (
-    // Clickable value — copies full fingerprint on click (Android parity).
-    // Uses a <button> so it is keyboard-accessible and screen-reader announced.
-    <button
-      type="button"
-      className={copied ? "cfield copied" : "cfield"}
-      data-testid="fingerprint-copy"
-      title={`Copy full fingerprint: ${fingerprint}`}
-      aria-label={`Fingerprint: ${truncated} — click to copy`}
-      onClick={handleCopy}
-    >
-      <span className="cfield__k">Fingerprint</span>
-      <span className="cfield__v">{copied ? "Copied!" : truncated}</span>
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // ThisDeviceCard — rich identity block for the local device
 // ---------------------------------------------------------------------------
 
@@ -195,10 +148,6 @@ export function ThisDeviceCard({ info }: { info: OwnDeviceInfo }) {
             <MetaRow label="Version" value={info.app_version} />
             <MetaRow label="Local IP" value={info.local_ip} />
             <MetaRow label="Public IP" value={info.public_ip ?? undefined} />
-            {/* wb6s / cg2h: show own-device security fingerprint at parity with Android.
-                Truncated to first8…last8 with tap-to-copy (PG-9 spec).
-                Null when P2P is disabled (no cert generated). */}
-            <FingerprintRow fingerprint={info.fingerprint} />
           </DeviceMetaGrid>
         </div>
       </div>

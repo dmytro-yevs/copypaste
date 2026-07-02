@@ -41,7 +41,9 @@ export function SettingsView() {
     <ToastProvider>
     <ViewShell title="Settings">
       <SettingsToaster s={s} />
-      <StatusBanners loadState={s.loadState} staleDaemon={s.staleDaemon} degradedReason={s.degradedReason} onRetry={onRetry} />
+      <div className="set-banners">
+        <StatusBanners loadState={s.loadState} staleDaemon={s.staleDaemon} degradedReason={s.degradedReason} onRetry={onRetry} />
+      </div>
 
       {s.loadState === "loading" && (
         <div>Loading…</div>

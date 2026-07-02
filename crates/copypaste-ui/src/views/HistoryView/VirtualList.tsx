@@ -102,6 +102,29 @@ export function VirtualList({
     return () => ro.disconnect();
   }, [listRef]);
 
+  // CopyPaste-f2ec #17: keep the tracked `scrollTop` (and the real scrollable
+  // element) from pointing past the end of a shorter list. `offsets`/`totalH`
+  // are correctly recomputed whenever `previewLines` or `imageMaxHeight`
+  // change (see the useMemo above), but the DOM's scroll POSITION is only
+  // ever updated in response to a user scroll event (`handleScroll` below).
+  // If the user is scrolled deep into the list and a display-setting change
+  // (or a filter/delete) shrinks `totalH` well below the stale `scrollTop`,
+  // `computeVisibleWindow`'s binary search degenerates to a window of just
+  // the last row or two — the list visually collapses to "broken/short"
+  // until the next manual scroll re-syncs `scrollTop`. Clamping here (and
+  // writing the real DOM scrollTop back) whenever the content or viewport
+  // height changes keeps the render window valid immediately.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const maxScrollTop = Math.max(0, totalH - viewportH);
+    setScrollTop((prev) => {
+      if (prev <= maxScrollTop) return prev;
+      el.scrollTop = maxScrollTop;
+      return maxScrollTop;
+    });
+  }, [totalH, viewportH, listRef]);
+
   const { start, end } = computeVisibleWindow(offsets, scrollTop, viewportH);
   const visible = items.slice(start, end);
   const padTop = offsets[start] ?? 0;
