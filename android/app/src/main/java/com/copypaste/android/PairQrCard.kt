@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -29,12 +27,24 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.LocalCpColors
+import com.copypaste.android.ui.theme.icons.LucideIcons
 
 // CopyPaste-vp63.38: extracted verbatim from the former PairScreen composable
 // (the own-QR display card — CopyPasteCard wrapping the QR slot + countdown/
 // drain bar). Behaviour-preserving: same tap-to-reveal gating, same fixed-size
 // slot to avoid layout jitter.
+// CopyPaste-myh8.8 (S8): re-based on CpColors/CpTypography tokens; migrated off
+// material-icons-extended (LucideIcons.PairingQr); fixed the drain-bar track/
+// fill, which previously had no `.background()` and rendered nothing; added an
+// explicit "Request new token" action for the expired state (spec's "Expired
+// QR offers regenerate" scenario — the auto-refresh margin in PairScreen makes
+// this state rare in practice, but it is still a reachable presentation state
+// e.g. if a regenerate attempt itself fails).
 
 /**
  * Side of the rendered QR image, in dp.
@@ -70,7 +80,8 @@ private const val QR_SLOT_SIZE_DP = QR_IMAGE_SIZE_DP + QR_PLATE_PADDING_DP * 2
  *
  * @param onTap invoked on every tap: the caller decides whether that means
  *   "reveal" (first tap) or "regenerate" (tap while already revealed) — see
- *   [PairController].
+ *   [PairController]. The expired-state "Request new token" button reuses the
+ *   same callback (the caller's reveal/regenerate contract is unchanged here).
  */
 @Composable
 internal fun PairQrCard(
@@ -82,6 +93,7 @@ internal fun PairQrCard(
     remainingSeconds: Int,
     onTap: () -> Unit,
 ) {
+    val cp = LocalCpColors.current
     CopyPasteCard {
         Column(
             modifier = Modifier
@@ -107,7 +119,8 @@ internal fun PairQrCard(
                             CircularProgressIndicator()
                             Text(
                                 text = stringResource(R.string.status_pairing),
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = CpTypography.body,
+                                color = cp.text,
                             )
                         }
                     }
@@ -154,8 +167,9 @@ internal fun PairQrCard(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
-                                        text = "Tap to reveal",
-                                        style = MaterialTheme.typography.labelMedium,
+                                        text = stringResource(R.string.devices_qr_tap_to_reveal),
+                                        style = CpTypography.bodyEmphasis,
+                                        color = cp.text,
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier
                                             .padding(horizontal = 12.dp, vertical = 5.dp),
@@ -166,10 +180,11 @@ internal fun PairQrCard(
                     }
                     else -> {
                         Icon(
-                            imageVector = Icons.Filled.QrCode,
+                            imageVector = LucideIcons.PairingQr,
                             // CopyPaste-3nyq: announce the QR-loading state so AT
                             // is not silent while the code is being generated.
                             contentDescription = stringResource(R.string.cd_pairing_qr_loading),
+                            tint = cp.faint,
                             modifier = Modifier.size(96.dp),
                         )
                     }
@@ -184,10 +199,22 @@ internal fun PairQrCard(
             if (hasQr && !loading) {
                 when {
                     expired -> {
-                        Text(
-                            text = stringResource(R.string.pair_token_expired),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.pair_token_expired),
+                                style = CpTypography.body,
+                                color = cp.warn,
+                            )
+                            CopyPasteButton(
+                                onClick = onTap,
+                                variant = ButtonVariant.SECONDARY,
+                            ) {
+                                Text(text = stringResource(R.string.pair_request_new_token))
+                            }
+                        }
                     }
                     else -> {
                         // !loading: outer if(hasQr && !loading) guards this
@@ -199,21 +226,26 @@ internal fun PairQrCard(
                                 R.string.pair_token_expires_in_seconds,
                                 remainingSeconds
                             ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (urgent) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                            style = CpTypography.body,
+                            color = if (urgent) cp.warn else MaterialTheme.colorScheme.primary,
                         )
                         // Drain bar — 2dp thin track draining left-to-right over the TTL.
                         // Static (no pulse): progress bar pulse removed for calm UI.
+                        // CopyPaste-myh8.8: both track and fill now carry an explicit
+                        // `.background()` — previously neither did, so the bar rendered
+                        // nothing (an invisible no-op) despite the "§10 drain bar" comment.
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(2.dp)
-                                .clip(RoundedCornerShape(999.dp)),
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(cp.border),
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth(qrCountdownProgress(remainingSeconds, PAIR_TOKEN_TTL_SECONDS))
-                                    .height(2.dp),
+                                    .height(2.dp)
+                                    .background(if (urgent) cp.warn else MaterialTheme.colorScheme.primary),
                             )
                         }
                     }

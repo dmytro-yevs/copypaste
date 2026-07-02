@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontFamily
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -374,20 +374,20 @@ internal fun SasPairingDialog(
     // (handleConfirm/handleClose, status machine) is untouched.
     GlassAlertDialog(
         onDismissRequest = { handleClose() },
-        title = { Text("Pair “$title”") },
+        title = { Text(stringResource(R.string.sas_dialog_title, title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when {
                     ended -> {
                         Text(
                             "Pairing ended — check the other device.",
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = CpTypography.body,
                         )
                     }
                     status.state == "confirmed" -> {
                         Text(
-                            "Paired ✓",
-                            style = MaterialTheme.typography.titleSmall,
+                            stringResource(R.string.sas_paired_ok),
+                            style = CpTypography.section,
                         )
                     }
                     status.state == "rejected" || status.state == "aborted" || status.state == "timed_out" -> {
@@ -397,7 +397,7 @@ internal fun SasPairingDialog(
                                 "rejected" -> "Pairing was rejected."
                                 else -> "Pairing was cancelled."
                             },
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = CpTypography.body,
                         )
                     }
                     status.state == "awaiting_sas" && status.sas != null -> {
@@ -407,7 +407,7 @@ internal fun SasPairingDialog(
                         SasPeerMetadataCard(status = status)
                         Text(
                             stringResource(R.string.sas_confirm_prompt),
-                            style = MaterialTheme.typography.bodySmall,
+                            style = CpTypography.meta,
                         )
                         // §10 SAS per-digit cells — styleguide .sas: each digit in its
                         // own 38dp-wide centered mono cell, 28sp/600, letterSpacing 1.1sp
@@ -454,7 +454,7 @@ internal fun SasPairingDialog(
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
                                 stringResource(R.string.sas_waiting_other),
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = CpTypography.body,
                             )
                         }
                     }
@@ -467,14 +467,14 @@ internal fun SasPairingDialog(
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
                                 stringResource(R.string.sas_connecting),
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = CpTypography.body,
                             )
                         }
                     }
                 }
                 error?.let { msg ->
                     if (!terminal) {
-                        Text(msg, style = MaterialTheme.typography.labelSmall)
+                        Text(msg, style = CpTypography.micro)
                     }
                 }
             }
@@ -482,14 +482,14 @@ internal fun SasPairingDialog(
         confirmButton = {
             when {
                 terminal -> {
-                    CopyPasteButton(onClick = { onClose() }, variant = ButtonVariant.GHOST) { Text("Close") }
+                    CopyPasteButton(onClick = { onClose() }, variant = ButtonVariant.GHOST) { Text(stringResource(R.string.sas_btn_close)) }
                 }
                 status.state == "awaiting_sas" && status.sas != null -> {
                     CopyPasteButton(
                         enabled = !confirmPending,
                         onClick = { handleConfirm(true) },
                         variant = ButtonVariant.PRIMARY,
-                    ) { Text(if (confirmPending) "…" else "Match") }
+                    ) { Text(if (confirmPending) "…" else stringResource(R.string.sas_btn_match)) }
                 }
                 else -> {}
             }
@@ -502,10 +502,10 @@ internal fun SasPairingDialog(
                         enabled = !confirmPending,
                         onClick = { handleConfirm(false) },
                         variant = ButtonVariant.GHOST,
-                    ) { Text("Doesn't match") }
+                    ) { Text(stringResource(R.string.sas_btn_no_match)) }
                 }
                 else -> {
-                    CopyPasteButton(onClick = { handleClose() }, variant = ButtonVariant.GHOST) { Text("Cancel") }
+                    CopyPasteButton(onClick = { handleClose() }, variant = ButtonVariant.GHOST) { Text(stringResource(R.string.dialog_cancel)) }
                 }
             }
         },

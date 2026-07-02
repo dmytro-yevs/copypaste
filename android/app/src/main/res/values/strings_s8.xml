@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  New strings introduced by android-material3-redesign slice S8 (Pairing).
+  Kept in a dedicated file (not res/values/strings.xml, which other parallel
+  redesign slices also touch) purely to avoid merge collisions during the
+  wave — Android resource merging treats every res/values/*.xml file as one
+  combined pool, so these keys are ordinary R.string.* entries at build time.
+  See CopyPaste-myh8.8 bd notes.
+-->
+<resources>
+    <!-- ScannedPeerReviewCard (PairedPeerList.kt) — scan-review card fallback/labels -->
+    <string name="s8_pair_unknown_device">Unknown device</string>
+    <string name="s8_pair_transport_p2p">P2P</string>
+    <string name="s8_pair_address_format">Address: %1$s</string>
+    <string name="s8_pair_fingerprint_format">Fingerprint: %1$s</string>
+
+    <!-- PairedDeviceSummaryCard / PairedSuccessPopup shared label -->
+    <string name="s8_paired_device_label">Paired device</string>
+
+    <!-- PairSuccessPopup.kt -->
+    <string name="s8_pair_success_title">Paired successfully</string>
+    <string name="s8_pair_success_status">Paired ✓</string>
+    <string name="s8_pair_success_done">Done</string>
+</resources>
