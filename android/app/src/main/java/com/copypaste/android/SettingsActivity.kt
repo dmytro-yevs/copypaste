@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
+import com.copypaste.android.ui.theme.AccentColor
 import com.copypaste.android.ui.theme.AppearanceStore
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CommittedCopyPasteTheme
@@ -87,6 +88,29 @@ private const val TAB_DISPLAY       = 1
 private const val TAB_SYNC          = 2
 private const val TAB_STORAGE       = 3
 private const val TAB_NOTIFICATIONS = 4
+
+/**
+ * The Settings screen's appearance draft/commit contract (android-appearance
+ * D5, S4 review finding). [commit] is the ONLY function that may publish a
+ * draft to [AppearanceStore] — discarding a draft (the user backs out or taps
+ * Cancel) is simply never calling it, which [SettingsScreen] already does by
+ * construction (its Discard path never reaches [commitSave]). Reads the
+ * current draft through the supplied lambdas (backed by the
+ * Composable-local `mutableStateOf` fields declared in [SettingsScreen]) so
+ * this contract is unit-testable without a full Compose UI test harness —
+ * see `AppearanceStateTest` "discarding a draft change never touches
+ * AppearanceStore committed state" / "committing a draft publishes it".
+ */
+class AppearanceDraft(
+    private val themeMode: () -> ThemeMode,
+    private val accent: () -> AccentColor,
+    private val translucency: () -> Boolean,
+) {
+    /** Publishes the current draft app-wide. Callers MUST only invoke this after a successful persist (D5/R17). */
+    fun commit() {
+        AppearanceStore.publish(CommittedAppearance(themeMode(), accent(), translucency()))
+    }
+}
 
 /**
  * Expose the unsaved-changes guard to external navigation controllers
@@ -154,6 +178,9 @@ fun SettingsScreen(
     // writing to Settings or AppearanceStore until Save (see commitSave()).
     var themeMode by remember { mutableStateOf(settings.themeMode) }
     var accent by remember { mutableStateOf(settings.accent) }
+    val appearanceDraft = remember {
+        AppearanceDraft(themeMode = { themeMode }, accent = { accent }, translucency = { translucency })
+    }
     val isDark = resolveIsDark(themeMode)
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
@@ -360,7 +387,7 @@ fun SettingsScreen(
     fun commitSave() {
         if (persistAll()) {
             dirty = false
-            AppearanceStore.publish(CommittedAppearance(themeMode, accent, translucency))
+            appearanceDraft.commit()
             onSaved()
         } else {
             settingsScope.launch {

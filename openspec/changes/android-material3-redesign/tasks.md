@@ -208,8 +208,10 @@ slices may be N-A only with a recorded rationale.
 - [x] 3.4 Tests: migration once/idempotent, retains canonical keys regardless of getter-read order
       (order-independence, not order-dependence, is the fixed D6 invariant — see
       `SettingsThemeMigrationTest`); committed-survives-process-death; live-preview/Save/Discard
-      (`AppearanceStateTest` "discarding a draft change never touches AppearanceStore" — the
-      store-level contract a Settings-screen Discard relies on); System reacts to OS change.
+      (`AppearanceStateTest` "discarding a draft change never touches AppearanceStore" /
+      "committing a draft publishes its current values app-wide" — S4 review fix: these now
+      exercise the real, extracted `AppearanceDraft` class SettingsActivity's commit path uses,
+      not a re-declared local echoing its own literals); System reacts to OS change.
 
 ## 4. S4 — Shell + navigation  → `android-navigation-chrome`
 

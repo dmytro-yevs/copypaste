@@ -216,6 +216,7 @@ in screens. Frozen `CpDimensions` (no ranges):
 | `sasCell` | 44dp | one of six SAS digit cells |
 | `touchMin` | 48dp | minimum touch target (separate from visual size) |
 | `navBottomClearance` | 12dp | floating nav pill clearance above the resolved bottom system-bar/gesture inset |
+| `navSideInset` | 12dp | floating nav pill inset from left/right screen edges |
 | width classes | compact <600 · medium 600–840 · expanded ≥840 dp | WindowSizeClass breakpoints |
 
 #### Scenario: Spacing scale is tokenized

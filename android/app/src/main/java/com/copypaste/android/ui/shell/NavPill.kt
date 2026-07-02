@@ -1,7 +1,5 @@
 package com.copypaste.android.ui.shell
 
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.os.Build
 import androidx.annotation.StringRes
 import androidx.compose.animation.core.Spring
@@ -31,9 +29,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asComposeRenderEffect
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
@@ -73,18 +70,18 @@ private val PillBlurRadius = 22.dp
  * (`rememberResolvedBlurMode()`/`rememberCpMotionReduced()`) and passed in as
  * plain values so a golden/preview can pin either branch deterministically.
  *
- * D7 captured-layer strategy: the pill sits within the fully-opaque tail of the
- * shell's `--bg` gradient fade ([NavGradientFade]) by construction (§9.12
- * "Background Gradient Fade" requirement — the fade reaches full `--bg` opacity
- * by the time it passes behind the pill), so the backdrop this pill duplicates-
- * then-blurs is the same solid [LocalCpColors]`.bg` color rather than a
- * re-invoked live/interactive screen subtree — re-rendering a stateful,
- * ViewModel-backed screen a second time purely to sample it for blur would
- * double-fire its side effects (LaunchedEffects, analytics, etc.), a
- * correctness risk the captured-layer technique must not introduce. The
- * duplicate-then-blur SHAPE (offset-aligned copy, blurred, clipped to the
- * pill, foreground composed above) otherwise matches the S0.5 spike
- * (`BlurSpikeActivity.kt`).
+ * D7 captured-layer strategy (S4 review fix — see `BackdropCapture.kt`): a
+ * real `android.graphics.Picture` recording of whatever [backdropState]'s
+ * source draws is captured ONCE per frame at the draw phase and replayed here
+ * translated + blurred (via `Modifier.graphicsLayer { renderEffect = ... }`,
+ * never `Modifier.blur` on the pill's own solid fill — that would be a
+ * no-op-by-construction, blurring a constant color reproduces the same
+ * color) + clipped to the pill — never a re-invoked live/interactive screen
+ * subtree (that would double-fire its side effects: LaunchedEffects,
+ * analytics, etc.). [backdropState] is null when the caller has not wired a
+ * capture source (e.g. a hermetic fixture smoke-testing only the fallback
+ * branch) — that falls back to the SAME honest opaque card as
+ * API<31/translucency-off, never a fake blur.
  *
  * [visible] is a hard on/off — the "IME visible" scenario mandates the pill is
  * hidden outright while the IME is up, not repositioned above it (single
@@ -102,6 +99,16 @@ fun NavPill(
     visible: Boolean = true,
     sideOffset: Dp = CpDimensions.navSideInset,
     bottomOffset: Dp = CpDimensions.navBottomClearance,
+    /** The real backdrop-capture source (D7) — null falls back to the opaque card. */
+    backdropState: BackdropCaptureState? = null,
+    /**
+     * Reports the INNER pill box's own measured height in px (the pill shape
+     * itself — shadow/clip/border/content — NOT this composable's outer
+     * side/bottom-offset wrapper). S4 review fix: measuring the outer wrapper
+     * here double-counted [bottomOffset] in callers that add it again on top
+     * (`MainShell`'s `reservedBottomSpace = bottomOffset + pillHeightDp`).
+     */
+    onPillHeightChanged: (heightPx: Int) -> Unit = {},
 ) {
     if (!visible) return
 
@@ -127,27 +134,18 @@ fun NavPill(
             modifier = Modifier
                 .shadow(elevation = CpElevation.sh2, shape = pillShape, clip = false)
                 .clip(pillShape)
-                .border(width = 1.dp, color = cp.border, shape = pillShape),
+                .border(width = 1.dp, color = cp.border, shape = pillShape)
+                .onSizeChanged { size -> onPillHeightChanged(size.height) },
         ) {
-            // Layer 1 — captured backdrop: real blur (API 31+, translucency on) or
-            // the canonical opaque fallback (D7 "never a reduced-alpha-without-
-            // blur layer over arbitrary content").
-            if (realBackdrop) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .graphicsLayer {
-                            renderEffect = RenderEffect
-                                .createBlurEffect(
-                                    PillBlurRadius.toPx(),
-                                    PillBlurRadius.toPx(),
-                                    Shader.TileMode.CLAMP,
-                                )
-                                .asComposeRenderEffect()
-                        },
-                ) {
-                    Box(Modifier.matchParentSize().background(cp.bg))
-                }
+            // Layer 1 — captured backdrop: real blur (API 31+, translucency on,
+            // AND a capture source wired) or the canonical opaque fallback (D7
+            // "never a reduced-alpha-without-blur layer over arbitrary content").
+            if (realBackdrop && backdropState != null) {
+                CapturedBackdropBlur(
+                    state = backdropState,
+                    blurRadius = PillBlurRadius,
+                    modifier = Modifier.matchParentSize(),
+                )
                 // Layer 2 — translucent tint above the blur: `card @ 90%` (STYLEGUIDE §9.12).
                 Box(Modifier.matchParentSize().background(cp.card.copy(alpha = 0.90f)))
             } else {

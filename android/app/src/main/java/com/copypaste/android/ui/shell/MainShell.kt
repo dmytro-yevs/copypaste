@@ -2,6 +2,7 @@
 
 package com.copypaste.android.ui.shell
 
+import android.os.Build
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -28,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
@@ -38,6 +38,7 @@ import com.copypaste.android.HistoryScreen
 import com.copypaste.android.R
 import com.copypaste.android.SettingsScreen
 import com.copypaste.android.ui.SyncStatusBadge
+import com.copypaste.android.ui.theme.BlurMode
 import com.copypaste.android.ui.theme.CpDimensions
 import com.copypaste.android.ui.theme.icons.LucideIcons
 import com.copypaste.android.ui.theme.rememberCpMotionReduced
@@ -109,61 +110,82 @@ fun MainShell(viewModel: ClipboardViewModel) {
     // Measured pill height (content-driven, no fixed min-height — matches the
     // pre-extraction FloatingTabBar's sizing). 74dp is the pre-measurement
     // fallback so the gradient fade / sync-status gap is reasonable on frame 1.
+    // S4 review fix: this is now reported by NavPill's `onPillHeightChanged`
+    // off its INNER pill box only — the outer wrapper already carries
+    // [bottomOffset] as its own padding, so measuring the outer box here would
+    // double-count it into [reservedBottomSpace] below.
     var pillHeightDp by remember { mutableStateOf(74.dp) }
     val reservedBottomSpace = bottomOffset + pillHeightDp
 
+    // D7 real backdrop-capture source (see `BackdropCapture.kt`). Only ever
+    // constructed when blur is actually enabled — the blur itself (RenderEffect)
+    // is API 31+ regardless of the capture mechanism (see `NavPill.realBackdrop`).
+    val backdropState = remember(blurMode) {
+        if (blurMode == BlurMode.REAL_BACKDROP && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            BackdropCaptureState()
+        } else {
+            null
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            // Zero all Scaffold insets: the TOP inset is handled by each screen's own
-            // TopAppBar, and the BOTTOM is handled by explicit content padding below so
-            // the list clears the floating pill.
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(bottom = reservedBottomSpace),
-            ) {
-                when (NavTab.entries[selectedTab]) {
-                    NavTab.CLIPS -> HistoryScreen(
-                        viewModel = viewModel,
-                        showBackButton = false,
-                        onBack = {},
-                        paintCanvasBackdrop = false,
-                    )
-                    NavTab.DEVICES -> DevicesScreen(
-                        showBackButton = false,
-                        onBack = {},
-                        paintCanvasBackdrop = false,
-                    )
-                    NavTab.SETTINGS -> SettingsScreen(
-                        showBackButton = false,
-                        onBack = {},
-                        onRegisterNavGuard = { guard -> settingsNavGuard = guard },
-                        paintCanvasBackdrop = false,
-                        onSaved = { selectedTab = NavTab.CLIPS.ordinal },
-                    )
+        // Capture source: everything the pill floats over (screen content,
+        // gradient fade, sync badge) — recorded into [backdropState] once per
+        // frame and replayed here unchanged; NavPill (outside this Box) draws
+        // its own translated/blurred copy. `captureBackdrop(null)` is a no-op.
+        Box(modifier = Modifier.fillMaxSize().captureBackdrop(backdropState)) {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                // Zero all Scaffold insets: the TOP inset is handled by each screen's own
+                // TopAppBar, and the BOTTOM is handled by explicit content padding below so
+                // the list clears the floating pill.
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            ) { innerPadding ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(bottom = reservedBottomSpace),
+                ) {
+                    when (NavTab.entries[selectedTab]) {
+                        NavTab.CLIPS -> HistoryScreen(
+                            viewModel = viewModel,
+                            showBackButton = false,
+                            onBack = {},
+                            paintCanvasBackdrop = false,
+                        )
+                        NavTab.DEVICES -> DevicesScreen(
+                            showBackButton = false,
+                            onBack = {},
+                            paintCanvasBackdrop = false,
+                        )
+                        NavTab.SETTINGS -> SettingsScreen(
+                            showBackButton = false,
+                            onBack = {},
+                            onRegisterNavGuard = { guard -> settingsNavGuard = guard },
+                            paintCanvasBackdrop = false,
+                            onSaved = { selectedTab = NavTab.CLIPS.ordinal },
+                        )
+                    }
                 }
             }
-        }
 
-        // ── Gradient fade + sync status + pill, in the reserved bottom gap ──
-        NavGradientFade(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-            height = reservedBottomSpace,
-        )
+            // ── Gradient fade + sync status, in the reserved bottom gap ──
+            NavGradientFade(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                height = reservedBottomSpace,
+            )
 
-        // android-navigation-chrome "Sync Status Indicator Placement": a
-        // shell-owned position that never overlaps the pill — sits directly
-        // above the pill's measured footprint, within the reserved gap.
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = reservedBottomSpace),
-        ) {
-            SyncStatusBadge()
+            // android-navigation-chrome "Sync Status Indicator Placement": a
+            // shell-owned position that never overlaps the pill — sits directly
+            // above the pill's measured footprint, within the reserved gap.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = reservedBottomSpace),
+            ) {
+                SyncStatusBadge()
+            }
         }
 
         NavPill(
@@ -174,11 +196,11 @@ fun MainShell(viewModel: ClipboardViewModel) {
             visible = !imeVisible,
             sideOffset = sideOffset,
             bottomOffset = bottomOffset,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .onSizeChanged { size ->
-                    pillHeightDp = with(density) { size.height.toDp() }
-                },
+            backdropState = backdropState,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            onPillHeightChanged = { heightPx ->
+                pillHeightDp = with(density) { heightPx.toDp() }
+            },
             onTabSelected = { index ->
                 val leavingSettings =
                     NavTab.entries[selectedTab] == NavTab.SETTINGS && index != selectedTab

@@ -2,6 +2,7 @@ package com.copypaste.android.ui.theme
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.copypaste.android.AppearanceDraft
 import com.copypaste.android.Settings
 import com.copypaste.android.ThemeMode
 import org.junit.Assert.assertEquals
@@ -74,35 +75,63 @@ class AppearanceStateTest {
     }
 
     /**
-     * S4 carried review finding (b): D5 says "Draft never feeds committed state
-     * before Save" — SettingsActivity's Discard path is exactly "mutate local
-     * draft state, then never call AppearanceStore.publish". SettingsActivity's
-     * draft state itself is private Composable-local state (not extractable to
-     * a pure function without a full Compose-UI-test harness), so this asserts
-     * the contract at the level [AppearanceStore] actually enforces it: mutating
-     * ANY number of local draft-like values, without an explicit [publish] call,
-     * leaves [AppearanceStore.committed] untouched. This is the exact invariant
-     * a Discard (which structurally never reaches `commitSave()`'s `publish`
-     * call — see `SettingsActivity.kt`) relies on.
+     * S4 carried review finding (b), fixed in the S4 review-fix pass: D5 says
+     * "Draft never feeds committed state before Save" — SettingsActivity's
+     * Discard path is exactly "mutate local draft state, then never call
+     * [AppearanceDraft.commit]". The draft/commit boundary is now the real,
+     * production [AppearanceDraft] class (extracted from SettingsActivity's
+     * Composable-local `mutableStateOf` fields — see its kdoc), so this test
+     * exercises the ACTUAL production code path rather than a re-declared
+     * local that merely echoes its own literals.
      */
     @Test
     fun `discarding a draft change never touches AppearanceStore committed state`() {
         val baseline = CommittedAppearance(ThemeMode.DARK, AccentColor.INDIGO, translucency = true)
         AppearanceStore.publish(baseline)
 
-        // Simulate a Settings-screen draft edit (local vars, mirroring the
-        // Composable-local `mutableStateOf` draft fields) that the user then
-        // discards — i.e. publish() is deliberately never called below.
-        val draftThemeMode = ThemeMode.SYSTEM
-        val draftAccent = AccentColor.TEAL
-        val draftTranslucency = true
+        // Mutate the draft's backing values (mirrors editing the Display tab),
+        // then discard — i.e. AppearanceDraft.commit() is deliberately never
+        // called below.
+        var draftThemeMode = ThemeMode.SYSTEM
+        var draftAccent = AccentColor.TEAL
+        var draftTranslucency = true
+        AppearanceDraft(
+            themeMode = { draftThemeMode },
+            accent = { draftAccent },
+            translucency = { draftTranslucency },
+        )
+        draftThemeMode = ThemeMode.LIGHT
+        draftAccent = AccentColor.ROSE
+        draftTranslucency = false
 
-        // Discard: the draft is simply dropped — no publish() call reaches AppearanceStore.
+        // Discard: no `commit()` call was ever made — AppearanceStore.committed
+        // must still be exactly the pre-edit baseline.
         assertEquals(baseline, AppearanceStore.committed.value)
-        // The draft locals themselves are unused past this point (this test's
-        // whole point is that mutating them has no path to AppearanceStore).
-        assertEquals(ThemeMode.SYSTEM, draftThemeMode)
-        assertEquals(AccentColor.TEAL, draftAccent)
-        assertTrue(draftTranslucency)
+    }
+
+    @Test
+    fun `committing a draft publishes its current values app-wide`() {
+        AppearanceStore.publish(CommittedAppearance(ThemeMode.DARK, AccentColor.INDIGO, translucency = true))
+
+        var draftThemeMode = ThemeMode.LIGHT
+        var draftAccent = AccentColor.ROSE
+        var draftTranslucency = false
+        val draft = AppearanceDraft(
+            themeMode = { draftThemeMode },
+            accent = { draftAccent },
+            translucency = { draftTranslucency },
+        )
+
+        draft.commit()
+
+        assertEquals(
+            CommittedAppearance(ThemeMode.LIGHT, AccentColor.ROSE, translucency = false),
+            AppearanceStore.committed.value,
+        )
+
+        // A later, un-committed mutation of the draft's backing values must
+        // NOT retroactively change what was already published.
+        draftThemeMode = ThemeMode.SYSTEM
+        assertEquals(ThemeMode.LIGHT, AppearanceStore.committed.value.themeMode)
     }
 }
