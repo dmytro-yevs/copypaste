@@ -146,37 +146,41 @@ export function VirtualList({
       // .scroll-y makes this the bounded scroll container (flex:1; min-height:0;
       // overflow-y:auto) so the virtualizer's clientHeight/scrollTop math holds.
       className={`${className} scroll-y`}
-      role="listbox"
+      // g27b.29: role="list"/"listitem" (not listbox/option) — the rows carry
+      // action <button>s, and a listbox option must not contain focusable
+      // descendants (axe nested-interactive); a plain list has no such rule and
+      // still satisfies aria-required-children. activedescendant isn't allowed on
+      // role=list, so the roving-active id is exposed as a data-* attr instead
+      // (the arrow-key handler drives visual selection via onKeyDown regardless).
+      role="list"
       aria-label="Clipboard history"
-      aria-activedescendant={safeActiveDescendantId}
+      data-active-descendant={safeActiveDescendantId}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onScroll={handleScroll}
     >
       {/* Spacer establishes the full scroll height; the inner block is offset
-          to where the visible window starts. FUNCTIONAL: drives the virtual
-          scroller's total scrollable height. */}
-      <div style={{ height: totalH, position: "relative" }}>
+          to where the visible window starts. `height` (FUNCTIONAL, per-render
+          computed) stays inline; the static `position: relative` moved to the
+          `.vlist-spacer` class (g27b.4). */}
+      <div className="vlist-spacer" style={{ height: totalH }}>
         {/* §8 selection glide: a single absolutely-positioned layer that animates
             its top/height to the selected row(s). Rendered before the rows so it
             sits behind them; rows carry no selection background of their own. */}
         {glideStyle && (
           <div
             aria-hidden
-            // FUNCTIONAL: position/left/right/top/height/pointerEvents drive the
-            // glide layer's computed placement over the selected row(s) and
-            // ensure it never blocks clicks on the rows beneath it.
+            className="row-glide"
+            // FUNCTIONAL: top/height are per-selection computed placement over
+            // the selected row(s); the static position/left/right/z-index/
+            // pointer-events moved to the `.row-glide` class (g27b.4).
             style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
               top: glideStyle.top,
               height: glideStyle.height,
-              pointerEvents: "none",
             }}
           />
         )}
-        <div style={{ position: "absolute", top: padTop, left: 0, right: 0 }}>
+        <div className="vlist-window" style={{ top: padTop }}>
           {/* Wrap each row in a keyed fragment so React tracks identity by item
               id across the sliding virtual window — not by position within the
               visible slice, which changes on every scroll. The renderRow callback

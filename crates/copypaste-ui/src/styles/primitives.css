@@ -38,7 +38,11 @@
   .btn--ghost { color: var(--dim); }
   .btn--ghost:hover { color: var(--text); background: var(--hover); }
   .btn--danger {
-    color: var(--err);
+    /* g27b.27: text color is --err-strong (a contrast-safe darkened variant
+       for light theme, see tokens.css), NOT --err — --err alone fails AA as
+       foreground text on this tint in light theme. border/background keep
+       the original --err hue; only the text needed darkening. */
+    color: var(--err-strong);
     border-color: color-mix(in srgb, var(--err) 40%, transparent);
     background: color-mix(in srgb, var(--err) 9%, transparent);
   }
@@ -195,6 +199,9 @@
     background: color-mix(in srgb, var(--c-url) 14%, transparent);
     border: var(--stroke-1) solid color-mix(in srgb, var(--c-url) 32%, transparent);
   }
+  /* g27b.27: --c-url as pill TEXT on its light tint fails WCAG AA; darken toward
+     black in light theme only (keeps the teal hue). Dark theme is legible. */
+  :root[data-theme="light"] .tpill--p2p { color: color-mix(in srgb, var(--c-url) 55%, #000); }
   .tpill--cloud {
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -205,6 +212,10 @@
     background: color-mix(in srgb, var(--accent) 14%, transparent);
     border: var(--stroke-1) solid color-mix(in srgb, var(--accent) 38%, transparent);
   }
+  /* g27b.27: --accent-2 is a LIGHT accent tint — on the pill's light accent-tint
+     background in light theme it fails WCAG AA. The AA-tuned light --accent has
+     enough contrast, so use it as the text colour in light theme only. */
+  :root[data-theme="light"] .tpill--this { color: var(--accent); }
 
   /* --- Badges --------------------------------------------------------------- */
   .badge {
@@ -217,7 +228,9 @@
     border-radius: var(--r-chip);
   }
   .badge--verified {
-    color: var(--ok);
+    /* g27b.27: --ok-strong is a contrast-safe text variant in light theme
+       (== --ok in dark); --ok alone fails AA as text on the tint. */
+    color: var(--ok-strong);
     background: color-mix(in srgb, var(--ok) 12%, transparent);
     border: var(--stroke-1) solid color-mix(in srgb, var(--ok) 32%, transparent);
   }
@@ -244,7 +257,18 @@
     color: var(--ct, var(--c-text));
   }
   .tile--swatch { box-shadow: inset 0 0 0 var(--stroke-1) var(--ring-inset); }
-  .tile--thumb img { display: block; max-width: 100%; border-radius: var(--r-chip); }
+  .tile--thumb img {
+    display: block;
+    /* g27b.25: cap BOTH axes so the thumbnail honours the imageMaxHeight setting
+       (--img-max, set per-row by HistoryRow) instead of growing to the width cap
+       and ballooning the row. width/height:auto keeps the aspect ratio while the
+       two max-* bounds fit it inside the tile. */
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: var(--img-max, 40px);
+    border-radius: var(--r-chip);
+  }
   .tile--thumb {
     width: auto;
     height: auto;
@@ -373,6 +397,22 @@
 
   /* --- Range slider + growable field (slice 5 cleanup) ---------------------- */
   .field--grow { flex: 1; max-width: 320px; }
+
+  /* CopyPaste-g27b.32: Sync-tab credential fields (Supabase URL, Anon key,
+     Email, Password, Relay URL) must fill the available card width — unlike
+     .field--grow's 320px cap (sized for GeneralTab's short "Excluded apps"
+     input), these can hold long values (base64 anon keys, URLs) that must
+     never be hidden behind the browser's ~146px default text-input intrinsic
+     width via native text-scroll. shell.css's `.srow__c { flex: none }`
+     sizes the control column to fit its content by default (correct for
+     toggles/buttons), so there is no free space for `flex: 1` on the field
+     alone to grow into. The `:has()` rule below opts only rows carrying this
+     marker into growing — reaching through the optional `.ctl` wrapper some
+     rows use for a trailing "set ✓" badge — leaving every other `.srow__c`
+     row untouched. */
+  .srow__c:has(.field--grow-full) { flex: 1; min-width: 0; }
+  .ctl--grow { flex: 1; min-width: 0; }
+  .field--grow-full { flex: 1; min-width: 0; }
 
   /* CopyPaste-g27b.21: one themed range-slider look shared by every settings
      slider. SliderRow.tsx sets `--range-fill` inline as a "N%" string derived

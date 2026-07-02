@@ -1,4 +1,5 @@
-import type { CSSProperties } from "react";
+import { useContext, type CSSProperties } from "react";
+import { SettingsFieldLabelContext } from "./settingsFieldLabelContext";
 
 // ---------------------------------------------------------------------------
 // SliderRow — consistent grid: [slider (flex)] [fixed-width value]
@@ -47,6 +48,12 @@ interface SliderRowProps {
    * visually wired so every slider looks the same.
    */
   tickStepCount?: number;
+  /**
+   * Explicit accessible name for the range input. When omitted, the enclosing
+   * SettingsRow title is used (g27b.26) — a bare range input otherwise has no
+   * accessible name and axe flags `label` (critical).
+   */
+  ariaLabel?: string;
 }
 
 export function SliderRow({
@@ -59,7 +66,9 @@ export function SliderRow({
   formatValue,
   disabled,
   tickStepCount,
+  ariaLabel,
 }: SliderRowProps) {
+  const rowLabel = useContext(SettingsFieldLabelContext);
   // Generate a stable id for the datalist when tick marks are requested.
   // We use the min/max/step combo as a cheap content-stable key.
   const datalistId =
@@ -87,6 +96,7 @@ export function SliderRow({
       <input
         type="range"
         className="range"
+        aria-label={ariaLabel ?? rowLabel}
         min={min}
         max={max}
         step={step}

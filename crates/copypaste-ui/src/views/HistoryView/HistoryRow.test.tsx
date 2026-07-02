@@ -39,7 +39,11 @@ const props = (e: HistoryEntry, over: Partial<RowProps> = {}): RowProps => ({
 describe("HistoryRow — sensitive masking a11y (X6 / P0 A11Y-1 fix)", () => {
   it("masked row: aria-label is the placeholder, never the plaintext", () => {
     render(<HistoryRow {...props(entry({ preview: "secret-token-xyz", is_sensitive: true }))} />);
-    const row = screen.getByRole("option");
+    // g27b.29: role="option" flattens descendant interactive semantics
+    // (ARIA childrenPresentational), tripping axe's nested-interactive check
+    // on the row's checkbox/Pin/Preview/Delete controls — the row is now
+    // role="group" instead (see HistoryRow.tsx's g27b.29 comment).
+    const row = screen.getByRole("listitem");
     expect(row.getAttribute("aria-label")).toMatch(/hidden/i);
     expect(row.getAttribute("aria-label")).not.toContain("secret-token-xyz");
     // Real text is present (width preserved) but aria-hidden.
@@ -52,7 +56,7 @@ describe("HistoryRow — sensitive masking a11y (X6 / P0 A11Y-1 fix)", () => {
     render(
       <HistoryRow {...props(entry({ preview: "hello world", kind: "TEXT" }), { maskSensitive: false })} />,
     );
-    const row = screen.getByRole("option");
+    const row = screen.getByRole("listitem");
     expect(row.getAttribute("aria-label")).toContain("hello world");
     expect(document.querySelector(".tile")).not.toBeNull();
     expect(row).toHaveClass("row");
@@ -60,9 +64,21 @@ describe("HistoryRow — sensitive masking a11y (X6 / P0 A11Y-1 fix)", () => {
 
   it("pinned row carries the .pinned class; selected carries .sel", () => {
     render(<HistoryRow {...props(entry({ pinned: true }), { multiSelected: true })} />);
-    const row = screen.getByRole("option");
+    const row = screen.getByRole("listitem");
     expect(row).toHaveClass("pinned");
     expect(row).toHaveClass("sel");
-    expect(row).toHaveAttribute("aria-selected", "true");
+    // aria-selected is not an allowed attribute on role="group" — the
+    // selected state is exposed via aria-current instead (g27b.29).
+    expect(row).toHaveAttribute("aria-current", "true");
+  });
+});
+
+describe("HistoryRow — g27b.29 nested-interactive structural guard", () => {
+  it("the row's own role has no ARIA childrenPresentational flattening (not option/button/link/etc.) so nested Pin/Preview/Delete buttons and the multi-select checkbox stay individually operable by assistive tech", () => {
+    render(<HistoryRow {...props(entry())} />);
+    const row = screen.getByRole("listitem");
+    expect(row.getAttribute("role")).toBe("listitem");
+    // Sanity: the controls this fix is protecting are still real descendants.
+    expect(row.querySelectorAll('button, [role="checkbox"]').length).toBeGreaterThan(0);
   });
 });

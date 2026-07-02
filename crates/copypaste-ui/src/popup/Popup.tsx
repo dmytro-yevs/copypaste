@@ -392,9 +392,9 @@ export function Popup() {
           <ul
             className="list"
             ref={listRef}
-            role="listbox"
+            role="list"
             aria-label="Clipboard history"
-            aria-activedescendant={
+            data-active-descendant={
               filtered[selectedIdx] ? `popup-item-${filtered[selectedIdx].item.id}` : undefined
             }
           >

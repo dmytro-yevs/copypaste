@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { ChevronRight, ShieldOff, Unlink } from "lucide-react";
 import {
-  formatWallTime,
   formatEpochSecs,
   type OwnDeviceInfo,
   type PairedDevice,
@@ -53,6 +52,10 @@ export function StatusDot({
   // online, so no separate ping/ring child element is needed here.
   return (
     <span
+      // g27b.28: role=img makes aria-label a permitted attribute (axe
+      // aria-prohibited-attr) — this coloured dot conveys online/offline status
+      // graphically, so it is semantically an image with a text alternative.
+      role="img"
       className={online ? "dot-stat" : "dot-stat off"}
       title={title}
       aria-label={title}
@@ -265,6 +268,11 @@ export function PeerRow({
   const isPending = rowSt?.pending ?? false;
   const revokedAt = rowSt?.revokedAt ?? null;
   const rowError = rowSt?.error ?? null;
+  // CopyPaste-g27b.36b: once this row has been revoked (client-side, tracked
+  // via rowSt.revokedAt from the revoke_peer/revoke_and_rotate response), the
+  // row must stop presenting itself as an actively-paired device — no more
+  // green online dot, "Verified" trust badge, or live Unpair/Revoke actions.
+  const isRevoked = revokedAt !== null;
 
   // Prefer the peer's in-band advertised local_ip; fall back to parsing the
   // "host:port" P2P address field.
@@ -303,7 +311,9 @@ export function PeerRow({
   // itself by transport (Decision: transport shown ONLY via this chip).
   const tpillClass = transportLabel === "P2P" ? "tpill--p2p" : "tpill--cloud";
 
-  const online = liveOnline !== undefined ? liveOnline : peer.online === true;
+  // g27b.36b: a revoked device is never "online" regardless of the last
+  // presence poll — it has just been cut off from P2P (and possibly cloud).
+  const online = isRevoked ? false : liveOnline !== undefined ? liveOnline : peer.online === true;
   const summary = [peer.os_version, ip].filter(Boolean).join(" · ");
   const bodyId = `devrow-body-${peer.fingerprint}`;
 
@@ -322,8 +332,14 @@ export function PeerRow({
         </span>
         {/* mgkr (NG-3) / CopyPaste-1jms.30: trust badge derived from peer.trust.
             "verified" → green Verified (SAS-confirmed peer).
-            Any other value or absent → Unverified (matches Android trustLabel). */}
-        {peer.trust === "verified" ? (
+            Any other value or absent → Unverified (matches Android trustLabel).
+            g27b.36b: a revoked device no longer shows "Verified" (or
+            "Unverified") — SAS trust is moot once P2P trust has been cut. */}
+        {isRevoked ? (
+          <span className="badge" data-testid="trust-badge">
+            Revoked
+          </span>
+        ) : peer.trust === "verified" ? (
           <span className="badge badge--verified" data-testid="trust-badge">
             <span className="d" aria-hidden="true" />
             Verified
@@ -355,9 +371,15 @@ export function PeerRow({
             />
           </DeviceMetaGrid>
 
-          {/* Revoked / error states — kept on their own line for visual weight */}
-          {revokedAt !== null && (
-            <p>Revoked · {formatWallTime(revokedAt)}</p>
+          {/* Revoked / error states — kept on their own line for visual weight.
+              g27b.36b: revokedAt is Unix epoch SECONDS (as returned by
+              revoke_peer/revoke_and_rotate) — formatEpochSecs (not
+              formatWallTime, which expects milliseconds) is the correct
+              formatter here; it also returns "—" for a falsy/0 timestamp, so
+              a device revoked with an unknown time shows plain "Revoked"
+              rather than a bogus epoch-1970 date. */}
+          {isRevoked && (
+            <p>{revokedAt ? `Revoked · ${formatEpochSecs(revokedAt)}` : "Revoked"}</p>
           )}
           {rowError !== null && (
             <p className="field-note field-note--err">{rowError}</p>
@@ -370,29 +392,33 @@ export function PeerRow({
                breaks trust and keeps .btn--danger (Revoke & rotate stays inside
                RevokeConfirmDialog). Rendered as plain buttons (not ActionButton, which
                only knows primary/secondary/danger/danger-solid/ghost — no warning
-               variant) so ActionButton.tsx (out of this slice's scope) stays untouched. */}
-          <div className="devrow__foot">
-            <button
-              type="button"
-              className="btn btn--warning sm"
-              onClick={() => onUnpair(peer.fingerprint)}
-              disabled={isPending}
-              aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
-            >
-              <Unlink aria-hidden="true" />
-              {isPending ? "…" : "Unpair"}
-            </button>
-            <button
-              type="button"
-              className="btn btn--danger sm"
-              onClick={() => onRevoke(peer.fingerprint)}
-              disabled={isPending}
-              aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
-            >
-              <ShieldOff aria-hidden="true" />
-              {isPending ? "…" : "Revoke"}
-            </button>
-          </div>
+               variant) so ActionButton.tsx (out of this slice's scope) stays untouched.
+               g27b.36b: an already-revoked device has no live actions left to take —
+               the footer is hidden entirely rather than showing disabled buttons. */}
+          {!isRevoked && (
+            <div className="devrow__foot">
+              <button
+                type="button"
+                className="btn btn--warning sm"
+                onClick={() => onUnpair(peer.fingerprint)}
+                disabled={isPending}
+                aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
+              >
+                <Unlink aria-hidden="true" />
+                {isPending ? "…" : "Unpair"}
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger sm"
+                onClick={() => onRevoke(peer.fingerprint)}
+                disabled={isPending}
+                aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
+              >
+                <ShieldOff aria-hidden="true" />
+                {isPending ? "…" : "Revoke"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

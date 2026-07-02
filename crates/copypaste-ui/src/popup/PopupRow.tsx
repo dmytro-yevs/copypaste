@@ -87,19 +87,28 @@ export const PopupRow = React.memo(function PopupRow({
         }
       : undefined;
 
+  // g27b.29 (a11y — nested-interactive, same fix pattern as HistoryRow.tsx):
+  // `role="option"` flattens descendant interactive semantics
+  // (childrenPresentational in the ARIA roles model), which is why axe's
+  // "nested-interactive" check fires on the nested Pin <button>. `role="group"`
+  // is a valid `listbox` owned-element (Popup.tsx's `role="listbox"`) without
+  // that flattening, so the same nested button no longer trips the check.
+  // `aria-selected` isn't an allowed attribute on `group`; `aria-current`
+  // takes over exposing the selected state to AT.
   return (
     <li
       id={`popup-item-${item.id}`}
-      role="option"
+      role="listitem"
       className={selected ? "row sel" : "row"}
-      aria-selected={selected}
+      aria-current={selected ? "true" : undefined}
       aria-label={blurred ? MASKED_A11Y_LABEL : undefined}
       style={{
         // Functional: matches the geometry GlideHighlight reads via
         // child.offsetHeight to size/position its overlay for this row.
         minHeight: isImage ? Math.max(rowH, 50) : rowH,
-        // Functional: row content must paint above the GlideHighlight overlay.
-        zIndex: 1,
+        // z-index (row paints above the GlideHighlight overlay) moved to the
+        // shared `.row` rule (patterns.css) — g27b.4: it's a static value,
+        // never per-item, so it doesn't need to be recomputed inline.
       }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}

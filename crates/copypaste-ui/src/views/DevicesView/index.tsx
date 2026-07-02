@@ -173,10 +173,17 @@ function DevicesViewInner({
   const actions = (
     <div>
       {/* uw45: replaced tiny inline Yes/No with a proper modal confirmation */}
+      {/* g27b.36a: only one confirm modal may be open at a time — opening
+          "Revoke all" while a single-device revoke prompt is open must close
+          that one first, otherwise both .modal/.scrim stack on top of each
+          other (two coexisting portals). */}
       <button
         type="button"
         className="btn btn--danger sm"
-        onClick={() => setRevokeAllConfirm(true)}
+        onClick={() => {
+          setRevokePrompt(null);
+          setRevokeAllConfirm(true);
+        }}
         disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
       >
         <Trash2 aria-hidden="true" />
@@ -357,6 +364,10 @@ function DevicesViewInner({
                 liveOnline={presenceOnline[peer.fingerprint]}
                 onUnpair={(fp) => void handleUnpair(fp)}
                 onRevoke={(fp) => {
+                  // g27b.36a: opening the single-device revoke prompt must close
+                  // any already-open "Revoke all" confirm so only one confirm
+                  // modal is ever on screen at once.
+                  setRevokeAllConfirm(false);
                   setRotatePassphrase("");
                   setRevokePrompt({
                     fingerprint: fp,

@@ -121,16 +121,20 @@
   .vsub { font-size: var(--fs-sm); color: var(--faint); font-family: var(--f-mono); }
 
   /* --- Settings tabs / groups / rows ---------------------------------------- */
+  /* CopyPaste-g27b.31: at the app's real minWidth (720px, tauri.conf.json)
+     the 7 sub-tabs no longer fit in one row (scrollWidth 629 > clientWidth
+     520) — "Logs" was fully off-screen and "About" was truncated, reachable
+     only via a hidden (scrollbar-width:none) horizontal scroll of the WHOLE
+     settings panel. Wrapping to a second line keeps every tab reachable and
+     visible without any scroll affordance. */
   .set-tabs {
     display: flex;
     flex: none;
+    flex-wrap: wrap;
     gap: var(--s-1);
     padding: 8px 12px 0;
     border-bottom: var(--stroke-1) solid var(--divider);
-    overflow-x: auto;
-    scrollbar-width: none;
   }
-  .set-tabs::-webkit-scrollbar { display: none; }
   .set-tab {
     font-size: var(--fs-125);
     font-weight: var(--fw-semibold);
@@ -172,6 +176,13 @@
   .srow__l { font-size: 13.5px; color: var(--text); }
   .srow__s { font-size: var(--fs-sm); color: var(--faint); margin-top: var(--s-1); max-width: 340px; }
   .srow__c { flex: none; display: flex; align-items: center; gap: var(--gap-field); }
+  /* g27b.32: rows whose control is a full-width field (Sync credential inputs)
+     must let the control column GROW — the default flex:none sizes it to the
+     input's ~146px intrinsic width, hiding long values. This override lives in
+     the shell layer (not primitives) because @layer order (…primitives, shell)
+     means the shell `.srow__c { flex:none }` above otherwise wins regardless of
+     specificity. */
+  .srow__c:has(.field--grow-full) { flex: 1; min-width: 0; }
   /* Title + inline info (i) trigger — keeps the popover icon beside the label. */
   .srow__title { display: inline-flex; align-items: center; gap: var(--s-3); }
   .statusrow { display: flex; align-items: center; gap: var(--s-3); font-size: var(--fs-125); color: var(--dim); }
@@ -192,8 +203,12 @@
   /* --- Logs ----------------------------------------------------------------- */
   /* Logs toolbar (filter + Refresh + Export) — top bar when Logs is a Settings tab. */
   .logs-toolbar { flex: none; display: flex; padding: 12px 14px; border-bottom: var(--stroke-1) solid var(--divider); }
-  .logs-toolbar .srow__c { flex: 1; }
-  .logs-toolbar .field { flex: 1; }
+  /* CopyPaste-g27b.31: at narrow width the filter field + Refresh + Export
+     no longer fit in one row; wrap instead of pushing the buttons
+     off-screen. min-width:0 lets the filter field shrink to make room
+     before wrapping. */
+  .logs-toolbar .srow__c { flex: 1; flex-wrap: wrap; row-gap: var(--s-3); }
+  .logs-toolbar .field { flex: 1; min-width: 0; }
   /* Log dir path subtitle + footer — spaced apart from the log lines. */
   .logs-path {
     flex: none;
@@ -215,8 +230,15 @@
   .logline { display: flex; gap: var(--s-5); padding: var(--s-2) var(--s-5); border-radius: var(--r-sm); }
   .logline:hover { background: var(--hover); }
   .logline .t { color: var(--faint); flex: none; }
+  /* CopyPaste-g27b.31 (P3): fixed min-width so the badge forms a stable
+     column — otherwise "INFO"/"DEBUG"/"WARN"/"ERROR" render at different
+     widths and every message `code` element left-aligns at a ragged x
+     position. Width/layout only — color/contrast per level is owned
+     elsewhere (the `.lvl.*` color rules below are unchanged). */
   .logline .lvl {
     flex: none;
+    min-width: 42px;
+    text-align: center;
     font-size: var(--fs-3xs);
     font-weight: var(--fw-strong);
     padding: 1px 6px;
@@ -225,10 +247,18 @@
     text-transform: uppercase;
   }
   .lvl.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
-  .lvl.info { color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); }
+  /* g27b.27: --info-strong (contrast-safe in light theme; == --info in dark). */
+  .lvl.info { color: var(--info-strong); background: color-mix(in srgb, var(--info) 12%, transparent); }
   .lvl.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
   .lvl.err { color: var(--err); background: color-mix(in srgb, var(--err) 12%, transparent); }
-  .logline .m { color: var(--dim); }
+  /* CopyPaste-g27b.31: at narrow width the message was scrolled fully out of
+     view (only timestamp + level badge visible) because `.m` had no
+     min-width override — a flex item's default min-width is `auto` (its
+     content size), so the row never shrank below the message's full length.
+     min-width:0 lets it shrink to the available width; the `code` wraps
+     instead of overflowing. */
+  .logline .m { flex: 1; min-width: 0; color: var(--dim); }
+  .logline .m code { white-space: pre-wrap; word-break: break-word; }
   .logline .m b { color: var(--text); }
 
   /* --- About ---------------------------------------------------------------- */
@@ -268,7 +298,10 @@
   }
   .about__grid dt { color: var(--dim); }
   .about__grid dd { color: var(--faint); font-family: var(--f-mono); }
-  .about__links { display: flex; gap: var(--s-4); margin-top: var(--s-2); }
+  /* CopyPaste-g27b.31: allow the github/Changelog/Privacy buttons to wrap at
+     narrow width instead of overflowing the (overflow-y:auto) .about pane —
+     previously Privacy policy was pushed past the right edge. */
+  .about__links { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-4); margin-top: var(--s-2); }
   /* Feature list: left-aligned block centered within the (text-align:center)
      .about column, so bullets line up in a column instead of ragged-centering. */
   .about__features {

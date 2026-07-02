@@ -200,13 +200,35 @@ export const HistoryRow = React.memo(function HistoryRow({
   // and taller image rows aren't clipped by the static `.row` cap.
   const rowStyle = {
     ["--row-max"]: `${rowHeightFor(entry, previewSize, imageMaxHeight, density, previewLines)}px`,
+    // g27b.25: the actual height cap for the thumbnail. imageMaxHeight was only
+    // fed to rowHeightFor (row reservation) and the <img> HTML height attribute
+    // (a decode hint, not a layout bound), so a square/tall source image ignored
+    // the setting and grew to the width cap — ballooning the row. .tile--thumb img
+    // reads this var as its CSS max-height so the setting truly caps rendered height.
+    ["--img-max"]: `${imageMaxHeight}px`,
   } as CSSProperties;
 
+  // g27b.29 (a11y — nested-interactive): `role="option"` has
+  // `childrenPresentational: true` in the ARIA roles model — its descendants'
+  // interactive semantics are flattened away for assistive tech, which is
+  // exactly why axe's "nested-interactive" check (serious, WCAG 4.1.2) fires
+  // on this row: it nests the multi-select checkbox (role=checkbox) AND the
+  // Pin/Preview/Delete <button>s. `role="group"` is also a valid `listbox`
+  // owned-element (VirtualList.tsx's `role="listbox"` — ARIA's
+  // `requiredOwned` list for listbox is `['group', 'option']`) but does NOT
+  // have childrenPresentational, so the exact same nested checkbox/buttons no
+  // longer trip the check. `aria-selected` is not an allowed attribute on
+  // `group` (would trip aria-allowed-attr), so the selected state is exposed
+  // via `aria-current` instead — still announced by AT, still readable by
+  // the `.sel` CSS class for sighted users. Click-to-select, multi-select,
+  // and keyboard all keep working unchanged; only the ARIA role/attribute
+  // pair changed. See CopyPaste-g27b.29 bd note for the full trade-off.
+  const isRowSelected = multiSelected || selected;
   return (
     <div
       id={`clip-${entry.id}`}
-      role="option"
-      aria-selected={multiSelected || selected}
+      role="listitem"
+      aria-current={isRowSelected ? "true" : undefined}
       aria-label={ariaRowLabel}
       className={rowClass}
       style={rowStyle}

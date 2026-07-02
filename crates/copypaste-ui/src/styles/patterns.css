@@ -12,6 +12,12 @@
     padding: var(--pad-row);
     border-radius: var(--r-row);
     position: relative;
+    /* g27b.4: row content must paint above the selection glide overlay
+       (VirtualList's/GlideHighlight's absolutely-positioned `.row-glide`
+       layer, rendered earlier in the DOM so it sits behind by default) —
+       moved out of PopupRow's per-item inline style since it's a constant,
+       never a per-row computed value. */
+    z-index: 1;
     /* Per-row bound set by HistoryRow (--row-max) so multi-line preview rows and
        taller image rows aren't clipped; falls back to the single-line default. */
     max-height: var(--row-max, 74px);
@@ -28,6 +34,11 @@
   .row.sel {
     background: var(--selected);
   }
+  /* g27b.27: on a selected row the --selected accent tint lowers the effective
+     background luminance enough that --faint meta text dips under AA (light
+     theme, axe). --dim clears it and reads as appropriate emphasis on the
+     selected row. */
+  .row.sel .row__meta { color: var(--dim); }
   .row.sel::before {
     content: "";
     position: absolute;
@@ -108,11 +119,47 @@
     color: var(--ct, var(--c-text));
     font-weight: var(--fw-semibold);
   }
+  /* g27b.27: the content-type accent colours are tuned for tile FILLS; as small
+     meta TEXT on a light (white) surface several of them fall under WCAG AA.
+     Darken the .ty label toward black in light theme only — keeps the hue for
+     type-coding while clearing the 4.5:1 floor. Dark theme is already legible. */
+  :root[data-theme="light"] .row__meta .ty {
+    color: color-mix(in srgb, var(--ct, var(--c-text)) 55%, #000);
+  }
   .row__right {
     display: flex;
     align-items: center;
     gap: var(--s-1);
     flex: none;
+  }
+
+  /* --- Virtual-list structural layers (g27b.4) -------------------------------
+     Static geometry moved out of VirtualList.tsx/GlideHighlight.tsx's inline
+     styles into dedicated classes; only genuinely per-item computed values
+     (scroll-derived heights/top offsets) stay inline on those elements. */
+  .vlist-spacer {
+    /* Establishes the virtual scroller's positioning context; `height` (the
+       full scrollable height) is set inline — it's recomputed per render. */
+    position: relative;
+  }
+  .vlist-window {
+    /* Offsets the currently-rendered row window to where it starts in the
+       full (virtual) list; `top` is set inline (scroll-derived). */
+    position: absolute;
+    left: 0;
+    right: 0;
+  }
+  .row-glide {
+    /* The selection-glide overlay (VirtualList's glideStyle layer / Popup's
+       GlideHighlight) that animates to the selected row(s). `top`/`height`
+       (scroll- and selection-derived) and `opacity`/`transition` (motion
+       state) stay inline. z-index sits below `.row`'s (1) so row content
+       always paints above the glide layer regardless of DOM order. */
+    position: absolute;
+    left: 0;
+    right: 0;
+    z-index: 0;
+    pointer-events: none;
   }
 
   /* --- Hover-revealed row actions (design.md Decision 13/X4) ----------------- */
@@ -344,7 +391,13 @@
   .devrow__body > div { overflow: hidden; min-height: 0; }
   .cfields {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    /* g27b.33: reflow on the grid's OWN width, not the viewport. The devices
+       panel is narrower than the viewport (sidebar), so a viewport media query
+       kept 2 columns while the panel was too narrow, cramming values (long
+       fingerprint / OS) into ~14px cells that word-break to one char per line.
+       auto-fit + minmax drops to a single column whenever a column can't hold
+       >=210px, regardless of viewport width. */
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
     gap: 1px;
     padding: 5px 8px 4px;
     border-top: var(--stroke-1) solid var(--divider);
@@ -375,7 +428,8 @@
   /* g27b.19: right-aligned, compact (no flex:1) — Unpair/Revoke read as two
      distinct, differently-severe actions rather than one giant equal-width bar. */
   .devrow__foot { display: flex; gap: var(--s-4); padding: 3px 13px 13px; justify-content: flex-end; }
-  @media (max-width: 600px) { .cfields { grid-template-columns: 1fr; } }
+  /* (g27b.33) the viewport media query is superseded by .cfields' auto-fit
+     minmax above, which reflows on the grid's own width. */
 
   /* --- Warning button variant (g27b.19) — Unpair is destructive-but-reversible
      (re-pairing is easy), so it gets an amber/warn treatment one notch below
@@ -473,6 +527,11 @@
   .ctl--stack { flex-direction: column; align-items: stretch; gap: var(--s-3); }
   .ctl--col { flex-direction: column; align-items: flex-end; gap: var(--s-2); }
   .ctl--wrap { flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3); }
+  /* g27b.34: a single very long bundle id must not push its chip past the card
+     edge — cap the chip and ellipsis-truncate its label (the × stays visible).
+     Scoped to .ctl--wrap so filter chips elsewhere are unaffected. */
+  .ctl--wrap .chip { max-width: 100%; min-width: 0; }
+  .chip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .check-label { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); }
   .field-note { font-size: var(--fs-sm); color: var(--faint); }
   .field-note--err { color: var(--err); }

@@ -12,6 +12,9 @@
 // Hardcoded translate-x-[16px] / duration-[120ms] removed; tokens govern both.
 // ---------------------------------------------------------------------------
 
+import { useContext } from "react";
+import { SettingsFieldLabelContext } from "./settingsFieldLabelContext";
+
 interface ToggleProps {
   checked: boolean;
   onChange: (val: boolean) => void;
@@ -25,13 +28,17 @@ export function Toggle({
   disabled,
   "aria-label": ariaLabel,
 }: ToggleProps) {
+  // g27b.26: a role=switch button has no text child, so without an aria-label
+  // axe flags `button-name` (critical). Fall back to the enclosing SettingsRow
+  // title when no explicit label is passed.
+  const rowLabel = useContext(SettingsFieldLabelContext);
   return (
     <button
       type="button"
       role="switch"
       className={checked ? "toggle" : "toggle off"}
       aria-checked={checked}
-      aria-label={ariaLabel}
+      aria-label={ariaLabel ?? rowLabel}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >

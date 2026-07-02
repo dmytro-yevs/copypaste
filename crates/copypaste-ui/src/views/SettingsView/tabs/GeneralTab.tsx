@@ -291,8 +291,11 @@ export function GeneralTab({
                 <span
                   key={bundleId}
                   className="chip"
+                  title={bundleId}
                 >
-                  {bundleId}
+                  {/* g27b.34: wrap the id so a very long bundle id truncates
+                      with an ellipsis inside the card instead of overflowing. */}
+                  <span className="chip__label">{bundleId}</span>
                   <button
                     type="button"
                     className="chip__x"

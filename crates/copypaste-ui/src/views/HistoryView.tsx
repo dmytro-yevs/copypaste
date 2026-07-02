@@ -66,6 +66,9 @@ import { useHistoryFilter } from "./HistoryView/hooks/useHistoryFilter";
 import { useHistorySelection } from "./HistoryView/hooks/useHistorySelection";
 import { useFileDrop } from "./HistoryView/hooks/useFileDrop";
 
+// g27b.37: pure toolbar count-badge logic — see historyBadge.ts.
+import { historyBadgeCount } from "./HistoryView/historyBadge";
+
 // ---------------------------------------------------------------------------
 // Main view
 // ---------------------------------------------------------------------------
@@ -655,6 +658,16 @@ export function HistoryViewInner() {
   // Render
   // -------------------------------------------------------------------------
 
+  // g27b.37: toolbar count badge — see historyBadge.ts for the "filtered vs.
+  // total" contract this implements.
+  const isHistoryFiltered = search.trim().length > 0 || deviceFilter !== "all";
+  const badgeCount = historyBadgeCount({
+    totalCount,
+    filteredCount: filtered.length,
+    search,
+    deviceFilter,
+  });
+
   const actions = (
     <>
       {/* Search bar (primary; grows to fill the header via `.vhead__actions .field`) */}
@@ -721,15 +734,18 @@ export function HistoryViewInner() {
         </button>
       )}
 
-      {/* Total-count badge — shows the full DB count from the daemon, not just
-          the loaded slice. Hidden until the first page resolves (totalCount null). */}
-      {totalCount !== null && (
+      {/* Total-count badge — shows the full DB count from the daemon when no
+          search/device filter is active; while one is, it switches to the
+          FILTERED (visible) count instead so a zero-match search doesn't
+          still read "14 items" next to an empty results list (g27b.37).
+          Hidden until the first page resolves (totalCount null). */}
+      {badgeCount !== null && (
         <span
           className="field-note"
           data-testid="history-total-badge"
-          title="Total items in clipboard history"
+          title={isHistoryFiltered ? "Matching items" : "Total items in clipboard history"}
         >
-          {totalCount} {totalCount === 1 ? "item" : "items"}
+          {badgeCount} {badgeCount === 1 ? "item" : "items"}
         </span>
       )}
       {/* kayk: Clear all — destructive action hidden behind a ConfirmModal; only

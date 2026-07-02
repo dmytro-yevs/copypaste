@@ -21,10 +21,27 @@
     color-scheme: dark;
     --bg:#0E0F14; --panel:#16181F; --elevated:#1E2027; --card:#1E2027; --raised:#282B33; --raised-2:#33373F;
     --border:#33363F; --divider:#24262D;
-    --text:#E7E9EE; --dim:#9CA1AC; --faint:#7E838E; --mute:#5C616B;
+    /* --faint lifted #7E838E→#8F94A0 for WCAG AA (>=4.5:1) on card/raised surfaces
+       — it labels real meta text (.row__meta, .devrow__sum), so it must be legible
+       (g27b.27). --mute stays decorative-only (never sole carrier of text). */
+    --text:#E7E9EE; --dim:#9CA1AC; --faint:#8F94A0; --mute:#5C616B;
     --hover:rgba(255,255,255,.045); --pressed:rgba(255,255,255,.075);
     --selected:color-mix(in srgb,var(--accent) 16%,transparent); --scrim:rgba(0,0,0,.55);
     --ok:#4FB866; --warn:#E0A33F; --err:#E5645F; --info:#5B9DFF;
+    /* --err-strong: additive (not in copypaste-design-reference.html, no
+       parity constraint — g27b.27). Foreground-text variant of --err for use
+       where --err is rendered as small/semibold TEXT over a tinted --err
+       background (.btn--danger), as opposed to --err's other jobs (tint fill,
+       status dot, syntax-highlight hue) where the base hue is correct. Dark
+       theme's .btn--danger already clears AA, so this equals --err here. */
+    --err-strong: var(--err);
+    /* --info-strong (g27b.27): foreground-text variant of --info for the log
+       level badge (.lvl.info) rendered as text on an --info 12% tint. Dark
+       theme already clears AA, so this equals --info here. */
+    --info-strong: var(--info);
+    /* --ok-strong (g27b.27): text variant of --ok for the .badge--verified label
+       on its --ok tint. Dark theme clears AA, so equals --ok here. */
+    --ok-strong: var(--ok);
     --c-text:#8B93A5; --c-url:#34D1BF; --c-code:#A78BFA; --c-image:#E879C6; --c-mail:#4ED98A;
     --c-color:#F5A524; --c-num:#5CC1CE; --c-path:#5B9DFF; --c-file:#5B9DFF; --c-json:#FB7B53; --c-secret:#F2616B;
     --sh1:0 1px 2px rgba(0,0,0,.30); --sh2:0 8px 24px -6px rgba(0,0,0,.45); --sh3:0 24px 64px -12px rgba(0,0,0,.60);
@@ -35,10 +52,29 @@
     color-scheme: light;
     --bg:#F5F6F8; --panel:#FFFFFF; --elevated:#FFFFFF; --card:#FFFFFF; --raised:#EFF1F4; --raised-2:#E2E5EA;
     --border:#E1E4E9; --divider:#ECEEF1;
-    --text:#1A1C22; --dim:#565B66; --faint:#767B86; --mute:#A2A7B1;
+    /* --faint darkened #767B86→#6E7380 for WCAG AA on white/panel (g27b.27). */
+    --text:#1A1C22; --dim:#565B66; --faint:#6E7380; --mute:#A2A7B1;
     --hover:rgba(15,18,26,.045); --pressed:rgba(15,18,26,.075);
     --selected:color-mix(in srgb,var(--accent) 12%,transparent); --scrim:rgba(20,22,30,.28);
     --ok:#1FA85B; --warn:#C77F1A; --err:#D64545; --info:#2563EB;
+    /* --err-strong (g27b.27): --err (#D64545) as .btn--danger's text color
+       measures ~3.9:1 against its own 9%-tinted background on light card
+       surfaces — under the 4.5:1 AA floor for normal-weight text (axe
+       color-contrast, 8 nodes: Clear all/Revoke on history+devices).
+       Darkened to #B93434, which holds >=4.6:1 against the tint at both the
+       rest (9%) and hover (16%) opacities. --err itself is untouched (tint
+       fill / status dot / syntax hue all read correctly at the original
+       value, and it stays parity-locked to copypaste-design-reference.html). */
+    --err-strong: #B93434;
+    /* --info-strong (g27b.27): --info (#2563EB) as .lvl.info badge TEXT on its
+       12% tint fails AA on light card surfaces (axe, 7 nodes). Darkened to
+       #1D4ED8 (>=4.5:1 on the tint). --info itself is untouched (banners/links
+       resolve correctly and it stays parity-locked to the reference). */
+    --info-strong: #1D4ED8;
+    /* --ok-strong (g27b.27): --ok (#1FA85B) as .badge--verified TEXT on its 12%
+       green tint fails AA on light surfaces (axe, 6 nodes). Darkened to #157A42
+       (>=4.5:1 on the tint). --ok itself untouched (dot/status use it directly). */
+    --ok-strong: #157A42;
     --c-text:#6A7282; --c-url:#0E9E8C; --c-code:#7C5CE6; --c-image:#C44BA0; --c-mail:#1FA85B;
     --c-color:#C77F1A; --c-num:#1C8B9B; --c-path:#2F6FE0; --c-file:#2F6FE0; --c-json:#DC5A2E; --c-secret:#D64545;
     --sh1:0 1px 2px rgba(20,22,30,.06); --sh2:0 8px 24px -8px rgba(20,22,30,.12); --sh3:0 24px 64px -12px rgba(20,22,30,.18);

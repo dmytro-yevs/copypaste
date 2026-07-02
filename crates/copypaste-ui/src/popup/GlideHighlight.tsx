@@ -75,12 +75,15 @@ export function GlideHighlight({
   return (
     <div
       aria-hidden
+      // g27b.4: static position/left/right/z-index/pointer-events moved to
+      // the shared `.row-glide` class (patterns.css) — VirtualList.tsx's
+      // History glide layer uses the same class. `top`/`height` (per-row
+      // measured geometry) and `opacity`/`transition` (motion state) stay
+      // inline below since they're genuinely per-render computed values.
+      className="row-glide"
       style={{
-        // Functional measurement/positioning only — tracks the selected row's
+        // Functional measurement/positioning — tracks the selected row's
         // geometry so the glide layer overlays the right list item.
-        position: "absolute",
-        left: 0,
-        right: 0,
         top,
         height,
         // Functional: suppress the transition during scroll, and hide
@@ -93,11 +96,6 @@ export function GlideHighlight({
           ? "none"
           : "top var(--dur) var(--ease), height var(--dur) var(--ease)",
         opacity: visible && !isScrolling ? 1 : 0,
-        // Functional: absolutely-positioned elements paint above static
-        // siblings by default regardless of DOM order — zIndex 0 here keeps
-        // this layer behind the row content (text must stay legible).
-        zIndex: 0,
-        pointerEvents: "none",
       }}
     />
   );

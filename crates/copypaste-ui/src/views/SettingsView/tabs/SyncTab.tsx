@@ -239,7 +239,10 @@ export function SyncTab({
       />
       <Panel>
         <SettingsRow title="Supabase URL">
-          <div className="field">
+          {/* g27b.32: field--grow-full fills the available card width (see
+              primitives.css) — the bare .field sat at the browser's ~146px
+              intrinsic input width regardless of card width. */}
+          <div className="field field--grow-full">
             <input
               type="url"
               placeholder="https://your-project.supabase.co"
@@ -253,8 +256,9 @@ export function SyncTab({
         </SettingsRow>
         {/* bdac.80: standardized to "Anon key" (sentence case, drop redundant "Supabase" prefix — section header already provides context) */}
         <SettingsRow title="Anon key">
-          <div className="ctl">
-            <div className="field">
+          {/* g27b.32: ctl--grow + field--grow-full — see Supabase URL above. */}
+          <div className="ctl ctl--grow">
+            <div className="field field--grow-full">
               <input
                 type="password"
                 placeholder={
@@ -280,8 +284,9 @@ export function SyncTab({
              Inputs are cleared after a successful Save. Password is always masked. */}
         {/* crh3.17: "Email" matches "Anon key" pattern (no prefix; bdac.80) */}
         <SettingsRow title="Email">
-          <div className="ctl">
-            <div className="field">
+          {/* g27b.32: ctl--grow + field--grow-full — see Supabase URL above. */}
+          <div className="ctl ctl--grow">
+            <div className="field field--grow-full">
               <input
                 type="email"
                 placeholder={
@@ -303,8 +308,9 @@ export function SyncTab({
         </SettingsRow>
         {/* crh3.17: "Password" matches "Anon key" / "Email" pattern (no prefix) */}
         <SettingsRow title="Password">
-          <div className="ctl">
-            <div className="field">
+          {/* g27b.32: ctl--grow + field--grow-full — see Supabase URL above. */}
+          <div className="ctl ctl--grow">
+            <div className="field field--grow-full">
               <input
                 type="password"
                 placeholder={
@@ -329,7 +335,8 @@ export function SyncTab({
           title="Relay URL"
           info={<InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />}
         >
-          <div className="field">
+          {/* g27b.32: field--grow-full — see Supabase URL above. */}
+          <div className="field field--grow-full">
             <input
               type="url"
               placeholder="https://relay.example.com"

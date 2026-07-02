@@ -11,6 +11,8 @@
 //   disabled     — visually dims the title/description when true.
 // ---------------------------------------------------------------------------
 
+import { SettingsFieldLabelContext } from "./settingsFieldLabelContext";
+
 interface SettingsRowProps {
   title: string;
   description?: string;
@@ -51,8 +53,13 @@ export function SettingsRow({ title, description, info, children, disabled, full
         </div>
         {description && <p className="srow__s">{description}</p>}
       </div>
-      {/* Right/below: control slot */}
-      <div className="srow__c" style={fullWidth ? { width: "100%" } : undefined}>{children}</div>
+      {/* Right/below: control slot. g27b.26: publish the row title so nested
+          Toggle/SliderRow controls inherit it as a fallback accessible name. */}
+      <div className="srow__c" style={fullWidth ? { width: "100%" } : undefined}>
+        <SettingsFieldLabelContext.Provider value={title}>
+          {children}
+        </SettingsFieldLabelContext.Provider>
+      </div>
     </div>
   );
 }
