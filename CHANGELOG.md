@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-02
+
+Desktop UI redesign (design-system-redesign / CopyPaste-g27b) — a full ITCSS
+token-based design system across every surface.
+
+- **New design system:** two-axis theming (dark/light × 6 accents × translucency)
+  with an external pre-paint bootstrap, plus a new **System** theme that follows
+  the OS colour scheme live.
+- **Redesigned surfaces:** History, Devices, Settings, the quick-paste popup,
+  banners, toasts and all modals — rebuilt on shared primitives; About and Logs
+  are now trailing Settings tabs.
+- **Display settings apply live:** preview-lines (multi-line rows sized to
+  content), image-preview height, sensitive-masking, and theme/accent/translucency.
+- **Devices:** pairing QR moved into a modal; distinct Unpair/Revoke severity;
+  aligned section headers; icons on every action.
+- **A11y & tooling:** portaled popovers/dialogs, a DEV-only component gallery,
+  a Playwright + `@axe-core/playwright` suite, and a packaged-Tauri smoke
+  release gate wired for macOS CI.
+
+Note: the Android `g5u1` de-style is deferred — re-applied on main's decomposed
+Android structure as a follow-up (this release keeps main's Android as-is).
+
 ## [0.3.2] - 2026-07-01
 
 - **Cloud sync (security):** per-account cloud sync key with a single, purpose-
