@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use copypaste_ipc::backoff::BackoffScheduler;
 use reqwest::{Client, StatusCode};
 use tracing::{debug, info, warn};
 
@@ -17,6 +18,34 @@ const REFRESH_MARGIN_SECS: u64 = 60;
 // (`expires_in <= REFRESH_MARGIN_SECS`) yields a sleep of 0, producing an
 // unthrottled refresh loop that hammers GoTrue. Never sleep below this.
 const MIN_REFRESH_INTERVAL_SECS: u64 = 5;
+
+// CopyPaste-vgpy: base/cap for the `BackoffScheduler` driving the
+// refresh-failure retry path (see `spawn_auto_refresh`). Base matches the
+// old flat retry delay so first-failure behaviour is unchanged; the cap
+// bounds how far repeated failures can stretch the interval so a
+// long-lasting GoTrue outage doesn't leave the client refreshing every 30 s
+// forever, but also doesn't wait unboundedly long once GoTrue recovers.
+const REFRESH_BACKOFF_BASE_SECS: u64 = 30;
+const REFRESH_BACKOFF_CAP_SECS: u64 = 300;
+// Any successful refresh resets the schedule immediately (no minimum "hold"
+// duration needed — a successful token refresh is itself the success
+// signal), so the threshold value here is never consulted by our call
+// pattern (we always call `on_success_held()` right after a success).
+const REFRESH_BACKOFF_SUCCESS_HOLD_SECS: u64 = 60;
+
+/// Default HTTP timeout for all GoTrue auth requests.
+///
+/// Matches `SYNC_HTTP_TIMEOUT` / `REST_HTTP_TIMEOUT` used elsewhere in this
+/// workspace (30 s) for consistency.
+///
+/// # CopyPaste-8ebg.49
+///
+/// The previous `AuthClient` used `Client::new()` with no timeout, so a
+/// stalled GoTrue endpoint could block `sign_in`/`refresh_session` (and thus
+/// the auto-refresh loop) indefinitely. The sibling `RestClient` was already
+/// fixed for this in CopyPaste-16vr; this constant carries the same guard
+/// over to `AuthClient`.
+const AUTH_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Which GoTrue token grant a request used. A `400`/`422` means different
 /// things per grant — bad password vs. bad refresh token — and the OAuth
@@ -97,13 +126,25 @@ impl AuthClient {
     }
 
     /// Create a client with a custom [`SessionStore`].
+    ///
+    /// # CopyPaste-8ebg.49
+    ///
+    /// Uses a 30 s HTTP timeout (`AUTH_HTTP_TIMEOUT`) so a stalled GoTrue
+    /// endpoint cannot block `sign_in`/`refresh_session` indefinitely.
     pub fn with_store(
         base_url: impl Into<String>,
         anon_key: impl Into<String>,
         store: Arc<dyn SessionStore>,
     ) -> Self {
+        // TLS cert-store load cannot fail on macOS/Linux in normal operation.
+        // Propagate via expect rather than silently falling back to a no-timeout
+        // client (which would be worse than aborting on a stalled endpoint).
+        let http = Client::builder()
+            .timeout(AUTH_HTTP_TIMEOUT)
+            .build()
+            .expect("reqwest Client::builder should not fail on supported platforms");
         Self {
-            http: Client::new(),
+            http,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             anon_key: anon_key.into(),
             store,
@@ -217,8 +258,29 @@ impl AuthClient {
     ///
     /// The returned [`tokio::task::JoinHandle`] can be dropped — the task
     /// keeps running.  Abort it when the user signs out.
+    ///
+    /// # Backoff on refresh failure (CopyPaste-8ebg.59 / CopyPaste-vgpy.59)
+    ///
+    /// The proactive-refresh-before-expiry timing (`REFRESH_MARGIN_SECS`
+    /// countdown, and the `next_refresh_sleep_secs` interval after a
+    /// successful refresh) is unchanged. Only the retry-on-*failure* path
+    /// now escalates: it is driven by the same
+    /// [`copypaste_ipc::backoff::BackoffScheduler`] the sibling Realtime
+    /// client already uses, instead of a flat 30 s sleep. The scheduler is
+    /// carried across loop iterations, reset on every successful refresh,
+    /// and advanced on every failure so repeated GoTrue outages back off
+    /// exponentially (30 s, 60 s, 120 s, ... capped at
+    /// `REFRESH_BACKOFF_CAP_SECS`) instead of hammering at a fixed interval.
+    /// The "no session yet" branch (10 s) is untouched — it is not a
+    /// retry-after-failure, just idle polling for a first sign-in.
     pub fn spawn_auto_refresh(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
+            let mut refresh_backoff = BackoffScheduler::new(
+                std::time::Duration::from_secs(REFRESH_BACKOFF_BASE_SECS),
+                std::time::Duration::from_secs(REFRESH_BACKOFF_CAP_SECS),
+                std::time::Duration::from_secs(REFRESH_BACKOFF_SUCCESS_HOLD_SECS),
+            );
+
             loop {
                 let sleep_secs = match self.store.load() {
                     None => {
@@ -236,14 +298,25 @@ impl AuthClient {
                             match self.refresh_session(&session.refresh_token).await {
                                 Ok(new) => {
                                     info!("auto-refresh: new expiry = {}", new.expires_at);
+                                    // A successful refresh is itself the success
+                                    // signal — reset the failure-backoff schedule
+                                    // unconditionally so the next failure starts
+                                    // from the base delay again.
+                                    refresh_backoff.on_success_held();
                                     // Next check in expires_in - margin, floored so a
                                     // short-lived token can't spin the refresh loop.
                                     next_refresh_sleep_secs(new.expires_in)
                                 }
                                 Err(e) => {
                                     warn!("auto-refresh failed: {e}");
-                                    // Back-off 30 s and try again.
-                                    30
+                                    // Back off exponentially instead of a flat
+                                    // 30 s retry; advance the schedule for the
+                                    // *next* failure per BackoffScheduler's
+                                    // documented next_delay()-then-on_failure()
+                                    // ordering.
+                                    let delay = refresh_backoff.next_delay();
+                                    refresh_backoff.on_failure();
+                                    delay.as_secs().max(1)
                                 }
                             }
                         } else {

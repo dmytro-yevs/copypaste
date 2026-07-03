@@ -124,16 +124,28 @@ async fn standing_responder_loop(
                 }
             };
 
-        // Only accept an inbound pairing when idle (single active pairing). If a
-        // pairing is already in flight, drop this responder and loop; the next
-        // bind happens once the previous one finishes.
-        if !coordinator.try_begin(pairing::PairingRole::Responder) {
-            drop(responder);
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            continue;
-        }
-
+        // CopyPaste-vgpy (.25 follow-on): the single-active-pairing gate used to
+        // be checked HERE, before the handshake even started — a busy responder
+        // just dropped the raw TCP connection pre-accept, so the initiator saw
+        // an indistinguishable connect failure and could never learn "busy" vs
+        // "peer unreachable". The macOS/daemon responder
+        // (`p2p/pairing_responder.rs`) fixed this by moving the `try_begin`
+        // check INSIDE the `run_with_confirm` confirm callback: the PAKE
+        // handshake always completes through frame 9, and only at the SAS-reveal
+        // step does a busy coordinator short-circuit with
+        // `ConfirmOutcome::Busy`, which `run_with_confirm` wire-encodes as frame
+        // 10a `SAS_BUSY` (0x02) — distinct from an actual human `SAS_REJECT`.
+        // Mirror that here so Android emits the same honest signal instead of
+        // silently dropping the connection.
         let confirm_coord = std::sync::Arc::clone(&coordinator);
+        // Tracks whether THIS iteration's confirm callback actually claimed the
+        // coordinator (`try_begin` returned `true`). When busy, `try_begin`
+        // refuses and the callback returns `ConfirmOutcome::Busy` WITHOUT ever
+        // owning the shared `pairing` state — the `Err(e)` handler below must
+        // not call `coordinator.finish(Aborted)` in that case, or it would stomp
+        // the *other*, still-in-progress pairing's state.
+        let claimed_coordinator = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let claimed_for_confirm = std::sync::Arc::clone(&claimed_coordinator);
         // The discovery path uses a FIXED well-known PAKE password
         // (`DISCOVERY_PAIRING_PASSWORD`): opaque-ke is asymmetric, so both ends
         // must register the IDENTICAL password or the handshake fails at frame 7
@@ -150,14 +162,23 @@ async fn standing_responder_loop(
                 None,
                 move |sas: &str, _peer_fp: &str| {
                     let coord = std::sync::Arc::clone(&confirm_coord);
+                    let claimed = std::sync::Arc::clone(&claimed_for_confirm);
                     let sas = sas.to_string();
                     async move {
+                        // Single active pairing: gate at the SAS step (after PAKE
+                        // completes), not before accept. If busy, emit SAS_BUSY
+                        // instead of an indistinguishable reject/drop.
+                        if !coord.try_begin(pairing::PairingRole::Responder) {
+                            return copypaste_p2p::bootstrap::ConfirmOutcome::Busy;
+                        }
+                        claimed.store(true, std::sync::atomic::Ordering::Release);
                         // Park on the user's decision, bounded by the SAS window.
                         let rx = coord.enter_awaiting_sas(sas, pairing::PairingRole::Responder);
                         match tokio::time::timeout(pairing::SAS_CONFIRM_TIMEOUT, rx).await {
-                            Ok(Ok(accept)) => accept,
-                            // Timeout or sender dropped (abort) → reject.
-                            _ => false,
+                            Ok(Ok(accept)) => accept.into(),
+                            // Timeout or sender dropped (abort) → reject (a real
+                            // human-decision-window outcome, not "busy").
+                            _ => copypaste_p2p::bootstrap::ConfirmOutcome::Reject,
                         }
                     }
                 },
@@ -174,8 +195,12 @@ async fn standing_responder_loop(
                 // `pair_abort` already set Aborted, leave it. Keys drop/zeroize
                 // (nothing persisted). Distinguish timeout vs reject is not
                 // observable from the Err alone, so report Aborted unless the
-                // coordinator already recorded a terminal state.
-                if coordinator.snapshot().is_active() {
+                // coordinator already recorded a terminal state. Skip entirely
+                // if this iteration never claimed the coordinator (busy path) —
+                // touching state here would stomp an unrelated in-flight pairing.
+                if claimed_coordinator.load(std::sync::atomic::Ordering::Acquire)
+                    && coordinator.snapshot().is_active()
+                {
                     coordinator.finish(pairing::PairingState::Aborted);
                 }
             }
