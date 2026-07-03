@@ -138,12 +138,22 @@ pub(in super::super) async fn realtime_loop(
                 // runtime set_config change takes effect without a restart.
                 // The is_on_wifi check runs on a blocking thread (networksetup
                 // shell invocation) so it doesn't block the async executor.
-                let (sync_on_wifi_only, storage_quota_bytes) = {
+                let (sync_on_wifi_only, storage_quota_bytes, max_decoded_image_mb) = {
                     let defaults = copypaste_core::AppConfig::default();
                     core_config
                         .read()
-                        .map(|g| (g.sync_on_wifi_only, g.storage_quota_bytes))
-                        .unwrap_or((false, defaults.storage_quota_bytes))
+                        .map(|g| {
+                            (
+                                g.sync_on_wifi_only,
+                                g.storage_quota_bytes,
+                                g.max_decoded_image_mb,
+                            )
+                        })
+                        .unwrap_or((
+                            false,
+                            defaults.storage_quota_bytes,
+                            defaults.max_decoded_image_mb,
+                        ))
                 };
                 if sync_on_wifi_only
                     && !tokio::task::spawn_blocking(crate::platform::is_on_wifi)
@@ -210,6 +220,7 @@ pub(in super::super) async fn realtime_loop(
                         &key_bytes,
                         cursor,
                         storage_quota_bytes,
+                        max_decoded_image_mb,
                     )
                     .await;
                     // Drop the guard before the burst-drain loop's bookkeeping

@@ -140,3 +140,134 @@ fn gap_a_addressless_pending_unpair_is_retained() {
     assert_eq!(loaded[0].address, None);
     assert_eq!(loaded[0].fingerprint, "deadbeef");
 }
+
+/// CopyPaste-8ebg.5 regression (bd CopyPaste-vgpy item A): pending-unpair
+/// delivery MUST dial the revoked peer through a **scoped, throwaway**
+/// allowlist (`PeerTransport::connect_with_retry_scoped`) and MUST NEVER
+/// populate the shared/live `PairedPeers` allowlist that `accept()` also
+/// consults for inbound connections. An earlier version temporarily
+/// `live_peers.add()`-ed the revoked fingerprint before dialing and
+/// `.remove()`-ed it afterward — since `accept()` and the delivery dial share
+/// one `PairedPeers`, a revoked peer connecting IN during that window would
+/// also have been accepted and resumed full sync (see
+/// `crates/copypaste-daemon/src/p2p/connector/pending_unpair.rs`).
+///
+/// This test drives BOTH directions concurrently during the delivery window:
+/// A performs the real `connect_with_retry_scoped` delivery to B while B
+/// simultaneously attempts to dial IN to A using A's shared live allowlist.
+/// The inbound attempt must be rejected the whole time, and the shared
+/// allowlist must never report the revoked fingerprint as known.
+#[tokio::test(flavor = "multi_thread")]
+async fn gap_a_shared_live_allowlist_never_populated_during_pending_unpair_delivery() {
+    let a_cert = copypaste_p2p::cert::SelfSignedCert::generate("unpair-A2").unwrap();
+    let b_cert = copypaste_p2p::cert::SelfSignedCert::generate("unpair-B2").unwrap();
+    let a_fp = a_cert.fingerprint();
+    let b_fp = b_cert.fingerprint();
+
+    // A's SHARED live allowlist. B has been revoked (mutual-unpair), so it
+    // starts — and per CopyPaste-8ebg.5 must STAY — empty for the entire
+    // pending-unpair delivery window.
+    let a_live = PairedPeers::new();
+    let a_transport = std::sync::Arc::new(PeerTransport::from_cert(
+        a_cert.cert_der.clone(),
+        a_cert.key_der.clone(),
+        a_live.clone(),
+    ));
+    let a_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let a_addr = a_listener.local_addr().unwrap();
+
+    // B's inbound side — the delivery target ("B is back online" and
+    // reachable at its last-known address).
+    let b_accept_peers = PairedPeers::new();
+    b_accept_peers.add(a_fp.clone(), "device-A2");
+    let b_accept_transport = PeerTransport::from_cert(
+        b_cert.cert_der.clone(),
+        b_cert.key_der.clone(),
+        b_accept_peers,
+    );
+    let b_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let b_addr = b_listener.local_addr().unwrap();
+
+    let b_accept = tokio::spawn(async move {
+        let (_addr, _peer_fp, mut stream) = b_accept_transport.accept(&b_listener).await.unwrap();
+        matches!(
+            stream.next().await,
+            Some(Ok(frame)) if matches!(
+                serde_json::from_slice::<PeerFrame>(&frame),
+                Ok(PeerFrame::Control(ControlMsg::Unpair))
+            )
+        )
+    });
+
+    // A's inbound side, run concurrently with the delivery dial below. If the
+    // OLD buggy pattern (temporarily `a_live.add(b_fp)` before dialing) were
+    // still present, a connection from B during this window would be
+    // accepted. With the fix (scoped throwaway allowlist), `a_live` is never
+    // touched, so this must be rejected regardless of timing.
+    let a_accept_transport = std::sync::Arc::clone(&a_transport);
+    let a_accept = tokio::spawn(async move {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            a_accept_transport.accept(&a_listener),
+        )
+        .await
+    });
+
+    // B attempts to dial IN to A "during" the delivery window (mirrors a
+    // revoked peer trying to resume sync while A is mid-scoped-dial to B). B
+    // trusts A's fingerprint (that half of a real revoke can be asymmetric in
+    // timing) — what must hold is that A's side rejects it.
+    let b_dial_peers = PairedPeers::new();
+    b_dial_peers.add(a_fp.clone(), "device-A2-dial");
+    let b_dial_transport = PeerTransport::from_cert(
+        b_cert.cert_der.clone(),
+        b_cert.key_der.clone(),
+        b_dial_peers,
+    );
+    let a_fp_for_dial = a_fp.clone();
+    let b_dial =
+        tokio::spawn(async move { b_dial_transport.connect(a_addr, &a_fp_for_dial).await });
+
+    // A's connector-mirroring delivery step: dial B using the SCOPED
+    // throwaway allowlist (CopyPaste-8ebg.5's `connect_with_retry_scoped`)
+    // and send the Unpair frame — all WITHOUT ever adding B to `a_live`.
+    let mut stream = a_transport
+        .connect_with_retry_scoped(b_addr, &b_fp)
+        .await
+        .unwrap();
+    let payload = serde_json::to_vec(&PeerFrame::Control(ControlMsg::Unpair)).unwrap();
+    stream.send(Bytes::from(payload)).await.unwrap();
+    drop(stream);
+
+    // --- Assertions ---
+    assert!(
+        b_accept.await.unwrap(),
+        "delivery must still work through the scoped API"
+    );
+
+    // The core regression guard: B dialing IN to A during the delivery window
+    // must be rejected — the shared live allowlist was never populated with
+    // B's revoked fingerprint.
+    let b_dial_result = b_dial.await.unwrap();
+    assert!(
+        b_dial_result.is_err(),
+        "CopyPaste-8ebg.5 regression: a revoked peer must NOT be accepted via \
+         A's shared live allowlist during pending-unpair delivery"
+    );
+
+    // A's accept() call must never have succeeded for B either (a timeout or
+    // a handshake/verification error are both acceptable "rejected"
+    // outcomes; only Ok would be a regression).
+    match a_accept.await.unwrap() {
+        Ok(Ok((_, fp, _))) => panic!(
+            "CopyPaste-8ebg.5 regression: A accepted an inbound connection from \
+             revoked peer {fp:?} during pending-unpair delivery"
+        ),
+        _ => {} // timeout or handshake/verification error — expected.
+    }
+
+    assert!(
+        !a_live.is_known(&b_fp),
+        "the shared live allowlist must never contain the revoked fingerprint"
+    );
+}

@@ -97,6 +97,10 @@ impl IpcServer {
                 os_version: peer_meta.os_version.clone(),
                 app_version: peer_meta.app_version.clone(),
                 local_ip: peer_meta.local_ip.clone(),
+                // CopyPaste-8ebg.27: persist the peer's stable mDNS device UUID
+                // so the connector's discovery-refresh can re-key on it instead
+                // of the (potentially stale) persisted IP.
+                device_id: peer_meta.device_id.clone(),
                 public_ip: peer_meta.public_ip.clone(),
                 // CopyPaste-yw2k: persist the peer's non-secret Supabase account
                 // identity so list_peers can surface it and the UI can detect

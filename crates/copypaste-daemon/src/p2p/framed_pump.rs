@@ -1,6 +1,6 @@
 //! Duplex pump shared by inbound and outbound mTLS connection tasks.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
@@ -9,8 +9,16 @@ use tokio::sync::mpsc;
 use copypaste_p2p::transport::{DeviceFingerprint, PairedPeers};
 use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
 
-use super::unpair::evict_peer_local;
+use super::unpair::{evict_peer_local, stamp_peer_sync};
 use super::{PeerRttMs, PendingPings};
+
+/// Minimum interval between `stamp_peer_sync` calls triggered by successful
+/// inbound `Data` frames on a single connection (CopyPaste-dkwl).
+///
+/// A sync-on-connect catch-up replay or a burst of clipboard items can
+/// deliver many `Data` frames in quick succession; without this throttle each
+/// one would trigger a `peers.json` read-modify-write.
+const INBOUND_STAMP_THROTTLE: Duration = Duration::from_secs(60);
 
 /// Maximum time a single outbound `framed.send().await` may block before the
 /// pump tears the connection down.
@@ -25,6 +33,30 @@ use super::{PeerRttMs, PendingPings};
 /// loop keeps treating the dead peer as connected). Bounding the write forces
 /// teardown so the sink closes and recovery can proceed.
 pub(super) const WRITE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Compile-time assertion: `WRITE_TIMEOUT` must stay strictly below
+/// [`copypaste_p2p::transport::TCP_KEEPALIVE_TIME`] (CopyPaste-vgpy).
+///
+/// `TCP_KEEPALIVE_TIME`'s doc comment already describes the intended
+/// ordering — it calls itself "defense-in-depth **alongside** the
+/// daemon-side write timeout" for the case where a peer vanishes with no FIN.
+/// That relationship only holds if `WRITE_TIMEOUT` is the faster detector:
+/// on a connection with an outstanding write, `WRITE_TIMEOUT` (8 s) must
+/// trip and tear the connection down before the OS keepalive prober would
+/// even start (`TCP_KEEPALIVE_TIME` = 20 s of idle time). If `WRITE_TIMEOUT`
+/// were ever raised to meet or exceed `TCP_KEEPALIVE_TIME`, the write-timeout
+/// guard would stop being the primary (faster) recovery path and silently
+/// degrade to redundant with — or slower than — the OS-level keepalive,
+/// defeating the reason it exists (see the comment on `WRITE_TIMEOUT` above).
+/// This was previously assumed across the two crates with no assertion; this
+/// makes a regression a build failure instead of a silent slowdown of dead-
+/// peer detection, mirroring the `CONNECTOR_TICK`/`MIN_HEALTHY_DWELL`
+/// assertion in `p2p/connector/mod.rs`.
+const _: () = assert!(
+    WRITE_TIMEOUT.as_nanos() < copypaste_p2p::transport::TCP_KEEPALIVE_TIME.as_nanos(),
+    "WRITE_TIMEOUT must stay below copypaste_p2p::transport::TCP_KEEPALIVE_TIME or the \
+     write-timeout guard stops being the faster dead-peer detector it was designed to be"
+);
 
 /// Manage one authenticated **inbound** (accept-side) peer connection.
 ///
@@ -108,6 +140,10 @@ pub(super) async fn run_peer_connection_framed<S>(
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
+    // CopyPaste-dkwl: per-connection throttle for inbound-exchange stamping —
+    // see `INBOUND_STAMP_THROTTLE`.
+    let mut last_inbound_stamp: Option<Instant> = None;
+
     loop {
         tokio::select! {
             // Inbound: peer sent a frame — deserialise and dispatch.
@@ -120,6 +156,20 @@ pub(super) async fn run_peer_connection_framed<S>(
                                     // incoming_tx closed means sync_orch shut down.
                                     tracing::debug!("incoming_tx closed, dropping peer connection");
                                     return;
+                                }
+                                // CopyPaste-dkwl: a `Data` frame we could
+                                // decode and hand off is proof of a real
+                                // application-level exchange with this peer —
+                                // stamp `last_sync_at` here (throttled) rather
+                                // than relying solely on the connection-time
+                                // stamp in `listener.rs`/`connector/mod.rs`,
+                                // which does not observe whether syncing
+                                // actually keeps working after connect.
+                                let stamp_due = last_inbound_stamp
+                                    .is_none_or(|t| t.elapsed() >= INBOUND_STAMP_THROTTLE);
+                                if stamp_due {
+                                    stamp_peer_sync(&crate::ipc::peers_file_path(), &peer_fp);
+                                    last_inbound_stamp = Some(Instant::now());
                                 }
                             }
                             Ok(PeerFrame::Control(ControlMsg::Unpair)) => {
@@ -286,6 +336,22 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::Mutex;
+
+    /// CopyPaste-vgpy: explicit runtime pin of the compile-time assertion
+    /// declared next to `WRITE_TIMEOUT` — kept alongside it (rather than
+    /// relying solely on the `const _: ()` assert) so the invariant shows up
+    /// in test output/coverage like any other regression guard, mirroring
+    /// `connector_tick_is_below_min_healthy_dwell` in `p2p/connector/mod.rs`.
+    #[test]
+    fn write_timeout_is_below_tcp_keepalive_time() {
+        assert!(
+            WRITE_TIMEOUT < copypaste_p2p::transport::TCP_KEEPALIVE_TIME,
+            "WRITE_TIMEOUT ({WRITE_TIMEOUT:?}) must stay below TCP_KEEPALIVE_TIME ({:?}) so a \
+             dead peer with an outstanding write is torn down by the (faster) write-timeout \
+             guard before the OS keepalive prober would even start",
+            copypaste_p2p::transport::TCP_KEEPALIVE_TIME,
+        );
+    }
 
     /// Build a minimal `WireItem` for use in tests.
     fn test_wire_item(id: &str) -> WireItem {

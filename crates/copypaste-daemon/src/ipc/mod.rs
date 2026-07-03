@@ -104,9 +104,8 @@ pub(crate) use pairing::peers_file_path;
 // Helpers used in impl IpcServer dispatch code (non-test):
 use pairing::{
     byte_to_char_offset, encrypt_pake_password_file, extract_uuid_param, is_valid_fingerprint,
-    load_peers, paired_ip_hosts, queue_unpair_for_offline_delivery, save_peers,
-    send_unpair_signal_if_connected, too_large_to_sync, PakeSession, StampedPakeSession,
-    MAX_PAKE_SESSIONS, PAKE_SESSION_TTL,
+    load_peers, paired_ip_hosts, queue_unpair_for_offline_delivery, save_peers, too_large_to_sync,
+    PakeSession, StampedPakeSession, MAX_PAKE_SESSIONS, PAKE_SESSION_TTL,
 };
 // Helpers only called from the inline test module:
 #[cfg(test)]

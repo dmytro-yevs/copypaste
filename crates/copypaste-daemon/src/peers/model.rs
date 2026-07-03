@@ -59,6 +59,23 @@ pub struct PairedDevice {
     /// parsing the `host:port` `address` field for UI display.
     #[serde(default)]
     pub local_ip: Option<String>,
+    /// Peer's stable mDNS device UUID (`PeerMeta::device_id`), learned in-band
+    /// over the bootstrap channel at pairing time (CopyPaste-8ebg.27).
+    ///
+    /// This is the SAME random per-install UUID advertised as the mDNS TXT
+    /// `did` field — NOT the TLS cert fingerprint this record is keyed by (see
+    /// `resolve_addr_from_discovery`'s doc comment for why the two must not be
+    /// conflated). Persisting it lets
+    /// `p2p::connector::discovery_resolve::refresh_peer_meta_from_discovery`
+    /// re-correlate a paired peer against the live mDNS snapshot by a stable
+    /// identifier instead of the persisted (and potentially stale, e.g. after
+    /// DHCP renewal or network roaming) IP address.
+    ///
+    /// `#[serde(default)]` keeps backward compatibility with `peers.json`
+    /// records written before this field existed (they deserialise to
+    /// `None`); those legacy records fall back to IP-based correlation.
+    #[serde(default)]
+    pub device_id: Option<String>,
     /// Peer's STUN-discovered public / global IP (e.g. `"203.0.113.42"`), learned
     /// in-band over the bootstrap channel during pairing (B1: full device info).
     /// Surfaced verbatim in the `list_peers` IPC response so the Devices UI can
@@ -167,6 +184,7 @@ mod tests {
             os_version: None,
             app_version: None,
             local_ip: None,
+            device_id: None,
             public_ip: None,
             supabase_account_id: None,
             first_sync_at: None,
@@ -245,6 +263,7 @@ mod tests {
             os_version: None,
             app_version: None,
             local_ip: None,
+            device_id: None,
             public_ip: None,
             supabase_account_id: None,
             first_sync_at: None,
@@ -335,6 +354,7 @@ mod tests {
             os_version: None,
             app_version: None,
             local_ip: None,
+            device_id: None,
             public_ip: None,
             supabase_account_id: None,
             first_sync_at: None,

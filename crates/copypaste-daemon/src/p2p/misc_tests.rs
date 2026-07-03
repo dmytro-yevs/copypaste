@@ -33,6 +33,8 @@ fn update_peer_address_updates_matching_peer_only() {
                 os_version: None,
                 app_version: None,
                 local_ip: None,
+                // Fresh test fixture, no prior device to carry a device_id from.
+                device_id: None,
                 public_ip: None,
                 first_sync_at: Some(500),
                 last_sync_at: Some(999),
@@ -50,6 +52,8 @@ fn update_peer_address_updates_matching_peer_only() {
                 os_version: None,
                 app_version: None,
                 local_ip: None,
+                // Fresh test fixture, no prior device to carry a device_id from.
+                device_id: None,
                 public_ip: None,
                 first_sync_at: None,
                 last_sync_at: None,
@@ -108,6 +112,8 @@ fn update_peer_address_no_match_is_noop() {
             os_version: None,
             app_version: None,
             local_ip: None,
+            // Fresh test fixture, no prior device to carry a device_id from.
+            device_id: None,
             public_ip: None,
             first_sync_at: None,
             last_sync_at: None,

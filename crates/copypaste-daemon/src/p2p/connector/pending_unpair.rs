@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use futures_util::SinkExt;
 
-use copypaste_p2p::transport::{PairedPeers, PeerTransport};
+use copypaste_p2p::transport::PeerTransport;
 use copypaste_sync::protocol::{ControlMsg, PeerFrame};
 
 use super::super::framed_pump::WRITE_TIMEOUT;
@@ -17,22 +17,28 @@ use super::super::framed_pump::WRITE_TIMEOUT;
 ///
 /// For each queued [`PendingUnpair`](crate::peers::PendingUnpair) that carries a
 /// parseable dial address (and is not our own fingerprint), this:
-///   1. TEMPORARILY allow-lists the peer's fingerprint on the live
-///      [`PairedPeers`] so the outbound mTLS handshake is accepted by the peer
-///      (the peer pins US, but we must pin THEM to connect);
-///   2. dials the peer and sends ONE `PeerFrame::Control(ControlMsg::Unpair)`;
-///   3. removes the peer from the live allowlist again (it must NOT resume sync);
-///   4. removes the record from `pending_unpair.json` so it is delivered once.
+///   1. dials the peer using a **one-off, scoped** TLS verifier that trusts
+///      only this peer's fingerprint for this single dial (see
+///      [`PeerTransport::connect_with_retry_scoped`]) and sends ONE
+///      `PeerFrame::Control(ControlMsg::Unpair)`;
+///   2. removes the record from `pending_unpair.json` so it is delivered once.
+///
+/// CopyPaste-8ebg.5: this deliberately does NOT touch the live/shared
+/// `PairedPeers` allowlist. An earlier version temporarily `add()`-ed the
+/// revoked fingerprint to `live_peers` before dialing and `remove()`-d it
+/// afterwards — but `live_peers` is the same allowlist `accept()` consults
+/// for inbound connections, so a revoked peer dialing IN during that window
+/// would also have been accepted and resumed full sync. The scoped verifier
+/// closes that window entirely: the revoked fingerprint is never re-added to
+/// any allowlist the inbound accept path can see.
 ///
 /// Best-effort: a dial/connect/send failure leaves the record in place for a
-/// retry on the next tick (the entry is removed from the live allowlist either
-/// way, so a transient allow-list never lingers). Records with no address are
-/// left untouched — there is nothing to dial.
+/// retry on the next tick. Records with no address are left untouched —
+/// there is nothing to dial.
 pub(super) async fn deliver_pending_unpairs(
     transport: &PeerTransport,
     pending_path: &std::path::Path,
     own_fp: &str,
-    live_peers: &PairedPeers,
 ) {
     let pending = crate::peers::load_pending_unpairs(pending_path);
     if pending.is_empty() {
@@ -65,11 +71,7 @@ pub(super) async fn deliver_pending_unpairs(
             }
         };
 
-        // Temporarily allow-list so our own client config will accept the peer's
-        // pinned cert on the handshake. Removed again below regardless of outcome.
-        live_peers.add(canonical.clone(), entry.name.clone());
-
-        let dialed = transport.connect_with_retry(addr, &canonical).await;
+        let dialed = transport.connect_with_retry_scoped(addr, &canonical).await;
         match dialed {
             Ok(mut stream) => {
                 let frame = PeerFrame::Control(ControlMsg::Unpair);
@@ -118,9 +120,5 @@ pub(super) async fn deliver_pending_unpairs(
                 );
             }
         }
-
-        // Always drop the transient allow-list entry so the peer can never
-        // resume normal sync through this window.
-        live_peers.remove(&canonical);
     }
 }

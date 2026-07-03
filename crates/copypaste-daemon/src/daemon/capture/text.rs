@@ -137,7 +137,24 @@ pub(crate) async fn handle_text(
                 };
                 let new_lamport =
                     copypaste_core::next_lamport_ts(existing_row.lamport_ts, now_ms);
-                match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport, None) {
+                // CopyPaste-8ebg.2: pass the sensitive TTL so a re-copied
+                // sensitive item's expires_at is recomputed from `now_ms`
+                // instead of staying pinned to the original capture's
+                // deadline. `sensitive_ttl_secs == 0` is the "auto-wipe
+                // disabled" sentinel — pass None so bump_item_recency leaves
+                // expires_at untouched (matches bootstrap.rs / monitor_loop.rs).
+                let sensitive_ttl_ms = if config.sensitive_ttl_secs == 0 {
+                    None
+                } else {
+                    Some(config.sensitive_ttl_secs as i64 * 1000)
+                };
+                match bump_item_recency(
+                    &db_guard,
+                    &existing_id,
+                    now_ms,
+                    new_lamport,
+                    sensitive_ttl_ms,
+                ) {
                     Ok(changed) if changed > 0 => {
                         tracing::debug!(
                             existing = %existing_id,
@@ -208,7 +225,13 @@ pub(crate) async fn handle_text(
         item.content_hash = Some(hash_hex);
 
         if is_sensitive {
-            item.expires_at = Some(now_ms + (config.sensitive_ttl_local_secs as i64 * 1000));
+            // CopyPaste-8ebg.1: the user-configurable field is
+            // `sensitive_ttl_secs` (default 30s, set via `set_config`).
+            // `sensitive_ttl_local_secs` (default 1800s) has no IPC setter
+            // and was never wired to any UI control, so reading it here made
+            // the password-expiry setting dead — a password always lived for
+            // 30 minutes regardless of what the user configured.
+            item.expires_at = Some(now_ms + (config.sensitive_ttl_secs as i64 * 1000));
         }
 
         // v0.3 post-T2: insert_item + upsert_fts collapsed into a single

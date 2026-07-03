@@ -921,6 +921,7 @@ async fn poll_decrypts_rows_with_single_account_key() {
         &key_bytes,
         PollCursor::default(),
         500_000_000,
+        copypaste_core::config::MAX_DECODED_IMAGE_MB, // max_decoded_image_mb
     )
     .await;
 
@@ -1012,7 +1013,8 @@ async fn poll_advances_watermark_and_does_not_refetch_old_rows() {
         &auth,
         &key_bytes,
         PollCursor::default(),
-        500_000_000, // storage_quota_bytes: 500 MB
+        500_000_000,                                  // storage_quota_bytes: 500 MB
+        copypaste_core::config::MAX_DECODED_IMAGE_MB, // max_decoded_image_mb
     )
     .await;
     assert_eq!(
@@ -1050,7 +1052,8 @@ async fn poll_advances_watermark_and_does_not_refetch_old_rows() {
         &auth,
         &key_bytes,
         wm1,
-        500_000_000, // storage_quota_bytes
+        500_000_000,                                  // storage_quota_bytes
+        copypaste_core::config::MAX_DECODED_IMAGE_MB, // max_decoded_image_mb
     )
     .await;
     assert_eq!(
@@ -1182,7 +1185,8 @@ async fn poll_forward_pagination_does_not_skip_when_more_than_limit_arrive() {
             &auth,
             &key_bytes,
             cursor,
-            500_000_000, // storage_quota_bytes
+            500_000_000,                                  // storage_quota_bytes
+            copypaste_core::config::MAX_DECODED_IMAGE_MB, // max_decoded_image_mb
         )
         .await;
     }
@@ -1314,7 +1318,8 @@ async fn poll_fetches_all_rows_sharing_one_wall_time_via_keyset_cursor() {
             &auth,
             &key_bytes,
             cursor,
-            500_000_000, // storage_quota_bytes
+            500_000_000,                                  // storage_quota_bytes
+            copypaste_core::config::MAX_DECODED_IMAGE_MB, // max_decoded_image_mb
         )
         .await;
     }
@@ -1368,6 +1373,7 @@ async fn poll_lww_replaces_existing_item_id_preserving_local_pk() {
             None,
             "device-local".to_owned(),
             &local_key,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         )
         .expect("seed build");
         copypaste_core::insert_item(&g, &seeded).expect("seed insert");
@@ -1413,7 +1419,8 @@ async fn poll_lww_replaces_existing_item_id_preserving_local_pk() {
         &auth,
         &key_bytes,
         PollCursor::default(),
-        500_000_000, // storage_quota_bytes
+        500_000_000,                                  // storage_quota_bytes
+        copypaste_core::config::MAX_DECODED_IMAGE_MB, // max_decoded_image_mb
     )
     .await;
 

@@ -333,12 +333,21 @@ impl IpcServer {
                     None => return Response::err(req.id, "discovery not available (P2P disabled)"),
                 };
 
-                // HB-4: the mDNS `device_id` is a UUID, NOT a cert fingerprint, so
-                // a fingerprint-compare against peers.json never matched and paired
-                // devices kept showing "Pair". Instead snapshot the set of IP hosts
-                // we have paired with (`local_ip` + the host part of `address`) and
-                // mark a discovered peer `paired` when ANY of its resolved
-                // `ip_addrs` is in that set.
+                // CopyPaste-vgpy: `paired_fingerprints()` (pairing.rs) cannot be
+                // wired in here — the mDNS-discovered `PeerInfo` carries only
+                // `device_id` (the peer's random per-install mDNS UUID,
+                // advertised as the `did` TXT key) and never a TLS cert
+                // fingerprint, so comparing it against a fingerprint set would
+                // never match anything. The stable identity field that DOES
+                // round-trip on both sides is `device_id`: `PairedDevice.device_id`
+                // persists the SAME mDNS UUID, learned in-band at pairing time
+                // (see `peers/model.rs`), and is already used for the identical
+                // re-correlation problem in
+                // `p2p::connector::discovery_resolve::refresh_peer_meta_from_discovery`.
+                // We mirror that pattern here: prefer a `device_id` match (stable
+                // across DHCP/IP changes) and fall back to the HB-4 IP-host
+                // correlation for legacy peers.json records that predate
+                // `device_id` persistence (`device_id: None`).
                 //
                 // Race-fix (CopyPaste-daq, sibling of CopyPaste-7mf): if the QR
                 // bootstrap responder task is still in flight, await it (with a
@@ -353,12 +362,18 @@ impl IpcServer {
                             tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
                     }
                 }
-                let paired_ips: std::collections::HashSet<String> = match load_peers() {
-                    Ok(stored) => paired_ip_hosts(&stored),
+                let (paired_ips, paired_device_id_set): (
+                    std::collections::HashSet<String>,
+                    std::collections::HashSet<String>,
+                ) = match load_peers() {
+                    Ok(stored) => (paired_ip_hosts(&stored), paired_device_ids(&stored)),
                     // Non-fatal: treat as empty — we just won't mark any peer paired.
                     Err(e) => {
                         tracing::warn!("list_discovered: failed to load peers.json: {e}");
-                        std::collections::HashSet::new()
+                        (
+                            std::collections::HashSet::new(),
+                            std::collections::HashSet::new(),
+                        )
                     }
                 };
 
@@ -368,7 +383,13 @@ impl IpcServer {
                     .map(|peer| {
                         let ip_strs: Vec<String> =
                             peer.ip_addrs.iter().map(|a| a.to_string()).collect();
-                        let paired = ip_strs.iter().any(|ip| paired_ips.contains(ip));
+                        // device_id match takes priority: it is stable across
+                        // DHCP/IP changes. Fall back to IP correlation only when
+                        // the discovered peer's device_id is unknown to us
+                        // (empty / never learned).
+                        let paired = (!peer.device_id.is_empty()
+                            && paired_device_id_set.contains(&peer.device_id))
+                            || ip_strs.iter().any(|ip| paired_ips.contains(ip));
                         serde_json::json!({
                             "device_id":   peer.device_id,
                             "device_name": peer.device_name,
@@ -473,12 +494,21 @@ impl IpcServer {
                     }
                 }
 
-                // HB-4: IP-correlate already-paired peers (see `list_discovered`).
-                let paired_ips: std::collections::HashSet<String> = match load_peers() {
-                    Ok(stored) => paired_ip_hosts(&stored),
+                // CopyPaste-vgpy: device_id-correlate already-paired peers, with
+                // HB-4 IP correlation as the legacy fallback (see `list_discovered`
+                // for the full rationale — `paired_fingerprints()` does not apply
+                // here because discovered peers carry no TLS cert fingerprint).
+                let (paired_ips, paired_device_id_set): (
+                    std::collections::HashSet<String>,
+                    std::collections::HashSet<String>,
+                ) = match load_peers() {
+                    Ok(stored) => (paired_ip_hosts(&stored), paired_device_ids(&stored)),
                     Err(e) => {
                         tracing::warn!("rescan_discovered: failed to load peers.json: {e}");
-                        std::collections::HashSet::new()
+                        (
+                            std::collections::HashSet::new(),
+                            std::collections::HashSet::new(),
+                        )
                     }
                 };
 
@@ -488,7 +518,9 @@ impl IpcServer {
                     .map(|peer| {
                         let ip_strs: Vec<String> =
                             peer.ip_addrs.iter().map(|a| a.to_string()).collect();
-                        let paired = ip_strs.iter().any(|ip| paired_ips.contains(ip));
+                        let paired = (!peer.device_id.is_empty()
+                            && paired_device_id_set.contains(&peer.device_id))
+                            || ip_strs.iter().any(|ip| paired_ips.contains(ip));
                         serde_json::json!({
                             "device_id":   peer.device_id,
                             "device_name": peer.device_name,
@@ -506,4 +538,32 @@ impl IpcServer {
             _ => self.dispatch_pairing(req).await,
         }
     }
+}
+
+/// CopyPaste-vgpy: build the set of paired peers' stable mDNS `device_id`s
+/// (the per-install UUID advertised as the `did` TXT key, persisted on
+/// `PairedDevice.device_id` — see `peers/model.rs`), for correlating
+/// mDNS-discovered peers against `peers.json` **by identity** instead of by
+/// IP host.
+///
+/// This is the discovered-list analogue of
+/// `p2p::connector::discovery_resolve::refresh_peer_meta_from_discovery`,
+/// which already re-keys a *paired* peer's persisted address on this same
+/// `device_id` after a DHCP/roaming IP change. `pairing::paired_fingerprints`
+/// is NOT usable here: it is keyed on the peer's TLS **cert fingerprint**,
+/// but the mDNS `PeerInfo` a discovered peer is built from carries no cert
+/// fingerprint at all (only `device_id`, `device_name`, `ip_addrs`, `port`,
+/// `bport`) — the fingerprint is learned only after an authenticated mTLS
+/// handshake, which a not-yet-paired discovered peer has not undergone.
+///
+/// Records written before `device_id` persistence existed deserialize it to
+/// `None` and are simply absent from the returned set; callers must keep the
+/// [`paired_ip_hosts`] fallback for those legacy peers.
+fn paired_device_ids(peers: &[serde_json::Value]) -> std::collections::HashSet<String> {
+    peers
+        .iter()
+        .filter_map(|p| p.get("device_id").and_then(|v| v.as_str()))
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
 }

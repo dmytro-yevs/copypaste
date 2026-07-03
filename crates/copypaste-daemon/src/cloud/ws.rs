@@ -311,6 +311,16 @@ pub(super) async fn ws_ingest_loop(
                                     .map(|g| g.storage_quota_bytes)
                                     .unwrap_or(defaults.storage_quota_bytes)
                             };
+                            // CopyPaste-8ebg.7: same live-config read pattern as
+                            // storage_quota_bytes above — read + drop the guard
+                            // before the spawn_blocking move (guard is !Send).
+                            let max_decoded_image_mb = {
+                                let defaults = copypaste_core::AppConfig::default();
+                                core_config
+                                    .read()
+                                    .map(|g| g.max_decoded_image_mb)
+                                    .unwrap_or(defaults.max_decoded_image_mb)
+                            };
 
                             // CopyPaste-1jms.22: arm in-flight guard for this
                             // WS event ingest. The guard covers the blocking DB
@@ -482,6 +492,7 @@ pub(super) async fn ws_ingest_loop(
                                     app_bundle_id,
                                     origin_device_id,
                                     &local_key_clone,
+                                    max_decoded_image_mb,
                                 ) {
                                     Ok(i) => i,
                                     Err(e) => {

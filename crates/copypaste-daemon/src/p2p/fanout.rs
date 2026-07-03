@@ -1,5 +1,9 @@
 //! Outbound fanout loop and catch-up replay.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -7,7 +11,52 @@ use copypaste_core::ClipboardItem;
 use copypaste_p2p::transport::DeviceFingerprint;
 use copypaste_sync::protocol::{PeerFrame, WireItem};
 
+use super::unpair::stamp_peer_sync;
 use super::{CatchupProvider, PeerSinks};
+
+/// Minimum interval between `stamp_peer_sync` calls triggered by a successful
+/// outbound send to a given peer (CopyPaste-dkwl) — mirrors
+/// `INBOUND_STAMP_THROTTLE` in `framed_pump.rs`. Without this, fanning out a
+/// burst of items would rewrite `peers.json` once per item per peer.
+const OUTBOUND_STAMP_THROTTLE: Duration = Duration::from_secs(60);
+
+/// Last successful-outbound-send stamp time per peer fingerprint.
+///
+/// In-process only (reset on daemon restart) — purely a write-rate limiter
+/// for `peers.json`, not itself a source of truth. A `std::sync::Mutex` is
+/// fine here: the critical section is a single map lookup/insert with no
+/// `.await` inside it.
+fn last_outbound_stamp_map() -> &'static Mutex<HashMap<DeviceFingerprint, Instant>> {
+    static MAP: OnceLock<Mutex<HashMap<DeviceFingerprint, Instant>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Stamp `last_sync_at` for `peer` following a successful outbound send,
+/// throttled to at most once per [`OUTBOUND_STAMP_THROTTLE`] per peer.
+///
+/// CopyPaste-dkwl: called only when the item was actually re-keyed
+/// successfully (or forwarded via the legacy no-pairwise-key path) AND
+/// handed off to the peer's local sink — i.e. NOT on `RekeyOutcome::Failed`.
+/// This closes the specific gap that motivated this change: a peer whose
+/// pairwise key is broken stops advancing `last_sync_at` from the outbound
+/// side, so it correctly goes stale instead of looking healthy forever off
+/// the one-time connection-establishment stamp.
+fn stamp_outbound_success(peer: &DeviceFingerprint) {
+    // Lock poisoning here would only mean a prior panic while holding the
+    // map — recover the inner map rather than propagate, since this stamp is
+    // best-effort and must never take down the fanout loop.
+    let mut map = last_outbound_stamp_map()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let due = map
+        .get(peer)
+        .is_none_or(|t| t.elapsed() >= OUTBOUND_STAMP_THROTTLE);
+    if due {
+        map.insert(peer.clone(), Instant::now());
+        drop(map); // release before the (blocking, best-effort) file write
+        stamp_peer_sync(&crate::ipc::peers_file_path(), peer);
+    }
+}
 
 /// Outbound fanout loop.
 ///
@@ -157,6 +206,31 @@ pub(super) async fn fanout_to_peers(
                     // this item for this peer rather than forwarding an
                     // undecryptable blob. The catch-up replay will retry on
                     // the next reconnect once the root cause is resolved.
+                    //
+                    // CopyPaste-dkwl (fixed the `last_sync_at` half of
+                    // CopyPaste-8ebg.26's gap): deliberately do NOT call
+                    // `stamp_outbound_success` here. `last_sync_at` is now
+                    // stamped from real successful application-level
+                    // exchanges — a successful inbound `Data` frame
+                    // (`framed_pump.rs`) or a successful outbound send that
+                    // did NOT hit this `Failed` arm (`stamp_outbound_success`
+                    // below) — rather than only once at mTLS
+                    // handshake (`listener.rs`/`connector/mod.rs`). So a peer
+                    // whose key is permanently broken now correctly stops
+                    // advancing `last_sync_at` from this device's outbound
+                    // side and goes stale, instead of looking healthy forever
+                    // off the one-time connection stamp.
+                    //
+                    // Still deferred (CopyPaste-dkwl notes): a REAL per-peer
+                    // rekey-failure counter/flag surfaced to `list_peers`/
+                    // Devices, so a stuck peer can be flagged immediately
+                    // rather than waiting out `PEER_STALL_THRESHOLD_MS` (30
+                    // min) for `last_sync_at` to go stale. That needs a
+                    // shared counter threaded in from `p2p/mod.rs::start_p2p`
+                    // alongside `peer_sinks`, PLUS a decision on how to
+                    // surface it (new IPC/`list_peers` field vs. folding into
+                    // an existing one) and a client (SyncStatusChip.tsx)
+                    // change to consume it — out of scope for this fix.
                     tracing::warn!(
                         peer = %key,
                         item_id = %item.item_id,
@@ -176,7 +250,12 @@ pub(super) async fn fanout_to_peers(
         };
 
         match tx.try_send(PeerFrame::Data(peer_item)) {
-            Ok(()) => {}
+            Ok(()) => {
+                // CopyPaste-dkwl: only reached when rekey did NOT fail for
+                // this peer and the frame was actually enqueued — see
+                // `stamp_outbound_success`.
+                stamp_outbound_success(&key);
+            }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!(
                     peer = %key,

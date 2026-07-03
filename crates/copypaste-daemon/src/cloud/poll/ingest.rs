@@ -44,6 +44,10 @@ fn ingest_row(
     db_guard: &Database,
     sync_key: &SyncKey,
     local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
+    // Item 3 (CopyPaste-8ebg.7): live AppConfig value, threaded from
+    // `poll_once` the same way `storage_quota_bytes` already is, instead of
+    // the compile-time `copypaste_core::config::MAX_DECODED_IMAGE_MB` default.
+    max_decoded_image_mb: u32,
 ) -> RowOutcome {
     let Some(id) = row["id"].as_str() else {
         return RowOutcome::Unparseable;
@@ -256,16 +260,13 @@ fn ingest_row(
     let wall_time = row_wall;
     let expires_at = row["expires_at"].as_i64();
     let app_bundle_id = row["app_bundle_id"].as_str().map(str::to_owned);
-    let origin_device_id =
-        row["device_id"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                tracing::warn!(
-                    "cloud-sync poll_once: id={id} missing device_id; defaulting to empty"
-                );
-                String::new()
-            });
+    let origin_device_id = row["device_id"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            tracing::warn!("cloud-sync poll_once: id={id} missing device_id; defaulting to empty");
+            String::new()
+        });
 
     // Read cloud pin state. These are sourced from the real columns now
     // (schema v10+), so the previous OR-merge workaround is replaced by
@@ -284,6 +285,10 @@ fn ingest_row(
         app_bundle_id,
         origin_device_id,
         local_key,
+        // CopyPaste-8ebg.7: now threaded from the live AppConfig via
+        // `poll_once`'s new `max_decoded_image_mb` param (mirrors
+        // `storage_quota_bytes`), instead of the compiled default.
+        max_decoded_image_mb,
     ) {
         Ok(i) => i,
         Err(e) => {
@@ -387,6 +392,10 @@ pub(crate) async fn poll_once(
     // Retention limit threaded from `AppConfig` so a long-offline device
     // converges to the cap after backfill instead of materialising unbounded rows.
     storage_quota_bytes: u64,
+    // Item 3 (CopyPaste-8ebg.7): live AppConfig decode-bomb budget, threaded
+    // the same way `storage_quota_bytes` is, so `ingest_row` no longer falls
+    // back to the compile-time `MAX_DECODED_IMAGE_MB` default.
+    max_decoded_image_mb: u32,
 ) -> (PollCursor, usize) {
     // Compile-time guard: POLL_SELECT_QS embeds a numeric `limit=` that MUST
     // match POLL_BATCH_SIZE. If this assert fires, update the limit= in
@@ -438,7 +447,13 @@ pub(crate) async fn poll_once(
         // query's `(wall_time, id)` sort.
         let mut batch_max: (i64, String) = (start_cursor.wall, start_cursor.id.clone());
         for row in rows {
-            match ingest_row(&row, &db_guard, &sync_key, &local_key_clone) {
+            match ingest_row(
+                &row,
+                &db_guard,
+                &sync_key,
+                &local_key_clone,
+                max_decoded_image_mb,
+            ) {
                 RowOutcome::Unparseable => continue,
                 RowOutcome::Ingested { wall, id, synced } => {
                     // Advance the batch cursor for EVERY row we can read —

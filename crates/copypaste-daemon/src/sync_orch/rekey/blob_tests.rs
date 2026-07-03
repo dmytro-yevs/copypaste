@@ -96,7 +96,12 @@ fn image_rekey_round_trip_decodes_back_to_original_png_on_peer() {
     .unwrap();
     let crypto_b = SyncCrypto::new(seed_b, peers_b);
 
-    let (stored, fts) = rekey_inbound(&crypto_b, wire).expect("B must unwrap the synced image");
+    let (stored, fts) = rekey_inbound(
+        &crypto_b,
+        wire,
+        copypaste_core::config::MAX_DECODED_IMAGE_MB,
+    )
+    .expect("B must unwrap the synced image");
     assert!(fts.is_none(), "images carry no FTS plaintext");
     assert_eq!(stored.content_type, "image");
     assert_eq!(
@@ -209,7 +214,12 @@ fn file_rekey_round_trip_decodes_back_to_original_bytes_on_peer() {
     .unwrap();
     let crypto_b = SyncCrypto::new(seed_b, peers_b);
 
-    let (stored, fts) = rekey_inbound(&crypto_b, wire).expect("B must unwrap the synced file");
+    let (stored, fts) = rekey_inbound(
+        &crypto_b,
+        wire,
+        copypaste_core::config::MAX_DECODED_IMAGE_MB,
+    )
+    .expect("B must unwrap the synced file");
     assert!(fts.is_none());
     assert_eq!(stored.content_type, "file");
     assert_eq!(stored.item_id, item_id, "item_id converges");

@@ -8,7 +8,6 @@ use super::config::config_base_dir;
 use copypaste_core::{decrypt_item_with_aad, encrypt_item_with_aad, NONCE_SIZE};
 use copypaste_p2p::pake::{PakeInitiator, PakeResponder, PasswordFile};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // P2P helpers
@@ -288,6 +287,36 @@ pub(crate) fn paired_ip_hosts(peers: &[serde_json::Value]) -> std::collections::
     hosts
 }
 
+/// CopyPaste-8ebg.52: build the set of canonical (colon-free, lowercase)
+/// fingerprints we have already paired with, for correlating mDNS-discovered
+/// peers against `peers.json` **by device identity** rather than by network
+/// address.
+///
+/// [`paired_ip_hosts`] correlates on `local_ip`/`address` host, which is
+/// correct for matching a discovered peer's *reachability* but is the WRONG
+/// key for the "is this peer already paired?" flag: after a DHCP lease change
+/// the same paired device advertises a new IP, so an IP-keyed lookup misses it
+/// and the peer list shows the device as simultaneously "Paired" (its stale
+/// peers.json entry) and "Discovered" with a live "Pair" button (its new IP
+/// not found in the paired-IP set) — a confusing duplicate/contradictory
+/// entry for the same physical device.
+///
+/// A peer's cert fingerprint is stable across IP/DHCP changes (it is derived
+/// from the peer's long-lived mTLS keypair, not its network location), so
+/// correlating on [`canonical_fingerprint`] is the identity-correct match.
+/// Callers should prefer this over [`paired_ip_hosts`] specifically for the
+/// "already paired" badge; `paired_ip_hosts` remains appropriate for anything
+/// that genuinely needs a reachability/address correlation.
+pub(crate) fn paired_fingerprints(
+    peers: &[serde_json::Value],
+) -> std::collections::HashSet<String> {
+    peers
+        .iter()
+        .filter_map(|p| p.get("fingerprint").and_then(|v| v.as_str()))
+        .map(canonical_fingerprint)
+        .collect()
+}
+
 /// Persist peers list to peers.json atomically with mode 0600, via the
 /// canonical typed `crate::peers::save_peers` helper.
 ///
@@ -379,39 +408,6 @@ pub(crate) fn display_fingerprint(fp: &str) -> String {
 /// - **No panic**: all `Mutex::lock` failures (poisoned lock) are silently
 ///   swallowed so a prior panic cannot prevent the caller from returning a
 ///   success response.
-/// - **Minimal blast radius**: only the specific peer's sink is touched; other
-///   connections are unaffected.
-pub(crate) fn send_unpair_signal_if_connected(
-    live_sinks: &Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>>,
-    canonical_fp: &str,
-) {
-    use copypaste_sync::protocol::{ControlMsg, PeerFrame};
-
-    // Acquire the outer Mutex<Option<LivePeerSinks>> — this holds the Arc to the
-    // inner async Mutex<HashMap> only for the brief clone, never across send.
-    let sinks_arc_opt = match live_sinks.lock() {
-        Ok(guard) => guard.clone(),
-        Err(_) => return, // poisoned — skip silently
-    };
-    let sinks_arc = match sinks_arc_opt {
-        Some(a) => a,
-        None => return, // P2P not started
-    };
-
-    // `try_lock` on the async Mutex: if the map is momentarily locked by an
-    // accept/fanout task we skip — it is only needed to clone the sender.
-    let sender_opt = match sinks_arc.try_lock() {
-        Ok(map) => map.get(canonical_fp).cloned(),
-        Err(_) => return,
-    };
-
-    if let Some(tx) = sender_opt {
-        // `try_send` never blocks; Closed/Full both mean "skip silently".
-        let _ = tx.try_send(PeerFrame::Control(ControlMsg::Unpair));
-        tracing::debug!(peer = %canonical_fp, "mutual unpair: sent Unpair signal to connected peer");
-    }
-}
-
 /// Gap A (durable unpair): record a pending `ControlMsg::Unpair` delivery in
 /// `pending_unpair.json` so the P2P connector loop can dial the (possibly
 /// offline) peer on its next reconnect and deliver the signal there.

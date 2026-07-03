@@ -434,6 +434,8 @@ fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
         os_version: None,
         app_version: None,
         local_ip: None,
+        // Fresh test fixture, no prior device to carry a device_id from.
+        device_id: None,
         public_ip: None,
         first_sync_at: None,
         last_sync_at: None,
@@ -465,6 +467,8 @@ fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
         os_version: None,
         app_version: None,
         local_ip: None,
+        // Fresh test fixture, no prior device to carry a device_id from.
+        device_id: None,
         public_ip: None,
         first_sync_at: None,
         last_sync_at: None,

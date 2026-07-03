@@ -74,9 +74,22 @@ pub(in crate::p2p) fn resolve_addr_from_discovery_by_ip(
 /// the live mDNS discovery snapshot.
 ///
 /// Called every connector tick for each dialable peer, regardless of
-/// connection state.  Correlates by the IP component of the peer's persisted
-/// `address` — the mDNS `device_id` is a UUID, never a cert fingerprint, so
-/// fingerprint-keyed lookup ([`resolve_addr_from_discovery`]) would never match.
+/// connection state.
+///
+/// # Correlation key (CopyPaste-8ebg.27)
+/// Peers paired since [`crate::peers::PairedDevice::device_id`] was
+/// introduced carry the peer's stable mDNS device UUID, learned in-band at
+/// pairing time (`PeerMeta::device_id`). When present, that UUID is matched
+/// directly against each discovered peer's `device_id` — this is stable
+/// across DHCP renewal / network roaming, unlike the persisted IP.
+///
+/// Legacy peers paired before this field existed have `device_id == None`;
+/// for those we fall back to the OLD IP-correlation heuristic (find the
+/// discovered peer whose `ip_addrs` still contains the stale persisted IP).
+/// That fallback only self-heals a port change on the SAME IP — it can never
+/// heal an IP change — but it is the best available signal without a stable
+/// identifier, and preserves prior behavior for peers that have not been
+/// re-paired.
 ///
 /// When a matching mDNS peer is found and any of its fields (name, sync port,
 /// IP) differ from what is persisted, [`crate::peers::update_peer_meta`] rewrites
@@ -95,18 +108,56 @@ pub(in crate::p2p) fn refresh_peer_meta_from_discovery(
     discovery: &DiscoveryService,
 ) {
     let want_ip = persisted_addr.ip();
-    let Some(discovered) = discovery
-        .peers()
+
+    // Look up the persisted record's stable device_id (if any) so we can
+    // re-key on it instead of the (possibly stale) IP.
+    let persisted_device_id = crate::peers::load_peers(peers_path)
         .into_iter()
-        .find(|p| p.ip_addrs.contains(&want_ip))
-    else {
+        .find(|p| {
+            crate::ipc::canonical_fingerprint(&p.fingerprint)
+                == crate::ipc::canonical_fingerprint(fingerprint)
+        })
+        .and_then(|p| p.device_id);
+
+    let discovered = match persisted_device_id {
+        Some(device_id) if !device_id.is_empty() => {
+            // Stable-key match: same mDNS device_id, regardless of IP.
+            match discovery.resolve_peer(&device_id) {
+                Some(p) => Some(p),
+                // No match under the stable key — do NOT silently fall back to
+                // IP correlation here: a device_id is present, so IP drift is
+                // exactly the case this path exists to heal, and falling back
+                // to IP would just reproduce the original bug for this peer.
+                None => None,
+            }
+        }
+        // Legacy peer (paired before device_id was persisted) — fall back to
+        // the original IP-correlation heuristic.
+        _ => discovery
+            .peers()
+            .into_iter()
+            .find(|p| p.ip_addrs.contains(&want_ip)),
+    };
+
+    let Some(discovered) = discovered else {
         // Peer not in the current mDNS snapshot — nothing to refresh.
         return;
     };
 
-    let fresh_addr = SocketAddr::new(want_ip, discovered.port);
+    // Prefer the freshly discovered IP (heals IP drift for device_id-matched
+    // peers); fall back to the first advertised IPv4/any address, and finally
+    // to the persisted IP if the discovery record has no addresses at all.
+    let fresh_ip = discovered
+        .ip_addrs
+        .iter()
+        .find(|a| a.is_ipv4())
+        .or_else(|| discovered.ip_addrs.first())
+        .copied()
+        .unwrap_or(want_ip);
+
+    let fresh_addr = SocketAddr::new(fresh_ip, discovered.port);
     let fresh_name = discovered.device_name.as_str();
-    let local_ip_str = want_ip.to_string();
+    let local_ip_str = fresh_ip.to_string();
 
     match crate::peers::update_peer_meta(
         peers_path,
@@ -221,5 +272,116 @@ mod tests {
         assert!(result.is_some());
         let addr = result.unwrap();
         assert!(!addr.ip().is_ipv6(), "must prefer IPv4 when available");
+    }
+
+    // ── CopyPaste-8ebg.27: device_id-keyed refresh survives IP changes ──────
+
+    fn make_paired_device(
+        fingerprint: &str,
+        address: &str,
+        device_id: Option<&str>,
+    ) -> crate::peers::PairedDevice {
+        crate::peers::PairedDevice {
+            fingerprint: fingerprint.to_string(),
+            name: String::new(),
+            added_at: 1_700_000_000,
+            address: Some(address.to_string()),
+            sync_key_b64: None,
+            model: None,
+            os_version: None,
+            app_version: None,
+            local_ip: None,
+            device_id: device_id.map(str::to_string),
+            public_ip: None,
+            first_sync_at: None,
+            last_sync_at: None,
+            password_file_b64: None,
+            password_file_enc: None,
+            supabase_account_id: None,
+        }
+    }
+
+    /// The bug this fix addresses: when the persisted peer has a stored
+    /// `device_id`, `refresh_peer_meta_from_discovery` must find it under its
+    /// NEW IP (DHCP renewal / roaming) via the stable device_id match — the
+    /// old IP-only correlation would return `None` here and silently no-op.
+    #[test]
+    fn refresh_by_device_id_heals_ip_change() {
+        use copypaste_p2p::discovery::PeerInfo;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        crate::peers::save_peers(
+            &path,
+            &[make_paired_device(
+                "aa:bb:cc:dd",
+                "192.168.1.50:5000", // stale IP — peer has since roamed
+                Some("device-uuid-123"),
+            )],
+        )
+        .unwrap();
+
+        let discovery = DiscoveryService::new();
+        // Peer re-announces under a brand-new IP after DHCP renewal, but the
+        // same stable mDNS device_id.
+        discovery.inject_peer_for_test(
+            "alice.local.",
+            PeerInfo {
+                device_id: "device-uuid-123".to_string(),
+                device_name: "Alice".to_string(),
+                ip_addrs: vec!["192.168.9.77".parse().unwrap()],
+                port: 6000,
+                bport: None,
+            },
+        );
+
+        let persisted_addr: SocketAddr = "192.168.1.50:5000".parse().unwrap();
+        refresh_peer_meta_from_discovery(&path, "aabbccdd", persisted_addr, &discovery);
+
+        let loaded = crate::peers::load_peers(&path);
+        assert_eq!(
+            loaded[0].address.as_deref(),
+            Some("192.168.9.77:6000"),
+            "device_id-keyed refresh must adopt the peer's new IP+port"
+        );
+        assert_eq!(loaded[0].local_ip.as_deref(), Some("192.168.9.77"));
+    }
+
+    /// Legacy peers (paired before `device_id` was persisted, so it is `None`)
+    /// must keep working via the old IP-correlation fallback: a port change on
+    /// the SAME IP is still healed.
+    #[test]
+    fn refresh_falls_back_to_ip_for_legacy_peer_without_device_id() {
+        use copypaste_p2p::discovery::PeerInfo;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        crate::peers::save_peers(
+            &path,
+            &[make_paired_device("aa:bb:cc:ee", "192.168.1.60:5001", None)],
+        )
+        .unwrap();
+
+        let discovery = DiscoveryService::new();
+        discovery.inject_peer_for_test(
+            "bob.local.",
+            PeerInfo {
+                device_id: "some-other-uuid".to_string(),
+                device_name: "Bob".to_string(),
+                ip_addrs: vec!["192.168.1.60".parse().unwrap()],
+                port: 7000, // port drifted, same IP
+                bport: None,
+            },
+        );
+
+        let persisted_addr: SocketAddr = "192.168.1.60:5001".parse().unwrap();
+        refresh_peer_meta_from_discovery(&path, "aabbccee", persisted_addr, &discovery);
+
+        let loaded = crate::peers::load_peers(&path);
+        assert_eq!(
+            loaded[0].address.as_deref(),
+            Some("192.168.1.60:7000"),
+            "legacy IP-correlation fallback must still heal a port change"
+        );
     }
 }

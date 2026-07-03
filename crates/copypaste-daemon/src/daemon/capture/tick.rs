@@ -285,6 +285,14 @@ pub(crate) async fn handle_tick(
                         // am9w: do NOT log filename — it contains PII (full
                         // path / document name). Log name-length only,
                         // mirroring the File branch above.
+                        //
+                        // CopyPaste-8ebg.57: bump the same readable rejection
+                        // signal ClipboardMonitor uses for text/image TooLarge
+                        // so a "too large" rejection is not ONLY visible as a
+                        // warn! log line.
+                        monitor
+                            .too_large_rejection_count
+                            .fetch_add(1, Ordering::Relaxed);
                         tracing::warn!(
                             bytes = bytes.len(),
                             max = max_file_bytes,
