@@ -4,7 +4,7 @@
 // tokens.css). Instant when prefers-reduced-motion is set (--dur collapses to
 // 0ms in that case too, so the explicit isScrolling/prefersReduced guard below
 // is a belt-and-suspenders skip of the transition altogether).
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { HistoryEntry } from "../lib/ipc";
 
 export interface GlideHighlightProps {
@@ -38,7 +38,14 @@ export function GlideHighlight({
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 
-  useEffect(() => {
+  // CopyPaste-8ebg.64: this was a plain useEffect, which fires AFTER the
+  // browser has already painted the initial top/height state (0 /
+  // textRowHeight) — visible as one frame of wrong geometry (e.g. the
+  // highlight briefly covering row 0 before snapping to the real selected
+  // row) every time the popup mounts or the list re-renders with new items.
+  // useLayoutEffect runs synchronously after DOM mutations but before paint,
+  // so the corrected top/height are committed in the same frame.
+  useLayoutEffect(() => {
     // Read geometry directly from the rendered list item so we match the
     // exact heights produced by popupRowHeight() without duplicating the calc.
     const list = listRef.current;

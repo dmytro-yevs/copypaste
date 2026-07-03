@@ -67,6 +67,14 @@ describe("loadPrefs — appearance-field validation & merge", () => {
     expect(console.warn).toHaveBeenCalled();
   });
 
+  it("theme:\"system\" is a valid ThemeValue and round-trips (CopyPaste-g27b.20)", () => {
+    seed({ theme: "system", accent: "teal" });
+    const prefs = loadPrefs();
+    expect(prefs.theme).toBe("system"); // not defaulted
+    expect(prefs.accent).toBe("teal");
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
   it("an invalid accent defaults while a valid theme is kept", () => {
     seed({ theme: "light", accent: "chartreuse" });
     const prefs = loadPrefs();
@@ -113,6 +121,11 @@ describe("loadPrefs — appearance-field validation & merge", () => {
     useUI.getState().reloadPrefs();
     expect(useUI.getState().prefs.theme).toBe("dark");
     expect(useUI.getState().prefs.accent).toBe("teal");
+    // theme:"system" is valid (CopyPaste-g27b.20) and round-trips on reload too.
+    seed({ ...DEFAULT_PREFS, theme: "system", accent: "rose" });
+    useUI.getState().reloadPrefs();
+    expect(useUI.getState().prefs.theme).toBe("system");
+    expect(useUI.getState().prefs.accent).toBe("rose");
   });
 
   it("a localStorage access exception falls back to defaults", () => {

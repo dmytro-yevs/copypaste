@@ -33,7 +33,7 @@ import { RevokeConfirmDialog } from "./RevokeConfirmDialog";
 import { useOwnDevice } from "./hooks/useOwnDevice";
 import { usePairedDevices } from "./hooks/usePairedDevices";
 import { useDiscoveredDevices } from "./hooks/useDiscoveredDevices";
-import { useQrCode } from "./hooks/useQrCode";
+import { useQrCode, QR_TTL_SECS } from "./hooks/useQrCode";
 
 // ---------------------------------------------------------------------------
 // Main view (inner — requires ToastProvider ancestor)
@@ -41,6 +41,7 @@ import { useQrCode } from "./hooks/useQrCode";
 
 function DevicesViewInner({
   incomingPairing = null,
+  onIncomingPairingHandled,
 }: {
   /**
    * When the Tauri backend detects an inbound pairing request (responder side),
@@ -48,6 +49,16 @@ function DevicesViewInner({
    * of which tab was active when the request arrived.
    */
   incomingPairing?: PairSasStatus | null;
+  /**
+   * CopyPaste-8ebg.28: App.tsx's `incomingPairing` state was never cleared
+   * after DevicesView consumed it into local `responderPairing` state — so
+   * closing the tab and switching back to Devices re-seeded a phantom SAS
+   * modal from the STALE (already-finished) pairing episode. Call this once
+   * the payload has been copied into local state so App.tsx can reset it to
+   * `null`, and a later mount only opens the modal for a genuinely new
+   * inbound pairing event.
+   */
+  onIncomingPairingHandled?: () => void;
 } = {}) {
   // --- Live peer-presence from the global event-broadcast store ---
   // 5917.34: Updated ~every 5 s (30 s when idle) by `App.tsx`'s
@@ -122,12 +133,18 @@ function DevicesViewInner({
   );
 
   // Keep responderPairing in sync when the prop changes (App.tsx may update it
-  // after the component is already mounted).
+  // after the component is already mounted). CopyPaste-8ebg.28: also tell
+  // App.tsx the payload has been consumed so it resets its own
+  // `incomingPairing` state to null — otherwise it stays set forever and a
+  // later DevicesView mount (e.g. tab away then back) re-seeds
+  // `responderPairing` from the same stale, already-finished pairing episode
+  // (a phantom SAS modal).
   useEffect(() => {
     if (incomingPairing != null) {
       setResponderPairing(incomingPairing);
+      onIncomingPairingHandled?.();
     }
-  }, [incomingPairing]);
+  }, [incomingPairing, onIncomingPairingHandled]);
 
   // --- QR pairing ---
   // The useQrCode() hook itself keeps its existing eager-generate-on-mount +
@@ -224,10 +241,14 @@ function DevicesViewInner({
   if (loadState === "loading") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div>
-          <span
-            aria-label="Loading devices…"
-          />
+        {/* CopyPaste-8ebg.29: this used to be a classless empty <span> — no
+            width/height/background/animation, so it rendered as nothing
+            (blank screen indistinguishable from a layout bug) instead of a
+            visible loading indicator. `.empty` (centers content, already
+            used by EmptyState) + the existing `.spinner` class (primitives.css)
+            give it real, already-defined styling. */}
+        <div className="empty" aria-busy="true" aria-label="Loading devices…">
+          <span className="spinner" aria-hidden="true" />
         </div>
       </ViewShell>
     );
@@ -317,14 +338,15 @@ function DevicesViewInner({
       <div className="dev-list">
         {/* This device — always first */}
         {ownState.status === "loading" && (
-          /* Skeleton matches ThisDeviceCard layout: avatar block + two text rows.
-             animate-pulse communicates loading shape without layout jump (CopyPaste-5917.22). */
-          <div aria-busy="true" aria-label="Loading device…">
-            <div />
-            <div>
-              <div />
-              <div />
-            </div>
+          // CopyPaste-8ebg.29: the comment here promised an "animate-pulse"
+          // skeleton, but none of these divs ever had a class — they rendered
+          // as zero-size invisible boxes (blank screen, not a skeleton).
+          // `.dev-hint` + the existing `.spinner` class (primitives.css) are
+          // real, already-defined styles, so this is now an actually visible
+          // loading row instead of an empty one.
+          <div className="dev-hint" aria-busy="true" aria-label="Loading device…">
+            <span className="spinner" aria-hidden="true" />
+            Loading this device…
           </div>
         )}
         {ownState.status === "offline" && (
@@ -483,12 +505,29 @@ function DevicesViewInner({
                   {qrSecsLeft !== null && qrSecsLeft > 0 && (
                     <>
                       {/* Determinate drain bar: width drains from 100% to 0 as the
-                          pairing token (300 s TTL) runs out. */}
+                          pairing token runs out. CopyPaste-8ebg.15: this used to
+                          divide by a stale literal 300 while the real TTL is
+                          QR_TTL_SECS (120 s, PAKE_SESSION_TTL) — or whatever the
+                          daemon actually returned in expires_in_secs — so the bar
+                          started at ~40% and never reached 100%. Use the same TTL
+                          basis useQrCode() used to derive qrSecsLeft itself. */}
                       <div className="qr-drain">
                         <div
                           className="qr-drain__fill"
                           data-testid="qr-drain-bar"
-                          style={{ width: `${Math.max(0, Math.min(100, (qrSecsLeft / 300) * 100))}%` }}
+                          style={{
+                            width: `${Math.max(
+                              0,
+                              Math.min(
+                                100,
+                                (qrSecsLeft /
+                                  (qrState.status === "ready" && qrState.qr.expires_in_secs > 0
+                                    ? qrState.qr.expires_in_secs
+                                    : QR_TTL_SECS)) *
+                                  100
+                              )
+                            )}%`,
+                          }}
                         />
                       </div>
                       <p className="field-note">
@@ -532,7 +571,13 @@ function DevicesViewInner({
       {pairingDevice !== null && (
         <SasPairingModal
           device={pairingDevice ?? undefined}
-          initialStatus={incomingPairing ?? undefined}
+          // CopyPaste-8ebg.28: this modal is the INITIATOR side (opened from
+          // `handlePairDiscovered`, not from the inbound "incoming-pairing"
+          // event) — it must start from SasPairingModal's own default
+          // ({state: "initiating"}), never from `incomingPairing`, which is
+          // the RESPONDER-side seed from App.tsx. Passing it here fed a
+          // stale/unrelated responder payload into the initiator's modal.
+          initialStatus={undefined}
           onClose={handleClosePairing}
           onPaired={loadPeers}
         />
@@ -590,12 +635,17 @@ function DevicesViewInner({
 
 export function DevicesView({
   incomingPairing = null,
+  onIncomingPairingHandled,
 }: {
   incomingPairing?: PairSasStatus | null;
+  onIncomingPairingHandled?: () => void;
 } = {}) {
   return (
     <ToastProvider>
-      <DevicesViewInner incomingPairing={incomingPairing} />
+      <DevicesViewInner
+        incomingPairing={incomingPairing}
+        onIncomingPairingHandled={onIncomingPairingHandled}
+      />
     </ToastProvider>
   );
 }

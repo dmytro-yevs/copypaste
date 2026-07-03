@@ -99,6 +99,9 @@
   .toggle[aria-checked="false"] { background: var(--raised-2); }
   .toggle.off > span,
   .toggle[aria-checked="false"] > span { right: auto; left: var(--s-1); background: var(--faint); }
+  /* Disabled affordance (g8ebg.32): Toggle.tsx renders a real <button disabled>
+     — match .btn:disabled/.range:disabled so it visibly reads as inert. */
+  .toggle:disabled { opacity: 0.45; pointer-events: none; }
 
   /* --- Segmented control ---------------------------------------------------- */
   .seg {
@@ -153,6 +156,10 @@
     font-weight: var(--fw-normal);
   }
   .field input::placeholder { color: var(--faint); }
+  /* Disabled affordance (g8ebg.32): matches .btn:disabled/.range:disabled —
+     dim the whole field and block interaction when its input is disabled. */
+  .field:has(input:disabled) { opacity: 0.45; pointer-events: none; }
+  .field input:disabled { cursor: not-allowed; }
 
   /* --- Chips ---------------------------------------------------------------- */
   .chip {
@@ -301,7 +308,19 @@
   }
 
   /* --- Card / divider / spinner / keycap ------------------------------------ */
-  .card { background: var(--card); border: var(--stroke-1) solid var(--border); border-radius: var(--r-card); box-shadow: var(--sh1); }
+  /* Canonical elevated-surface recipe (CopyPaste-8ebg.47). .devrow (patterns.css,
+     paired-devices list) shares this exact background/border/radius — the two
+     selectors are combined here instead of duplicating the literals. .devrow
+     intentionally omits box-shadow: it renders as an inline list row, not a
+     floating card, so no shadow layer of its own. .popover (patterns.css) is
+     also documented as an intentional variant: it needs the stronger --elevated
+     background, --sh2 shadow and --r-ctl radius because it's a portaled overlay
+     that must read as "above" everything else, not a same-plane card. .banner
+     is a fourth intentional variant — a semantically tinted (warn/err/info/ok)
+     surface, not a neutral elevated one — so it does not compose this recipe
+     either, though it does already share --r-card for corner consistency. */
+  .card, .devrow { background: var(--card); border: var(--stroke-1) solid var(--border); border-radius: var(--r-card); }
+  .card { box-shadow: var(--sh1); }
   .divider { height: var(--hairline); background: var(--divider); border: 0; }
   .spinner {
     width: var(--sz-spinner);
@@ -342,7 +361,7 @@
     align-items: center;
     justify-content: center;
     padding: var(--s-9);
-    z-index: 40;
+    z-index: var(--z-scrim);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--dur) var(--ease);
@@ -563,8 +582,24 @@
     font-size: var(--fs-125);
     padding: var(--pad-field);
     cursor: pointer;
-    transition: border-color var(--dur-fast) var(--ease);
+    transition:
+      border-color var(--dur-fast) var(--ease),
+      box-shadow var(--dur-fast) var(--ease);
   }
-  .select:hover { border-color: var(--border-strong, var(--border)); }
-  .select:focus-visible { border-color: var(--accent); outline: none; }
+  /* g8ebg.46: --border-strong was referenced but never defined anywhere (no
+     fallback ever fires in practice since the var itself is simply absent,
+     making this a silent no-op) — swapped for --mute, an existing decorative
+     token (tokens.css) with real contrast against --border in both themes.
+     Cleaner long-term fix: define --border-strong in tokens.css, out of
+     scope for this pass (primitives.css only). */
+  .select:hover { border-color: var(--mute); }
+  /* CopyPaste-8ebg.64: previously only border-color changed and outline was
+     removed with no replacement ring, so keyboard-focus on .select was much
+     less visible than .field:focus-within's accent ring. Match .field's
+     treatment exactly. */
+  .select:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 var(--stroke-3) color-mix(in srgb, var(--accent) 15%, transparent);
+  }
 }

@@ -26,9 +26,14 @@ export const SAS_POLL_MS = 700;
 
 // bdac.9: watchdog timeout for the SAS pairing modal. If no terminal state
 // (confirmed/rejected/aborted/timed_out) is reached within this window, the
-// modal shows a friendly error instead of spinning forever. 30 s is generous
-// (typical LAN handshake < 5 s) but accommodates slow mDNS discovery.
-export const SAS_WATCHDOG_MS = 30_000;
+// modal shows a friendly error instead of spinning forever.
+//
+// CopyPaste-8ebg.52: raised from 30s to 60s to match the daemon's own SAS
+// watchdog (copypaste-daemon pairing.rs). At 30s the client reported "timed
+// out" while the SAS Match/Doesn't-match buttons stayed live and functional
+// for another 30s (the daemon hadn't actually given up yet) — confusing the
+// user into believing the pairing had failed when it may still succeed.
+export const SAS_WATCHDOG_MS = 60_000;
 
 /**
  * Modal that drives the SAS pairing handshake for a single peer. Works for
@@ -265,13 +270,24 @@ export function SasPairingModal({
 
         {/* Peer metadata (responder path, or when daemon provides it).
             CopyPaste-g27b.11: MetaRow now renders a .cfield button, so its
-            container needs the .cfields grid (patterns.css) to lay out right. */}
+            container needs the .cfields grid (patterns.css) to lay out right.
+            CopyPaste-8ebg.51: this metadata is self-reported by the peer over
+            mDNS before the SAS handshake authenticates anything — it was
+            previously styled identically to trusted/verified data. Label it
+            explicitly as unverified (reusing the existing .dev-hint / .field-note
+            de-emphasis classes — no new CSS) so the user doesn't mistake it for
+            confirmed identity. */}
         {(status.peer_model || status.peer_os || status.peer_app_version || status.peer_ip) && (
-          <div className="cfields">
-            <MetaRow label="Model" value={status.peer_model} />
-            <MetaRow label="OS" value={status.peer_os} />
-            <MetaRow label="Version" value={status.peer_app_version} />
-            <MetaRow label="IP" value={status.peer_ip} />
+          <div>
+            <p className="field-note field-note--dim">
+              Unverified — reported by the peer, not yet confirmed
+            </p>
+            <div className="cfields">
+              <MetaRow label="Model" value={status.peer_model} />
+              <MetaRow label="OS" value={status.peer_os} />
+              <MetaRow label="Version" value={status.peer_app_version} />
+              <MetaRow label="IP" value={status.peer_ip} />
+            </div>
           </div>
         )}
 
@@ -303,8 +319,13 @@ export function SasPairingModal({
             </div>
           )}
 
-        {/* Awaiting SAS — show the code prominently */}
-        {!ended && status.state === "awaiting_sas" && status.sas !== undefined && (
+        {/* Awaiting SAS — show the code prominently.
+            bdac.9 / CopyPaste-8ebg.30: gate on error === null like the other
+            non-terminal states above — otherwise the 30s watchdog's
+            "Pairing timed out" error can render while the live SAS digits
+            and Match/Doesn't match buttons are still shown, letting the user
+            act on a pairing that has already timed out. */}
+        {!ended && error === null && status.state === "awaiting_sas" && status.sas !== undefined && (
           <div>
             <p>
               Confirm this code matches the one shown on the other device.
@@ -326,16 +347,26 @@ export function SasPairingModal({
                 SAS time (mDNS: name, IPs, fingerprint). All rows are optional;
                 nothing renders when a field is absent (responder path). */}
             {/* surface-card: shared glass class instead of raw bg-ide-panel/40 fill (zxv2) */}
+            {/* CopyPaste-8ebg.51: this is the metadata rendered right next to the
+                SAS code itself — the exact spot the audit flagged as looking
+                trusted. It's still only mDNS-advertised data; the SAS code above
+                is what actually authenticates the peer. Label it unverified so
+                it doesn't read as confirmed identity next to the live code. */}
             {(status.peer_device_name ??
               status.peer_ip_addrs?.length ??
               status.peer_fingerprint) && (
-              <div className="cfields">
-                <MetaRow label="Name" value={status.peer_device_name} />
-                <MetaRow
-                  label="Addresses"
-                  value={status.peer_ip_addrs?.join(", ")}
-                />
-                <MetaRow label="Fingerprint" value={status.peer_fingerprint} />
+              <div>
+                <p className="field-note field-note--dim">
+                  Unverified device details
+                </p>
+                <div className="cfields">
+                  <MetaRow label="Name" value={status.peer_device_name} />
+                  <MetaRow
+                    label="Addresses"
+                    value={status.peer_ip_addrs?.join(", ")}
+                  />
+                  <MetaRow label="Fingerprint" value={status.peer_fingerprint} />
+                </div>
               </div>
             )}
             <div className="modal__act">
@@ -369,8 +400,10 @@ export function SasPairingModal({
           </div>
         )}
 
-        {/* Waiting after the user accepted, for the peer to also accept */}
-        {!ended && status.state === "awaiting_sas" && status.sas === undefined && (
+        {/* Waiting after the user accepted, for the peer to also accept.
+            Same error===null gate as above (CopyPaste-8ebg.30) for consistency
+            with the other non-terminal states. */}
+        {!ended && error === null && status.state === "awaiting_sas" && status.sas === undefined && (
           <div>
             {/* animate-spin + motion-reduce:animate-none — respects reduced-motion (MOT-18) */}
             <span />

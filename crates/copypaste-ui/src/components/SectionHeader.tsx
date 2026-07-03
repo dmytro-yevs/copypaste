@@ -25,8 +25,12 @@ export function SectionHeader({ label, hint }: SectionHeaderProps) {
       {/* §3: section labels = grey (text-ide-dim or text-ide-faint), NOT accent blue;
           11px semibold uppercase matching Components.kt SectionLabel.
           crh3.43: faint vs dim is now moot — .set-grp__h always renders in
-          var(--faint) per shell.css, so the faint prop has no visual axis left. */}
-      <div className="set-grp__h">
+          var(--faint) per shell.css, so the faint prop has no visual axis left.
+          CopyPaste-8ebg.35: bare div gave no heading semantics, so the VoiceOver
+          rotor's Headings category skipped every section. role="heading" +
+          aria-level (no visual/CSS change) makes it a real heading landmark;
+          level 3 since it sits below the tab/view title (level-2 equivalent). */}
+      <div className="set-grp__h" role="heading" aria-level={3}>
         {label}
       </div>
       {/* No dedicated contract class for a group hint — reuse .srow__s (small,

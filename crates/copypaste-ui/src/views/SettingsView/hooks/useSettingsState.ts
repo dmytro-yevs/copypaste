@@ -572,11 +572,16 @@ export function useSettingsState() {
       setNewExcludedApp("");
       return;
     }
+    // CopyPaste-8ebg.20 fix: bail out BEFORE the optimistic setState when
+    // config isn't loaded yet. The old order applied the optimistic update
+    // unconditionally and only skipped the persist call afterwards, so the
+    // edit appeared in the UI, was never saved, and silently vanished on the
+    // next reload.
+    if (loadState !== "ready") return;
     const next = [...excludedApps, id];
     const prev = excludedApps;
     setExcludedApps(next);
     setNewExcludedApp("");
-    if (loadState !== "ready") return;
     try {
       await api.setConfig(
         buildConfigPatch({ excluded_app_bundle_ids: next }),
@@ -588,10 +593,12 @@ export function useSettingsState() {
 
   // Remove a bundle ID from the excluded-apps list and persist. Reverts on failure.
   async function removeExcludedApp(bundleId: string) {
+    // CopyPaste-8ebg.20 fix: same ordering fix as addExcludedApp — gate the
+    // optimistic update on loadState readiness instead of applying it first.
+    if (loadState !== "ready") return;
     const next = excludedApps.filter((b) => b !== bundleId);
     const prev = excludedApps;
     setExcludedApps(next);
-    if (loadState !== "ready") return;
     try {
       await api.setConfig(
         buildConfigPatch({ excluded_app_bundle_ids: next }),
@@ -720,8 +727,20 @@ export function useSettingsState() {
       setSyncRestarting(true);
       try {
         await restartDaemon();
-      } catch {
-        // Non-fatal: config is saved; user can relaunch manually if restart fails.
+      } catch (restartErr) {
+        // CopyPaste-8ebg.19 fix: a failed restart is NOT non-fatal — the
+        // daemon keeps running with the OLD credentials and sync breaks
+        // silently while the UI still shows "Saved". Surface the failure the
+        // same way handleP2pToggle does instead of swallowing it.
+        setSavedMsg(false);
+        if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+        const msg =
+          restartErr instanceof Error
+            ? restartErr.message
+            : "Saved, but restarting the sync service failed — relaunch the app to apply the new credentials.";
+        setSaveError(msg);
+        if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
+        saveErrTimer.current = setTimeout(() => setSaveError(null), 4000);
       } finally {
         setSyncRestarting(false);
       }

@@ -36,8 +36,17 @@ export function ShortcutsTab({
 }: ShortcutsTabProps) {
   return (
     <div>
-      {/* Design-reference parity: this group is labelled "Global shortcuts". */}
-      <SectionHeader label="Global shortcuts" />
+      {/* Design-reference parity: this group is labelled "Global shortcuts".
+          CopyPaste-f72f: this tab has exactly one row (bdac.59: macOS-only,
+          no Android equivalent to add rows for), which read as an empty
+          panel floating in `.set-body`'s flex:1 space. `hint` (existing
+          SectionHeader prop, .srow__s) adds a one-line explanation so the
+          sparse layout reads as "intentionally minimal" rather than
+          "broken/missing content" — no new components or CSS needed. */}
+      <SectionHeader
+        label="Global shortcuts"
+        hint="macOS-only. Opens the quick-paste popup from anywhere, even when CopyPaste isn't focused."
+      />
       <Panel>
         {/* bdac.104: InfoPopover moved to info= slot (label column) */}
         <SettingsRow

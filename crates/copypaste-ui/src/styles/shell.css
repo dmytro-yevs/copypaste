@@ -14,10 +14,23 @@
   }
 
   /* --- Sidebar -------------------------------------------------------------- */
+  /* CopyPaste-8ebg.11: titleBarStyle:"Overlay" (tauri.conf.json) draws the
+     macOS traffic lights over the top-left of the window with no reserved
+     inset from Tauri itself — the drag-region div had no height (0px), so
+     the sidebar's first nav item (History) rendered directly under the
+     lights, overlapping them (HIG violation). Give the drag region the same
+     44px height as `.vhead` ("header 44px everywhere" — DESIGN-SYSTEM-v2.md)
+     so the traffic lights sit in their own reserved strip above the nav. */
+  .sb [data-tauri-drag-region] {
+    height: 44px;
+    flex: none;
+  }
   .sb {
     width: 174px;
     flex: none;
-    background: var(--panel);
+    background: var(--chrome-bg);
+    -webkit-backdrop-filter: var(--frost-filter);
+    backdrop-filter: var(--frost-filter);
     border: var(--stroke-1) solid var(--border);
     border-radius: var(--r-card);
     padding: var(--s-4);
@@ -106,6 +119,7 @@
   .vhead__actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--s-4);
     flex: 1;
     min-width: 0;
@@ -156,6 +170,25 @@
   .set-tab:hover { color: var(--text); }
   .set-tab.on,
   .set-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  /* CopyPaste-f72f: below ~500px the wrap-to-multiple-lines fix (g27b.31,
+     above) itself becomes the problem — 7 tabs wrapping to 4 rows eats most
+     of the vertical space before any tab content is visible. At this width
+     switch strategy: stop wrapping and let the tab row scroll horizontally
+     instead (condensed single row), same "every tab stays reachable"
+     outcome as the wrap fix but without the 4-row cost. */
+  @media (max-width: 500px) {
+    .set-tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .set-tabs::-webkit-scrollbar { display: none; }
+    .set-tab {
+      flex: none;
+      padding: 8px 9px;
+      gap: var(--s-2);
+    }
+  }
   .set-body { padding: 18px 20px; flex: 1; min-height: 0; overflow-y: auto; }
   .set-pane { display: none; }
   .set-pane.on { display: block; animation: viewIn var(--dur) var(--ease); }
@@ -179,7 +212,7 @@
     gap: var(--s-7);
     padding: 9px 0;
   }
-  .srow__l { font-size: 13.5px; color: var(--text); min-width: 0; }
+  .srow__l { font-size: var(--fs-135); color: var(--text); min-width: 0; }
   /* Secondary text spans the row width instead of clamping at a narrow column
      (which forced premature wrapping even with plenty of horizontal space). */
   .srow__s { font-size: var(--fs-sm); color: var(--faint); margin-top: var(--s-1); }
@@ -299,7 +332,7 @@
     align-items: center;
     justify-content: center;
     color: var(--knob-fill);
-    font-size: 34px;
+    font-size: var(--fs-34);
     margin-bottom: var(--s-5);
     box-shadow: var(--sh2);
   }
@@ -307,7 +340,7 @@
      shared .set-grp__h is left-aligned by default, which left the "Features"
      heading hanging off to the side of an otherwise centered column). */
   .about .set-grp__h { text-align: center; }
-  .about__name { font-size: 19px; font-weight: var(--fw-bold); letter-spacing: -0.02em; }
+  .about__name { font-size: var(--fs-19); font-weight: var(--fw-bold); letter-spacing: -0.02em; }
   .about__ver { font-size: var(--fs-125); color: var(--faint); font-family: var(--f-mono); }
   .about__grid {
     display: grid;

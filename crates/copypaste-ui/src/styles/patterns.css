@@ -4,6 +4,17 @@
      (color/background/border/radius/shadow/padding/gap/margin/duration) go through
      tokens; state is expressed via classes/data-state driven by React. */
 
+  /* CopyPaste-8ebg.48: durations longer than the base --dur-fast/--dur/--dur-theme
+     scale (tokens.css) for a handful of keyframe animations in this file. Named
+     here (not inline as magic numbers) so .row.copied and .cfield.copied share
+     one source of truth instead of two independent 0.65s literals, and so the
+     qr-drain countdown isn't a bare "1s" scattered in the middle of a rule. */
+  :root {
+    --dur-flash: 650ms;
+    --dur-pop: 320ms;
+    --dur-drain: 1s;
+  }
+
   /* --- Clipboard row -------------------------------------------------------- */
   .row {
     display: flex;
@@ -12,12 +23,17 @@
     padding: var(--pad-row);
     border-radius: var(--r-row);
     position: relative;
+    /* CopyPaste-8ebg.55: rows are clickable (copy-to-clipboard / open) whether
+       or not the list is in selection-mode — previously only
+       `.list.selecting .row` carried cursor: pointer, so the default,
+       far-more-common non-selecting state showed no pointer affordance. */
+    cursor: pointer;
     /* g27b.4: row content must paint above the selection glide overlay
        (VirtualList's/GlideHighlight's absolutely-positioned `.row-glide`
        layer, rendered earlier in the DOM so it sits behind by default) —
        moved out of PopupRow's per-item inline style since it's a constant,
        never a per-row computed value. */
-    z-index: 1;
+    z-index: var(--z-row);
     /* Per-row bound set by HistoryRow (--row-max) so multi-line preview rows and
        taller image rows aren't clipped; falls back to the single-line default. */
     max-height: var(--row-max, 74px);
@@ -50,7 +66,7 @@
     background: var(--accent);
   }
   .row.copied {
-    animation: flash 0.65s var(--ease);
+    animation: flash var(--dur-flash) var(--ease);
   }
   .row.filtered,
   .row.removing {
@@ -158,7 +174,7 @@
     position: absolute;
     left: 0;
     right: 0;
-    z-index: 0;
+    z-index: var(--z-glide);
     pointer-events: none;
   }
 
@@ -200,7 +216,7 @@
     fill: currentColor;
   }
   .star-btn.pop svg {
-    animation: pop 0.32s var(--ease);
+    animation: pop var(--dur-pop) var(--ease);
   }
   @keyframes pop {
     0% { transform: scale(1); }
@@ -229,7 +245,9 @@
   }
   .list.selecting .chk { display: flex; }
   .list.selecting .row__right { display: none; }
-  .list.selecting .row { cursor: pointer; }
+  /* cursor: pointer for .row now lives on the base rule above (8ebg.55) — rows
+     are clickable outside selection-mode too, so this selecting-only override
+     was redundant. */
 
   /* --- Group header + bulk bar + filters ------------------------------------ */
   .grouphead {
@@ -243,7 +261,7 @@
     position: sticky;
     top: 0;
     background: var(--panel);
-    z-index: 2;
+    z-index: var(--z-grouphead);
     transition:
       max-height var(--dur) var(--ease),
       opacity var(--dur) var(--ease),
@@ -341,10 +359,10 @@
      device" — previously an empty unstyled <div/> that rendered no visible
      line and no reliable gap. */
   .dev-divider { height: var(--hairline); background: var(--divider); margin: var(--s-5) var(--s-6); }
+  /* Shared elevated-surface background/border/radius now lives in primitives.css
+     on the combined `.card, .devrow` rule (CopyPaste-8ebg.47) — this keeps only
+     .devrow's own layout/behavior concerns. */
   .devrow {
-    border: var(--stroke-1) solid var(--border);
-    border-radius: var(--r-card);
-    background: var(--card);
     overflow: hidden;
     transition:
       border-color var(--dur-fast) var(--ease),
@@ -364,7 +382,21 @@
     transition: background var(--dur-fast) var(--ease);
   }
   .devrow__head:hover { background: var(--hover); }
-  .devrow__name { font-weight: var(--fw-strong); font-size: 13.5px; color: var(--text); flex: none; }
+  /* CopyPaste-8ebg.51: the neighboring .devrow__sum already truncates with
+     ellipsis, but the device name did not — a long custom device name could
+     overflow the row. flex: 0 1 auto + min-width: 0 lets it shrink (yielding
+     space to .devrow__sum, same priority order as before) so overflow/
+     text-overflow actually get a chance to engage. */
+  .devrow__name {
+    font-weight: var(--fw-strong);
+    font-size: var(--fs-135);
+    color: var(--text);
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .devrow__sum {
     flex: 1;
     min-width: 0;
@@ -414,7 +446,7 @@
   }
   .cfield:hover { background: var(--hover); }
   .cfield:active { background: var(--pressed); }
-  .cfield.copied { animation: flash 0.65s var(--ease); }
+  .cfield.copied { animation: flash var(--dur-flash) var(--ease); }
   .cfield__k { font-size: var(--fs-xs); color: var(--dim); width: 70px; flex: none; }
   .cfield__v {
     font-size: var(--fs-smd);
@@ -473,7 +505,7 @@
     align-items: center;
     justify-content: center;
     font-family: var(--f-mono);
-    font-size: 20px;
+    font-size: var(--fs-20);
     font-weight: var(--fw-strong);
     color: var(--accent-2);
   }
@@ -498,15 +530,31 @@
   .banner b { color: var(--text); }
 
   /* --- Toast (slice 5) — aria-live status pill ------------------------------ */
+  /* CopyPaste-8ebg.38: the group of toasts is positioned/stacked as ONE unit —
+     `.toast-stack` owns the fixed bottom-center placement, and lays its children
+     out with column-reverse so multiple toasts fan out upward instead of every
+     `.toast` independently self-positioning to the same fixed spot (which made
+     them render exactly on top of each other, despite the doc comment above
+     GlassToast claiming "stacked"). pointer-events is off on the stack itself
+     (empty gaps between pills shouldn't eat clicks) and back on per-toast. */
+  .toast-stack {
+    position: fixed;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: var(--z-toast);
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: center;
+    gap: var(--s-4);
+    pointer-events: none;
+  }
   /* A proper themed surface (elevated card + border + shadow), NOT an inverted
      stark-white/black pill. Enters with a slide-up + fade every time it mounts
      (toasts render already-`.show`, so the entrance is an animation, not a
      transition from a never-painted hidden state). */
   .toast {
-    position: fixed;
-    bottom: 22px;
-    left: 50%;
-    transform: translateX(-50%);
+    position: relative;
     background: var(--chrome-bg, var(--elevated));
     -webkit-backdrop-filter: var(--frost-filter);
     backdrop-filter: var(--frost-filter);
@@ -518,15 +566,14 @@
     border-radius: var(--r-pill);
     box-shadow: var(--sh3);
     pointer-events: auto;
-    z-index: 60;
     display: flex;
     align-items: center;
     gap: var(--s-4);
     animation: toastIn var(--dur) var(--ease);
   }
   @keyframes toastIn {
-    from { opacity: 0; transform: translateX(-50%) translateY(14px); }
-    to { opacity: 1; transform: translateX(-50%); }
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: none; }
   }
   .toast svg { font-size: var(--fs-base); }
 
@@ -545,6 +592,28 @@
      Scoped to .ctl--wrap so filter chips elsewhere are unaffected. */
   .ctl--wrap .chip { max-width: 100%; min-width: 0; }
   .chip__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  /* CopyPaste-f72f: FileChip filename — a long path/filename must keep its
+     tail (the actual filename + extension) visible rather than being
+     truncated from the end, which for long paths hid the meaningful part.
+     `direction: rtl` on the LTR text makes overflow (and the ellipsis)
+     appear at the *start* of the string while the tail stays visible;
+     `unicode-bidi: plaintext` keeps mixed-script filenames rendering in
+     their natural direction instead of being mirrored. */
+  /* Chip itself must be allowed to shrink to the available width (both for
+     min-width:0 flex-shrink and max-width:100% clamp) before the label's
+     own overflow rules below can engage. */
+  .filechip { max-width: 100%; min-width: 0; }
+  .filechip__name {
+    display: inline-block;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+    unicode-bidi: plaintext;
+  }
   .check-label { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); }
   .field-note { font-size: var(--fs-sm); color: var(--faint); }
   .field-note--err { color: var(--err); }
@@ -594,7 +663,7 @@
     transition: opacity var(--dur) var(--ease);
   }
   .qr-drain { width: 150px; height: 4px; background: var(--divider); border-radius: var(--r-pill); overflow: hidden; }
-  .qr-drain__fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); transition: width 1s linear; }
+  .qr-drain__fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); transition: width var(--dur-drain) linear; }
   .qr-meta { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
 
   /* Chip remove affordance (e.g. excluded-apps chips). */
@@ -613,6 +682,34 @@
   .thumb-ph { display: inline-block; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--raised); }
   .thumb-ph--err { background: transparent; border: var(--stroke-1) dashed var(--border); }
 
+  /* CopyPaste-8ebg.41: D3 OS drag-drop overlay (HistoryView) — sits above the
+     content while files are hovering over the window and shows the promised
+     dashed-border dropzone treatment. `.dropzone-host` gives the fill-col
+     wrapper a positioning context so the overlay can cover it with `inset:0`. */
+  .dropzone-host { position: relative; }
+  .dropzone-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: var(--z-dropzone);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg) 90%);
+    pointer-events: none;
+  }
+  .dropzone-overlay__label {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    padding: var(--s-6) var(--s-8);
+    border: var(--stroke-2) dashed var(--accent);
+    border-radius: var(--r-card);
+    background: var(--panel);
+    color: var(--accent);
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+  }
+
   /* Portaled info popover (settings (i) tooltips). Real card — bg/border/shadow/
      z-index — so it never floats transparently over the row content. */
   .popover {
@@ -625,6 +722,6 @@
     color: var(--dim);
     line-height: var(--lh-normal);
     max-width: 280px;
-    z-index: 80;
+    z-index: var(--z-popover);
   }
 }

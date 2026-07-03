@@ -1,5 +1,7 @@
 // GeneralTab.tsx
 // Extracted from SettingsView.tsx renderGeneral() (CopyPaste-g06m.14 split) — cut/paste only.
+import { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { SectionHeader } from "../../../components/SectionHeader";
 import { Plus, X } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
@@ -8,9 +10,14 @@ import { Panel } from "../../../components/Panel";
 import { RestartDaemonButton } from "../../../components/RestartDaemonButton";
 import { InfoPopover } from "../components/InfoPopover";
 import { LimitsMsg } from "../components/LimitsMsg";
-import { api } from "../../../lib/ipc";
+import { api, appVersion, invoke } from "../../../lib/ipc";
 import type { AppSettings } from "../../../lib/ipc";
 import type { UIPrefs } from "../../../store";
+
+// CopyPaste-8ebg.53: reverse-DNS-ish bundle id, e.g. "com.1password.1password".
+// Requires at least one dot and only the characters valid in a bundle
+// identifier segment — rejects garbage like "not a bundle id" or "foo".
+const BUNDLE_ID_PATTERN = /^[A-Za-z0-9]+(\.[A-Za-z0-9-]+)+$/;
 
 export type GeneralTabProps = {
   offline: boolean;
@@ -71,6 +78,74 @@ export function GeneralTab({
   removeExcludedApp,
   setReloadKey,
 }: GeneralTabProps) {
+  // CopyPaste-8ebg.53: bundle-id inline validation — reverse-DNS pattern.
+  const [bundleIdErr, setBundleIdErr] = useState<string | null>(null);
+  const handleAddExcludedApp = () => {
+    const id = newExcludedApp.trim();
+    if (id === "") return;
+    if (!BUNDLE_ID_PATTERN.test(id)) {
+      setBundleIdErr('Enter a reverse-DNS bundle id, e.g. "com.example.app"');
+      return;
+    }
+    setBundleIdErr(null);
+    void addExcludedApp();
+  };
+
+  // CopyPaste-8ebg.63: the "Version" row's caption promises app + daemon
+  // versions but only ever rendered the daemon's. Pull the app version the
+  // same way AboutView does (bundle getVersion, IPC appVersion() fallback).
+  const [appVer, setAppVer] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getVersion().then(
+      (v) => {
+        if (!cancelled) setAppVer(v);
+      },
+      () => {
+        void appVersion().then(
+          (v) => {
+            if (!cancelled && v) setAppVer(v);
+          },
+          () => {
+            /* both unavailable — leave null, row just shows the daemon version */
+          }
+        );
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // CopyPaste-8ebg.53: launch_at_login defaulted to true with no UI control.
+  // A get_launch_at_login/set_launch_at_login Tauri command pair was added
+  // (src-tauri/src/config.rs, mirroring set_allow_screenshots) so this can be
+  // wired directly via the shared `invoke` re-export without touching
+  // useSettingsState.ts / tauriCommands.ts (outside this task's file scope).
+  const [launchAtLogin, setLaunchAtLoginState] = useState<boolean | null>(null);
+  const [launchAtLoginErr, setLaunchAtLoginErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<boolean>("get_launch_at_login")
+      .then((v) => {
+        if (!cancelled) setLaunchAtLoginState(v);
+      })
+      .catch(() => {
+        /* command unavailable (older backend / mock mode) — row hides itself */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const handleLaunchAtLoginToggle = (v: boolean) => {
+    setLaunchAtLoginState(v);
+    setLaunchAtLoginErr(null);
+    invoke<void>("set_launch_at_login", { enabled: v }).catch((e: unknown) => {
+      setLaunchAtLoginState(!v);
+      setLaunchAtLoginErr(e instanceof Error ? e.message : String(e));
+    });
+  };
+
   return (
     <div>
       {/* bdac.93: sub-group "General" — sync + private mode */}
@@ -82,7 +157,7 @@ export function GeneralTab({
         {/* bdac.104: InfoPopover moved to info= slot (label column) for all rows */}
         <SettingsRow
           title="Enable sync"
-          info={<InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />}
+          info={<InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity. Configure P2P, cloud, and relay credentials on the Sync tab." />}
         >
           <div className="ctl">
             <LimitsMsg field="sync_enabled" limitsMsg={limitsMsg} />
@@ -167,22 +242,8 @@ export function GeneralTab({
         </SettingsRow>
       </Panel>
 
-      {/* bdac.93: sub-group "Privacy" — mask sensitive. Named "Privacy" (not
-          "Display") to avoid colliding with the "Display" appearance tab. */}
-      <SectionHeader label="Privacy" />
-      <Panel>
-        {/* bdac.50: InfoPopover added for Mask sensitive data; bdac.104: moved to info= slot */}
-        <SettingsRow
-          title="Mask sensitive data"
-          info={<InfoPopover text="Hide preview text for items flagged as sensitive (passwords, credit cards, tokens). Click an item in history to reveal its content." />}
-        >
-          <Toggle
-            checked={prefs.maskSensitive}
-            onChange={(v) => setPrefs({ maskSensitive: v })}
-          />
-        </SettingsRow>
-      </Panel>
-
+      {/* CopyPaste-8ebg.34: "Mask sensitive data" duplicated the Display tab's
+          Privacy control (DisplayTab.tsx) — single source of truth kept there. */}
       <SectionHeader
         label="Capture"
         hint="Control public-IP lookup, paste formatting, and which apps are never captured."
@@ -266,13 +327,17 @@ export function GeneralTab({
                 value={newExcludedApp}
                 placeholder="com.example.app"
                 disabled={offline}
-                onChange={(e) => setNewExcludedApp(e.target.value)}
+                onChange={(e) => {
+                  setNewExcludedApp(e.target.value);
+                  if (bundleIdErr !== null) setBundleIdErr(null);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    void addExcludedApp();
+                    handleAddExcludedApp();
                   }
                 }}
+                aria-invalid={bundleIdErr !== null}
                 /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
                    the Sync-tab text inputs: white/near-white elevated fill. */
               />
@@ -281,9 +346,12 @@ export function GeneralTab({
               type="button"
               className="btn btn--primary sm"
               disabled={offline || newExcludedApp.trim() === ""}
-              onClick={() => void addExcludedApp()}
+              onClick={handleAddExcludedApp}
             ><Plus aria-hidden="true" />Add</button>
           </div>
+          {bundleIdErr !== null && (
+            <span className="field-note field-note--err">{bundleIdErr}</span>
+          )}
           {excludedApps.length > 0 && (
             <div className="xapps">
               {excludedApps.map((bundleId) => (
@@ -307,16 +375,39 @@ export function GeneralTab({
 
       <SectionHeader label="Background service" />
       <Panel>
-        {/* bdac.107: description added for Version row (Background service section) */}
+        {/* bdac.107: description added for Version row (Background service section).
+            CopyPaste-8ebg.63: the row's title implied both app + daemon version but
+            only ever showed the daemon's — now shows both, app version first. */}
         <SettingsRow title="Version">
           <span className="field-note field-note--dim field-note--mono">
-            {offline ? "Not running" : (daemonVersion ?? "unknown")}
+            App {appVer ?? "unknown"} · Daemon {offline ? "not running" : (daemonVersion ?? "unknown")}
           </span>
         </SettingsRow>
         {/* bdac.107: "Restart" → "Restart service" — unambiguous */}
         <SettingsRow title="Restart service">
           <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
         </SettingsRow>
+        {/* CopyPaste-8ebg.53: launch_at_login defaults to true with previously no
+            UI control to disable it. Hidden (not disabled) when the backend
+            command is unavailable (launchAtLogin stays null) rather than showing
+            a toggle that silently does nothing. */}
+        {launchAtLogin !== null && (
+          <SettingsRow
+            title="Launch at login"
+            info={<InfoPopover text="Automatically start CopyPaste when you log in to macOS." />}
+          >
+            <div className="ctl">
+              {launchAtLoginErr !== null && (
+                <span className="field-note field-note--err">{launchAtLoginErr}</span>
+              )}
+              <Toggle
+                checked={launchAtLogin}
+                onChange={handleLaunchAtLoginToggle}
+                aria-label="Launch at login"
+              />
+            </div>
+          </SettingsRow>
+        )}
       </Panel>
     </div>
   );

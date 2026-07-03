@@ -31,8 +31,14 @@ export function ClipMetadata({ entry, ownDeviceId }: ClipMetadataProps) {
         {p.label}
       </span>
       {` · ${formatRelativeTime(entry.wall_time, "short")}`}
-      {app ? ` · ${app}` : ""}
+      {/* CopyPaste-8ebg.55: origin device moved ahead of the source-app label —
+          this row is truncated (single line, overflow clipped by the row
+          layout), and origin was last, so on a narrow/long metadata line it
+          was the first thing to disappear even though it's the more
+          decision-relevant field (which device this came from) than the
+          source app name. */}
       {origin ? ` · ${origin}` : ""}
+      {app ? ` · ${app}` : ""}
     </div>
   );
 }

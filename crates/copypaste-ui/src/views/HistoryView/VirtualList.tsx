@@ -7,7 +7,7 @@
  * heights), stored in a prefix-sum table, and binary-searched for the first
  * visible row — O(log n) per scroll event.
  */
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { HistoryEntry } from "../../lib/ipc";
 import {
   rowHeightFor,
@@ -72,6 +72,10 @@ export function VirtualList({
 }: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
+  // Read the latest scrollTop from effects without adding it as a dependency
+  // (it changes on every scroll frame; see the scroll-anchoring effect below).
+  const scrollTopRef = useRef(0);
+  scrollTopRef.current = scrollTop;
 
   // Prefix-sum offsets: offsets[i] is the top of row i; offsets[n] is total height.
   // Memoized on item count/ids and display settings so scroll events (which only
@@ -125,6 +129,50 @@ export function VirtualList({
     });
   }, [totalH, viewportH, listRef]);
 
+  // CopyPaste-8ebg.44: scroll anchoring. `items` only receives a new array
+  // reference on a genuine content change (useHistoryData's sigRef gate keeps
+  // identical polls from producing a new reference; useHistoryFilter's
+  // useMemo does the same for filtering/sorting), so this effect fires
+  // exactly on the cases the bug report calls out: a background poll
+  // prepending a newly-copied item, load-more appending a page, or a
+  // delete/undo/pin mutation. Without anchoring, any row-count/height change
+  // above the viewport shifts every row below it by the same pixel delta,
+  // so the same raw `scrollTop` now points at different content — the
+  // viewport visibly jumps out from under a mid-scroll user. We anchor by
+  // remembering which item was at the top of the viewport in the OLD list
+  // (via the OLD offsets table, captured in the refs below before this
+  // render's useMemo overwrote them) and re-deriving a scrollTop that keeps
+  // that same item in the same on-screen position in the NEW list.
+  const prevItemsRef = useRef(items);
+  const prevOffsetsRef = useRef(offsets);
+  useEffect(() => {
+    if (items !== prevItemsRef.current) {
+      const el = listRef.current;
+      const oldItems = prevItemsRef.current;
+      const oldOffsets = prevOffsetsRef.current;
+      const anchorScrollTop = scrollTopRef.current;
+      // overscanPx=0 so `start` is the exact top-most row spanning scrollTop.
+      const { start: anchorIdx } = computeVisibleWindow(oldOffsets, anchorScrollTop, 0, 0);
+      const anchorItem = oldItems[anchorIdx];
+      if (el && anchorItem) {
+        const withinRow = anchorScrollTop - (oldOffsets[anchorIdx] ?? 0);
+        const newIdx = items.findIndex((it) => it.id === anchorItem.id);
+        if (newIdx >= 0) {
+          const newTop = Math.max(0, (offsets[newIdx] ?? 0) + withinRow);
+          if (Math.abs(newTop - anchorScrollTop) > 1) {
+            el.scrollTop = newTop;
+            setScrollTop(newTop);
+          }
+        }
+        // else: the anchor item is gone (e.g. it was the one just deleted) —
+        // fall through and let the browser's natural scroll position stand;
+        // clamping above still keeps it in-bounds.
+      }
+    }
+    prevItemsRef.current = items;
+    prevOffsetsRef.current = offsets;
+  }, [items, offsets, listRef]);
+
   const { start, end } = computeVisibleWindow(offsets, scrollTop, viewportH);
   const visible = items.slice(start, end);
   const padTop = offsets[start] ?? 0;
@@ -146,6 +194,22 @@ export function VirtualList({
   const safeActiveDescendantId = activeIdInView
     ? (activeDescendantId ?? undefined)
     : undefined;
+
+  // CopyPaste-8ebg.45: role="list" (not "listbox") deliberately does not carry
+  // a real aria-activedescendant — see the g27b.29 note in HistoryRow.tsx for
+  // why (role="listbox"/"option" would trip axe's nested-interactive check on
+  // the per-row Pin/Preview/Delete buttons). That trade-off means screen
+  // readers get no automatic announcement as the roving selection moves via
+  // arrow keys. This polite aria-live region closes that gap without
+  // reintroducing the nested-interactive violation: it mirrors the active
+  // row's own aria-label (set by HistoryRow) whenever the active id changes.
+  const [activeAnnouncement, setActiveAnnouncement] = useState("");
+  useEffect(() => {
+    if (!safeActiveDescendantId) return;
+    const el = document.getElementById(safeActiveDescendantId);
+    const label = el?.getAttribute("aria-label");
+    if (label) setActiveAnnouncement(label);
+  }, [safeActiveDescendantId]);
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -217,6 +281,12 @@ export function VirtualList({
           ))}
         </div>
       </div>
+      {/* CopyPaste-8ebg.45: polite live region announcing the currently active
+          row — see the comment above activeAnnouncement for why this exists
+          instead of a real aria-activedescendant. */}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {activeAnnouncement}
+      </span>
     </div>
   );
 }

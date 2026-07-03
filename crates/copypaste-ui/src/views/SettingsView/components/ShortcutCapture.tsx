@@ -156,12 +156,24 @@ export function ShortcutCapture({
   // this is display-only, split into one glyph per modifier/key.
   const parts = capturing ? ["Press a shortcut…"] : formatAcceleratorParts(value);
 
+  // CopyPaste-8ebg.53: the aria-label was a static "Click and press a key
+  // combination" that never announced the currently bound shortcut, so a
+  // screen-reader user landing on this control had no way to know what was
+  // already bound before changing it.
+  // Raw accelerator string ("CmdOrCtrl+Shift+V"), not the glyph rendering —
+  // screen readers announce it more clearly than symbol soup like "⌘⇧V".
+  const a11yLabel = capturing
+    ? "Press a key combination"
+    : value
+      ? `Current shortcut: ${value}. Click and press a new key combination.`
+      : "No shortcut set. Click and press a key combination.";
+
   return (
     <div
       ref={triggerRef}
       role="button"
       tabIndex={0}
-      aria-label="Click and press a key combination"
+      aria-label={a11yLabel}
       title="Click and press a key combination"
       onFocus={() => setCapturing(true)}
       onBlur={() => setCapturing(false)}

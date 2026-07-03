@@ -46,10 +46,14 @@ describe("HistoryRow — sensitive masking a11y (X6 / P0 A11Y-1 fix)", () => {
     const row = screen.getByRole("listitem");
     expect(row.getAttribute("aria-label")).toMatch(/hidden/i);
     expect(row.getAttribute("aria-label")).not.toContain("secret-token-xyz");
-    // Real text is present (width preserved) but aria-hidden.
+    // Real text is present (width preserved). CopyPaste-8ebg.55: `.mask` is a
+    // real <button> (fixes keyboard-unreachable reveal), so aria-hidden lives
+    // on the inner text span only — the button itself must stay in the a11y
+    // tree (with its own aria-label) or it would vanish from AT entirely.
     const mask = document.querySelector(".mask");
     expect(mask).toHaveTextContent("secret-token-xyz");
-    expect(mask).toHaveAttribute("aria-hidden", "true");
+    expect(mask).not.toHaveAttribute("aria-hidden");
+    expect(mask?.querySelector("span[aria-hidden='true']")).not.toBeNull();
   });
 
   it("non-sensitive row: aria-label includes the preview and a tile renders", () => {

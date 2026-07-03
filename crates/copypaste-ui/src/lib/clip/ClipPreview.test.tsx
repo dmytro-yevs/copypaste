@@ -23,9 +23,16 @@ describe("ClipPreview — X6 sensitive masking contract", () => {
     const mask = document.querySelector(".mask");
     expect(mask).not.toBeNull();
     // Real text is present (so the mask occupies real rendered width + is
-    // selectable) — but aria-hidden so its accessible name never leaks.
+    // selectable). CopyPaste-8ebg.55: `.mask` is now a real <button> (fixes
+    // keyboard-unreachable reveal) so it must NOT itself be aria-hidden — that
+    // would drop it from the accessibility tree entirely, undoing the fix.
+    // Its accessible name comes from an explicit aria-label instead; the raw
+    // preview text is only hidden on the inner span so it never leaks.
     expect(mask).toHaveTextContent("super-secret-token-abc123");
-    expect(mask).toHaveAttribute("aria-hidden", "true");
+    expect(mask).not.toHaveAttribute("aria-hidden");
+    expect(mask).toHaveAttribute("aria-label");
+    expect(mask?.getAttribute("aria-label")).not.toMatch(/secret|token|abc123/i);
+    expect(mask?.querySelector("span[aria-hidden='true']")).not.toBeNull();
   });
 
   it("masked: clicking the mask reveals (calls onReveal)", () => {

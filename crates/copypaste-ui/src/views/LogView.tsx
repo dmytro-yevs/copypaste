@@ -1,10 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { AlertTriangle, Download, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, Download, PauseCircle, PlayCircle, RefreshCw, Search } from "lucide-react";
 import { readLogs, logDirPath, IpcError } from "../lib/ipc";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
 
 const MAX_LINES = 500;
+
+// CopyPaste-8ebg.54: auto-refresh interval for the "Live" tail toggle.
+const LIVE_TAIL_INTERVAL_MS = 3000;
 
 // audit P2: colorize each log line by level. Each token meets WCAG AA on the
 // log surface (bg-ide-raised): WARN→warning amber, ERROR→danger red, DEBUG/TRACE
@@ -73,7 +76,21 @@ function relativizeLogPath(absPath: string): string {
   return absPath.replace(/^\/Users\/[^/]+\//, "~/");
 }
 
-export function LogContent() {
+export interface LogContentProps {
+  /**
+   * CopyPaste-8ebg.54: the log filter is lifted to the parent (SettingsView)
+   * so it survives switching to another Settings tab and back — previously
+   * this pane's `{activeTab === "logs" && <LogContent />}` conditional render
+   * fully unmounted LogContent on every tab switch, discarding the filter
+   * text. Both props are optional so LogContent keeps working uncontrolled
+   * (e.g. if ever rendered standalone/in tests) by falling back to internal
+   * state.
+   */
+  filter?: string;
+  onFilterChange?: (filter: string) => void;
+}
+
+export function LogContent({ filter: filterProp, onFilterChange }: LogContentProps = {}) {
   const [content, setContent] = useState<string>("");
   // bdac.63: track empty state as a boolean, not a string sentinel.
   // Previously setContent("(no log entries)") tied display text to logic.
@@ -83,7 +100,15 @@ export function LogContent() {
   const [error, setError] = useState<string | null>(null);
   // Slice 5 (CopyPaste-g27b.12): client-side substring filter over the
   // already-loaded lines, wired to the `.field` search box in the header.
-  const [filter, setFilter] = useState("");
+  // Uncontrolled fallback — used only when the parent doesn't lift the state
+  // (see LogContentProps above).
+  const [filterState, setFilterState] = useState("");
+  const filter = filterProp ?? filterState;
+  const setFilter = onFilterChange ?? setFilterState;
+  // CopyPaste-8ebg.54: "Live" tail toggle — off by default (matches the prior
+  // manual-refresh-only behavior); when on, auto-refreshes on an interval
+  // instead of requiring a manual Refresh click.
+  const [live, setLive] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -116,6 +141,16 @@ export function LogContent() {
     void load();
   }, [load]);
 
+  // CopyPaste-8ebg.54: live-tail — while `live` is on, poll on an interval so
+  // new log lines show up without a manual Refresh click. Skips overlapping
+  // polls implicitly: `load()` always resolves before the next tick since the
+  // interval delay is well above realistic read-logs latency.
+  useEffect(() => {
+    if (!live) return;
+    const id = setInterval(() => void load(), LIVE_TAIL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [live, load]);
+
   // Auto-scroll to bottom when content loads
   useEffect(() => {
     if (scrollRef.current) {
@@ -123,8 +158,20 @@ export function LogContent() {
     }
   }, [content]);
 
+  const lines = content.split("\n");
+  const trimmedFilter = filter.trim().toLowerCase();
+  const visibleLines = trimmedFilter
+    ? lines.filter((line) => line.toLowerCase().includes(trimmedFilter))
+    : lines;
+
+  // CopyPaste-8ebg.64: export the currently FILTERED view, not the full raw
+  // log — previously this always exported `content` (all MAX_LINES lines)
+  // even when the user had narrowed the on-screen view with the filter box,
+  // silently discarding the filter for the one action (Export) where you'd
+  // most want it applied.
   const handleExport = useCallback(() => {
-    const blob = new Blob([content], { type: "text/plain" });
+    const exportText = visibleLines.join("\n");
+    const blob = new Blob([exportText], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -133,13 +180,7 @@ export function LogContent() {
     // Defer revoke so the browser has time to start the download before the
     // object URL is invalidated (immediate revoke can abort the download).
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [content]);
-
-  const lines = content.split("\n");
-  const trimmedFilter = filter.trim().toLowerCase();
-  const visibleLines = trimmedFilter
-    ? lines.filter((line) => line.toLowerCase().includes(trimmedFilter))
-    : lines;
+  }, [visibleLines]);
 
   // Actions slot rendered into the ViewShell header (filter field + Refresh +
   // Export buttons). Wrapped locally in `.srow__c` (shell.css "flex cluster of
@@ -158,6 +199,18 @@ export function LogContent() {
           aria-label="Filter logs"
         />
       </div>
+      {/* CopyPaste-8ebg.54: "Live" tail toggle — auto-refreshes on an interval
+          while on, so new log lines appear without a manual Refresh click. */}
+      <button
+        type="button"
+        className="btn sm btn--secondary"
+        aria-pressed={live}
+        onClick={() => setLive((v) => !v)}
+        title={live ? "Stop live tail" : "Live tail — auto-refresh"}
+      >
+        {live ? <PauseCircle aria-hidden="true" /> : <PlayCircle aria-hidden="true" />}
+        Live
+      </button>
       <button
         type="button"
         className="btn sm btn--secondary"

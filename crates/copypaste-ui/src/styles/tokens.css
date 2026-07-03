@@ -122,13 +122,25 @@
        The size scale covers the discrete sizes the reference primitives use so
        no component layer hardcodes a px font-size (design.md Decision 12/S5). */
     --fs-3xs:9.5px; --fs-2xs:10px; --fs-xs:11px; --fs-sm:11.5px; --fs-smd:12px;
-    --fs-125:12.5px; --fs-md:13px; --fs-base:14px; --fs-lg:15px; --fs-xl:17px; --fs-2xl:24px;
+    --fs-125:12.5px; --fs-md:13px; --fs-135:13.5px; --fs-base:14px; --fs-lg:15px; --fs-xl:17px;
+    --fs-19:19px; --fs-20:20px; --fs-2xl:24px; --fs-34:34px;
     --fw-normal:450; --fw-medium:500; --fw-semibold:550; --fw-strong:600; --fw-bold:700;
     --lh-tight:1.2; --lh-normal:1.5;
     --ls-body:-.006em; --ls-tight:-.01em; --ls-none:0; --ls-wide:.05em; --ls-wider:.06em;
 
     /* Focus ring (design.md Decision 12 — explicit tokens). */
     --focus-ring-width:2px; --focus-ring-offset:2px;
+
+    /* Z-index scale (CopyPaste-8ebg.61 — was 6 raw numeric z-index literals
+       scattered across patterns.css/primitives.css with no token backing).
+       Ordered low→high in stacking-context terms: the selection-glide overlay
+       paints beneath row content; group headers stick above scrolled rows;
+       the drag-drop dropzone overlays the list; the modal scrim sits above the
+       whole shell; toasts float above the scrim; popovers (portaled tooltips)
+       are topmost. Values are unchanged from their prior literals — this is a
+       rename, not a re-stacking. */
+    --z-glide:0; --z-row:1; --z-grouphead:2; --z-dropzone:10;
+    --z-scrim:40; --z-toast:60; --z-popover:80;
 
     /* Hairline / icon sizes / control heights (design.md Decision 12/S1). */
     --hairline:1px;

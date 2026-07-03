@@ -34,6 +34,13 @@ function SettingsToaster({ s }: { s: ReturnType<typeof useSettingsState> }) {
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<TabId>("general");
+  // CopyPaste-8ebg.54: lifted out of LogContent so the log filter survives
+  // switching to another Settings tab and back (the `{activeTab === "logs" &&
+  // <LogContent/>}` pane below fully unmounts LogContent on every tab
+  // switch — this is the minimal, tractable fix; keeping every Settings tab
+  // permanently mounted to avoid ANY state loss is a bigger layout/perf
+  // change, deferred — see bd note on CopyPaste-8ebg.54).
+  const [logFilter, setLogFilter] = useState("");
   const s = useSettingsState();
   const onRetry = () => s.setReloadKey((k) => k + 1);
 
@@ -144,7 +151,7 @@ export function SettingsView() {
             )}
             {activeTab === "logs" && (
               <div className="set-pane on" role="tabpanel" id="tabpanel-logs" aria-labelledby="tab-logs">
-                <LogContent />
+                <LogContent filter={logFilter} onFilterChange={setLogFilter} />
               </div>
             )}
           </div>
