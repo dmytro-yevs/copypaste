@@ -49,7 +49,16 @@ const SOCKET_RELEASE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Polling interval while waiting for socket release.
 const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Maximum wait for the daemon socket to become reachable after spawn.
-const SOCKET_READY_TIMEOUT: Duration = Duration::from_millis(2000);
+///
+/// CopyPaste-8ebg.57: 2000 ms was too tight — the daemon's own startup work
+/// (Keychain read, SQLCipher open + any pending migration, socket bind) can
+/// legitimately exceed 2 s on a cold cache or a slow disk, independent of the
+/// up-to-`SOCKET_RELEASE_TIMEOUT` eviction wait that already ran before this
+/// poll loop starts. A too-short timeout here produced a false "daemon did
+/// not become reachable" error while the daemon was still coming up normally.
+/// Raised to 5 s, matching the order of magnitude of `SOCKET_RELEASE_TIMEOUT`
+/// used for the symmetric wait-for-release case above.
+const SOCKET_READY_TIMEOUT: Duration = Duration::from_millis(5000);
 
 /// Managed state holding the handle to the daemon child process the app
 /// spawned (if any). `None` means the app has not (yet) started a daemon, or
@@ -78,6 +87,23 @@ pub struct DaemonSpawnError(pub Mutex<Option<String>>);
 /// ordering inversion.
 #[derive(Default)]
 pub struct DaemonLifecycleGen(pub AtomicU64);
+
+/// Serializes [`restart_daemon`] so concurrent UI triggers (e.g. an update
+/// banner, the tray menu, and a Settings button firing independently) queue
+/// instead of racing.
+///
+/// Without this, N concurrent `restart_daemon` calls can each read an empty
+/// (or stale) [`DaemonChild`] slot, each spawn their own fresh daemon child,
+/// and each overwrite the slot — only the LAST write is tracked, so the
+/// other N-1 spawned daemon processes are never SIGTERM'd by `stop_daemon`
+/// and outlive the app's own quit (CopyPaste-8ebg.22).
+///
+/// A plain `std::sync::Mutex` (not `tokio::sync::Mutex`) is correct here:
+/// `restart_daemon` is a synchronous, blocking Tauri command already used
+/// with the same poisoned-mutex-recovery pattern as [`DaemonChild`] and
+/// [`DaemonSpawnError`] below, and holding a std mutex across its body just
+/// serializes callers on the thread pool — no async runtime is involved.
+static RESTART_LOCK: Mutex<()> = Mutex::new(());
 
 /// Resolve the daemon socket path. Delegates to `crate::ipc::socket_path`
 /// so there is a single definition shared by the IPC layer and the lifecycle
@@ -518,6 +544,14 @@ pub fn get_daemon_error(app: tauri::AppHandle) -> Option<String> {
 /// surfaces loudly.
 #[tauri::command]
 pub fn restart_daemon(app: tauri::AppHandle) -> Result<(), String> {
+    // Serialize concurrent restart requests (see RESTART_LOCK doc comment):
+    // held for the entire stop -> spawn -> confirm sequence below so a
+    // second/third caller queues behind this one instead of racing it to
+    // spawn its own overlapping daemon. Poisoned-mutex recovery mirrors the
+    // pattern used for DaemonChild/DaemonSpawnError elsewhere in this file —
+    // a prior panicking restart must not permanently wedge future restarts.
+    let _restart_guard = RESTART_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
     // Step 1: bump the lifecycle generation BEFORE killing the old child.
     // This lets a concurrent ensure_daemon_running (running in the startup
     // background thread) detect that its child was superseded and suppress

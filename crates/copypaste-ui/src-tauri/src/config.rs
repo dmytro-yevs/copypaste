@@ -131,8 +131,13 @@ pub(crate) struct CurrentPopupPosition(pub(crate) Mutex<PopupPosition>);
 pub(crate) struct AllowScreenshots(pub(crate) Mutex<bool>);
 
 // ---------------------------------------------------------------------------
-// Launch-at-login — internal startup helper (no longer a public Tauri command;
-// the Settings UI for this feature has not been wired up yet — CopyPaste-loyk.7).
+// Launch-at-login
+//
+// CopyPaste-8ebg.53: launch_at_login defaulted to `true` with no Settings UI
+// control to disable it. get_launch_at_login/set_launch_at_login below close
+// that gap — CopyPaste-loyk.7 is superseded by this pair, mirroring the
+// get_allow_screenshots/set_allow_screenshots pattern (persist to
+// ui-config.json, apply the OS-level effect immediately).
 // ---------------------------------------------------------------------------
 
 /// Idempotently sync the OS launch-agent state with the desired value.
@@ -154,6 +159,31 @@ pub(crate) fn apply_launch_at_login(handle: &tauri::AppHandle, enabled: bool) {
         }
     }
     // If current == desired, nothing to do (idempotent).
+}
+
+/// Return the persisted launch-at-login preference.
+///
+/// Reads from `ui-config.json` rather than the OS autolaunch manager so the
+/// value reflects what the user last set even if the OS-level registration
+/// is momentarily out of sync (e.g. failed silently — see
+/// `apply_launch_at_login`).
+#[tauri::command]
+pub(crate) fn get_launch_at_login(handle: tauri::AppHandle) -> bool {
+    load_ui_config(&handle).launch_at_login
+}
+
+/// Enable or disable launch-at-login and persist the preference.
+///
+/// Mirrors `set_allow_screenshots`: apply the OS-level effect first (best
+/// effort — logged, not surfaced, since a LaunchAgent registration failure
+/// is non-fatal for the running app), then persist to `ui-config.json`.
+#[tauri::command]
+pub(crate) fn set_launch_at_login(enabled: bool, handle: tauri::AppHandle) -> Result<(), String> {
+    apply_launch_at_login(&handle, enabled);
+
+    let mut cfg = load_ui_config(&handle);
+    cfg.launch_at_login = enabled;
+    save_ui_config(&handle, &cfg)
 }
 
 // ---------------------------------------------------------------------------
@@ -207,14 +237,19 @@ pub(crate) fn set_popup_shortcut(
         guard.clone()
     };
 
-    // Unregister the old shortcut (best-effort). Log a warning when this fails
-    // so a ghost shortcut registration doesn't go unnoticed.
-    if let Err(e) = handle.global_shortcut().unregister(old.as_str()) {
-        tracing::warn!(
-            "set_popup_shortcut: failed to unregister old shortcut '{}': {e} \
-             (ghost registration possible — old hotkey may still be active)",
-            old
-        );
+    // CopyPaste-8ebg.24: register the NEW shortcut BEFORE touching the old
+    // one. The previous order unregistered `old` first and only then tried
+    // to register `accelerator`; if that registration failed (OS-reserved
+    // combo, no CGEventTap fallback), the user was left with the old
+    // shortcut unregistered AND the new one not registered — zero working
+    // hotkeys, while the UI still displayed the old accelerator as active.
+    // Registering first means a failed rebind leaves `old` untouched and
+    // still working.
+    if old == accelerator {
+        // No-op rebind: the accelerator is unchanged, so there is nothing to
+        // register/unregister (re-registering the same string can error with
+        // "already registered" on some backends).
+        return Ok(());
     }
 
     // Fix #2: attempt to register via the plugin.  On macOS, OS-reserved or
@@ -229,7 +264,8 @@ pub(crate) fn set_popup_shortcut(
             .map(|s| *s.0.lock().expect("mutex poisoned"))
             .unwrap_or(false);
         if !tap_active {
-            // No tap — plugin must succeed.
+            // No tap — plugin must succeed. `old` is still registered at
+            // this point, so on failure the user keeps a working hotkey.
             plugin_result.map_err(|e| e.to_string())?;
         } else {
             // Tap is running; log plugin failure but don't surface it as an error.
@@ -243,6 +279,17 @@ pub(crate) fn set_popup_shortcut(
     }
     #[cfg(not(target_os = "macos"))]
     plugin_result.map_err(|e| e.to_string())?;
+
+    // New shortcut is registered (or accepted via the CGEventTap fallback) —
+    // now it is safe to unregister the old one. Best-effort: log a warning
+    // when this fails so a ghost shortcut registration doesn't go unnoticed.
+    if let Err(e) = handle.global_shortcut().unregister(old.as_str()) {
+        tracing::warn!(
+            "set_popup_shortcut: failed to unregister old shortcut '{}': {e} \
+             (ghost registration possible — old hotkey may still be active)",
+            old
+        );
+    }
 
     // Persist the new accelerator (preserving other config fields).
     let mut new_cfg = load_ui_config(&handle);

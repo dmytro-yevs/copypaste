@@ -10,37 +10,23 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use copypaste_ipc::{METHOD_GET_ITEM_FILE, METHOD_PAIR_GENERATE_QR, METHOD_RESET_DATABASE};
+use copypaste_ipc::{
+    METHOD_DB_BACKUP, METHOD_DB_RESTORE, METHOD_GET_ITEM_FILE, METHOD_IMPORT,
+    METHOD_PAIR_GENERATE_QR, METHOD_PAIR_PEER_WITH_PASSWORD, METHOD_PAIR_WITH_DISCOVERED,
+    METHOD_RESET_DATABASE, METHOD_VACUUM,
+};
 use serde_json::Value;
 
-/// Resolve the daemon socket path, matching `copypaste-daemon::paths::socket_path`.
+/// Resolve the daemon socket path.
+///
+/// CopyPaste-c4q2.2 / CopyPaste-8ebg.59: this used to be a third independent
+/// copy of the platform-path logic (macOS/XDG/fallback branches duplicated
+/// from `copypaste-daemon::paths::socket_path`). It now delegates to
+/// [`copypaste_ipc::paths::socket_path`] — the single canonical resolver
+/// shared by the daemon, CLI, and UI — so all three consumers can no longer
+/// drift independently.
 pub(crate) fn socket_path() -> PathBuf {
-    if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
-        return PathBuf::from(p);
-    }
-    // If the home directory cannot be resolved we have no way to locate the
-    // daemon socket. Fall back to a path that is guaranteed not to exist (and is
-    // not a real system directory) so `UnixStream::connect` fails with NotFound
-    // and the frontend surfaces a clean `daemon_offline` rather than silently
-    // probing `/Library/...` or `/.local/...`.
-    let Some(home) = home::home_dir() else {
-        return PathBuf::from("/nonexistent/copypaste/daemon.sock");
-    };
-    #[cfg(target_os = "macos")]
-    {
-        home.join("Library/Application Support/CopyPaste/daemon.sock")
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            return PathBuf::from(xdg).join("copypaste/daemon.sock");
-        }
-        home.join(".local/share/copypaste/daemon.sock")
-    }
-    #[cfg(not(unix))]
-    {
-        home.join("daemon.sock")
-    }
+    copypaste_ipc::paths::socket_path()
 }
 
 /// JSON-RPC request id sent by all UI→daemon calls.
@@ -51,6 +37,44 @@ pub(crate) fn socket_path() -> PathBuf {
 /// per-call correlation is needed in the future, replace this with an atomic
 /// counter and format it as a string (e.g. `ui-{n}`).
 const IPC_REQUEST_ID: &str = "ui-1";
+
+/// Read-timeout for IPC calls that are expected to complete quickly (the vast
+/// majority of methods — history/status/copy/etc).
+const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Read-timeout for methods whose daemon-side handler is expected to run far
+/// longer than the default budget (CopyPaste-8ebg.4).
+///
+/// - `vacuum` / `db_backup` / `db_restore` / `import` do real I/O over a
+///   potentially large SQLCipher database and can legitimately run well past
+///   10 s.
+/// - `pair_with_discovered` / `pair_peer_with_password` await the *human*
+///   SAS-confirmation step on both devices before returning (see
+///   `pairing_ops_flows_discovered.rs`'s confirm callback) — that is a
+///   person-timescale wait, not a network hang.
+///
+/// The daemon writes nothing until the handler completes, so with the old
+/// blanket 10 s timeout these calls were killed client-side as `io_error`
+/// even though the daemon went on to finish the operation successfully.
+const LONG_READ_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Pick the read-timeout for a given IPC method. See [`LONG_READ_TIMEOUT`]
+/// for why a handful of methods need more than the default budget.
+fn read_timeout_for(method: &str) -> Duration {
+    if matches!(
+        method,
+        METHOD_VACUUM
+            | METHOD_DB_BACKUP
+            | METHOD_DB_RESTORE
+            | METHOD_IMPORT
+            | METHOD_PAIR_WITH_DISCOVERED
+            | METHOD_PAIR_PEER_WITH_PASSWORD
+    ) {
+        LONG_READ_TIMEOUT
+    } else {
+        DEFAULT_READ_TIMEOUT
+    }
+}
 
 /// Daemon reply, mirroring the wire shape so the frontend can branch on
 /// `ok` / `error_code` exactly like the daemon emits.
@@ -82,7 +106,7 @@ fn do_call(method: &str, params: Value) -> Result<IpcReply, String> {
         _ => format!("io_error:{e}"),
     })?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
+        .set_read_timeout(Some(read_timeout_for(method)))
         .map_err(|e| format!("io_error:{e}"))?;
 
     let req = serde_json::json!({
