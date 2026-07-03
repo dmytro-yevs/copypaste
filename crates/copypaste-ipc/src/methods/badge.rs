@@ -175,6 +175,75 @@ pub fn compute_sync_badge_state_with_inflight(
     SyncBadgeState::Idle
 }
 
+// ── Per-peer stall detection (CopyPaste-8ebg.26) ────────────────────────────
+
+/// Per-peer sync-health snapshot used by [`stalled_peer_fingerprints`].
+///
+/// Complements [`compute_sync_badge_state`] / [`compute_sync_badge_state_with_inflight`]:
+/// those derive ONE global badge from the *best* (most recent) signal across
+/// all peers, so a single healthy peer keeps the badge green even while a
+/// different peer has been stalled — e.g. a broken pairwise sync key causing
+/// every fanout re-encrypt to hit `RekeyOutcome::Failed` (see `fanout.rs`) —
+/// for an extended period. `stalled_peer_fingerprints` flags each peer
+/// independently so a consumer (e.g. the Devices list) doesn't have to wait
+/// for the global badge to notice, or rely on it noticing at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerSyncHealth {
+    /// Canonical (lowercase, colon-free hex) certificate fingerprint.
+    pub fingerprint: String,
+    /// Epoch ms of the most recent successful exchange with this peer, or
+    /// `None` if it has never synced.
+    pub last_sync_ms: Option<i64>,
+    /// Epoch ms this peer was paired (`added_at`). Used as the stall
+    /// baseline when `last_sync_ms` is `None`: a peer paired a long time ago
+    /// that has NEVER synced is stalled too (broken handshake/key from the
+    /// start), not merely "not yet synced".
+    pub paired_at_ms: Option<i64>,
+}
+
+/// How stale an individual peer's last successful exchange must be (ms)
+/// before it is considered independently stalled — see [`PeerSyncHealth`].
+///
+/// Deliberately much larger than [`SYNC_BADGE_RECENT_MS`] (5 min): the
+/// global badge threshold answers "is anything working right now", while
+/// this threshold targets a peer that has been broken for a while, not one
+/// that is simply between sync rounds. Mirrors `PEER_STALL_THRESHOLD_MS` in
+/// the macOS UI's `SyncStatusChip.tsx`.
+pub const PEER_STALL_THRESHOLD_MS: u64 = 30 * 60 * 1_000; // 30 minutes
+
+/// Return the fingerprints of every peer in `peers` that is individually
+/// stalled per [`PEER_STALL_THRESHOLD_MS`] (CopyPaste-8ebg.26).
+///
+/// `now_ms` mirrors the `now_ms` parameter on [`compute_sync_badge_state`] —
+/// pass `None` in production to use wall-clock time; tests inject a fixed
+/// value for determinism.
+pub fn stalled_peer_fingerprints(peers: &[PeerSyncHealth], now_ms: Option<u64>) -> Vec<String> {
+    let now = now_ms.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    });
+    peers
+        .iter()
+        .filter(|p| is_peer_stalled(p, now))
+        .map(|p| p.fingerprint.clone())
+        .collect()
+}
+
+fn is_peer_stalled(peer: &PeerSyncHealth, now_ms: u64) -> bool {
+    match peer.last_sync_ms {
+        Some(ts) if ts > 0 => now_ms.saturating_sub(ts as u64) > PEER_STALL_THRESHOLD_MS,
+        // Never synced: fall back to the pairing timestamp so a peer that
+        // has NEVER completed an exchange is still flagged once it has had
+        // long enough to do so.
+        _ => match peer.paired_at_ms {
+            Some(ts) if ts > 0 => now_ms.saturating_sub(ts as u64) > PEER_STALL_THRESHOLD_MS,
+            _ => false, // no timestamps at all — nothing to compare against
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,5 +464,76 @@ mod tests {
             let s = serde_json::to_string(variant).unwrap();
             assert_eq!(&s, expected, "variant serialisation mismatch");
         }
+    }
+
+    // ── stalled_peer_fingerprints (CopyPaste-8ebg.26) ─────────────────────
+
+    #[test]
+    fn stalled_peer_fingerprints_flags_only_the_stale_peer() {
+        // The exact audit scenario: peer A synced recently (healthy), peer B
+        // has not synced in a long time — the global badge would stay green
+        // (driven by A) while B needs to be independently flagged.
+        let peers = [
+            PeerSyncHealth {
+                fingerprint: "aaaa".into(),
+                last_sync_ms: Some(NOW_MS as i64 - 1_000), // 1s ago — healthy
+                paired_at_ms: Some(NOW_MS as i64 - 100_000),
+            },
+            PeerSyncHealth {
+                fingerprint: "bbbb".into(),
+                last_sync_ms: Some(NOW_MS as i64 - PEER_STALL_THRESHOLD_MS as i64 - 1_000),
+                paired_at_ms: Some(NOW_MS as i64 - 1_000_000),
+            },
+        ];
+        let stalled = stalled_peer_fingerprints(&peers, Some(NOW_MS));
+        assert_eq!(stalled, vec!["bbbb".to_string()]);
+    }
+
+    #[test]
+    fn stalled_peer_fingerprints_empty_when_all_recent() {
+        let peers = [PeerSyncHealth {
+            fingerprint: "aaaa".into(),
+            last_sync_ms: Some(NOW_MS as i64 - 1_000),
+            paired_at_ms: Some(NOW_MS as i64 - 100_000),
+        }];
+        assert!(stalled_peer_fingerprints(&peers, Some(NOW_MS)).is_empty());
+    }
+
+    #[test]
+    fn stalled_peer_fingerprints_never_synced_but_paired_long_ago_is_stalled() {
+        // Broken key/handshake from the very start: no last_sync_ms at all,
+        // but paired long enough ago that it should have synced by now.
+        let peers = [PeerSyncHealth {
+            fingerprint: "cccc".into(),
+            last_sync_ms: None,
+            paired_at_ms: Some(NOW_MS as i64 - PEER_STALL_THRESHOLD_MS as i64 - 1_000),
+        }];
+        assert_eq!(
+            stalled_peer_fingerprints(&peers, Some(NOW_MS)),
+            vec!["cccc".to_string()]
+        );
+    }
+
+    #[test]
+    fn stalled_peer_fingerprints_never_synced_freshly_paired_is_not_stalled() {
+        // Give a freshly-paired peer time to complete its first exchange
+        // before flagging it.
+        let peers = [PeerSyncHealth {
+            fingerprint: "dddd".into(),
+            last_sync_ms: None,
+            paired_at_ms: Some(NOW_MS as i64 - 1_000),
+        }];
+        assert!(stalled_peer_fingerprints(&peers, Some(NOW_MS)).is_empty());
+    }
+
+    #[test]
+    fn stalled_peer_fingerprints_no_timestamps_is_not_stalled() {
+        // Nothing to compare against — must not flag on missing data alone.
+        let peers = [PeerSyncHealth {
+            fingerprint: "eeee".into(),
+            last_sync_ms: None,
+            paired_at_ms: None,
+        }];
+        assert!(stalled_peer_fingerprints(&peers, Some(NOW_MS)).is_empty());
     }
 }

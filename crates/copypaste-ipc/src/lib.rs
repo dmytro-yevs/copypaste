@@ -87,8 +87,77 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// within this window. Both values previously hard-coded `120`; this constant
 /// exists so they cannot drift independently.
 ///
-/// Note: `copypaste-p2p` does not (and should not) depend on `copypaste-ipc`,
-/// so its `BOOTSTRAP_ACCEPT_TIMEOUT` carries a `TODO(shared-const)` pointing
-/// here rather than referencing this directly. Any consumer that *does* depend
-/// on this crate (the daemon) should derive the QR TTL from this constant.
+/// Note (updated CopyPaste-8ebg.65): `copypaste-p2p` *does* now depend on
+/// `copypaste-ipc` (see `crates/copypaste-p2p/Cargo.toml`) — the coupling was
+/// judged acceptable because `copypaste-ipc` is a tiny types-only crate
+/// (serde + serde_json, no `copypaste-core`). `BOOTSTRAP_ACCEPT_TIMEOUT`
+/// (`crates/copypaste-p2p/src/bootstrap/mod.rs`) derives directly from
+/// [`QR_PAIRING_TTL_SECS`] rather than carrying its own literal or a
+/// `TODO(shared-const)`. This doc previously claimed the dependency did not
+/// (and should not) exist; that was stale as of the P2P/IPC coupling change.
 pub const QR_PAIRING_TTL_SECS: u64 = 120;
+
+/// Maximum size, in bytes, of a single line-delimited-JSON IPC request/frame.
+///
+/// This is the single source of truth for the daemon's IPC request-size cap.
+/// Both the Unix-socket server (`copypaste-daemon/src/ipc/consts.rs`) and the
+/// frozen Windows named-pipe skeleton (`copypaste-daemon/src/ipc_win.rs`,
+/// see `docs/adr/ADR-012-windows-frozen-homebrew-only.md`) enforce this same
+/// 16 MiB ceiling, and the CLI's `import` command (`copypaste-cli/src/commands/import.rs`)
+/// derives its own tighter pre-flight cap from it to fail fast before ever
+/// opening the IPC connection. CopyPaste-8ebg.59/.65: previously each site
+/// carried its own `16 * 1024 * 1024` literal kept in sync only by comments.
+pub const MAX_IPC_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+
+/// Maximum length-delimited data-plane frame size, in bytes (16 MiB).
+///
+/// Single source of truth for `copypaste_sync::engine::MAX_FRAME_BYTES` and
+/// `copypaste_p2p::transport::MAX_FRAME_BYTES` — the P2P sync protocol's
+/// frame codec and the P2P transport's `LengthDelimitedCodec` ceiling must
+/// stay in lockstep or a peer sending a maximally-sized image item would be
+/// accepted by one layer and truncated/rejected by the other.
+///
+/// CopyPaste-1d5l.59: previously each crate carried its own
+/// `16 * 1024 * 1024` literal, kept in sync only by a doc comment plus a
+/// compile-time assertion in `copypaste-daemon/tests/frame_consts.rs`
+/// (CopyPaste-w47w #1, still kept green). `copypaste-sync` and
+/// `copypaste-p2p` do not depend on each other, but `copypaste-p2p` already
+/// depends on `copypaste-ipc` (see its `Cargo.toml`) and `copypaste-sync`
+/// gains the same tiny (serde + serde_json + home) dependency here, mirroring
+/// the precedent set by [`QR_PAIRING_TTL_SECS`].
+pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+/// Maximum plaintext blob size, in bytes, re-keyed onto the sync wire (8 MiB).
+///
+/// Single source of truth shared by:
+///   * `copypaste-daemon`'s outbound re-key ceiling
+///     (`sync_orch::rekey::outbound::SYNC_MAX_BLOB_BYTES`) — items above this
+///     size are kept locally but skipped for sync (warned), never forwarded.
+///   * `copypaste-relay`'s per-tier text-item quota
+///     (`copypaste_relay::quota::Tier::max_item_bytes("text")`) — sized to
+///     match so a 1-8 MiB text item that clears the sync ceiling is not
+///     separately rejected 413 by the relay.
+///
+/// CopyPaste-1d5l.58: previously each site carried its own
+/// `8 * 1024 * 1024` literal kept in sync only by cross-referencing comments.
+pub const SYNC_MAX_BLOB_BYTES: usize = 8 * 1024 * 1024;
+
+/// Default maximum decoded ciphertext size, in bytes, for a single relay item
+/// (10 MiB) — the relay's own configurable request-body / per-item-quota
+/// ceiling.
+///
+/// Single source of truth shared by:
+///   * `copypaste-relay`'s `RelayConfig::default().max_item_bytes` (overridable
+///     at runtime via `RELAY_MAX_ITEM_BYTES`).
+///   * `copypaste-relay`'s per-tier image/file quota
+///     (`copypaste_relay::quota::Tier::max_item_bytes("image" | "file")`),
+///     which must match the operator body cap — otherwise file payloads
+///     between 1-10 MiB are wrongly rejected 413.
+///
+/// CopyPaste-1d5l.58: previously each site carried its own
+/// `10 * 1024 * 1024` literal kept in sync only by comments. Distinct from
+/// [`SYNC_MAX_BLOB_BYTES`] (8 MiB) and the P2P transport's 16 MiB
+/// [`MAX_FRAME_BYTES`] — those are different ceilings for different purposes
+/// (sync-eligibility vs. transport framing) and are intentionally NOT
+/// collapsed into this constant.
+pub const RELAY_MAX_ITEM_BYTES: usize = 10 * 1024 * 1024;

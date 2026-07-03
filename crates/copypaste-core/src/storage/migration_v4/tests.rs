@@ -14,11 +14,7 @@ use uuid::Uuid;
 /// Seed a row that looks exactly like a v1-key-encrypted text item:
 /// `key_version = 1`, AEAD built with the legacy 2-arg AAD format
 /// `"{item_id}|3"`. Returns `(row_id, item_id, plaintext)`.
-fn seed_v1_row(
-    db: &Database,
-    v1_key: &[u8; 32],
-    plaintext: &[u8],
-) -> (String, String, Vec<u8>) {
+fn seed_v1_row(db: &Database, v1_key: &[u8; 32], plaintext: &[u8]) -> (String, String, Vec<u8>) {
     let row_id = Uuid::new_v4().to_string();
     let item_id = Uuid::new_v4().to_string();
     let aad = build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_V3);
@@ -247,8 +243,7 @@ fn image_chunk_row_migrates_to_key_version_2() {
     let plaintext: Vec<u8> = (0..(IMAGE_CHUNK_SIZE + 137))
         .map(|i| (i % 251) as u8)
         .collect();
-    let (row_id, file_id, expected) =
-        seed_v1_image_row(&db, &v1_key, &plaintext, IMAGE_CHUNK_SIZE);
+    let (row_id, file_id, expected) = seed_v1_image_row(&db, &v1_key, &plaintext, IMAGE_CHUNK_SIZE);
 
     let rotated = migrate_v1_image_chunks_to_v2(&db, &v1_key, &v2_key).unwrap();
     assert_eq!(rotated, 1, "the one v1 image row must be rotated");
@@ -633,8 +628,8 @@ fn kv2_mislabeled_image_row_repairs_via_migration() {
     let chunks = chunks_from_blob(&blob).unwrap();
 
     // Must now decrypt with v2 key.
-    let recovered = decrypt_chunks(&chunks, &v2_key, &file_id)
-        .expect("repaired row must decrypt with v2 key");
+    let recovered =
+        decrypt_chunks(&chunks, &v2_key, &file_id).expect("repaired row must decrypt with v2 key");
     assert_eq!(recovered, expected_pt, "v2 plaintext must match original");
 
     // Must NOT decrypt with v1 key anymore.

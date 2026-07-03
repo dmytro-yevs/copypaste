@@ -133,7 +133,10 @@ fn fetch_v1_image_batch(db: &Database, limit: usize) -> Result<Vec<V1ImageRow>, 
 ///
 /// `pub(super)` because [`super::repair::maybe_repair_one_kv2_blob`] also
 /// needs it to recover the AAD context for the mislabeled-kv2 repair probe.
-pub(super) fn parse_file_id(id: &str, blob_ref: Option<&str>) -> Result<[u8; 16], MigrationV4Error> {
+pub(super) fn parse_file_id(
+    id: &str,
+    blob_ref: Option<&str>,
+) -> Result<[u8; 16], MigrationV4Error> {
     let meta_json = blob_ref.ok_or_else(|| MigrationV4Error::ImageMeta {
         id: id.to_string(),
         reason: "missing blob_ref metadata".to_string(),
