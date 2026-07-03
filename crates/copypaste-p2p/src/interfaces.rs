@@ -219,9 +219,19 @@ pub fn pick_advertise_host(usable: &[IpAddr], fallback: IpAddr) -> IpAddr {
 
     // Probe the OS routing table: connected UDP socket → local_addr() reveals
     // the source IP the kernel selects for default-route traffic (no data sent).
-    // Use 1.1.1.1:53 (Cloudflare anycast) as the probe target — any routable
-    // public IP works; the socket is UDP and never actually sends a packet.
-    let probe_target = std::net::SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 53);
+    //
+    // CopyPaste-8ebg.65: the probe target is intentionally hardcoded to
+    // 1.1.1.1:53 (Cloudflare anycast) — any routable public IP works equally
+    // well since the socket is UDP and `connect()` never actually sends a
+    // packet (see `probe_default_route_source`'s doc comment); no real
+    // network traffic reaches this address, so it is not a privacy/telemetry
+    // concern. It is nonetheless overridable via `COPYPASTE_P2P_ROUTE_PROBE`
+    // (`ip:port`) for restricted/offline test environments where even a
+    // routing-table lookup toward a specific public anycast IP is undesired.
+    let probe_target = std::env::var("COPYPASTE_P2P_ROUTE_PROBE")
+        .ok()
+        .and_then(|s| s.parse::<std::net::SocketAddrV4>().ok())
+        .unwrap_or_else(|| std::net::SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 53));
     if let Some(egress_ip) = probe_default_route_source(probe_target) {
         let egress = IpAddr::V4(egress_ip);
         if usable.contains(&egress) {

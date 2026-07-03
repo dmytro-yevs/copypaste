@@ -12,7 +12,7 @@ use tokio_util::codec::Framed;
 
 use super::framing::{
     io_other, length_codec, recv_confirm_byte, recv_confirmation_tag, recv_fingerprint, recv_frame,
-    recv_sync_addr, send_frame, SAS_ACCEPT, SAS_REJECT,
+    recv_sync_addr, send_frame, ConfirmOutcome, SAS_ACCEPT,
 };
 use super::meta::exchange_peer_meta;
 use super::tls::AcceptAnyCert;
@@ -276,10 +276,14 @@ impl BootstrapResponder {
     ///
     /// Runs the IDENTICAL handshake transcript through frame 9 (PAKE +
     /// channel-binding tag verify), then derives the 6-digit SAS and invokes
-    /// `confirm(sas, peer_fingerprint)`. If the user rejects (returns `false`) the
-    /// pairing aborts with an error (keys drop/zeroize). Otherwise both sides
-    /// exchange a NEW frame 10a (`SAS_ACCEPT`/`SAS_REJECT`) and proceed to
-    /// the metadata exchange / `Ok` ONLY if BOTH bytes are `SAS_ACCEPT`.
+    /// `confirm(sas, peer_fingerprint)`. `confirm`'s future may resolve to a
+    /// plain `bool` (accept/reject) or a [`ConfirmOutcome`] — the latter lets a
+    /// caller distinguish a human decline from a locally-busy coordinator that
+    /// never even surfaced the SAS (CopyPaste-njt8.25). Anything other than
+    /// `Accept` aborts the pairing with an error (keys drop/zeroize). Otherwise
+    /// both sides exchange a NEW frame 10a (`SAS_ACCEPT`/`SAS_REJECT`/`SAS_BUSY`)
+    /// and proceed to the metadata exchange / `Ok` ONLY if BOTH bytes are
+    /// `SAS_ACCEPT`.
     ///
     /// The `peer_fingerprint` argument is the TLS peer certificate fingerprint
     /// observed during the bootstrap handshake (the same value stored in
@@ -300,7 +304,8 @@ impl BootstrapResponder {
     ) -> Result<BootstrapPairing, TransportError>
     where
         F: FnOnce(&str, &str) -> Fut,
-        Fut: std::future::Future<Output = bool>,
+        Fut: std::future::Future,
+        Fut::Output: Into<ConfirmOutcome>,
     {
         let (tcp_stream, peer_addr) =
             match tokio::time::timeout(BOOTSTRAP_ACCEPT_TIMEOUT, self.listener.accept()).await {
@@ -409,14 +414,11 @@ impl BootstrapResponder {
         // an error so `session_key` drops/zeroizes and the caller persists nothing.
         // CopyPaste-n3bc: pass peer_fingerprint alongside sas so the daemon
         // coordinator has identity binding on the responder path.
-        let accepted_locally = confirm(&sas, &peer_fingerprint).await;
+        let outcome: ConfirmOutcome = confirm(&sas, &peer_fingerprint).await.into();
 
-        // Frame 10a: exchange ACCEPT/REJECT bytes. Proceed only if BOTH accept.
-        let our_byte = if accepted_locally {
-            SAS_ACCEPT
-        } else {
-            SAS_REJECT
-        };
+        // Frame 10a: exchange ACCEPT/REJECT/BUSY bytes. Proceed only if BOTH
+        // sides accept.
+        let our_byte = outcome.to_wire_byte();
         send_frame(&mut framed, &[our_byte]).await?;
         let peer_byte = recv_confirm_byte(&mut framed).await?;
         if our_byte != SAS_ACCEPT || peer_byte != SAS_ACCEPT {

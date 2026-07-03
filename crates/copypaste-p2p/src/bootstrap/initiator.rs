@@ -12,7 +12,7 @@ use tokio_util::codec::Framed;
 
 use super::framing::{
     io_other, length_codec, recv_confirm_byte, recv_confirmation_tag, recv_fingerprint, recv_frame,
-    recv_sync_addr, send_frame, SAS_ACCEPT, SAS_REJECT,
+    recv_sync_addr, send_frame, SAS_ACCEPT, SAS_BUSY, SAS_REJECT,
 };
 use super::meta::exchange_peer_meta;
 use super::tls::AcceptAnyCert;
@@ -207,8 +207,8 @@ pub async fn run_initiator(
 /// channel-binding tag verify), then derives the 6-digit SAS and invokes
 /// `confirm(sas, peer_fingerprint)`. On reject (`false`) the pairing aborts
 /// with an error so the session key drops/zeroizes. Otherwise both sides exchange
-/// frame 10a (`SAS_ACCEPT`/`SAS_REJECT`) and the pairing succeeds ONLY if
-/// BOTH bytes are `SAS_ACCEPT`.
+/// frame 10a (`SAS_ACCEPT`/`SAS_REJECT`/`SAS_BUSY`) and the pairing succeeds
+/// ONLY if BOTH bytes are `SAS_ACCEPT`.
 ///
 /// The `peer_fingerprint` argument is the TLS peer certificate fingerprint
 /// observed during the bootstrap handshake (the same value stored in
@@ -362,8 +362,35 @@ where
     };
     send_frame(&mut framed, &[our_byte]).await?;
     let peer_byte = recv_confirm_byte(&mut framed).await?;
-    if our_byte != SAS_ACCEPT || peer_byte != SAS_ACCEPT {
-        return Err(io_other("SAS rejected by user — pairing aborted".into()));
+    if our_byte != SAS_ACCEPT {
+        // WE know why: the local human declined.
+        return Err(io_other("SAS rejected locally — pairing aborted".into()));
+    }
+    // CopyPaste-njt8.25: frame 10a now carries a THIRD value, `SAS_BUSY`, so a
+    // responder that was already occupied by an unrelated pairing attempt (and
+    // never even surfaced the SAS to a human — see `pairing_responder.rs`'s
+    // `try_begin` gate) can say so honestly instead of forcing us to guess.
+    // Backward-compat: an OLD responder only ever sends `SAS_ACCEPT` (0x01) or
+    // `SAS_REJECT` (0x00); both still decode correctly here since `SAS_BUSY`
+    // is a purely additive third value the match below newly recognises.
+    match peer_byte {
+        SAS_ACCEPT => {}
+        SAS_BUSY => {
+            return Err(io_other(
+                "pairing aborted — peer is busy with another pairing attempt".into(),
+            ));
+        }
+        SAS_REJECT => {
+            return Err(io_other("SAS rejected by peer — pairing aborted".into()));
+        }
+        _ => {
+            // Unrecognised value from a newer/foreign peer: we genuinely do not
+            // know the reason, so keep the old honestly-ambiguous message
+            // rather than asserting a specific (possibly wrong) cause.
+            return Err(io_other(
+                "SAS not confirmed by peer — pairing aborted (rejected or peer busy)".into(),
+            ));
+        }
     }
 
     let (peer_meta, peer_provisioning) =

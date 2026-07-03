@@ -35,8 +35,7 @@ async fn mutual_tls_loopback_handshake_succeeds() {
 
     let (server_result, client_result) = tokio::join!(server_fut, client_fut);
 
-    let (_peer_addr, _peer_fp, _server_stream) =
-        server_result.expect("server accept must succeed");
+    let (_peer_addr, _peer_fp, _server_stream) = server_result.expect("server accept must succeed");
     let _client_stream = client_result.expect("client connect must succeed");
 }
 

@@ -27,7 +27,7 @@ mod tests;
 
 pub use config::{
     CONNECT_RETRY_DELAY, MAX_CONNECT_ATTEMPTS, MAX_FRAME_BYTES, P2P_SNI_SENTINEL,
-    TCP_CONNECT_TIMEOUT, TLS_HANDSHAKE_TIMEOUT,
+    TCP_CONNECT_TIMEOUT, TCP_KEEPALIVE_TIME, TLS_HANDSHAKE_TIMEOUT,
 };
 pub use error::{PeerClientStream, PeerStream, TransportError};
 
@@ -291,6 +291,46 @@ impl PeerTransport {
         }
         // Exhausted retries — surface the last transient error.
         Err(last_err.expect("loop runs at least once so last_err is set on failure"))
+    }
+
+    /// Connect to a peer with bounded retries, using a **one-off allowlist**
+    /// scoped to just `expected_fingerprint` — never the shared, live
+    /// [`PairedPeers`] that also gates [`Self::accept`].
+    ///
+    /// CopyPaste-8ebg.5: pending-unpair delivery must dial a peer whose
+    /// fingerprint has already been revoked so it can hand it one last
+    /// `Unpair` control frame. The naive approach — temporarily
+    /// `live_peers.add()`-ing the revoked fingerprint before the dial, then
+    /// `.remove()`-ing it after — mutates the *same* `Arc<PairedPeers>` that
+    /// `accept()` consults for inbound connections, because both share one
+    /// `PeerTransport`. That opens a window where a revoked peer dialing IN
+    /// during the outbound send is also accepted, resuming full sync. This
+    /// method instead builds a throwaway single-entry `PairedPeers` used only
+    /// for this dial's TLS verifier, so the shared inbound allowlist is never
+    /// touched and the window does not exist.
+    pub async fn connect_with_retry_scoped(
+        &self,
+        addr: SocketAddr,
+        expected_fingerprint: &str,
+    ) -> Result<PeerClientStream, TransportError> {
+        let scoped_peers = PairedPeers::new();
+        scoped_peers.add(
+            expected_fingerprint.to_owned(),
+            "pending-unpair-scoped-dial",
+        );
+        let scoped_transport = PeerTransport {
+            own_cert_der: self.own_cert_der.clone(),
+            own_key_der: self.own_key_der.clone(),
+            own_fingerprint: self.own_fingerprint.clone(),
+            peers: Arc::new(scoped_peers),
+            // Server-side acceptor is irrelevant for an outbound-only dial and
+            // is never populated from a scoped transport; a fresh OnceLock
+            // just mirrors the struct's normal default state.
+            cached_acceptor: std::sync::OnceLock::new(),
+        };
+        scoped_transport
+            .connect_with_retry(addr, expected_fingerprint)
+            .await
     }
 
     // ---- private helpers ----

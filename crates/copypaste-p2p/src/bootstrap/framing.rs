@@ -31,13 +31,65 @@ pub(super) const MAX_PROVISIONING_BYTES: usize = 4 * 1024;
 ///
 /// After frame 9 (channel-binding tag verified) the confirm-gated variants
 /// exchange exactly one byte each: `SAS_ACCEPT` (0x01) when the local user
-/// confirmed the SAS matched, or `SAS_REJECT` (0x00) otherwise. Pairing
-/// proceeds to the metadata exchange / `Ok` ONLY when BOTH bytes are
+/// confirmed the SAS matched, `SAS_REJECT` (0x00) when the local user (or the
+/// SAS window timing out) declined, or `SAS_BUSY` (0x02, responder-only —
+/// CopyPaste-njt8.25) when the local pairing coordinator was already occupied
+/// by an unrelated pairing attempt and never even surfaced the SAS to a human.
+/// Pairing proceeds to the metadata exchange / `Ok` ONLY when BOTH bytes are
 /// `SAS_ACCEPT`. This frame exists solely on the new `*_with_confirm` paths;
 /// the legacy `run`/`run_initiator` transcript is byte-unchanged.
 pub(super) const SAS_ACCEPT: u8 = 0x01;
 /// See [`SAS_ACCEPT`].
 pub(super) const SAS_REJECT: u8 = 0x00;
+/// See [`SAS_ACCEPT`]. Additive: an old peer that only ever sends/understands
+/// `SAS_ACCEPT`/`SAS_REJECT` is unaffected — it never emits this value, and
+/// a byte-length-1 frame carrying it decodes exactly like any other reject
+/// unless the reader specifically checks for it (see `initiator.rs`).
+pub(super) const SAS_BUSY: u8 = 0x02;
+
+/// Outcome of the local SAS-confirm decision that a responder or initiator
+/// sends as the frame-10a wire byte (CopyPaste-njt8.25).
+///
+/// `Busy` exists only on the responder side: the responder's pairing
+/// coordinator can refuse a NEW inbound pairing attempt because it is already
+/// occupied by an unrelated one, which is a fundamentally different situation
+/// from a human explicitly declining the SAS compare. Callers that have no
+/// concept of "busy" (e.g. the initiator's local human-confirm callback, and
+/// every existing `bool`-returning confirm closure) can keep returning a
+/// plain `bool` — `From<bool>` below maps `true`/`false` to `Accept`/`Reject`
+/// so no caller is forced to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmOutcome {
+    /// The local human confirmed the SAS matched.
+    Accept,
+    /// The local human declined, the SAS confirm window timed out, or the
+    /// pairing was aborted.
+    Reject,
+    /// The local coordinator was already busy with an unrelated pairing
+    /// attempt and never surfaced a SAS to a human at all. Responder-only.
+    Busy,
+}
+
+impl From<bool> for ConfirmOutcome {
+    fn from(accepted: bool) -> Self {
+        if accepted {
+            ConfirmOutcome::Accept
+        } else {
+            ConfirmOutcome::Reject
+        }
+    }
+}
+
+impl ConfirmOutcome {
+    /// Map this outcome to the frame-10a wire byte.
+    pub(super) fn to_wire_byte(self) -> u8 {
+        match self {
+            ConfirmOutcome::Accept => SAS_ACCEPT,
+            ConfirmOutcome::Reject => SAS_REJECT,
+            ConfirmOutcome::Busy => SAS_BUSY,
+        }
+    }
+}
 
 /// Upper bound on the peer metadata JSON frame. The four short strings (model,
 /// OS, app version, IP) total well under 256 bytes; 1 KiB is a wide ceiling that
