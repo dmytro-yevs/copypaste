@@ -122,7 +122,7 @@ class OnboardingPermissions(
             listOf(
                 Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    android.net.Uri.parse("package:\${packageName}")
+                    android.net.Uri.fromParts("package", activity.packageName, null)
                 ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         )

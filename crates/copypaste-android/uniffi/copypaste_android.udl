@@ -677,6 +677,12 @@ dictionary DeviceCert {
 // authenticated bootstrap tunnel (from BootstrapPairing.peer_*). All null for a
 // legacy peer. Kotlin persists them on the PairedPeer so Wave 3 renders the
 // device card. peer_public_ip is informational only — never used for trust.
+// ABI 19 (CopyPaste-gldr): peer_supabase_account_id carries the PEER's
+// non-secret Supabase/cloud account id, learned in-band over the same
+// authenticated tunnel (from BootstrapPairing.peer_supabase_account_id). Null
+// for legacy peers or peers with no cloud account configured. Kotlin persists
+// it so cross-account pairing mismatches can be detected, at parity with the
+// macOS daemon (CopyPaste-yw2k).
 dictionary BootstrapResult {
   string peer_fingerprint;
   string peer_sync_addr;
@@ -688,6 +694,7 @@ dictionary BootstrapResult {
   string? peer_local_ip;
   string? peer_public_ip;
   string? peer_device_id;
+  string? peer_supabase_account_id;
 };
 
 // Sync-account provisioning exchanged in-band over the AUTHENTICATED bootstrap
@@ -964,4 +971,8 @@ dictionary PairStatus {
   string? peer_local_ip;
   string? peer_public_ip;
   string? peer_device_id;
+  // ABI 19 (CopyPaste-gldr): the PEER's non-secret Supabase/cloud account id,
+  // set ONLY in the `confirmed` state (from ConfirmedPairing). Null for
+  // legacy peers or peers with no cloud account configured.
+  string? peer_supabase_account_id;
 };

@@ -252,7 +252,18 @@
 /// Kotlin generated against ABI 17 calls the three pairing functions with the
 /// wrong arity (missing `publicIp`) and lacks `resolveStunPublicIp`; it must
 /// be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 18;
+///
+/// **ABI 19 (CopyPaste-gldr):** `BootstrapResult` and `PairStatus` gained a
+/// `peer_supabase_account_id: String?` field, carrying the PEER's non-secret
+/// Supabase/cloud account id (sourced from
+/// `BootstrapPairing.peer_supabase_account_id`, already threaded by the
+/// macOS daemon under CopyPaste-yw2k) so Android can persist it on the
+/// `PairedPeer` and detect cross-account pairing mismatches at parity with
+/// desktop. Previously this field existed on the Rust-side `BootstrapPairing`
+/// but was silently dropped by `bootstrap_result_from_pairing` /
+/// `confirmed_pairing_from` — both now map it through. Kotlin generated
+/// against ABI 18 is missing the field and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 19;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

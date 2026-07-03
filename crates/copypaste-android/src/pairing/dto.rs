@@ -78,6 +78,11 @@ pub struct PairStatus {
     /// ABI 17 (CopyPaste-3k6m): the PEER's stable device UUID, set ONLY in the
     /// `confirmed` state (copied from [`super::state::ConfirmedPairing`]).
     pub peer_device_id: Option<String>,
+    /// ABI 19 (CopyPaste-gldr): the PEER's non-secret Supabase/cloud account
+    /// id, set ONLY in the `confirmed` state (copied from
+    /// [`super::state::ConfirmedPairing`]). `None` for legacy peers or peers
+    /// with no cloud account configured.
+    pub peer_supabase_account_id: Option<String>,
 }
 
 impl PairStatus {
@@ -102,6 +107,7 @@ impl PairStatus {
             status.peer_local_ip = c.peer_local_ip.clone();
             status.peer_public_ip = c.peer_public_ip.clone();
             status.peer_device_id = c.peer_device_id.clone();
+            status.peer_supabase_account_id = c.peer_supabase_account_id.clone();
         }
         status
     }
