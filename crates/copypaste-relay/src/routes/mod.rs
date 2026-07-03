@@ -13,9 +13,6 @@ use tower_governor::GovernorLayer;
 
 use crate::api::metrics;
 use crate::config::RelayConfig;
-use crate::middleware::rate_limit::{
-    PER_DEVICE_BURST_SIZE, PER_DEVICE_PER_SECOND, PER_IP_BURST_SIZE, PER_IP_PER_SECOND,
-};
 use crate::state::AppState;
 
 /// Build the complete relay router.
@@ -119,8 +116,8 @@ where
     let per_ip_key_for_item = per_ip_key.clone();
     let per_ip_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(PER_IP_PER_SECOND)
-            .burst_size(PER_IP_BURST_SIZE)
+            .per_second(config.per_ip_per_second)
+            .burst_size(config.per_ip_burst_size)
             .key_extractor(per_ip_key)
             .finish()
             .ok_or_else(|| {
@@ -143,8 +140,8 @@ where
     // it is no longer wired into the production rate-limit layer.
     let per_item_ip_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(PER_DEVICE_PER_SECOND)
-            .burst_size(PER_DEVICE_BURST_SIZE)
+            .per_second(config.per_device_per_second)
+            .burst_size(config.per_device_burst_size)
             .key_extractor(per_ip_key_for_item)
             .finish()
             .ok_or_else(|| {

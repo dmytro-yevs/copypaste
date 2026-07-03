@@ -375,7 +375,8 @@ mod tests {
         }
         let items = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
         let min_wt = items.iter().map(|i| i.wall_time).min().unwrap();
         assert_eq!(min_wt, 2, "oldest item must be evicted");
@@ -434,7 +435,8 @@ mod tests {
 
         let items = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         assert!(
             items.len() <= effective_cap,
             "inbox must never exceed the effective history cap ({effective_cap}), got {}",
@@ -464,7 +466,8 @@ mod tests {
 
         let items = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         // Pro tier has no history limit, so only the absolute hard cap applies.
         assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
     }
@@ -531,6 +534,7 @@ mod tests {
         let remaining: Vec<i64> = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
             .unwrap()
+            .items
             .into_iter()
             .map(|it| it.id)
             .collect();
@@ -568,7 +572,8 @@ mod tests {
         }
         let items = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(
             items.len(),
             CUSTOM_CAP,

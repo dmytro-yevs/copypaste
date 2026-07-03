@@ -38,15 +38,19 @@ impl Tier {
     /// Maximum decoded ciphertext size in bytes for a single clipboard item.
     pub fn max_item_bytes(self, content_type: &str) -> usize {
         match (self, content_type) {
-            // Images and files: 10 MiB for both tiers (matches the operator body
-            // cap). `push_item` accepts "file", so it must share the image limit
-            // — otherwise file payloads >1 MiB are wrongly rejected with 413.
-            (_, "image") | (_, "file") => 10 * 1024 * 1024,
-            // Text: 8 MiB for both tiers — matches the local `MAX_TEXT_SIZE_BYTES`
-            // headroom and the `SYNC_MAX_BLOB_BYTES` (8 MiB) cap used by the P2P /
-            // cloud transports, so a 1–8 MiB text item that stores locally and
-            // passes the sync caps is no longer rejected 413 on the relay path.
-            _ => 8 * 1024 * 1024,
+            // Images and files: `RELAY_MAX_ITEM_BYTES` (10 MiB) for both tiers
+            // (matches the operator body cap). `push_item` accepts "file", so
+            // it must share the image limit — otherwise file payloads >1 MiB
+            // are wrongly rejected with 413. CopyPaste-1d5l.58: single source
+            // of truth shared with `RelayConfig::default().max_item_bytes`.
+            (_, "image") | (_, "file") => copypaste_ipc::RELAY_MAX_ITEM_BYTES,
+            // Text: `SYNC_MAX_BLOB_BYTES` (8 MiB) for both tiers — matches the
+            // local `MAX_TEXT_SIZE_BYTES` headroom and the cap used by the
+            // P2P / cloud transports, so a 1–8 MiB text item that stores
+            // locally and passes the sync caps is no longer rejected 413 on
+            // the relay path. CopyPaste-1d5l.58: single source of truth
+            // shared with `sync_orch::rekey::outbound::SYNC_MAX_BLOB_BYTES`.
+            _ => copypaste_ipc::SYNC_MAX_BLOB_BYTES,
         }
     }
 }

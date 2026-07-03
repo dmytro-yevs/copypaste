@@ -20,29 +20,51 @@
 ///
 /// # Wiring
 ///
-/// These constants are the **single source of truth** for all `GovernorLayer`
-/// builders in `crate::routes`.  `routes::build_router` imports them via
-/// `use crate::middleware::rate_limit::{PER_IP_PER_SECOND, …}` and passes them
-/// directly to `GovernorConfigBuilder`.  Any change here is automatically
-/// picked up by both the production router and the integration tests that
-/// assert against the declared limits.
+/// CopyPaste-8ebg.50: these were previously the *only* source of truth and
+/// were imported directly by `crate::routes::build_router`. A false-positive
+/// 429 storm in production could then only be tuned by a rebuild and
+/// redeploy. `crate::config::RelayConfig` now carries a runtime override for
+/// each threshold (`per_ip_per_second`, `per_ip_burst_size`,
+/// `per_device_per_second`, `per_device_burst_size`), sourced from
+/// `RELAY_PER_IP_PER_SECOND` / `RELAY_PER_IP_BURST_SIZE` /
+/// `RELAY_PER_DEVICE_PER_SECOND` / `RELAY_PER_DEVICE_BURST_SIZE` and
+/// defaulting to the same numeric values as these constants (mirrored as
+/// literals in `RelayConfig::default`, since `config.rs` is also compiled
+/// standalone by the integration tests via `#[path]` and cannot depend on
+/// this `middleware` module). `crate::routes::build_router` now reads the
+/// resolved values off `RelayConfig` instead of importing these constants
+/// directly, so the override takes effect end-to-end. The constants below
+/// remain the documented, tested source of truth for the *default* numeric
+/// values (see the unit tests in this module).
 /// Per-IP rate limit: 200 requests/minute.
 /// Uses `per_second(3)` + `burst_size(60)` in `GovernorConfigBuilder`.
 ///
-/// Wired into the `GovernorLayer` via `crate::routes::build_router`.
+/// CopyPaste-8ebg.50: `crate::routes::build_router` now reads the *resolved*
+/// value off `RelayConfig` (`config.per_ip_per_second`) instead of this
+/// constant, so the override actually takes effect at runtime. This constant
+/// remains the single source of truth mirrored into
+/// `RelayConfig::default()`'s literal and is exercised directly by this
+/// module's own unit tests below — hence `#[allow(dead_code)]` rather than
+/// deletion.
+#[allow(dead_code)]
 pub const PER_IP_PER_SECOND: u64 = 3;
 
 /// Per-IP burst allowance — number of requests that may be served before
 /// the per-second replenishment rate kicks in.
+/// See `PER_IP_PER_SECOND` doc comment for why this is `#[allow(dead_code)]`.
+#[allow(dead_code)]
 pub const PER_IP_BURST_SIZE: u32 = 60;
 
 /// Per-device (item-route) rate limit: 60 requests/minute.
 /// Uses `per_second(1)` + `burst_size(20)` in `GovernorConfigBuilder`.
 ///
-/// Wired into the tighter item-route `GovernorLayer` via `crate::routes::build_router`.
+/// See `PER_IP_PER_SECOND` doc comment for why this is `#[allow(dead_code)]`.
+#[allow(dead_code)]
 pub const PER_DEVICE_PER_SECOND: u64 = 1;
 
 /// Per-device burst allowance for item routes.
+/// See `PER_IP_PER_SECOND` doc comment for why this is `#[allow(dead_code)]`.
+#[allow(dead_code)]
 pub const PER_DEVICE_BURST_SIZE: u32 = 20;
 
 // ---------------------------------------------------------------------------

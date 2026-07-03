@@ -100,7 +100,10 @@ fn devices_tokens_and_items_survive_reopen() {
     );
 
     // Inbox items survived, with ids and ordering intact.
-    let items = store.pull_items(DEVICE_A, 0, None, usize::MAX).unwrap();
+    let items = store
+        .pull_items(DEVICE_A, 0, None, usize::MAX)
+        .unwrap()
+        .items;
     assert_eq!(items.len(), 3, "all three items must persist");
     assert_eq!(
         items.iter().map(|i| i.id).collect::<Vec<_>>(),
@@ -154,13 +157,17 @@ fn ttl_eviction_persists_across_reopen() {
         assert!(store
             .pull_items(DEVICE_A, 0, None, usize::MAX)
             .unwrap()
+            .items
             .is_empty());
     }
 
     // Reopen: the evicted items must stay gone (the device itself persists).
     let store = RelayStore::new_persistent(TTL, MAX_ITEMS, &db_path).unwrap();
     assert!(store.get_device(DEVICE_A).is_ok(), "device record persists");
-    let items = store.pull_items(DEVICE_A, 0, None, usize::MAX).unwrap();
+    let items = store
+        .pull_items(DEVICE_A, 0, None, usize::MAX)
+        .unwrap()
+        .items;
     assert!(
         items.is_empty(),
         "TTL-evicted items must not resurrect after reopen, got {}",
@@ -195,7 +202,10 @@ fn cursor_ordering_correct_after_reopen() {
     let store = RelayStore::new_persistent(TTL, MAX_ITEMS, &db_path).unwrap();
 
     // Full ascending order preserved.
-    let all = store.pull_items(DEVICE_A, 0, None, usize::MAX).unwrap();
+    let all = store
+        .pull_items(DEVICE_A, 0, None, usize::MAX)
+        .unwrap()
+        .items;
     assert_eq!(
         all.iter().map(|i| i.id).collect::<Vec<_>>(),
         vec![id_a, id_b, id_c]
@@ -207,7 +217,10 @@ fn cursor_ordering_correct_after_reopen() {
     let mut since = 0u64;
     let mut since_id: Option<i64> = None;
     loop {
-        let page = store.pull_items(DEVICE_A, since, since_id, 1).unwrap();
+        let page = store
+            .pull_items(DEVICE_A, since, since_id, 1)
+            .unwrap()
+            .items;
         if page.is_empty() {
             break;
         }

@@ -16,7 +16,7 @@ use crate::error::RelayError;
 use crate::quota::{self, QuotaViolation, Tier};
 
 use super::device::{DeviceRecord, TokenEntry};
-use super::{REG_LIMIT_MAX_ATTEMPTS, REG_LIMIT_MAX_KEYS, REG_LIMIT_WINDOW};
+use super::{REG_LIMIT_MAX_KEYS, REG_LIMIT_WINDOW};
 
 /// CopyPaste-crh3.89 / CopyPaste-n2l: validate a presented proof-of-possession
 /// (PoP) in isolation so the security invariant is unit-testable without the
@@ -65,8 +65,9 @@ impl super::RelayStore {
 
     /// Record a registration attempt for `(client_ip, device_id)` and return
     /// `Err(retry_after_secs)` when the per-(ip, device) rate-limit window
-    /// is exhausted (`REG_LIMIT_MAX_ATTEMPTS` attempts within
-    /// `REG_LIMIT_WINDOW`).
+    /// is exhausted (`self.reg_limit_max_attempts` attempts, default
+    /// `REG_LIMIT_MAX_ATTEMPTS`, within `REG_LIMIT_WINDOW`; CopyPaste-vgpy
+    /// made the ceiling operator-configurable via `RelayConfig`).
     ///
     /// This is independent of the per-IP `tower_governor` limiter installed
     /// in `routes/mod.rs`: it blocks an attacker who has obtained a victim's
@@ -107,7 +108,7 @@ impl super::RelayStore {
             }
         }
 
-        if deque.len() >= REG_LIMIT_MAX_ATTEMPTS {
+        if deque.len() >= self.reg_limit_max_attempts {
             let oldest = *deque.front().expect("non-empty by check above");
             let retry_after = REG_LIMIT_WINDOW
                 .saturating_sub(now.duration_since(oldest))
@@ -304,6 +305,15 @@ impl super::RelayStore {
                 ));
             }
         };
+        // CopyPaste-8ebg.58: this 1-year bearer-token lifetime is intentionally
+        // independent of `store::DEVICE_INACTIVE_THRESHOLD_SECS` (30 days). The
+        // token lifetime is an auth-credential expiry; the 30-day threshold only
+        // reclaims a device record whose inbox has been *persistently empty*
+        // since registration (an abandoned/never-used registration), and any
+        // device with even one queued item is retained regardless of age. A
+        // device that is actually receiving fan-out never hits the 30-day path,
+        // so the two durations answer different questions and do not need to
+        // match.
         let expires_at_unix = now_unix + 365 * 24 * 3600;
 
         // Generate bearer token from 32 random bytes (NEVER derive from

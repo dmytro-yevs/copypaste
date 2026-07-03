@@ -124,7 +124,8 @@ fn three_co_registered_tokens_all_see_pushed_item_xush() {
         .expect("token2 authorizes pull");
     let items2 = store
         .pull_items(ACCOUNT_INBOX_ID, 0, None, 100)
-        .expect("pull via token2");
+        .expect("pull via token2")
+        .items;
     assert_eq!(
         items2.len(),
         1,
@@ -141,7 +142,8 @@ fn three_co_registered_tokens_all_see_pushed_item_xush() {
         .expect("token3 authorizes pull");
     let items3 = store
         .pull_items(ACCOUNT_INBOX_ID, 0, None, 100)
-        .expect("pull via token3");
+        .expect("pull via token3")
+        .items;
     assert_eq!(
         items3.len(),
         1,
@@ -195,7 +197,8 @@ fn five_co_registered_tokens_all_see_pushed_item_xush() {
             .unwrap_or_else(|e| panic!("token {i} must be valid: {e}"));
         let items = store
             .pull_items(ACCOUNT_INBOX_ID, 0, None, 100)
-            .expect("pull");
+            .expect("pull")
+            .items;
         assert_eq!(
             items.len(),
             1,
@@ -252,14 +255,20 @@ fn push_to_one_inbox_not_visible_in_others_xush() {
 
     // Y's and Z's inboxes must be empty.
     store.verify_token(DEVICE_Y, &tok_y).expect("tok_y valid");
-    let y_items = store.pull_items(DEVICE_Y, 0, None, 100).expect("pull Y");
+    let y_items = store
+        .pull_items(DEVICE_Y, 0, None, 100)
+        .expect("pull Y")
+        .items;
     assert!(
         y_items.is_empty(),
         "device Y inbox must be empty (only X was pushed to)"
     );
 
     store.verify_token(DEVICE_Z, &tok_z).expect("tok_z valid");
-    let z_items = store.pull_items(DEVICE_Z, 0, None, 100).expect("pull Z");
+    let z_items = store
+        .pull_items(DEVICE_Z, 0, None, 100)
+        .expect("pull Z")
+        .items;
     assert!(
         z_items.is_empty(),
         "device Z inbox must be empty (only X was pushed to)"
@@ -267,7 +276,10 @@ fn push_to_one_inbox_not_visible_in_others_xush() {
 
     // X's inbox must have the item.
     store.verify_token(DEVICE_X, &tok_x).expect("tok_x valid");
-    let x_items = store.pull_items(DEVICE_X, 0, None, 100).expect("pull X");
+    let x_items = store
+        .pull_items(DEVICE_X, 0, None, 100)
+        .expect("pull X")
+        .items;
     assert_eq!(x_items.len(), 1, "device X inbox must have the item");
 }
 
@@ -331,9 +343,18 @@ fn each_of_three_inboxes_receives_its_own_blob_xush() {
         )
         .expect("push Z");
 
-    let x_items = store.pull_items(DEVICE_X, 0, None, 100).expect("pull X");
-    let y_items = store.pull_items(DEVICE_Y, 0, None, 100).expect("pull Y");
-    let z_items = store.pull_items(DEVICE_Z, 0, None, 100).expect("pull Z");
+    let x_items = store
+        .pull_items(DEVICE_X, 0, None, 100)
+        .expect("pull X")
+        .items;
+    let y_items = store
+        .pull_items(DEVICE_Y, 0, None, 100)
+        .expect("pull Y")
+        .items;
+    let z_items = store
+        .pull_items(DEVICE_Z, 0, None, 100)
+        .expect("pull Z")
+        .items;
 
     assert_eq!(x_items.len(), 1);
     assert_eq!(y_items.len(), 1);
