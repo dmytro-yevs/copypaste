@@ -43,13 +43,16 @@ NO_STOP=0
 NO_RESTART=0
 BACKUP_FILE=""
 
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/release-identity.sh
+source "$REPO_ROOT/scripts/lib/release-identity.sh"   # sets DAEMON_LABEL
+
 DEFAULT_DATA_ROOT="${HOME:-/tmp}/Library/Application Support"
 DATA_ROOT="${COPYPASTE_DATA_HOME:-$DEFAULT_DATA_ROOT}"
 
 CANONICAL_DIR="CopyPaste"
 ALIAS_DIRS=("copypaste" "Copypaste")
 
-DAEMON_LABEL="com.copypaste.daemon"
 DAEMON_PLIST="$HOME/Library/LaunchAgents/${DAEMON_LABEL}.plist"
 DAEMON_PROC="copypaste-daemon"
 

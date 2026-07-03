@@ -293,6 +293,39 @@ jobs:
         working-directory: crates/copypaste-ui
         run: pnpm build
 
+      # CopyPaste-zenl: CSS tripwire — mirrors the same-named step in
+      # release.yml. Guards against a repeat of the d248ca9a incident
+      # (CopyPaste-ocpa) where the design layer silently dropped out of the
+      # build and shipped a completely unstyled UI. `pnpm build` (tsc && vite
+      # build) emits the bundled stylesheet to dist/assets/*.css. Fail
+      # loudly if that CSS is missing, too small, or lacks known selectors
+      # from src/styles/utilities.css (wholesale @import'd via
+      # src/styles/index.css — no purging, so these are always present in a
+      # healthy build).
+      - name: Verify built CSS is not empty (CopyPaste-zenl)
+        working-directory: crates/copypaste-ui
+        run: |
+          CSS_FILES=(dist/assets/*.css)
+          if [ ! -e "${CSS_FILES[0]}" ]; then
+            echo "::error::no CSS file found in dist/assets — the UI would ship completely unstyled"
+            exit 1
+          fi
+          CSS_FILE="${CSS_FILES[0]}"
+          SIZE=$(wc -c < "$CSS_FILE")
+          echo "Built CSS: $CSS_FILE ($SIZE bytes)"
+          MIN_SIZE=5000
+          if [ "$SIZE" -lt "$MIN_SIZE" ]; then
+            echo "::error::$CSS_FILE is only $SIZE bytes (< $MIN_SIZE) — design layer likely dropped from the build"
+            exit 1
+          fi
+          for SELECTOR in '\.sr-only\s*\{' '\.fill-col\s*\{'; do
+            if ! grep -Eq "$SELECTOR" "$CSS_FILE"; then
+              echo "::error::expected selector matching /$SELECTOR/ not found in $CSS_FILE — design layer likely dropped from the build"
+              exit 1
+            fi
+          done
+          echo "CSS tripwire OK: size >= $MIN_SIZE bytes and known selectors present."
+
   # ESLint for the React/TypeScript frontend (CopyPaste-q3pe).
   # Separate job so ESLint failures are clearly labelled in PR status checks,
   # independent of vitest and the tsc/vite build. Warnings are informational

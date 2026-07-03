@@ -159,6 +159,40 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm tauri build
 
+      # CopyPaste-zenl: CSS tripwire — guards against a repeat of the
+      # d248ca9a incident (CopyPaste-ocpa) where the design layer silently
+      # dropped out of the build and shipped a completely unstyled UI.
+      # `pnpm tauri build` runs `tsc && vite build` under the hood, emitting
+      # the bundled stylesheet to crates/copypaste-ui/dist/assets/*.css
+      # (frontendDist in src-tauri/tauri.conf.json points at ../dist). Fail
+      # loudly if that CSS is missing, too small, or lacks known selectors
+      # from src/styles/utilities.css (wholesale @import'd via
+      # src/styles/index.css — no purging, so these are always present in a
+      # healthy build).
+      - name: Verify built CSS is not empty (CopyPaste-zenl)
+        working-directory: crates/copypaste-ui
+        run: |
+          CSS_FILES=(dist/assets/*.css)
+          if [ ! -e "${CSS_FILES[0]}" ]; then
+            echo "::error::no CSS file found in dist/assets — the UI would ship completely unstyled"
+            exit 1
+          fi
+          CSS_FILE="${CSS_FILES[0]}"
+          SIZE=$(wc -c < "$CSS_FILE")
+          echo "Built CSS: $CSS_FILE ($SIZE bytes)"
+          MIN_SIZE=5000
+          if [ "$SIZE" -lt "$MIN_SIZE" ]; then
+            echo "::error::$CSS_FILE is only $SIZE bytes (< $MIN_SIZE) — design layer likely dropped from the build"
+            exit 1
+          fi
+          for SELECTOR in '\.sr-only\s*\{' '\.fill-col\s*\{'; do
+            if ! grep -Eq "$SELECTOR" "$CSS_FILE"; then
+              echo "::error::expected selector matching /$SELECTOR/ not found in $CSS_FILE — design layer likely dropped from the build"
+              exit 1
+            fi
+          done
+          echo "CSS tripwire OK: size >= $MIN_SIZE bytes and known selectors present."
+
       - name: Resolve release version
         id: ver
         run: |
@@ -271,15 +305,12 @@ jobs:
           fi
 
           echo "==> Re-signing inner binaries with Developer ID..."
+          # Bundle-id map lives in scripts/lib/release-identity.sh (CopyPaste-8ebg.60).
+          source scripts/lib/release-identity.sh
           for bin in copypaste-daemon copypaste copypaste-relay; do
             BIN_PATH="$APP/Contents/MacOS/$bin"
             if [ -f "$BIN_PATH" ]; then
-              case "$bin" in
-                copypaste-daemon) BIN_ID="com.copypaste.daemon" ;;
-                copypaste)        BIN_ID="com.copypaste.cli"    ;;
-                copypaste-relay)  BIN_ID="com.copypaste.relay"  ;;
-                *)                BIN_ID="com.copypaste.$bin"   ;;
-              esac
+              BIN_ID="$(bundle_id_for "$bin")"
               codesign --force \
                 --sign "$IDENTITY" \
                 --identifier "$BIN_ID" \

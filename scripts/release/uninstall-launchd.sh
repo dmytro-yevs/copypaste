@@ -21,8 +21,14 @@
 # leaving the binary in place.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# shellcheck source=../lib/release-identity.sh
+source "${REPO_ROOT}/scripts/lib/release-identity.sh"   # sets DAEMON_LABEL
+
 # ---- config ----------------------------------------------------------------
-LABEL="com.copypaste.daemon"
+LABEL="${DAEMON_LABEL}"
 LAUNCH_AGENT="$HOME/Library/LaunchAgents/${LABEL}.plist"
 # ----------------------------------------------------------------------------
 

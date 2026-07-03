@@ -11,9 +11,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-SOURCE_PLIST="${REPO_ROOT}/packaging/macos/com.copypaste.daemon.plist"
 
-LABEL="com.copypaste.daemon"
+# shellcheck source=../lib/release-identity.sh
+source "${REPO_ROOT}/scripts/lib/release-identity.sh"   # sets DAEMON_LABEL
+
+SOURCE_PLIST="${REPO_ROOT}/packaging/macos/${DAEMON_LABEL}.plist"
+
+LABEL="${DAEMON_LABEL}"
 TARGET_DIR="${HOME}/Library/LaunchAgents"
 TARGET_PLIST="${TARGET_DIR}/${LABEL}.plist"
 LOG_DIR="${HOME}/Library/Logs/CopyPaste"

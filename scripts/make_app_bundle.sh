@@ -29,6 +29,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# shellcheck source=lib/release-identity.sh
+source "$REPO_ROOT/scripts/lib/release-identity.sh"   # sets DAEMON_LABEL
+
 # Resolve build output dir: prefer per-triple build when triple given.
 # src-tauri is a workspace member, so the Tauri bundler and sibling binaries
 # both land under the WORKSPACE-ROOT target/ (per-triple when --target used).
@@ -73,9 +76,9 @@ done
 
 # LaunchAgent plist template (USERNAME placeholder substituted at install time
 # by `copypaste daemon install` or `scripts/launchd/install-agent.sh`).
-PLIST_SRC="packaging/macos/com.copypaste.daemon.plist"
+PLIST_SRC="packaging/macos/${DAEMON_LABEL}.plist"
 if [[ -f "$PLIST_SRC" ]]; then
-    cp "$PLIST_SRC" "$CONTENTS/Resources/com.copypaste.daemon.plist"
+    cp "$PLIST_SRC" "$CONTENTS/Resources/${DAEMON_LABEL}.plist"
 else
     echo "warning: $PLIST_SRC missing — autostart on first launch will fail" >&2
 fi

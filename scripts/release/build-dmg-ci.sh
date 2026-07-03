@@ -49,6 +49,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
+# shellcheck source=../lib/release-identity.sh
+source "$REPO_ROOT/scripts/lib/release-identity.sh"
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "ERROR: build-dmg-ci.sh must run on macOS (current: $(uname -s))" >&2
     exit 1
@@ -140,9 +143,9 @@ cp "$BIN_RELAY"  "$APP_DIR/Contents/MacOS/"
 # the app's back. We still ship the plist (RunAtLoad=false, KeepAlive=false) for
 # power users who want a CLI-managed, headless daemon via
 # scripts/launchd/install-agent.sh, but a default install never loads it.
-LAUNCHD_PLIST_SRC="packaging/macos/com.copypaste.daemon.plist"
+LAUNCHD_PLIST_SRC="packaging/macos/${DAEMON_LABEL}.plist"
 if [[ -f "$LAUNCHD_PLIST_SRC" ]]; then
-    cp "$LAUNCHD_PLIST_SRC" "$APP_DIR/Contents/Resources/com.copypaste.daemon.plist"
+    cp "$LAUNCHD_PLIST_SRC" "$APP_DIR/Contents/Resources/${DAEMON_LABEL}.plist"
 else
     echo "warning: $LAUNCHD_PLIST_SRC missing — skipping legacy LaunchAgent template" >&2
 fi
@@ -189,16 +192,9 @@ SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 # makes the launchd label / item attributes deterministic and is required if a
 # Developer ID identity is later supplied.
 echo "==> Signing inner binaries with stable identifiers (identity: $SIGN_IDENTITY)"
-# NOTE: macOS ships bash 3.2, which has NO associative arrays (`declare -A` is
-# bash 4+). Use a case statement so this runs on the stock macOS interpreter as
-# well as the Linux CI runner — `declare -A` here fails with "unbound variable".
+# Bundle-id map lives in scripts/lib/release-identity.sh (CopyPaste-8ebg.60).
 for bin in copypaste-daemon copypaste copypaste-relay; do
-    case "$bin" in
-        copypaste-daemon) bin_id="com.copypaste.daemon" ;;
-        copypaste)        bin_id="com.copypaste.cli" ;;
-        copypaste-relay)  bin_id="com.copypaste.relay" ;;
-        *)                bin_id="com.copypaste.$bin" ;;
-    esac
+    bin_id="$(bundle_id_for "$bin")"
     codesign --force \
         --sign "$SIGN_IDENTITY" \
         --identifier "$bin_id" \
