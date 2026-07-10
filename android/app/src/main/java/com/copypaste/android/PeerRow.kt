@@ -249,6 +249,16 @@ internal fun OwnDeviceRow(
     ownPublicIp: String? = null,
     /** android-devices spec "Fingerprint tap-to-copy parity" — see [PeerRow]. */
     onCopyFingerprint: (String) -> Unit = {},
+    /**
+     * Test-only override for the live LAN-IPv4 lookup (CopyPaste-6l1ky).
+     * [lanIpv4Address] enumerates the HOST's real [java.net.NetworkInterface]s,
+     * so on a JVM-hosted Paparazzi run it returns whatever address the CI
+     * runner happens to have that run — non-deterministic across otherwise
+     * identical runs, which broke the "own device card" golden's byte-exact
+     * comparison. Production call sites never pass this; snapshot tests pass
+     * a fixed fake IP instead of touching the real network stack.
+     */
+    localIpOverrideForTest: String? = null,
 ) {
     // HB-1c: render THIS device's info at parity with the macOS "This Mac" card.
     // ABI 14 sends these same fields to peers (own gather in PairActivity /
@@ -266,7 +276,7 @@ internal fun OwnDeviceRow(
     // change (Wi-Fi handoff, VPN connect) is reflected promptly.
     // The bare `remember { lanIpv4Address() }` snapshot was stale on network
     // change because it was only evaluated once at first composition.
-    val localIp = remember(nowMs / 5_000L) { lanIpv4Address() }
+    val localIp = localIpOverrideForTest ?: remember(nowMs / 5_000L) { lanIpv4Address() }
 
     // Row content only — the enclosing CopyPasteCard provides the surface.
     // android-devices spec "Own-device card field grid": no Unpair/Revoke

@@ -61,6 +61,12 @@ class DevicesCardSnapshotTest {
                     ),
                     nowMs = fixedNowMs,
                     ownPublicIp = "203.0.113.10",
+                    // CopyPaste-6l1ky: lanIpv4Address() enumerates the HOST's real
+                    // NetworkInterfaces, so on a JVM-hosted Paparazzi run it
+                    // returns whatever LAN IP the runner happens to have —
+                    // non-deterministic across otherwise-identical runs. Fix it
+                    // so the golden is byte-exact and reproducible.
+                    localIpOverrideForTest = "10.1.0.82",
                 )
             }
         }
