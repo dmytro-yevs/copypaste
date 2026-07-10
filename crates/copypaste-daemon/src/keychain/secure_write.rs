@@ -121,7 +121,9 @@ pub(crate) fn set_generic_password_locked_down(
     }
 }
 
-#[cfg(test)]
+// macOS-gated items only — on Linux this module compiles to an empty shell
+// whose `use super::*` trips -D unused-imports (MSRV job).
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

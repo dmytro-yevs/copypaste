@@ -312,7 +312,9 @@ fn migrate_legacy_accessibility_if_needed(secret: &[u8; 32]) -> Result<(), Keych
     super::secure_write::set_generic_password_locked_down(SERVICE, ACCOUNT, secret)
 }
 
-#[cfg(test)]
+// macOS-gated items only — on Linux this module compiles to an empty shell
+// whose `use super::*` trips -D unused-imports (MSRV job).
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

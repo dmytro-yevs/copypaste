@@ -147,7 +147,9 @@ pub(crate) async fn resolve_frontmost_bundle_id(cache: &mut FrontmostAppCache) -
     resolved
 }
 
-#[cfg(test)]
+// macOS-gated items only — on Linux this module compiles to an empty shell
+// whose `use super::*` trips -D unused-imports (MSRV job).
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
