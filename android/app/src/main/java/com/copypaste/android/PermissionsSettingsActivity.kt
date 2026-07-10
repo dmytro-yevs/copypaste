@@ -6,7 +6,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -28,15 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.outlined.Battery5Bar
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.PhonelinkSetup
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -50,18 +41,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
+import com.copypaste.android.ui.theme.icons.LucideIcons
 import kotlinx.coroutines.launch
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import com.copypaste.android.ui.theme.ButtonVariant
-import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 
@@ -132,6 +120,7 @@ class PermissionsSettingsActivity : ComponentActivity() {
                     onRequestBattery = { requestBatteryOptimizationExemption() },
                     onOpenOemAutoStart = { openOemAutoStart() },
                     onBack = { finish() },
+                    notificationStatus = NotificationPermissionHelper.notificationPermissionStatus(this@PermissionsSettingsActivity),
                     oemHint = oemToastMsg,
                     onOemHintConsumed = { oemToastMsg = null },
                 )
@@ -180,7 +169,11 @@ class PermissionsSettingsActivity : ComponentActivity() {
         }
         // CopyPaste-l080: permanent-denial fallback — route to system notification
         // settings instead of firing a dialog the OS will no longer show.
-        if (NotificationPermissionHelper.isPermanentlyDenied(this)) {
+        // S10 Wave E (CopyPaste-myh8.10): route via the shared, unit-tested
+        // permissionCardCta() decision layer instead of re-deriving the
+        // PERMANENTLY_DENIED check ad hoc.
+        val status = NotificationPermissionHelper.notificationPermissionStatus(this)
+        if (permissionCardCta(status) == PermissionCardCta.OPEN_SETTINGS) {
             Log.i(TAG, "POST_NOTIFICATIONS permanently denied — opening app notification settings")
             launchGated(NotificationPermissionHelper.appNotificationSettingsIntents(this))
             return
@@ -227,6 +220,13 @@ fun PermissionsScreen(
     onRequestBattery: () -> Unit,
     onOpenOemAutoStart: () -> Unit,
     onBack: () -> Unit,
+    // CopyPaste-myh8.10 Wave C: Activity-bound (shouldShowRequestPermissionRationale)
+    // so it is computed by the caller and threaded in, mirroring OnboardingScreen.
+    notificationStatus: PermissionStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        PermissionStatus.DENIED
+    } else {
+        PermissionStatus.NOT_APPLICABLE
+    },
     oemHint: String? = null,
     onOemHintConsumed: () -> Unit = {},
 ) {
@@ -242,11 +242,8 @@ fun PermissionsScreen(
         }
     }
 
-    // Re-evaluated every recomposition (triggered by refreshTrigger / onResume).
-    val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-    } else true
+    // Re-evaluated every recomposition (triggered by refreshTrigger / onResume, via notificationStatus).
+    val notifGranted = notificationStatus.isSatisfied()
 
     val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
     val overlayGranted: Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -291,15 +288,19 @@ fun PermissionsScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             // 1. Notifications
-            PermissionStatusCard(
-                icon = Icons.Outlined.Notifications,
-                title = "Notifications",
-                description = "Required on Android 13+ so the clipboard-monitoring " +
-                        "foreground service can show its status notification (Pause/Resume).",
-                granted = notifGranted,
-                buttonLabel = if (notifGranted) "Re-open Request" else "Grant",
+            PermissionCard(
+                icon = LucideIcons.PermissionNotifications,
+                title = stringResource(R.string.perm_notifications_title),
+                description = stringResource(R.string.perm_notifications_desc),
+                status = notificationStatus,
+                buttonLabel = if (notifGranted) stringResource(R.string.perm_notifications_reopen) else stringResource(R.string.btn_grant),
+                permanentlyDeniedButtonLabel = stringResource(R.string.perm_notifications_open_settings),
                 onClick = onRequestNotification,
                 required = true,
+                // PermissionsSettingsActivity keeps every action button ENABLED
+                // (re-openable), unlike onboarding's disable-on-granted behavior.
+                alwaysShowButton = true,
+                showStatusPill = true,
             )
 
             // 2. Background Capture (ADB)
@@ -312,51 +313,50 @@ fun PermissionsScreen(
             )
 
             // 3. Battery Optimization exemption
-            PermissionStatusCard(
-                icon = Icons.Outlined.Battery5Bar,
-                title = "Battery Optimization Exemption",
-                description = "Prevents Android from killing the sync service when the " +
-                        "phone is idle. Recommended for reliable Supabase polling.",
-                granted = batteryExempt,
-                buttonLabel = if (batteryExempt) "Open Battery Settings" else "Request Exemption",
+            PermissionCard(
+                icon = LucideIcons.PermissionBattery,
+                title = stringResource(R.string.perm_battery_title),
+                description = stringResource(R.string.perm_battery_desc),
+                status = booleanGrantStatus(batteryExempt),
+                buttonLabel = if (batteryExempt) stringResource(R.string.perm_battery_open_settings) else stringResource(R.string.perm_battery_request),
                 onClick = onRequestBattery,
                 required = false,
+                alwaysShowButton = true,
+                showStatusPill = true,
             )
 
             // 4. OEM autostart (only on devices where we have a known screen)
             if (hasOemScreen) {
-                val oemDesc = buildString {
-                    append(
-                        "Many phone makers (Xiaomi, Huawei, Samsung, Oppo, Vivo, OnePlus, etc.) " +
-                        "have extra battery-saver layers that kill background apps regardless of " +
-                        "Android's own battery optimisation. Whitelist CopyPaste in the " +
-                        "manufacturer's autostart / protected-apps screen so it survives when " +
-                        "the screen is off."
-                    )
-                    if (oemLabel != null) {
-                        append("\n\nOn this device: $oemLabel")
-                    }
+                val oemBaseDesc = stringResource(R.string.perm_oem_desc_base)
+                val oemDesc = if (oemLabel != null) {
+                    stringResource(R.string.perm_oem_desc_device, oemBaseDesc, oemLabel)
+                } else {
+                    oemBaseDesc
                 }
-                PermissionStatusCard(
-                    icon = Icons.Outlined.PhonelinkSetup,
-                    title = "OEM Autostart / Protected Apps",
+                PermissionCard(
+                    icon = LucideIcons.PermissionOemSetup,
+                    title = stringResource(R.string.perm_oem_title),
                     description = oemDesc,
-                    // Cannot reliably detect this without root; never shown "granted".
-                    granted = null,
-                    buttonLabel = "Open OEM Settings",
+                    // CopyPaste-myh8.10 Wave C: cannot reliably detect this without
+                    // root. DENIED + required=false renders identically to the old
+                    // "indeterminate" granted=null (neutral border, never red) — see
+                    // permissionCardCta() in PermissionStatus.kt. showStatusPill=false
+                    // preserves the old behavior of hiding the status pill for this card.
+                    status = PermissionStatus.DENIED,
+                    buttonLabel = stringResource(R.string.perm_oem_button),
                     onClick = onOpenOemAutoStart,
                     required = false,
+                    alwaysShowButton = true,
                 )
             }
 
             // 5. Foreground service (install-time, info only)
-            PermissionStatusCard(
-                icon = Icons.Outlined.Tune,
-                title = "Foreground Service",
-                description = "Granted automatically at install — no action needed. Lets the " +
-                        "clipboard-monitoring service run in the background.",
-                granted = true,
-                buttonLabel = "Granted",
+            PermissionCard(
+                icon = LucideIcons.PermissionForegroundService,
+                title = stringResource(R.string.perm_fg_service_title),
+                description = stringResource(R.string.perm_fg_service_desc),
+                status = PermissionStatus.GRANTED,
+                buttonLabel = stringResource(R.string.perm_fg_service_granted),
                 onClick = {},
                 required = false,
                 infoOnly = true,
@@ -398,7 +398,7 @@ private fun BgCaptureStatusCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4)) {
                 Text(
                     text = if (readLogsGranted)
                         stringResource(R.string.bg_adb_status_read_logs_ok)
@@ -487,103 +487,3 @@ internal fun AdbCommandBlock(
     }
 }
 
-/**
- * Status card for the Permissions screen. Mirrors [OnboardingActivity]'s
- * PermissionCard styling but always keeps the action button ENABLED (so the
- * user can re-open a request/settings window at any time), except for
- * [infoOnly] rows which have no action.
- *
- * [granted] = null means "cannot be determined" (e.g. OEM autostart) — shown
- * neutrally with no green/red status.
- */
-@Composable
-private fun PermissionStatusCard(
-    icon: ImageVector,
-    title: String,
-    description: String,
-    granted: Boolean?,
-    buttonLabel: String,
-    onClick: () -> Unit,
-    required: Boolean,
-    infoOnly: Boolean = false,
-) {
-    // Status-colored hairline border: primary = granted, error = missing+required,
-    // neutral outline = unknown / optional. Matches the restrained macOS look.
-    val borderColor = when {
-        granted == true              -> MaterialTheme.colorScheme.primary
-        granted == false && required -> MaterialTheme.colorScheme.error
-        else                         -> MaterialTheme.colorScheme.outline
-    }
-
-    CopyPasteCard(accent = borderColor) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (granted == true) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                if (required) {
-                    Text(
-                        text = "required",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Live status indicator.
-            if (granted != null) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = if (granted) Icons.Outlined.CheckCircle
-                                      else Icons.Filled.ErrorOutline,
-                        contentDescription = null,
-                        tint = if (granted) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error,
-                    )
-                    Text(
-                        text = if (granted) "Granted" else "Not granted",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.error,
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            if (!infoOnly) {
-                Spacer(modifier = Modifier.height(8.dp))
-                CopyPasteButton(
-                    onClick = onClick,
-                    // Stay enabled even when granted so the user can re-open the window.
-                    enabled = true,
-                    variant = ButtonVariant.PRIMARY,
-                    modifier = Modifier.align(Alignment.End),
-                ) {
-                    Text(buttonLabel)
-                }
-            }
-        }
-    }
-}

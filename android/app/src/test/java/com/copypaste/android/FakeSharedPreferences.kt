@@ -12,8 +12,16 @@ import android.content.SharedPreferences
  *
  * `apply()` and `commit()` both write synchronously (no background thread),
  * which is fine for tests: we only care about the resulting map contents.
+ *
+ * [forceCommitFailure] (CopyPaste-npqx) mirrors real `SharedPreferencesImpl`:
+ * the in-memory map is updated immediately regardless of whether the disk
+ * write succeeds, but `commit()`'s return value reflects the disk write
+ * outcome — so a "disk full" / IO-failure commit still returns `false` while
+ * the process-local reads immediately see the new values. Tests that need to
+ * exercise a caller's `commit() == false` branch (e.g.
+ * [Settings.saveScreenSettings]) set this to `true` before calling commit().
  */
-class FakeSharedPreferences : SharedPreferences {
+class FakeSharedPreferences(private val forceCommitFailure: Boolean = false) : SharedPreferences {
     private val map = mutableMapOf<String, Any?>()
 
     override fun getAll(): MutableMap<String, *> = map.toMutableMap()
@@ -96,7 +104,7 @@ class FakeSharedPreferences : SharedPreferences {
 
         override fun commit(): Boolean {
             apply()
-            return true
+            return !forceCommitFailure
         }
 
         override fun apply() {

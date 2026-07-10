@@ -22,11 +22,13 @@ import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CpBadgeChip
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.EmptyStateCard
 import com.copypaste.android.ui.theme.LocalAccent
 import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.icons.LucideIcons
+import com.copypaste.android.ui.theme.relativeTimeAgoLabel
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grouped inset list rows (PARITY-SPEC §8)
@@ -78,7 +80,7 @@ internal fun PeerRow(
         // ── Header row: pulse dot + name + status + transport chip ───────
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             // §7 online pulse ring (replaces plain dot).
@@ -119,14 +121,10 @@ internal fun PeerRow(
         // renders, with an em-dash placeholder when no live P2P link has ever
         // measured a round trip (android-devices spec "RTT shows a placeholder
         // without a live P2P link").
+        val lastSyncElapsedMs = nowMs - peer.lastSyncMs
         val lastSyncText: String? = if (peer.lastSyncMs > 0L) {
-            val elapsed = (nowMs - peer.lastSyncMs) / 1_000L
-            when {
-                elapsed < 60 -> "${elapsed}s ago"
-                elapsed < 3600 -> "${elapsed / 60}m ago"
-                elapsed < 86400 -> "${elapsed / 3600}h ago"
-                else -> formatEpochMs(peer.lastSyncMs)
-            }
+            if (lastSyncElapsedMs >= 86_400_000L) formatEpochMs(peer.lastSyncMs)
+            else relativeTimeAgoLabel(lastSyncElapsedMs)
         } else null
 
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
@@ -278,7 +276,7 @@ internal fun OwnDeviceRow(
         // + §9.4 "This device" accent-2 pill (parity with macOS "This Mac").
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4),
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             // Own device is always online — pulse ring always animates (unless
@@ -371,7 +369,7 @@ internal fun DiscoveredPeerRow(
                 Spacer(Modifier.height(4.dp))
                 // CopyPaste-cnmw: show all IPs joined, matching macOS parity.
                 // Each IP shown on its own MetaRow so long multi-IP lists wrap cleanly.
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s2)) {
                     if (ips.isNotEmpty()) {
                         MetaRow(
                             label = stringResource(R.string.meta_label_local_ip),

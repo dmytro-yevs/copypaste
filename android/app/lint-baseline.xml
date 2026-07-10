@@ -46,24 +46,13 @@
     </issue>
 
     <issue
-        id="ApplySharedPref"
-        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
-        errorLine1="            .commit() // synchronous: survives an immediate force-stop (SIGKILL)"
-        errorLine2="             ~~~~~~~~">
-        <location
-            file="src/main/java/com/copypaste/android/Settings.kt"
-            line="879"
-            column="14"/>
-    </issue>
-
-    <issue
         id="InlinedApi"
         message="Field requires API level 34 (current min is 29): `android.content.pm.ServiceInfo#FOREGROUND_SERVICE_TYPE_SPECIAL_USE`"
         errorLine1="                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/ClipboardService.kt"
-            line="241"
+            line="245"
             column="21"/>
     </issue>
 
@@ -151,7 +140,7 @@
         errorLine2="      ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="13"
+            line="14"
             column="7"/>
     </issue>
 
@@ -162,7 +151,7 @@
         errorLine2="      ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="13"
+            line="14"
             column="7"/>
     </issue>
 
@@ -173,7 +162,7 @@
         errorLine2="      ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="13"
+            line="14"
             column="7"/>
     </issue>
 
@@ -184,7 +173,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="333"
+            line="327"
             column="21"/>
     </issue>
 
@@ -195,7 +184,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="336"
+            line="330"
             column="21"/>
     </issue>
 
@@ -206,7 +195,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="407"
+            line="400"
             column="25"/>
     </issue>
 
@@ -217,7 +206,7 @@
         errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="414"
+            line="407"
             column="32"/>
     </issue>
 
@@ -228,7 +217,7 @@
         errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="415"
+            line="408"
             column="32"/>
     </issue>
 
@@ -239,7 +228,7 @@
         errorLine2="          ~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="18"
+            line="19"
             column="11"/>
     </issue>
 
@@ -250,7 +239,7 @@
         errorLine2="          ~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="18"
+            line="19"
             column="11"/>
     </issue>
 
@@ -261,7 +250,7 @@
         errorLine2="          ~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="18"
+            line="19"
             column="11"/>
     </issue>
 
@@ -272,7 +261,7 @@
         errorLine2="            ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="19"
+            line="20"
             column="13"/>
     </issue>
 
@@ -283,7 +272,7 @@
         errorLine2="            ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="19"
+            line="20"
             column="13"/>
     </issue>
 
@@ -294,7 +283,7 @@
         errorLine2="            ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="19"
+            line="20"
             column="13"/>
     </issue>
 
@@ -305,7 +294,7 @@
         errorLine2="           ~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="20"
+            line="21"
             column="12"/>
     </issue>
 
@@ -316,7 +305,7 @@
         errorLine2="           ~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="20"
+            line="21"
             column="12"/>
     </issue>
 
@@ -327,7 +316,7 @@
         errorLine2="           ~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="20"
+            line="21"
             column="12"/>
     </issue>
 
@@ -338,7 +327,7 @@
         errorLine2="             ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="21"
+            line="22"
             column="14"/>
     </issue>
 
@@ -349,7 +338,7 @@
         errorLine2="             ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="21"
+            line="22"
             column="14"/>
     </issue>
 
@@ -360,7 +349,7 @@
         errorLine2="             ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="21"
+            line="22"
             column="14"/>
     </issue>
 
@@ -371,7 +360,7 @@
         errorLine2="             ~~~~~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="25"
+            line="26"
             column="14"/>
     </issue>
 
@@ -382,7 +371,7 @@
         errorLine2="             ~~~~~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="25"
+            line="26"
             column="14"/>
     </issue>
 
@@ -393,7 +382,7 @@
         errorLine2="             ~~~~~~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="25"
+            line="26"
             column="14"/>
     </issue>
 
@@ -404,7 +393,7 @@
         errorLine2="                  ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="26"
+            line="27"
             column="19"/>
     </issue>
 
@@ -415,7 +404,7 @@
         errorLine2="                  ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="26"
+            line="27"
             column="19"/>
     </issue>
 
@@ -426,7 +415,7 @@
         errorLine2="                  ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="26"
+            line="27"
             column="19"/>
     </issue>
 
@@ -437,7 +426,7 @@
         errorLine2="                            ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="27"
+            line="28"
             column="29"/>
     </issue>
 
@@ -448,7 +437,7 @@
         errorLine2="                            ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="27"
+            line="28"
             column="29"/>
     </issue>
 
@@ -459,7 +448,7 @@
         errorLine2="                            ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="27"
+            line="28"
             column="29"/>
     </issue>
 
@@ -470,7 +459,7 @@
         errorLine2="                      ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="29"
+            line="30"
             column="23"/>
     </issue>
 
@@ -481,7 +470,7 @@
         errorLine2="                      ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="29"
+            line="30"
             column="23"/>
     </issue>
 
@@ -492,7 +481,7 @@
         errorLine2="                      ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="29"
+            line="30"
             column="23"/>
     </issue>
 
@@ -503,7 +492,7 @@
         errorLine2="              ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="30"
+            line="31"
             column="15"/>
     </issue>
 
@@ -514,7 +503,7 @@
         errorLine2="              ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="30"
+            line="31"
             column="15"/>
     </issue>
 
@@ -525,8 +514,41 @@
         errorLine2="              ~~~~~~~">
         <location
             file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
-            line="30"
+            line="31"
             column="15"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
+        errorLine1="# against our pinned AGP 8.3.2 — see the agp/kotlin comment above for why"
+        errorLine2="                   ~~~~~~~">
+        <location
+            file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
+            line="51"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
+        errorLine1="# against our pinned AGP 8.3.2 — see the agp/kotlin comment above for why"
+        errorLine2="                   ~~~~~~~">
+        <location
+            file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
+            line="51"
+            column="20"/>
+    </issue>
+
+    <issue
+        id="GradleDependency"
+        message="A newer version of androidx.core:core-splashscreen than 1.0.1 is available: 1.2.0"
+        errorLine1="# against our pinned AGP 8.3.2 — see the agp/kotlin comment above for why"
+        errorLine2="                   ~~~~~~~">
+        <location
+            file="$HOME/Documents/CopyPaste/android/gradle/libs.versions.toml"
+            line="51"
+            column="20"/>
     </issue>
 
     <issue
@@ -536,7 +558,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="142"
+            line="145"
             column="13"/>
     </issue>
 
@@ -547,7 +569,7 @@
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/PortraitCaptureActivity.kt"
-            line="39"
+            line="58"
             column="9"/>
     </issue>
 
@@ -558,7 +580,7 @@
         errorLine2="    ~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/HistoryScreen.kt"
-            line="52"
+            line="58"
             column="5"/>
     </issue>
 
@@ -580,7 +602,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="142"
+            line="145"
             column="13"/>
     </issue>
 
@@ -591,7 +613,7 @@
         errorLine2="                                                                ^">
         <location
             file="src/main/res/values/strings.xml"
-            line="161"
+            line="180"
             column="65"/>
     </issue>
 
@@ -602,7 +624,7 @@
         errorLine2="                                                                             ^">
         <location
             file="src/main/res/values/strings.xml"
-            line="357"
+            line="385"
             column="78"/>
     </issue>
 
@@ -613,7 +635,7 @@
         errorLine2="                                                                               ^">
         <location
             file="src/main/res/values/strings.xml"
-            line="358"
+            line="386"
             column="80"/>
     </issue>
 
@@ -624,7 +646,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="112"
+            line="114"
             column="5"/>
     </issue>
 
@@ -635,7 +657,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="247"
+            line="271"
             column="5"/>
     </issue>
 
@@ -646,7 +668,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="302"
+            line="326"
             column="5"/>
     </issue>
 
@@ -657,7 +679,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="304"
+            line="328"
             column="5"/>
     </issue>
 
@@ -668,7 +690,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="315"
+            line="339"
             column="5"/>
     </issue>
 
@@ -679,7 +701,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="319"
+            line="343"
             column="5"/>
     </issue>
 
@@ -690,7 +712,7 @@
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="511"
+            line="541"
             column="5"/>
     </issue>
 
@@ -712,7 +734,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/BackgroundCaptureSetupActivity.kt"
-            line="168"
+            line="160"
             column="13"/>
     </issue>
 
@@ -723,7 +745,7 @@
         errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/BackgroundCaptureSetupActivity.kt"
-            line="273"
+            line="265"
             column="39"/>
     </issue>
 
@@ -800,7 +822,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/NotificationPermissionHelper.kt"
-            line="71"
+            line="104"
             column="13"/>
     </issue>
 
@@ -811,7 +833,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/OnboardingPermissions.kt"
-            line="120"
+            line="121"
             column="13"/>
     </issue>
 
@@ -822,7 +844,7 @@
         errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/OnboardingScreen.kt"
-            line="83"
+            line="86"
             column="39"/>
     </issue>
 
@@ -833,7 +855,7 @@
         errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/PermissionsSettingsActivity.kt"
-            line="252"
+            line="248"
             column="39"/>
     </issue>
 
@@ -844,7 +866,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/ServiceNotifications.kt"
-            line="144"
+            line="192"
             column="13"/>
     </issue>
 
@@ -855,7 +877,7 @@
         errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsComponents.kt"
-            line="247"
+            line="336"
             column="39"/>
     </issue>
 
@@ -873,7 +895,7 @@
         errorLine2="                                 ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/BackgroundCaptureSetupActivity.kt"
-            line="126"
+            line="118"
             column="34"/>
     </issue>
 
@@ -906,7 +928,7 @@
         errorLine2="                                                ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/HistoryRow.kt"
-            line="244"
+            line="252"
             column="49"/>
     </issue>
 
@@ -939,7 +961,7 @@
         errorLine2="                                 ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/PermissionsSettingsActivity.kt"
-            line="117"
+            line="104"
             column="34"/>
     </issue>
 
@@ -961,7 +983,7 @@
         errorLine2="                                           ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="123"
+            line="179"
             column="44"/>
     </issue>
 
@@ -972,7 +994,7 @@
         errorLine2="                                     ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="141"
+            line="206"
             column="38"/>
     </issue>
 
@@ -983,7 +1005,7 @@
         errorLine2="                                   ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="142"
+            line="207"
             column="36"/>
     </issue>
 
@@ -994,7 +1016,7 @@
         errorLine2="                                   ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="144"
+            line="209"
             column="36"/>
     </issue>
 
@@ -1005,7 +1027,7 @@
         errorLine2="        ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="148"
+            line="213"
             column="9"/>
     </issue>
 
@@ -1016,7 +1038,7 @@
         errorLine2="        ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="151"
+            line="216"
             column="9"/>
     </issue>
 
@@ -1027,7 +1049,7 @@
         errorLine2="        ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="154"
+            line="219"
             column="9"/>
     </issue>
 
@@ -1038,7 +1060,7 @@
         errorLine2="        ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="157"
+            line="222"
             column="9"/>
     </issue>
 
@@ -1049,7 +1071,7 @@
         errorLine2="        ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="160"
+            line="225"
             column="9"/>
     </issue>
 
@@ -1060,7 +1082,7 @@
         errorLine2="        ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="164"
+            line="229"
             column="9"/>
     </issue>
 
@@ -1071,7 +1093,7 @@
         errorLine2="                                          ~~~~~~~~~~~~~~">
         <location
             file="src/main/java/com/copypaste/android/SettingsActivity.kt"
-            line="279"
+            line="356"
             column="43"/>
     </issue>
 
@@ -1324,18 +1346,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="32"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.pair_request_new_token` appears to be unused"
-        errorLine1="    &lt;string name=&quot;pair_request_new_token&quot;>Request new token&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="47"
+            line="34"
             column="13"/>
     </issue>
 
@@ -1346,7 +1357,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="76"
+            line="78"
             column="13"/>
     </issue>
 
@@ -1357,7 +1368,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="87"
+            line="89"
             column="13"/>
     </issue>
 
@@ -1368,7 +1379,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="88"
+            line="90"
             column="13"/>
     </issue>
 
@@ -1379,7 +1390,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="90"
+            line="92"
             column="13"/>
     </issue>
 
@@ -1390,7 +1401,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="92"
+            line="94"
             column="13"/>
     </issue>
 
@@ -1401,7 +1412,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="97"
+            line="99"
             column="13"/>
     </issue>
 
@@ -1412,7 +1423,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="99"
+            line="101"
             column="13"/>
     </issue>
 
@@ -1423,7 +1434,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="101"
+            line="103"
             column="13"/>
     </issue>
 
@@ -1434,7 +1445,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="131"
+            line="133"
             column="13"/>
     </issue>
 
@@ -1445,7 +1456,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="132"
+            line="134"
             column="13"/>
     </issue>
 
@@ -1456,7 +1467,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="141"
+            line="145"
             column="13"/>
     </issue>
 
@@ -1467,7 +1478,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="216"
+            line="235"
             column="13"/>
     </issue>
 
@@ -1478,7 +1489,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="217"
+            line="236"
             column="13"/>
     </issue>
 
@@ -1489,7 +1500,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="265"
+            line="289"
             column="13"/>
     </issue>
 
@@ -1500,7 +1511,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="266"
+            line="290"
             column="13"/>
     </issue>
 
@@ -1511,7 +1522,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="268"
+            line="292"
             column="13"/>
     </issue>
 
@@ -1522,7 +1533,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="269"
+            line="293"
             column="13"/>
     </issue>
 
@@ -1533,18 +1544,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="278"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.cd_copy_fingerprint` appears to be unused"
-        errorLine1="    &lt;string name=&quot;cd_copy_fingerprint&quot;>Copy fingerprint&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="279"
+            line="302"
             column="13"/>
     </issue>
 
@@ -1555,7 +1555,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="285"
+            line="309"
             column="13"/>
     </issue>
 
@@ -1566,7 +1566,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="292"
+            line="316"
             column="13"/>
     </issue>
 
@@ -1577,7 +1577,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="293"
+            line="317"
             column="13"/>
     </issue>
 
@@ -1588,7 +1588,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="296"
+            line="320"
             column="13"/>
     </issue>
 
@@ -1599,7 +1599,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="309"
+            line="333"
             column="13"/>
     </issue>
 
@@ -1610,7 +1610,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="310"
+            line="334"
             column="13"/>
     </issue>
 
@@ -1621,7 +1621,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="311"
+            line="335"
             column="13"/>
     </issue>
 
@@ -1632,7 +1632,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="312"
+            line="336"
             column="13"/>
     </issue>
 
@@ -1643,7 +1643,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="353"
+            line="381"
             column="13"/>
     </issue>
 
@@ -1654,7 +1654,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="354"
+            line="382"
             column="13"/>
     </issue>
 
@@ -1665,7 +1665,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="355"
+            line="383"
             column="13"/>
     </issue>
 
@@ -1676,7 +1676,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="356"
+            line="384"
             column="13"/>
     </issue>
 
@@ -1687,7 +1687,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="357"
+            line="385"
             column="13"/>
     </issue>
 
@@ -1698,7 +1698,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="358"
+            line="386"
             column="13"/>
     </issue>
 
@@ -1709,7 +1709,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="359"
+            line="387"
             column="13"/>
     </issue>
 
@@ -1720,7 +1720,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="362"
+            line="390"
             column="13"/>
     </issue>
 
@@ -1731,7 +1731,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="363"
+            line="391"
             column="13"/>
     </issue>
 
@@ -1742,7 +1742,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="364"
+            line="392"
             column="13"/>
     </issue>
 
@@ -1753,7 +1753,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="365"
+            line="393"
             column="13"/>
     </issue>
 
@@ -1764,7 +1764,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="366"
+            line="394"
             column="13"/>
     </issue>
 
@@ -1775,7 +1775,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="367"
+            line="395"
             column="13"/>
     </issue>
 
@@ -1786,7 +1786,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="368"
+            line="396"
             column="13"/>
     </issue>
 
@@ -1797,7 +1797,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="369"
+            line="397"
             column="13"/>
     </issue>
 
@@ -1808,7 +1808,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="371"
+            line="399"
             column="13"/>
     </issue>
 
@@ -1819,7 +1819,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="372"
+            line="400"
             column="13"/>
     </issue>
 
@@ -1830,29 +1830,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="373"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.notif_native_unavailable_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;notif_native_unavailable_title&quot;>CopyPaste: sync disabled&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="376"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.notif_native_unavailable_content` appears to be unused"
-        errorLine1="    &lt;string name=&quot;notif_native_unavailable_content&quot;>The encryption library failed to load. Items will NOT be saved until the app is restarted.&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="377"
+            line="401"
             column="13"/>
     </issue>
 
@@ -1863,7 +1841,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="380"
+            line="410"
             column="13"/>
     </issue>
 
@@ -1874,18 +1852,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="384"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_section_paired` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_section_paired&quot;>Paired devices&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="395"
+            line="414"
             column="13"/>
     </issue>
 
@@ -1896,7 +1863,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="396"
+            line="426"
             column="13"/>
     </issue>
 
@@ -1907,18 +1874,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="397"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_qr_tap_to_reveal` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_qr_tap_to_reveal&quot;>Tap to reveal&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="398"
+            line="427"
             column="13"/>
     </issue>
 
@@ -1929,205 +1885,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="399"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_discovered_section` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_discovered_section&quot;>Discovered on your network&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="401"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_status_online` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_status_online&quot;>Online&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="404"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_status_offline` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_status_offline&quot;>Offline&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="405"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_badge_this_device` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_badge_this_device&quot;>This device&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="406"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_peer_default_name` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_peer_default_name&quot;>Paired device&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="407"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.meta_label_paired` appears to be unused"
-        errorLine1="    &lt;string name=&quot;meta_label_paired&quot;>Paired&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="413"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.meta_label_last_sync` appears to be unused"
-        errorLine1="    &lt;string name=&quot;meta_label_last_sync&quot;>Last sync&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="414"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.meta_label_rtt` appears to be unused"
-        errorLine1="    &lt;string name=&quot;meta_label_rtt&quot;>RTT&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="415"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.meta_label_rtt_value` appears to be unused"
-        errorLine1="    &lt;string name=&quot;meta_label_rtt_value&quot;>%1$d ms&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="416"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_no_peer_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_no_peer_title&quot;>No paired devices&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="420"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_no_peer_body` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_no_peer_body&quot;>Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="421"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_btn_pair_device` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_btn_pair_device&quot;>Pair a device&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="422"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.btn_unpair` appears to be unused"
-        errorLine1="    &lt;string name=&quot;btn_unpair&quot;>Unpair&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="425"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.btn_revoke` appears to be unused"
-        errorLine1="    &lt;string name=&quot;btn_revoke&quot;>Revoke&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="426"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.btn_pair` appears to be unused"
-        errorLine1="    &lt;string name=&quot;btn_pair&quot;>Pair&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="427"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.devices_no_secure_pairing` appears to be unused"
-        errorLine1="    &lt;string name=&quot;devices_no_secure_pairing&quot;>This device does not support secure pairing.&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="430"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sas_dialog_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sas_dialog_title&quot;>Pair “%1$s”&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="433"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sas_paired_ok` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sas_paired_ok&quot;>Paired ✓&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="437"
+            line="429"
             column="13"/>
     </issue>
 
@@ -2138,7 +1896,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="438"
+            line="468"
             column="13"/>
     </issue>
 
@@ -2149,7 +1907,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="439"
+            line="469"
             column="13"/>
     </issue>
 
@@ -2160,7 +1918,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="441"
+            line="471"
             column="13"/>
     </issue>
 
@@ -2171,40 +1929,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="442"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sas_btn_match` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sas_btn_match&quot;>Match&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="443"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sas_btn_no_match` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sas_btn_no_match&quot;>Doesn\&apos;t match&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="444"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.sas_btn_close` appears to be unused"
-        errorLine1="    &lt;string name=&quot;sas_btn_close&quot;>Close&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="445"
+            line="472"
             column="13"/>
     </issue>
 
@@ -2215,7 +1940,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="446"
+            line="476"
             column="13"/>
     </issue>
 
@@ -2226,73 +1951,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="447"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.dialog_forget_device_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_forget_device_title&quot;>Unpair device?&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="451"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.dialog_forget_device_body` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_forget_device_body&quot;>This device will no longer sync with %1$s over P2P. You can re-pair at any time by scanning a new QR code.&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="452"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.dialog_forget_btn` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_forget_btn&quot;>Unpair&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="453"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.dialog_revoke_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_revoke_title&quot;>Revoke pairing?&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="454"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.dialog_revoke_incomplete_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_revoke_incomplete_title&quot;>Revocation incomplete&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="456"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.dialog_scanner_unavailable_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;dialog_scanner_unavailable_title&quot;>Scanner unavailable&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="457"
+            line="477"
             column="13"/>
     </issue>
 
@@ -2303,7 +1962,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="460"
+            line="489"
             column="13"/>
     </issue>
 
@@ -2314,7 +1973,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="461"
+            line="490"
             column="13"/>
     </issue>
 
@@ -2325,7 +1984,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="462"
+            line="491"
             column="13"/>
     </issue>
 
@@ -2336,7 +1995,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="463"
+            line="492"
             column="13"/>
     </issue>
 
@@ -2347,7 +2006,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="467"
+            line="496"
             column="13"/>
     </issue>
 
@@ -2358,7 +2017,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="469"
+            line="498"
             column="13"/>
     </issue>
 
@@ -2369,7 +2028,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="470"
+            line="499"
             column="13"/>
     </issue>
 
@@ -2380,7 +2039,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="471"
+            line="500"
             column="13"/>
     </issue>
 
@@ -2391,7 +2050,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="472"
+            line="501"
             column="13"/>
     </issue>
 
@@ -2402,7 +2061,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="486"
+            line="516"
             column="13"/>
     </issue>
 
@@ -2413,7 +2072,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="487"
+            line="517"
             column="13"/>
     </issue>
 
@@ -2424,7 +2083,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="490"
+            line="520"
             column="13"/>
     </issue>
 
@@ -2435,7 +2094,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="503"
+            line="533"
             column="13"/>
     </issue>
 
@@ -2446,18 +2105,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="504"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.section_appearance` appears to be unused"
-        errorLine1="    &lt;string name=&quot;section_appearance&quot;>Appearance&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="515"
+            line="534"
             column="13"/>
     </issue>
 
@@ -2468,18 +2116,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="516"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.setting_accent_label` appears to be unused"
-        errorLine1="    &lt;string name=&quot;setting_accent_label&quot;>Accent&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="517"
+            line="546"
             column="13"/>
     </issue>
 
@@ -2490,7 +2127,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="518"
+            line="548"
             column="13"/>
     </issue>
 
@@ -2501,7 +2138,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="519"
+            line="549"
             column="13"/>
     </issue>
 
@@ -2512,7 +2149,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="520"
+            line="550"
             column="13"/>
     </issue>
 
@@ -2523,7 +2160,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="521"
+            line="551"
             column="13"/>
     </issue>
 
@@ -2534,7 +2171,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="522"
+            line="552"
             column="13"/>
     </issue>
 
@@ -2545,29 +2182,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="523"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.theme_light` appears to be unused"
-        errorLine1="    &lt;string name=&quot;theme_light&quot;>Light&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="524"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.theme_dark` appears to be unused"
-        errorLine1="    &lt;string name=&quot;theme_dark&quot;>Dark&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="525"
+            line="553"
             column="13"/>
     </issue>
 
@@ -2578,7 +2193,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="546"
+            line="587"
             column="13"/>
     </issue>
 
@@ -2589,7 +2204,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="547"
+            line="588"
             column="13"/>
     </issue>
 
@@ -2600,7 +2215,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="548"
+            line="589"
             column="13"/>
     </issue>
 
@@ -2611,40 +2226,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="549"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.pair_review_title` appears to be unused"
-        errorLine1="    &lt;string name=&quot;pair_review_title&quot;>Peer device&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="566"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.pair_review_subtitle` appears to be unused"
-        errorLine1="    &lt;string name=&quot;pair_review_subtitle&quot;>Verify the device details before confirming&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="567"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.string.pair_review_no_meta` appears to be unused"
-        errorLine1="    &lt;string name=&quot;pair_review_no_meta&quot;>No device metadata received&lt;/string>"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/strings.xml"
-            line="568"
+            line="590"
             column="13"/>
     </issue>
 
@@ -2655,7 +2237,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="577"
+            line="618"
             column="13"/>
     </issue>
 
@@ -2666,7 +2248,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="578"
+            line="619"
             column="13"/>
     </issue>
 
@@ -2677,7 +2259,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="583"
+            line="624"
             column="13"/>
     </issue>
 
@@ -2688,7 +2270,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
-            line="584"
+            line="625"
             column="13"/>
     </issue>
 
@@ -2729,7 +2311,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="333"
+            line="327"
             column="21"/>
     </issue>
 
@@ -2740,7 +2322,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="336"
+            line="330"
             column="21"/>
     </issue>
 
@@ -2751,7 +2333,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="364"
+            line="357"
             column="21"/>
     </issue>
 
@@ -2762,7 +2344,7 @@
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="377"
+            line="370"
             column="21"/>
     </issue>
 
@@ -2773,7 +2355,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="393"
+            line="386"
             column="25"/>
     </issue>
 
@@ -2784,7 +2366,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="399"
+            line="392"
             column="25"/>
     </issue>
 
@@ -2795,7 +2377,7 @@
         errorLine2="                        ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="407"
+            line="400"
             column="25"/>
     </issue>
 
@@ -2806,7 +2388,7 @@
         errorLine2="                               ~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="413"
+            line="406"
             column="32"/>
     </issue>
 
@@ -2817,7 +2399,7 @@
         errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="414"
+            line="407"
             column="32"/>
     </issue>
 
@@ -2828,7 +2410,7 @@
         errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="415"
+            line="408"
             column="32"/>
     </issue>
 
@@ -2839,7 +2421,7 @@
         errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="421"
+            line="414"
             column="32"/>
     </issue>
 
@@ -2850,7 +2432,7 @@
         errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="428"
+            line="421"
             column="32"/>
     </issue>
 
@@ -2861,7 +2443,7 @@
         errorLine2="                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="build.gradle.kts"
-            line="429"
+            line="422"
             column="26"/>
     </issue>
 

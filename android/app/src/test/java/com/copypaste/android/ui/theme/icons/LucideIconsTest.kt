@@ -43,9 +43,15 @@ class LucideIconsTest {
             LucideIcons.PairingQr, LucideIcons.NavBack,
             LucideIcons.ActionClose, LucideIcons.ActionOpenExternal,
             LucideIcons.ActionDownload, LucideIcons.ActionBookmark,
+            LucideIcons.PermissionNotifications, LucideIcons.PermissionBattery,
+            LucideIcons.PermissionForegroundService, LucideIcons.PermissionOverlay,
+            LucideIcons.ActionPlay, LucideIcons.PermissionOemSetup,
         )
-        assertEquals(34, roles.size)
-        roles.forEach { assertNotSame(null, it) }
+        assertEquals(40, roles.size)
+        roles.forEach {
+            assert(it.defaultWidth.value > 0f) { "expected positive defaultWidth for $it" }
+            assert(it.defaultHeight.value > 0f) { "expected positive defaultHeight for $it" }
+        }
     }
 
     /** android-iconography "Fixed box per icon role" requirement (task 2.8's icon-role size table). */

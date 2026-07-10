@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontFamily
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import kotlinx.coroutines.Dispatchers
@@ -80,7 +81,7 @@ private fun SasPeerMetadataCard(status: PairStatus) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(CpSpacing.s2),
     ) {
         fields.forEach { (label, value) ->
             MetaRow(label = label, value = value)
@@ -136,6 +137,7 @@ internal fun SasPairingDialog(
                 peerLocalIp = null,
                 peerPublicIp = null,
                 peerDeviceId = null,
+                peerSupabaseAccountId = null,
             )
         )
     }
@@ -188,6 +190,9 @@ internal fun SasPairingDialog(
                         // CopyPaste-3k6m (ABI 17): persist the peer's stable device UUID so
                         // OriginDeviceFilter resolves clipboard item names by UUID.
                         peerDeviceId = st.peerDeviceId,
+                        // CopyPaste-6udn (ABI 19): persist the peer's linked Supabase
+                        // account id received over the SAS pairing.
+                        peerSupabaseAccountId = st.peerSupabaseAccountId,
                     )
                 )
 
@@ -301,6 +306,8 @@ internal fun SasPairingDialog(
                                 peerPublicIp = status.peerPublicIp,
                                 // CopyPaste-3k6m: carry forward peer_device_id.
                                 peerDeviceId = status.peerDeviceId,
+                                // CopyPaste-6udn: carry forward peer_supabase_account_id.
+                                peerSupabaseAccountId = status.peerSupabaseAccountId,
                             )
                             onPaired()
                         } else {
@@ -376,7 +383,7 @@ internal fun SasPairingDialog(
         onDismissRequest = { handleClose() },
         title = { Text(stringResource(R.string.sas_dialog_title, title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s4)) {
                 when {
                     ended -> {
                         Text(
@@ -419,7 +426,7 @@ internal fun SasPairingDialog(
                         // token. The row is display-only (no clickable, no long-press copy).
                         val sasFull = status.sas ?: ""
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4, Alignment.CenterHorizontally),
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()

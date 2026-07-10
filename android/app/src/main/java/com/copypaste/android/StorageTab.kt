@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -22,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
@@ -150,6 +154,11 @@ internal fun StorageTab(
     // CopyPaste-bdac.42: compact (VACUUM) the SQLCipher database (macOS parity).
     // Null → not yet available (no FFI vacuum entry point on Android yet).
     onVacuumDatabase: (() -> Unit)? = null,
+    // Wave 3: transient loading state for the export/import/vacuum actions, hoisted
+    // in SettingsActivity (set true before the coroutine, false in finally).
+    exportInFlight: Boolean = false,
+    importInFlight: Boolean = false,
+    vacuumInFlight: Boolean = false,
 ) {
     Column {
         SectionLabel(stringResource(R.string.section_storage_limits))
@@ -318,8 +327,17 @@ internal fun StorageTab(
                     CopyPasteButton(
                         onClick = { onExportHistory(includeSensitiveExport) },
                         variant = ButtonVariant.PRIMARY,
+                        enabled = !exportInFlight,
                     ) {
-                        Text(stringResource(R.string.action_export))
+                        if (exportInFlight) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = LocalContentColor.current,
+                            )
+                        } else {
+                            Text(stringResource(R.string.action_export))
+                        }
                     }
                 }
                 // Include-sensitive toggle row — mirrors macOS "Include sensitive items" checkbox.
@@ -368,8 +386,17 @@ internal fun StorageTab(
                 CopyPasteButton(
                     onClick = onImportHistory,
                     variant = ButtonVariant.PRIMARY,
+                    enabled = !importInFlight,
                 ) {
-                    Text(stringResource(R.string.action_import))
+                    if (importInFlight) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = LocalContentColor.current,
+                        )
+                    } else {
+                        Text(stringResource(R.string.action_import))
+                    }
                 }
             }
             SettingsCardDivider()
@@ -438,9 +465,17 @@ internal fun StorageTab(
                 CopyPasteButton(
                     onClick = { onVacuumDatabase?.invoke() },
                     variant = ButtonVariant.PRIMARY,
-                    enabled = onVacuumDatabase != null,
+                    enabled = onVacuumDatabase != null && !vacuumInFlight,
                 ) {
-                    Text(stringResource(R.string.btn_compact_db))
+                    if (vacuumInFlight) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = LocalContentColor.current,
+                        )
+                    } else {
+                        Text(stringResource(R.string.btn_compact_db))
+                    }
                 }
             }
         }

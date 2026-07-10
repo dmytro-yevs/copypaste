@@ -58,6 +58,17 @@ import org.junit.Test
 //     COMPILES (`:app:compileDebugAndroidTestKotlin`) and is ready for the
 //     pending local emulator run (bd-noted as outstanding, mirrors every
 //     other connected test in this slice/wave).
+//   - CopyPaste-9u7l fix: the backdrop refreshes via a BOUNDED, THROTTLED
+//     polling loop (`CapturedBackdropBlur`'s `LaunchedEffect`, ~100ms
+//     ceiling), not an immediate/synchronous invalidation on scroll — so
+//     after `performScrollToIndex` + `waitForIdle` this test also sleeps past
+//     that refresh-latency ceiling (`Thread.sleep(2_000)` + a second
+//     `waitForIdle`) before sampling `afterScroll`, to avoid a flaky false
+//     negative from asserting before the throttled tick has fired. 2s (20x
+//     the 100ms ceiling) rather than a tighter margin: a bulk
+//     `connectedDebugAndroidTest` run with 26 tests back-to-back is
+//     measurably slower per-frame than running this class alone, and both
+//     250ms and 500ms margins flaked under that load.
 // ---------------------------------------------------------------------------
 class BackdropScrollFreshnessConnectedTest {
 
@@ -68,7 +79,7 @@ class BackdropScrollFreshnessConnectedTest {
         Color(0xFFE53935), Color(0xFFFFB300), Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA),
     )
 
-    @Test
+    @Test(timeout = 30_000)
     fun pillBackdropShowsFreshPixelsAfterAProgrammaticScroll() {
         assumeTrue(
             "REAL_BACKDROP blur (RenderEffect) requires API 31+",
@@ -123,7 +134,18 @@ class BackdropScrollFreshnessConnectedTest {
 
         val beforeScroll = composeRule.onNodeWithTag("navPill").captureToImage().asAndroidBitmap()
 
-        composeRule.onNodeWithTag("scrollContent").performScrollToIndex(150)
+        // 152, not a multiple of `stripeColors.size` (5): scrolling by a
+        // multiple of the stripe period would leave every visible pixel color
+        // byte-identical to the pre-scroll frame (index % 5 unchanged for
+        // every visible row) regardless of whether the backdrop actually
+        // refreshed, making the probe below vacuously pass/fail on layout
+        // alone rather than on freshness.
+        composeRule.onNodeWithTag("scrollContent").performScrollToIndex(152)
+        composeRule.waitForIdle()
+        // Bounded-latency polling refresh (CopyPaste-9u7l): the throttled tick
+        // loop has a ~100ms ceiling, so wait past it before sampling. 2s
+        // margin found necessary under bulk-suite load (see class kdoc).
+        Thread.sleep(2_000)
         composeRule.waitForIdle()
 
         val afterScroll = composeRule.onNodeWithTag("navPill").captureToImage().asAndroidBitmap()

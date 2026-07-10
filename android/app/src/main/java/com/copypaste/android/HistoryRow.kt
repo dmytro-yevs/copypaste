@@ -70,6 +70,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.material3.ColorScheme
 import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.CpDimensions
+import com.copypaste.android.ui.theme.CpSpacing
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -446,7 +448,7 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp)
+                    .heightIn(min = CpDimensions.touchMin)
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -542,7 +544,7 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp),
+                    .heightIn(min = CpDimensions.touchMin),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // egsf: kind-tinted icon tile (§3.7/§9.4: color@14% bg, full-strength glyph) — parity .ci
@@ -566,7 +568,7 @@ internal fun HistoryRow(
                     // CopyPaste-9uyk: source-app badge added after timestamp for file rows.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s3),
                     ) {
                         Text(
                             text = relativeTime(item.wallTimeMs),
@@ -619,7 +621,7 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp),
+                    .heightIn(min = CpDimensions.touchMin),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // egsf: kind-tinted icon tile (§3.7/§9.4: color@14% bg, full-strength glyph) — parity .ci

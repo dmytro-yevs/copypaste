@@ -26,6 +26,7 @@ import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CpBadgeChip
 import com.copypaste.android.ui.theme.CpDimensions
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.icons.LucideIcons
@@ -78,7 +79,7 @@ internal fun ScannedPeerReviewCard(
     CopyPasteCard {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(CpSpacing.s4),
         ) {
             // lclr: avatar tile — accent-tint rounded tile with device initial.
             Row(
@@ -99,7 +100,7 @@ internal fun ScannedPeerReviewCard(
                         color = accent,
                     )
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                     Text(
                         text = stringResource(R.string.pair_review_title),
                         style = CpTypography.micro,
@@ -162,7 +163,7 @@ internal fun ScannedPeerReviewCard(
                     peerAppVersion = bs.peerAppVersion,
                 )
                 if (metaRows.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                         metaRows.forEach { (labelKey, value) ->
                             // Resolve the string resource by name.
                             // The label keys map 1:1 to strings.xml entries
@@ -250,7 +251,7 @@ internal fun PairedDeviceSummaryCard(
 
     // 6i0w: replace raw Material Card with CopyPasteCard.
     CopyPasteCard {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(CpSpacing.s4)) {
             // lclr: avatar tile — accent-tint rounded tile with a device glyph
             // (LucideIcons.NavDevices — replaces the former raw "📱" emoji, which
             // renders inconsistently across OEM emoji fonts).
@@ -272,7 +273,7 @@ internal fun PairedDeviceSummaryCard(
                         modifier = Modifier.size(CpDimensions.glyphBox),
                     )
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                     Text(
                         text = stringResource(R.string.s8_paired_device_label),
                         style = CpTypography.micro,
@@ -284,7 +285,7 @@ internal fun PairedDeviceSummaryCard(
                     // once reachability is confirmed unreachable.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s3),
                     ) {
                         Box(
                             modifier = Modifier

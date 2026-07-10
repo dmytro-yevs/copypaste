@@ -38,6 +38,9 @@ class ConfigKnobsStore(private val prefs: SharedPreferences) {
         pasteAsPlainText: Boolean = this.pasteAsPlainText,
         excludedAppBundleIds: List<String> = this.excludedAppBundleIds,
     ): uniffi.copypaste_android.Config {
+        // Kotlin only floors negatives; the UPPER bounds (e.g. the 100 MiB
+        // maxFileSizeBytes ceiling) are enforced solely by the native
+        // clampConfig below — do not assume this layer caps anything.
         val candidate = configDefaults.copy(
             maxTextSizeBytes = maxTextSizeBytes.coerceAtLeast(0L).toULong(),
             maxImageSizeBytes = maxImageSizeBytes.coerceAtLeast(0L).toULong(),
@@ -57,18 +60,28 @@ class ConfigKnobsStore(private val prefs: SharedPreferences) {
     }
 
     /**
-     * Clamp only [maxTextSizeBytes]/[maxImageSizeBytes]/[storageQuotaBytes] for
-     * [Settings.saveScreenSettings], leaving the other knobs at their currently
-     * stored values (mirrors the per-setter clamp behavior above).
+     * Clamp the size/quota/ttl/privacy knobs for [Settings.saveScreenSettings]
+     * (CopyPaste-myh8.9 wave 0: folds these into the atomic Save batch instead
+     * of the individual per-setter `apply()` writes below).
      */
     fun clampConfigForSave(
         maxTextSizeBytes: Long,
         maxImageSizeBytes: Long,
         storageQuotaBytes: Long,
+        maxFileSizeBytes: Long,
+        sensitiveTtlSecs: Long,
+        collectPublicIp: Boolean,
+        pasteAsPlainText: Boolean,
+        excludedAppBundleIds: List<String>,
     ): uniffi.copypaste_android.Config = clampSizeKnobs(
         maxTextSizeBytes = maxTextSizeBytes,
         maxImageSizeBytes = maxImageSizeBytes,
         storageQuotaBytes = storageQuotaBytes,
+        maxFileSizeBytes = maxFileSizeBytes,
+        sensitiveTtlSecs = sensitiveTtlSecs,
+        collectPublicIp = collectPublicIp,
+        pasteAsPlainText = pasteAsPlainText,
+        excludedAppBundleIds = excludedAppBundleIds,
     )
 
     /**
@@ -187,12 +200,15 @@ class ConfigKnobsStore(private val prefs: SharedPreferences) {
         private val configDefaultsLock = Any()
 
         // ── Excluded apps (privacy) ─────────────────────────────────────────────
-        private const val KEY_EXCLUDED_APP_BUNDLE_IDS = "excluded_app_bundle_ids"
+        // internal (not private): Settings.saveScreenSettings needs the same
+        // key to serialize excludedAppBundleIds into its own atomic commit()
+        // batch (CopyPaste-myh8.9 wave 0) without duplicating the format.
+        internal const val KEY_EXCLUDED_APP_BUNDLE_IDS = "excluded_app_bundle_ids"
 
         /**
          * NUL delimiter for the joined [excludedAppBundleIds] pref string. NUL never
          * occurs in a package/bundle id, so it cannot collide with an entry.
          */
-        private const val EXCLUDED_APP_DELIM = "\u0000"
+        internal const val EXCLUDED_APP_DELIM = "\u0000"
     }
 }

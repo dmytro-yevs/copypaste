@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.shell.MainShell
 import com.copypaste.android.ui.theme.CommittedCopyPasteTheme
@@ -88,6 +89,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // installSplashScreen() must be called BEFORE super.onCreate() (library
+        // contract — it reads/replaces the current theme's windowBackground
+        // before the Activity's own onCreate has a chance to set content).
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
         // SecureWindowChrome applies FLAG_SECURE centrally when allowScreenshots=false (the default).

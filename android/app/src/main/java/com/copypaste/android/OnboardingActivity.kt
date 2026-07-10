@@ -112,6 +112,8 @@ class OnboardingActivity : ComponentActivity() {
                     onOpenOemAutoStart = { permissions.openOemAutoStart() },
                     onExportLogs = { LogExportHelper.shareLogsZip(this@OnboardingActivity) },
                     onDone = { finish() },
+                    // Re-evaluated every recomposition via refreshTrigger (read above).
+                    notificationStatus = NotificationPermissionHelper.notificationPermissionStatus(this@OnboardingActivity),
                     oemHint = oemToastMsg,
                     onOemHintConsumed = { oemToastMsg = null },
                 )
@@ -133,13 +135,23 @@ class OnboardingActivity : ComponentActivity() {
          * is set up via ADB — not blockable at this gate.
          */
         fun allCriticalGranted(context: android.content.Context): Boolean {
-            val notifOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val isGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 ContextCompat.checkSelfPermission(
                     context, Manifest.permission.POST_NOTIFICATIONS
                 ) == PackageManager.PERMISSION_GRANTED
             } else true
+            // Only isGranted/sdkInt affect the GRANTED/NOT_APPLICABLE outcome this gate
+            // cares about; wasRequested/shouldShowRationale are irrelevant here (this call
+            // site takes a Context, not an Activity, so rationale isn't queryable) and are
+            // never consulted once isGranted or sdkInt already resolves the status.
+            val status = NotificationPermissionHelper.notificationStatus(
+                sdkInt = Build.VERSION.SDK_INT,
+                isGranted = isGranted,
+                wasRequested = false,
+                shouldShowRationale = false,
+            )
             // Battery/overlay/READ_LOGS are opt-in; only POST_NOTIFICATIONS blocks onboarding.
-            return notifOk
+            return status.isSatisfied()
         }
     }
 }

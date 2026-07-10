@@ -1,5 +1,7 @@
 package com.copypaste.android
 
+import androidx.compose.runtime.Composable
+import com.copypaste.android.ui.theme.relativeTimeAgoLabel
 import java.text.DateFormat
 import java.util.Date
 
@@ -7,16 +9,12 @@ import java.util.Date
 // Relative time helper — §5 tabular-nums timestamps
 // ─────────────────────────────────────────────────────────────────────────────
 
+@Composable
 internal fun relativeTime(ms: Long): String {
     if (ms <= 0L) return "—"
     val diff = System.currentTimeMillis() - ms
-    return when {
-        diff < 60_000L      -> "just now"
-        diff < 3_600_000L   -> "${diff / 60_000}m ago"
-        diff < 86_400_000L  -> "${diff / 3_600_000}h ago"
-        diff < 7 * 86_400_000L -> "${diff / 86_400_000}d ago"
-        else -> DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ms))
-    }
+    if (diff >= 7 * 86_400_000L) return DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ms))
+    return relativeTimeAgoLabel(diff)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

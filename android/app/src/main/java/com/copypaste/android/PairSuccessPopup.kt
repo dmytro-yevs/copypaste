@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CpDimensions
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalCpColors
@@ -85,7 +86,7 @@ internal fun PairedSuccessPopup(
                             color = accent,
                         )
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                         Text(
                             text = displayName,
                             style = CpTypography.bodyEmphasis,
@@ -93,7 +94,7 @@ internal fun PairedSuccessPopup(
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s3),
                         ) {
                             // prld: status dot, success state — pairing just completed.
                             Box(
@@ -112,7 +113,7 @@ internal fun PairedSuccessPopup(
                 }
 
                 // ── Device metadata rows (only non-blank fields) ─────────────
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                     peer.peerModel?.takeIf { it.isNotBlank() }?.let {
                         PopupMetaRow(label = stringResource(R.string.meta_label_model), value = it)
                     }
@@ -143,7 +144,7 @@ private fun PopupMetaRow(label: String, value: String) {
     val cp = LocalCpColors.current
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4),
     ) {
         Text(text = label, style = CpTypography.meta, color = cp.faint)
         Text(

@@ -28,6 +28,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
@@ -50,6 +51,7 @@ import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -88,6 +90,23 @@ private const val TAB_DISPLAY       = 1
 private const val TAB_SYNC          = 2
 private const val TAB_STORAGE       = 3
 private const val TAB_NOTIFICATIONS = 4
+
+/**
+ * CopyPaste-26zi: whether the Supabase poll worker should run — gates on
+ * [Settings.supabaseEnabled] and [Settings.isSupabaseConfigured] directly,
+ * mirroring [SupabasePollWorker]'s own self-gate in `doWork()`, rather than the
+ * legacy `syncBackend == SyncBackend.SUPABASE` enum hint.
+ *
+ * Split into a pure boolean overload + a [Settings]-reading convenience overload
+ * so the gate logic is unit-testable without touching [Settings.cloudSyncPassphrase]
+ * / [Settings.cloudSyncKeyDirect] (both keystore-backed — real AndroidKeyStore is
+ * unavailable under this module's Robolectric JVM tests; see KeystoreSecretStoreTest).
+ */
+internal fun shouldScheduleSupabasePoll(supabaseEnabled: Boolean, isSupabaseConfigured: Boolean): Boolean =
+    supabaseEnabled && isSupabaseConfigured
+
+internal fun shouldScheduleSupabasePoll(settings: Settings): Boolean =
+    shouldScheduleSupabasePoll(settings.supabaseEnabled, settings.isSupabaseConfigured)
 
 /**
  * The Settings screen's appearance draft/commit contract (android-appearance
@@ -147,6 +166,9 @@ fun SettingsScreen(
 
     // ── Draft dirty flag — true once any setting is changed, reset to false after save ──
     var dirty by remember { mutableStateOf(false) }
+    // Wave 3: transient "Saved" acknowledgement on the header Save button — set true
+    // on a successful commitSave(), auto-reset by the LaunchedEffect near commitSave().
+    var justSaved by remember { mutableStateOf(false) }
     // ── Discard-confirmation dialog state ──
     var showDiscardDialog by remember { mutableStateOf(false) }
     var pendingProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -245,6 +267,14 @@ fun SettingsScreen(
 
     // bd CopyPaste-44rq.22: toast state for export/import feedback.
     val toastState = remember { GlassToastState() }
+    // CopyPaste-myh8.13 S13 Wave a: captured here (composable scope) — the
+    // test-connection toast fires from settingsScope.launch(Dispatchers.IO), where
+    // stringResource() cannot be called (not a @Composable context).
+    val syncTestNoTransportEnabled = stringResource(R.string.sync_test_no_transport_enabled)
+    val syncTestRelayOk = stringResource(R.string.sync_test_relay_ok)
+    val syncTestRelayFailed = stringResource(R.string.sync_test_relay_failed)
+    val syncTestSupabaseOk = stringResource(R.string.sync_test_supabase_ok)
+    val syncTestSupabaseFailed = stringResource(R.string.sync_test_supabase_failed)
     // CopyPaste-5917.17: scope for GlassToast.show (suspend) from non-composable callbacks
     // (AdbCmdRow tap, log export error). Hoisted at screen level so any tab can use it.
     val settingsScope = rememberCoroutineScope()
@@ -307,25 +337,26 @@ fun SettingsScreen(
             notifyOnCopy = notifyOnCopy,
             soundOnCopy = soundOnCopy,
             logcatCaptureEnabled = logcatEnabled,
+            // CopyPaste-myh8.9 wave 0: folded into the atomic batch — these used to
+            // be separate apply()-based setter calls below, each independently
+            // droppable by a force-stop right after Save.
+            collectPublicIp = collectPublicIp,
+            pasteAsPlainText = pasteAsPlainText,
+            excludedAppBundleIds = excludedApps,
+            showSensitiveWarnings = revealGuard,
+            autoApplySyncedClip = autoApplySyncedClip,
+            maxFileSizeBytes = maxFileSizeBytes,
+            sensitiveTtlSecs = sensitiveTtlSecs,
+            // §3/P1#9: preview-lines pref is pref-only (no daemon IPC), like density.
+            previewLines = previewLines,
+            // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
+            maxHistoryItems = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
         )
         if (!committed) return false
-        settings.maxFileSizeBytes = maxFileSizeBytes
-        settings.sensitiveTtlSecs = sensitiveTtlSecs
-        // §3/P1#9: preview-lines pref is pref-only (no daemon IPC), like density.
-        settings.previewLines = previewLines
-        // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
-        settings.maxHistoryItems = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         // CopyPaste-iovc: apply the cap immediately so stored/displayed history is
         // trimmed right away — without waiting for the next clipboard capture.
         ClipboardRepository(ctx).applyHistoryCap()
-        settings.collectPublicIp = collectPublicIp
-        settings.pasteAsPlainText = pasteAsPlainText
-        settings.excludedAppBundleIds = excludedApps
-        // CopyPaste-bdac.35: persist reveal-guard toggle (not in saveScreenSettings batch).
-        settings.showSensitiveWarnings = revealGuard
-        // CopyPaste-44rq.24: persist auto-apply-synced-clip toggle.
-        settings.autoApplySyncedClip = autoApplySyncedClip
-        SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
+        SupabasePollWorker.schedule(ctx, enabled = shouldScheduleSupabasePoll(settings))
         LogcatCaptureService.syncState(ctx, settings)
         return true
     }
@@ -387,12 +418,22 @@ fun SettingsScreen(
     fun commitSave() {
         if (persistAll()) {
             dirty = false
+            justSaved = true
             appearanceDraft.commit()
             onSaved()
         } else {
             settingsScope.launch {
                 toastState.show(ctx.getString(R.string.toast_settings_save_failed), GlassToastKind.DANGER)
             }
+        }
+    }
+
+    // Wave 3: transient "Saved" label on the header Save button, auto-reset after
+    // ~1200ms — a lightweight visual acknowledgement, not a new toast.
+    LaunchedEffect(justSaved) {
+        if (justSaved) {
+            delay(1200)
+            justSaved = false
         }
     }
 
@@ -423,7 +464,13 @@ fun SettingsScreen(
             onDismissRequest = { showCapReductionConfirm = false },
             title = { Text(stringResource(R.string.dialog_max_items_reduce_title)) },
             text = {
-                Text(stringResource(R.string.dialog_max_items_reduce_body, pendingCapPruneCount))
+                Text(
+                    pluralStringResource(
+                        R.plurals.dialog_max_items_reduce_body,
+                        pendingCapPruneCount,
+                        pendingCapPruneCount,
+                    ),
+                )
             },
             confirmButton = {
                 CopyPasteButton(
@@ -462,7 +509,12 @@ fun SettingsScreen(
                         variant = ButtonVariant.PRIMARY,
                         enabled = dirty,
                     ) {
-                        Text(text = stringResource(R.string.btn_save))
+                        Text(
+                            text = if (justSaved && !dirty)
+                                stringResource(R.string.btn_save_saved)
+                            else
+                                stringResource(R.string.btn_save),
+                        )
                     }
                 },
             )
@@ -560,6 +612,12 @@ fun SettingsScreen(
                         // (in onExportHistory below) so the SAF result callback always sees the
                         // value the user had selected when they pressed "Export".
                         var exportIncludeSensitive by remember { mutableStateOf(false) }
+                        // Wave 3: transient loading states for the Storage tab's async actions,
+                        // hoisted here so they survive the file-picker round trip and drive
+                        // StorageTab's per-button spinners.
+                        var exportInFlight by remember { mutableStateOf(false) }
+                        var importInFlight by remember { mutableStateOf(false) }
+                        var vacuumInFlight by remember { mutableStateOf(false) }
                         val exportLauncher = rememberLauncherForActivityResult(
                             androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
                         ) { uri ->
@@ -567,6 +625,7 @@ fun SettingsScreen(
                             // Capture the flag into a local val so the coroutine closure is stable
                             // even if a recomposition updates the outer var before the IO work runs.
                             val includeSensitive = exportIncludeSensitive
+                            exportInFlight = true
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val key = settings.encryptionKey
@@ -579,6 +638,8 @@ fun SettingsScreen(
                                 } catch (e: Exception) {
                                     android.util.Log.e("SettingsActivity", "Export failed: ${e.message}", e)
                                     toastState.show(ctx.getString(R.string.history_export_failed), GlassToastKind.DANGER)
+                                } finally {
+                                    exportInFlight = false
                                 }
                             }
                         }
@@ -589,20 +650,27 @@ fun SettingsScreen(
                             androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
                         ) { uri ->
                             if (uri == null) return@rememberLauncherForActivityResult
+                            importInFlight = true
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val json = ctx.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }
                                         ?: return@launch
                                     val key = settings.encryptionKey
-                                    val count = repository.importHistory(json, key)
+                                    val count = repository.importHistory(json, key, settings)
                                     android.util.Log.i("SettingsActivity", "Imported $count items from $uri")
                                     toastState.show(
-                                        ctx.getString(R.string.history_import_ok, count),
+                                        ctx.resources.getQuantityString(
+                                            R.plurals.history_import_ok,
+                                            count,
+                                            count,
+                                        ),
                                         GlassToastKind.SUCCESS,
                                     )
                                 } catch (e: Exception) {
                                     android.util.Log.e("SettingsActivity", "Import failed: ${e.message}", e)
                                     toastState.show(ctx.getString(R.string.history_import_failed), GlassToastKind.DANGER)
+                                } finally {
+                                    importInFlight = false
                                 }
                             }
                         }
@@ -652,25 +720,33 @@ fun SettingsScreen(
                             // mirrors the conventional FFI live-DB location. With the native
                             // library absent the call is a validated no-op (stub mode, still Ok).
                             onVacuumDatabase = {
+                                vacuumInFlight = true
                                 scope.launch(Dispatchers.IO) {
-                                    val dbPath = ctx.getDatabasePath("copypaste.db").absolutePath
-                                    val ok = runCatching {
-                                        val key = settings.encryptionKey
-                                        dbVacuum(dbPath, key)
-                                    }.isSuccess
-                                    if (ok) {
-                                        toastState.show(
-                                            ctx.getString(R.string.toast_compact_db_ok),
-                                            GlassToastKind.SUCCESS,
-                                        )
-                                    } else {
-                                        toastState.show(
-                                            ctx.getString(R.string.toast_compact_db_fail),
-                                            GlassToastKind.DANGER,
-                                        )
+                                    try {
+                                        val dbPath = ctx.getDatabasePath("copypaste.db").absolutePath
+                                        val ok = runCatching {
+                                            val key = settings.encryptionKey
+                                            dbVacuum(dbPath, key)
+                                        }.isSuccess
+                                        if (ok) {
+                                            toastState.show(
+                                                ctx.getString(R.string.toast_compact_db_ok),
+                                                GlassToastKind.SUCCESS,
+                                            )
+                                        } else {
+                                            toastState.show(
+                                                ctx.getString(R.string.toast_compact_db_fail),
+                                                GlassToastKind.DANGER,
+                                            )
+                                        }
+                                    } finally {
+                                        vacuumInFlight = false
                                     }
                                 }
                             },
+                            exportInFlight = exportInFlight,
+                            importInFlight = importInFlight,
+                            vacuumInFlight = vacuumInFlight,
                         )
                     }
                     TAB_SYNC -> SyncTab(
@@ -723,7 +799,7 @@ fun SettingsScreen(
 
                                 if (!spec.relay && !spec.supabase) {
                                     toastState.show(
-                                        "No enabled transport to test — enable Relay or Supabase above.",
+                                        syncTestNoTransportEnabled,
                                         GlassToastKind.DANGER,
                                     )
                                     return@launch
@@ -736,7 +812,7 @@ fun SettingsScreen(
                                     val ok = runCatching {
                                         RelayClient(draftRelayUrl).health()
                                     }.getOrDefault(false)
-                                    parts += if (ok) "Relay: OK" else "Relay: failed"
+                                    parts += if (ok) syncTestRelayOk else syncTestRelayFailed
                                     if (!ok) allOk = false
                                 }
 
@@ -744,7 +820,7 @@ fun SettingsScreen(
                                     val ok = runCatching {
                                         SupabaseClient(draftSupabaseUrl, draftAnonKey).health()
                                     }.getOrDefault(false)
-                                    parts += if (ok) "Supabase: OK" else "Supabase: failed"
+                                    parts += if (ok) syncTestSupabaseOk else syncTestSupabaseFailed
                                     if (!ok) allOk = false
                                 }
 

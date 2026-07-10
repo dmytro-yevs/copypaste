@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
@@ -107,27 +108,37 @@ internal fun IdeSegmentedControl(
     ) {
         options.forEachIndexed { index, label ->
             val isSelected = index == selectedIndex
+            // Outer box carries the >=48dp touch target (WCAG 2.5.5) without
+            // inflating the segment's visual size — the inner box keeps the
+            // original chip padding/background so the control's look is unchanged.
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(CpShapes.chip))
-                    .then(
-                        if (isSelected) Modifier.background(cp.raised) else Modifier,
-                    )
+                    .heightIn(min = CpDimensions.touchMin)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null, // suppress ripple — bg fill is the selection indicator
                         onClick = { onSelect(index) },
-                    )
-                    .padding(vertical = 6.dp),
+                    ),
             ) {
-                Text(
-                    text = label,
-                    style = if (isSelected) CpTypography.bodyEmphasis else CpTypography.body,
-                    color = if (isSelected) cp.text else cp.dim,
-                    maxLines = 1,
-                )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(CpShapes.chip))
+                        .then(
+                            if (isSelected) Modifier.background(cp.raised) else Modifier,
+                        )
+                        .padding(vertical = 6.dp),
+                ) {
+                    Text(
+                        text = label,
+                        style = if (isSelected) CpTypography.bodyEmphasis else CpTypography.body,
+                        color = if (isSelected) cp.text else cp.dim,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -209,6 +220,8 @@ internal fun SettingsTextField(
     value: String,
     onValueChange: (String) -> Unit,
     password: Boolean = false,
+    isError: Boolean = false,
+    errorText: String? = null,
 ) {
     // AND4: No onCommit — values are buffered until Save is pressed.
     OutlinedTextField(
@@ -227,6 +240,10 @@ internal fun SettingsTextField(
             imeAction = ImeAction.Done,
         ) else KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = {}),
+        isError = isError,
+        supportingText = if (isError && errorText != null) {
+            { Text(errorText) }
+        } else null,
     )
 }
 
@@ -396,22 +413,27 @@ internal fun AdbCmdRow(
         style = CpTypography.meta,
         color = cp.faint,
     )
-    Text(
-        text = cmd,
-        // Mono font — machine-shaped input (STYLEGUIDE §9.3 "Mono font when the
-        // field holds machine input").
-        style = CpTypography.bodyMono,
-        color = MaterialTheme.colorScheme.primary,
+    Box(
+        contentAlignment = Alignment.CenterStart,
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = CpDimensions.touchMin)
             // CopyPaste-n7ff: announce as a Button with a "Copy command" action.
             .semantics { role = Role.Button }
-            .clickable(onClickLabel = "Copy command") {
+            .clickable(onClickLabel = stringResource(R.string.onboarding_copy_command_label)) {
                 val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as ClipboardManager
                 cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", cmd))
                 // CopyPaste-5917.17: route feedback through GlassToastHost, not OS Toast.
                 onToastRequest(toastText)
             },
-    )
+    ) {
+        Text(
+            text = cmd,
+            // Mono font — machine-shaped input (STYLEGUIDE §9.3 "Mono font when the
+            // field holds machine input").
+            style = CpTypography.bodyMono,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
 }

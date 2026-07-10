@@ -12,6 +12,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -19,8 +21,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -31,18 +35,29 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.DarkColors
+import com.copypaste.android.ui.theme.LocalAccent
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SecureWindowChrome
+import kotlinx.coroutines.launch
 
 class AboutActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,6 +91,13 @@ private const val GITHUB_URL = "https://github.com/dmytro-yevs/copypaste"
  */
 internal fun versionLabel(): String = BuildConfig.VERSION_NAME
 
+/**
+ * Version + build number, e.g. "0.5.3 (build 42)" — S11 W4 adds the build
+ * number alongside [versionLabel] for support/bug-report identification.
+ */
+internal fun buildIdentifierLabel(): String =
+    "${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})"
+
 @Composable
 fun AboutScreen(
     modifier: Modifier = Modifier,
@@ -83,13 +105,20 @@ fun AboutScreen(
     onBack: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val toastState = remember { GlassToastState() }
+    val linkFailedMsg = stringResource(R.string.about_link_failed)
+    // No isDark composition local is exposed directly; DarkColors/LightColors are the
+    // two possible CpColors instances so identity comparison recovers the axis
+    // (mirrors the pattern the brand-mark gradient below needs from LocalAccent).
+    val isDark = LocalCpColors.current === DarkColors
 
     // Entrance trigger — flip to true on first composition so the card reveals.
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
 
+    Box(modifier = modifier.fillMaxSize()) {
     Scaffold(
-        modifier = modifier,
         containerColor = Color.Transparent,
         topBar = {
             CopyPasteTopBar(
@@ -116,9 +145,21 @@ fun AboutScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
+                        // Brand mark — mirrors macOS .about__logo (135deg accent->accent-2).
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(LocalAccent.current.base(isDark), LocalAccent.current.variant),
+                                    ),
+                                ),
+                        )
                         Text(text = stringResource(R.string.app_name))
-                        Text(text = versionLabel())
+                        Text(text = buildIdentifierLabel())
                         Text(text = stringResource(R.string.about_tagline))
+                        Text(text = stringResource(R.string.about_license))
                     }
 
                     Column(
@@ -156,6 +197,10 @@ fun AboutScreen(
                         context.startActivity(
                             Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL))
                         )
+                    }.onFailure {
+                        // No handler for ACTION_VIEW (e.g. no browser installed) — surface a
+                        // toast instead of silently swallowing the failure.
+                        scope.launch { toastState.show(linkFailedMsg, GlassToastKind.DANGER) }
                     }
                 },
                 variant = ButtonVariant.SECONDARY,
@@ -169,4 +214,6 @@ fun AboutScreen(
             }
         }
     }
+    GlassToastHost(state = toastState)
+    } // end Box
 }

@@ -1,0 +1,813 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CopyPaste</string>
+    <string name="home_tagline">Наскрізно зашифрована синхронізація буфера обміну між вашими пристроями.</string>
+
+    <!-- Navigation -->
+    <string name="nav_history">Історія</string>
+    <string name="nav_pair">Прив\'язка</string>
+    <string name="nav_settings">Налаштування</string>
+    <string name="nav_about">Про застосунок</string>
+
+    <!-- About screen -->
+    <string name="title_about">Про застосунок</string>
+    <string name="about_tagline">Менеджер зашифрованого буфера обміну</string>
+    <string name="about_features">Можливості</string>
+    <string name="about_open_github">Відкрити репозиторій на GitHub</string>
+    <string name="about_license">Ліцензовано за умовами MIT або Apache-2.0</string>
+    <string name="about_link_failed">Не вдалося відкрити посилання</string>
+
+    <!-- Screen titles -->
+    <string name="title_history">Історія</string>
+    <string name="title_devices">Пристрої</string>
+    <string name="title_pair">Прив\'язати пристрій</string>
+    <string name="title_settings">Налаштування</string>
+
+    <!-- History screen — §9 empty states + search filter -->
+    <string name="empty_history">Ще нічого не скопійовано</string>
+    <string name="empty_history_subtitle">Скопіюйте щось, і воно з\'явиться тут.</string>
+    <!-- CopyPaste-crh3.31: private-mode empty state (parity with macOS HistoryView). -->
+    <string name="empty_history_private">Увімкнено приватний режим</string>
+    <string name="empty_history_private_subtitle">Буфер обміну не записується, поки активний приватний режим.</string>
+    <string name="empty_search_title">Немає результатів для «%1$s»</string>
+    <string name="empty_search_subtitle">Спробуйте інший пошуковий запит.</string>
+    <string name="history_filter_placeholder">Фільтр…</string>
+    <string name="history_search_placeholder">Пошук в історії…</string>
+    <string name="history_recent_searches">Останні запити</string>
+    <string name="action_clear_recent_searches">Очистити</string>
+    <string name="cd_search_open">Відкрити пошук</string>
+    <string name="cd_search_close">Очистити і закрити пошук</string>
+
+    <!-- Pair screen -->
+    <!-- Devices screen — empty-state for the LAN discovery section (CopyPaste-0nd4) -->
+    <string name="no_devices_nearby">Поки не знайдено пристроїв у вашій мережі.</string>
+
+    <string name="pair_instructions">Відскануйте цей QR-код іншим пристроєм, щоб прив\'язати його. Щоб натомість відсканувати QR-код іншого пристрою, скористайтеся кнопкою «Сканувати QR-код пристрою» на екрані «Пристрої».</string>
+    <string name="btn_scan_qr">Сканувати QR-код пристрою</string>
+    <string name="pair_token_expires_in_seconds">Закінчується через %1$d с</string>
+    <string name="pair_token_expired">Термін дії токена закінчився. Запросіть новий.</string>
+    <string name="pair_request_new_token">Запросити новий токен</string>
+
+    <!-- Settings — section headers -->
+    <string name="section_general">Загальні</string>
+    <string name="section_display">Відображення</string>
+    <string name="section_storage_limits">Сховище / Ліміти</string>
+    <string name="section_sync">Синхронізація</string>
+    <string name="section_supabase_config">Налаштування Supabase</string>
+    <string name="section_supabase_account">Обліковий запис Supabase (необов\'язково)</string>
+    <string name="section_relay_config">Налаштування ретранслятора</string>
+    <string name="section_notifications">Сповіщення</string>
+    <string name="section_privacy">Конфіденційність</string>
+
+    <!-- Settings — General -->
+    <string name="setting_private_mode_title">Приватний режим</string>
+    <string name="setting_private_mode_subtitle">Коли увімкнено, цей пристрій припиняє записувати нові елементи буфера обміну. Відповідає приватному режиму на ваших інших пристроях. (Тимчасова пауза також доступна зі сповіщення.)</string>
+    <string name="setting_sync_enabled_title">Увімкнути синхронізацію буфера обміну</string>
+    <string name="setting_sync_enabled_subtitle">Синхронізує елементи буфера обміну між вашими пристроями. Використовує ретранслятор, хмару (Supabase) або пряме з\'єднання P2P залежно від налаштувань синхронізації.</string>
+
+    <!-- Settings — Privacy (C-P1-1, macOS parity) -->
+    <string name="setting_collect_public_ip_title">Визначати публічну IP-адресу</string>
+    <string name="setting_collect_public_ip_subtitle">Дозволити одноразовий запит STUN, щоб визначити публічну IP-адресу цього пристрою, яка показується в картці інформації про пристрій. Дані не надсилаються в аналітику.</string>
+    <string name="setting_paste_as_plain_text_title">Вставляти як звичайний текст</string>
+    <string name="setting_paste_as_plain_text_subtitle">Видаляти розширене форматування (RTF/HTML) під час вставлення: записується лише звичайний текст.</string>
+    <string name="setting_excluded_apps_label">Виключені застосунки</string>
+    <string name="setting_excluded_apps_subtitle">Ідентифікатори пакунків застосунків, буфер обміну яких ніколи не захоплюється, наприклад com.example.app.</string>
+
+    <!-- Generic actions -->
+    <string name="action_add">Додати</string>
+    <string name="action_remove">Видалити</string>
+
+    <!-- Settings — Display -->
+    <string name="setting_sensitive_warnings_title">Попереджати про конфіденційні дані</string>
+    <string name="setting_sensitive_warnings_subtitle">Показувати спливаюче повідомлення, коли номери карток або токени пропускаються.</string>
+    <string name="setting_mask_sensitive_title">Приховувати конфіденційний вміст</string>
+    <string name="setting_mask_sensitive_subtitle">Приховувати текст попереднього перегляду для елементів, позначених як конфіденційні. Торкніться елемента, щоб показати його на 5 секунд.</string>
+    <string name="setting_allow_screenshots_title">Дозволити знімки екрана</string>
+    <string name="setting_allow_screenshots_subtitle">Коли вимкнено, система блокує знімки екрана, запис екрана та попередній перегляд у списку нещодавніх застосунків, щоб захистити вміст буфера обміну. (Лише Android)</string>
+    <string name="setting_translucency_title">Прозорість</string>
+    <string name="setting_translucency_subtitle">Використовувати напівпрозорі фони поверхонь. Вимкніть для повністю суцільних фонів.</string>
+    <string name="setting_reduce_motion_title">Зменшити рух</string>
+    <string name="setting_reduce_motion_subtitle">Використовувати мінімальні переходи замість кінематографічних анімацій. Відображає системний параметр доступності.</string>
+    <string name="setting_image_max_height_label">Максимальна висота зображення (dp)</string>
+    <string name="setting_image_max_height_hint">1–200 dp (типово 40)</string>
+    <string name="setting_preview_delay_label">Затримка автозакриття рядка дій (мс)</string>
+    <string name="setting_preview_delay_hint">200–30000 мс (типово 1500)</string>
+    <string name="setting_preview_lines_label">Кількість рядків попереднього перегляду</string>
+
+    <!-- Settings — Storage / Limits (no item-count cap — size only) -->
+    <string name="setting_max_text_size_label">Максимальний розмір текстового елемента (МБ)</string>
+    <string name="setting_max_text_size_hint">1–100 МБ (типово 15)</string>
+    <string name="setting_max_image_size_label">Максимальний розмір зображення (МБ)</string>
+    <string name="setting_max_image_size_hint">1–512 МБ (типово 64)</string>
+    <string name="setting_storage_quota_label">Ліміт локального сховища (МБ)</string>
+    <string name="setting_storage_quota_hint">50–20480 МБ (типово 10240)</string>
+    <string name="setting_max_file_size_label">Максимальний розмір файлу</string>
+    <string name="setting_sensitive_ttl_label">Автоочищення конфіденційних через</string>
+    <!-- §6/§10 max-items slider — Unlimited sentinel = 100 000.
+         CopyPaste-crh3.39: unlike macOS (display-only filter that deletes nothing),
+         the Android cap is a STORED cap that permanently tombstones older unpinned
+         items — labelled "Maximum stored items" to make the destructive scope clear. -->
+    <string name="setting_max_items_label">Максимум збережених елементів</string>
+    <string name="setting_max_items_subtitle">Старіші незакріплені елементи видаляються назавжди, коли сховище перевищує цей ліміт. Закріплені елементи завжди зберігаються.</string>
+    <!-- CopyPaste-bdac.88: confirmation shown before a destructive cap reduction on Save. -->
+    <string name="dialog_max_items_reduce_title">Видалити старіші елементи?</string>
+    <plurals name="dialog_max_items_reduce_body">
+        <item quantity="one">Зменшення максимальної кількості збережених елементів видалить %1$d старіший незакріплений елемент назавжди. Закріплені елементи зберігаються. Цю дію не можна скасувати.</item>
+        <item quantity="few">Зменшення максимальної кількості збережених елементів видалить %1$d старіші незакріплені елементи назавжди. Закріплені елементи зберігаються. Цю дію не можна скасувати.</item>
+        <item quantity="many">Зменшення максимальної кількості збережених елементів видалить %1$d старіших незакріплених елементів назавжди. Закріплені елементи зберігаються. Цю дію не можна скасувати.</item>
+        <item quantity="other">Зменшення максимальної кількості збережених елементів видалить %1$d старішого незакріпленого елемента назавжди. Закріплені елементи зберігаються. Цю дію не можна скасувати.</item>
+    </plurals>
+    <string name="dialog_max_items_reduce_confirm">Видалити і зберегти</string>
+    <!-- CopyPaste-wuek NG-1: clear-all in Settings (canonical location, parity with macOS) -->
+    <string name="section_data">Дані</string>
+    <string name="setting_clear_history_label">Очистити історію буфера обміну</string>
+    <string name="btn_clear_history">Очистити історію…</string>
+
+
+    <!-- Settings — Sync (HW-A9: P2P toggle) -->
+    <string name="setting_p2p_sync_title">P2P-синхронізація (локальна мережа)</string>
+    <string name="setting_p2p_sync_subtitle">Пряма синхронізація між пристроями через вашу локальну мережу. Потребує прив\'язаного пристрою. Вимкніть для синхронізації лише через хмару.</string>
+
+    <!-- Settings — Sync (PG-29/CopyPaste-yqn5: LAN visibility toggle, mirrors macOS lan_visibility) -->
+    <string name="setting_lan_visibility_title">Видимість у локальній мережі</string>
+    <string name="setting_lan_visibility_subtitle">Оголошувати цей пристрій у вашій локальній мережі (mDNS). Вимкніть у публічних або ненадійних мережах, щоб приховати пристрій від виявлення.</string>
+
+    <!-- Settings — Sync -->
+    <string name="setting_sync_wifi_only_title">Синхронізувати лише через Wi-Fi</string>
+    <string name="setting_sync_wifi_only_subtitle">Обмежити завантаження і вивантаження синхронізації лише з\'єднаннями Wi-Fi. Коли увімкнено, мобільні дані не використовуються.</string>
+    <string name="setting_use_supabase_title">Використовувати хмарну синхронізацію Supabase</string>
+    <string name="setting_use_supabase_subtitle">Синхронізація між пристроями через Supabase (наскрізно зашифрована). Вимкнено = режим ретранслятора.</string>
+    <string name="setting_supabase_url_label">URL Supabase</string>
+    <string name="setting_supabase_anon_key_label">Анонімний ключ</string>
+    <string name="setting_sync_passphrase_label">Парольна фраза синхронізації</string>
+    <string name="setting_sync_passphrase_hint">Спільна парольна фраза (однакова на всіх пристроях)</string>
+    <string name="setting_supabase_email_label">Ел. пошта</string>
+    <string name="setting_supabase_password_label">Пароль</string>
+    <string name="setting_supabase_account_note">Якщо залишити порожнім, як bearer-токен використовується анонімний ключ. Вхід у обліковий запис вмикає політики Row Level Security.</string>
+    <string name="setting_relay_url_label">URL ретранслятора</string>
+    <string name="setting_supabase_url_invalid">URL Supabase має починатися з https://</string>
+    <string name="setting_relay_url_invalid">URL ретранслятора порожній або вказує на localhost, який недоступний на реальному пристрої</string>
+    <string name="setting_device_id_label">Ідентифікатор пристрою</string>
+    <string name="setting_permissions_title">Дозволи</string>
+    <string name="setting_permissions_subtitle">Перегляд і повторний запит дозволів</string>
+    <string name="setting_devices_title">Пристрої</string>
+    <string name="setting_devices_subtitle">Керуйте прив\'язаними P2P-пристроями та переглядайте ідентичність цього пристрою</string>
+
+    <!-- Settings — Notifications -->
+    <string name="setting_notify_on_copy_title">Сповіщати про копіювання</string>
+    <string name="setting_notify_on_copy_subtitle">Показувати коротке сповіщення щоразу, коли захоплюється елемент буфера обміну.</string>
+    <string name="setting_sound_on_copy_title">Звук при копіюванні</string>
+    <string name="setting_sound_on_copy_subtitle">Відтворювати легкий звук клацання щоразу, коли захоплюється елемент буфера обміну.</string>
+
+    <!-- Permissions screen -->
+    <string name="title_permissions">Дозволи</string>
+    <string name="permissions_intro">Перегляньте стан кожного дозволу, який використовує CopyPaste. Торкніться кнопки, щоб будь-коли повторно відкрити запит або екран налаштувань.</string>
+    <string name="perm_notifications_title">Сповіщення</string>
+    <string name="perm_notifications_desc">Потрібно на Android 13+, щоб служба переднього плану, яка відстежує буфер обміну, могла показувати сповіщення про стан (Пауза/Відновити).</string>
+    <string name="perm_notifications_reopen">Повторити запит</string>
+    <string name="perm_notifications_open_settings">Відкрити налаштування сповіщень</string>
+    <string name="perm_battery_title">Виняток з оптимізації батареї</string>
+    <string name="perm_battery_desc">Запобігає завершенню Android службою синхронізації, коли телефон бездіяльний. Рекомендується для надійного опитування Supabase.</string>
+    <string name="perm_battery_open_settings">Відкрити налаштування батареї</string>
+    <string name="perm_battery_request">Запросити виняток</string>
+    <string name="perm_oem_title">Автозапуск виробника / Захищені застосунки</string>
+    <string name="perm_oem_desc_base">Багато виробників телефонів (Xiaomi, Huawei, Samsung, Oppo, Vivo, OnePlus тощо) мають додаткові рівні заощадження батареї, які завершують фонові застосунки незалежно від власної оптимізації батареї Android. Додайте CopyPaste до білого списку на екрані автозапуску / захищених застосунків виробника, щоб він продовжував працювати, коли екран вимкнено.</string>
+    <string name="perm_oem_desc_device">%1$s\n\nНа цьому пристрої: %2$s</string>
+    <string name="perm_oem_button">Відкрити налаштування виробника</string>
+    <string name="perm_fg_service_title">Служба переднього плану</string>
+    <string name="perm_fg_service_desc">Надається автоматично під час встановлення, дія не потрібна. Дозволяє службі відстеження буфера обміну працювати у фоні.</string>
+    <string name="perm_fg_service_granted">Надано</string>
+
+    <!-- Background Capture ADB commands (Settings + Onboarding) -->
+    <string name="bg_adb_section_title">Фонове захоплення буфера обміну (ADB)</string>
+    <string name="bg_adb_explainer">Android блокує читання буфера обміну у фоні. Виконайте ці команди один раз через ADB (потрібне налагодження через USB, root не потрібен), а потім перезапустіть застосунок.</string>
+    <string name="bg_adb_cmd1_label">1. Надати READ_LOGS (вмикає виявлення через logcat):</string>
+    <string name="bg_adb_cmd1">adb shell pm grant com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="bg_adb_cmd2_label">2. Надати дозвіл на накладання (вмикає фокусоване читання):</string>
+    <string name="bg_adb_cmd2">adb shell appops set com.copypaste.android SYSTEM_ALERT_WINDOW allow</string>
+    <string name="bg_adb_cmd3_label">3. Примусово зупинити застосунок (застосувати зміни під час наступного запуску):</string>
+    <string name="bg_adb_cmd3">adb shell am force-stop com.copypaste.android</string>
+    <string name="bg_adb_cmd_copied">Команду скопійовано</string>
+    <string name="bg_adb_status_read_logs_ok">READ_LOGS: надано</string>
+    <string name="bg_adb_status_read_logs_no">READ_LOGS: не надано</string>
+    <string name="bg_adb_status_overlay_ok">Накладання: дозволено</string>
+    <string name="bg_adb_status_overlay_no">Накладання: не дозволено</string>
+    <string name="bg_adb_status_capture_working">Захоплення: працює</string>
+    <string name="bg_adb_status_capture_inactive">Захоплення: неактивне</string>
+
+    <!-- Background Capture Setup screen -->
+    <string name="title_bg_capture_setup">Налаштування фонового захоплення</string>
+    <string name="setting_bg_capture_title">Налаштування фонового захоплення</string>
+    <string name="setting_bg_capture_subtitle">Надайте накладання і виняток з оптимізації батареї для надійного фонового читання буфера обміну</string>
+    <string name="bg_capture_intro">Android 10+ блокує читання буфера обміну фоновими застосунками. Увімкніть три кроки нижче, щоб отримати надійне захоплення: таку саму комбінацію використовує ClipCascade.</string>
+
+    <!-- Step 1: SYSTEM_ALERT_WINDOW -->
+    <string name="bg_capture_overlay_title">Показ поверх інших застосунків (накладання)</string>
+    <string name="bg_capture_overlay_desc">Надає застосунку мінімальне невидиме вікно накладання. Коли накладання активне, система вважає процес сфокусованим, знімаючи обмеження на фонове читання буфера обміну в Android 10+. Це той самий механізм, який використовує ClipCascade.</string>
+    <string name="bg_capture_overlay_grant">Надати дозвіл на накладання</string>
+    <string name="bg_capture_overlay_granted">Відкрити налаштування накладання</string>
+
+    <!-- Step 2: Battery Optimization exemption -->
+    <string name="bg_capture_battery_title">Вимкнути оптимізацію батареї</string>
+    <string name="bg_capture_battery_desc">Запобігає завершенню служби переднього плану, яка відстежує буфер обміну, режимами Doze та App Standby Android, коли екран вимкнено. Потрібно для стабільного фонового захоплення.</string>
+    <string name="bg_capture_battery_grant">Запросити виняток</string>
+    <string name="bg_capture_battery_granted">Відкрити налаштування батареї</string>
+
+    <!-- Step 3: OEM autostart -->
+    <string name="bg_capture_oem_title">Автозапуск виробника / Керування живленням</string>
+    <string name="bg_capture_oem_desc_base">Багато виробників (Xiaomi, Huawei, Oppo, Vivo, Samsung, OnePlus тощо) додають додатковий рівень заощадження батареї, який завершує фонові застосунки незалежно від власної оптимізації батареї Android. Додайте CopyPaste до білого списку на екрані автозапуску або захищених застосунків вашого телефона.</string>
+    <string name="bg_capture_oem_desc_this_device">На цьому пристрої: %1$s</string>
+    <string name="bg_capture_oem_button">Відкрити налаштування живлення виробника</string>
+    <string name="bg_capture_oem_not_needed">На цьому пристрої не потрібно: рівень керування живленням виробника не виявлено. Достатньо стандартного винятку з оптимізації батареї Android (крок 2).</string>
+    <!-- ANDO-6: OEM acknowledgement button + confirmed state description -->
+    <string name="bg_capture_oem_ack">Готово, це ввімкнено</string>
+    <string name="bg_capture_oem_ack_done">Ви підтвердили, що автозапуск увімкнено. Якщо фонове захоплення перестане працювати, торкніться кнопки вище, щоб знову відкрити екран налаштувань виробника.</string>
+
+    <!-- Step 4: Final instruction -->
+    <string name="bg_capture_restart_title">Останній крок: примусова зупинка один раз</string>
+    <string name="bg_capture_restart_desc">Після виконання кроків вище перейдіть у Налаштування › Застосунки › CopyPaste, торкніться «Зупинити примусово», а потім знову відкрийте застосунок. Це дозволяє вікну накладання ініціалізуватися під час першого запуску, щоб фонове захоплення активувалося одразу.</string>
+
+    <!-- Shared status labels (also used by PermissionsSettingsActivity) -->
+    <string name="status_granted">Надано</string>
+    <string name="status_not_granted">Не надано</string>
+    <string name="label_required">обов\'язково</string>
+
+    <!-- History — sensitive marker -->
+    <string name="sensitive_preview_mask">••••••</string>
+    <!-- CopyPaste-crh3.23: TalkBack announcement for a blurred sensitive row, so
+         the underlying plaintext is never read aloud from the a11y tree. -->
+    <string name="sensitive_hidden_a11y">Конфіденційний вміст приховано, торкніться, щоб показати</string>
+    <string name="sensitive_badge_label">Конфіденційно</string>
+    <string name="cd_sensitive_item">Конфіденційний вміст: попередній перегляд приховано</string>
+    <string name="sensitive_tap_hint">Конфіденційно: скористайтеся дією «Копіювати»</string>
+    <!-- CopyPaste-5917.76: feedback when paste-as-plain-text is ON and user taps a media item -->
+    <string name="error_cannot_paste_as_text">Зображення та файли не можна вставити як звичайний текст</string>
+
+    <!-- Incoming pairing-request notification channel (Deliverable 1) -->
+    <string name="notif_channel_pair_request_name">Запити на прив\'язку</string>
+    <string name="notif_channel_pair_request_description">Сповіщення з високим пріоритетом, коли інший пристрій хоче прив\'язатися до цього.</string>
+    <string name="notif_pair_request_title">CopyPaste: запит на прив\'язку</string>
+    <string name="notif_pair_request_content">%1$s хоче прив\'язатися, торкніться, щоб підтвердити</string>
+    <string name="notif_pair_request_content_unknown">Пристрій хоче прив\'язатися, торкніться, щоб підтвердити</string>
+    <string name="notif_pair_action_confirm">Підтвердити</string>
+
+    <!-- Per-copy event notification channel -->
+    <string name="notif_channel_copy_event_name">Події копіювання</string>
+    <string name="notif_channel_copy_event_description">Тихе сповіщення-значок щоразу, коли захоплюється елемент буфера обміну.</string>
+    <string name="notif_copy_event_title">Елемент скопійовано</string>
+    <string name="notif_copy_event_content">Елемент буфера обміну збережено в історії.</string>
+
+    <!-- Sensitive-upload-skipped notification (CopyPaste-myh8.9). Generic text only —
+         must never reveal the clip's content. values-uk translation is S13's job. -->
+    <string name="notif_sensitive_skip_title">Конфіденційний елемент не синхронізовано</string>
+    <string name="notif_sensitive_skip_content">Елемент буфера обміну збережено локально, але не завантажено, оскільки він виглядає конфіденційним.</string>
+
+    <!-- Logcat capture FGS notification channel (CopyPaste-44rq.4) -->
+    <string name="notif_channel_logcat_capture_name">Фонове захоплення через ADB</string>
+    <string name="notif_channel_logcat_capture_description">Тихе постійне сповіщення, поки активне фонове захоплення буфера обміну через logcat (потребує наданого дозволу adb READ_LOGS).</string>
+    <string name="notif_logcat_capture_title">CopyPaste: захоплення через ADB активне</string>
+    <string name="notif_logcat_capture_content">Відстеження змін буфера обміну через logcat (READ_LOGS).</string>
+
+    <!-- Foreground service notification -->
+    <string name="notif_channel_service_name">Відстеження буфера обміну</string>
+    <string name="notif_channel_service_description">Постійне сповіщення, поки CopyPaste відстежує буфер обміну.</string>
+    <string name="notif_title_active">CopyPaste: активно</string>
+    <string name="notif_title_paused">CopyPaste: на паузі</string>
+    <plurals name="notif_content_today">
+        <item quantity="one">Сьогодні захоплено %1$d елемент</item>
+        <item quantity="few">Сьогодні захоплено %1$d елементи</item>
+        <item quantity="many">Сьогодні захоплено %1$d елементів</item>
+        <item quantity="other">Сьогодні захоплено %1$d елемента</item>
+    </plurals>
+    <string name="notif_content_paused">Захоплення на паузі. Торкніться «Відновити», щоб продовжити.</string>
+    <string name="notif_action_pause">Пауза</string>
+    <string name="notif_action_resume">Відновити</string>
+    <string name="notif_action_open">Відкрити</string>
+
+    <!-- OEM autostart onboarding -->
+    <string name="onboarding_oem_title">Автозапуск виробника / Захищені застосунки</string>
+    <string name="onboarding_oem_button">Відкрити налаштування виробника</string>
+    <string name="oem_autostart_toast_labeled">Знайдіть CopyPaste і увімкніть: %1$s</string>
+    <string name="oem_autostart_toast_generic">Знайдіть CopyPaste і дозвольте автозапуск / фонову активність, потім поверніться сюди.</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_back">Назад</string>
+    <string name="cd_refresh">Оновити</string>
+    <string name="cd_copy">Копіювати</string>
+    <string name="cd_delete">Видалити елемент</string>
+    <string name="preview_drag_up_hint">Потягніть вгору, щоб розгорнути</string>
+    <string name="cd_sensitive_icon">Позначка конфіденційного вмісту</string>
+    <string name="cd_image_item">Зображення в буфері обміну</string>
+    <string name="cd_image_thumbnail">Мініатюра зображення</string>
+    <string name="cd_pin_item">Закріпити елемент</string>
+    <string name="cd_unpin_item">Відкріпити елемент</string>
+    <string name="cd_too_large_sync">Занадто великий для синхронізації</string>
+    <string name="cd_select_all">Вибрати все</string>
+    <string name="cd_close_selection">Закрити режим вибору</string>
+
+    <!-- CopyPaste-3nyq: content descriptions for images / QR / fingerprint / status -->
+    <string name="cd_preview_image">Попередній перегляд зображення з буфера обміну</string>
+    <string name="cd_pairing_qr">QR-код прив\'язки</string>
+    <string name="cd_pairing_qr_loading">QR-код прив\'язки завантажується</string>
+    <string name="cd_own_fingerprint">Відбиток цього пристрою</string>
+    <string name="cd_copy_fingerprint">Копіювати відбиток</string>
+    <string name="cd_status_connected">З\'єднано</string>
+    <string name="cd_status_offline">Не в мережі</string>
+    <string name="cd_status_idle">Очікування</string>
+
+    <!-- History — file item actions -->
+    <string name="action_open_file">Відкрити файл</string>
+    <string name="cd_open_file">Відкрити застосунком за замовчуванням</string>
+    <string name="file_open_no_app">Не знайдено застосунка для відкриття цього типу файлу</string>
+
+    <!-- History — bulk / pin actions -->
+    <string name="action_pin">Закріпити</string>
+    <string name="action_unpin">Відкріпити</string>
+    <string name="action_move_up">Перемістити вгору</string>
+    <string name="action_move_down">Перемістити вниз</string>
+    <string name="cd_reorder_handle">Змінити порядок закріпленого елемента</string>
+    <string name="cd_more_options">Більше опцій</string>
+    <string name="action_clear_all">Очистити все</string>
+    <string name="action_clear_unpinned">Очистити незакріплені</string>
+    <string name="action_copy_selected">Копіювати вибрані</string>
+    <string name="action_delete_selected">Видалити вибрані</string>
+    <string name="action_pin_selected">Закріпити вибрані</string>
+    <string name="action_unpin_selected">Відкріпити вибрані</string>
+    <plurals name="selection_count">
+        <item quantity="one">Вибрано: %1$d</item>
+        <item quantity="few">Вибрано: %1$d</item>
+        <item quantity="many">Вибрано: %1$d</item>
+        <item quantity="other">Вибрано: %1$d</item>
+    </plurals>
+    <!-- g3z4: bulk-copy toast — shown after joining text items to clipboard -->
+    <plurals name="snackbar_bulk_copied">
+        <item quantity="one">%1$d елемент скопійовано</item>
+        <item quantity="few">%1$d елементи скопійовано</item>
+        <item quantity="many">%1$d елементів скопійовано</item>
+        <item quantity="other">%1$d елемента скопійовано</item>
+    </plurals>
+    <string name="snackbar_bulk_copied_no_text">Немає текстових елементів для копіювання</string>
+
+    <!-- Confirmation dialogs -->
+    <!-- HW-A10: unsaved settings discard warning -->
+    <string name="dialog_discard_title">Скасувати зміни?</string>
+    <string name="dialog_discard_message">У вас є незбережені зміни. Вийти без збереження?</string>
+    <string name="dialog_discard_confirm">Скасувати</string>
+    <string name="dialog_discard_keep">Продовжити редагування</string>
+
+    <string name="dialog_clear_all_title">Очистити всю історію</string>
+    <plurals name="dialog_clear_all_message">
+        <item quantity="one">Це назавжди видалить усі %1$d елемент буфера обміну. Цю дію не можна скасувати.</item>
+        <item quantity="few">Це назавжди видалить усі %1$d елементи буфера обміну. Цю дію не можна скасувати.</item>
+        <item quantity="many">Це назавжди видалить усі %1$d елементів буфера обміну. Цю дію не можна скасувати.</item>
+        <item quantity="other">Це назавжди видалить усі %1$d елемента буфера обміну. Цю дію не можна скасувати.</item>
+    </plurals>
+    <string name="dialog_clear_unpinned_title">Очистити незакріплені елементи</string>
+    <string name="dialog_clear_unpinned_message">Це назавжди видалить усі незакріплені елементи буфера обміну. Закріплені елементи буде збережено.</string>
+    <string name="dialog_delete_selected_title">Видалити вибрані</string>
+    <plurals name="dialog_delete_selected_message">
+        <item quantity="one">Це назавжди видалить %1$d вибраний елемент. Цю дію не можна скасувати.</item>
+        <item quantity="few">Це назавжди видалить %1$d вибрані елементи. Цю дію не можна скасувати.</item>
+        <item quantity="many">Це назавжди видалить %1$d вибраних елементів. Цю дію не можна скасувати.</item>
+        <item quantity="other">Це назавжди видалить %1$d вибраного елемента. Цю дію не можна скасувати.</item>
+    </plurals>
+    <!-- CopyPaste-2ifa: single-item delete confirmation dialog -->
+    <string name="dialog_delete_single_title">Видалити елемент</string>
+    <string name="dialog_delete_single_message">Видалити цей елемент буфера обміну?</string>
+    <string name="dialog_confirm">Видалити</string>
+    <string name="dialog_cancel">Скасувати</string>
+    <!-- CopyPaste-kaf6: undo snackbar for single-item delete -->
+    <string name="snackbar_item_deleted">Елемент видалено</string>
+    <string name="snackbar_undo">Скасувати</string>
+    <!-- CopyPaste-yel4: clear-all error uses the existing error_clear_all string resource -->
+
+    <!-- Log viewer (in-app) -->
+    <string name="log_viewer_button">Переглянути журнали</string>
+    <string name="log_viewer_description">Перегляд діагностичних журналів у застосунку.</string>
+
+    <!-- Diagnostics section (Settings) -->
+    <string name="section_diagnostics">Діагностика</string>
+
+    <!-- Log export -->
+    <string name="log_export_button">Експортувати журнали</string>
+    <string name="log_export_description">Поділіться діагностичними журналами з розробником, щоб допомогти розслідувати проблеми.\nЖурнали також можна отримати через adb pull без root:\nadb pull /sdcard/Android/data/com.copypaste.android/files/logs/</string>
+    <string name="log_export_chooser_title">Поділитися журналами через…</string>
+    <string name="log_export_empty">Файлів журналу поки не знайдено.</string>
+    <string name="log_export_failed">Не вдалося підготувати архів журналів. Спробуйте adb pull натомість.</string>
+    <string name="log_export_success">Журнали експортовано</string>
+    <string name="log_level_error">Помилка</string>
+    <string name="log_level_warning">Попередження</string>
+    <string name="log_level_info">Інформація</string>
+
+    <!-- Crash detection (OnboardingActivity / next-launch prompt) -->
+    <string name="crash_detected_title">Застосунок аварійно завершився минулого разу</string>
+    <string name="crash_detected_message">Виявлено аварійне завершення під час попереднього запуску. Експортувати журнали, щоб допомогти діагностувати проблему?</string>
+    <string name="crash_detected_export">Експортувати журнали</string>
+    <string name="crash_detected_dismiss">Закрити</string>
+
+    <!-- adb READ_LOGS logcat capture (Settings › Diagnostics) -->
+    <string name="setting_logcat_capture_title">Фонове захоплення через adb logcat</string>
+    <string name="setting_logcat_capture_subtitle">Резервний варіант для досвідчених користувачів: читає події зміни буфера обміну з logcat, коли AccessibilityService недоступна. Потребує наданого через adb дозволу READ_LOGS (див. нижче).</string>
+    <string name="logcat_status_not_granted">Стан: READ_LOGS не надано</string>
+    <string name="logcat_status_disabled">Стан: вимкнено (увімкніть перемикач, щоб активувати)</string>
+    <string name="logcat_status_not_working">Стан: надано, але не працює. Android 11+ може обмежувати системні журнали. Увімкніть AccessibilityService натомість.</string>
+    <string name="logcat_status_working">Стан: працює, елементи захоплюються через logcat</string>
+    <string name="logcat_adb_grant_command">adb shell pm grant com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="logcat_adb_revoke_command">adb shell pm revoke com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="logcat_adb_label">Команда надання дозволу (виконати один раз):</string>
+
+    <!-- Error / status -->
+    <string name="error_generic">Помилка: %1$s</string>
+    <string name="error_load_history">Не вдалося завантажити історію: %1$s</string>
+    <string name="error_delete_item">Не вдалося видалити елемент: %1$s</string>
+    <string name="error_pairing">Помилка прив\'язки: %1$s</string>
+    <string name="error_settings_save">Не вдалося зберегти налаштування: %1$s</string>
+    <string name="error_clear_all">Не вдалося очистити історію: %1$s</string>
+    <string name="error_set_pinned">Не вдалося оновити закріплення: %1$s</string>
+    <string name="error_delete_items">Не вдалося видалити елементи: %1$s</string>
+    <string name="status_pairing">Генерація токена прив\'язки…</string>
+    <string name="snackbar_dismiss">Закрити</string>
+    <string name="settings_saved">Налаштування збережено</string>
+    <string name="action_save">Зберегти</string>
+
+    <!-- Native library unavailable — sync disabled sentinel notification -->
+    <string name="notif_native_unavailable_title">CopyPaste: синхронізацію вимкнено</string>
+    <string name="notif_native_unavailable_content">Не вдалося завантажити бібліотеку шифрування. Елементи НЕ будуть зберігатися, поки застосунок не буде перезапущено.</string>
+    <string name="notif_channel_sync_name">Стан синхронізації</string>
+    <string name="notif_channel_sync_description">Сповіщення про стан синхронізації через ретранслятор</string>
+
+    <!-- File item UI -->
+    <string name="cd_file_item">Синхронізований файл</string>
+    <string name="action_save_file">Зберегти файл</string>
+    <string name="file_saved_ok">Файл збережено в «Завантаження»</string>
+    <string name="file_save_failed">Не вдалося зберегти файл</string>
+    <string name="file_copy_failed">Не вдалося скопіювати файл</string>
+
+    <!-- fr44: dangerous-extension block message -->
+    <string name="file_open_dangerous_ext">Цей тип файлу не можна відкрити напряму з міркувань безпеки. Скористайтеся кнопкою «Поділитися», щоб вибрати застосунок вручну.</string>
+
+    <!-- HB-11: in-app file picker (history screen AttachFile button) -->
+    <string name="cd_attach_file">Вибрати файл для надсилання</string>
+    <string name="snackbar_file_captured">Файл додано до буфера обміну, синхронізація…</string>
+    <string name="error_file_pick_failed">Не вдалося захопити файл</string>
+
+    <!-- Devices screen — OwnQrSection strings (ojsq) -->
+    <string name="devices_section_paired">Прив\'язані пристрої</string>
+    <string name="devices_section_your_qr">Ваш QR-код</string>
+    <string name="devices_qr_subtitle">Дозвольте іншому пристрою відсканувати це для прив\'язки</string>
+    <string name="devices_qr_tap_to_reveal">Торкніться, щоб показати</string>
+    <string name="devices_qr_refreshing">Оновлення…</string>
+    <string name="cd_own_qr_blurred">Ваш QR-код прив\'язки, торкніться, щоб показати</string>
+    <string name="devices_discovered_section">Знайдено у вашій мережі</string>
+
+    <!-- Devices screen — PeerRow / OwnDeviceRow labels (ojsq) -->
+    <string name="devices_status_online">У мережі</string>
+    <string name="devices_status_offline">Не в мережі</string>
+    <string name="devices_badge_this_device">Цей пристрій</string>
+    <string name="devices_peer_default_name">Прив\'язаний пристрій</string>
+    <string name="meta_label_model">Модель</string>
+    <string name="meta_label_os">ОС</string>
+    <string name="meta_label_version">Версія</string>
+    <string name="meta_label_local_ip">Локальна IP-адреса</string>
+    <string name="meta_label_public_ip">Публічна IP-адреса</string>
+    <string name="meta_label_paired">Прив\'язано</string>
+    <string name="meta_label_last_sync">Остання синхронізація</string>
+    <string name="meta_label_rtt">RTT</string>
+    <string name="meta_label_rtt_value">%1$d мс</string>
+    <string name="meta_label_fingerprint">Відбиток</string>
+
+    <!-- Devices screen — NoPeerCard (ojsq) -->
+    <string name="devices_no_peer_title">Немає прив\'язаних пристроїв</string>
+    <string name="devices_no_peer_body">Прив\'яжіть Mac із запущеним CopyPaste, щоб увімкнути P2P-синхронізацію буфера обміну через локальну мережу.</string>
+    <string name="devices_btn_pair_device">Прив\'язати пристрій</string>
+
+    <!-- Devices screen — action buttons (ojsq) -->
+    <string name="btn_unpair">Відв\'язати</string>
+    <string name="btn_revoke">Відкликати</string>
+    <string name="btn_pair">Прив\'язати</string>
+
+    <!-- Devices screen — DiscoveredPeerRow (ojsq) -->
+    <string name="devices_no_secure_pairing">Цей пристрій не підтримує безпечну прив\'язку.</string>
+
+    <!-- Devices screen — SAS pairing dialog (ojsq) -->
+    <string name="sas_dialog_title">Прив\'язати «%1$s»</string>
+    <string name="sas_connecting">З\'єднання…</string>
+    <string name="sas_waiting_other">Очікування іншого пристрою…</string>
+    <string name="sas_confirm_prompt">Підтвердьте, що цей код збігається з кодом, показаним на іншому пристрої.</string>
+    <string name="sas_paired_ok">Прив\'язано ✓</string>
+    <string name="sas_ended">Прив\'язку завершено, перевірте інший пристрій.</string>
+    <string name="sas_timed_out">Час очікування прив\'язки минув.</string>
+    <string name="sas_watchdog_timeout">Час очікування прив\'язки минув. Перевірте, що обидва пристрої в одній мережі, і спробуйте ще раз.</string>
+    <string name="sas_rejected">Прив\'язку відхилено.</string>
+    <string name="sas_cancelled">Прив\'язку скасовано.</string>
+    <string name="sas_btn_match">Збігається</string>
+    <string name="sas_btn_no_match">Не збігається</string>
+    <string name="sas_btn_close">Закрити</string>
+    <string name="sas_copy_code_label">Копіювати код</string>
+    <string name="sas_code_copied">Код скопійовано</string>
+
+    <!-- Devices screen — dialogs (ojsq) -->
+    <!-- CopyPaste-bdac.51: renamed from dialog_forget_* to dialog_unpair_* ("Forget" → "Unpair"). -->
+    <string name="dialog_forget_device_title">Відв\'язати пристрій?</string>
+    <string name="dialog_forget_device_body">Цей пристрій більше не синхронізуватиметься з %1$s через P2P. Ви можете повторно прив\'язати його будь-коли, відсканувавши новий QR-код.</string>
+    <string name="dialog_forget_btn">Відв\'язати</string>
+    <string name="dialog_revoke_title">Відкликати прив\'язку?</string>
+    <string name="dialog_revoke_incomplete_title">Відкликання не завершено</string>
+    <string name="dialog_scanner_unavailable_title">Сканер недоступний</string>
+
+    <!-- Devices screen — scan flow errors (ojsq) -->
+    <string name="error_scan_camera">Не вдалося відкрити сканер камери: %1$s</string>
+    <string name="error_scan_camera_permission">Для сканування QR-коду прив\'язки потрібен дозвіл на камеру. Надайте його в Налаштування → Застосунки → CopyPaste → Дозволи.</string>
+    <string name="error_pair_start">Не вдалося розпочати прив\'язку.</string>
+    <string name="error_revoke_record">Не вдалося зафіксувати відкликання. Пристрій відв\'язано локально.</string>
+
+    <!-- Devices screen — QR error (ojsq) -->
+    <!-- CopyPaste-7yno: user-facing QR error; never include raw exception detail. -->
+    <string name="devices_qr_error">QR-код недоступний, спробуйте ще раз.</string>
+    <!-- CopyPaste-jwga: generic sanitized operation error messages (no internals). -->
+    <string name="error_pairing_generic">Помилка прив\'язки. Перевірте, що обидва пристрої в одній мережі, і спробуйте ще раз.</string>
+    <string name="error_sync_generic">Помилка синхронізації. Спробуйте ще раз.</string>
+    <string name="error_qr_generate">Не вдалося створити код прив\'язки. Спробуйте ще раз.</string>
+    <string name="error_camera_open">Не вдалося відкрити камеру. Перевірте дозволи камери і спробуйте ще раз.</string>
+    <string name="error_camera_permission_denied">Для сканування QR-коду прив\'язки потрібен доступ до камери. Ви можете надати його в налаштуваннях або натомість показати QR-код цього пристрою.</string>
+    <string name="error_camera_permission_permanent">Доступ до камери заборонено назавжди. Відкрийте налаштування, щоб увімкнути його, або натомість покажіть QR-код цього пристрою.</string>
+
+    <!-- Settings — Save button (ojsq) -->
+    <string name="btn_save">Зберегти</string>
+    <string name="btn_save_saved">Збережено</string>
+
+    <!-- Settings — discard dialog (ojsq; also covers the duplicate hardcoded version) -->
+    <string name="dialog_unsaved_title">Незбережені зміни</string>
+    <string name="dialog_unsaved_body">У вас є незбережені зміни. Скасувати їх і вийти?</string>
+    <string name="dialog_unsaved_discard">Скасувати</string>
+    <string name="dialog_unsaved_keep">Продовжити редагування</string>
+
+    <!-- History — checkbox a11y (q649) -->
+    <string name="cd_checkbox_select">Вибрати елемент</string>
+    <string name="cd_checkbox_deselect">Скасувати вибір елемента</string>
+
+    <!-- Devices — QR section a11y (q649) -->
+    <string name="cd_qr_reveal_toggle">Торкніться, щоб показати QR-код прив\'язки</string>
+
+    <!-- History — DeviceFilterRow chip (ojsq) -->
+    <string name="device_filter_all">Усі</string>
+
+    <!-- CopyPaste-12f0: Reset database (degraded-DB recovery, macOS parity) -->
+    <string name="setting_reset_db_label">Скинути базу даних</string>
+    <string name="setting_reset_db_subtitle">Видалити всю історію буфера обміну, коли база даних пошкоджена (незворотно)</string>
+    <string name="dialog_reset_db_title">Скинути базу даних?</string>
+    <string name="dialog_reset_db_body">Це назавжди видалить УСІ елементи буфера обміну, включно закріплені. Ваші налаштування синхронізації та прив\'язка пристроїв збережуться. Цю дію не можна скасувати.</string>
+    <string name="btn_reset_db">Скинути</string>
+
+    <!-- CopyPaste-un29: Sort by device toggle (macOS parity) -->
+    <string name="setting_sort_by_device_title">Групувати за пристроєм</string>
+    <string name="setting_sort_by_device_subtitle">Показувати елементи, згруповані за пристроєм, який їх скопіював</string>
+    <string name="action_sort_by_device">Групувати за пристроєм</string>
+    <string name="action_sort_by_recency">Сортувати за часом</string>
+
+    <!-- bd CopyPaste-44rq.22: export/import history toast feedback -->
+    <string name="history_export_ok">Історію експортовано</string>
+    <string name="history_export_failed">Помилка експорту</string>
+    <plurals name="history_import_ok">
+        <item quantity="one">Імпортовано %1$d елемент</item>
+        <item quantity="few">Імпортовано %1$d елементи</item>
+        <item quantity="many">Імпортовано %1$d елементів</item>
+        <item quantity="other">Імпортовано %1$d елемента</item>
+    </plurals>
+    <string name="history_import_failed">Помилка імпорту</string>
+
+    <!-- CopyPaste-bdac.61: SettingsActivity — Appearance section strings -->
+    <string name="section_appearance">Зовнішній вигляд</string>
+    <string name="setting_color_scheme_label">Колірна схема</string>
+    <string name="setting_accent_label">Акцент</string>
+    <string name="palette_dark_label">Темна</string>
+    <string name="palette_light_label">Світла</string>
+    <string name="skin_visual_style_label">Візуальний стиль</string>
+    <string name="skin_classic">Класичний</string>
+    <string name="skin_quiet">Тихий</string>
+    <string name="skin_vapor">Vapor</string>
+    <string name="theme_light">Світла</string>
+    <string name="theme_dark">Темна</string>
+
+    <!-- android-appearance S3: Theme segmented control (Dark/Light/System) + accent swatch row -->
+    <string name="setting_theme_label">Тема</string>
+    <string name="theme_mode_system">Система</string>
+    <string name="accent_name_indigo">Індиго</string>
+    <string name="accent_name_blue">Синій</string>
+    <string name="accent_name_teal">Бірюзовий</string>
+    <string name="accent_name_green">Зелений</string>
+    <string name="accent_name_amber">Бурштиновий</string>
+    <string name="accent_name_rose">Рожевий</string>
+    <string name="toast_settings_save_failed">Помилка збереження, спробуйте ще раз</string>
+
+    <!-- CopyPaste-bdac.61: SettingsActivity — Image &amp; preview section -->
+    <string name="section_image_preview">Зображення і попередній перегляд</string>
+
+    <!-- CopyPaste-bdac.61: SettingsActivity — reveal-guard toggle -->
+    <string name="setting_reveal_guard_title">Попереджати перед показом конфіденційного</string>
+    <string name="setting_reveal_guard_subtitle">Показувати крок підтвердження перед зняттям розмиття з конфіденційних елементів буфера обміну</string>
+
+    <!-- CopyPaste-bdac.61: SettingsActivity — Data section export/import actions -->
+    <string name="setting_export_history_label">Експортувати історію</string>
+    <string name="setting_export_history_subtitle">Зберегти текстові елементи у файл JSON (зображення виключено; конфіденційні елементи виключено за замовчуванням)</string>
+    <string name="action_export">Експортувати</string>
+    <!-- CopyPaste-crh3.40: Include-sensitive-items toggle on export (parity with macOS) -->
+    <string name="setting_export_include_sensitive_label">Включати конфіденційні елементи</string>
+    <string name="setting_export_include_sensitive_warning">Увага: конфіденційні елементи буде експортовано як звичайний текст. Зберігайте файл у безпеці і видаліть його після використання.</string>
+    <string name="setting_import_history_label">Імпортувати історію</string>
+    <string name="setting_import_history_subtitle">Завантажити елементи з файлу експорту JSON</string>
+    <string name="action_import">Імпортувати</string>
+
+    <!-- CopyPaste-bdac.57: sync backend segmented control (replaces boolean Supabase toggle) -->
+    <string name="setting_sync_backend_title">Бекенд синхронізації</string>
+    <string name="setting_sync_backend_subtitle">Виберіть хмарний бекенд синхронізації. Обидва режими наскрізно зашифровано; перемикання не вимикає синхронізацію.</string>
+    <string name="setting_sync_backend_relay">Ретранслятор</string>
+    <string name="setting_sync_backend_supabase">Supabase</string>
+
+    <!-- CopyPaste-26zi: independent, additive transport toggles (replace the
+         exclusive Relay|Supabase segmented control). Both transports can be active
+         at once; the runtime fans out to every enabled + configured transport. -->
+    <string name="setting_sync_transports_title">Транспорти синхронізації</string>
+    <string name="setting_sync_transports_subtitle">Синхронізація через ретранслятор і хмару Supabase незалежні: увімкніть один із варіантів або обидва. Коли увімкнено обидва, елементи синхронізуються через обидва одночасно. Усі транспорти наскрізно зашифровано.</string>
+    <string name="setting_relay_enabled_title">Синхронізація через ретранслятор</string>
+    <string name="setting_relay_enabled_subtitle">Синхронізація через сервер-ретранслятор (на основі прив\'язки, зручна для локальної мережі). Вимкнення зупиняє надсилання через ретранслятор, навіть якщо URL ретранслятора налаштовано.</string>
+    <string name="setting_supabase_enabled_title">Хмарна синхронізація Supabase</string>
+    <string name="setting_supabase_enabled_subtitle">Синхронізація через Supabase (між пристроями, на основі хмари). Вимкнення зупиняє надсилання і опитування Supabase, навіть якщо Supabase налаштовано.</string>
+
+    <!-- CopyPaste-crh3.38: cloud account-mismatch banner (parity with macOS CloudAccountMismatchBanner) -->
+    <string name="setting_cloud_account_mismatch_title">Виявлено невідповідність облікових записів Supabase</string>
+    <string name="setting_cloud_account_mismatch_body">Два або більше прив\'язаних пристроїв використовують різні облікові записи або проєкти Supabase. Елементи буфера обміну не синхронізуватимуться: RLS Supabase дозволяє спільний доступ лише до рядків одного облікового запису. Переконайтеся, що на кожному пристрої виконано вхід з однаковою поштою Supabase і вказано однаковий URL проєкту Supabase.</string>
+
+    <!-- CopyPaste-1jms.33: PairActivity — post-PAKE peer-review card strings -->
+    <string name="pair_review_title">Партнерський пристрій</string>
+    <string name="pair_review_subtitle">Перевірте дані пристрою перед підтвердженням</string>
+    <string name="pair_review_no_meta">Метадані пристрою не отримано</string>
+    <string name="pair_btn_verify">Прив\'язати і перевірити…</string>
+    <string name="pair_btn_confirm_sync">Підтвердити і синхронізувати</string>
+    <string name="pair_verifying">Перевірка пристрою…</string>
+
+    <!-- CopyPaste-bdac.42: Storage vacuum + Sync test-connection (macOS parity) -->
+    <string name="setting_compact_db_label">Стиснути базу даних</string>
+    <string name="setting_compact_db_subtitle">Виконати VACUUM, щоб звільнити місце після видалень. Безпечно запускати будь-коли.</string>
+    <string name="btn_compact_db">Стиснути…</string>
+    <string name="compact_db_ok">Базу даних стиснено</string>
+    <string name="compact_db_failed">Помилка стиснення</string>
+    <string name="setting_test_connection_label">Перевірити з\'єднання</string>
+    <string name="setting_test_connection_subtitle">Перевірити, чи доступний налаштований бекенд синхронізації.</string>
+    <string name="btn_test_connection">Перевірити</string>
+    <!-- Toast feedback for Test connection probe (bdac.42) -->
+    <string name="toast_test_connection_ok">З\'єднання успішне</string>
+    <string name="toast_test_connection_fail">Помилка з\'єднання, перевірте URL і мережу</string>
+
+    <!-- CopyPaste-myh8.11 S11 Wave 2: SyncTab error banners (CpBanner migration) -->
+    <string name="sync_error_unauthorized">%1$s\n\nПеревірте парольну фразу / облікові дані нижче і збережіть.</string>
+    <string name="btn_retry">Повторити</string>
+
+    <!-- CopyPaste-bdac.61: SettingsActivity — Sync tab -->
+    <string name="section_sync_diagnostics">Діагностика синхронізації</string>
+    <string name="setting_auto_apply_synced_clip_title">Автозастосування синхронізованого буфера обміну</string>
+    <string name="setting_auto_apply_synced_clip_subtitle">Автоматично застосовувати синхронізовані елементи з інших пристроїв у ваш буфер обміну</string>
+
+    <!-- CopyPaste-bdac.85: SettingsActivity — Supabase account display strings -->
+    <string name="setting_supabase_account_anon">Обліковий запис: не виконано вхід (анонімний доступ)</string>
+    <string name="setting_supabase_account_signed_in">Обліковий запис: %1$s</string>
+    <string name="setting_supabase_account_same_warning">Для синхронізації всі ваші пристрої мають використовувати один обліковий запис Supabase: різні облікові записи не бачать елементи одне одного.</string>
+
+    <!-- CopyPaste-44rq.5: OnboardingActivity strings -->
+    <string name="onboarding_setup_title">Налаштувати CopyPaste</string>
+    <string name="onboarding_intro">CopyPaste потребує кількох дозволів для відстеження і синхронізації вашого буфера обміну.</string>
+    <string name="onboarding_notifications_title">Сповіщення</string>
+    <string name="onboarding_notifications_desc">Потрібно на Android 13+, щоб служба переднього плану, яка відстежує буфер обміну, могла показувати сповіщення про стан (Пауза/Відновити).</string>
+    <string name="onboarding_battery_title">Виняток з оптимізації батареї</string>
+    <string name="onboarding_battery_desc">Запобігає завершенню Android службою синхронізації, коли телефон бездіяльний. Рекомендується для надійної фонової синхронізації.</string>
+    <string name="onboarding_oem_desc_base_onboarding">Багато виробників телефонів (Xiaomi, Huawei, Samsung, Oppo, Vivo, OnePlus тощо) мають додаткові рівні заощадження батареї, які завершують фонові застосунки незалежно від власної оптимізації батареї Android. Вам потрібно вручну додати CopyPaste до білого списку на екрані автозапуску / захищених застосунків виробника, щоб він продовжував працювати, коли екран вимкнено.</string>
+    <string name="onboarding_oem_desc_device">%1$s\n\nНа цьому пристрої: %2$s</string>
+    <string name="onboarding_fg_service_title">Служба переднього плану</string>
+    <string name="onboarding_fg_service_desc">Надається автоматично під час встановлення, дія не потрібна.</string>
+    <string name="btn_continue_to_copypaste">Продовжити в CopyPaste</string>
+    <string name="btn_skip_for_now">Пропустити поки що</string>
+    <string name="btn_grant">Надати</string>
+    <string name="btn_exempt">Виключити</string>
+    <string name="btn_request_exemption">Запросити виняток</string>
+
+    <!-- CopyPaste-bdac.42: SettingsActivity — Storage tab vacuum toast feedback -->
+    <string name="toast_compact_db_ok">Базу даних успішно стиснено</string>
+    <string name="toast_compact_db_fail">Помилка стиснення, деталі в журналах</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: LogViewerActivity top-bar/dialog actions -->
+    <string name="logs_title">Журнали</string>
+    <string name="logs_action_clear">Очистити</string>
+    <string name="logs_action_refresh">Оновити</string>
+    <string name="logs_action_export">Експортувати</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: SyncTab diagnostics -->
+    <string name="sync_peers_online_label">Пристроїв у мережі (P2P)</string>
+    <string name="sync_test_no_transport_enabled">Немає ввімкненого транспорту для перевірки: увімкніть Ретранслятор або Supabase вище.</string>
+    <string name="sync_test_relay_ok">Ретранслятор: з\'єднання успішне</string>
+    <string name="sync_test_relay_failed">Ретранслятор: помилка з\'єднання</string>
+    <string name="sync_test_supabase_ok">Supabase: з\'єднання успішне</string>
+    <string name="sync_test_supabase_failed">Supabase: помилка з\'єднання</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: OnboardingCards overlay-permission button + tap-to-copy row -->
+    <string name="onboarding_grant_overlay_permission">Надати дозвіл на накладання</string>
+    <string name="onboarding_copy_command_label">Копіювати команду</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: PairScreen fingerprint copy toast -->
+    <string name="pair_fingerprint_copied">Відбиток скопійовано</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a2: SyncStatusBadge bottom-sheet labels -->
+    <string name="sync_status_sheet_title">Стан синхронізації</string>
+    <string name="sync_devices_connected_label">Підключені пристрої</string>
+    <string name="sync_devices_connected_none">Немає</string>
+    <string name="sync_status_account_label">Обліковий запис</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a2: slider row content-description join format -->
+    <string name="slider_content_description_format">%1$s, %2$s</string>
+
+    <!-- CopyPaste-myh8.13 S13 review fix: buildSyncTooltip (PARITY-SPEC §9) -->
+    <string name="sync_tooltip_daemon_unreachable">Демон недоступний</string>
+    <string name="sync_tooltip_last_sync_format">Остання синхронізація: %1$s</string>
+    <string name="sync_tooltip_no_sync_yet">Ще не було синхронізації</string>
+    <string name="sync_tooltip_no_paired_devices">Немає прив\'язаних пристроїв</string>
+    <plurals name="sync_tooltip_device_count">
+        <item quantity="one">%d пристрій</item>
+        <item quantity="few">%d пристрої</item>
+        <item quantity="many">%d пристроїв</item>
+        <item quantity="other">%d пристрою</item>
+    </plurals>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: shared relative-time helper (ui/theme/RelativeTime.kt) -->
+    <string name="relative_time_just_now">щойно</string>
+    <string name="relative_time_never">Ніколи</string>
+    <plurals name="relative_time_seconds">
+        <item quantity="one">%d секунду тому</item>
+        <item quantity="few">%d секунди тому</item>
+        <item quantity="many">%d секунд тому</item>
+        <item quantity="other">%d секунди тому</item>
+    </plurals>
+    <plurals name="relative_time_minutes">
+        <item quantity="one">%d хвилину тому</item>
+        <item quantity="few">%d хвилини тому</item>
+        <item quantity="many">%d хвилин тому</item>
+        <item quantity="other">%d хвилини тому</item>
+    </plurals>
+    <plurals name="relative_time_hours">
+        <item quantity="one">%d годину тому</item>
+        <item quantity="few">%d години тому</item>
+        <item quantity="many">%d годин тому</item>
+        <item quantity="other">%d години тому</item>
+    </plurals>
+    <plurals name="relative_time_days">
+        <item quantity="one">%d день тому</item>
+        <item quantity="few">%d дні тому</item>
+        <item quantity="many">%d днів тому</item>
+        <item quantity="other">%d дня тому</item>
+    </plurals>
+
+    <!-- CopyPaste-myh8.5 — S5 (History) new user-facing strings. -->
+    <string name="date_header_pinned">ЗАКРІПЛЕНІ</string>
+    <string name="date_header_today">СЬОГОДНІ</string>
+    <string name="date_header_yesterday">ВЧОРА</string>
+    <string name="date_header_earlier">РАНІШЕ</string>
+
+    <string name="history_error_title">Історія недоступна</string>
+    <string name="history_error_subtitle">Не вдалося завантажити історію буфера обміну. Перевірте з\'єднання з демоном і спробуйте ще раз.</string>
+    <string name="history_error_retry">Повторити</string>
+
+    <!-- CopyPaste-myh8.6 — S6 (Full-screen preview) new user-facing strings. -->
+    <string name="action_reveal">Показати</string>
+    <string name="preview_masked_content_a11y">Конфіденційний вміст приховано. Скористайтеся кнопкою «Показати», щоб переглянути.</string>
+    <string name="preview_image_load_failed">Не вдалося завантажити це зображення.</string>
+
+    <!-- CopyPaste-myh8.7 — S7 (Devices) new user-facing strings. -->
+    <string name="devices_fingerprint_copied">Відбиток скопійовано</string>
+    <string name="devices_local_only_notice">Це лише локальна дія, інший пристрій не отримує сповіщення.</string>
+    <string name="devices_revoke_body_primary">%1$s більше не підключатиметься через P2P, а запис про відкликання буде збережено.</string>
+    <string name="devices_revoke_body_secondary">Відкликаний пристрій, який досі знає парольну фразу синхронізації, може продовжувати читати нові елементи через ретранслятор і хмару. Щоб закрити цю прогалину, виберіть «Відкликати і змінити ключ» нижче.</string>
+    <string name="devices_btn_revoke_rotate">Відкликати і змінити ключ</string>
+    <string name="devices_btn_revoke_only">Лише відкликати</string>
+
+    <string name="devices_rotate_title">Встановити нову парольну фразу синхронізації</string>
+    <string name="devices_rotate_body">Введіть нову парольну фразу, щоб змінити ключ синхронізації. Усім довіреним пристроям потрібно буде повторно ввести цю парольну фразу, щоб продовжити синхронізацію.</string>
+    <string name="devices_rotate_passphrase_label">Нова парольна фраза (мінімум 8 символів)</string>
+    <string name="devices_rotate_passphrase_error">Парольна фраза має містити щонайменше 8 символів.</string>
+    <string name="devices_btn_confirm_revoke_rotate">Підтвердити відкликання і зміну ключа</string>
+
+    <string name="devices_revoke_all_title">Відкликати всі прив\'язані пристрої?</string>
+    <string name="devices_btn_revoke_all_confirm">Відкликати всі</string>
+
+    <string name="devices_dialog_ok">Гаразд</string>
+
+    <!-- New strings introduced by android-material3-redesign slice S8 (Pairing). -->
+    <string name="s8_pair_unknown_device">Невідомий пристрій</string>
+    <string name="s8_pair_transport_p2p">P2P</string>
+    <string name="s8_pair_address_format">Адреса: %1$s</string>
+    <string name="s8_pair_fingerprint_format">Відбиток: %1$s</string>
+
+    <string name="s8_paired_device_label">Прив\'язаний пристрій</string>
+
+    <string name="s8_pair_success_title">Успішно прив\'язано</string>
+    <string name="s8_pair_success_status">Прив\'язано ✓</string>
+    <string name="s8_pair_success_done">Готово</string>
+
+</resources>

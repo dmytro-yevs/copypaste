@@ -52,11 +52,21 @@ class PeerRosterStoreTest {
                 peerLocalIp = "10.0.0.5",
                 peerPublicIp = "203.0.113.9",
                 peerDeviceId = "device-uuid-1",
+                peerSupabaseAccountId = "supabase-acct-1",
             ),
         )
         val json = s.serializePairedPeers(original)
         val parsed = s.parsePairedPeers(json)
         assertEquals(original, parsed)
+    }
+
+    @Test
+    fun `parsePairedPeers on legacy JSON without peerSupabaseAccountId yields null`() {
+        val s = store()
+        val json = """[{"fingerprint":"fp1","syncAddr":"10.0.0.5:1234"}]"""
+        val parsed = s.parsePairedPeers(json)
+        assertEquals(1, parsed.size)
+        assertEquals(null, parsed[0].peerSupabaseAccountId)
     }
 
     @Test

@@ -52,6 +52,14 @@ object ServiceNotifications {
     private const val NOTIF_ID_COPY_EVENT = 1003
 
     /**
+     * CopyPaste-myh8.9: stable notification id for the sensitive-upload-skipped
+     * alert (see [postSensitiveSkipNotification]). Distinct from
+     * [NOTIF_ID_COPY_EVENT] so the two never clobber each other when both fire
+     * close together.
+     */
+    private const val NOTIF_ID_SENSITIVE_SKIP = 1005
+
+    /**
      * Debounce guard: timestamp (System.currentTimeMillis) of the last copy
      * notification. If another capture arrives within [COPY_NOTIF_DEBOUNCE_MS],
      * the notification is refreshed in-place (same id) rather than posting a
@@ -84,7 +92,7 @@ object ServiceNotifications {
         lastCopyNotifMs = now
         ensureChannel(context)
         val notification = NotificationCompat.Builder(context, CHANNEL_COPY_EVENT)
-            .setSmallIcon(R.mipmap.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentTitle(context.getString(R.string.notif_copy_event_title))
             .setContentText(context.getString(R.string.notif_copy_event_content))
             .setPriority(NotificationCompat.PRIORITY_MIN)
@@ -108,6 +116,46 @@ object ServiceNotifications {
                 NotificationManagerCompat.from(context).notify(NOTIF_ID_COPY_EVENT, notification)
             } catch (se: SecurityException) {
                 Log.w(TAG, "postCopyNotification: permission revoked mid-flight (non-fatal): ${se.message}")
+            }
+        }
+    }
+
+    /**
+     * CopyPaste-myh8.9: post (or refresh) the sensitive-upload-skipped notification.
+     * Gated by [Settings.notifyOnSensitiveSkip] — the caller ([ClipboardCapturePipeline.captureClip])
+     * checks the setting before invoking this.
+     *
+     * Reuses [CHANNEL_COPY_EVENT] (same silent, IMPORTANCE_MIN badge-only channel as
+     * [postCopyNotification]) rather than adding a new channel — this is a sibling
+     * per-capture event notification, not a distinct notification category.
+     *
+     * SECURITY: the notification text is a GENERIC localized string (R.string.notif_sensitive_skip_content)
+     * — it must NEVER contain the clip's plaintext or any derived preview of it.
+     */
+    fun postSensitiveSkipNotification(context: Context) {
+        ensureChannel(context)
+        val notification = NotificationCompat.Builder(context, CHANNEL_COPY_EVENT)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setContentTitle(context.getString(R.string.notif_sensitive_skip_title))
+            .setContentText(context.getString(R.string.notif_sensitive_skip_content))
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setAutoCancel(true)
+            .setTimeoutAfter(4_000L)
+            .setOnlyAlertOnce(true)
+            .build()
+        val canNotify = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        if (canNotify) {
+            try {
+                NotificationManagerCompat.from(context).notify(NOTIF_ID_SENSITIVE_SKIP, notification)
+            } catch (se: SecurityException) {
+                Log.w(TAG, "postSensitiveSkipNotification: permission revoked mid-flight (non-fatal): ${se.message}")
             }
         }
     }
@@ -216,7 +264,7 @@ object ServiceNotifications {
         }
 
         val notification = NotificationCompat.Builder(context, CHANNEL_PAIR_REQUEST)
-            .setSmallIcon(R.mipmap.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentTitle(context.getString(R.string.notif_pair_request_title))
             .setContentText(content)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -333,7 +381,7 @@ object ServiceNotifications {
         val content = if (paused) {
             context.getString(R.string.notif_content_paused)
         } else {
-            context.getString(R.string.notif_content_today, count)
+            context.resources.getQuantityString(R.plurals.notif_content_today, count, count)
         }
 
         // Pending-intent flag set: IMMUTABLE is required on API 31+, allowed
@@ -360,7 +408,7 @@ object ServiceNotifications {
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
-            .setSmallIcon(R.mipmap.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_notify)
             .setOngoing(true)
             .setShowWhen(false)
             .setOnlyAlertOnce(true)

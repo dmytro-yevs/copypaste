@@ -72,12 +72,15 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:theme="@style/Theme.CopyPaste">
 
-        <!-- Main entry point — hosts the bottom-nav shell (Clips / Devices / Settings) -->
+        <!-- Main entry point — hosts the bottom-nav shell (Clips / Devices / Settings).
+             Theme.CopyPaste.Splash (task 0.10, S12): installSplashScreen() in
+             MainActivity.onCreate switches the window to postSplashScreenTheme
+             (Theme.CopyPaste) once first-paint is ready. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:theme="@style/Theme.CopyPaste">
+            android:theme="@style/Theme.CopyPaste.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

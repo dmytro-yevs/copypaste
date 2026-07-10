@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CpBadgeChip
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.LocalCpColors
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ internal fun DeviceFilterRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s3),
         contentPadding = PaddingValues(horizontal = 4.dp),
     ) {
         // "All" chip — always first

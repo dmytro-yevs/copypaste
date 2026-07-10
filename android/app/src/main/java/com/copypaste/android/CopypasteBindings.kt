@@ -99,8 +99,12 @@ fun isSupportedAbi(abi: String): Boolean = abi in SUPPORTED_NATIVE_ABIS
  * path). A new `resolve_stun_public_ip() -> String?` function is also exported.
  * Kotlin generated against ABI 17 calls the pairing functions with wrong arity
  * and lacks `resolveStunPublicIp`; must be regenerated against ABI 18.
+ * Bumped 18 → 19 (CopyPaste-6udn): `BootstrapResult` and `PairStatus` each
+ * gained `peerSupabaseAccountId: String?` — the peer's linked Supabase account
+ * id, threaded through so Kotlin can persist it on `PairedPeer` (mirroring
+ * `peerDeviceId`). Additive nullable field; old peers surface `null`.
  */
-const val APP_ABI_VERSION: UInt = 18u
+const val APP_ABI_VERSION: UInt = 19u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {

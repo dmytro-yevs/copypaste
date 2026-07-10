@@ -242,7 +242,6 @@ fun HistoryScreen(
         containerColor = c.background,
         topBar = {
             if (state.selectionMode) {
-                val bulkCopiedMsg = stringResource(R.string.snackbar_bulk_copied)
                 val bulkCopiedNoTextMsg = stringResource(R.string.snackbar_bulk_copied_no_text)
                 SelectionTopBar(
                     selectedCount = state.selectedIds.size,
@@ -293,7 +292,11 @@ fun HistoryScreen(
                                 toastState.show(bulkCopiedNoTextMsg, GlassToastKind.INFO)
                             } else {
                                 toastState.show(
-                                    bulkCopiedMsg.format(copiedCount),
+                                    ctx.resources.getQuantityString(
+                                        R.plurals.snackbar_bulk_copied,
+                                        copiedCount,
+                                        copiedCount,
+                                    ),
                                     GlassToastKind.SUCCESS,
                                 )
                             }
@@ -353,20 +356,25 @@ fun HistoryScreen(
             bottom = innerPadding.calculateBottomPadding() + bottomContentPadding,
         )
         Box(modifier = Modifier.fillMaxSize()) {
-            when {
-                loading && sortedItems.isEmpty() -> LoadingBox(listPadding)
-                // android-history 5.3 — NEW persistent error/degraded state: only
-                // takes over the list surface when there is nothing else to show
-                // (a transient blip while valid cached items are still on screen
-                // does not blow away that data — see `state.isDegraded`'s kdoc).
-                sortedItems.isEmpty() && state.isDegraded ->
-                    HistoryErrorState(listPadding, onRetry = { viewModel.loadItems() })
-                // §9: history completely empty — CopyPaste-crh3.31: show the
-                // private-mode message when recording is paused (parity w/ macOS).
-                sortedItems.isEmpty() -> EmptyHistoryState(listPadding, isPrivateMode = settings.privateMode)
-                // §9: search returned no results (counting device filter too)
-                deviceFilteredItems.isEmpty() -> EmptySearchState(listPadding, state.searchQuery.trim())
-                else -> HistoryList(
+            // android-history 5.3 — the error/degraded state only takes over the
+            // list surface when there is nothing else to show (a transient blip
+            // while valid cached items are still on screen does not blow away
+            // that data — see `state.isDegraded`'s kdoc). §9: private-mode empty
+            // message (CopyPaste-crh3.31) and search-no-results (counting device
+            // filter too) are the other two empty branches.
+            // CopyPaste-ci3u: when-branch extracted to HistoryListBody (S2.9
+            // Paparazzi seam) — same conditions, zero behaviour change.
+            HistoryListBody(
+                padding = listPadding,
+                loading = loading,
+                hasAnyItems = sortedItems.isNotEmpty(),
+                hasFilteredItems = deviceFilteredItems.isNotEmpty(),
+                isDegraded = state.isDegraded,
+                isPrivateMode = settings.privateMode,
+                searchQuery = state.searchQuery.trim(),
+                onRetry = { viewModel.loadItems() },
+            ) {
+                HistoryList(
                     items = deviceFilteredItems,
                     padding = listPadding,
                     hasMore = hasMore,

@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -41,11 +43,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -54,6 +60,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -157,7 +164,30 @@ fun GlassAlertDialog(
         confirmButton = confirmButton,
         modifier = modifier,
         dismissButton = dismissButton,
-        title = title,
+        // A11y: M3 AlertDialog does not itself move focus onto any node
+        // inside the dialog subtree on open — a Tab/D-pad/TalkBack user gets
+        // no entry point. Request focus onto the title (present on every
+        // confirm dialog) once, on first composition. The FocusRequester and
+        // its LaunchedEffect must live INSIDE this slot lambda — it composes
+        // in the AlertDialog's own Dialog window composition, which settles
+        // on a different pass than GlassAlertDialog's own composition, so a
+        // requestFocus() call from outside this slot races the modifier
+        // attaching to the node and throws "FocusRequester is not initialized".
+        title = title?.let { titleContent ->
+            {
+                val titleFocusRequester = remember { FocusRequester() }
+                Box(
+                    modifier = Modifier
+                        .focusRequester(titleFocusRequester)
+                        .focusable(),
+                ) {
+                    titleContent()
+                }
+                LaunchedEffect(Unit) {
+                    titleFocusRequester.requestFocus()
+                }
+            }
+        },
         text = text,
         properties = properties,
         shape = RoundedCornerShape(CpShapes.card),
@@ -195,24 +225,28 @@ fun IdeSwitch(
         animationSpec = tween(cpMotionDuration(CpMotion.FAST_MS, reduced)),
         label = "toggleKnobOffset",
     )
+    // Outer box carries the >=48dp touch target (WCAG 2.5.5) and the
+    // toggleable+semantics interactive node — the inner box keeps the
+    // documented 38x22 (STYLEGUIDE §9.2) visual track unchanged. Same
+    // outer-touch/inner-visual precedent as AccentSwatchRow/IdeSegmentedControl.
     Box(
         modifier = modifier
-            .size(width = CpDimensions.touchMin, height = CpDimensions.touchMin),
+            .size(width = CpDimensions.touchMin, height = CpDimensions.touchMin)
+            .toggleable(
+                value = checked,
+                onValueChange = { onCheckedChange?.invoke(it) },
+                enabled = enabled,
+                role = Role.Switch,
+            )
+            .semantics {
+                stateDescription = if (checked) "On" else "Off"
+                if (name != null) contentDescription = name
+            },
         contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
                 .size(width = CpDimensions.toggleW, height = CpDimensions.toggleH)
-                .toggleable(
-                    value = checked,
-                    onValueChange = { onCheckedChange?.invoke(it) },
-                    enabled = enabled,
-                    role = Role.Switch,
-                )
-                .semantics {
-                    stateDescription = if (checked) "On" else "Off"
-                    if (name != null) contentDescription = name
-                }
                 .alpha(if (enabled) 1f else DISABLED_ALPHA)
                 .clip(RoundedCornerShape(CpShapes.pill))
                 .background(trackColor),
@@ -418,6 +452,7 @@ fun SharedSettingsNavRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .heightIn(min = CpDimensions.touchMin)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -541,5 +576,61 @@ fun CpBadgeChip(
             )
         }
         Text(text = text, style = CpTypography.micro, color = color)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A2 (CopyPaste-fm0s.6): @Preview coverage for Android Studio's Preview pane
+// (dev-only annotation, zero runtime impact). Static-data snapshot of the
+// shared design surfaces above, wrapped in CopyPasteTheme per light/dark —
+// mirrors the Paparazzi snapshot fixtures' direct-call convention (see
+// PermissionCardSnapshotTest.kt) without depending on the paparazzi plugin.
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun ComponentsPreviewContent() {
+    val cp = LocalCpColors.current
+    Column(
+        modifier = Modifier
+            .background(cp.bg)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionLabel(text = "Buttons")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CopyPasteButton(onClick = {}, variant = ButtonVariant.PRIMARY) { Text("Primary") }
+            CopyPasteButton(onClick = {}, variant = ButtonVariant.SECONDARY) { Text("Secondary") }
+            CopyPasteButton(onClick = {}, variant = ButtonVariant.DANGER) { Text("Danger") }
+        }
+        CopyPasteCard {
+            Text(text = "Card content", modifier = Modifier.padding(16.dp), color = cp.text)
+        }
+        SharedSettingsRow(title = "Setting title", subtitle = "Setting subtitle", checked = true, onCheckedChange = {})
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CpBadgeChip(text = "Verified", color = cp.ok, pill = false, showDot = true)
+            CpBadgeChip(text = "Cloud", color = cp.info)
+        }
+        EmptyStateCard(
+            icon = { Icon(imageVector = LucideIcons.StatusInfo, contentDescription = null, tint = cp.faint) },
+            title = "Nothing here yet",
+            subtitle = "Copy something to get started",
+            padding = PaddingValues(0.dp),
+        )
+    }
+}
+
+@Preview(name = "Components — light", showBackground = true)
+@Composable
+private fun ComponentsPreviewLight() {
+    CopyPasteTheme(isDark = false) {
+        ComponentsPreviewContent()
+    }
+}
+
+@Preview(name = "Components — dark", showBackground = true)
+@Composable
+private fun ComponentsPreviewDark() {
+    CopyPasteTheme(isDark = true) {
+        ComponentsPreviewContent()
     }
 }

@@ -47,6 +47,16 @@ data class PairedPeer(
      * persisted now so it will be populated automatically once the FFI is extended.
      */
     val peerDeviceId: String? = null,
+    /**
+     * CopyPaste-6udn: the peer's linked Supabase account id (from
+     * BootstrapResult.peerSupabaseAccountId / PairStatus.peerSupabaseAccountId in
+     * the ABI 19 UDL), distinct from both [fingerprint] and [peerDeviceId].
+     *
+     * Populated in [SasPairingDialog.persistConfirmed] and
+     * [PairBootstrapSync.finalizeSync] when the FFI surface exposes the value.
+     * Null for legacy roster entries written before this field was added.
+     */
+    val peerSupabaseAccountId: String? = null,
     // Runtime-only: round-trip time in ms measured by FgsSyncLoop over the mTLS P2P
     // connection. Not persisted to the roster JSON — populated in-memory during an
     // active sync session. Wired to the UI via DevicesViewModel; actual FgsSyncLoop

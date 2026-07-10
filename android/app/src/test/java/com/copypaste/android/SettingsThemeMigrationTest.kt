@@ -119,6 +119,15 @@ class SettingsThemeMigrationTest {
             notifyOnCopy = true,
             soundOnCopy = true,
             logcatCaptureEnabled = false,
+            collectPublicIp = true,
+            pasteAsPlainText = false,
+            excludedAppBundleIds = emptyList(),
+            showSensitiveWarnings = true,
+            autoApplySyncedClip = true,
+            maxFileSizeBytes = settings.maxFileSizeBytes,
+            sensitiveTtlSecs = settings.sensitiveTtlSecs,
+            previewLines = 1,
+            maxHistoryItems = 1000,
         )
 
         assertTrue(committed)

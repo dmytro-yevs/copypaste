@@ -10,6 +10,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
@@ -52,7 +53,7 @@ internal fun SelectionTopBar(
             title = {
                 // CopyPaste-mpp6: headlineSmall to match CopyPasteTopBar hierarchy.
                 Text(
-                    text = stringResource(R.string.selection_count, selectedCount),
+                    text = pluralStringResource(R.plurals.selection_count, selectedCount, selectedCount),
                     color = c.onSurface,
                 )
             },
@@ -132,9 +133,9 @@ internal fun ConfirmationDialog(
         ConfirmAction.CLEAR_UNPINNED ->
             stringResource(R.string.dialog_clear_unpinned_message)
         ConfirmAction.CLEAR_ALL ->
-            stringResource(R.string.dialog_clear_all_message, itemCount)
+            pluralStringResource(R.plurals.dialog_clear_all_message, itemCount, itemCount)
         ConfirmAction.DELETE_SELECTED ->
-            stringResource(R.string.dialog_delete_selected_message, itemCount)
+            pluralStringResource(R.plurals.dialog_delete_selected_message, itemCount, itemCount)
         // CopyPaste-2ifa: single-item delete uses a concise, non-count message.
         ConfirmAction.DELETE_SINGLE ->
             stringResource(R.string.dialog_delete_single_message)

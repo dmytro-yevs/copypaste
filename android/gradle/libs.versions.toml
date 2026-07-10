@@ -44,6 +44,16 @@ paparazzi = "1.3.4"
 # caps at SDK 33); 4.16 wants JDK 21. Fallback = 4.14 if dependency
 # resolution fails against our Gradle 8.7.
 robolectric = "4.15"
+# core-splashscreen (task 0.10, S12): 1.0.1 is the latest STABLE release this
+# module can actually use. 1.2.0 IS newer and stable (verified against
+# dl.google.com/android/maven2 maven-metadata.xml — 1.1.0 is alpha/rc-only)
+# but its AAR metadata requires AGP >= 8.6.0 (`checkDebugAarMetadata` fails
+# against our pinned AGP 8.3.2 — see the agp/kotlin comment above for why
+# that pin is load-bearing, Paparazzi 1.3.4). Bumping AGP is out of this
+# slice's scope (one-gradle-change-at-a-time landmine) — 1.0.1 stays until a
+# future slice revisits the AGP pin. The lintDebug `GradleDependency` nag for
+# this is baselined below with that rationale, not silently ignored.
+coreSplashscreen = "1.0.1"
 
 [libraries]
 core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -57,7 +67,6 @@ compose-ui = { group = "androidx.compose.ui", name = "ui" }
 compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 compose-material3 = { group = "androidx.compose.material3", name = "material3" }
-compose-material-icons = { group = "androidx.compose.material", name = "material-icons-extended" }
 compose-runtime-livedata = { group = "androidx.compose.runtime", name = "runtime-livedata" }
 activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycleViewModelCompose" }
@@ -66,6 +75,7 @@ work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
 zxing-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingEmbedded" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "coreSplashscreen" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

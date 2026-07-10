@@ -7,11 +7,13 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -22,6 +24,8 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.Dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 // ---------------------------------------------------------------------------
 // BackdropCapture — the real Haze-style "captured-layer" backdrop-blur source
@@ -65,6 +69,21 @@ import androidx.compose.ui.unit.Dp
  * inside its own draw phase to subscribe to Compose's snapshot system, so it
  * redraws whenever the source redraws (e.g. on scroll) with no explicit
  * invalidation wiring between the two composables.
+ *
+ * [generation] and [tick] are two deliberately ONE-DIRECTIONAL channels — each
+ * is written by exactly one side and read by the other, never both in the
+ * same scope:
+ *  - [generation]: source-writes (inside [Modifier.captureBackdrop]'s own
+ *    `drawWithContent`), consumer-reads (inside [CapturedBackdropBlur]'s
+ *    `drawWithContent`) — "the source just recorded a new frame".
+ *  - [tick]: consumer-writes (the bounded throttled refresh loop in
+ *    [CapturedBackdropBlur]), source-reads (inside [Modifier.captureBackdrop]'s
+ *    `drawWithContent`) — "re-run the capture even though nothing in the
+ *    source subtree itself changed" (e.g. a scrolled child repainted only its
+ *    own hardware layer, which does not by itself invalidate the parent's
+ *    draw phase). Mixing read+write of the SAME field in one scope is exactly
+ *    what caused the self-invalidation bug fixed below (CopyPaste-6jk9) — see
+ *    the `Snapshot.withoutReadObservation` note on [generation]'s writer.
  */
 class BackdropCaptureState {
     internal val picture = Picture()
@@ -73,6 +92,10 @@ class BackdropCaptureState {
         internal set
 
     var generation: Int by mutableIntStateOf(0)
+        internal set
+
+    /** See the two-channel note above — consumer-written, source-read only. */
+    var tick: Int by mutableIntStateOf(0)
         internal set
 }
 
@@ -89,6 +112,11 @@ fun Modifier.captureBackdrop(state: BackdropCaptureState?): Modifier {
     return this
         .onGloballyPositioned { coordinates -> state.originInRoot = coordinates.positionInRoot() }
         .drawWithContent {
+            // Deliberate observed read: the only trigger that re-runs this draw
+            // phase when a child repaints its own hardware layer without
+            // otherwise invalidating this parent (e.g. a scrolled LazyColumn
+            // item) — see the two-channel note on BackdropCaptureState.
+            state.tick
             val w = size.width.toInt()
             val h = size.height.toInt()
             if (w <= 0 || h <= 0) {
@@ -108,9 +136,23 @@ fun Modifier.captureBackdrop(state: BackdropCaptureState?): Modifier {
             // the Picture capture is a side channel, not a replacement for
             // this content's own on-screen drawing.
             realCanvas.nativeCanvas.drawPicture(state.picture)
-            state.generation++
+            // This write must NOT be read-observed by this drawWithContent
+            // scope: an observed get-then-set on the same snapshot state
+            // inside the scope that reads it self-invalidates every frame,
+            // causing the source to redraw continuously even with zero
+            // consumers (confirmed by on-device isolation).
+            Snapshot.withoutReadObservation { state.generation++ }
         }
 }
+
+/**
+ * Ceiling on how often [CapturedBackdropBlur]'s bounded refresh loop bumps
+ * [BackdropCaptureState.tick] (CopyPaste-9u7l) — a scroll-freshness floor, not
+ * a frame-rate target: 100ms keeps the pill's backdrop visibly current during
+ * a scroll while capping the extra draw work to ~10 forced re-captures/sec
+ * for as long as this composable is on screen.
+ */
+private const val BackdropRefreshIntervalMillis = 100L
 
 /**
  * Draws a blurred, translated copy of [state]'s captured backdrop, clipped to
@@ -128,6 +170,31 @@ fun CapturedBackdropBlur(
     modifier: Modifier = Modifier,
 ) {
     var originInRoot by remember { mutableStateOf(Offset.Zero) }
+    // Bounded, throttled freshness refresh (CopyPaste-9u7l): the capture
+    // source's own draw phase does not always re-run when only an unrelated
+    // descendant's hardware layer changes (e.g. LazyColumn scroll), so the
+    // backdrop can go stale. This loop bumps `state.tick` at most once per
+    // BackdropRefreshIntervalMillis while this composable is part of the
+    // composition — its lifetime is scoped to THIS composable (cancelled
+    // automatically when it leaves composition), and it is only composed at
+    // all when REAL_BACKDROP blur + the pill are both visible (NavPill.kt's
+    // existing `realBackdrop` gate), so the battery cost is bounded to
+    // "pill on screen with real blur enabled", not global.
+    //
+    // Uses `delay(...)`, not `withFrameNanos`: an awaiter registered on the
+    // main choreographer clock is treated by Compose UI test's idling
+    // resource as a pending recomposition forever, so
+    // `ComposeTestRule.waitForIdle()` times out with
+    // "possibly due to compose being busy" as soon as this loop is composed
+    // (confirmed empirically running BackdropScrollFreshnessConnectedTest —
+    // see its own kdoc). `delay` suspends off the frame clock, so Espresso's
+    // idling check does not see it as perpetually busy.
+    LaunchedEffect(state) {
+        while (isActive) {
+            delay(BackdropRefreshIntervalMillis)
+            state.tick++
+        }
+    }
     Box(
         modifier = modifier
             .onGloballyPositioned { originInRoot = it.positionInRoot() }

@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpShapes
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.icons.LucideIcons
@@ -100,7 +102,7 @@ internal fun PairQrCard(
                 .fillMaxWidth()
                 .padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(CpSpacing.s7)
         ) {
             // Reserve a fixed-size slot for the QR area. Every state
             // (loading / QR present / placeholder) renders into this same
@@ -238,7 +240,7 @@ internal fun PairQrCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(2.dp)
-                                .clip(RoundedCornerShape(999.dp))
+                                .clip(RoundedCornerShape(CpShapes.pill))
                                 .background(cp.border),
                         ) {
                             Box(

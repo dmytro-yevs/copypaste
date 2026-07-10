@@ -33,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpShapes
 import com.copypaste.android.ui.theme.SectionLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -288,7 +289,7 @@ internal fun OwnQrSection(settings: Settings) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(2.dp)
-                        .clip(RoundedCornerShape(999.dp))
+                        .clip(RoundedCornerShape(CpShapes.pill))
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                 ) {
                     Box(

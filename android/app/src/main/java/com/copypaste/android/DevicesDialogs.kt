@@ -16,6 +16,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalCpColors
@@ -55,7 +56,7 @@ private fun UnpairConfirmDialog(controller: DevicesController) {
         // CopyPaste-bdac.51: standardized to "Unpair" — was "Forget" (terminology conflict).
         title = { Text(stringResource(R.string.dialog_forget_device_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s4)) {
                 Text(
                     stringResource(R.string.dialog_forget_device_body, target.displayName()),
                     style = CpTypography.body,
@@ -98,7 +99,7 @@ private fun RevokeConfirmDialog(controller: DevicesController) {
         onDismissRequest = { controller.revoke.revokeTarget = null },
         title = { Text(stringResource(R.string.dialog_revoke_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s4)) {
                 Text(
                     stringResource(R.string.devices_revoke_body_primary, target.displayName()),
                     style = CpTypography.body,
@@ -154,7 +155,7 @@ private fun RevokeRotateDialog(controller: DevicesController) {
         onDismissRequest = { controller.revoke.cancelRevokeRotate() },
         title = { Text(stringResource(R.string.devices_rotate_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s4)) {
                 Text(
                     stringResource(R.string.devices_rotate_body),
                     style = CpTypography.body,

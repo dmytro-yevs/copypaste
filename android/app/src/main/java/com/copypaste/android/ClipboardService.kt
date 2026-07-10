@@ -167,7 +167,9 @@ class ClipboardService : Service() {
             syncManager = syncManager,
             repository = repository,
             scope = scope,
-            onSyncedTextClip = { text -> applyTextToClipboard(text) },
+            onSyncedTextClip = { text ->
+                ClipboardCapturePipeline.applySyncedTextIfEnabled(settings, text, ::applyTextToClipboard)
+            },
         )
         deviceKeyStore = DeviceKeyStore(this)
         fgsSyncLoop = FgsSyncLoop(
@@ -176,7 +178,9 @@ class ClipboardService : Service() {
             syncManager = syncManager,
             deviceKeyStore = deviceKeyStore,
             wsClient = realtimeClient,
-            onSyncedTextClip = { text -> applyTextToClipboard(text) },
+            onSyncedTextClip = { text ->
+                ClipboardCapturePipeline.applySyncedTextIfEnabled(settings, text, ::applyTextToClipboard)
+            },
             // CopyPaste-yaip: supply application context so dialPairedPeer can read
             // the OutboundMutationQueue and include pin/reorder/delete mutations in
             // the P2P outbound set even when they have an old wallTimeMs.
@@ -380,6 +384,11 @@ class ClipboardService : Service() {
      * that the capture listeners ([ClipboardService] / [ClipboardAccessibilityService])
      * recognise the upcoming setPrimaryClip as an internal write and skip it —
      * preventing a capture → re-push → re-sync round-trip.
+     *
+     * CopyPaste-myh8.9: callers gate this via
+     * [ClipboardCapturePipeline.applySyncedTextIfEnabled], which re-reads
+     * [Settings.autoApplySyncedClip] at EVENT time (not at registration time)
+     * so a mid-session toggle takes effect on the very next synced clip.
      */
     private fun applyTextToClipboard(text: String) {
         ClipboardRepository.expectClip(text)

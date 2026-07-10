@@ -19,9 +19,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.R
 
 // ---------------------------------------------------------------------------
 // Slider rows re-based on tokens (task 2.3): thumb/active-track = the resolved
@@ -80,6 +82,7 @@ fun SteppedSliderRow(
             )
         }
         val stepLabel = stepLabels[sliderPosition.toInt().coerceIn(0, stepValues.size - 1)]
+        val sliderContentDescription = stringResource(R.string.slider_content_description_format, label, stepLabel)
         Slider(
             value = sliderPosition,
             onValueChange = { sliderPosition = it },
@@ -92,7 +95,7 @@ fun SteppedSliderRow(
             colors = cpSliderColors(),
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "$label, $stepLabel" },
+                .semantics { contentDescription = sliderContentDescription },
         )
     }
 }
@@ -130,6 +133,7 @@ fun ContinuousSliderRow(
             )
         }
         val valueLabel = formatValue(sliderPos.toInt().coerceIn(min, max))
+        val sliderContentDescription = stringResource(R.string.slider_content_description_format, label, valueLabel)
         Slider(
             value = sliderPos,
             onValueChange = { sliderPos = it },
@@ -140,7 +144,7 @@ fun ContinuousSliderRow(
             colors = cpSliderColors(),
             modifier = Modifier
                 .fillMaxWidth()
-                .semantics { contentDescription = "$label, $valueLabel" },
+                .semantics { contentDescription = sliderContentDescription },
         )
     }
 }

@@ -17,6 +17,7 @@ import com.copypaste.android.ui.theme.CpDimensions
 import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.icons.LucideIcons
+import com.copypaste.android.ui.theme.relativeTimeAgoLabel
 
 // ─────────────────────────────────────────────────────────────────────────────
 // android-preview S6 — PreviewActionRow: the pinned-mode action row + the
@@ -144,16 +145,14 @@ internal fun previewPlaintextExposed(isSensitive: Boolean, revealed: Boolean): B
     !isSensitive || revealed
 
 /** Relative-time helper for PreviewOverlay (no dependency on HistoryActivity internals). */
+@Composable
 internal fun relativeTimePreview(ms: Long): String {
     if (ms <= 0L) return "—"
     val diff = System.currentTimeMillis() - ms
-    return when {
-        diff < 60_000L         -> "just now"
-        diff < 3_600_000L      -> "${diff / 60_000}m ago"
-        diff < 86_400_000L     -> "${diff / 3_600_000}h ago"
-        diff < 7 * 86_400_000L -> "${diff / 86_400_000}d ago"
-        else -> java.text.DateFormat
+    if (diff >= 7 * 86_400_000L) {
+        return java.text.DateFormat
             .getDateInstance(java.text.DateFormat.SHORT)
             .format(java.util.Date(ms))
     }
+    return relativeTimeAgoLabel(diff)
 }

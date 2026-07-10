@@ -14,6 +14,8 @@
     <string name="about_tagline">Encrypted clipboard manager</string>
     <string name="about_features">Features</string>
     <string name="about_open_github">Open GitHub repository</string>
+    <string name="about_license">Licensed under MIT OR Apache-2.0</string>
+    <string name="about_link_failed">Could not open the link</string>
 
     <!-- Screen titles -->
     <string name="title_history">History</string>
@@ -109,7 +111,10 @@
     <string name="setting_max_items_subtitle">Older unpinned items are permanently deleted when the store exceeds this limit. Pinned items are always kept.</string>
     <!-- CopyPaste-bdac.88: confirmation shown before a destructive cap reduction on Save. -->
     <string name="dialog_max_items_reduce_title">Delete older items?</string>
-    <string name="dialog_max_items_reduce_body">Lowering the maximum stored items will permanently delete %1$d older unpinned item(s). Pinned items are kept. This cannot be undone.</string>
+    <plurals name="dialog_max_items_reduce_body">
+        <item quantity="one">Lowering the maximum stored items will permanently delete %1$d older unpinned item. Pinned items are kept. This cannot be undone.</item>
+        <item quantity="other">Lowering the maximum stored items will permanently delete %1$d older unpinned items. Pinned items are kept. This cannot be undone.</item>
+    </plurals>
     <string name="dialog_max_items_reduce_confirm">Delete and save</string>
     <!-- CopyPaste-wuek NG-1: clear-all in Settings (canonical location, parity with macOS) -->
     <string name="section_data">Data</string>
@@ -138,6 +143,8 @@
     <string name="setting_supabase_password_label">Password</string>
     <string name="setting_supabase_account_note">If left blank, the anon key is used as bearer. Sign-in enables Row Level Security policies.</string>
     <string name="setting_relay_url_label">Relay URL</string>
+    <string name="setting_supabase_url_invalid">Supabase URL must start with https://</string>
+    <string name="setting_relay_url_invalid">Relay URL is blank or points to localhost, which is unreachable on a real device</string>
     <string name="setting_device_id_label">Device ID</string>
     <string name="setting_permissions_title">Permissions</string>
     <string name="setting_permissions_subtitle">Review and re-request permissions</string>
@@ -153,6 +160,21 @@
     <!-- Permissions screen -->
     <string name="title_permissions">Permissions</string>
     <string name="permissions_intro">Review the status of each permission CopyPaste uses. Tap a button to re-open its request or settings screen at any time.</string>
+    <string name="perm_notifications_title">Notifications</string>
+    <string name="perm_notifications_desc">Required on Android 13+ so the clipboard-monitoring foreground service can show its status notification (Pause/Resume).</string>
+    <string name="perm_notifications_reopen">Re-open Request</string>
+    <string name="perm_notifications_open_settings">Open Notification Settings</string>
+    <string name="perm_battery_title">Battery Optimization Exemption</string>
+    <string name="perm_battery_desc">Prevents Android from killing the sync service when the phone is idle. Recommended for reliable Supabase polling.</string>
+    <string name="perm_battery_open_settings">Open Battery Settings</string>
+    <string name="perm_battery_request">Request Exemption</string>
+    <string name="perm_oem_title">OEM Autostart / Protected Apps</string>
+    <string name="perm_oem_desc_base">Many phone makers (Xiaomi, Huawei, Samsung, Oppo, Vivo, OnePlus, etc.) have extra battery-saver layers that kill background apps regardless of Android\'s own battery optimisation. Whitelist CopyPaste in the manufacturer\'s autostart / protected-apps screen so it survives when the screen is off.</string>
+    <string name="perm_oem_desc_device">%1$s\n\nOn this device: %2$s</string>
+    <string name="perm_oem_button">Open OEM Settings</string>
+    <string name="perm_fg_service_title">Foreground Service</string>
+    <string name="perm_fg_service_desc">Granted automatically at install — no action needed. Lets the clipboard-monitoring service run in the background.</string>
+    <string name="perm_fg_service_granted">Granted</string>
 
     <!-- Background Capture ADB commands (Settings + Onboarding) -->
     <string name="bg_adb_section_title">Background clipboard capture (ADB)</string>
@@ -233,6 +255,11 @@
     <string name="notif_copy_event_title">Item copied</string>
     <string name="notif_copy_event_content">Clipboard item saved to history.</string>
 
+    <!-- Sensitive-upload-skipped notification (CopyPaste-myh8.9). Generic text only —
+         must never reveal the clip's content. values-uk translation is S13's job. -->
+    <string name="notif_sensitive_skip_title">Sensitive item not synced</string>
+    <string name="notif_sensitive_skip_content">A clipboard item was saved locally, but not uploaded because it looks sensitive.</string>
+
     <!-- Logcat capture FGS notification channel (CopyPaste-44rq.4) -->
     <string name="notif_channel_logcat_capture_name">Background ADB Capture</string>
     <string name="notif_channel_logcat_capture_description">Silent persistent notification while logcat-based background clipboard capture is active (requires adb READ_LOGS grant).</string>
@@ -244,7 +271,10 @@
     <string name="notif_channel_service_description">Persistent notification while CopyPaste is monitoring the clipboard.</string>
     <string name="notif_title_active">CopyPaste — Active</string>
     <string name="notif_title_paused">CopyPaste — Paused</string>
-    <string name="notif_content_today">%1$d items captured today</string>
+    <plurals name="notif_content_today">
+        <item quantity="one">%1$d item captured today</item>
+        <item quantity="other">%1$d items captured today</item>
+    </plurals>
     <string name="notif_content_paused">Capture paused. Tap Resume to continue.</string>
     <string name="notif_action_pause">Pause</string>
     <string name="notif_action_resume">Resume</string>
@@ -299,9 +329,15 @@
     <string name="action_delete_selected">Delete selected</string>
     <string name="action_pin_selected">Pin selected</string>
     <string name="action_unpin_selected">Unpin selected</string>
-    <string name="selection_count">%1$d selected</string>
+    <plurals name="selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
     <!-- g3z4: bulk-copy toast — shown after joining text items to clipboard -->
-    <string name="snackbar_bulk_copied">%1$d item(s) copied</string>
+    <plurals name="snackbar_bulk_copied">
+        <item quantity="one">%1$d item copied</item>
+        <item quantity="other">%1$d items copied</item>
+    </plurals>
     <string name="snackbar_bulk_copied_no_text">No text items to copy</string>
 
     <!-- Confirmation dialogs -->
@@ -312,11 +348,17 @@
     <string name="dialog_discard_keep">Keep editing</string>
 
     <string name="dialog_clear_all_title">Clear All History</string>
-    <string name="dialog_clear_all_message">This will permanently delete all %1$d clipboard items. This cannot be undone.</string>
+    <plurals name="dialog_clear_all_message">
+        <item quantity="one">This will permanently delete all %1$d clipboard item. This cannot be undone.</item>
+        <item quantity="other">This will permanently delete all %1$d clipboard items. This cannot be undone.</item>
+    </plurals>
     <string name="dialog_clear_unpinned_title">Clear Unpinned Items</string>
     <string name="dialog_clear_unpinned_message">This will permanently delete all unpinned clipboard items. Pinned items will be kept.</string>
     <string name="dialog_delete_selected_title">Delete Selected</string>
-    <string name="dialog_delete_selected_message">This will permanently delete %1$d selected items. This cannot be undone.</string>
+    <plurals name="dialog_delete_selected_message">
+        <item quantity="one">This will permanently delete %1$d selected item. This cannot be undone.</item>
+        <item quantity="other">This will permanently delete %1$d selected items. This cannot be undone.</item>
+    </plurals>
     <!-- CopyPaste-2ifa: single-item delete confirmation dialog -->
     <string name="dialog_delete_single_title">Delete Item</string>
     <string name="dialog_delete_single_message">Delete this clipboard item?</string>
@@ -340,6 +382,10 @@
     <string name="log_export_chooser_title">Share logs via…</string>
     <string name="log_export_empty">No log files found yet.</string>
     <string name="log_export_failed">Could not prepare log archive. Try adb pull instead.</string>
+    <string name="log_export_success">Logs exported</string>
+    <string name="log_level_error">Error</string>
+    <string name="log_level_warning">Warning</string>
+    <string name="log_level_info">Info</string>
 
     <!-- Crash detection (OnboardingActivity / next-launch prompt) -->
     <string name="crash_detected_title">App crashed last time</string>
@@ -375,6 +421,8 @@
     <!-- Native library unavailable — sync disabled sentinel notification -->
     <string name="notif_native_unavailable_title">CopyPaste: sync disabled</string>
     <string name="notif_native_unavailable_content">The encryption library failed to load. Items will NOT be saved until the app is restarted.</string>
+    <string name="notif_channel_sync_name">Sync Status</string>
+    <string name="notif_channel_sync_description">Relay sync status notifications</string>
 
     <!-- File item UI -->
     <string name="cd_file_item">Synced file</string>
@@ -474,6 +522,7 @@
 
     <!-- Settings — Save button (ojsq) -->
     <string name="btn_save">Save</string>
+    <string name="btn_save_saved">Saved</string>
 
     <!-- Settings — discard dialog (ojsq; also covers the duplicate hardcoded version) -->
     <string name="dialog_unsaved_title">Unsaved changes</string>
@@ -507,7 +556,10 @@
     <!-- bd CopyPaste-44rq.22: export/import history toast feedback -->
     <string name="history_export_ok">History exported</string>
     <string name="history_export_failed">Export failed</string>
-    <string name="history_import_ok">%1$d items imported</string>
+    <plurals name="history_import_ok">
+        <item quantity="one">%1$d item imported</item>
+        <item quantity="other">%1$d items imported</item>
+    </plurals>
     <string name="history_import_failed">Import failed</string>
 
     <!-- CopyPaste-bdac.61: SettingsActivity — Appearance section strings -->
@@ -593,6 +645,10 @@
     <string name="toast_test_connection_ok">Connection OK</string>
     <string name="toast_test_connection_fail">Connection failed — check URL and network</string>
 
+    <!-- CopyPaste-myh8.11 S11 Wave 2: SyncTab error banners (CpBanner migration) -->
+    <string name="sync_error_unauthorized">%1$s\n\nCheck your passphrase / credentials below and save.</string>
+    <string name="btn_retry">Retry</string>
+
     <!-- CopyPaste-bdac.61: SettingsActivity — Sync tab -->
     <string name="section_sync_diagnostics">Sync Diagnostics</string>
     <string name="setting_auto_apply_synced_clip_title">Auto-apply synced clipboard</string>
@@ -623,5 +679,65 @@
     <!-- CopyPaste-bdac.42: SettingsActivity — Storage tab vacuum toast feedback -->
     <string name="toast_compact_db_ok">Database compacted successfully</string>
     <string name="toast_compact_db_fail">Compact failed — see logs for details</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: LogViewerActivity top-bar/dialog actions -->
+    <string name="logs_title">Logs</string>
+    <string name="logs_action_clear">Clear</string>
+    <string name="logs_action_refresh">Refresh</string>
+    <string name="logs_action_export">Export</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: SyncTab diagnostics -->
+    <string name="sync_peers_online_label">Peers online (P2P)</string>
+    <string name="sync_test_no_transport_enabled">No enabled transport to test — enable Relay or Supabase above.</string>
+    <string name="sync_test_relay_ok">Relay: connection OK</string>
+    <string name="sync_test_relay_failed">Relay: connection failed</string>
+    <string name="sync_test_supabase_ok">Supabase: connection OK</string>
+    <string name="sync_test_supabase_failed">Supabase: connection failed</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: OnboardingCards overlay-permission button + tap-to-copy row -->
+    <string name="onboarding_grant_overlay_permission">Grant Overlay Permission</string>
+    <string name="onboarding_copy_command_label">Copy command</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: PairScreen fingerprint copy toast -->
+    <string name="pair_fingerprint_copied">Fingerprint copied</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a2: SyncStatusBadge bottom-sheet labels -->
+    <string name="sync_status_sheet_title">Sync status</string>
+    <string name="sync_devices_connected_label">Devices connected</string>
+    <string name="sync_devices_connected_none">None</string>
+    <string name="sync_status_account_label">Account</string>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a2: slider row content-description join format -->
+    <string name="slider_content_description_format">%1$s, %2$s</string>
+
+    <!-- CopyPaste-myh8.13 S13 review fix: buildSyncTooltip (PARITY-SPEC §9) -->
+    <string name="sync_tooltip_daemon_unreachable">Daemon unreachable</string>
+    <string name="sync_tooltip_last_sync_format">Last sync: %1$s</string>
+    <string name="sync_tooltip_no_sync_yet">No sync yet</string>
+    <string name="sync_tooltip_no_paired_devices">No paired devices</string>
+    <plurals name="sync_tooltip_device_count">
+        <item quantity="one">%d device</item>
+        <item quantity="other">%d devices</item>
+    </plurals>
+
+    <!-- CopyPaste-myh8.13 S13 Wave a: shared relative-time helper (ui/theme/RelativeTime.kt) -->
+    <string name="relative_time_just_now">just now</string>
+    <string name="relative_time_never">Never</string>
+    <plurals name="relative_time_seconds">
+        <item quantity="one">%ds ago</item>
+        <item quantity="other">%ds ago</item>
+    </plurals>
+    <plurals name="relative_time_minutes">
+        <item quantity="one">%dm ago</item>
+        <item quantity="other">%dm ago</item>
+    </plurals>
+    <plurals name="relative_time_hours">
+        <item quantity="one">%dh ago</item>
+        <item quantity="other">%dh ago</item>
+    </plurals>
+    <plurals name="relative_time_days">
+        <item quantity="one">%dd ago</item>
+        <item quantity="other">%dd ago</item>
+    </plurals>
 
 </resources>

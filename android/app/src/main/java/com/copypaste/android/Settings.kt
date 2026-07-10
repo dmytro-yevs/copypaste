@@ -21,9 +21,19 @@ import java.util.UUID
 //   - P2pIdentityStore.kt    — this device's persistent P2P mTLS identity.
 //   - ConfigKnobsStore.kt    — FFI-backed size/quota/ttl config knobs.
 //   - SyncCursorsStore.kt    — relay/Supabase/P2P sync cursors + high-water marks.
-class Settings(context: Context) {
+class Settings(
+    context: Context,
+    // CopyPaste-npqx: injectable SharedPreferences seam. Production call sites
+    // never pass this — real Android SharedPreferences.commit() cannot be
+    // forced to fail from a JVM test, so a fake with a controllable commit()
+    // result is the only way to exercise the "commit() == false" branch of
+    // [saveScreenSettings] (android-settings spec D5/M6, reviewer follow-up
+    // from CopyPaste-myh8.3). No behavior change on the default (null) path.
+    prefsOverride: SharedPreferences? = null,
+) {
     private val appContext: Context = context.applicationContext
-    private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        prefsOverride ?: context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
 
     private val keystoreSecretStore = KeystoreSecretStore(prefs)
     private val syncCursorsStore = SyncCursorsStore(prefs)
@@ -888,6 +898,18 @@ class Settings(context: Context) {
         notifyOnCopy: Boolean,
         soundOnCopy: Boolean,
         logcatCaptureEnabled: Boolean,
+        // CopyPaste-myh8.9 wave 0: fold these 9 previously-stray fields (each
+        // persisted via its own apply()-based setter, so a force-stop right
+        // after Save could silently drop them) into this atomic commit() batch.
+        collectPublicIp: Boolean,
+        pasteAsPlainText: Boolean,
+        excludedAppBundleIds: List<String>,
+        showSensitiveWarnings: Boolean,
+        autoApplySyncedClip: Boolean,
+        maxFileSizeBytes: Long,
+        sensitiveTtlSecs: Long,
+        previewLines: Int,
+        maxHistoryItems: Int,
     ): Boolean {
         // Clamp the size/quota knobs through the SAME native clampConfig the macOS
         // daemon uses so a force-stop-safe batch write can never persist a
@@ -896,6 +918,11 @@ class Settings(context: Context) {
             maxTextSizeBytes = maxTextSizeBytes,
             maxImageSizeBytes = maxImageSizeBytes,
             storageQuotaBytes = storageQuotaBytes,
+            maxFileSizeBytes = maxFileSizeBytes,
+            sensitiveTtlSecs = sensitiveTtlSecs,
+            collectPublicIp = collectPublicIp,
+            pasteAsPlainText = pasteAsPlainText,
+            excludedAppBundleIds = excludedAppBundleIds,
         )
         return prefs.edit()
             .putBoolean("capture_enabled", captureEnabled)
@@ -924,6 +951,20 @@ class Settings(context: Context) {
             .putBoolean("notify_on_copy", notifyOnCopy)
             .putBoolean("sound_on_copy", soundOnCopy)
             .putBoolean("logcat_capture_enabled", logcatCaptureEnabled)
+            .putBoolean("collect_public_ip", clamped.collectPublicIp)
+            .putBoolean("paste_as_plain_text", clamped.pasteAsPlainText)
+            // Mirrors ConfigKnobsStore.excludedAppBundleIds' own NUL-joined format
+            // so both writers agree on a single on-disk representation.
+            .putString(
+                ConfigKnobsStore.KEY_EXCLUDED_APP_BUNDLE_IDS,
+                clamped.excludedAppBundleIds.joinToString(ConfigKnobsStore.EXCLUDED_APP_DELIM),
+            )
+            .putBoolean("show_sensitive_warnings_reveal_guard", showSensitiveWarnings)
+            .putBoolean("auto_apply_synced_clip", autoApplySyncedClip)
+            .putLong("max_file_size_bytes", clamped.maxFileSizeBytes.toLong())
+            .putLong("sensitive_ttl_secs", clamped.sensitiveTtlSecs.toLong())
+            .putInt("preview_lines", previewLines.coerceIn(1, 6))
+            .putInt("max_history_items", maxHistoryItems)
             .commit() // synchronous: survives an immediate force-stop (SIGKILL)
     }
 

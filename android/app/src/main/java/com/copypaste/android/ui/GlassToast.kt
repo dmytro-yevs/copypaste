@@ -42,6 +42,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.copypaste.android.ui.theme.CpShapes
+import com.copypaste.android.ui.theme.CpSpacing
+import com.copypaste.android.ui.theme.CpTypography
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
@@ -71,6 +74,41 @@ import kotlinx.coroutines.delay
  * neutral hints (e.g. "syncing…", "use Copy action") that Android surfaces.
  */
 enum class GlassToastKind { SUCCESS, DANGER, INFO, ACCENT }
+
+/**
+ * Outcome of [decideToastAdmission] — what [GlassToastState.show] should do
+ * with an incoming toast given what's currently shown (CopyPaste-myh8.11 S11
+ * Wave 1, actionable-coalescing). Actionable toasts (e.g. the delete UNDO
+ * toast) carry a user decision window that a merely-informational toast must
+ * not clobber; two actionable toasts racing (e.g. rapid successive deletes)
+ * instead PROMOTE so the newer action wins without losing "an action is
+ * pending" visibility.
+ */
+internal enum class ToastAdmission { REPLACE, DROP, PROMOTE }
+
+/**
+ * Pure decision table for toast coalescing (no Compose/coroutine state) —
+ * kept side-effect-free so it's covered by a plain JUnit test without a
+ * kotlinx-coroutines-test dependency (this project deliberately has none).
+ *
+ * - No toast currently shown → REPLACE (show the new one).
+ * - Current toast is non-actionable → REPLACE (its "one at a time" behavior
+ *   already exists; nothing to protect).
+ * - Current toast is actionable and the new one is NOT → DROP (don't let a
+ *   passive info/success toast steal the action window).
+ * - Both are actionable → PROMOTE (the newer action supersedes the older
+ *   one; the caller decides what "promote" means — e.g. dismiss + re-show).
+ */
+internal fun decideToastAdmission(
+    currentPresent: Boolean,
+    currentIsActionable: Boolean,
+    newIsActionable: Boolean,
+): ToastAdmission = when {
+    !currentPresent -> ToastAdmission.REPLACE
+    !currentIsActionable -> ToastAdmission.REPLACE
+    !newIsActionable -> ToastAdmission.DROP
+    else -> ToastAdmission.PROMOTE
+}
 
 @Immutable
 internal data class GlassToastData(
@@ -110,13 +148,31 @@ class GlassToastState {
      * the toast. When the action button is clicked the toast is dismissed immediately
      * and the callback is invoked, so callers can detect it via a flag set in the
      * lambda before show() returns.
+     *
+     * [onPromote] (CopyPaste-myh8.11 S11 Wave 1) is invoked instead of replacing
+     * `current` when [decideToastAdmission] returns PROMOTE (an actionable toast is
+     * already showing and this new call is also actionable) — see that function's
+     * kdoc for the coalescing rules. Left null, PROMOTE falls back to REPLACE so
+     * existing call sites (all currently non-actionable-vs-actionable races) keep
+     * their old behavior untouched.
      */
     suspend fun show(
         message: String,
         kind: GlassToastKind = GlassToastKind.SUCCESS,
         durationMs: Long = DEFAULT_DURATION_MS,
         action: Pair<String, () -> Unit>? = null,
+        onPromote: ((String) -> Unit)? = null,
     ) {
+        val admission = decideToastAdmission(
+            currentPresent = current != null,
+            currentIsActionable = current?.action != null,
+            newIsActionable = action != null,
+        )
+        if (admission == ToastAdmission.DROP) return
+        if (admission == ToastAdmission.PROMOTE && onPromote != null) {
+            onPromote(message)
+            return
+        }
         val myToken = ++token
         // Wake any currently-suspended show() so it stops driving `current`.
         supersede.trySend(Unit)
@@ -194,7 +250,7 @@ fun GlassToastHost(
 private fun GlassToastContent(data: GlassToastData) {
     // Fixed toast geometry (STYLEGUIDE §5 --r-card 13dp + §5 --sh2 float).
     val shadowElevationDp = 6.dp
-    val toastShape = RoundedCornerShape(13.dp)
+    val toastShape = RoundedCornerShape(CpShapes.card)
 
     val dotColor: Color = when (data.kind) {
         GlassToastKind.SUCCESS -> MaterialTheme.colorScheme.primary
@@ -231,7 +287,7 @@ private fun GlassToastContent(data: GlassToastData) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4),
             modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
         ) {
             // 6dp semantic dot (web parity).
@@ -248,7 +304,7 @@ private fun GlassToastContent(data: GlassToastData) {
                 text = data.message,
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 13.sp,
+                    fontSize = CpTypography.bodyMono.fontSize,
                     fontWeight = FontWeight.Normal,
                 ),
             )
@@ -261,7 +317,7 @@ private fun GlassToastContent(data: GlassToastData) {
                         text = data.action.first,
                         color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 13.sp,
+                            fontSize = CpTypography.bodyMono.fontSize,
                             fontWeight = FontWeight.Normal,
                         ),
                     )

@@ -201,7 +201,9 @@ class ShareReceiverActivity : Activity() {
                 )
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "share: failed to capture $uri: ${t.message}")
+            // URI is deliberately omitted — content:// URIs can encode filenames
+            // or paths that must not land in logcat.
+            Log.w(TAG, redactedFailureLog("share: failed to capture stream", t))
         }
     }
 
@@ -220,7 +222,7 @@ class ShareReceiverActivity : Activity() {
                 } else -1L
             } ?: -1L
         } catch (e: Exception) {
-            Log.w(TAG, "share: SIZE query failed for $uri: ${e.message}")
+            Log.w(TAG, redactedFailureLog("share: SIZE query failed", e))
             -1L
         }
     }
@@ -291,5 +293,18 @@ class ShareReceiverActivity : Activity() {
             val cap = if (isImage) MAX_IMAGE_BYTES else MAX_FILE_BYTES
             return declaredSize <= cap
         }
+
+        /**
+         * Build a log message for a stream-handling failure WITHOUT the offending
+         * URI (content:// URIs can encode filenames/paths of shared content — a
+         * security-sensitive value that must never land in logcat). Carries only
+         * the exception's type, which is enough to diagnose without identifying
+         * the shared content.
+         *
+         * Pure function (no Android deps) so it is unit-testable without an
+         * Activity/Context.
+         */
+        fun redactedFailureLog(prefix: String, t: Throwable): String =
+            "$prefix: ${t::class.simpleName ?: "Throwable"}"
     }
 }

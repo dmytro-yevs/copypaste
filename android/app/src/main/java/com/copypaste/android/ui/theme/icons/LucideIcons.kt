@@ -111,6 +111,14 @@ object LucideIcons {
     /** Vendored ahead of a wired consumer (no bookmark/save-item affordance exists yet). */
     val ActionBookmark: ImageVector get() = Bookmark
 
+    // --- permission/setup screens (S10 material-icons migration) ---
+    val PermissionNotifications: ImageVector get() = Bell
+    val PermissionBattery: ImageVector get() = Battery
+    val PermissionForegroundService: ImageVector get() = SlidersHorizontal
+    val PermissionOverlay: ImageVector get() = Layers
+    val ActionPlay: ImageVector get() = Play
+    val PermissionOemSetup: ImageVector get() = Smartphone
+
     /** Never a blank composable or a crash — see android-iconography "Fallback for a missing glyph". */
     val Fallback: ImageVector get() = CircleDashed
 

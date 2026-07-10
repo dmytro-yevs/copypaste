@@ -112,6 +112,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a")
+            // CopyPaste-k1l0: the ubuntu+KVM instrumented-test CI job boots an
+            // x86_64 AVD (arm64 AVDs cannot use KVM acceleration on x86_64
+            // runners), so the APK under test needs an x86_64 .so too. Gated
+            // behind a property so local dev (`assembleDebug` with no -P
+            // override) keeps packaging arm64-v8a only, unchanged.
+            if ((project.findProperty("includeX86_64Abi") as String?) == "true") {
+                abiFilters += "x86_64"
+            }
         }
     }
 
@@ -320,6 +328,8 @@ android {
 dependencies {
     implementation(libs.core.ktx)
     implementation(libs.appcompat)
+    // core-splashscreen (task 0.10, S12): installSplashScreen() + Theme.CopyPaste.Splash.
+    implementation(libs.core.splashscreen)
     implementation(libs.material)
     implementation(libs.kotlinx.coroutines.android)
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
@@ -332,7 +342,6 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
-    implementation(libs.compose.material.icons)
     implementation(libs.compose.runtime.livedata)
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.viewmodel.compose)
