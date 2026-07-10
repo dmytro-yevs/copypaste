@@ -16,12 +16,18 @@
 //   - shared-component params: title/subtitle/message/label/hint/placeholder = "<literal>"
 //   - Toast-like builders: makeText(ctx, "<literal>", ...)
 //   - NotificationCompat.Builder setContentTitle/setContentText("<literal>")
+//   - GlassToast: toastState.show("<literal>", ...)
 //
 // KNOWN GAP (documented, not silently swept): a full AST would also catch
 // string CONCATENATION reaching a sink ("Hello " + name) and literals passed
 // through multi-hop local variables. This script only catches literals
 // passed directly at the call site — the review's M1 finding about indirect
 // sinks is a real limitation of this heuristic pass, not fixed by it.
+// CopyPaste-7vxf: this heuristic pass explicitly does NOT attempt to resolve
+// a `return "Literal"` inside a helper function called at a sink (too easy to
+// false-positive on non-sink helpers), nor literals reaching a sink via local
+// string concatenation (already covered by the KNOWN GAP above) — both remain
+// out of scope for the regex/line-based scan, not silently missed.
 //
 // BASELINE (pre-existing ~8% legacy hardcoded debt, design.md "Localization
 // gap"): `scripts/hardcoded-text-baseline.txt` lists every currently-known
@@ -55,6 +61,8 @@ const SINK_PATTERNS = [
   // NotificationCompat.Builder setContentTitle("...") / setContentText("...")
   /\bsetContentTit(?:le)\("((?:[^"\\]|\\.)*)"/g,
   /\bsetContentText\("((?:[^"\\]|\\.)*)"/g,
+  // GlassToast: toastState.show("...", ...)
+  /\btoastState\.show\(\s*"((?:[^"\\]|\\.)*)"/g,
 ];
 
 /** A literal is "user-facing text" if it contains a letter and isn't a pure format/identifier token. */

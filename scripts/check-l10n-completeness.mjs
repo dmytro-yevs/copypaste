@@ -12,13 +12,11 @@
 //    allowlist fails the gate — this is the concrete, always-checkable half
 //    of M2 ("explicitly allowlist non-translatable keys").
 //
-// 2. EN -> UK key coverage (REPORT-ONLY today): res/values-uk/strings.xml
-//    does not exist yet — completing it is explicitly S13's job (tasks.md
-//    "13.2 Complete values-uk/strings.xml"). Making this blocking in S2
-//    would fail CI on all ~438 pre-existing strings before S13 has run.
-//    This script reports the missing-translation count so the gap is
-//    visible in CI output from S2 onward, without gating the merge on work
-//    that isn't scoped to this slice.
+// 2. EN -> UK key coverage (BLOCKING as of S13 Wave e): res/values-uk/strings.xml
+//    is now complete (tasks.md "13.2 Complete values-uk/strings.xml" is done),
+//    so a missing UK key is a real regression, not expected pre-S13 noise.
+//    Flipped from report-only to blocking here — a repo-wide CI behavior
+//    change, not a strings-content change.
 //
 // Usage: node scripts/check-l10n-completeness.mjs
 
@@ -98,12 +96,15 @@ if (unallowlisted.length > 0) {
   console.log(`l10n gate: translatable="false" allowlist OK (${en.nonTranslatable.size} entries, all allowlisted).`);
 }
 
-// Report-only: translatable EN keys with no UK counterpart yet (S13 scope).
+// Blocking (S13 Wave e onward): translatable EN keys with no UK counterpart.
 const translatableEn = [...en.keys].filter((k) => !en.nonTranslatable.has(k));
-const missingUk = translatableEn.filter((k) => !uk.keys.has(k));
-console.log(
-  `l10n gate (report-only, S13 completes this): ${missingUk.length}/${translatableEn.length} ` +
-    `translatable EN keys have no values-uk counterpart yet.`,
-);
+const missingUk = translatableEn.filter((k) => !uk.keys.has(k)).sort();
+if (missingUk.length > 0) {
+  failed = true;
+  console.error(`l10n gate: ${missingUk.length}/${translatableEn.length} translatable EN key(s) missing from values-uk/strings.xml:\n`);
+  for (const k of missingUk) console.error(`  ${k}`);
+} else {
+  console.log(`l10n gate: values-uk/strings.xml covers all ${translatableEn.length} translatable EN keys.`);
+}
 
 process.exit(failed ? 1 : 0);

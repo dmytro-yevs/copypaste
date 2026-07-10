@@ -70,6 +70,13 @@ const ICONS = [
   ["ExternalLink", "external-link"],
   ["Download", "download"],
   ["Bookmark", "bookmark"],
+  // S10 material-icons migration (CopyPaste-myh8.10, W1): permission/setup screens.
+  ["Bell", "bell"],
+  ["Battery", "battery"],
+  ["SlidersHorizontal", "sliders-horizontal"],
+  ["Layers", "layers"],
+  ["Play", "play"],
+  ["Smartphone", "smartphone"],
 ];
 
 const RAW_BASE = `https://raw.githubusercontent.com/lucide-icons/lucide/${LUCIDE_SHA}/icons`;
