@@ -61,14 +61,20 @@ import org.junit.Test
 //   - CopyPaste-9u7l fix: the backdrop refreshes via a BOUNDED, THROTTLED
 //     polling loop (`CapturedBackdropBlur`'s `LaunchedEffect`, ~100ms
 //     ceiling), not an immediate/synchronous invalidation on scroll — so
-//     after `performScrollToIndex` + `waitForIdle` this test also sleeps past
-//     that refresh-latency ceiling (`Thread.sleep(2_000)` + a second
-//     `waitForIdle`) before sampling `afterScroll`, to avoid a flaky false
-//     negative from asserting before the throttled tick has fired. 2s (20x
-//     the 100ms ceiling) rather than a tighter margin: a bulk
-//     `connectedDebugAndroidTest` run with 26 tests back-to-back is
-//     measurably slower per-frame than running this class alone, and both
-//     250ms and 500ms margins flaked under that load.
+//     after `performScrollToIndex` + `waitForIdle` this test also waits past
+//     that refresh-latency ceiling before sampling `afterScroll`, to avoid a
+//     flaky false negative from asserting before the throttled tick has
+//     fired.
+//   - CopyPaste-k1l0: a fixed `Thread.sleep(2_000)` here was tuned against a
+//     bulk-suite run on hardware-accelerated rendering (real device/local
+//     machine); it under-shot on the ubuntu-latest + KVM x86_64 AVD this job
+//     now runs on, where `-gpu swiftshader_indirect` software rendering makes
+//     every frame (and therefore every throttled tick's actual draw)
+//     noticeably slower — observed failing in CI run 29080074945. Replaced
+//     the fixed sleep with a bounded POLL (recapture every 500ms until the
+//     bitmap changes, up to an 8s ceiling) so the test still fails fast if
+//     the backdrop is genuinely stale, but no longer flakes purely from
+//     running on a slower renderer than the margin was tuned against.
 // ---------------------------------------------------------------------------
 class BackdropScrollFreshnessConnectedTest {
 
@@ -79,7 +85,10 @@ class BackdropScrollFreshnessConnectedTest {
         Color(0xFFE53935), Color(0xFFFFB300), Color(0xFF43A047), Color(0xFF1E88E5), Color(0xFF8E24AA),
     )
 
-    @Test(timeout = 30_000)
+    // CopyPaste-k1l0: bumped from 30_000 — the bounded freshness poll below can
+    // itself take up to 8s on the slower software-rendered CI AVD, on top of
+    // setContent/scroll/idle overhead.
+    @Test(timeout = 45_000)
     fun pillBackdropShowsFreshPixelsAfterAProgrammaticScroll() {
         assumeTrue(
             "REAL_BACKDROP blur (RenderEffect) requires API 31+",
@@ -142,13 +151,23 @@ class BackdropScrollFreshnessConnectedTest {
         // alone rather than on freshness.
         composeRule.onNodeWithTag("scrollContent").performScrollToIndex(152)
         composeRule.waitForIdle()
-        // Bounded-latency polling refresh (CopyPaste-9u7l): the throttled tick
-        // loop has a ~100ms ceiling, so wait past it before sampling. 2s
-        // margin found necessary under bulk-suite load (see class kdoc).
-        Thread.sleep(2_000)
-        composeRule.waitForIdle()
 
-        val afterScroll = composeRule.onNodeWithTag("navPill").captureToImage().asAndroidBitmap()
+        // Bounded-latency polling refresh (CopyPaste-9u7l): the throttled tick
+        // loop has a ~100ms ceiling. CopyPaste-k1l0: poll (rather than a single
+        // fixed sleep) so this tolerates the slower software-rendered CI AVD
+        // without weakening the assertion — it still fails on a genuinely stale
+        // backdrop, it just gives a slow renderer more chances to catch up first.
+        var afterScroll = beforeScroll
+        val pollCeilingMillis = 8_000L
+        val pollIntervalMillis = 500L
+        var waited = 0L
+        while (waited < pollCeilingMillis) {
+            Thread.sleep(pollIntervalMillis)
+            waited += pollIntervalMillis
+            composeRule.waitForIdle()
+            afterScroll = composeRule.onNodeWithTag("navPill").captureToImage().asAndroidBitmap()
+            if (!beforeScroll.sameAs(afterScroll)) break
+        }
 
         assertFalse(
             "pill backdrop pixels were identical before/after scroll — the captured " +
