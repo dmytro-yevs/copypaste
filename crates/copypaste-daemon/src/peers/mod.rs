@@ -5,10 +5,10 @@
 //! changes.
 //!
 //! Split (ADR-017, CopyPaste-vp63.4) into:
-//! - [`model`] — the `PairedDevice` record + canonical-fingerprint lookup helpers.
-//! - [`store`] — `load_peers`/`save_peers` + the shared atomic-0600 JSON writer.
-//! - [`updates`] — per-peer live-metadata updaters (`update_peer_meta`, etc.).
-//! - [`pending_unpair`] — the durable `pending_unpair.json` queue (Gap A).
+//! - `model` — the `PairedDevice` record + canonical-fingerprint lookup helpers.
+//! - `store` — `load_peers`/`save_peers` + the shared atomic-0600 JSON writer.
+//! - `updates` — per-peer live-metadata updaters (`update_peer_meta`, etc.).
+//! - `pending_unpair` — the durable `pending_unpair.json` queue (Gap A).
 //!
 //! This file is a thin facade: it re-exports the exact same public surface the
 //! flat `peers.rs` file exposed so every `crate::peers::X` call site (ipc,

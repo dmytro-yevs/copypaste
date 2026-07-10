@@ -66,9 +66,9 @@
 //!
 //! This module is split into 3 independent sweep clusters sharing the
 //! constants + error type defined here:
-//! * [`text`] — text-item item-level AEAD rotation.
-//! * [`images`] — image-chunk rotation (closes Cnew).
-//! * [`repair`] — mislabeled-kv2-blob repair (closes the pre-fix writer bug).
+//! * `text` — text-item item-level AEAD rotation.
+//! * `images` — image-chunk rotation (closes Cnew).
+//! * `repair` — mislabeled-kv2-blob repair (closes the pre-fix writer bug).
 
 use super::db::Database;
 use crate::crypto::encrypt::EncryptError;

@@ -12,16 +12,16 @@
 //!
 //! Every item below is re-exported here so `crate::ffi_pairing::<name>`
 //! resolves exactly as it did when this was a single file.
-//! - [`qr`]: the QR-transport pairing FFI (`PairingQrPayload`, `ScannedPairing`,
+//! - `qr`: the QR-transport pairing FFI (`PairingQrPayload`, `ScannedPairing`,
 //!   `build_pairing_qr`, `parse_pairing_qr`). The QR is purely a transport for
 //!   the existing PAKE pairing material.
-//! - [`runtime`]: the shared process-wide tokio runtime backing every blocking
-//!   P2P FFI wrapper in [`bootstrap`] and [`discovery`].
-//! - [`bootstrap`]: mTLS cert generation + QR-initiator bootstrap PAKE pairing
+//! - `runtime`: the shared process-wide tokio runtime backing every blocking
+//!   P2P FFI wrapper in `bootstrap` and `discovery`.
+//! - `bootstrap`: mTLS cert generation + QR-initiator bootstrap PAKE pairing
 //!   FFI, plus the mapping helpers shared by every Android pairing path
 //!   (`build_android_peer_meta`, `bootstrap_result_from_pairing`,
 //!   `confirmed_pairing_from`).
-//! - [`discovery`]: discovery + SAS pairing FFI (Android parity for LAN
+//! - `discovery`: discovery + SAS pairing FFI (Android parity for LAN
 //!   discovery) — the standing responder, initiator, and poll/confirm surface.
 
 mod bootstrap;

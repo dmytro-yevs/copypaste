@@ -131,7 +131,7 @@ fn fetch_v1_image_batch(db: &Database, limit: usize) -> Result<Vec<V1ImageRow>, 
 /// hand-rolled substring scanner: field reordering, extra whitespace, or new
 /// metadata fields added to `blob_ref` in the future will not break extraction.
 ///
-/// `pub(super)` because [`super::repair::maybe_repair_one_kv2_blob`] also
+/// `pub(super)` because `repair::maybe_repair_one_kv2_blob` also
 /// needs it to recover the AAD context for the mislabeled-kv2 repair probe.
 pub(super) fn parse_file_id(
     id: &str,
@@ -180,8 +180,8 @@ pub(super) fn parse_file_id(
 /// `MigrationV4Error::ImageChunkEncrypt`.
 ///
 /// Extracted because the exact same error-mapping block was duplicated
-/// verbatim in [`rotate_one_image`] and
-/// [`super::repair::maybe_repair_one_kv2_blob`] (CopyPaste-vp63.21 dedup).
+/// verbatim in `rotate_one_image` and
+/// `repair::maybe_repair_one_kv2_blob` (CopyPaste-vp63.21 dedup).
 pub(super) fn v2_blob_from_chunks(
     id: &str,
     chunks: &[EncryptedChunk],

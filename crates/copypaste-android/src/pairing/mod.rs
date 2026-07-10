@@ -53,14 +53,14 @@
 //! this was a single file. `DiscoveredPeer` and `PairStatus` are UDL-exported
 //! dictionaries (FROZEN field shape) re-exported at `lib.rs`; everything else is
 //! internal, consumed only by `ffi_pairing.rs`.
-//! - [`state`]: the state-machine domain types (`PairingRole`, `PairingState`,
+//! - `state`: the state-machine domain types (`PairingRole`, `PairingState`,
 //!   `ConfirmedPairing`).
-//! - [`coordinator`]: [`PairingCoordinator`], owning the live state + the
+//! - `coordinator`: [`PairingCoordinator`], owning the live state + the
 //!   confirm oneshot channel.
-//! - [`global`]: the process-global [`AndroidPairing`] singleton + shared
+//! - `global`: the process-global [`AndroidPairing`] singleton + shared
 //!   constants.
-//! - [`dto`]: the FFI DTOs (`DiscoveredPeer`, `PairStatus`).
-//! - [`helpers`]: free helpers (`ipv4_first_addr`, `outcome_for_initiator_error`,
+//! - `dto`: the FFI DTOs (`DiscoveredPeer`, `PairStatus`).
+//! - `helpers`: free helpers (`ipv4_first_addr`, `outcome_for_initiator_error`,
 //!   `p2p_err`).
 
 mod coordinator;

@@ -35,10 +35,10 @@
 //!
 //! # Module layout (ADR-017 split)
 //!
-//! This is a thin shell: the registry/state types live in [`registry`], the
-//! pure FFI→wire builders in [`builders`], the item↔wire codec in [`codec`],
-//! the per-connection duplex pump in [`connection`], and the accept loop in
-//! [`accept`]. Every cross-submodule item is `pub(super)` (visible within this
+//! This is a thin shell: the registry/state types live in `registry`, the
+//! pure FFI→wire builders in `builders`, the item↔wire codec in `codec`,
+//! the per-connection duplex pump in `connection`, and the accept loop in
+//! `accept`. Every cross-submodule item is `pub(super)` (visible within this
 //! module's subtree only); [`PeerSessionKey`] and [`P2pListenerHandle`] stay
 //! fully `pub` (re-exported at `lib.rs`, consumed by `ffi_p2p_session.rs`) and
 //! are UDL-exported dictionaries with a FROZEN field shape.

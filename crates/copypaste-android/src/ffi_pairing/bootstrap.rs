@@ -8,7 +8,7 @@
 //! generation and bootstrap PAKE pairing the macOS daemon uses, so the
 //! fingerprints Android generates/pins are bit-for-bit what the desktop side
 //! expects. The synchronous UniFFI surface blocks on the shared long-lived
-//! multi-thread tokio runtime ([`super::runtime`]) — the bootstrap handshake
+//! multi-thread tokio runtime ([`super::runtime()`]) — the bootstrap handshake
 //! drives concurrent TLS read/write.
 
 use crate::{pairing, panic_boundary, CopypasteError};

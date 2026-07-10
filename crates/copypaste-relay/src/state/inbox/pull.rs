@@ -5,13 +5,13 @@ use crate::models::PullItem;
 
 use super::super::MAX_PULL_BYTES_BUDGET;
 
-/// A page returned by [`RelayStore::pull_items`], plus whether more qualifying
-/// items exist beyond what was returned.
+/// A page returned by [`super::super::RelayStore::pull_items`], plus whether
+/// more qualifying items exist beyond what was returned.
 ///
 /// `has_more` is `true` when either the byte-budget cap ([`MAX_PULL_BYTES_BUDGET`])
 /// broke the collection loop before `limit` items were gathered, or the inbox
 /// held more than `limit` qualifying items past the cursor (or both) — see
-/// [`RelayStore::pull_items`] (CopyPaste-8ebg.58).
+/// [`super::super::RelayStore::pull_items`] (CopyPaste-8ebg.58).
 #[derive(Debug, Clone)]
 pub struct PullPage {
     pub items: Vec<PullItem>,

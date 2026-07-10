@@ -21,12 +21,12 @@
 //! and tests are unchanged.
 //!
 //! Split (ADR-017, CopyPaste-vp63.7) into:
-//! - [`envelope`] — cloud file-identity header + `decode_payload_ct`.
-//! - [`decrypt`] — local decrypt (upload side).
-//! - [`rebuild`] — local rebuild (download side).
-//! - [`storage`] — atomic LWW replace-by-`item_id`.
-//! - [`wifi_gate`] — shared "Wi-Fi only" outbound gate.
-//! - [`local_crypto`] — shared local-v2 at-rest encrypt glue (ADR-017
+//! - `envelope` — cloud file-identity header + `decode_payload_ct`.
+//! - `decrypt` — local decrypt (upload side).
+//! - `rebuild` — local rebuild (download side).
+//! - `storage` — atomic LWW replace-by-`item_id`.
+//! - `wifi_gate` — shared "Wi-Fi only" outbound gate.
+//! - `local_crypto` — shared local-v2 at-rest encrypt glue (ADR-017
 //!   Wave-2, CopyPaste-vp63.52), reused by `rebuild`, `sync_orch::rekey`,
 //!   `daemon::capture::text`, and `ipc::handlers_transfer`.
 //!

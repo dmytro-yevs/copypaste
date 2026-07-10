@@ -28,11 +28,11 @@
 //!
 //! | Sub-module | Responsibility |
 //! |---|---|
-//! | [`client`] | [`RestClient`] construction, shared state, redacting `Debug` impl |
-//! | [`http`] | Table URL / auth-header helpers, PostgREST error-body decoding |
-//! | [`read`] | [`RestClient::list_cloud_items`] |
-//! | [`write`] | [`RestClient::replace_cloud_item_by_item_id`], [`RestClient::delete_cloud_item_by_item_id`] |
-//! | [`reencrypt`] | [`RestClient::reencrypt_all_cloud_items`] (CopyPaste-vvsf) |
+//! | `client` | [`RestClient`] construction, shared state, redacting `Debug` impl |
+//! | `http` | Table URL / auth-header helpers, PostgREST error-body decoding |
+//! | `read` | [`RestClient::list_cloud_items`] |
+//! | `write` | [`RestClient::replace_cloud_item_by_item_id`], [`RestClient::delete_cloud_item_by_item_id`] |
+//! | `reencrypt` | [`RestClient::reencrypt_all_cloud_items`] (CopyPaste-vvsf) |
 
 mod client;
 mod error;

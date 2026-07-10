@@ -221,7 +221,7 @@ pub struct MdnsRateLimiter {
 impl MdnsRateLimiter {
     /// Construct an empty rate limiter, sourcing its admission thresholds
     /// from the `COPYPASTE_MDNS_*` env vars (falling back to the compile-time
-    /// defaults — see [`MdnsRateLimitConfig::from_env`]).
+    /// defaults — see `MdnsRateLimitConfig::from_env`).
     pub fn new() -> Self {
         Self {
             config: MdnsRateLimitConfig::from_env(),
