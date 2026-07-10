@@ -85,7 +85,7 @@ export function useDiscoveredDevices({
       } else {
         // Log raw error for diagnostics only — never render raw IPC/FS strings
         // in the DOM (CopyPaste-j5qg).
-        // eslint-disable-next-line no-console
+         
         console.error("[DevicesView] rescan failed:", e);
         // bdac.36: "clipboard service" is the canonical user-facing term.
         setDiscoverError("Network scan failed. Check that Wi-Fi is on and the clipboard service is running.");

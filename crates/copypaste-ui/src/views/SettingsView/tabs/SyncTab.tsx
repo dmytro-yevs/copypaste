@@ -1,7 +1,8 @@
 // SyncTab.tsx
 // Extracted from SettingsView.tsx renderSync() (CopyPaste-g06m.14 split) — cut/paste only.
+import { useState } from "react";
 import { SectionHeader } from "../../../components/SectionHeader";
-import { AlertTriangle, Check, Key, Plug, Save } from "lucide-react";
+import { AlertTriangle, Check, Eye, EyeOff, Key, Plug, Save } from "lucide-react";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
@@ -17,6 +18,22 @@ import type { SyncStatus, AppSettings } from "../../../lib/ipc";
 function formatLastSync(ms: number | null): string {
   if (ms === null) return "Never";
   return formatSyncTime(ms, "ms") ?? "Never";
+}
+
+// CopyPaste-8ebg.53: blur-time URL validation. Empty is allowed (both fields
+// are optional — Relay URL always, Supabase URL when cloud sync is unused),
+// so only a non-empty, malformed value produces an error.
+function validateUrlField(v: string): string | null {
+  if (v.trim() === "") return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      return "URL must start with http:// or https://";
+    }
+    return null;
+  } catch {
+    return "Enter a valid URL, e.g. https://example.com";
+  }
 }
 
 export type SyncTabProps = {
@@ -113,6 +130,15 @@ export function SyncTab({
   cloudAccountMismatch,
   localSupabaseAccountId,
 }: SyncTabProps) {
+  // CopyPaste-8ebg.53: no wrapping <form> exists here, so browser URL-type
+  // validation never fires; blur-time validation + field-note--err fills
+  // the gap for the two free-text URL fields.
+  const [supabaseUrlErr, setSupabaseUrlErr] = useState<string | null>(null);
+  const [relayUrlErr, setRelayUrlErr] = useState<string | null>(null);
+  // CopyPaste-8ebg.53: eye-toggle so a passphrase typo is visible before it
+  // silently breaks sync across every paired device.
+  const [showPassphrase, setShowPassphrase] = useState(false);
+
   // Q2: one consolidated status instead of 3 raw status rows.
   const syncBlocker =
     syncStatus === null
@@ -164,9 +190,13 @@ export function SyncTab({
             (3) Cloud sync — credentials
           j9xj (PG-30): per-transport controls are visually disabled when the
           master syncEnabled kill-switch is off (they still show their state). */}
+      {/* CopyPaste-8ebg.53: cross-reference note — the master "Enable sync"
+          kill-switch that gates every control below lives on the General
+          tab, not here. Callers landing straight on Sync otherwise have no
+          clue why every row shows disabled. */}
       <SectionHeader
         label="General sync"
-        hint="Applies to all sync transports."
+        hint="Applies to all sync transports. Master switch: General tab → Enable sync."
       />
       <Panel>
         <SettingsRow title="Sync on Wi-Fi only">
@@ -206,7 +236,7 @@ export function SyncTab({
         {/* bdac.104: InfoPopover moved to info= slot (label column) */}
         <SettingsRow
           title="Enable P2P (LAN) sync"
-          info={<InfoPopover text="Direct device-to-device sync over your local network. Requires a paired device on the Devices screen. Disable for cloud-only sync." />}
+          info={<InfoPopover text="Direct device-to-device sync over your local network. Requires a paired device on the Devices screen. Disable for cloud-only sync. Restarts the background sync service to apply." />}
         >
           <div className="ctl">
             <LimitsMsg field="p2p_enabled" limitsMsg={limitsMsg} />
@@ -253,16 +283,26 @@ export function SyncTab({
           {/* g27b.32: field--grow-full fills the available card width (see
               primitives.css) — the bare .field sat at the browser's ~146px
               intrinsic input width regardless of card width. */}
-          <div className="field field--grow-full">
-            <input
-              type="url"
-              placeholder="https://your-project.supabase.co"
-              value={supabaseUrl}
-              onChange={(e) => setSupabaseUrl(e.target.value)}
-              disabled={offline}
-              autoComplete="off"
-              spellCheck={false}
-            />
+          <div className="ctl ctl--col">
+            <div className="field field--grow-full">
+              <input
+                type="url"
+                placeholder="https://your-project.supabase.co"
+                value={supabaseUrl}
+                onChange={(e) => {
+                  setSupabaseUrl(e.target.value);
+                  if (supabaseUrlErr !== null) setSupabaseUrlErr(null);
+                }}
+                onBlur={(e) => setSupabaseUrlErr(validateUrlField(e.target.value))}
+                disabled={offline}
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={supabaseUrlErr !== null}
+              />
+            </div>
+            {supabaseUrlErr !== null && (
+              <span className="field-note field-note--err">{supabaseUrlErr}</span>
+            )}
           </div>
         </SettingsRow>
         {/* bdac.80: standardized to "Anon key" (sentence case, drop redundant "Supabase" prefix — section header already provides context) */}
@@ -347,16 +387,26 @@ export function SyncTab({
           info={<InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />}
         >
           {/* g27b.32: field--grow-full — see Supabase URL above. */}
-          <div className="field field--grow-full">
-            <input
-              type="url"
-              placeholder="https://relay.example.com"
-              value={relayUrl}
-              onChange={(e) => setRelayUrl(e.target.value)}
-              disabled={offline}
-              autoComplete="off"
-              spellCheck={false}
-            />
+          <div className="ctl ctl--col">
+            <div className="field field--grow-full">
+              <input
+                type="url"
+                placeholder="https://relay.example.com"
+                value={relayUrl}
+                onChange={(e) => {
+                  setRelayUrl(e.target.value);
+                  if (relayUrlErr !== null) setRelayUrlErr(null);
+                }}
+                onBlur={(e) => setRelayUrlErr(validateUrlField(e.target.value))}
+                disabled={offline}
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={relayUrlErr !== null}
+              />
+            </div>
+            {relayUrlErr !== null && (
+              <span className="field-note field-note--err">{relayUrlErr}</span>
+            )}
           </div>
         </SettingsRow>
         {/* bdac.104: InfoPopover moved to info= slot (label column) */}
@@ -368,7 +418,7 @@ export function SyncTab({
             <div className="ctl">
               <div className="field">
                 <input
-                  type="password"
+                  type={showPassphrase ? "text" : "password"}
                   placeholder="Shared passphrase…"
                   value={passphrase}
                   onChange={(e) => setPassphrase(e.target.value)}
@@ -380,6 +430,18 @@ export function SyncTab({
                   }}
                 />
               </div>
+              {/* CopyPaste-8ebg.53: eye-toggle — a silent typo here breaks sync
+                  across every paired device, so a reveal is worth the exposure. */}
+              <button
+                type="button"
+                className="iconbtn"
+                aria-label={showPassphrase ? "Hide passphrase" : "Show passphrase"}
+                aria-pressed={showPassphrase}
+                disabled={offline}
+                onClick={() => setShowPassphrase((v) => !v)}
+              >
+                {showPassphrase ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+              </button>
               <button
                 type="button"
                 className="btn btn--secondary sm"
@@ -412,7 +474,7 @@ export function SyncTab({
             disabled={offline || testing}
             onClick={() => void handleTestConnection()}
           >
-            <Plug aria-hidden="true" />{testing ? "Testing…" : "Test connection"}
+            <Plug aria-hidden="true" />{testing ? "Saving & testing…" : "Save & test connection"}
           </button>
           <button
             type="button"
@@ -420,6 +482,10 @@ export function SyncTab({
             disabled={offline}
             onClick={() => void handleSaveConfig()}
           ><Save aria-hidden="true" />Save</button>
+          {/* CopyPaste-8ebg.33: both buttons persist config AND restart the
+              background daemon so new credentials/p2p_enabled take effect —
+              call that out up front instead of only via a post-hoc toast. */}
+          <InfoPopover text="Saving cloud settings (via either button) restarts the background sync service to apply the new credentials." />
         </div>
       </Panel>
     </div>

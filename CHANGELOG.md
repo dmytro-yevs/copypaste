@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-10
+
+- **Android M3 redesign complete (S9-S15):** settings save-batch commit
+  flow, a permissions status state machine, glass toast feedback states,
+  full Ukrainian localization (525 keys), system surfaces (notification
+  channels, launcher icon, splash theme), a Lucide icon migration, 57
+  Paparazzi golden snapshots, and a11y fixes (48dp touch targets, dialog
+  focus trap, switch semantics, backdrop scroll freshness).
+- **Security:** ReplayGuard is now actually wired into the live P2P
+  receive path (was constructed but never consulted); RustSec bumps for
+  `crossbeam-epoch` and `quick-xml`.
+- **Backdrop fix:** battery status and freshness now update correctly on
+  the Android home-screen widget.
+- **IPC:** `history_page` switched to keyset cursor pagination.
+- **Desktop:** accessibility gate green (86/86 — aria, contrast, clipping).
+- **CI:** instrumented Android tests now run on ubuntu with KVM.
+
 ## [0.4.0] - 2026-07-02
 
 Desktop UI redesign (design-system-redesign / CopyPaste-g27b) — a full ITCSS

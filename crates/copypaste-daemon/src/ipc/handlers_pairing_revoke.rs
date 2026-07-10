@@ -1,8 +1,34 @@
 //! Unpair / revoke IPC verbs (split from handlers_pairing.rs, ADR-017
 //! daemon-ipc track, CopyPaste-vp63.16).
 use super::*;
+use crate::p2p::send_unpair_and_close_session;
 
 impl IpcServer {
+    /// CopyPaste-8ebg.6 (P0 SECURITY): resolve `self.live_peer_sinks`
+    /// (`Arc<std::sync::Mutex<Option<LivePeerSinks>>>`) down to the inner
+    /// `PeerSinks` map and route through `send_unpair_and_close_session`,
+    /// which both (1) best-effort notifies the peer via `ControlMsg::Unpair`
+    /// and (2) *removes* the peer's sender from the live sink map so the
+    /// fanout loop can no longer deliver items to it.
+    ///
+    /// Previously all three revoke/unpair handlers called
+    /// `send_unpair_signal_if_connected`, which only does step (1) — the
+    /// sink stayed registered in `live_peer_sinks` and a revoked-but-still-
+    /// connected (or modified/non-cooperative) peer kept receiving every
+    /// new clipboard item fanned out until it disconnected on its own.
+    /// `send_unpair_and_close_session`'s own doc comment flagged this
+    /// exact gap as a pending cross-file follow-up; this closes it.
+    async fn close_peer_session_if_connected(&self, canonical_fp: &str) -> bool {
+        let sinks_arc_opt = match self.live_peer_sinks.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => return false, // poisoned — best-effort, matches prior behavior
+        };
+        match sinks_arc_opt {
+            Some(sinks_arc) => send_unpair_and_close_session(&sinks_arc, canonical_fp).await,
+            None => false, // P2P not started
+        }
+    }
+
     /// CopyPaste-3n9h: `pair_peer` previously trusted a peer and
     /// registered it in the live mTLS allowlist WITHOUT any
     /// authentication (no PAKE, no SAS). A caller that knew a peer's
@@ -78,11 +104,11 @@ impl IpcServer {
                             peers.remove(&canonical_fingerprint(&fingerprint));
                         }
                         // Mutual unpair: best-effort signal the peer if
-                        // it is currently connected over P2P.
-                        send_unpair_signal_if_connected(
-                            &self.live_peer_sinks,
-                            &canonical_fingerprint(&fingerprint),
-                        );
+                        // it is currently connected over P2P, AND remove its
+                        // sink from live_peer_sinks so fanout stops
+                        // delivering to it immediately (CopyPaste-8ebg.6).
+                        self.close_peer_session_if_connected(&canonical_fingerprint(&fingerprint))
+                            .await;
                         // Gap A: queue a DURABLE pending-unpair so the
                         // connector can deliver the Unpair frame on the
                         // peer's next reconnect even if it was offline now.
@@ -244,11 +270,11 @@ impl IpcServer {
             };
 
         // Mutual unpair: best-effort signal the peer if it is
-        // currently connected over P2P.
-        send_unpair_signal_if_connected(
-            &self.live_peer_sinks,
-            &canonical_fingerprint(&fingerprint),
-        );
+        // currently connected over P2P, AND remove its sink from
+        // live_peer_sinks so fanout stops delivering to it immediately
+        // (CopyPaste-8ebg.6).
+        self.close_peer_session_if_connected(&canonical_fingerprint(&fingerprint))
+            .await;
         // Gap A: durable pending-unpair for offline delivery.
         if removed {
             queue_unpair_for_offline_delivery(
@@ -430,9 +456,12 @@ impl IpcServer {
             }
         }
 
-        // Mutual unpair: signal every currently-connected peer.
+        // Mutual unpair: signal every currently-connected peer AND remove
+        // its sink from live_peer_sinks so fanout stops delivering to it
+        // immediately (CopyPaste-8ebg.6).
         for (fp, _) in &captured {
-            send_unpair_signal_if_connected(&self.live_peer_sinks, &canonical_fingerprint(fp));
+            self.close_peer_session_if_connected(&canonical_fingerprint(fp))
+                .await;
         }
 
         // Gap A: durable pending-unpair for every revoked peer so the

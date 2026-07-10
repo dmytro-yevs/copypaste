@@ -324,20 +324,23 @@ step_pass "${STEP3}"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 4: Kotlin/JVM unit tests (./gradlew :app:testDebugUnitTest in android/).
+# Step 4: Kotlin/JVM unit tests.
 #
-# NOTE: as of this writing the project has no src/test JVM unit tests — the
-# real Android test surface is the INSTRUMENTED cross-language crypto
-# conformance suite (CryptoConformanceTest.kt) under src/androidTest, which
-# runs only on a device/emulator via `./gradlew connectedDebugAndroidTest` and
-# is intentionally out of scope for this no-device chain. Running the JVM unit
-# test task is still a meaningful gate: it compiles the unit-test classpath and
-# will fail loudly the moment real unit tests are added and break. If/when JVM
-# unit tests exist, this step actually exercises them.
+# S2 split the JVM unit-test surface into two tasks:
+#   :app:testDebugUnitTest           - Paparazzi golden-render suite only
+#                                       (com.copypaste.android.paparazzi.*)
+#   :app:testDebugUnitTestPreExisting - everything else (242 tests across
+#                                       26+ suites: crypto conformance,
+#                                       parity, view models, etc.)
+# Both must run for this gate to cover the full JVM unit-test surface. The
+# INSTRUMENTED cross-language crypto conformance suite
+# (CryptoConformanceTest.kt) under src/androidTest is separate — it runs only
+# on a device/emulator via `./gradlew connectedDebugAndroidTest` and is
+# intentionally out of scope for this no-device chain.
 # ---------------------------------------------------------------------------
-STEP4="step 4: Kotlin unit tests (./gradlew :app:testDebugUnitTest)"
+STEP4="step 4: Kotlin unit tests (./gradlew :app:testDebugUnitTest :app:testDebugUnitTestPreExisting)"
 echo "==> ${STEP4}"
-if ! ( cd "${ANDROID_DIR}" && ./gradlew :app:testDebugUnitTest ); then
+if ! ( cd "${ANDROID_DIR}" && ./gradlew :app:testDebugUnitTest :app:testDebugUnitTestPreExisting ); then
   fail "${STEP4}"
 fi
 step_pass "${STEP4}"

@@ -8,6 +8,13 @@ import { ActionButton } from "../../components/ActionButton";
 export interface BulkBarProps {
   count: number;
   allSelected: boolean;
+  /**
+   * CopyPaste-8ebg.55: true when every currently multi-selected item is
+   * already pinned. Drives the single Pin/Unpin toggle below — previously
+   * Pin and Unpin were both always shown even though one is always a no-op
+   * for the current selection (e.g. Unpin when nothing selected is pinned).
+   */
+  allPinned: boolean;
   onSelectAll: () => void;
   onClearSelection: () => void;
   onBulkCopy: () => void;
@@ -20,6 +27,7 @@ export interface BulkBarProps {
 export function BulkActionBar({
   count,
   allSelected,
+  allPinned,
   onSelectAll,
   onClearSelection,
   onBulkCopy,
@@ -60,21 +68,17 @@ export function BulkActionBar({
       >
         Copy
       </ActionButton>
+      {/* CopyPaste-8ebg.55: single toggle reflecting the selection's pin state
+          instead of always showing both Pin and Unpin (one of which is always
+          a no-op for the current selection). */}
       <ActionButton
         variant="secondary"
         size="sm"
-        onClick={onBulkPin}
+        aria-pressed={allPinned}
+        onClick={allPinned ? onBulkUnpin : onBulkPin}
         disabled={isBusy}
       >
-        Pin
-      </ActionButton>
-      <ActionButton
-        variant="secondary"
-        size="sm"
-        onClick={onBulkUnpin}
-        disabled={isBusy}
-      >
-        Unpin
+        {allPinned ? "Unpin" : "Pin"}
       </ActionButton>
       <ActionButton
         variant="danger"

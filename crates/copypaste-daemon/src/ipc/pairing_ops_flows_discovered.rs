@@ -185,117 +185,138 @@ impl IpcServer {
             }
         };
 
-        let result = copypaste_p2p::bootstrap::run_initiator_with_confirm(
-            addr,
-            cert_der,
-            key_der,
-            &password,
-            &own_sync_addr,
-            &own_meta,
-            own_provisioning,
-            confirm,
-        )
-        .await;
+        // CopyPaste-8ebg.3: the daemon blocks until the SAS confirm decision
+        // (`enter_awaiting_sas` awaits an oneshot that only fires from
+        // `pair_confirm_sas`/`pair_abort`), so awaiting the whole handshake
+        // HERE — inside the `pair_with_discovered` IPC handler — deadlocks
+        // the initiator: the frontend's SAS modal only mounts AFTER this call
+        // resolves (`await api.pairWithDiscovered(...)` in
+        // `DevicesView/index.tsx`'s `handlePairDiscovered`), but the call
+        // never resolves until the user confirms in that same not-yet-mounted
+        // modal. Fix: run the handshake DETACHED (mirroring the QR
+        // responder's `spawn_bootstrap_responder`) and return as soon as the
+        // pairing has been claimed, so the UI can open the modal immediately
+        // and learn the SAS via `pair_get_sas` polling — exactly like the
+        // inbound/responder path already does via its own standing task.
+        //
+        // `self` cannot be moved into a `'static` `tokio::spawn` future, so
+        // clone the specific Arc-backed handles the post-handshake bookkeeping
+        // needs.
+        let p2p_peers_for_task = self.p2p_peers.clone();
+        let p2p_sync_crypto_for_task = self.p2p_sync_crypto.clone();
+        let pairing_for_task = Arc::clone(&self.pairing);
+        #[cfg(feature = "cloud-sync")]
+        let sync_key_for_task = self.sync_key.clone();
 
-        match result {
-            Ok(outcome) => {
-                tracing::info!(
-                    peer_fingerprint = %outcome.peer_fingerprint,
-                    "discovery SAS pairing completed (both sides accepted)"
-                );
-                // Both sides accepted: trust + persist exactly like the QR path.
-                if let Some(ref peers) = self.p2p_peers {
-                    peers.rotate_peer(
-                        &outcome.peer_fingerprint,
-                        outcome.peer_fingerprint.to_string(),
-                        String::new(),
+        tokio::spawn(async move {
+            let result = copypaste_p2p::bootstrap::run_initiator_with_confirm(
+                addr,
+                cert_der,
+                key_der,
+                &password,
+                &own_sync_addr,
+                &own_meta,
+                own_provisioning,
+                confirm,
+            )
+            .await;
+
+            match result {
+                Ok(outcome) => {
+                    tracing::info!(
+                        peer_fingerprint = %outcome.peer_fingerprint,
+                        "discovery SAS pairing completed (both sides accepted)"
                     );
-                }
-                let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
-                    model: outcome.peer_model.clone(),
-                    os_version: outcome.peer_os.clone(),
-                    app_version: outcome.peer_app_version.clone(),
-                    local_ip: outcome.peer_local_ip.clone(),
-                    device_name: outcome.peer_device_name.clone(),
-                    public_ip: outcome.peer_public_ip.clone(),
-                    device_id: outcome.peer_device_id.clone(),
-                    // CopyPaste-yw2k: carry the peer's non-secret account identity.
-                    supabase_account_id: outcome.peer_supabase_account_id.clone(),
-                };
-                Self::persist_paired_peer(
-                    &outcome.peer_fingerprint,
-                    &outcome.peer_sync_addr,
-                    &outcome.session_key,
-                    &peer_meta,
-                    self.p2p_sync_crypto.as_ref(),
-                )
-                .await;
-                // "QR fully provisions all sync": apply any sync config the peer
-                // advertised that we currently lack (never overwrites existing).
-                if let Some(prov) = outcome.peer_provisioning {
-                    self.apply_peer_provisioning(prov).await;
-                }
-                self.pairing
-                    .finish(crate::pairing_sm::PairingState::Confirmed);
-                let resp = Response::ok(
-                    req_id,
-                    serde_json::json!({
-                        "ok": true,
-                        "peer_fingerprint": outcome.peer_fingerprint.to_string(),
-                    }),
-                );
-                // BUG A1: the terminal outcome is returned synchronously to the
-                // UI in `resp`, so the brief observable-window concern does not
-                // apply on this initiator path. Reset the SM to `Idle` so a
-                // SUBSEQUENT `pair_with_discovered` is not refused as
-                // rate-limited (the SM requires `is_idle()` for `try_begin`).
-                self.pairing.reset();
-                resp
-            }
-            Err(e) => {
-                // Reject / mismatch / timeout / network error → NO persist, NO
-                // rotate_peer; the session key already dropped/zeroized inside
-                // the bootstrap function. Record a terminal state unless the SM
-                // was already moved to a terminal state by `pair_abort`.
-                let snapshot = self.pairing.snapshot();
-                if !snapshot.is_terminal() {
-                    self.pairing
-                        .finish(crate::pairing_sm::PairingState::Rejected);
-                }
-                tracing::warn!("discovery SAS pairing failed: {e}");
-                // HB-4: a raw TCP connect failure ("Connection refused", host
-                // unreachable, timeout) means the peer's bootstrap responder is
-                // not listening — almost always because the device is already
-                // paired (so it no longer advertises) or its Devices/pairing
-                // screen is closed. Map that to a friendly message instead of the
-                // raw os-error; genuine PAKE/SAS failures keep the auth message.
-                let lower = e.to_string().to_ascii_lowercase();
-                let is_connect_failure = lower.contains("connection refused")
-                    || lower.contains("connect")
-                    || lower.contains("unreachable")
-                    || lower.contains("timed out")
-                    || lower.contains("timeout")
-                    || lower.contains("os error 61")
-                    || lower.contains("os error 111");
-                let (code, message) = if is_connect_failure {
-                    (
-                        ERR_CODE_NOT_FOUND,
-                        "device not reachable (already paired or its screen is closed)".to_string(),
+                    // Both sides accepted: trust + persist exactly like the QR path.
+                    if let Some(ref peers) = p2p_peers_for_task {
+                        peers.rotate_peer(
+                            &outcome.peer_fingerprint,
+                            outcome.peer_fingerprint.to_string(),
+                            String::new(),
+                        );
+                    }
+                    let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+                        model: outcome.peer_model.clone(),
+                        os_version: outcome.peer_os.clone(),
+                        app_version: outcome.peer_app_version.clone(),
+                        local_ip: outcome.peer_local_ip.clone(),
+                        device_name: outcome.peer_device_name.clone(),
+                        public_ip: outcome.peer_public_ip.clone(),
+                        device_id: outcome.peer_device_id.clone(),
+                        // CopyPaste-yw2k: carry the peer's non-secret account identity.
+                        supabase_account_id: outcome.peer_supabase_account_id.clone(),
+                    };
+                    Self::persist_paired_peer(
+                        &outcome.peer_fingerprint,
+                        &outcome.peer_sync_addr,
+                        &outcome.session_key,
+                        &peer_meta,
+                        p2p_sync_crypto_for_task.as_ref(),
                     )
-                } else {
-                    (
-                        ERR_CODE_AUTH_FAILED,
-                        format!("discovery SAS pairing failed: {e}"),
-                    )
-                };
-                let resp = Response::err_with_code(req_id, code, message);
-                // BUG A1: reset the SM to `Idle` on EVERY failure return path that
-                // reached here after `try_begin` succeeded, so the next pairing
-                // attempt is not refused as rate-limited. The terminal outcome is
-                // already returned synchronously to the UI in `resp` above.
-                self.pairing.reset();
-                resp
+                    .await;
+                    // "QR fully provisions all sync": apply any sync config the peer
+                    // advertised that we currently lack (never overwrites existing).
+                    #[cfg(feature = "cloud-sync")]
+                    if let Some(prov) = outcome.peer_provisioning {
+                        Self::apply_peer_provisioning_to(&sync_key_for_task, prov).await;
+                    }
+                    pairing_for_task.finish(crate::pairing_sm::PairingState::Confirmed);
+                    // BUG A1: reset the SM to `Idle` so a SUBSEQUENT
+                    // `pair_with_discovered` is not refused as rate-limited
+                    // (the SM requires `is_idle()` for `try_begin`). The UI
+                    // observes the terminal `confirmed` state via its
+                    // `pair_get_sas` poll before this reset (same brief
+                    // observable window the responder's standing task uses).
+                    pairing_for_task.reset();
+                }
+                Err(e) => {
+                    // Reject / mismatch / timeout / network error → NO persist, NO
+                    // rotate_peer; the session key already dropped/zeroized inside
+                    // the bootstrap function. Record a terminal state unless the SM
+                    // was already moved to a terminal state by `pair_abort`.
+                    let snapshot = pairing_for_task.snapshot();
+                    if !snapshot.is_terminal() {
+                        pairing_for_task.finish(crate::pairing_sm::PairingState::Rejected);
+                    }
+                    // HB-4: a raw TCP connect failure ("Connection refused", host
+                    // unreachable, timeout) means the peer's bootstrap responder is
+                    // not listening — almost always because the device is already
+                    // paired (so it no longer advertises) or its Devices/pairing
+                    // screen is closed. Logged only (no synchronous caller left to
+                    // hand a friendly message to); the UI's SAS modal surfaces the
+                    // generic terminal `rejected` state via `pair_get_sas` polling.
+                    let lower = e.to_string().to_ascii_lowercase();
+                    let is_connect_failure = lower.contains("connection refused")
+                        || lower.contains("connect")
+                        || lower.contains("unreachable")
+                        || lower.contains("timed out")
+                        || lower.contains("timeout")
+                        || lower.contains("os error 61")
+                        || lower.contains("os error 111");
+                    if is_connect_failure {
+                        tracing::warn!(
+                            "discovery SAS pairing failed: device not reachable \
+                             (already paired or its screen is closed): {e}"
+                        );
+                    } else {
+                        tracing::warn!("discovery SAS pairing failed: {e}");
+                    }
+                    // BUG A1: reset the SM to `Idle` on EVERY failure path that
+                    // reached here after `try_begin` succeeded, so the next
+                    // pairing attempt is not refused as rate-limited.
+                    pairing_for_task.reset();
+                }
             }
-        }
+        });
+
+        // Detached: the confirm-wait/handshake continues in the background
+        // task above. Return immediately (mirrors `pair_get_sas`'s doc'd
+        // contract and the QR responder's `spawn_bootstrap_responder`) so the
+        // frontend can open the SAS modal right away and learn the SAS/outcome
+        // by polling `pair_get_sas`.
+        Response::ok(
+            req_id,
+            serde_json::json!({ "ok": true, "state": "initiating" }),
+        )
     }
 }

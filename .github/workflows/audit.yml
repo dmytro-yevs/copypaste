@@ -37,12 +37,11 @@ jobs:
 
       - name: cargo audit
         # --no-fetch uses the cached advisory-db; on a cache miss (first run of the
-        # week or cold runner) we refresh the DB and re-run --no-fetch.
-        # Splitting cache-miss recovery from advisory failure prevents a genuine
-        # advisory hit from being masked by the retry: if --no-fetch fails due to a
-        # missing DB the update step fixes that; if it fails due to an advisory the
-        # re-run after --db-update will still report it.
-        run: cargo audit --no-fetch || { cargo audit --db-update && cargo audit --no-fetch; }
+        # week or cold runner) --no-fetch fails because there is no local DB yet,
+        # so we fall back to a plain `cargo audit`, which fetches the DB itself.
+        # cargo-audit has no --db-update flag; a genuine advisory hit still fails
+        # this second invocation, so it is never masked by the fallback.
+        run: cargo audit --no-fetch || cargo audit
 
       - name: Open GitHub issue on audit failure
         if: failure()

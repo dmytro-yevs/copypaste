@@ -1,0 +1,51 @@
+Third-party notices — CopyPaste for Android
+=============================================
+
+This file lists third-party assets vendored (not linked as a Maven
+dependency) into this module's source tree, and their licenses.
+
+Lucide icons
+------------
+
+Path geometry for the glyphs under
+`app/src/main/java/com/copypaste/android/ui/theme/icons/` is vendored from
+lucide-icons/lucide (https://github.com/lucide-icons/lucide) at tag
+v0.265.0, commit 9fb4b0b161fc256d2333f91812a927f2ed6f84c0, converted from SVG
+`<path>`/`<circle>`/`<line>`/`<rect>`/`<polyline>` data to Kotlin
+`androidx.compose.ui.graphics.vector.ImageVector` source by
+`scripts/generate-lucide-icons.sh` (+ `generate-lucide-icons.mjs`). No
+Lucide-Compose Maven artifact is used — see design.md's "Resolved decisions"
+(android-material3-redesign) for why: every published Lucide-Compose
+artifact requires kotlin-stdlib >= 2.0, incompatible with this workspace's
+Kotlin 1.9.23.
+
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as
+part of Feather (MIT). All other copyright (c) for Lucide are held by
+Lucide Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+Tooling deviation note (DevSrSouza/svg-to-compose)
+---------------------------------------------------
+
+design.md's S0.3 spike named `DevSrSouza/svg-to-compose` (MIT) as the
+primary conversion tool. As of 2026-07-02 that project has no artifact
+resolvable from Maven Central or JitPack (JitPack returns 404 with no build
+triggered), so it was not actually invoked anywhere in this pipeline — no
+svg-to-compose source or binary is vendored or executed, and no MIT notice
+is owed for it. `generate-lucide-icons.mjs` is an independently written
+SVG-path -> Compose PathBuilder DSL converter (design.md's pre-authorized
+"hand-port" fallback for this exact case). See bd issue CopyPaste-myh8.2
+notes for the full rationale.

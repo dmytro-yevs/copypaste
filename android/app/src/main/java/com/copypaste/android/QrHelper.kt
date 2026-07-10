@@ -33,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpShapes
 import com.copypaste.android.ui.theme.SectionLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -279,16 +280,23 @@ internal fun OwnQrSection(settings: Settings) {
                 )
                 // §10 QR countdown drain bar: 2dp track; fill drains over TTL.
                 // Static fill (no pulse) — progress-bar pulse removed for calm UI.
+                // Fix round (mirrors PairQrCard.kt CopyPaste-myh8.8): both track and
+                // fill now carry an explicit `.background()` — previously neither did,
+                // so the bar rendered nothing (an invisible no-op) despite the "§10
+                // drain bar" comment. Same urgent/normal color pair the countdown Text
+                // above already uses.
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(2.dp)
-                        .clip(RoundedCornerShape(999.dp)),
+                        .clip(RoundedCornerShape(CpShapes.pill))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth(qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS))
-                            .height(2.dp),
+                            .height(2.dp)
+                            .background(if (urgent) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary),
                     )
                 }
             }

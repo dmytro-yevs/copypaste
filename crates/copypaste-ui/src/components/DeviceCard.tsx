@@ -99,7 +99,17 @@ export function MetaRow({
       aria-label={`${label}: ${value} — click to copy`}
     >
       <span className="cfield__k">{label}</span>
-      <span className="cfield__v">{copied ? "Copied!" : value}</span>
+      {/* CopyPaste-8ebg.62: "Copied!" previously replaced the value entirely,
+          hiding the fingerprint the user just confirmed they were copying.
+          Keep the value visible and show the confirmation as a suffix
+          (reusing the existing .field-note--ok success-color class — no new
+          CSS) so both remain readable at once. */}
+      <span className="cfield__v">
+        {value}
+        {copied && (
+          <span className="field-note field-note--ok"> Copied!</span>
+        )}
+      </span>
     </button>
   );
 }
@@ -139,8 +149,12 @@ export function ThisDeviceCard({ info }: { info: OwnDeviceInfo }) {
         <ChevronRight aria-hidden="true" className="devrow__chev" />
       </DisclosureHeader>
 
-      {/* Aligned two-column metadata grid */}
-      <div className="devrow__body" id={bodyId}>
+      {/* Aligned two-column metadata grid.
+          CopyPaste-8ebg.31: the collapsed body is only visually hidden (grid-template-rows:
+          0fr in patterns.css) — without `inert` its content stays in the tab order, so
+          Tab could land focus on fields the user can't see. `inert` also removes it from
+          the accessibility tree while collapsed. */}
+      <div className="devrow__body" id={bodyId} inert={!expanded}>
         <div>
           <DeviceMetaGrid>
             <MetaRow label="Model" value={info.device_model} />
@@ -303,7 +317,10 @@ export function PeerRow({
         <ChevronRight aria-hidden="true" className="devrow__chev" />
       </DisclosureHeader>
 
-      <div className="devrow__body" id={bodyId}>
+      {/* CopyPaste-8ebg.31: same collapsed-focus fix as ThisDeviceCard above — inert
+          keeps Tab (and the destructive Unpair/Revoke buttons in the footer below)
+          out of the tab order while the row is visually collapsed. */}
+      <div className="devrow__body" id={bodyId} inert={!expanded}>
         <div>
           {/* Aligned two-column metadata grid — labels line up vertically */}
           <DeviceMetaGrid>

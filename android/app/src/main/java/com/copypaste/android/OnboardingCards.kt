@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -27,36 +29,66 @@ import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpShapes
+import com.copypaste.android.ui.theme.icons.LucideIcons
 
 /**
  * Leaf card composables for the onboarding screen. Moved verbatim out of
  * OnboardingActivity.kt (CopyPaste-vp63.41).
+ *
+ * Shared between the onboarding flow (OnboardingScreen.kt) and the standalone
+ * Permissions settings screen (PermissionsSettingsActivity.kt) — S10 Wave B/C
+ * (CopyPaste-myh8.10) merged PermissionsSettingsActivity's near-duplicate
+ * `PermissionStatusCard` into this composable.
  */
 @Composable
 internal fun PermissionCard(
     title: String,
     description: String,
-    // CopyPaste-crh3.113: nullable — null means "indeterminate" (e.g. OEM
-    // autostart, which cannot be detected without root). A null card renders
-    // NEUTRAL (never red), matching PermissionsSettingsActivity's PermissionCard,
-    // instead of the previous granted=false which forced a permanent not-granted
-    // (red-on-required) appearance even after the user completed the OEM steps.
-    granted: Boolean?,
+    // CopyPaste-myh8.10 Wave B: replaces the old nullable Boolean ("null" =
+    // indeterminate, e.g. OEM autostart which cannot be detected without root)
+    // with the explicit PermissionStatus state machine (Wave A). The OEM
+    // "indeterminate" case now maps to DENIED with required=false, which
+    // renders identically (neutral border, no red) — see permissionCardCta().
+    status: PermissionStatus,
     buttonLabel: String,
     onClick: () -> Unit,
     required: Boolean,
+    // Leading icon (Lucide role) — null renders no icon, matching the
+    // onboarding cards' original icon-less layout.
+    icon: ImageVector? = null,
     alwaysShowButton: Boolean = false,
+    // Hides the action button entirely (e.g. install-time-granted permissions
+    // on the Permissions settings screen that need no user action).
+    infoOnly: Boolean = false,
+    // Renders the Granted/Not-granted status pill row (PermissionsSettingsActivity's
+    // live-status indicator). Off by default to match the onboarding cards, which
+    // never showed it.
+    showStatusPill: Boolean = false,
+    // CTA wording for PERMANENTLY_DENIED; falls back to [buttonLabel] (i.e.
+    // identical to the DENIED/REQUEST wording) when the caller has no distinct
+    // "open settings" copy for this permission.
+    permanentlyDeniedButtonLabel: String? = null,
     enterDelayMs: Int = 0,
     entered: Boolean = true,
+    // S10 Wave D (CopyPaste-myh8.10): optional secondary "Done" action for
+    // indeterminate special-access cards (e.g. OEM autostart, which cannot be
+    // queried without root) — mirrors the old BackgroundCaptureSetupActivity
+    // BgCaptureCard's onAcknowledge/acknowledgeLabel.
+    onAcknowledge: (() -> Unit)? = null,
+    acknowledgeLabel: String? = null,
 ) {
     val slowDur = 450
+    val cta = permissionCardCta(status)
+    val satisfied = cta == PermissionCardCta.SATISFIED
 
-    // Status-colored hairline border: granted → success; explicitly-missing +
-    // required → danger; null (indeterminate) or optional → neutral.
+    // Status-colored hairline border: satisfied → success; explicitly-missing +
+    // required → danger; otherwise (optional, or indeterminate folded into
+    // DENIED) → neutral.
     val borderColor = when {
-        granted == true               -> MaterialTheme.colorScheme.primary
-        granted == false && required  -> MaterialTheme.colorScheme.error
-        else                          -> MaterialTheme.colorScheme.outline
+        satisfied                  -> MaterialTheme.colorScheme.primary
+        !satisfied && required     -> MaterialTheme.colorScheme.error
+        else                       -> MaterialTheme.colorScheme.outline
     }
 
     val alpha by animateFloatAsState(
@@ -73,6 +105,14 @@ internal fun PermissionCard(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (satisfied) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(
                     text = title,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -82,28 +122,63 @@ internal fun PermissionCard(
                     // Required badge — accent-tinted chip pill
                     Box(
                         modifier = Modifier
-                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                            .border(0.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(8.dp)),
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(CpShapes.ctl))
+                            .border(0.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(CpShapes.ctl)),
                     ) {
                         Text(
-                            text = "required",
+                            text = stringResource(R.string.label_required),
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
+                }
+            }
+            if (showStatusPill) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = if (satisfied) LucideIcons.StatusOk else LucideIcons.StatusErr,
+                        contentDescription = null,
+                        tint = if (satisfied) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.error,
+                    )
+                    Text(
+                        text = if (satisfied) stringResource(R.string.status_granted)
+                               else stringResource(R.string.status_not_granted),
+                        color = if (satisfied) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error,
+                    )
                 }
             }
             Text(
                 text = description,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            CopyPasteButton(
-                onClick = onClick,
-                enabled = granted != true || alwaysShowButton,
-                variant = if (granted == true && !alwaysShowButton) ButtonVariant.GHOST
-                          else ButtonVariant.PRIMARY,
-                modifier = Modifier.align(Alignment.End),
-            ) {
-                Text(buttonLabel)
+            if (!infoOnly) {
+                CopyPasteButton(
+                    onClick = onClick,
+                    enabled = !satisfied || alwaysShowButton,
+                    variant = if (satisfied && !alwaysShowButton) ButtonVariant.GHOST
+                              else ButtonVariant.PRIMARY,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text(
+                        if (cta == PermissionCardCta.OPEN_SETTINGS) {
+                            permanentlyDeniedButtonLabel ?: buttonLabel
+                        } else {
+                            buttonLabel
+                        },
+                    )
+                }
+            }
+            if (onAcknowledge != null && acknowledgeLabel != null) {
+                CopyPasteButton(
+                    onClick = onAcknowledge,
+                    variant = ButtonVariant.SECONDARY,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text(acknowledgeLabel)
+                }
             }
         }
     }
@@ -202,7 +277,7 @@ internal fun AdbBackgroundCaptureCard(
                     variant = ButtonVariant.PRIMARY,
                     modifier = Modifier.align(Alignment.End),
                 ) {
-                    Text("Grant Overlay Permission")
+                    Text(stringResource(R.string.onboarding_grant_overlay_permission))
                 }
             }
         }
@@ -214,11 +289,11 @@ internal fun AdbBackgroundCaptureCard(
 private fun StatusPill(text: String, ok: Boolean) {
     Box(
         modifier = Modifier
-            .background(if (ok) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(8.dp))
+            .background(if (ok) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(CpShapes.ctl))
             .border(
                 0.5.dp,
                 if (ok) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                RoundedCornerShape(8.dp),
+                RoundedCornerShape(CpShapes.ctl),
             ),
     ) {
         Text(
@@ -250,7 +325,7 @@ private fun AdbCommandRow(
                 // CopyPaste-n7ff: announce as a Button with a "Copy command" action
                 // so TalkBack reports the row as interactive (it was a bare clickable).
                 .semantics { role = Role.Button }
-                .clickable(onClickLabel = "Copy command") {
+                .clickable(onClickLabel = stringResource(R.string.onboarding_copy_command_label)) {
                     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                         as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", command))

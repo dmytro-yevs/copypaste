@@ -12,4 +12,17 @@
   /* Scroll-chain helpers: fill a flex parent (column) / own the vertical scroll. */
   .fill-col { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .scroll-y { flex: 1; min-height: 0; overflow-y: auto; }
+  /* CopyPaste-8ebg.45: visually-hidden but AT-readable — used for the
+     VirtualList active-descendant aria-live announcer (see VirtualList.tsx). */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 }

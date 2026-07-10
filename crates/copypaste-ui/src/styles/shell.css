@@ -14,10 +14,23 @@
   }
 
   /* --- Sidebar -------------------------------------------------------------- */
+  /* CopyPaste-8ebg.11: titleBarStyle:"Overlay" (tauri.conf.json) draws the
+     macOS traffic lights over the top-left of the window with no reserved
+     inset from Tauri itself — the drag-region div had no height (0px), so
+     the sidebar's first nav item (History) rendered directly under the
+     lights, overlapping them (HIG violation). Give the drag region the same
+     44px height as `.vhead` ("header 44px everywhere" — DESIGN-SYSTEM-v2.md)
+     so the traffic lights sit in their own reserved strip above the nav. */
+  .sb [data-tauri-drag-region] {
+    height: 44px;
+    flex: none;
+  }
   .sb {
     width: 174px;
     flex: none;
-    background: var(--panel);
+    background: var(--chrome-bg);
+    -webkit-backdrop-filter: var(--frost-filter);
+    backdrop-filter: var(--frost-filter);
     border: var(--stroke-1) solid var(--border);
     border-radius: var(--r-card);
     padding: var(--s-4);
@@ -28,7 +41,7 @@
     display: flex;
     align-items: center;
     gap: var(--s-5);
-    padding: 8px 10px;
+    padding: var(--s-4) 10px;
     border-radius: 9px;
     color: var(--dim);
     font-size: var(--fs-md);
@@ -56,7 +69,7 @@
   }
   .sb__foot {
     margin-top: auto;
-    padding: 10px 8px 4px;
+    padding: 10px var(--s-4) var(--s-2);
     border-top: var(--stroke-1) solid var(--divider);
     display: flex;
     align-items: center;
@@ -98,7 +111,7 @@
     display: flex;
     align-items: center;
     gap: var(--s-5);
-    padding: 12px 14px;
+    padding: 12px var(--s-6);
     border-bottom: var(--stroke-1) solid var(--divider);
   }
   /* Header actions slot (History toolbar, Logs filter+buttons, Devices Revoke).
@@ -106,6 +119,7 @@
   .vhead__actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--s-4);
     flex: 1;
     min-width: 0;
@@ -137,13 +151,13 @@
     flex: none;
     flex-wrap: wrap;
     gap: var(--s-1);
-    padding: 8px 12px 0;
+    padding: var(--s-4) 12px 0;
     border-bottom: var(--stroke-1) solid var(--divider);
   }
   .set-tab {
     font-size: var(--fs-125);
     font-weight: var(--fw-semibold);
-    padding: 8px 11px;
+    padding: var(--s-4) var(--s-5);
     color: var(--dim);
     border-bottom: var(--stroke-2) solid transparent;
     margin-bottom: -1px;
@@ -156,7 +170,26 @@
   .set-tab:hover { color: var(--text); }
   .set-tab.on,
   .set-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-  .set-body { padding: 18px 20px; flex: 1; min-height: 0; overflow-y: auto; }
+  /* CopyPaste-f72f: below ~500px the wrap-to-multiple-lines fix (g27b.31,
+     above) itself becomes the problem — 7 tabs wrapping to 4 rows eats most
+     of the vertical space before any tab content is visible. At this width
+     switch strategy: stop wrapping and let the tab row scroll horizontally
+     instead (condensed single row), same "every tab stays reachable"
+     outcome as the wrap fix but without the 4-row cost. */
+  @media (max-width: 500px) {
+    .set-tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .set-tabs::-webkit-scrollbar { display: none; }
+    .set-tab {
+      flex: none;
+      padding: var(--s-4) 9px;
+      gap: var(--s-2);
+    }
+  }
+  .set-body { padding: 18px var(--s-8); flex: 1; min-height: 0; overflow-y: auto; }
   .set-pane { display: none; }
   .set-pane.on { display: block; animation: viewIn var(--dur) var(--ease); }
   .set-grp { margin-bottom: 22px; }
@@ -179,7 +212,7 @@
     gap: var(--s-7);
     padding: 9px 0;
   }
-  .srow__l { font-size: 13.5px; color: var(--text); min-width: 0; }
+  .srow__l { font-size: var(--fs-135); color: var(--text); min-width: 0; }
   /* Secondary text spans the row width instead of clamping at a narrow column
      (which forced premature wrapping even with plenty of horizontal space). */
   .srow__s { font-size: var(--fs-sm); color: var(--faint); margin-top: var(--s-1); }
@@ -219,7 +252,7 @@
 
   /* --- Logs ----------------------------------------------------------------- */
   /* Logs toolbar (filter + Refresh + Export) — top bar when Logs is a Settings tab. */
-  .logs-toolbar { flex: none; display: flex; padding: 12px 14px; border-bottom: var(--stroke-1) solid var(--divider); }
+  .logs-toolbar { flex: none; display: flex; padding: 12px var(--s-6); border-bottom: var(--stroke-1) solid var(--divider); }
   /* CopyPaste-g27b.31: at narrow width the filter field + Refresh + Export
      no longer fit in one row; wrap instead of pushing the buttons
      off-screen. min-width:0 lets the filter field shrink to make room
@@ -299,7 +332,7 @@
     align-items: center;
     justify-content: center;
     color: var(--knob-fill);
-    font-size: 34px;
+    font-size: var(--fs-34);
     margin-bottom: var(--s-5);
     box-shadow: var(--sh2);
   }
@@ -307,7 +340,7 @@
      shared .set-grp__h is left-aligned by default, which left the "Features"
      heading hanging off to the side of an otherwise centered column). */
   .about .set-grp__h { text-align: center; }
-  .about__name { font-size: 19px; font-weight: var(--fw-bold); letter-spacing: -0.02em; }
+  .about__name { font-size: var(--fs-19); font-weight: var(--fw-bold); letter-spacing: -0.02em; }
   .about__ver { font-size: var(--fs-125); color: var(--faint); font-family: var(--f-mono); }
   .about__grid {
     display: grid;
@@ -360,7 +393,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--s-4);
-    padding: 7px 11px;
+    padding: 7px var(--s-5);
     border: var(--stroke-1) solid var(--border);
     border-radius: var(--r-ctl);
     background: var(--elevated);
@@ -375,7 +408,7 @@
     justify-content: space-between;
     align-items: center;
     gap: var(--gap-row);
-    padding: 14px;
+    padding: var(--s-6);
     border-bottom: var(--stroke-1) solid var(--divider);
     flex-wrap: wrap;
   }

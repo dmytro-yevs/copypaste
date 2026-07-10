@@ -335,6 +335,7 @@ internal suspend fun ClipboardRepository.exportHistoryImpl(
 internal suspend fun ClipboardRepository.importHistoryImpl(
     json: String,
     encryptionKey: ByteArray,
+    settings: Settings,
 ): Int = withContext(Dispatchers.IO) {
     val root = org.json.JSONObject(json)
     val version = root.getInt("version")
@@ -355,6 +356,24 @@ internal suspend fun ClipboardRepository.importHistoryImpl(
             obj.optString("snippet")
         }
         if (fullText.isBlank()) continue
+
+        // CopyPaste-myh8.9: skip file-type items whose declared byte size exceeds
+        // Settings.maxFileSizeBytes. Mirrors the "skip without counting" pattern
+        // already used above for blank full_text — there is no separate
+        // partial/failure counter in this format, so a skip simply does not
+        // increment [imported] (the sole outcome value returned to the caller).
+        val contentType = obj.optString("content_type", "text")
+        if (contentType != "text") {
+            val sizeBytes = obj.optLong("size_bytes", fullText.toByteArray(Charsets.UTF_8).size.toLong())
+            if (sizeBytes > settings.maxFileSizeBytes) {
+                Log.w(
+                    TAG,
+                    "importHistory: skipping oversized $contentType item $id " +
+                        "($sizeBytes B > ${settings.maxFileSizeBytes} B cap)",
+                )
+                continue
+            }
+        }
 
         val wallTimeMs = obj.optLong("wall_time_ms", System.currentTimeMillis())
         val pinned = obj.optBoolean("pinned", false)

@@ -61,6 +61,11 @@ mod misc_tests;
 pub use init::{get_own_fingerprint, init, list_peers, load_persisted_peers_into};
 pub use unpair::send_unpair_and_close_session;
 
+// CopyPaste-ptgcc: per-peer rekey-failure counter, surfaced by `list_peers`.
+pub(crate) use fanout::rekey_failure_snapshot;
+#[cfg(test)]
+pub(crate) use fanout::{clear_rekey_failure, record_rekey_failure};
+
 // ── types (split out to `types.rs`, ADR-017 CopyPaste-vp63.2) ────────────────
 pub(crate) use types::PendingPings;
 pub use types::{

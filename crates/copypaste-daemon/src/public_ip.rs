@@ -1,9 +1,9 @@
 //! Best-effort public / WAN IP discovery via STUN.
 //!
 //! Sends a single RFC 5389 STUN Binding Request to a public STUN server
-//! (`stun.l.google.com:19302` by default) over UDP, then parses the
-//! XOR-MAPPED-ADDRESS attribute from the response to learn the reflexive
-//! (NAT-external) address.
+//! (see `copypaste_core::net::STUN_SERVERS`, tried in order) over UDP, then
+//! parses the XOR-MAPPED-ADDRESS attribute from the response to learn the
+//! reflexive (NAT-external) address.
 //!
 //! ## Why STUN, not an HTTP echo?
 //! * No new crate dependencies: uses only `std::net::UdpSocket` + stdlib.
@@ -21,13 +21,10 @@
 //! All errors are logged at `debug` level and return `None` — they MUST NOT
 //! propagate to the caller or block startup.
 
+use copypaste_core::net::STUN_SERVERS;
 use std::net::UdpSocket;
 use std::time::Duration;
 use tracing::debug;
-
-/// STUN server used for the Binding Request.
-/// Google's servers are stable, publicly documented, and require no auth.
-const STUN_SERVER: &str = "stun.l.google.com:19302";
 
 /// Total wall-clock budget for the STUN exchange (connect + send + recv).
 /// 5 s is generous; typical round-trips to stun.l.google.com are < 100 ms.
@@ -52,8 +49,13 @@ const MAGIC_COOKIE: u32 = 0x2112_A442;
 ///
 /// This is a **blocking** function (uses `UdpSocket` with a read timeout).
 /// Call it via `tokio::task::spawn_blocking` in async contexts.
+///
+/// Tries each server in [`STUN_SERVERS`] in order, returning the first
+/// success (CopyPaste-8ebg.60: fallback list, was a single hardcoded server).
 pub fn resolve_public_ip() -> Option<String> {
-    resolve_public_ip_via(STUN_SERVER)
+    STUN_SERVERS
+        .iter()
+        .find_map(|server| resolve_public_ip_via(server))
 }
 
 /// Same as [`resolve_public_ip`] but accepts a custom server address.

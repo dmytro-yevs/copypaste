@@ -40,8 +40,10 @@ pub use insert::{
 pub use pinned::{mark_sensitive, pin_item, reorder_pinned, set_thumb, unpin_item};
 pub use query::{
     bump_item_recency, count_items, decrypt_page, exists_item_by_item_id, find_recent_by_hash,
-    get_item_by_id, get_item_by_item_id, get_page, get_page_meta, get_page_pinned_first,
-    get_page_pinned_first_lamport, DecryptedPage,
+    get_item_by_id, get_item_by_item_id, get_page, get_page_meta, get_page_meta_seek,
+    get_page_pinned_first, get_page_pinned_first_lamport, get_page_pinned_first_lamport_seek,
+    get_page_pinned_first_seek, get_page_seek, DecryptedPage, PinnedCursor, PinnedLamportCursor,
+    WallCursor,
 };
 pub use types::{next_lamport_ts, ClipboardItem, ItemsError};
 

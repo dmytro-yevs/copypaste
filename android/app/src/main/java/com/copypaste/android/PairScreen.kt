@@ -41,6 +41,7 @@ import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.CpSpacing
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.delay
@@ -75,6 +76,7 @@ fun PairScreen(
     val controller = remember { PairController(context, settings, deviceKeyStore, repository, scope) }
     val toastState = remember { GlassToastState() }
     val clipboardManager = LocalClipboardManager.current
+    val fingerprintCopiedMsg = stringResource(R.string.pair_fingerprint_copied)
     // CopyPaste-jwga: errorMessage now holds a pre-sanitized, user-friendly string
     // from ErrorMessages.friendly*(). No wrapper template is applied at display time
     // so raw exception text, paths, and FFI symbols never reach the user.
@@ -82,7 +84,7 @@ fun PairScreen(
     fun copyFingerprint(fingerprint: String) {
         clipboardManager.setText(AnnotatedString(fingerprint))
         scope.launch {
-            toastState.show("Fingerprint copied", GlassToastKind.ACCENT)
+            toastState.show(fingerprintCopiedMsg, GlassToastKind.ACCENT)
         }
     }
 
@@ -263,7 +265,7 @@ fun PairScreen(
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.Top)
+            verticalArrangement = Arrangement.spacedBy(CpSpacing.s8, Alignment.Top)
         ) {
             // ── Deliverable 2: hide own-QR once a peer has been scanned ───────
             // When scannedPeer is non-null we are in "confirm peer" mode. The own-QR

@@ -345,10 +345,11 @@ Drop in this file as `crates/copypaste-ui/src/styles/tokens.css`. Delete `skin.c
   color-scheme: dark;
   --bg:#0E0F14; --panel:#16181F; --elevated:#1E2027; --card:#1E2027; --raised:#282B33; --raised-2:#33373F;
   --border:#33363F; --divider:#24262D;
-  --text:#E7E9EE; --dim:#9CA1AC; --faint:#7E838E; --mute:#5C616B;
+  --text:#E7E9EE; --dim:#9CA1AC; --faint:#8F94A0; --mute:#5C616B;
   --hover:rgba(255,255,255,.045); --pressed:rgba(255,255,255,.075);
   --selected:color-mix(in srgb,var(--accent) 16%,transparent); --scrim:rgba(0,0,0,.55);
   --ok:#4FB866; --warn:#E0A33F; --err:#E5645F; --info:#5B9DFF;
+  --err-strong:var(--err); --info-strong:var(--info); --ok-strong:var(--ok);
   --c-text:#8B93A5; --c-url:#34D1BF; --c-code:#A78BFA; --c-image:#E879C6; --c-mail:#4ED98A;
   --c-color:#F5A524; --c-num:#5CC1CE; --c-path:#5B9DFF; --c-file:#5B9DFF; --c-json:#FB7B53; --c-secret:#F2616B;
   --sh1:0 1px 2px rgba(0,0,0,.30); --sh2:0 8px 24px -6px rgba(0,0,0,.45); --sh3:0 24px 64px -12px rgba(0,0,0,.60);
@@ -358,10 +359,11 @@ Drop in this file as `crates/copypaste-ui/src/styles/tokens.css`. Delete `skin.c
   color-scheme: light;
   --bg:#F5F6F8; --panel:#FFFFFF; --elevated:#FFFFFF; --card:#FFFFFF; --raised:#EFF1F4; --raised-2:#E2E5EA;
   --border:#E1E4E9; --divider:#ECEEF1;
-  --text:#1A1C22; --dim:#565B66; --faint:#767B86; --mute:#A2A7B1;
+  --text:#1A1C22; --dim:#565B66; --faint:#6E7380; --mute:#A2A7B1;
   --hover:rgba(15,18,26,.045); --pressed:rgba(15,18,26,.075);
   --selected:color-mix(in srgb,var(--accent) 12%,transparent); --scrim:rgba(20,22,30,.28);
   --ok:#1FA85B; --warn:#C77F1A; --err:#D64545; --info:#2563EB;
+  --err-strong:#B93434; --info-strong:#1D4ED8; --ok-strong:#157A42;
   --c-text:#6A7282; --c-url:#0E9E8C; --c-code:#7C5CE6; --c-image:#C44BA0; --c-mail:#1FA85B;
   --c-color:#C77F1A; --c-num:#1C8B9B; --c-path:#2F6FE0; --c-file:#2F6FE0; --c-json:#DC5A2E; --c-secret:#D64545;
   --sh1:0 1px 2px rgba(20,22,30,.06); --sh2:0 8px 24px -8px rgba(20,22,30,.12); --sh3:0 24px 64px -12px rgba(20,22,30,.18);
@@ -425,6 +427,7 @@ data class CpColors(
     val border: Color, val divider: Color,
     val text: Color, val dim: Color, val faint: Color, val mute: Color,
     val ok: Color, val warn: Color, val err: Color, val info: Color,
+    val okStrong: Color, val errStrong: Color, val infoStrong: Color,
     val cText: Color, val cUrl: Color, val cCode: Color, val cImage: Color, val cMail: Color,
     val cColor: Color, val cNum: Color, val cPath: Color, val cFile: Color, val cJson: Color, val cSecret: Color,
 )
@@ -433,8 +436,9 @@ val DarkColors = CpColors(
     bg = Color(0xFF0E0F14), panel = Color(0xFF16181F), elevated = Color(0xFF1E2027),
     raised = Color(0xFF282B33), raised2 = Color(0xFF33373F),
     border = Color(0xFF33363F), divider = Color(0xFF24262D),
-    text = Color(0xFFE7E9EE), dim = Color(0xFF9CA1AC), faint = Color(0xFF7E838E), mute = Color(0xFF5C616B),
+    text = Color(0xFFE7E9EE), dim = Color(0xFF9CA1AC), faint = Color(0xFF8F94A0), mute = Color(0xFF5C616B),
     ok = Color(0xFF4FB866), warn = Color(0xFFE0A33F), err = Color(0xFFE5645F), info = Color(0xFF5B9DFF),
+    okStrong = Color(0xFF4FB866), errStrong = Color(0xFFE5645F), infoStrong = Color(0xFF5B9DFF),
     cText = Color(0xFF8B93A5), cUrl = Color(0xFF34D1BF), cCode = Color(0xFFA78BFA), cImage = Color(0xFFE879C6),
     cMail = Color(0xFF4ED98A), cColor = Color(0xFFF5A524), cNum = Color(0xFF5CC1CE),
     cPath = Color(0xFF5B9DFF), cFile = Color(0xFF5B9DFF), cJson = Color(0xFFFB7B53), cSecret = Color(0xFFF2616B),
@@ -444,8 +448,9 @@ val LightColors = CpColors(
     bg = Color(0xFFF5F6F8), panel = Color(0xFFFFFFFF), elevated = Color(0xFFFFFFFF),
     raised = Color(0xFFEFF1F4), raised2 = Color(0xFFE2E5EA),
     border = Color(0xFFE1E4E9), divider = Color(0xFFECEEF1),
-    text = Color(0xFF1A1C22), dim = Color(0xFF565B66), faint = Color(0xFF767B86), mute = Color(0xFFA2A7B1),
+    text = Color(0xFF1A1C22), dim = Color(0xFF565B66), faint = Color(0xFF6E7380), mute = Color(0xFFA2A7B1),
     ok = Color(0xFF1FA85B), warn = Color(0xFFC77F1A), err = Color(0xFFD64545), info = Color(0xFF2563EB),
+    okStrong = Color(0xFF157A42), errStrong = Color(0xFFB93434), infoStrong = Color(0xFF1D4ED8),
     cText = Color(0xFF6A7282), cUrl = Color(0xFF0E9E8C), cCode = Color(0xFF7C5CE6), cImage = Color(0xFFC44BA0),
     cMail = Color(0xFF1FA85B), cColor = Color(0xFFC77F1A), cNum = Color(0xFF1C8B9B),
     cPath = Color(0xFF2F6FE0), cFile = Color(0xFF2F6FE0), cJson = Color(0xFFDC5A2E), cSecret = Color(0xFFD64545),

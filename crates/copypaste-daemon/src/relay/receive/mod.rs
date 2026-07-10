@@ -25,15 +25,21 @@ pub(super) use ingest::ingest_page_blocking;
 
 // ── Pull ─────────────────────────────────────────────────────────────────────
 
-/// Pull one page from the inbox past the watermark. Returns the raw items and
-/// whether a 401 was seen (caller re-registers).
+/// Relay-side header name (see `copypaste-relay::routes::items::RELAY_HAS_MORE_HEADER`).
+/// Not shared as a real dependency between the two crates — kept as a literal
+/// with this comment pointing at the source of truth so the two stay in sync.
+const RELAY_HAS_MORE_HEADER: &str = "relay-has-more";
+
+/// Pull one page from the inbox past the watermark. Returns the raw items,
+/// an explicit `has_more` signal (CopyPaste-8ebg.58 — see
+/// `RELAY_HAS_MORE_HEADER`), and whether a 401 was seen (caller re-registers).
 pub(super) async fn pull_page(
     client: &reqwest::Client,
     relay_url: &str,
     inbox_id: &str,
     token: &str,
     wm: Watermark,
-) -> Result<Vec<PullItem>, RelayError> {
+) -> Result<(Vec<PullItem>, bool), RelayError> {
     use super::super::relay::PULL_LIMIT;
     let url = format!(
         "{relay_url}/devices/{inbox_id}/items?since={}&since_id={}&limit={}",
@@ -52,9 +58,21 @@ pub(super) async fn pull_page(
     if !status.is_success() {
         return Err(RelayError::Status(status.as_u16()));
     }
-    resp.json::<Vec<PullItem>>()
+    // CopyPaste-8ebg.58: read the explicit has_more signal before consuming
+    // the body. Absent header (older relay) conservatively defaults to
+    // `false` — preserves the pre-fix `page.len() < limit` behaviour for
+    // that fallback case only.
+    let has_more = resp
+        .headers()
+        .get(RELAY_HAS_MORE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let items = resp
+        .json::<Vec<PullItem>>()
         .await
-        .map_err(|e| RelayError::Transport(format!("decode pull response: {e}")))
+        .map_err(|e| RelayError::Transport(format!("decode pull response: {e}")))?;
+    Ok((items, has_more))
 }
 
 // ── Receive loop ─────────────────────────────────────────────────────────────
@@ -190,7 +208,8 @@ pub(super) async fn receive_loop(
             // CopyPaste-1jms.22: arm in-flight guard for this relay pull
             // round-trip. Resets on drop (error, empty, or end of drain).
             let _relay_rx_guard = SyncInFlightGuard::new(std::sync::Arc::clone(&sync_in_flight));
-            let page = match pull_page(&client, &relay_url, &inbox_id, &token, wm).await {
+            let (page, has_more) = match pull_page(&client, &relay_url, &inbox_id, &token, wm).await
+            {
                 Ok(p) => p,
                 Err(RelayError::Status(401)) => {
                     tracing::info!("relay-sync receive_loop: 401; re-registering next tick");
@@ -220,17 +239,24 @@ pub(super) async fn receive_loop(
                 }
                 break;
             }
-            let page_len = page.len();
 
-            let quota = core_config
+            let (quota, max_decoded_image_mb) = core_config
                 .read()
-                .map(|g| g.storage_quota_bytes)
-                .unwrap_or(u64::MAX);
+                .map(|g| (g.storage_quota_bytes, g.max_decoded_image_mb))
+                .unwrap_or((u64::MAX, AppConfig::default().max_decoded_image_mb));
             let db_arc = db.clone();
             let local_key_clone = local_key.clone();
             let join = tokio::task::spawn_blocking(move || {
                 let guard = db_arc.blocking_lock();
-                ingest_page_blocking(&guard, &local_key_clone, &key_bytes, &page, wm, quota)
+                ingest_page_blocking(
+                    &guard,
+                    &local_key_clone,
+                    &key_bytes,
+                    &page,
+                    wm,
+                    quota,
+                    max_decoded_image_mb,
+                )
             })
             .await;
             match join {
@@ -304,8 +330,12 @@ pub(super) async fn receive_loop(
                     break;
                 }
             }
-            let pull_limit: usize = super::super::relay::PULL_LIMIT;
-            if page_len < pull_limit {
+            // CopyPaste-8ebg.58: use the relay's explicit has_more signal
+            // instead of inferring "caught up" from `page.len() < limit`,
+            // which was wrong when the relay's byte-budget cap truncated a
+            // page short of `limit` (a short page no longer implies
+            // exhaustion).
+            if !has_more {
                 break;
             }
         }
@@ -332,7 +362,7 @@ mod tests {
             .with_header("content-type", "application/json")
             .with_body(r#"[{"id":3,"content_type":"text","content_b64":"YQ==","wall_time":99}]"#)
             .create();
-        let items = pull_page(
+        let (items, _has_more) = pull_page(
             &test_client(),
             &mockito::server_url(),
             &inbox,

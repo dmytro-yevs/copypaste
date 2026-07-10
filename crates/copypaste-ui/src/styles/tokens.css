@@ -42,6 +42,10 @@
     /* --ok-strong (g27b.27): text variant of --ok for the .badge--verified label
        on its --ok tint. Dark theme clears AA, so equals --ok here. */
     --ok-strong: var(--ok);
+    /* --warn-strong (CopyPaste-wrfn): text variant of --warn for TEXT usage
+       (.field-note--warn, .banner--warn/.banner__x). Dark theme clears AA, so
+       equals --warn here. */
+    --warn-strong: var(--warn);
     --c-text:#8B93A5; --c-url:#34D1BF; --c-code:#A78BFA; --c-image:#E879C6; --c-mail:#4ED98A;
     --c-color:#F5A524; --c-num:#5CC1CE; --c-path:#5B9DFF; --c-file:#5B9DFF; --c-json:#FB7B53; --c-secret:#F2616B;
     --sh1:0 1px 2px rgba(0,0,0,.30); --sh2:0 8px 24px -6px rgba(0,0,0,.45); --sh3:0 24px 64px -12px rgba(0,0,0,.60);
@@ -75,6 +79,14 @@
        green tint fails AA on light surfaces (axe, 6 nodes). Darkened to #157A42
        (>=4.5:1 on the tint). --ok itself untouched (dot/status use it directly). */
     --ok-strong: #157A42;
+    /* --warn-strong (CopyPaste-wrfn): --warn (#C77F1A) as TEXT (.field-note--warn
+       on card/bg white, .banner--warn/.banner__x on its own ~11% tint) measures
+       ~3.2:1 on white — under the 4.5:1 AA floor (axe color-contrast, general
+       tab + sync banner). Darkened to #96570A, which holds >=5.3:1 on plain
+       white/--bg and >=4.5:1 on the warn-tint banner background. --warn itself
+       is untouched (tint fill / status dot / syntax hue read correctly at the
+       original value, parity-locked to copypaste-design-reference.html). */
+    --warn-strong: #96570A;
     --c-text:#6A7282; --c-url:#0E9E8C; --c-code:#7C5CE6; --c-image:#C44BA0; --c-mail:#1FA85B;
     --c-color:#C77F1A; --c-num:#1C8B9B; --c-path:#2F6FE0; --c-file:#2F6FE0; --c-json:#DC5A2E; --c-secret:#D64545;
     --sh1:0 1px 2px rgba(20,22,30,.06); --sh2:0 8px 24px -8px rgba(20,22,30,.12); --sh3:0 24px 64px -12px rgba(20,22,30,.18);
@@ -122,13 +134,25 @@
        The size scale covers the discrete sizes the reference primitives use so
        no component layer hardcodes a px font-size (design.md Decision 12/S5). */
     --fs-3xs:9.5px; --fs-2xs:10px; --fs-xs:11px; --fs-sm:11.5px; --fs-smd:12px;
-    --fs-125:12.5px; --fs-md:13px; --fs-base:14px; --fs-lg:15px; --fs-xl:17px; --fs-2xl:24px;
+    --fs-125:12.5px; --fs-md:13px; --fs-135:13.5px; --fs-base:14px; --fs-lg:15px; --fs-xl:17px;
+    --fs-19:19px; --fs-20:20px; --fs-2xl:24px; --fs-34:34px;
     --fw-normal:450; --fw-medium:500; --fw-semibold:550; --fw-strong:600; --fw-bold:700;
     --lh-tight:1.2; --lh-normal:1.5;
     --ls-body:-.006em; --ls-tight:-.01em; --ls-none:0; --ls-wide:.05em; --ls-wider:.06em;
 
     /* Focus ring (design.md Decision 12 — explicit tokens). */
     --focus-ring-width:2px; --focus-ring-offset:2px;
+
+    /* Z-index scale (CopyPaste-8ebg.61 — was 6 raw numeric z-index literals
+       scattered across patterns.css/primitives.css with no token backing).
+       Ordered low→high in stacking-context terms: the selection-glide overlay
+       paints beneath row content; group headers stick above scrolled rows;
+       the drag-drop dropzone overlays the list; the modal scrim sits above the
+       whole shell; toasts float above the scrim; popovers (portaled tooltips)
+       are topmost. Values are unchanged from their prior literals — this is a
+       rename, not a re-stacking. */
+    --z-glide:0; --z-row:1; --z-grouphead:2; --z-dropzone:10;
+    --z-scrim:40; --z-toast:60; --z-popover:80;
 
     /* Hairline / icon sizes / control heights (design.md Decision 12/S1). */
     --hairline:1px;

@@ -69,6 +69,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.material3.ColorScheme
+import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.CpDimensions
+import com.copypaste.android.ui.theme.CpSpacing
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -179,6 +182,12 @@ internal fun HistoryRow(
     /** CopyPaste-998 (jank): the active color scheme, passed in from list scope so the
      *  row never reads MaterialTheme.colorScheme during scroll recomposition. */
     colors: ColorScheme,
+    /**
+     * android-history D2/[ContentVisualKind] single content-color source
+     * ([CpColors.forContentKind]) — hoisted at list scope for the same
+     * jank-avoidance reason as [colors] above (CopyPaste-998).
+     */
+    cpColors: CpColors,
     repository: ClipboardRepository,
     maskSensitive: Boolean,
     imageMaxHeightDp: Int,
@@ -326,13 +335,23 @@ internal fun HistoryRow(
     val chipLabel = remember(item.contentType, detectedSensitive, item.snippet) {
         chipLabelFor(item.contentType, detectedSensitive, item.snippet)
     }
-    val chipColor = remember(chipLabel, colors) { chipColorFor(chipLabel, colors) }
+    // android-history D2: the single [ContentVisualKind] resolver (S1.8) drives BOTH
+    // the tile glyph/background AND the chip color through [chipColorFor]
+    // (ContentVisualKind, CpColors) — the one shared source with the full-screen
+    // Preview (S6). isSensitive resolves to SECRET regardless of the underlying
+    // text-kind classification (approved new behaviour, mirrors [chipLabelFor]).
+    val visualKind = remember(item.contentType, detectedSensitive, item.snippet) {
+        ContentVisualKind.resolve(item.contentType, detectedSensitive, item.snippet)
+    }
+    val chipColor = remember(visualKind, cpColors) { chipColorFor(visualKind, cpColors) }
 
     // audit #13 — URL rows render bold host + dim path (web parity). Pre-parse the
-    // snippet into (host, path) once; null when the row is not a URL chip. The parse
-    // is memoised so scroll recomposition never re-splits the string.
-    val urlParts = remember(chipLabel, display) {
-        if (chipLabel == "URL") splitUrl(display) else null
+    // snippet into (host, path) once; null when the row is not a URL chip.
+    // CopyPaste-myh8.5 (P0-7): sourced from [spanMaskedDisplay] first — see
+    // [urlPartsForRow] kdoc for the plaintext leak this closes. The parse is
+    // memoised so scroll recomposition never re-splits the string.
+    val urlParts = remember(chipLabel, spanMaskedDisplay, display) {
+        urlPartsForRow(chipLabel, spanMaskedDisplay, display)
     }
 
     // §5 row background: selection > expanded > sensitive tint > transparent
@@ -429,7 +448,7 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp)
+                    .heightIn(min = CpDimensions.touchMin)
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -443,14 +462,20 @@ internal fun HistoryRow(
                 // API 31+ when sensitive/masked; hide entirely (placeholder) on pre-31
                 // to avoid leaking image content via a no-op blur.
                 if (shouldSubstitutePlaceholder(masked, canBlur)) {
-                    // Pre-API-31: Modifier.blur is a no-op, so replace the bitmap
-                    // with a lock placeholder to prevent leaking the sensitive image.
+                    // Pre-API-31: Modifier.blur is a no-op AND the bitmap is never
+                    // drawn on this branch at all (no Image() call here — the decoded
+                    // ImageBitmap stays undrawn, so no pixel of the real image ever
+                    // enters the display list). android-history "List Masking
+                    // Contract": the placeholder itself must be a fully OPAQUE
+                    // geometry-preserving cover (not a translucent tint that lets the
+                    // row background bleed through), mirroring the text row's
+                    // sanitized-representation overlay.
                     Box(
                         modifier = Modifier
                             .widthIn(max = 340.dp)
                             .heightIn(max = imageMaxHeightDp.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(c.error.copy(alpha = 0.12f)),
+                            .background(c.surfaceVariant),
                         contentAlignment = Alignment.Center,
                     ) {
                     }
@@ -519,11 +544,11 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp),
+                    .heightIn(min = CpDimensions.touchMin),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
-                ContentIconTile(chipLabel = chipLabel, colors = c)
+                // egsf: kind-tinted icon tile (§3.7/§9.4: color@14% bg, full-strength glyph) — parity .ci
+                ContentIconTile(kind = visualKind, chipLabel = chipLabel, colors = cpColors)
                 Spacer(Modifier.width(8.dp))
                 // §3 content-type chip (faint for files — izio)
                 ContentTypeChip(label = chipLabel, color = chipColor)
@@ -543,7 +568,7 @@ internal fun HistoryRow(
                     // CopyPaste-9uyk: source-app badge added after timestamp for file rows.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s3),
                     ) {
                         Text(
                             text = relativeTime(item.wallTimeMs),
@@ -596,15 +621,19 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 44.dp),
+                    .heightIn(min = CpDimensions.touchMin),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // egsf: 26dp icon-tile (radius 7dp, surfaceVariant@0.16 bg, onSurfaceVariant glyph) — parity .ci
+                // egsf: kind-tinted icon tile (§3.7/§9.4: color@14% bg, full-strength glyph) — parity .ci
                 // lbnp: for COLOR rows, replace the tile with an inline color swatch square.
+                // A SECRET row (isSensitive) never takes the swatch branch — chipLabel
+                // is "SECRET", not "COLOR", even when the underlying text looked like a
+                // hex color, so a sensitive color value can never leak via its own
+                // swatch fill (android-history masking contract).
                 if (chipLabel == "COLOR") {
-                    ColorSwatchOrTile(snippet = display, colors = c)
+                    ColorSwatchOrTile(snippet = display, colors = cpColors)
                 } else {
-                    ContentIconTile(chipLabel = chipLabel, colors = c)
+                    ContentIconTile(kind = visualKind, chipLabel = chipLabel, colors = cpColors)
                 }
                 Spacer(Modifier.width(8.dp))
                 // gq48: body cell — 2-line Column: preview on line 1, meta caption on line 2.
@@ -632,44 +661,60 @@ internal fun HistoryRow(
                         )
                     } else {
                         // 0lis: CODE/COLOR/NUMBER/PATH/JSON → monospace 12sp (parity .preview.mono)
-                        val isMonoKind = chipLabel in setOf("CODE", "COLOR", "NUMBER", "PATH", "JSON")
-                        // CopyPaste-ojsh: use span-masked text when available (non-sensitive item
-                        // with sensitive sub-strings). Falls back to `display` when no span masking
-                        // applies (fully-sensitive items, no spans, or masked pref off).
-                        val previewText = spanMaskedDisplay ?: display
-                        Text(
-                            text = previewText,
-                            style = if (isMonoKind) {
-                                TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Normal,
-                                )
-                            } else {
-                                MaterialTheme.typography.bodyLarge
-                            },
-                            color = if (detectedSensitive) c.onSurfaceVariant else c.onSurface,
-                            maxLines = previewLines,
-                            overflow = TextOverflow.Ellipsis,
-                            // PG-61: blur radius 6dp (parity macOS blur(6px)).
-                            // §10/P1#10: blur the real text while masked (tap reveals). On
-                            // API < 31 `display` is the bullet mask instead (blur is a no-op
-                            // there and must not leak the text), so blur only when canBlur.
-                            // CopyPaste-crh3.23: blur is render-only — it does NOT redact the
-                            // Compose semantic tree, so TalkBack would read the real
-                            // password/card number. clearAndSetSemantics replaces the node's
-                            // semantics with a non-sensitive description while masked; after
-                            // reveal (masked=false) the modifier is bare and the real text is
-                            // announced again.
-                            modifier = if (shouldHideSemanticsForMasking(masked, canBlur))
-                                Modifier
-                                    .blur(6.dp, BlurredEdgeTreatment.Unbounded)
-                                    .clearAndSetSemantics {
-                                        contentDescription = sensitiveHiddenDesc
-                                    }
-                            else
-                                Modifier,
-                        )
+                        // spec.md "Preview text typography by kind": SECRET is ALSO monospace.
+                        val isMonoKind = chipLabel in setOf("CODE", "COLOR", "NUMBER", "PATH", "JSON", "SECRET")
+                        if (shouldSubstitutePlaceholder(masked, canBlur)) {
+                            // Pre-API-31 masking fallback — android-history "List Masking
+                            // Contract": a geometry-preserving OPAQUE OVERLAY over a
+                            // SANITIZED (never-plaintext) representation, not the old
+                            // fixed-width bullet substitution. See HistoryMasking.kt.
+                            MaskedRowSanitizedOverlay(
+                                snippet = item.snippet,
+                                isMonoKind = isMonoKind,
+                                previewLines = previewLines,
+                                hiddenDesc = sensitiveHiddenDesc,
+                                colors = c,
+                            )
+                        } else {
+                            // CopyPaste-ojsh: use span-masked text when available (non-sensitive
+                            // item with sensitive sub-strings). Falls back to `display` when no
+                            // span masking applies (fully-sensitive items, no spans, or masked
+                            // pref off).
+                            val previewText = spanMaskedDisplay ?: display
+                            Text(
+                                text = previewText,
+                                style = if (isMonoKind) {
+                                    TextStyle(
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Normal,
+                                    )
+                                } else {
+                                    MaterialTheme.typography.bodyLarge
+                                },
+                                color = if (detectedSensitive) c.onSurfaceVariant else c.onSurface,
+                                maxLines = previewLines,
+                                overflow = TextOverflow.Ellipsis,
+                                // PG-61: blur radius 6dp (parity macOS blur(6px)).
+                                // §10/P1#10: blur the real text while masked (tap reveals) — this
+                                // branch only runs when !shouldSubstitutePlaceholder, i.e. either
+                                // unmasked or masked-with-blur-support (API 31+).
+                                // CopyPaste-crh3.23: blur is render-only — it does NOT redact the
+                                // Compose semantic tree, so TalkBack would read the real
+                                // password/card number. clearAndSetSemantics replaces the node's
+                                // semantics with a non-sensitive description while masked; after
+                                // reveal (masked=false) the modifier is bare and the real text is
+                                // announced again.
+                                modifier = if (shouldHideSemanticsForMasking(masked, canBlur))
+                                    Modifier
+                                        .blur(6.dp, BlurredEdgeTreatment.Unbounded)
+                                        .clearAndSetSemantics {
+                                            contentDescription = sensitiveHiddenDesc
+                                        }
+                                else
+                                    Modifier,
+                            )
+                        }
                     }
                     // ── Line 2: meta caption — chip + timestamp + sourceApp ──────
                     // gq48: parity web .hrow .meta (11px faint, gap 7px, margin-top 2px).
@@ -727,6 +772,58 @@ internal fun HistoryRow(
                 }
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CopyPaste-myh8.5 (S5 5.4) — pre-API-31 masking fallback. See HistoryMasking.kt.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * android-history "List Masking Contract" pre-API-31 fallback: renders the
+ * geometry-preserving SANITIZED representation ([sanitizedMaskRepresentation] —
+ * same character count as the real snippet, built from [MASK_GLYPH], never the
+ * real characters) and then draws a fully OPAQUE box on top of it, so not even
+ * that sanitized shape/kerning is visible — defense in depth beyond the
+ * semantics-clearing below. Replaces the old fixed-width bullet substitution,
+ * which neither preserved the row's real geometry nor matched the spec's
+ * "opaque overlay over a sanitized representation" wording.
+ */
+@Composable
+internal fun MaskedRowSanitizedOverlay(
+    snippet: String,
+    isMonoKind: Boolean,
+    previewLines: Int,
+    hiddenDesc: String,
+    colors: ColorScheme,
+) {
+    val sanitized = remember(snippet) { sanitizedMaskRepresentation(snippet) }
+    Box {
+        Text(
+            text = sanitized,
+            style = if (isMonoKind) {
+                TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Normal,
+                )
+            } else {
+                MaterialTheme.typography.bodyLarge
+            },
+            color = colors.onSurfaceVariant,
+            maxLines = previewLines,
+            overflow = TextOverflow.Ellipsis,
+            // SECURITY (A11Y-1 parity): [sanitized] never contains plaintext, but
+            // its semantics are cleared too so TalkBack announces the same stable
+            // placeholder as the API 31+ blur path instead of reading a run of
+            // mask glyphs.
+            modifier = Modifier.clearAndSetSemantics { contentDescription = hiddenDesc },
+        )
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(colors.surfaceVariant),
+        )
     }
 }
 

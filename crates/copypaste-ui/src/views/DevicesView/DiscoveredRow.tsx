@@ -5,6 +5,7 @@
 // (unpaired) device has no expandable metadata — it renders as a static
 // .devrow (no DisclosureHeader/.devrow__chev, no .devrow__foot) with a single
 // "Pair" affordance, and its own not-pairable hint styled as .dev-hint.
+import { useEffect, useState } from "react";
 import { Info, Link } from "lucide-react";
 import { type DiscoveredDevice } from "../../lib/ipc";
 
@@ -26,6 +27,28 @@ export function DiscoveredRow({
     device.ip_addrs.length > 0 ? device.ip_addrs.join(", ") : null;
   // v1 peers without a bootstrap port cannot do SAS pairing.
   const pairable = device.bport !== null;
+
+  // CopyPaste-8ebg.51/.62: `busy` is a single flag shared by every discovered
+  // row (index.tsx sets it for the whole list once ANY pairing starts) — it
+  // doesn't say WHICH row is pairing. `pairingThis` is local per-row state so
+  // this row can show its own pending "Pairing…" affordance while OTHER rows
+  // stay disabled with an explanatory tooltip instead of looking inert.
+  const [pairingThis, setPairingThis] = useState(false);
+  useEffect(() => {
+    if (!busy) setPairingThis(false);
+  }, [busy]);
+
+  const handlePair = () => {
+    setPairingThis(true);
+    onPair(device);
+  };
+
+  const disabledReason = !pairable
+    ? "This device does not support secure pairing"
+    : busy && !pairingThis
+      ? "Another device is currently pairing — wait for it to finish"
+      : undefined;
+
   return (
     // list-item-in: staggered entrance; stagger delay = index × 60 ms (styleguide §list)
     <div className="devrow">
@@ -39,12 +62,24 @@ export function DiscoveredRow({
         <button
           type="button"
           className="btn btn--primary sm"
-          onClick={() => onPair(device)}
+          onClick={handlePair}
           disabled={!pairable || busy}
-          title={pairable ? undefined : "This device does not support secure pairing"}
+          title={disabledReason}
+          aria-label={pairingThis ? "Pairing…" : undefined}
         >
-          <Link aria-hidden="true" />
-          Pair
+          {pairingThis ? (
+            <>
+              {/* Reuses the .spinner class already used by SasPairingModal's
+                  confirm button — no new CSS. */}
+              <span className="spinner" />
+              Pairing…
+            </>
+          ) : (
+            <>
+              <Link aria-hidden="true" />
+              Pair
+            </>
+          )}
         </button>
       </div>
       {/* PG-43 / CopyPaste-3ese: Android parity — show a visible hint when the

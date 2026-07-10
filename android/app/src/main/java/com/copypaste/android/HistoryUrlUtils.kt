@@ -1,5 +1,7 @@
 package com.copypaste.android
 
+import androidx.compose.runtime.Composable
+import com.copypaste.android.ui.theme.relativeTimeAgoLabel
 import java.text.DateFormat
 import java.util.Date
 
@@ -7,16 +9,12 @@ import java.util.Date
 // Relative time helper — §5 tabular-nums timestamps
 // ─────────────────────────────────────────────────────────────────────────────
 
+@Composable
 internal fun relativeTime(ms: Long): String {
     if (ms <= 0L) return "—"
     val diff = System.currentTimeMillis() - ms
-    return when {
-        diff < 60_000L      -> "just now"
-        diff < 3_600_000L   -> "${diff / 60_000}m ago"
-        diff < 86_400_000L  -> "${diff / 3_600_000}h ago"
-        diff < 7 * 86_400_000L -> "${diff / 86_400_000}d ago"
-        else -> DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ms))
-    }
+    if (diff >= 7 * 86_400_000L) return DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ms))
+    return relativeTimeAgoLabel(diff)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,3 +44,26 @@ internal fun splitUrl(raw: String): Pair<String, String> {
     val path = if (pathStart < 0) "" else raw.substring(hostEnd)
     return host to path
 }
+
+/**
+ * CopyPaste-myh8.5 (S5 5.4, P0-7 partial-span masking) — the URL host/path
+ * split HistoryRow feeds into its bold-host/dim-path `AnnotatedString`, but
+ * ALWAYS sourced from [spanMaskedDisplay] when it is non-null (i.e. the item
+ * has partial sensitive spans and is not fully sensitive — see
+ * `HistoryRowModel.resolveSpanMaskedDisplay`).
+ *
+ * SECURITY: the previous inline call site built the annotated string straight
+ * from the raw (unmasked) `display` string whenever [chipLabel] was "URL" —
+ * bypassing span masking entirely, so a sensitive sub-string embedded in a URL
+ * (e.g. a token in the query string) rendered in plaintext inside the bold
+ * host / dim path spans even though the row was not "fully" sensitive. Routing
+ * through [spanMaskedDisplay] first closes that leak: spans are already
+ * bullet-replaced (see `applySpanMasking`) BEFORE this function ever splits
+ * the string into host/path, so no plaintext sensitive span reaches the
+ * `AnnotatedString` this feeds.
+ */
+internal fun urlPartsForRow(
+    chipLabel: String,
+    spanMaskedDisplay: String?,
+    display: String,
+): Pair<String, String>? = if (chipLabel == "URL") splitUrl(spanMaskedDisplay ?: display) else null

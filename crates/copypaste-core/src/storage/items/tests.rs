@@ -656,7 +656,7 @@ fn search_items_hyphen_query_does_not_error() {
 }
 
 /// A stored item containing a hyphenated word must be found when the user
-/// searches for that same hyphenated term: `well-known` → `well AND known*`.
+/// searches for that same hyphenated term: `well-known` → `well* AND known*`.
 #[test]
 fn search_items_finds_hyphenated_term() {
     let db = Database::open_in_memory().unwrap();
@@ -740,11 +740,15 @@ fn search_items_filtered_empty_query_with_type_returns_empty() {
 
 /// Direct unit check of the sanitizer: hyphens become whitespace-separated
 /// AND-ed terms and no raw `-` survives.
+///
+/// CopyPaste-8ebg.57: the prefix `*` is now applied to EVERY token (not just
+/// the last), since this feeds a search-as-you-type box where the user may
+/// still be mid-word on any token, not only the final one.
 #[test]
 fn sanitize_fts5_query_rewrites_hyphen_to_space() {
     let out = sanitize_fts5_query("foo-bar").expect("non-empty");
     assert!(!out.contains('-'), "no raw hyphen may remain: {out:?}");
-    assert_eq!(out, "foo AND bar*");
+    assert_eq!(out, "foo* AND bar*");
 }
 
 #[test]

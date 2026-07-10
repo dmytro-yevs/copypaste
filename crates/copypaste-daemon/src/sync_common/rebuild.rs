@@ -18,6 +18,10 @@ use super::local_crypto::encrypt_v2_for_local_storage;
 // type, key material) that do not group naturally without adding an intermediate
 // struct. The function is internal-only; a struct parameter would add indirection
 // without clarity benefit.
+// CopyPaste-8ebg.7: max_decoded_image_mb is threaded from the caller's live
+// AppConfig instead of being hardcoded, so a user-raised/lowered decode-bomb
+// budget is honoured on rebuild, matching the capture path
+// (daemon/capture/image.rs) which already passes config.max_decoded_image_mb.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_local_item(
     id: &str,
@@ -30,6 +34,7 @@ pub(crate) fn build_local_item(
     app_bundle_id: Option<String>,
     origin_device_id: String,
     local_key: &zeroize::Zeroizing<[u8; 32]>,
+    max_decoded_image_mb: u32,
 ) -> Result<ClipboardItem, String> {
     // v0.6: image/file payloads arrive as a single sync-key-wrapped plaintext
     // (PNG / raw bytes). Re-chunk them under THIS device's LOCAL v1 seed and
@@ -47,6 +52,7 @@ pub(crate) fn build_local_item(
             app_bundle_id,
             origin_device_id,
             local_key,
+            max_decoded_image_mb,
         );
     }
     if content_type != "text" {
@@ -114,6 +120,7 @@ fn build_local_blob_item(
     app_bundle_id: Option<String>,
     origin_device_id: String,
     local_key: &zeroize::Zeroizing<[u8; 32]>,
+    max_decoded_image_mb: u32,
 ) -> Result<ClipboardItem, String> {
     let ceiling = crate::sync_orch::SYNC_MAX_BLOB_BYTES;
     if plaintext.len() > ceiling {
@@ -152,7 +159,7 @@ fn build_local_blob_item(
             &v1_key,
             &file_id,
             copypaste_core::MAX_IMAGE_BYTES,
-            copypaste_core::config::MAX_DECODED_IMAGE_MB,
+            max_decoded_image_mb,
         )
         .map_err(|e| e.to_string())?;
         let blob = copypaste_core::chunks_to_blob(&chunks).map_err(|e| e.to_string())?;
@@ -242,6 +249,7 @@ mod tests {
             None,
             "device-a".to_string(),
             &local_key,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         )
         .expect("build_local_item must succeed");
 
@@ -280,6 +288,7 @@ mod tests {
             None,
             "device-a".to_string(),
             &local_key,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         )
         .expect_err("unsupported content_type must error");
         assert!(err.contains("unsupported content_type"), "got: {err}");
@@ -308,6 +317,7 @@ mod tests {
             None,
             "device-a".to_string(),
             &local_key,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         )
         .expect("build_local_item (file) must succeed");
 

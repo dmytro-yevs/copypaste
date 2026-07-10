@@ -2,6 +2,7 @@ package com.copypaste.android
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
+import android.view.WindowManager
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.DecodeHintType
 import com.journeyapps.barcodescanner.CaptureActivity
@@ -32,9 +33,27 @@ import com.journeyapps.barcodescanner.Size
  *
  * The scanning/decoding behaviour is entirely inherited from [CaptureActivity];
  * we only constrain orientation.
+ *
+ * SECURITY (CopyPaste-myh8.8, P0-1 — android-pairing spec "Scanner window must
+ * set FLAG_SECURE"): the camera preview necessarily shows the PEER's pairing
+ * QR, which encodes pairing material (fingerprint + PAKE token) — a screenshot
+ * or recents thumbnail of this screen would capture a still-valid pairing
+ * credential exactly like [PairActivity]'s own-QR screen does. FLAG_SECURE is
+ * set here, BEFORE `super.onCreate()`, so the window carries the flag before
+ * the preview surface is ever created (matches [PairActivity]'s "set before
+ * setContent" ordering). This reverses an earlier, incorrect "no FLAG_SECURE
+ * needed here" decision — the scanner shows the SAME class of secret as the
+ * display side, not merely a barcode of arbitrary origin.
  */
 class PortraitCaptureActivity : CaptureActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // FLAG_SECURE before super.onCreate(): the preview is created inside
+        // super.onCreate(), so the flag must land on the window first or an
+        // early frame could theoretically be captured.
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
         // Lock before super so the preview surface is created in portrait.
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         super.onCreate(savedInstanceState)

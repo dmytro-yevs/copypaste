@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, Settings } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
@@ -70,10 +70,21 @@ export function Popup() {
   }, [theme, accent, translucency]);
 
   const [query, setQuery] = useState("");
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  // CopyPaste-8ebg.17: selection is tracked by item id, not raw array index —
+  // the background 3s poll (usePopupHistory) can reorder `filtered` between
+  // keydowns, so a raw index would silently point at a different item by the
+  // time Enter fires. `selectedIdx` below is re-resolved from this id on every
+  // render via useMemo, so it always tracks the same logical item.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const isKeyboardNavRef = useRef(false);
+  // CopyPaste-8ebg.36: timestamp of the last keyboard navigation event, used to
+  // suppress hover-driven selection for a short window afterwards so mouse
+  // movement (e.g. from a poll-triggered re-layout) doesn't steal the
+  // keyboard-selected row — see onMouseEnter below.
+  const keyboardNavAtRef = useRef(0);
+  const HOVER_SUPPRESS_MS = 250;
   // zuzu: isScrollingRef tracks momentum-scroll state so onMouseEnter doesn't
   // fire for every row the pointer passes over during scroll, causing the
   // GlideHighlight to jump between items.
@@ -82,16 +93,23 @@ export function Popup() {
   const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isScrolling, setIsScrolling] = useState(false);
 
-  const { setItems, filtered, loading, error, setError, refresh } = usePopupHistory(
+  const { items, setItems, filtered, loading, error, setError, refresh, total } = usePopupHistory(
     query,
     maskSensitive,
     inputRef
   );
 
-  // Keep the selected index in bounds when filter changes.
-  useEffect(() => {
-    setSelectedIdx((prev) => (filtered.length === 0 ? 0 : Math.min(prev, filtered.length - 1)));
-  }, [filtered.length]);
+  // CopyPaste-8ebg.17: re-resolve the id-tracked selection against the current
+  // `filtered` list on every render. If the selected item is still present
+  // (even at a different index, e.g. after the poll reordered items) we keep
+  // pointing at it; if it's gone (deleted) or nothing has been selected yet,
+  // fall back to the first row. This replaces the old raw-index clamp, which
+  // could silently land on a different item after a background refresh.
+  const selectedIdx = useMemo(() => {
+    if (selectedId === null) return 0;
+    const idx = filtered.findIndex((f) => f.item.id === selectedId);
+    return idx === -1 ? 0 : idx;
+  }, [filtered, selectedId]);
 
   // Scroll the selected item into view.
   useEffect(() => {
@@ -137,7 +155,7 @@ export function Popup() {
     if (isHidingRef.current) return;
     isHidingRef.current = true;
     if (listRef.current) listRef.current.scrollTop = 0;
-    setSelectedIdx(0);
+    setSelectedId(null);
     try {
       await invoke("hide_popup");
     } catch (e) {
@@ -263,8 +281,13 @@ export function Popup() {
     await copyAndPaste(entry.item.id, entry.item.preview);
   }, [filtered, selectedIdx, copyAndPaste]);
 
+  // CopyPaste-8ebg.10: attached to the popup root (below), not the search
+  // input, so clicking Pin (or Tab-ing to another control inside the popup)
+  // no longer kills ArrowUp/ArrowDown/Enter/Escape. React key events bubble
+  // from whichever element currently has focus up to the root, so this still
+  // fires regardless of focus target as long as it's inside `.pop`.
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       // ⌘1-9: paste Nth item directly
       if (e.metaKey && !query.trim() && e.key >= "1" && e.key <= "9") {
         const idx = parseInt(e.key, 10) - 1;
@@ -283,16 +306,20 @@ export function Popup() {
         case "ArrowDown":
           e.preventDefault();
           isKeyboardNavRef.current = true;
-          setSelectedIdx((i) =>
-            filtered.length === 0 ? 0 : (i + 1) % filtered.length
-          );
+          keyboardNavAtRef.current = Date.now();
+          if (filtered.length > 0) {
+            const next = (selectedIdx + 1) % filtered.length;
+            setSelectedId(filtered[next].item.id);
+          }
           break;
         case "ArrowUp":
           e.preventDefault();
           isKeyboardNavRef.current = true;
-          setSelectedIdx((i) =>
-            filtered.length === 0 ? 0 : (i - 1 + filtered.length) % filtered.length
-          );
+          keyboardNavAtRef.current = Date.now();
+          if (filtered.length > 0) {
+            const prev = (selectedIdx - 1 + filtered.length) % filtered.length;
+            setSelectedId(filtered[prev].item.id);
+          }
           break;
         case "Enter":
           e.preventDefault();
@@ -317,6 +344,11 @@ export function Popup() {
     <div
       className="pop"
       data-popup-root
+      // CopyPaste-8ebg.10: the key handler lives here, on the popup root, not
+      // on the search input — it fires for any focused descendant (input,
+      // Pin/Settings buttons, etc.) so clicking Pin or Tab-ing away no longer
+      // dead-ends ArrowUp/ArrowDown/Enter/Escape.
+      onKeyDown={handleKeyDown}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           void hide();
@@ -331,19 +363,28 @@ export function Popup() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
           placeholder="Search clipboard…"
           autoFocus
         />
 
-        {/* Right: N of M result count (right-aligned, tabular-nums) */}
+        {/* Right: N of M result count (right-aligned, tabular-nums).
+            aria-live="polite" — CopyPaste-8ebg.64: this text updates on every
+            keystroke and selection change but was silent to screen readers. */}
         {!loading && filtered.length > 0 && (
-          <span className="pop__count">
-            {showQuery ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}` : `${filtered.length}`}
+          <span className="pop__count" aria-live="polite">
+            {showQuery
+              ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}`
+              : // CopyPaste-8ebg.56: the popup only ever fetches the first
+                // MAX_ITEMS (usePopupHistory.ts) but the daemon's page.total
+                // carries the real count — surface the cap instead of quietly
+                // showing 50 when there are e.g. 214 items.
+                total > items.length
+                ? `${items.length} of ${total}`
+                : `${filtered.length}`}
           </span>
         )}
         {loading && (
-          <span className="pop__count">…</span>
+          <span className="pop__count" aria-live="polite">…</span>
         )}
       </div>
 
@@ -367,7 +408,15 @@ export function Popup() {
           />
         )
       ) : filtered.length === 0 ? (
-        showQuery ? (
+        // CopyPaste-8ebg.37: items are cleared on hide (__copypasteFreeMemory)
+        // and refetched on the next show, so right after opening the popup
+        // `filtered` is briefly empty while `loading` is true. Without this
+        // branch the ternary fell through to "Nothing copied yet"/"No
+        // matches", flashing a misleading message before the real list
+        // arrives. Render nothing (blank list area) while loading instead.
+        loading ? (
+          <div className="pop__list" aria-hidden="true" />
+        ) : showQuery ? (
           <EmptyState
             title={`No matches for "${showQuery}"`}
             body="Try a different search term."
@@ -415,8 +464,15 @@ export function Popup() {
                   // mouseenter for every row the pointer passes over during
                   // scroll, which makes the GlideHighlight jump between items.
                   if (isScrollingRef.current) return;
+                  // CopyPaste-8ebg.36: don't let hover steal a keyboard-driven
+                  // selection right after ArrowUp/ArrowDown — the pointer can
+                  // end up resting over a different row than the one just
+                  // keyboard-selected (e.g. after scrollIntoView moves the
+                  // list under a stationary cursor), which otherwise silently
+                  // overrides it. Mirrors Raycast/Alfred's hover suppression.
+                  if (Date.now() - keyboardNavAtRef.current < HOVER_SUPPRESS_MS) return;
                   isKeyboardNavRef.current = false;
-                  setSelectedIdx(idx);
+                  setSelectedId(item.id);
                 }}
                 onClick={() => void copyAndPaste(item.id, item.preview)}
                 onPin={() => void handlePin(item.id, item.pinned)}
@@ -427,10 +483,27 @@ export function Popup() {
       )}
 
       {/* ── Footer keycap pills ─────────────────────────────────────────── */}
+      {/* CopyPaste-8ebg.56: ⌘1-9 (quick-paste Nth item) and Option+Enter
+          (paste as plain text) exist in handleKeyDown above but had zero
+          on-screen discoverability. Surfaced here as additional hint pills,
+          matching the existing ↑↓/⏎/Esc convention. ⌘1-9 only applies while
+          the list isn't filtered by a search query (see handleKeyDown), so
+          its hint is hidden while searching to avoid advertising a shortcut
+          that's currently inactive. */}
       <div className="pop__foot">
         <span className="pop__hint">
           <span className="kbd">↑↓</span>
           navigate
+        </span>
+        {!showQuery && (
+          <span className="pop__hint">
+            <span className="kbd">⌘1-9</span>
+            quick paste
+          </span>
+        )}
+        <span className="pop__hint">
+          <span className="kbd">⌥⏎</span>
+          plain text
         </span>
         <span className="pop__hint">
           <span className="kbd">⏎</span>

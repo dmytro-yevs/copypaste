@@ -36,6 +36,17 @@
 //!
 //! See the `replay_guard` submodule docs for the replay-attack protection
 //! (CopyPaste-4cyh) applied on enqueue.
+//!
+//! # `ReplayGuard` construction site (CopyPaste-sreb)
+//!
+//! [`ReplayGuard`] is constructed inline, per-connection, directly in
+//! `copypaste-daemon`'s `p2p::framed_pump::run_peer_connection_framed` —
+//! the single duplex pump shared by both the inbound (accept-side) and
+//! outbound (connector-side) connection tasks — rather than inside
+//! [`SyncInboxForwarder`]/[`SyncInboxSender`]. [`SyncInboxForwarder`] remains
+//! available but currently unused in the daemon's wiring; it stays in the
+//! crate for a future consumer that needs the ring-buffer/backpressure
+//! decoupling described above, independent of replay protection.
 
 mod forwarder;
 mod replay_guard;

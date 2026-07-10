@@ -118,6 +118,7 @@ mod tests;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
+pub use framing::ConfirmOutcome;
 pub use initiator::{run_initiator, run_initiator_with_confirm};
 pub use responder::BootstrapResponder;
 pub use types::{BootstrapPairing, PeerMeta, SyncProvisioning};

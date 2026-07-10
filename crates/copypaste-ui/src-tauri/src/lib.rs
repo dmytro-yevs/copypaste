@@ -79,6 +79,8 @@ pub fn run() {
             notifications::check_notification_permission,
             config::get_allow_screenshots,
             config::set_allow_screenshots,
+            config::get_launch_at_login,
+            config::set_launch_at_login,
             ipc::read_logs,
             ipc::log_dir_path,
             ipc::open_item_file,

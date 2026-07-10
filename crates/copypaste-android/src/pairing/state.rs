@@ -57,6 +57,13 @@ pub struct ConfirmedPairing {
     /// `None` for legacy peers. Surfaced to Kotlin via `PairStatus` on
     /// `confirmed` state.
     pub peer_device_id: Option<String>,
+    /// ABI 19 (CopyPaste-gldr): the PEER's non-secret Supabase/cloud account
+    /// id, learned in-band during the discovery/SAS pairing, sourced from
+    /// `BootstrapPairing.peer_supabase_account_id`. `None` for legacy peers or
+    /// when the peer has no cloud account configured. Surfaced to Kotlin via
+    /// `PairStatus` on `confirmed` state so Android can detect cross-account
+    /// pairing mismatches, at parity with the macOS daemon (CopyPaste-yw2k).
+    pub peer_supabase_account_id: Option<String>,
 }
 
 /// The discovery-pairing state machine. Ported from the macOS daemon's

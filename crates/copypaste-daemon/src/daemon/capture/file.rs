@@ -2,7 +2,8 @@
 //! decode/re-encode, unlike images) and store.
 
 use copypaste_core::{
-    chunks_to_blob, encode_file, insert_item_with_fts, AppConfig, ClipboardItem, Database,
+    bump_item_recency, chunks_to_blob, encode_file, get_item_by_id, insert_item_with_fts,
+    next_lamport_ts, AppConfig, ClipboardItem, Database,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -89,11 +90,41 @@ pub(crate) async fn handle_file(
                 match insert_item_with_fts(&db_guard, &item, "") {
                     Ok(stored_id) => {
                         if stored_id != item.id {
+                            // CopyPaste-8ebg.57: mirror the image.rs fix — a re-copy of
+                            // an identical file hits the UNIQUE-index dedup path but
+                            // never bumped the existing row's recency the way
+                            // handle_text's explicit dedup lookup does. Bump it here.
                             tracing::debug!(
                                 requested = %item.id,
                                 existing = %stored_id,
                                 "file item deduped against existing row"
                             );
+                            match get_item_by_id(&*db_guard, &stored_id) {
+                                Ok(Some(existing_row)) => {
+                                    let new_lamport =
+                                        next_lamport_ts(existing_row.lamport_ts, item.wall_time);
+                                    if let Err(e) = bump_item_recency(
+                                        &db_guard,
+                                        &stored_id,
+                                        item.wall_time,
+                                        new_lamport,
+                                        None,
+                                    ) {
+                                        tracing::warn!("file dedup: bump_item_recency failed: {e}");
+                                    }
+                                }
+                                Ok(None) => {
+                                    tracing::debug!(
+                                        id = %stored_id,
+                                        "file dedup: existing row disappeared before bump (deleted concurrently)"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "file dedup: failed to fetch existing row for bump: {e}"
+                                    );
+                                }
+                            }
                         } else {
                             tracing::info!(id = %item.id, "stored file item id={}", item.id);
                         }

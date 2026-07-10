@@ -220,7 +220,9 @@ pub fn get_device_names<D: DbRead + ?Sized>(
 /// - If the cleaned query contains a quoted phrase (starts with `"` and ends with `"`),
 ///   pass it through as-is (FTS5 phrase queries are safe once other operators are stripped).
 /// - Otherwise split on whitespace into individual tokens, discard empty tokens, join with
-///   ` AND ` so all terms must appear, and append `*` to the last token for prefix search.
+///   ` AND ` so all terms must appear, and append `*` to EVERY token for prefix search
+///   (CopyPaste-8ebg.57: search-as-you-type means any token, not just the last, may
+///   still be mid-word).
 /// - Return `None` if no valid tokens remain after filtering (caller returns empty results).
 ///
 /// This is a whitelist approach: only known-safe characters pass through, preventing
@@ -288,18 +290,15 @@ pub(crate) fn sanitize_fts5_query(raw: &str) -> Option<String> {
     if tokens.is_empty() {
         return None;
     }
-    let last_idx = tokens.len() - 1;
-    let parts: Vec<String> = tokens
-        .iter()
-        .enumerate()
-        .map(|(i, tok)| {
-            if i == last_idx {
-                format!("{tok}*")
-            } else {
-                (*tok).to_string()
-            }
-        })
-        .collect();
+    // CopyPaste-8ebg.57: append the prefix `*` to EVERY token, not just the
+    // last one. This is a search-as-you-type box — the user is mid-word on
+    // every token while typing a multi-word query (e.g. "priv keys" while
+    // still typing toward "private keychain"), not just the final one. The
+    // previous last-token-only behavior meant earlier tokens required an
+    // exact whole-word match, so a query like "priv key" (both partial) found
+    // nothing even though "private keychain" exists — only "priv keychain" or
+    // similar (first token complete) would have matched.
+    let parts: Vec<String> = tokens.iter().map(|tok| format!("{tok}*")).collect();
 
     Some(parts.join(" AND "))
 }

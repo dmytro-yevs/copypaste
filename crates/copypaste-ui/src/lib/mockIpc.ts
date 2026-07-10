@@ -273,6 +273,7 @@ const PAIRED_DEVICES = [
     online: true,
     last_seen_secs: 4,
     latency_ms: 12,
+    rekey_failures: 0,
   }),
   makeDevice({
     fingerprint:
@@ -291,6 +292,8 @@ const PAIRED_DEVICES = [
     online: false,
     last_seen_secs: 29_200,
     latency_ms: undefined,
+    // rekey_failures deliberately omitted — back-compat path for daemons
+    // predating CopyPaste-ptgcc.
   }),
   makeDevice({
     fingerprint:
@@ -309,6 +312,7 @@ const PAIRED_DEVICES = [
     online: true,
     last_seen_secs: 18,
     latency_ms: 28,
+    rekey_failures: 0,
   }),
 ];
 
@@ -783,6 +787,18 @@ export async function mockInvoke(
       return false;
 
     case "set_allow_screenshots":
+      return undefined;
+
+    // CopyPaste-wrfn: launch_at_login had no mock case, so it fell through to
+    // the `default: return undefined` branch below — GeneralTab.tsx then set
+    // state to `undefined` (not null), which renders the toggle row (guard is
+    // `!== null`) but leaves `aria-checked` unset on the role=switch button
+    // (React omits aria-* attrs for `undefined`), tripping axe's
+    // aria-required-attr. A real boolean fixes both the row and the attribute.
+    case "get_launch_at_login":
+      return true;
+
+    case "set_launch_at_login":
       return undefined;
 
     default:

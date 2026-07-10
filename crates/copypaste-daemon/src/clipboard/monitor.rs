@@ -4,7 +4,7 @@
 // l07l: AtomicI64/Ordering are only exercised by the macOS pasteboard
 // change-count path; allow them unused on non-macOS so -D warnings stays green.
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::content::{ClipboardContent, ClipboardError, SKIPPED_BATCH_THRESHOLD};
@@ -31,6 +31,15 @@ pub struct ClipboardMonitor {
     /// caused the change itself — skip recording to prevent a duplicate row.
     /// Shared with `write_to_pasteboard` via an `Arc<AtomicI64>`.
     pub self_write_change_count: Arc<AtomicI64>,
+    /// CopyPaste-8ebg.57: count of `TooLarge`/`ImageTooLarge` rejections since
+    /// the monitor was created. Before this field, an oversized clipboard entry
+    /// was only ever surfaced via a `warn!` log line (see `handle_tick`'s
+    /// `Err(e) => tracing::warn!(...)` arm) — indistinguishable to a user from
+    /// "the daemon silently isn't working". This is a settable/readable signal
+    /// a future IPC `status` response can expose; it deliberately does not
+    /// build any UI itself. `Arc` so callers (e.g. the IPC status handler) can
+    /// clone a handle without holding a reference to the monitor.
+    pub too_large_rejection_count: Arc<AtomicU64>,
 }
 
 /// CopyPaste-pbre: process-wide cache of the invariant pasteboard UTI strings.
@@ -90,7 +99,17 @@ impl ClipboardMonitor {
             max_image_bytes: MAX_IMAGE_BYTES,
             max_file_bytes: MAX_FILE_BYTES,
             self_write_change_count: Arc::new(AtomicI64::new(-1)),
+            too_large_rejection_count: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// CopyPaste-8ebg.57: current count of `TooLarge`/`ImageTooLarge`
+    /// rejections observed by this monitor. A settable/readable status signal
+    /// so a future IPC `status` response (or any other consumer) can surface
+    /// "clipboard content was rejected as too large" instead of that only
+    /// existing as a `warn!` log line.
+    pub fn too_large_rejection_count(&self) -> u64 {
+        self.too_large_rejection_count.load(Ordering::Relaxed)
     }
 
     /// Override the image-size READ gate with the user-configured cap.
@@ -441,6 +460,8 @@ impl ClipboardMonitor {
 
             if let Some(text) = text {
                 if text.len() as u64 > self.max_text_bytes {
+                    self.too_large_rejection_count
+                        .fetch_add(1, Ordering::Relaxed);
                     return Err(ClipboardError::TooLarge {
                         max: self.max_text_bytes,
                         actual: text.len(),
@@ -451,6 +472,8 @@ impl ClipboardMonitor {
 
             if let Some(bytes) = image_bytes {
                 if bytes.len() > self.max_image_bytes {
+                    self.too_large_rejection_count
+                        .fetch_add(1, Ordering::Relaxed);
                     return Err(ClipboardError::ImageTooLarge {
                         max: self.max_image_bytes,
                         actual: bytes.len(),

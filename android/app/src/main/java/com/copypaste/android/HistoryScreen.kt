@@ -4,6 +4,9 @@ package com.copypaste.android
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -16,7 +19,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
@@ -59,6 +65,18 @@ fun HistoryScreen(
      * (avoids a per-screen vs shell-sized double-paint seam at the nav-bar edge).
      */
     paintCanvasBackdrop: Boolean = true,
+    /**
+     * MainShell D7 edge-to-edge backdrop (S5 carried task): extra reserved
+     * space added on top of this screen's OWN Scaffold bottom inset for the
+     * SCROLLABLE list content only (see [HistoryList]'s `contentPadding`) —
+     * e.g. the floating nav pill's measured footprint when embedded in
+     * MainShell. MainShell no longer reserves this space via an outer
+     * `Modifier.padding` around the whole screen, so this screen's own pixels
+     * can pass BEHIND the pill for its backdrop blur to sample. Zero for the
+     * standalone `HistoryActivity` (`paintCanvasBackdrop = true`), which has
+     * no floating pill.
+     */
+    bottomContentPadding: Dp = 0.dp,
 ) {
     val items by viewModel.items.observeAsState(emptyList())
     val loading by viewModel.loading.observeAsState(false)
@@ -131,7 +149,24 @@ fun HistoryScreen(
         // CopyPaste-7m6r: route raw exception message through ErrorMessages so
         // internals (SQLite class names, file-system paths) are never shown.
         toastState.show(ErrorMessages.friendlyOperationError(msg), GlassToastKind.DANGER)
+        // android-history 5.3: `errors` is a TRANSIENT signal (cleared right
+        // below) — it cannot itself satisfy "a persistent error/degraded state
+        // ... not communicated solely via a transient toast" (spec.md). Latch
+        // a STICKY presentation-layer flag instead; see `HistoryScreenState`
+        // and `HistoryErrorState`'s render branch further down. NO
+        // ClipboardViewModel/repository/IPC change — presentation-layer only.
+        state.isDegraded = true
         viewModel.clearError()
+    }
+
+    // Clears the sticky degraded flag once a subsequent load actually returns
+    // data — see `clearsDegradedState` (HistoryScreenState.kt) for the pure
+    // decision and its documented limitation (a load that legitimately settles
+    // on zero items after an error stays degraded until the user retries).
+    LaunchedEffect(loading, sortedItems) {
+        if (clearsDegradedState(loading = loading, hasItems = sortedItems.isNotEmpty())) {
+            state.isDegraded = false
+        }
     }
 
     // CopyPaste-yel4: clearAll errors are surfaced through a dedicated channel so the
@@ -207,7 +242,6 @@ fun HistoryScreen(
         containerColor = c.background,
         topBar = {
             if (state.selectionMode) {
-                val bulkCopiedMsg = stringResource(R.string.snackbar_bulk_copied)
                 val bulkCopiedNoTextMsg = stringResource(R.string.snackbar_bulk_copied_no_text)
                 SelectionTopBar(
                     selectedCount = state.selectedIds.size,
@@ -258,7 +292,11 @@ fun HistoryScreen(
                                 toastState.show(bulkCopiedNoTextMsg, GlassToastKind.INFO)
                             } else {
                                 toastState.show(
-                                    bulkCopiedMsg.format(copiedCount),
+                                    ctx.resources.getQuantityString(
+                                        R.plurals.snackbar_bulk_copied,
+                                        copiedCount,
+                                        copiedCount,
+                                    ),
                                     GlassToastKind.SUCCESS,
                                 )
                             }
@@ -305,17 +343,40 @@ fun HistoryScreen(
         // (not interrupted by a Dialog/Popup window boundary). The overlay uses
         // WindowInsets.statusBars top padding to ensure the card is never occluded
         // by the status bar or app header.
+        // MainShell D7 edge-to-edge backdrop: fold [bottomContentPadding] into
+        // the bottom inset handed to the list/loading/empty states, on top of
+        // this Scaffold's own (top-bar) inset — see [HistoryList]'s own
+        // Modifier-vs-contentPadding split for where the edge-to-edge behaviour
+        // actually takes effect.
+        val ld = LocalLayoutDirection.current
+        val listPadding = PaddingValues(
+            start = innerPadding.calculateStartPadding(ld),
+            top = innerPadding.calculateTopPadding(),
+            end = innerPadding.calculateEndPadding(ld),
+            bottom = innerPadding.calculateBottomPadding() + bottomContentPadding,
+        )
         Box(modifier = Modifier.fillMaxSize()) {
-            when {
-                loading && sortedItems.isEmpty() -> LoadingBox(innerPadding)
-                // §9: history completely empty — CopyPaste-crh3.31: show the
-                // private-mode message when recording is paused (parity w/ macOS).
-                sortedItems.isEmpty() -> EmptyHistoryState(innerPadding, isPrivateMode = settings.privateMode)
-                // §9: search returned no results (counting device filter too)
-                deviceFilteredItems.isEmpty() -> EmptySearchState(innerPadding, state.searchQuery.trim())
-                else -> HistoryList(
+            // android-history 5.3 — the error/degraded state only takes over the
+            // list surface when there is nothing else to show (a transient blip
+            // while valid cached items are still on screen does not blow away
+            // that data — see `state.isDegraded`'s kdoc). §9: private-mode empty
+            // message (CopyPaste-crh3.31) and search-no-results (counting device
+            // filter too) are the other two empty branches.
+            // CopyPaste-ci3u: when-branch extracted to HistoryListBody (S2.9
+            // Paparazzi seam) — same conditions, zero behaviour change.
+            HistoryListBody(
+                padding = listPadding,
+                loading = loading,
+                hasAnyItems = sortedItems.isNotEmpty(),
+                hasFilteredItems = deviceFilteredItems.isNotEmpty(),
+                isDegraded = state.isDegraded,
+                isPrivateMode = settings.privateMode,
+                searchQuery = state.searchQuery.trim(),
+                onRetry = { viewModel.loadItems() },
+            ) {
+                HistoryList(
                     items = deviceFilteredItems,
-                    padding = innerPadding,
+                    padding = listPadding,
                     hasMore = hasMore,
                     onLoadMore = { viewModel.loadMore() },
                     ownDeviceId = ownDeviceId,

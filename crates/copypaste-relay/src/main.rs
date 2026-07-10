@@ -43,11 +43,16 @@ async fn main() -> anyhow::Result<()> {
     // file path the relay survives restart. A failure to open/load the store is
     // fatal — better to refuse to start than to silently serve an empty inbox
     // and lose every device's history.
-    let relay_store = RelayStore::new_persistent(
+    let mut relay_store = RelayStore::new_persistent(
         config.sync_ttl_secs,
         config.max_items_per_device,
         &config.db_path,
     )?;
+    // CopyPaste-vgpy: wire the operator-configurable registration rate-limit
+    // ceiling (RELAY_REG_LIMIT_MAX_ATTEMPTS) into the store. A setter rather
+    // than a `new_persistent` parameter — see the doc comment on
+    // `RelayStore::reg_limit_max_attempts` for why.
+    relay_store.set_reg_limit_max_attempts(config.reg_limit_max_attempts);
     if config.db_path != db::IN_MEMORY_PATH {
         tracing::info!(db_path = %config.db_path, "relay persistence enabled (SQLite)");
     }

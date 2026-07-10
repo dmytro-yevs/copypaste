@@ -239,8 +239,7 @@ fn from_bytes_decrypts_blob_encrypted_by_derive_sync_key() {
     // Wrap in Zeroizing so the stack copy is scrubbed when it goes out of
     // scope, closing the window where raw key bytes sit on the stack unguarded.
     let key_bytes = zeroize::Zeroizing::new(*original_key.as_bytes());
-    let blob =
-        encrypt_for_cloud(&original_key, item_id, plaintext).expect("encrypt must succeed");
+    let blob = encrypt_for_cloud(&original_key, item_id, plaintext).expect("encrypt must succeed");
 
     // Reconstruct a SyncKey from the raw bytes (simulates the spawn_blocking
     // snapshot path) and verify the blob decrypts to the original plaintext.
@@ -259,8 +258,7 @@ fn from_bytes_decrypts_blob_encrypted_by_derive_sync_key() {
 #[test]
 fn from_bytes_wrong_key_returns_decrypt_failed() {
     let key = derive_sync_key(PASS, ACCOUNT_A).expect("derive must succeed");
-    let blob =
-        encrypt_for_cloud(&key, "item-fb-wrong", b"secret").expect("encrypt must succeed");
+    let blob = encrypt_for_cloud(&key, "item-fb-wrong", b"secret").expect("encrypt must succeed");
 
     // Construct a key from all-zero bytes — should not decrypt correctly.
     let wrong_key = SyncKey::from_bytes([0u8; 32]);

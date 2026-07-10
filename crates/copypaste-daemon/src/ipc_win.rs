@@ -51,10 +51,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 /// Maximum size of a single IPC request line. Mirrors the Unix server's
-/// 16 MiB cap. Clients exceeding this receive an error response and have
-/// their pipe instance closed. Prevents OOM from a malicious or buggy
-/// client sending an unbounded stream without newlines.
-pub const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+/// 16 MiB cap ([`copypaste_ipc::MAX_IPC_REQUEST_BYTES`], the single shared
+/// source of truth as of CopyPaste-8ebg.65 — this module previously carried
+/// its own independent `16 * 1024 * 1024` literal). Clients exceeding this
+/// receive an error response and have their pipe instance closed. Prevents
+/// OOM from a malicious or buggy client sending an unbounded stream without
+/// newlines.
+pub const MAX_REQUEST_BYTES: usize = copypaste_ipc::MAX_IPC_REQUEST_BYTES;
 
 /// Default Windows named-pipe path used by the daemon.
 ///

@@ -72,7 +72,6 @@ pub(crate) fn truncate_preview(s: &str, max_chars: usize) -> String {
 /// Gracefully degrades when the daemon is offline: Recent submenu shows a
 /// disabled "No recent items" entry, and Private Mode defaults to unchecked.
 pub(crate) fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
-    use serde_json::json;
     use tauri::menu::{
         CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
     };
@@ -82,53 +81,17 @@ pub(crate) fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open CopyPaste").build(app)?;
 
     // --- "Recent" submenu ---
-    // Fetch up to 10 recent items from the daemon. If the daemon is offline or
-    // returns an empty list we show a single disabled placeholder entry.
-    // The submenu handle is stored in RecentSubmenu managed state so the
-    // background poller can rebuild it once the daemon is ready.
+    // `setup_tray` runs synchronously on the main thread during app startup
+    // (CopyPaste-8ebg.23): it must NOT block on IPC here, or app launch stalls
+    // for up to the daemon read-timeout. Build with a placeholder and let
+    // `spawn_tray_recent_resync` (already started right after `setup_tray`
+    // returns, see `lib.rs`) populate the real items in the background.
     let recent_submenu = {
         let mut builder = SubmenuBuilder::new(app, "Recent");
-
-        let items_opt: Option<Vec<(String, String)>> =
-            crate::ipc::call(METHOD_HISTORY_PAGE, json!({ "limit": 10, "offset": 0 }))
-                .ok()
-                .and_then(|reply| {
-                    if !reply.ok {
-                        return None;
-                    }
-                    reply
-                        .data
-                        .as_ref()
-                        .and_then(|d| d["items"].as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|item| {
-                                    let id = item["id"].as_str()?.to_owned();
-                                    let preview = item["preview"].as_str().unwrap_or("").to_owned();
-                                    Some((id, preview))
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                });
-
-        match items_opt {
-            Some(items) if !items.is_empty() => {
-                for (id, preview) in &items {
-                    let label = truncate_preview(preview, 40);
-                    let menu_id = format!("recent:{id}");
-                    let item = MenuItemBuilder::with_id(menu_id, label).build(app)?;
-                    builder = builder.item(&item);
-                }
-            }
-            _ => {
-                // Daemon offline or no items — show a disabled placeholder.
-                let placeholder = MenuItemBuilder::with_id("recent:none", "No recent items")
-                    .enabled(false)
-                    .build(app)?;
-                builder = builder.item(&placeholder);
-            }
-        }
-
+        let placeholder = MenuItemBuilder::with_id("recent:none", "No recent items")
+            .enabled(false)
+            .build(app)?;
+        builder = builder.item(&placeholder);
         builder.build()?
     };
 
@@ -141,19 +104,11 @@ pub(crate) fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     }
 
     // --- "Private Mode" check item ---
-    // Query the daemon for the current state; fall back to false on any error.
-    let private_mode_on: bool = crate::ipc::call(METHOD_GET_PRIVATE_MODE, json!({}))
-        .ok()
-        .and_then(|reply| {
-            if !reply.ok {
-                return None;
-            }
-            reply
-                .data
-                .as_ref()
-                .and_then(|d| d["private_mode"].as_bool())
-        })
-        .unwrap_or(false);
+    // Same rationale as the Recent submenu above: do not block the main thread
+    // on IPC during startup. Default to unchecked and let
+    // `spawn_tray_private_mode_resync` (started right after `setup_tray`
+    // returns) write the real daemon value once it responds.
+    let private_mode_on = false;
 
     let private_mode = CheckMenuItemBuilder::with_id("private_mode", "Private Mode")
         .checked(private_mode_on)
@@ -196,49 +151,66 @@ pub(crate) fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                     // Tauri pre-toggles the checkmark before firing the event.
                     // Read the new (already-toggled) state from the cloned item.
                     let new_state = private_mode_clone.is_checked().unwrap_or(false);
-                    let result = crate::ipc::call(
-                        METHOD_SET_PRIVATE_MODE,
-                        serde_json::json!({ "enabled": new_state }),
-                    );
-                    match result {
-                        Ok(_) => {
-                            // M4: Broadcast the confirmed toggle so the Settings
-                            // window (and any other listener) converges on the
-                            // same value, regardless of where the toggle began.
-                            let _ = tauri::Emitter::emit(app, "private-mode-changed", new_state);
+                    // CopyPaste-8ebg.23: `on_menu_event` runs on the main thread, so a
+                    // blocking IPC call here (up to the read-timeout, ipc.rs) freezes
+                    // the UI on every click. Offload to a background thread, same
+                    // pattern as `spawn_tray_private_mode_resync` already uses to
+                    // mutate the CheckMenuItem off the main thread.
+                    let app = app.clone();
+                    let private_mode_clone = private_mode_clone.clone();
+                    std::thread::spawn(move || {
+                        let result = crate::ipc::call(
+                            METHOD_SET_PRIVATE_MODE,
+                            serde_json::json!({ "enabled": new_state }),
+                        );
+                        match result {
+                            Ok(_) => {
+                                // M4: Broadcast the confirmed toggle so the Settings
+                                // window (and any other listener) converges on the
+                                // same value, regardless of where the toggle began.
+                                let _ =
+                                    tauri::Emitter::emit(&app, "private-mode-changed", new_state);
+                            }
+                            Err(e) => {
+                                // V-21-B: IPC failed — the daemon did not change state.
+                                // Revert the checkmark so the tray reflects daemon truth
+                                // rather than staying in the (incorrect) toggled position.
+                                tracing::warn!("set_private_mode IPC error (reverting tray): {e}");
+                                let _ = private_mode_clone.set_checked(!new_state);
+                                // Broadcast the reverted (daemon-truth) value too.
+                                let _ =
+                                    tauri::Emitter::emit(&app, "private-mode-changed", !new_state);
+                            }
                         }
-                        Err(e) => {
-                            // V-21-B: IPC failed — the daemon did not change state.
-                            // Revert the checkmark so the tray reflects daemon truth
-                            // rather than staying in the (incorrect) toggled position.
-                            tracing::warn!("set_private_mode IPC error (reverting tray): {e}");
-                            let _ = private_mode_clone.set_checked(!new_state);
-                            // Broadcast the reverted (daemon-truth) value too.
-                            let _ = tauri::Emitter::emit(app, "private-mode-changed", !new_state);
-                        }
-                    }
+                    });
                 }
                 other if other.starts_with("recent:") && other != "recent:none" => {
-                    let item_id = &other["recent:".len()..];
-                    let result =
-                        crate::ipc::call(METHOD_COPY_ITEM, serde_json::json!({ "id": item_id }));
-                    match &result {
-                        Ok(reply) if reply.ok => {
-                            // Mirror the sound/notification that row-click copy fires so
-                            // tray copies are consistent with the "always sound on copy"
-                            // promise (audit finding P1 / M12 parity).
-                            crate::popup::play_copy_sound();
-                            // Build rich title + body from the content_type / preview
-                            // returned by the copy_item IPC response.
-                            let (title, body) =
-                                crate::notifications::notification_title_body_from_reply(reply);
-                            crate::notifications::show_copy_notification(title, body);
+                    // CopyPaste-8ebg.23: same rationale as the "private_mode" arm —
+                    // move the blocking `copy_item` IPC call off the main thread.
+                    let item_id = other["recent:".len()..].to_string();
+                    std::thread::spawn(move || {
+                        let result = crate::ipc::call(
+                            METHOD_COPY_ITEM,
+                            serde_json::json!({ "id": item_id }),
+                        );
+                        match &result {
+                            Ok(reply) if reply.ok => {
+                                // Mirror the sound/notification that row-click copy fires so
+                                // tray copies are consistent with the "always sound on copy"
+                                // promise (audit finding P1 / M12 parity).
+                                crate::popup::play_copy_sound();
+                                // Build rich title + body from the content_type / preview
+                                // returned by the copy_item IPC response.
+                                let (title, body) =
+                                    crate::notifications::notification_title_body_from_reply(reply);
+                                crate::notifications::show_copy_notification(title, body);
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::warn!("copy_item IPC error: {e}");
+                            }
                         }
-                        Ok(_) => {}
-                        Err(e) => {
-                            tracing::warn!("copy_item IPC error: {e}");
-                        }
-                    }
+                    });
                 }
                 _ => {}
             }

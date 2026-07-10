@@ -266,8 +266,18 @@ pub async fn merge_incoming_with_crypto(
                 // under this device's own local key, recovering the plaintext for
                 // FTS.  Returns the row to insert plus the decrypted plaintext
                 // (when text) to index.
+                // CopyPaste-8ebg.7: honour the live decode-bomb budget when
+                // Universal Clipboard's AppConfig handle is available (the
+                // usual case); otherwise fall back to the compiled default —
+                // there is no other config handle reachable at this call site
+                // without changing `merge_incoming_with_crypto`'s signature.
+                let max_decoded_image_mb = auto_apply_owned
+                    .as_ref()
+                    .and_then(|(_, _, core_config)| core_config.read().ok())
+                    .map(|cfg| cfg.max_decoded_image_mb)
+                    .unwrap_or(copypaste_core::config::MAX_DECODED_IMAGE_MB);
                 let (mut to_insert, fts_plaintext) = match crypto_owned.as_ref() {
-                    Some(c) => match rekey_inbound(c, wire) {
+                    Some(c) => match rekey_inbound(c, wire, max_decoded_image_mb) {
                         Ok(pair) => pair,
                         Err(w) => {
                             // Guard: if the item looks sync-key-wrapped but we

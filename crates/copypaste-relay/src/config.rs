@@ -21,7 +21,8 @@ pub struct RelayConfig {
     /// for longer than this TTL must re-sync from cloud storage rather than the
     /// relay inbox. Override with `RELAY_SYNC_TTL_SECS`.
     pub sync_ttl_secs: u64,
-    /// Maximum allowed decoded size of a single ciphertext payload in bytes (default: 10 MiB)
+    /// Maximum allowed decoded size of a single ciphertext payload in bytes
+    /// (default: [`copypaste_ipc::RELAY_MAX_ITEM_BYTES`], 10 MiB).
     pub max_item_bytes: usize,
     /// Maximum number of items stored per device inbox (default: 500).
     /// Sourced from `RELAY_MAX_ITEMS_PER_DEVICE`. Wired into `RelayStore` so
@@ -55,6 +56,37 @@ pub struct RelayConfig {
     /// rather than being dropped. Complements the per-IP/per-device rate limits
     /// (which bound request *rate*, not *concurrency*).
     pub max_connections: usize,
+    /// Per-IP rate limit steady-state, in requests/second (default: see
+    /// `crate::middleware::rate_limit::PER_IP_PER_SECOND`, currently 3, i.e.
+    /// ~200 req/min combined with `per_ip_burst_size`). Sourced from
+    /// `RELAY_PER_IP_PER_SECOND`.
+    ///
+    /// CopyPaste-8ebg.50: previously this bound was a compile-time constant,
+    /// so a false-positive 429 storm could only be tuned by a rebuild and
+    /// redeploy. It is now runtime-configurable like the other relay limits.
+    pub per_ip_per_second: u64,
+    /// Per-IP burst allowance (default: see
+    /// `crate::middleware::rate_limit::PER_IP_BURST_SIZE`, currently 60).
+    /// Sourced from `RELAY_PER_IP_BURST_SIZE`.
+    pub per_ip_burst_size: u32,
+    /// Per-device (item-route) rate limit steady-state, in requests/second
+    /// (default: see `crate::middleware::rate_limit::PER_DEVICE_PER_SECOND`,
+    /// currently 1, i.e. 60 req/min). Sourced from `RELAY_PER_DEVICE_PER_SECOND`.
+    pub per_device_per_second: u64,
+    /// Per-device burst allowance for item routes (default: see
+    /// `crate::middleware::rate_limit::PER_DEVICE_BURST_SIZE`, currently 20).
+    /// Sourced from `RELAY_PER_DEVICE_BURST_SIZE`.
+    pub per_device_burst_size: u32,
+    /// Maximum registration attempts allowed per `(client_ip, device_id)`
+    /// within `crate::state::REG_LIMIT_WINDOW` (default: see
+    /// `crate::state::REG_LIMIT_MAX_ATTEMPTS`, currently 5). Sourced from
+    /// `RELAY_REG_LIMIT_MAX_ATTEMPTS` (CopyPaste-vgpy).
+    ///
+    /// Literal default (not a `crate::state::...` reference) for the same
+    /// reason as `per_ip_per_second` above: `config.rs` is also compiled
+    /// standalone via `#[path = "../src/config.rs"]` in the relay's
+    /// integration tests, which do not declare a `state` module.
+    pub reg_limit_max_attempts: usize,
 }
 
 impl Default for RelayConfig {
@@ -63,11 +95,23 @@ impl Default for RelayConfig {
             port: 8080,
             bind_addr: "0.0.0.0".to_string(),
             sync_ttl_secs: 86_400,
-            max_item_bytes: 10 * 1024 * 1024,
+            max_item_bytes: copypaste_ipc::RELAY_MAX_ITEM_BYTES,
             max_items_per_device: 500,
             trust_proxy_headers: false,
             db_path: crate::db::IN_MEMORY_PATH.to_string(),
             max_connections: 1024,
+            // Mirrors `crate::middleware::rate_limit::PER_IP_PER_SECOND` etc.
+            // Literal (not a `crate::middleware::...` reference) because
+            // `config.rs` is also compiled standalone via `#[path = "../src/config.rs"]`
+            // in the relay's integration tests, which do not declare a
+            // `middleware` module — see crates/copypaste-relay/tests/*.rs.
+            per_ip_per_second: 3,
+            per_ip_burst_size: 60,
+            per_device_per_second: 1,
+            per_device_burst_size: 20,
+            // Mirrors `crate::state::REG_LIMIT_MAX_ATTEMPTS` — see the
+            // standalone-compile note on the field doc comment above.
+            reg_limit_max_attempts: 5,
         }
     }
 }
@@ -85,6 +129,12 @@ impl RelayConfig {
     /// - `RELAY_TRUST_PROXY_HEADERS`   — `1`/`true` to honor XFF/X-Real-IP/Forwarded
     /// - `RELAY_DB_PATH`               — on-disk SQLite path (default `:memory:`)
     /// - `RELAY_MAX_CONNECTIONS`       — max concurrent in-flight requests (usize, default 1024)
+    /// - `RELAY_PER_IP_PER_SECOND`     — per-IP steady-state rate, req/s (u64, default 3)
+    /// - `RELAY_PER_IP_BURST_SIZE`     — per-IP burst allowance (u32, default 60)
+    /// - `RELAY_PER_DEVICE_PER_SECOND` — per-device steady-state rate, req/s (u64, default 1)
+    /// - `RELAY_PER_DEVICE_BURST_SIZE` — per-device burst allowance (u32, default 20)
+    /// - `RELAY_REG_LIMIT_MAX_ATTEMPTS` — registration attempts per (ip, device_id)
+    ///   per window (usize, default 5)
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
 
@@ -138,6 +188,39 @@ impl RelayConfig {
                 cfg.max_connections = n.max(1);
             }
         }
+        if let Ok(v) = std::env::var("RELAY_PER_IP_PER_SECOND") {
+            if let Ok(n) = v.parse::<u64>() {
+                // Clamp to at least 1: `governor`'s `GovernorConfigBuilder::finish()`
+                // rejects a zero rate, which would otherwise turn a misconfig into a
+                // process-level `unwrap`-adjacent panic at router build time instead
+                // of a clean fallback.
+                cfg.per_ip_per_second = n.max(1);
+            }
+        }
+        if let Ok(v) = std::env::var("RELAY_PER_IP_BURST_SIZE") {
+            if let Ok(n) = v.parse::<u32>() {
+                cfg.per_ip_burst_size = n.max(1);
+            }
+        }
+        if let Ok(v) = std::env::var("RELAY_PER_DEVICE_PER_SECOND") {
+            if let Ok(n) = v.parse::<u64>() {
+                cfg.per_device_per_second = n.max(1);
+            }
+        }
+        if let Ok(v) = std::env::var("RELAY_PER_DEVICE_BURST_SIZE") {
+            if let Ok(n) = v.parse::<u32>() {
+                cfg.per_device_burst_size = n.max(1);
+            }
+        }
+        if let Ok(v) = std::env::var("RELAY_REG_LIMIT_MAX_ATTEMPTS") {
+            if let Ok(n) = v.parse::<usize>() {
+                // Clamp to at least 1: a 0 limit would make
+                // `check_registration_rate_limit` reject every registration
+                // attempt outright (deque.len() >= 0 is always true),
+                // effectively bricking registration for a config typo.
+                cfg.reg_limit_max_attempts = n.max(1);
+            }
+        }
 
         cfg
     }
@@ -170,10 +253,88 @@ mod tests {
             "relay TTL default must be 86400 s (24 h); \
              this is intentionally shorter than the daemon's 30-day local history TTL"
         );
-        assert_eq!(cfg.max_item_bytes, 10 * 1024 * 1024);
+        assert_eq!(cfg.max_item_bytes, copypaste_ipc::RELAY_MAX_ITEM_BYTES);
         assert_eq!(cfg.max_items_per_device, 500);
         assert!(!cfg.trust_proxy_headers, "proxy trust must be opt-in");
         assert_eq!(cfg.max_connections, 1024);
+        // CopyPaste-8ebg.50: defaults must mirror the pre-existing compile-time
+        // constants exactly so this change is behavior-preserving until an
+        // operator opts into an override.
+        assert_eq!(cfg.per_ip_per_second, 3);
+        assert_eq!(cfg.per_ip_burst_size, 60);
+        assert_eq!(cfg.per_device_per_second, 1);
+        assert_eq!(cfg.per_device_burst_size, 20);
+        // CopyPaste-vgpy: default must mirror the pre-existing
+        // `crate::state::REG_LIMIT_MAX_ATTEMPTS` compile-time constant exactly
+        // so this change is behavior-preserving until an operator overrides it.
+        assert_eq!(cfg.reg_limit_max_attempts, 5);
+    }
+
+    /// CopyPaste-vgpy: the registration rate-limit ceiling must be tunable via
+    /// env without a rebuild, mirroring the other relay rate-limit knobs.
+    #[test]
+    fn reg_limit_max_attempts_read_from_env() {
+        let _guard = env_lock();
+        std::env::set_var("RELAY_REG_LIMIT_MAX_ATTEMPTS", "12");
+        let cfg = RelayConfig::from_env();
+        std::env::remove_var("RELAY_REG_LIMIT_MAX_ATTEMPTS");
+        assert_eq!(cfg.reg_limit_max_attempts, 12);
+    }
+
+    /// A `0` value must be clamped to `1` rather than passed through, since a
+    /// `0` limit would reject every registration attempt outright.
+    #[test]
+    fn reg_limit_max_attempts_zero_is_clamped_to_one() {
+        let _guard = env_lock();
+        std::env::set_var("RELAY_REG_LIMIT_MAX_ATTEMPTS", "0");
+        let cfg = RelayConfig::from_env();
+        std::env::remove_var("RELAY_REG_LIMIT_MAX_ATTEMPTS");
+        assert_eq!(cfg.reg_limit_max_attempts, 1);
+    }
+
+    /// CopyPaste-8ebg.50: rate-limit thresholds must be tunable via env vars
+    /// without a rebuild, so a false-positive 429 storm can be relieved by an
+    /// operator changing env and restarting the process.
+    #[test]
+    fn rate_limit_thresholds_read_from_env() {
+        let _guard = env_lock();
+        std::env::set_var("RELAY_PER_IP_PER_SECOND", "10");
+        std::env::set_var("RELAY_PER_IP_BURST_SIZE", "100");
+        std::env::set_var("RELAY_PER_DEVICE_PER_SECOND", "5");
+        std::env::set_var("RELAY_PER_DEVICE_BURST_SIZE", "40");
+        let cfg = RelayConfig::from_env();
+        std::env::remove_var("RELAY_PER_IP_PER_SECOND");
+        std::env::remove_var("RELAY_PER_IP_BURST_SIZE");
+        std::env::remove_var("RELAY_PER_DEVICE_PER_SECOND");
+        std::env::remove_var("RELAY_PER_DEVICE_BURST_SIZE");
+
+        assert_eq!(cfg.per_ip_per_second, 10);
+        assert_eq!(cfg.per_ip_burst_size, 100);
+        assert_eq!(cfg.per_device_per_second, 5);
+        assert_eq!(cfg.per_device_burst_size, 40);
+    }
+
+    /// CopyPaste-8ebg.50: a `0` rate/burst must be clamped to `1` rather than
+    /// passed through, because `governor::GovernorConfigBuilder::finish()`
+    /// rejects a zero rate and would otherwise turn an operator typo into a
+    /// router-build failure instead of a safe fallback.
+    #[test]
+    fn rate_limit_thresholds_zero_is_clamped_to_one() {
+        let _guard = env_lock();
+        std::env::set_var("RELAY_PER_IP_PER_SECOND", "0");
+        std::env::set_var("RELAY_PER_IP_BURST_SIZE", "0");
+        std::env::set_var("RELAY_PER_DEVICE_PER_SECOND", "0");
+        std::env::set_var("RELAY_PER_DEVICE_BURST_SIZE", "0");
+        let cfg = RelayConfig::from_env();
+        std::env::remove_var("RELAY_PER_IP_PER_SECOND");
+        std::env::remove_var("RELAY_PER_IP_BURST_SIZE");
+        std::env::remove_var("RELAY_PER_DEVICE_PER_SECOND");
+        std::env::remove_var("RELAY_PER_DEVICE_BURST_SIZE");
+
+        assert_eq!(cfg.per_ip_per_second, 1);
+        assert_eq!(cfg.per_ip_burst_size, 1);
+        assert_eq!(cfg.per_device_per_second, 1);
+        assert_eq!(cfg.per_device_burst_size, 1);
     }
 
     /// Asserts that the relay TTL default is intentionally shorter than the

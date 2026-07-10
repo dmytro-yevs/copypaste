@@ -8,7 +8,13 @@
 
 set -euo pipefail
 
-LABEL="com.copypaste.daemon"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# shellcheck source=../lib/release-identity.sh
+source "${REPO_ROOT}/scripts/lib/release-identity.sh"   # sets DAEMON_LABEL
+
+LABEL="${DAEMON_LABEL}"
 TARGET_PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then

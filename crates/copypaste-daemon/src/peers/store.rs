@@ -139,6 +139,8 @@ mod tests {
             os_version: None,
             app_version: None,
             local_ip: None,
+            // Fresh test fixture, no prior device to carry a device_id from.
+            device_id: None,
             public_ip: None,
             supabase_account_id: None,
             first_sync_at: None,

@@ -159,6 +159,13 @@ export function HistoryViewInner() {
   // true = modal is open; false = modal is closed.
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
 
+  // CopyPaste-8ebg.55: transient "just copied" flash — patterns.css already ships
+  // `.row.copied` (flash keyframes shared with DeviceCard's `.cfield.copied`), but
+  // nothing toggled it on HistoryRow. Mirrors DeviceCard.MetaRow's copied-state
+  // pattern: set on copy, cleared after a timeout comfortably longer than the
+  // --dur-flash (650ms) CSS animation.
+  const [flashCopiedId, setFlashCopiedId] = useState<string | null>(null);
+
   // A1: Drag-to-reorder pinned items state
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; position: "above" | "below" } | null>(null);
@@ -266,6 +273,12 @@ export function HistoryViewInner() {
     async (id: string) => {
       try {
         await api.copyItem(id);
+        // CopyPaste-8ebg.55: flash `.row.copied` on the copied row (was never
+        // toggled — see flashCopiedId declaration above).
+        setFlashCopiedId(id);
+        setTimeout(() => {
+          setFlashCopiedId((cur) => (cur === id ? null : cur));
+        }, 700);
         // Fire sound / notification on successful copy — same gates as the popup.
         // #16: delegated to copyWithFeedback to avoid duplicating the guard logic.
         const item = items.find((it) => it.id === id);
@@ -322,6 +335,10 @@ export function HistoryViewInner() {
         void api.deleteItem(prev.id).catch(() => {});
       }
       setItems((prevItems) => prevItems.filter((it) => it.id !== id));
+      // CopyPaste-8ebg.18: invalidate sigRef like every other mutation handler
+      // so the next poll (silent or otherwise) doesn't skip re-rendering because
+      // it still matches the stale pre-delete signature.
+      sigRef.current = "";
       if (selectedId === id) setSelectedId(null);
       const timer = setTimeout(() => {
         void api.deleteItem(id).catch(() => {});
@@ -329,7 +346,7 @@ export function HistoryViewInner() {
       }, 5000);
       setUndoPending({ id, preview, timer });
     },
-    [selectedId, undoPendingRef, setItems, setUndoPending]
+    [selectedId, undoPendingRef, setItems, setUndoPending, sigRef]
   );
 
   const handleUndo = useCallback(() => {
@@ -337,8 +354,11 @@ export function HistoryViewInner() {
     if (pending === null) return;
     clearTimeout(pending.timer);
     setUndoPending(null);
+    // CopyPaste-8ebg.18: invalidate sigRef so the reload below is guaranteed to
+    // re-render the restored item even if it happens to match a cached signature.
+    sigRef.current = "";
     void load(true);
-  }, [load, undoPendingRef, setUndoPending]);
+  }, [load, undoPendingRef, setUndoPending, sigRef]);
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -409,7 +429,7 @@ export function HistoryViewInner() {
         handleDelete(selectedId, entry?.preview ?? "");
       }
     },
-    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy, handleDelete, items]
+    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, showToast, handleCopy, handleDelete, items]
   );
 
   // -------------------------------------------------------------------------
@@ -505,7 +525,7 @@ export function HistoryViewInner() {
       // so the bulk action bar is never permanently disabled (V-13).
       setBulkBusy(false);
     }
-  }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast, sigRef]);
+  }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast, sigRef, setBulkBusy]);
 
   const handleBulkPin = useCallback(
     async (targetPinned: boolean) => {
@@ -536,7 +556,7 @@ export function HistoryViewInner() {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, multiSelectedIds, clearSelection, load, showToast, sigRef]
+    [bulkBusy, multiSelectedIds, clearSelection, load, showToast, sigRef, setBulkBusy]
   );
 
   /**
@@ -599,7 +619,7 @@ export function HistoryViewInner() {
       // so the bulk action bar is never permanently disabled (V-13).
       setBulkBusy(false);
     }
-  }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast, playSoundOnCopy, notifyOnCopy]);
+  }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast, playSoundOnCopy, notifyOnCopy, setBulkBusy]);
 
 
   // Destructive database reset — the recovery escape hatch when the daemon is
@@ -679,8 +699,18 @@ export function HistoryViewInner() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter…"
+          // CopyPaste-8ebg.64: the shortcut itself has zero discoverability from
+          // the input alone — the title tooltip plus the visible field-note hint
+          // below are the two affordances that surface it.
+          title="Search (⌘F)"
         />
       </div>
+      {/* CopyPaste-8ebg.64: Cmd+F / Cmd+A / Option+Enter (handleKeyDown above) have
+          no menu and no visible affordance anywhere in the UI — surface them as a
+          compact field-note hint so they're discoverable without reading docs. */}
+      <span className="field-note" title="Keyboard shortcuts">
+        ⌘F search · ⌘A select all · ⌥⏎ paste as plain text
+      </span>
 
       {/* D2: hidden file input (triggered via the attach button below) */}
       <input
@@ -764,6 +794,16 @@ export function HistoryViewInner() {
     </>
   );
 
+  // CopyPaste-8ebg.55: whether every currently multi-selected item is already
+  // pinned — drives BulkActionBar's single Pin/Unpin toggle (previously both
+  // actions were always shown even though one is always a no-op for the
+  // current selection).
+  const bulkSelectionAllPinned =
+    multiSelectedIds.size > 0 &&
+    filtered
+      .filter((it) => multiSelectedIds.has(it.id))
+      .every((it) => it.pinned);
+
   let body: React.ReactNode;
 
   if (loadState === "loading") {
@@ -836,6 +876,7 @@ export function HistoryViewInner() {
           <BulkActionBar
             count={multiSelectedIds.size}
             allSelected={allSelected}
+            allPinned={bulkSelectionAllPinned}
             onSelectAll={selectAll}
             onClearSelection={clearSelection}
             onBulkCopy={() => void handleBulkCopy()}
@@ -855,6 +896,7 @@ export function HistoryViewInner() {
           if (!isTruncated) return null;
           return (
             <div
+              className="field-note"
               aria-live="polite"
               data-testid="history-display-limit-hint"
             >
@@ -891,6 +933,7 @@ export function HistoryViewInner() {
               entry={entry}
               selected={entry.id === selectedId}
               multiSelected={multiSelectedIds.has(entry.id)}
+              copied={flashCopiedId === entry.id}
               selectionMode={selectionMode}
               previewLines={previewLinesApp}
               previewSize={previewSize}
@@ -980,12 +1023,10 @@ export function HistoryViewInner() {
         on the inner label so the Tauri drag event fires on the webview, not
         on a React element.
       */}
-      <div className="fill-col">
+      <div className="fill-col dropzone-host">
         {fileDragOver && (
-          <div
-            aria-hidden="true"
-          >
-            <div>
+          <div className="dropzone-overlay" aria-hidden="true">
+            <div className="dropzone-overlay__label">
               <span>Drop to add to clipboard</span>
             </div>
           </div>

@@ -7,15 +7,17 @@ use crate::protocol::Message;
 
 /// Maximum number of bytes allowed in a single protocol frame (16 MiB).
 ///
-/// This is the canonical value shared by the P2P data-plane transport
-/// (`copypaste_p2p::transport::MAX_FRAME_BYTES`).  Both sites must remain equal;
-/// a compile-time equality assertion lives in
-/// `copypaste-daemon/tests/frame_consts.rs` (CopyPaste-w47w #1).
+/// Re-exported from [`copypaste_ipc::MAX_FRAME_BYTES`] (CopyPaste-1d5l.59) —
+/// the canonical value shared with the P2P data-plane transport
+/// (`copypaste_p2p::transport::MAX_FRAME_BYTES`, also aliased to the same ipc
+/// const).  A compile-time equality assertion also lives in
+/// `copypaste-daemon/tests/frame_consts.rs` (CopyPaste-w47w #1) as a belt-
+/// and-suspenders regression guard.
 ///
 /// Exported as `usize` so the value is usable by codec builders; the internal
 /// `MAX_FRAME_SIZE` helper below casts it to `u32` for the hand-written
 /// 4-byte length-prefix framing used by `recv_message`.
-pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_FRAME_BYTES: usize = copypaste_ipc::MAX_FRAME_BYTES;
 
 /// `u32` variant of [`MAX_FRAME_BYTES`] used internally for the 4-byte
 /// little-endian length prefix.  The cast is infallible: 16 MiB fits in u32.
@@ -35,7 +37,9 @@ pub(crate) async fn send_message<S: AsyncWrite + Unpin>(
 }
 
 /// Read the next length-prefixed JSON frame and deserialise it.
-pub(crate) async fn recv_message<S: AsyncRead + Unpin>(stream: &mut S) -> Result<Message, SyncError> {
+pub(crate) async fn recv_message<S: AsyncRead + Unpin>(
+    stream: &mut S,
+) -> Result<Message, SyncError> {
     // Read 4-byte length prefix.
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;

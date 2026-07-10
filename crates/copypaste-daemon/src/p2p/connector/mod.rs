@@ -43,6 +43,21 @@ use discovery_resolve::{refresh_peer_meta_from_discovery, resolve_addr_from_disc
 /// connected peers to dial.
 const CONNECTOR_TICK: Duration = Duration::from_secs(3);
 
+/// Compile-time assertion: `CONNECTOR_TICK` must stay strictly below
+/// [`copypaste_p2p::connector::MIN_HEALTHY_DWELL`] (CopyPaste-1d5l.59).
+///
+/// `copypaste_p2p::connector`'s dwell-gated backoff reset (M3) is documented
+/// as relying on the dwell window being "sized comfortably above the
+/// connector tick" — a flapping peer that connects and immediately drops
+/// must never dwell long enough to reset its backoff. That relationship was
+/// previously assumed across the two crates with no assertion; this makes it
+/// a build failure instead of a silent regression if either constant moves.
+const _: () = assert!(
+    CONNECTOR_TICK.as_nanos() < copypaste_p2p::connector::MIN_HEALTHY_DWELL.as_nanos(),
+    "CONNECTOR_TICK must stay below MIN_HEALTHY_DWELL or the dwell-gated \
+     backoff reset (M3) could fire on a single tick, defeating the anti-flap guarantee"
+);
+
 /// Proactively dial paired peers that are not currently connected (Phase 3).
 ///
 /// Each tick re-reads `peers.json` (so a peer paired at runtime is picked up
@@ -80,10 +95,11 @@ pub(super) async fn peer_connector_loop(
     // persisted dial address fails (peer DHCP renew / network switch).
     discovery: Arc<DiscoveryService>,
     shutdown: CancellationToken,
-    // Live mTLS allowlist (Gap A + Gap B). Forwarded to per-connection tasks for
-    // inbound-unpair eviction, and used to TEMPORARILY allow-list a
-    // `pending_unpair` peer just long enough to dial it and deliver the deferred
-    // `ControlMsg::Unpair` frame.
+    // Live mTLS allowlist (Gap B). Forwarded to per-connection tasks for
+    // inbound-unpair eviction. CopyPaste-8ebg.5: no longer touched by
+    // pending-unpair delivery (Gap A) — that now dials via a one-off scoped
+    // verifier instead of temporarily mutating this shared, inbound-facing
+    // allowlist.
     live_peers: PairedPeers,
     // Shared RTT map — updated by the ping task spawned per connection.
     peer_rtt_ms: PeerRttMs,
@@ -113,9 +129,10 @@ pub(super) async fn peer_connector_loop(
         }
 
         // Gap A: drain durable pending-unpair deliveries first. Each entry that
-        // has a dial address is temporarily allow-listed, dialed, sent a single
-        // `Unpair` frame, then removed from both the live allowlist and the file.
-        deliver_pending_unpairs(&transport, &pending_path, &own_fp, &live_peers).await;
+        // has a dial address is dialed via a one-off scoped TLS verifier (never
+        // the shared `live_peers` allowlist — see CopyPaste-8ebg.5), sent a
+        // single `Unpair` frame, then removed from the pending file.
+        deliver_pending_unpairs(&transport, &pending_path, &own_fp).await;
 
         let peers = dialable_cache.get(&peers_path);
         // Drop dial-state for peers no longer present (unpaired) so the map
@@ -427,6 +444,22 @@ pub(super) fn spawn_connector_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CopyPaste-1d5l.59: explicit runtime pin of the compile-time assertion
+    /// declared next to `CONNECTOR_TICK` — kept alongside it (rather than
+    /// relying solely on the `const _: ()` assert) so the invariant shows up
+    /// in test output/coverage like any other regression guard, mirroring
+    /// `copypaste-daemon/tests/frame_consts.rs`.
+    #[test]
+    fn connector_tick_is_below_min_healthy_dwell() {
+        assert!(
+            CONNECTOR_TICK < copypaste_p2p::connector::MIN_HEALTHY_DWELL,
+            "CONNECTOR_TICK ({CONNECTOR_TICK:?}) must stay below MIN_HEALTHY_DWELL ({:?}) \
+             so a flapping peer's backoff is never wrongly reset (see \
+             copypaste_p2p::connector module docs, M3)",
+            copypaste_p2p::connector::MIN_HEALTHY_DWELL,
+        );
+    }
 
     /// BUG F1 (verification follow-up): the `peer_connector_loop` must exit
     /// promptly when its cloned token is cancelled. With an empty peers file the

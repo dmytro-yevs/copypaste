@@ -8,8 +8,10 @@
         <!-- Edge-to-edge: transparent system bars; Compose applies the insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <!-- Dark mode: dark status-bar icons. -->
+        <!-- Dark mode: light status-bar icons (CopyPasteTheme SideEffect updates at runtime — D16). -->
         <item name="android:windowLightStatusBar">false</item>
+        <!-- First-paint background (D16 part 1) — paints before Compose runs; tracks CpColors.bg. -->
+        <item name="android:windowBackground">@color/cp_window_background</item>
         <!-- Use the display cutout area on the short edges. -->
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
     </style>

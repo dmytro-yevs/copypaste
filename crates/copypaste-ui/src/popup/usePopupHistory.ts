@@ -1,7 +1,7 @@
 // ── usePopupHistory ───────────────────────────────────────────────────────────
 // Handles clipboard history polling (initial load + 3s visibility-gated interval
 // + focus-triggered refresh) and fuzzy filtering for the popup.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, HistoryEntry, IpcError, isIpcNotReady, isImageType } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
@@ -40,6 +40,10 @@ export interface UsePopupHistoryResult {
   error: string | null;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   refresh: () => Promise<void>;
+  /** Total items known to the daemon (page.total) — may exceed items.length
+   *  when the MAX_ITEMS cap below was hit. Used to render a "50 of 214"-style
+   *  hint so the cap is communicated instead of silently truncating. */
+  total: number;
 }
 
 export function usePopupHistory(
@@ -48,18 +52,32 @@ export function usePopupHistory(
   inputRef: React.RefObject<HTMLInputElement | null>
 ): UsePopupHistoryResult {
   const [items, setItems] = useState<HistoryEntry[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const win = getPopupWindow();
 
+  // CopyPaste-8ebg.56: refresh() is called from four independent triggers
+  // (initial mount, focus-change, 3s poll, and manual retry via the
+  // daemon-offline EmptyState button) with no cancellation between them. A
+  // slow response to an older call could resolve AFTER a newer call's
+  // response and clobber it with stale data. requestSeqRef tags each call
+  // with a monotonically increasing id; a response is only applied if its id
+  // is still the latest issued — older in-flight responses are dropped.
+  const requestSeqRef = useRef(0);
+
   // Fetch/refresh clipboard items from the daemon.
   const refresh = useCallback(async () => {
+    const requestId = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
     try {
       const page = await api.historyPage(MAX_ITEMS, 0);
+      if (requestSeqRef.current !== requestId) return; // superseded by a newer refresh
       setItems(page.items);
+      setTotal(page.total);
     } catch (e) {
+      if (requestSeqRef.current !== requestId) return; // superseded by a newer refresh
       if (e instanceof IpcError) {
         if (e.code === "daemon_offline") {
           setError("daemon_offline");
@@ -75,7 +93,7 @@ export function usePopupHistory(
         setError("error_unknown");
       }
     } finally {
-      setLoading(false);
+      if (requestSeqRef.current === requestId) setLoading(false);
     }
   }, []);
 
@@ -185,5 +203,5 @@ export function usePopupHistory(
     return scored.map(({ item, positions }) => ({ item, positions }));
   }, [items, query, maskSensitive]);
 
-  return { items, setItems, filtered, loading, error, setError, refresh };
+  return { items, setItems, filtered, loading, error, setError, refresh, total };
 }

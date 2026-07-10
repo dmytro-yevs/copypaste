@@ -190,7 +190,15 @@ export function useHistoryData() {
         setItems((prev) => {
           const existingIds = new Set(prev.map((it) => it.id));
           const fresh = page.items.filter((it) => !existingIds.has(it.id));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+          const merged = fresh.length > 0 ? [...prev, ...fresh] : prev;
+          // CopyPaste-8ebg.16: keep sigRef in sync with the merged (full) list,
+          // not just the first page. Without this, the next 3s poll compares its
+          // freshly-fetched first-page signature against a stale first-page
+          // sigRef, sees a "match", and — worse — if it ever does diverge,
+          // setItems() replaces the merged list with just the first page,
+          // silently dropping every loaded-more item.
+          sigRef.current = itemsSignature(merged);
+          return merged;
         });
       }
       // Update total in case new items arrived since the last poll.

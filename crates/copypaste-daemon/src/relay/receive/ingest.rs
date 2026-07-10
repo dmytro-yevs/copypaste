@@ -38,6 +38,10 @@ pub(in super::super) fn ingest_page_blocking(
     page: &[PullItem],
     start: Watermark,
     storage_quota_bytes: u64,
+    // Item 3 (CopyPaste-8ebg.7): live AppConfig decode-bomb budget, threaded
+    // the same way `storage_quota_bytes` is, so `build_local_item` no longer
+    // falls back to the compile-time `MAX_DECODED_IMAGE_MB` default.
+    max_decoded_image_mb: u32,
 ) -> (Watermark, u32) {
     let mut wm = start;
     let mut stored = 0u32;
@@ -180,6 +184,11 @@ pub(in super::super) fn ingest_page_blocking(
             // on this device stay deterministic across hops.
             env.origin_device_id.clone(),
             local_key,
+            // CopyPaste-8ebg.7: now threaded from the live AppConfig via
+            // `ingest_page_blocking`'s new `max_decoded_image_mb` param
+            // (mirrors `storage_quota_bytes`), instead of the compiled
+            // default.
+            max_decoded_image_mb,
         ) {
             Ok(i) => i,
             Err(e) => {
@@ -259,6 +268,7 @@ mod tests {
             std::slice::from_ref(&pull),
             Watermark::default(),
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored1, 1, "first ingest inserts the row");
         assert_eq!(wm1.wall, 2000);
@@ -282,6 +292,7 @@ mod tests {
             std::slice::from_ref(&pull2),
             wm1,
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored2, 0, "equal lamport+wall+origin echo is a no-op");
         // Watermark still advances past the seen row (id) so we don't re-fetch it.
@@ -297,6 +308,7 @@ mod tests {
             std::slice::from_ref(&pull3),
             wm2,
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored3, 1, "newer lamport replaces in place");
     }
@@ -324,6 +336,7 @@ mod tests {
             std::slice::from_ref(&live),
             Watermark::default(),
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored1, 1, "live item inserted");
         assert!(
@@ -340,6 +353,7 @@ mod tests {
             std::slice::from_ref(&tomb),
             wm1,
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored2, 1, "tombstone applied");
         let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
@@ -368,6 +382,7 @@ mod tests {
             std::slice::from_ref(&pinned),
             Watermark::default(),
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored, 1, "pinned item inserted");
         let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
@@ -454,6 +469,7 @@ mod tests {
                 std::slice::from_ref(&pull),
                 Watermark::default(),
                 u64::MAX,
+                copypaste_core::config::MAX_DECODED_IMAGE_MB,
             );
             let relay_took_remote = stored == 1;
             assert_eq!(
@@ -498,6 +514,7 @@ mod tests {
             std::slice::from_ref(&tomb),
             Watermark::default(),
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored1, 1, "tombstone inserted for unknown item");
         let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
@@ -515,6 +532,7 @@ mod tests {
             std::slice::from_ref(&create),
             wm1,
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored2, 0, "late lower-lamport create must NOT resurrect");
         let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
@@ -555,6 +573,7 @@ mod tests {
             std::slice::from_ref(&relay_pull),
             Watermark::default(),
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored1, 1, "first transport delivery must insert the row");
 
@@ -577,6 +596,7 @@ mod tests {
             std::slice::from_ref(&cloud_pull),
             wm1,
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(
             stored2, 0,

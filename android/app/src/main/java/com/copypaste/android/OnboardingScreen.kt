@@ -1,7 +1,5 @@
 package com.copypaste.android
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.compose.animation.core.animateFloatAsState
@@ -33,7 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
@@ -57,6 +54,15 @@ fun OnboardingScreen(
     onOpenOemAutoStart: () -> Unit,
     onExportLogs: () -> Unit,
     onDone: () -> Unit,
+    // CopyPaste-myh8.10 Wave B: real PERMANENTLY_DENIED detection for the
+    // notification card requires Activity-bound state (shouldShowRequestPermissionRationale),
+    // so it is computed by the caller (OnboardingActivity) and threaded in, mirroring
+    // every other Activity-bound flag already passed through this screen's params.
+    notificationStatus: PermissionStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        PermissionStatus.DENIED
+    } else {
+        PermissionStatus.NOT_APPLICABLE
+    },
     oemHint: String? = null,
     onOemHintConsumed: () -> Unit = {},
 ) {
@@ -74,11 +80,8 @@ fun OnboardingScreen(
         }
     }
 
-    // Re-evaluated every recomposition (triggered by refreshTrigger)
-    val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-    } else true
+    // Re-evaluated every recomposition (triggered by refreshTrigger, via notificationStatus).
+    val notifGranted = notificationStatus.isSatisfied()
 
     val overlayGranted: Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
         android.provider.Settings.canDrawOverlays(ctx)
@@ -135,8 +138,9 @@ fun OnboardingScreen(
             PermissionCard(
                 title = stringResource(R.string.onboarding_notifications_title),
                 description = stringResource(R.string.onboarding_notifications_desc),
-                granted = notifGranted,
+                status = notificationStatus,
                 buttonLabel = if (notifGranted) stringResource(R.string.status_granted) else stringResource(R.string.btn_grant),
+                permanentlyDeniedButtonLabel = stringResource(R.string.perm_notifications_open_settings),
                 onClick = onRequestNotification,
                 required = true,
                 enterDelayMs = baseDur / 4,
@@ -160,7 +164,7 @@ fun OnboardingScreen(
             PermissionCard(
                 title = stringResource(R.string.onboarding_battery_title),
                 description = stringResource(R.string.onboarding_battery_desc),
-                granted = batteryExempt,
+                status = booleanGrantStatus(batteryExempt),
                 buttonLabel = if (batteryExempt) stringResource(R.string.btn_exempt) else stringResource(R.string.btn_request_exemption),
                 onClick = onRequestBattery,
                 required = false,
@@ -179,11 +183,12 @@ fun OnboardingScreen(
                 PermissionCard(
                     title = stringResource(R.string.onboarding_oem_title),
                     description = oemDesc,
-                    // CopyPaste-crh3.113: we cannot reliably detect whether
-                    // autostart is enabled without root, so this card is
-                    // INDETERMINATE (null → neutral), not a permanent red
-                    // "not granted". Matches PermissionsSettingsActivity's OEM card.
-                    granted = null,
+                    // CopyPaste-crh3.113 / CopyPaste-myh8.10 Wave B: we cannot
+                    // reliably detect whether autostart is enabled without root.
+                    // DENIED + required=false renders identically to the old
+                    // "indeterminate" null (neutral border, never red) — see
+                    // permissionCardCta() in PermissionStatus.kt.
+                    status = PermissionStatus.DENIED,
                     buttonLabel = stringResource(R.string.onboarding_oem_button),
                     onClick = onOpenOemAutoStart,
                     required = false,
@@ -197,7 +202,7 @@ fun OnboardingScreen(
             PermissionCard(
                 title = stringResource(R.string.onboarding_fg_service_title),
                 description = stringResource(R.string.onboarding_fg_service_desc),
-                granted = true,
+                status = PermissionStatus.GRANTED,
                 buttonLabel = stringResource(R.string.status_granted),
                 onClick = {},
                 required = false,

@@ -1,0 +1,12 @@
+{
+  "fixture": "banner",
+  "schemaNote": "STYLEGUIDE §9.8 banner anatomy: [icon] message [action(s)]. Matches CpBanner (android/app/src/main/java/com/copypaste/android/ui/theme/Banner.kt, S2) 1:1.",
+  "android": { "component": "CpBanner", "status": "Verified", "owner": "android-material3-redesign S2" },
+  "desktop": { "component": "Toast.tsx / banner primitive", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    { "variant": "warn", "message": "Needs Accessibility access to capture clipboard changes.", "action": "Open Settings" },
+    { "variant": "error", "message": "Background service stopped unexpectedly.", "action": "Restart" },
+    { "variant": "info", "message": "App and daemon versions do not match.", "action": "Restart app" },
+    { "variant": "success", "message": "Accessibility access granted.", "action": null }
+  ]
+}

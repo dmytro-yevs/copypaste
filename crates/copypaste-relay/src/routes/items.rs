@@ -230,6 +230,15 @@ pub async fn push(
 /// items.
 pub const RELAY_WATERMARK_HEADER: &str = "relay-watermark";
 
+/// `Relay-Has-More: true|false` (CopyPaste-8ebg.58) — explicit signal that
+/// more qualifying items exist past this page, independent of whether the
+/// page came back shorter than the requested `limit`. A short page is
+/// ambiguous on its own (see `PullPage::has_more` in `state::inbox::pull`): it can
+/// mean either "inbox exhausted" or "the byte-budget cap truncated this page
+/// mid-drain". Callers MUST use this header instead of inferring "caught up"
+/// from `items.len() < limit`.
+pub const RELAY_HAS_MORE_HEADER: &str = "relay-has-more";
+
 /// GET /devices/:device_id/items?since=<wall_time>
 ///
 /// Returns all items in `device_id`'s inbox with `wall_time > since`, ordered ascending.
@@ -268,7 +277,8 @@ pub async fn pull(
     // the inactivity threshold even though it is continuously polling.
     store.update_last_seen(&device_id);
 
-    let items = store.pull_items(&device_id, params.since, params.since_id, limit)?;
+    let page = store.pull_items(&device_id, params.since, params.since_id, limit)?;
+    let items = page.items;
 
     // CopyPaste-tspz: build the watermark header from the effective next cursor.
     //
@@ -290,6 +300,11 @@ pub async fn pull(
     let mut resp = Json(items).into_response();
     resp.headers_mut()
         .insert(RELAY_WATERMARK_HEADER, watermark_header);
+    // CopyPaste-8ebg.58: explicit has_more signal — see RELAY_HAS_MORE_HEADER.
+    resp.headers_mut().insert(
+        RELAY_HAS_MORE_HEADER,
+        HeaderValue::from_static(if page.has_more { "true" } else { "false" }),
+    );
     Ok(resp)
 }
 
@@ -400,7 +415,7 @@ pub async fn subscribe(
                     store.update_last_seen(&producer_device);
                     match store.pull_items(&producer_device, cursor_wall, cursor_id, SSE_DRAIN_PAGE)
                     {
-                        Ok(items) => items,
+                        Ok(page) => page.items,
                         // Device gone (evicted) — stop the stream.
                         Err(_) => return,
                     }

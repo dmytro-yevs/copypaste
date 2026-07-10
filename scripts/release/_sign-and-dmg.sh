@@ -29,6 +29,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
+# shellcheck source=../lib/release-identity.sh
+source "$REPO_ROOT/scripts/lib/release-identity.sh"
+
 APP_DIR="dist/CopyPaste.app"
 ENTITLEMENTS="scripts/macos/entitlements.plist"
 # All release artefacts live in dist/ only — never target/release/.
@@ -56,15 +59,10 @@ fi
 SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 
 echo "==> Signing inner binaries with stable identifiers (identity: $SIGN_IDENTITY)"
-# macOS ships bash 3.2 (no associative arrays / `declare -A`); use a case stmt.
+# Bundle-id map lives in scripts/lib/release-identity.sh (CopyPaste-8ebg.60).
 for bin in copypaste-daemon copypaste copypaste-relay; do
     if [[ -f "$APP_DIR/Contents/MacOS/$bin" ]]; then
-        case "$bin" in
-            copypaste-daemon) bin_id="com.copypaste.daemon" ;;
-            copypaste)        bin_id="com.copypaste.cli" ;;
-            copypaste-relay)  bin_id="com.copypaste.relay" ;;
-            *)                bin_id="com.copypaste.$bin" ;;
-        esac
+        bin_id="$(bundle_id_for "$bin")"
         codesign --force \
             --sign "$SIGN_IDENTITY" \
             --identifier "$bin_id" \

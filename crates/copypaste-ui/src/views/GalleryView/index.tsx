@@ -3,6 +3,7 @@ import { ActionButton } from "../../components/ActionButton";
 import { Toggle } from "../../components/Toggle";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { DeviceBadge } from "../../components/DeviceBadge";
+import { AccentSwatch } from "../../components/AccentSwatch";
 import { FIXTURE_OWN_DEVICE_ID } from "../../lib/fixtures";
 import {
   ACCENT_VALUES,
@@ -38,6 +39,21 @@ import "../../styles/gallery.css";
 // Slice 2 seeds the primitive stories; later slices ADD their sections here.
 // ---------------------------------------------------------------------------
 
+// CopyPaste-8ebg.64: GalleryView is entered from Sidebar.tsx's
+// navigateToGallery() via a hard `window.location.href` navigation that sets
+// `?view=gallery` — App.tsx reads that URL param fresh on every render
+// (galleryActive(), not store state, per design.md Decision 6), so there was
+// no in-app way back short of manually editing the URL or closing the
+// window. Sidebar.tsx (the entry point) is owned by another cluster/out of
+// scope here, so this mirrors its navigation approach in reverse, entirely
+// within GalleryView: drop `view` from the URL and do the same kind of full
+// navigation, landing back on the default view (history).
+function navigateBack(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("view");
+  window.location.href = url.toString();
+}
+
 export function GalleryView() {
   const [theme, setTheme] = useState<ThemeValue>("dark");
   const [accent, setAccent] = useState<AccentValue>("indigo");
@@ -52,7 +68,16 @@ export function GalleryView() {
       data-accent={accent}
       data-translucency={translucency ? "on" : "off"}
     >
-      <div className="gallery__title">Component gallery (DEV)</div>
+      <div
+        className="gallery__title"
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+      >
+        <span>Component gallery (DEV)</span>
+        {/* CopyPaste-8ebg.64: back action — see navigateBack() above. */}
+        <ActionButton variant="ghost" size="sm" onClick={navigateBack}>
+          ← Back
+        </ActionButton>
+      </div>
 
       {/* Local theme/accent/translucency switcher — component state only, never
           setPrefs, so leaving the gallery leaves the real prefs untouched. */}
@@ -71,18 +96,14 @@ export function GalleryView() {
         </div>
         <div className="gallery__swatches" role="group" aria-label="Accent">
           {ACCENT_VALUES.map((a) => (
-            // Each swatch is its own nested theme-scope so var(--accent) resolves
-            // to that swatch's accent value (theme-aware) — not the wrapper's.
-            <span key={a} className="theme-scope" data-theme={theme} data-accent={a}>
-              <button
-                type="button"
-                className="gallery__swatch"
-                aria-label={a}
-                aria-pressed={a === accent}
-                style={{ background: "var(--accent)" }}
-                onClick={() => setAccent(a)}
-              />
-            </span>
+            <AccentSwatch
+              key={a}
+              accent={a}
+              theme={theme}
+              selected={a === accent}
+              onSelect={setAccent}
+              className="gallery__swatch"
+            />
           ))}
         </div>
         <label className="gallery__row">

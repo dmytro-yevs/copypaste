@@ -26,7 +26,7 @@ mod tls;
 pub use connection::{
     PeerClientStream, PeerStream, PeerTransport, TransportError, CONNECT_RETRY_DELAY,
     MAX_CONNECT_ATTEMPTS, MAX_FRAME_BYTES, P2P_SNI_SENTINEL, TCP_CONNECT_TIMEOUT,
-    TLS_HANDSHAKE_TIMEOUT,
+    TCP_KEEPALIVE_TIME, TLS_HANDSHAKE_TIMEOUT,
 };
 pub use peers::{DeviceFingerprint, PairedPeers, CERT_ROTATION_GRACE};
 pub use push::{try_push_frame, PushError, PushNotifier, PEER_SEND_TIMEOUT};

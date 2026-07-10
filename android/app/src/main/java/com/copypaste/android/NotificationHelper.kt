@@ -25,10 +25,10 @@ object NotificationHelper {
             manager.createNotificationChannel(
                 NotificationChannel(
                     CHANNEL_SYNC,
-                    "Sync Status",
+                    context.getString(R.string.notif_channel_sync_name),
                     NotificationManager.IMPORTANCE_LOW
                 ).apply {
-                    description = "Relay sync status notifications"
+                    description = context.getString(R.string.notif_channel_sync_description)
                 }
             )
         }
@@ -45,16 +45,12 @@ object NotificationHelper {
      * [nativeUnavailableNotified] before calling this.
      */
     fun notifyNativeUnavailable(context: Context, id: Int = 1002) {
-        // ANDO-7: use app icon (monochrome foreground layer) rather than generic system drawable.
-        // ic_launcher_foreground is an alpha-channel PNG produced from the adaptive-icon foreground —
-        // it is white-on-transparent on API 26+ where adaptive icons are used as notification icons.
+        // ANDO-7: use a dedicated alpha-only status-bar icon, not the full-color adaptive
+        // foreground — the OS masks smallIcon by alpha, so a colored source renders as a blob.
         val notification = NotificationCompat.Builder(context, CHANNEL_SYNC)
-            .setSmallIcon(R.mipmap.ic_launcher_foreground)
-            .setContentTitle("CopyPaste: sync disabled")
-            .setContentText(
-                "The encryption library failed to load. " +
-                    "Items will NOT be saved until the app is restarted."
-            )
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setContentTitle(context.getString(R.string.notif_native_unavailable_title))
+            .setContentText(context.getString(R.string.notif_native_unavailable_content))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .build()

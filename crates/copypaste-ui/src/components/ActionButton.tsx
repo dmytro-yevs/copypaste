@@ -29,6 +29,7 @@ interface ActionButtonProps {
   type?: "button" | "submit" | "reset";
   title?: string;
   "aria-label"?: string;
+  "aria-pressed"?: boolean;
   className?: string;
   children: React.ReactNode;
   size?: "sm" | "md";
@@ -43,6 +44,7 @@ export function ActionButton({
   type = "button",
   title,
   "aria-label": ariaLabel,
+  "aria-pressed": ariaPressed,
   className,
   children,
   size,
@@ -58,6 +60,7 @@ export function ActionButton({
       disabled={disabled ?? pending}
       title={title}
       aria-label={ariaLabel}
+      aria-pressed={ariaPressed}
     >
       {pending ? pendingLabel : children}
     </button>

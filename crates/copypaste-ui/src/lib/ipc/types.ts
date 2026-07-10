@@ -400,6 +400,16 @@ export interface PairedDevice {
    */
   latency_ms?: number;
   /**
+   * CopyPaste-ptgcc: current rekey-failure count for this peer's pairwise
+   * sync key, as tracked by the daemon's outbound fanout loop. Present only
+   * when P2P is running AND at least one rekey failure has been recorded
+   * since daemon start; absent means either no failures or an older daemon
+   * that predates this field. A non-zero value means this device cannot
+   * currently encrypt outbound items for this peer — a stronger signal than
+   * `last_sync_at` staleness alone.
+   */
+  rekey_failures?: number;
+  /**
    * CopyPaste-1jms.30: trust level as reported by the daemon's list_peers response.
    * "verified" = peer completed SAS confirmation; any other value (or absent) = not
    * SAS-verified. Optional for back-compat with daemon builds predating this field.

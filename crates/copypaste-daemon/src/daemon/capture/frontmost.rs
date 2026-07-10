@@ -3,18 +3,24 @@
 //! CopyPaste-44rq.33: caches the frontmost-app query so `lsappinfo` is not
 //! forked on every 500 ms clipboard tick.
 
-/// How long (in seconds) the frontmost-app bundle ID obtained from `lsappinfo`
-/// is considered fresh.  Caching avoids forking a new subprocess on every 500 ms
-/// clipboard tick (CopyPaste-44rq.33).  2 s is short enough to catch a typical
-/// Cmd+Tab switch (≤400 ms human reaction time + one full tick latency) while
-/// cutting the fork rate by ~75 % at the default 500 ms poll interval.
+/// How long (in milliseconds) the frontmost-app bundle ID obtained from
+/// `lsappinfo` is considered fresh.  Caching avoids forking a new subprocess on
+/// every 500 ms clipboard tick (CopyPaste-44rq.33).
+///
+/// CopyPaste-8ebg.57: the original TTL was 2000 ms (4x the default 500 ms tick
+/// interval), which meant a copy made shortly after an app switch could reuse
+/// a stale bundle ID for up to ~1.5 s, bypassing `excluded_app_bundle_ids` /
+/// `is_sensitive_app` for that window. Tightened to 750 ms — just above the
+/// default tick period, so at most one extra tick can observe a stale value —
+/// while still amortizing the `lsappinfo` fork across consecutive ticks of the
+/// same foreground app instead of forking on literally every tick.
 #[cfg(target_os = "macos")]
-pub(crate) const FRONTMOST_APP_CACHE_TTL_SECS: u64 = 2;
+pub(crate) const FRONTMOST_APP_CACHE_TTL_MS: u64 = 750;
 
 /// Per-tick cache for the frontmost application's bundle ID on macOS.
 ///
-/// Populated by `handle_tick` at most once every `FRONTMOST_APP_CACHE_TTL_SECS`
-/// seconds; stale when `expires_at` is in the past.
+/// Populated by `handle_tick` at most once every `FRONTMOST_APP_CACHE_TTL_MS`
+/// milliseconds; stale when `expires_at` is in the past.
 ///
 /// `cached_value` is `None` either when `lsappinfo` failed (we cache the
 /// failure too so we do not retry on the very next tick) or when the cache has
@@ -74,7 +80,7 @@ fn parse_lsappinfo_bundle_id(text: &str) -> Option<String> {
 }
 
 /// Resolve the frontmost application's bundle ID, using `cache` to avoid
-/// forking `lsappinfo` more often than [`FRONTMOST_APP_CACHE_TTL_SECS`].
+/// forking `lsappinfo` more often than [`FRONTMOST_APP_CACHE_TTL_MS`].
 ///
 /// Shared between the exclusion check and the `is_sensitive_app` check in
 /// `handle_tick` so lsappinfo is invoked AT MOST ONCE per TTL window
@@ -128,13 +134,13 @@ pub(crate) async fn resolve_frontmost_bundle_id(cache: &mut FrontmostAppCache) -
     };
 
     // Store the result (success or failure) and set the expiry so we
-    // do not fork again until FRONTMOST_APP_CACHE_TTL_SECS have elapsed.
+    // do not fork again until FRONTMOST_APP_CACHE_TTL_MS have elapsed.
     cache.cached_value = resolved.clone();
     cache.expires_at =
-        std::time::Instant::now() + std::time::Duration::from_secs(FRONTMOST_APP_CACHE_TTL_SECS);
+        std::time::Instant::now() + std::time::Duration::from_millis(FRONTMOST_APP_CACHE_TTL_MS);
     tracing::trace!(
         bundle_id = ?resolved,
-        ttl_secs = FRONTMOST_APP_CACHE_TTL_SECS,
+        ttl_ms = FRONTMOST_APP_CACHE_TTL_MS,
         "lsappinfo: cache refreshed"
     );
 
@@ -180,7 +186,7 @@ mod tests {
             cached_value: Some("com.apple.finder".to_string()),
             is_failure: false,
             expires_at: std::time::Instant::now()
-                + std::time::Duration::from_secs(FRONTMOST_APP_CACHE_TTL_SECS),
+                + std::time::Duration::from_millis(FRONTMOST_APP_CACHE_TTL_MS),
         };
         assert!(
             hot_cache.is_fresh(),
@@ -207,7 +213,7 @@ mod tests {
             cached_value: None,
             is_failure: true,
             expires_at: std::time::Instant::now()
-                + std::time::Duration::from_secs(FRONTMOST_APP_CACHE_TTL_SECS),
+                + std::time::Duration::from_millis(FRONTMOST_APP_CACHE_TTL_MS),
         };
         assert!(
             failure_cache.is_fresh(),

@@ -23,6 +23,10 @@
 set -euo pipefail
 
 # ---- config ----------------------------------------------------------------
+# NOTE: this script is designed to be curl-piped (`curl ... | bash`), so it
+# CANNOT `source` scripts/lib/release-identity.sh — there is no repo checkout
+# on disk at pipe time. REPO/DAEMON_LABEL are kept inline here and must stay
+# in sync with scripts/lib/release-identity.sh by hand (CopyPaste-8ebg.60).
 REPO="${COPYPASTE_REPO:-dmytro-yevs/copypaste}"   # override via env for forks
 VERSION="${1:-latest}"
 APP_NAME="CopyPaste"

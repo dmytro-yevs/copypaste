@@ -49,7 +49,7 @@ export function rowHeightFor(
   density: "comfortable" | "compact" | "spacious" = "comfortable",
   // Preview-lines setting: text rows grow by one line-height per extra line so
   // the virtualizer's allocated height matches HistoryRow's multi-line clamp.
-  previewLines: number = 1
+  previewLines = 1
 ): number {
   const isImage = isImageType(entry.content_type);
   // File rows get a fixed height that fits the FileChip (icon + filename + buttons).

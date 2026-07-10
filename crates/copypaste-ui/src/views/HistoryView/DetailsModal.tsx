@@ -59,7 +59,7 @@ function fullResCacheSet(id: string, uri: string): void {
   }
 }
 
-function FullResImage({ id, maxHeight: _maxHeight }: { id: string; maxHeight: number }) {
+function FullResImage({ id, maxHeight }: { id: string; maxHeight: number }) {
   const [src, setSrc] = useState<string | null>(() => fullResCacheGet(id) ?? null);
   const [failed, setFailed] = useState(false);
   const mountedRef = useRef(true);
@@ -103,7 +103,11 @@ function FullResImage({ id, maxHeight: _maxHeight }: { id: string; maxHeight: nu
     return <span>Loading…</span>;
   }
   return (
-    <img src={src} alt="" />
+    <img
+      src={src}
+      alt=""
+      style={{ maxWidth: "100%", maxHeight, objectFit: "contain" }}
+    />
   );
 }
 
@@ -208,9 +212,12 @@ export function DetailsModal({
                   can click the placeholder pre directly to reveal without an extra
                   confirmation step (matches Android show_sensitive_warnings=false). */}
               {blurred && showSensitiveWarnings && (
-                // Reveal overlay — sits on top of the placeholder so the user
-                // gets a clear affordance without needing to read the italic hint.
-                <div
+                // CopyPaste-8ebg.55: real <button> (was a div+onClick) — sits on
+                // top of the placeholder so the user gets a clear affordance,
+                // and is now Tab-reachable / Enter-Space activatable like any
+                // other control instead of mouse-only.
+                <button
+                  type="button"
                   onClick={() => setRevealed(true)}
                   title="Click to reveal sensitive content"
                 >
@@ -220,12 +227,14 @@ export function DetailsModal({
                   <span>
                     Sensitive — preview hidden · click to reveal
                   </span>
-                </div>
+                </button>
               )}
               {/* When warnings are off and still blurred, make the pre itself clickable to reveal. */}
               {blurred && !showSensitiveWarnings && (
-                <div
+                <button
+                  type="button"
                   onClick={() => setRevealed(true)}
+                  aria-label="Sensitive content hidden — activate to reveal"
                   title="Click to reveal sensitive content"
                 />
               )}

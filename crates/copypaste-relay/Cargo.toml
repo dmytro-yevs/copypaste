@@ -17,6 +17,13 @@ path = "src/main.rs"
 quota-tiers = []
 
 [dependencies]
+# CopyPaste-1d5l.58: single source of truth for the SYNC_MAX_BLOB_BYTES (8 MiB)
+# and RELAY_MAX_ITEM_BYTES (10 MiB) size-cap consts, shared with
+# copypaste-daemon (which already depends on copypaste-ipc). A normal
+# (non-dev) dependency because `config.rs` — which needs it — is also part of
+# the main lib, not just tests. copypaste-ipc is a tiny types-only crate
+# (serde + serde_json + home).
+copypaste-ipc = { path = "../copypaste-ipc" }
 axum = { version = "0.8", features = ["macros"] }
 tokio.workspace = true
 serde.workspace = true

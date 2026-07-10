@@ -1,0 +1,34 @@
+{
+  "fixture": "device-card",
+  "schemaNote": "STYLEGUIDE §9.7 device card — own-device 6-field grid vs paired-peer 8-field grid, same field set/weight for every peer. Owning slice: android-devices (S7) — no PeerRow/OwnDeviceRow composable exists yet; schema-only scaffolding.",
+  "android": { "component": "PeerRow.kt / OwnDeviceRow", "status": "Deferred", "owner": "android-devices (S7)" },
+  "desktop": { "component": "DeviceCard.tsx", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    {
+      "kind": "own",
+      "name": "Pixel 8",
+      "online": true,
+      "model": "Pixel 8",
+      "os": "Android 15",
+      "appVersion": "0.4.0",
+      "localIp": "192.168.1.42",
+      "publicIp": "203.0.113.7",
+      "fingerprint": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+    },
+    {
+      "kind": "peer",
+      "name": "MacBook Pro",
+      "online": false,
+      "transport": "P2P",
+      "verified": true,
+      "model": "MacBook Pro",
+      "os": "macOS 15.1",
+      "appVersion": "0.4.0",
+      "localIp": "192.168.1.10",
+      "publicIp": "203.0.113.9",
+      "pairedAt": "2026-05-01T12:00:00Z",
+      "lastSyncAt": "2026-07-01T09:30:00Z",
+      "rttMs": null
+    }
+  ]
+}

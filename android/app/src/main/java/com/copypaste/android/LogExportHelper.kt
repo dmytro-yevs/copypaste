@@ -34,8 +34,15 @@ object LogExportHelper {
      *   export fails. When provided, the callback is called instead of showing an
      *   [android.widget.Toast]. When null (default), a Toast is shown as a fallback so
      *   callers without a Compose error channel keep working.
+     * @param onSuccess optional callback invoked after the share chooser has been launched
+     *   successfully (not invoked on any of the failure paths above — those all go through
+     *   [onError]/the Toast fallback instead).
      */
-    fun shareLogsZip(context: Context, onError: ((String) -> Unit)? = null) {
+    fun shareLogsZip(
+        context: Context,
+        onError: ((String) -> Unit)? = null,
+        onSuccess: (() -> Unit)? = null,
+    ) {
         fun reportError(msg: String) {
             if (onError != null) onError(msg)
             else Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -71,7 +78,14 @@ object LogExportHelper {
 
         val chooser = Intent.createChooser(shareIntent, context.getString(R.string.log_export_chooser_title))
         chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(chooser)
+        try {
+            context.startActivity(chooser)
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Failed to launch share chooser", e)
+            reportError(context.getString(R.string.log_export_failed))
+            return
+        }
+        onSuccess?.invoke()
     }
 
     // ── Internals ────────────────────────────────────────────────────────────

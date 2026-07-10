@@ -67,8 +67,13 @@ choose a value, it uses the number HERE — not its platform's old value.
 
 ### §A.3 Per-palette accent tokens (dark mode) — the parity-check target
 
-These are the tokens the automated check (`scripts/parity-check.mjs`) compares.
-Tolerance: ±5 per channel (0–255). Background canvas (bg0/bg1/bg2) is also compared.
+These are the tokens the automated check compares. `scripts/gen-parity-tokens.mjs`
+generates `parity/tokens.json` from this spec; `TokenParityTest`
+(`android/app/src/test/java/com/copypaste/android/parity/TokenParityTest.kt`, run under
+`:app:testDebugUnitTestPreExisting`) plus `ParityFixturesTest` verify token alignment
+(the legacy `scripts/parity-check.mjs` and `.github/workflows/parity.yml` were retired by
+android-material3-redesign task 2.11a). Tolerance: ±5 per channel (0–255). Background
+canvas (bg0/bg1/bg2) is also compared.
 
 | Palette | Token | Web selector (index.css) | Android (Palette.kt) | Expected hex |
 |---|---|---|---|---|
@@ -380,4 +385,5 @@ Both platforms render the chip **with** the border (Android adds it).
 §A.3 palette accent table · §A.4 light-mode AA-tuned accents.
 
 Any agent touching these uses the values above verbatim.
-Run `node scripts/parity-check.mjs` to verify token alignment before merging.
+Run `node scripts/gen-parity-tokens.mjs` then `:app:testDebugUnitTestPreExisting`
+(`TokenParityTest` + `ParityFixturesTest`) to verify token alignment before merging.

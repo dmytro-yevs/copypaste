@@ -5,11 +5,13 @@
 // useSettingsState.ts) that already drove the pre-paint bootstrap and the
 // removed Appearance section, so this is a rebuild of existing wiring, not new
 // state/logic.
+import { useEffect, useState } from "react";
 import { SectionHeader } from "../../../components/SectionHeader";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
 import { SliderRow } from "../../../components/SliderRow";
+import { AccentSwatch } from "../../../components/AccentSwatch";
 import { InfoPopover } from "../components/InfoPopover";
 import { THEME_VALUES, ACCENT_VALUES } from "../../../lib/theme/prefsSchema";
 import type { UIPrefs } from "../../../store";
@@ -25,7 +27,26 @@ const THEME_LABEL: Record<(typeof THEME_VALUES)[number], string> = {
   light: "Light",
 };
 
+// CopyPaste-8ebg.63: sliders showed a bare number ("3") instead of its unit.
+function formatLines(v: number): string {
+  return `${v} line${v === 1 ? "" : "s"}`;
+}
+
 export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
+  // CopyPaste-8ebg.63: "System" doesn't say what it actually resolves to.
+  // Track the OS preference live so the hint updates if the user flips
+  // System Settings → Appearance while this panel is open.
+  const [systemIsDark, setSystemIsDark] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (e: MediaQueryListEvent) => setSystemIsDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
   return (
     <div>
       {/* task 5.3: Theme / Accent / Translucency — bound directly to prefs.theme,
@@ -36,20 +57,29 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
       <Panel>
         <SettingsRow
           title="Theme"
-          info={<InfoPopover text="Dark or light chrome across the whole app. Applied immediately and persisted." />}
+          info={<InfoPopover text="Dark or light chrome across the whole app. Applied immediately and persisted. 'System' follows the macOS Appearance setting." />}
         >
-          <div className="seg" role="group" aria-label="Theme">
-            {THEME_VALUES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={prefs.theme === t ? "on" : undefined}
-                aria-pressed={prefs.theme === t}
-                onClick={() => setPrefs({ theme: t })}
-              >
-                {THEME_LABEL[t]}
-              </button>
-            ))}
+          <div className="ctl ctl--col">
+            <div className="seg" role="group" aria-label="Theme">
+              {THEME_VALUES.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={prefs.theme === t ? "on" : undefined}
+                  aria-pressed={prefs.theme === t}
+                  onClick={() => setPrefs({ theme: t })}
+                >
+                  {THEME_LABEL[t]}
+                </button>
+              ))}
+            </div>
+            {/* CopyPaste-8ebg.63: "System" alone doesn't say what it resolves
+                to — show the live-resolved light/dark value. */}
+            {prefs.theme === "system" && (
+              <span className="field-note field-note--dim">
+                Currently resolves to {systemIsDark ? "Dark" : "Light"}.
+              </span>
+            )}
           </div>
         </SettingsRow>
         <SettingsRow
@@ -58,19 +88,13 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
         >
           <div className="swatches" role="group" aria-label="Accent">
             {ACCENT_VALUES.map((a) => (
-              // Each swatch is its own nested theme-scope so var(--accent)
-              // resolves to THAT swatch's accent value, not the page's live
-              // accent (matches GalleryView's swatch-preview pattern).
-              <span key={a} className="theme-scope" data-accent={a}>
-                <button
-                  type="button"
-                  className="swatch"
-                  aria-label={a}
-                  aria-pressed={prefs.accent === a}
-                  style={{ background: "var(--accent)" }}
-                  onClick={() => setPrefs({ accent: a })}
-                />
-              </span>
+              <AccentSwatch
+                key={a}
+                accent={a}
+                selected={prefs.accent === a}
+                onSelect={(accent) => setPrefs({ accent })}
+                className="swatch"
+              />
             ))}
           </div>
         </SettingsRow>
@@ -99,7 +123,7 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
             step={1}
             value={prefs.previewLinesApp}
             onChange={(v) => setPrefs({ previewLinesApp: v })}
-            formatValue={(v) => String(v)}
+            formatValue={formatLines}
           />
         </SettingsRow>
         {/* Image preview height controls the thumbnail bounding box in both
@@ -163,7 +187,7 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
             step={1}
             value={prefs.previewLinesPopup}
             onChange={(v) => setPrefs({ previewLinesPopup: v })}
-            formatValue={(v) => String(v)}
+            formatValue={formatLines}
           />
         </SettingsRow>
       </Panel>

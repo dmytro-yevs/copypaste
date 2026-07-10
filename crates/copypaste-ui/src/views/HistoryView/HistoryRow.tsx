@@ -56,6 +56,13 @@ export interface RowProps {
   selected: boolean;
   // Multi-select checkbox state
   multiSelected: boolean;
+  /**
+   * CopyPaste-8ebg.55: true for ~700ms right after this row's content was
+   * copied — toggles `.row.copied` (patterns.css flash keyframes, already
+   * used by DeviceCard's `.cfield.copied`) so the click-to-copy action gets
+   * the same transient visual confirmation DeviceCard already has.
+   */
+  copied?: boolean;
   selectionMode: boolean;
   previewLines: number;
   previewSize: number;
@@ -103,6 +110,7 @@ export const HistoryRow = React.memo(function HistoryRow({
   entry,
   selected,
   multiSelected,
+  copied = false,
   selectionMode,
   previewLines,
   previewSize,
@@ -141,7 +149,7 @@ export const HistoryRow = React.memo(function HistoryRow({
     if (!revealed) return;
     const t = setTimeout(() => setRevealed(false), 10_000);
     return () => clearTimeout(t);
-  }, [revealed]);
+  }, [revealed, setRevealed]);
 
   // Whether this row should be visually blurred right now (X6 sensitive masking).
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
@@ -193,7 +201,10 @@ export const HistoryRow = React.memo(function HistoryRow({
     : `${kindLabel}: ${displayPreview.slice(0, 80)}`;
 
   const rowClass =
-    "row" + (multiSelected ? " sel" : "") + (entry.pinned ? " pinned" : "");
+    "row" +
+    (multiSelected ? " sel" : "") +
+    (entry.pinned ? " pinned" : "") +
+    (copied ? " copied" : "");
 
   // Per-row max-height (CSS var) — bounds the collapse animation to the row's
   // real allocated height (same as the virtualizer) so multi-line preview rows
@@ -295,8 +306,13 @@ export const HistoryRow = React.memo(function HistoryRow({
         <ClipMetadata entry={entry} ownDeviceId={ownDeviceId} />
       </div>
 
-      {/* Right-side actions — hover/focus-revealed (design.md Decision 13/X4). */}
-      {!selectionMode && (
+      {/* Right-side actions — hover/focus-revealed (design.md Decision 13/X4).
+          CopyPaste-f72f: the too_large_to_sync warning icon must stay visible
+          in selection-mode too — only the row-action buttons (pin/preview/
+          delete) are selection-mode-only, since they duplicate the bulk
+          toolbar's actions. Previously the whole `.row__right` div (icon
+          included) was unmounted via `{!selectionMode && (...)}`. */}
+      {(entry.too_large_to_sync || !selectionMode) && (
         <div className="row__right" onClick={(e) => e.stopPropagation()}>
           {entry.too_large_to_sync && (
             <span
@@ -307,33 +323,37 @@ export const HistoryRow = React.memo(function HistoryRow({
               <AlertTriangle aria-hidden="true" />
             </span>
           )}
-          <button
-            type="button"
-            className={entry.pinned ? "iconbtn star-btn on" : "iconbtn star-btn"}
-            aria-label={entry.pinned ? "Unpin" : "Pin"}
-            title={entry.pinned ? "Unpin" : "Pin"}
-            onClick={onPin}
-          >
-            <Pin aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="iconbtn"
-            aria-label="Preview"
-            title="Preview"
-            onClick={onPreview}
-          >
-            <Eye aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="iconbtn danger del"
-            aria-label="Delete"
-            title="Delete"
-            onClick={onDelete}
-          >
-            <Trash2 aria-hidden="true" />
-          </button>
+          {!selectionMode && (
+            <>
+              <button
+                type="button"
+                className={entry.pinned ? "iconbtn star-btn on" : "iconbtn star-btn"}
+                aria-label={entry.pinned ? "Unpin" : "Pin"}
+                title={entry.pinned ? "Unpin" : "Pin"}
+                onClick={onPin}
+              >
+                <Pin aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="iconbtn"
+                aria-label="Preview"
+                title="Preview"
+                onClick={onPreview}
+              >
+                <Eye aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="iconbtn danger del"
+                aria-label="Delete"
+                title="Delete"
+                onClick={onDelete}
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -358,6 +378,7 @@ export const HistoryRow = React.memo(function HistoryRow({
   // Per-row display state.
   if (prev.selected !== next.selected) return false;
   if (prev.multiSelected !== next.multiSelected) return false;
+  if (prev.copied !== next.copied) return false;
   if (prev.selectionMode !== next.selectionMode) return false;
   if (prev.staggerIndex !== next.staggerIndex) return false;
   if (prev.applyStagger !== next.applyStagger) return false;

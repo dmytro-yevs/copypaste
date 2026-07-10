@@ -318,6 +318,7 @@ mod tests {
             std::slice::from_ref(&pull),
             Watermark::default(),
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored, 1, "first item must be stored");
 
@@ -352,6 +353,7 @@ mod tests {
             std::slice::from_ref(&pull),
             Watermark::default(),
             u64::MAX,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
         );
         assert_eq!(stored, 1);
 

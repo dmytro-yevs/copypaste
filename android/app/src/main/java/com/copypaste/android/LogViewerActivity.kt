@@ -7,9 +7,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.text.font.FontFamily
@@ -19,7 +21,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import com.copypaste.android.ui.theme.GlassAlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -33,16 +37,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.EmptyStateCard
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.icons.LucideIcons
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -93,6 +101,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
 
     // ── State ──────────────────────────────────────────────────────────────
     val toastState = remember { GlassToastState() }
+    val exportedMsg = stringResource(R.string.log_export_success)
     var allLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var filterText by remember { mutableStateOf("") }
     var fileSizeDesc by remember { mutableStateOf("") }
@@ -101,6 +110,9 @@ fun LogViewerScreen(onBack: () -> Unit) {
     var atBottom by remember { mutableStateOf(true) }
     // CopyPaste-bdac.4: error state for IO failures in readLogs().
     var readError by remember { mutableStateOf<String?>(null) }
+    // S11 W3: distinguishes "still reading files" from "read, found nothing" so the
+    // empty-state card doesn't flash before the first successful/failed load resolves.
+    var isLoading by remember { mutableStateOf(false) }
 
     // Filtered lines derived from allLines + filterText
     val displayLines = remember(allLines, filterText) {
@@ -111,6 +123,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
     // ── Load logs ──────────────────────────────────────────────────────────
     fun loadLogs() {
         scope.launch {
+            isLoading = true
             // CopyPaste-bdac.4: wrap IO in try/catch so a missing or unreadable log
             // file shows a friendly error instead of silently staying empty.
             try {
@@ -123,6 +136,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 atBottom = true
             } catch (e: Exception) {
                 readError = "Could not read log file — try restarting the app. (${e.message})"
+            } finally {
+                isLoading = false
             }
         }
     }
@@ -165,12 +180,12 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         loadLogs()
                     }
                 }, variant = ButtonVariant.DANGER) {
-                    Text("Clear")
+                    Text(stringResource(R.string.logs_action_clear))
                 }
             },
             dismissButton = {
                 CopyPasteButton(onClick = { showClearDialog = false }, variant = ButtonVariant.GHOST) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.dialog_cancel))
                 }
             },
         )
@@ -192,7 +207,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CopyPasteTopBar(
-                title = "Logs",
+                title = stringResource(R.string.logs_title),
                 showBackButton = true,
                 onBack = onBack,
                 backContentDescription = "Back",
@@ -207,19 +222,27 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     }
                     // Refresh
                     IconButton(onClick = { loadLogs() }) {
-                        Text("Refresh")
+                        Text(stringResource(R.string.logs_action_refresh))
                     }
                     // Share / Export
                     IconButton(onClick = {
-                        LogExportHelper.shareLogsZip(ctx, onError = { msg ->
-                            scope.launch { toastState.show(msg, GlassToastKind.DANGER) }
-                        })
+                        LogExportHelper.shareLogsZip(
+                            ctx,
+                            onError = { msg ->
+                                scope.launch { toastState.show(msg, GlassToastKind.DANGER) }
+                            },
+                            onSuccess = {
+                                scope.launch {
+                                    toastState.show(exportedMsg, GlassToastKind.SUCCESS)
+                                }
+                            },
+                        )
                     }) {
-                        Text("Export")
+                        Text(stringResource(R.string.logs_action_export))
                     }
                     // Clear logs
                     IconButton(onClick = { showClearDialog = true }) {
-                        Text("Clear")
+                        Text(stringResource(R.string.logs_action_clear))
                     }
                 },
             )
@@ -273,7 +296,20 @@ fun LogViewerScreen(onBack: () -> Unit) {
             )
 
             // ── Log lines ─────────────────────────────────────────────────
-            if (displayLines.isEmpty()) {
+            if (isLoading && allLines.isEmpty()) {
+                // Distinct from the empty-state card below — matches StorageTab's
+                // in-flight indicator (16dp/2dp) so "reading" doesn't look like "empty".
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else if (displayLines.isEmpty()) {
                 // CopyPaste-bdac.15: use shared EmptyStateCard (icon+card) so the empty state
                 // matches HistoryActivity's pattern (was a bare centered Text composable).
                 // Error state (bdac.4) still uses accent2 icon but with danger text below.
@@ -313,8 +349,30 @@ fun LogViewerScreen(onBack: () -> Unit) {
     } // end Box
 }
 
+/** Log severity extracted from a log line by [logLevelMarker]. Null = no level code present. */
+internal enum class LogLevel { E, W, I, D }
+
 /**
- * Renders a single log line with level-based colour coding.
+ * Detects the severity level of a raw log line, reusing the precompiled
+ * `RE_LEVEL_*` regexes so recomposition and tests share one source of truth.
+ * Pure function — no Compose/Android dependency — so it is JVM-unit-testable
+ * without the merged-resources/native-.so constraints that block Compose tests.
+ */
+internal fun logLevelMarker(line: String): LogLevel? {
+    if (!RE_LEVEL_ANY.containsMatchIn(line)) return null
+    return when {
+        RE_LEVEL_E.containsMatchIn(line) -> LogLevel.E
+        RE_LEVEL_W.containsMatchIn(line) -> LogLevel.W
+        RE_LEVEL_I.containsMatchIn(line) -> LogLevel.I
+        RE_LEVEL_D.containsMatchIn(line) -> LogLevel.D
+        else -> null
+    }
+}
+
+/**
+ * Renders a single log line with level-based colour coding AND a leading
+ * marker (icon or compact text badge) — colour alone is not an accessible
+ * level signal (CopyPaste-myh8.11 S11 W3).
  *
  * Log format written by AppLogger:
  *   `2026-01-15 12:34:56.789 E/MyTag: message`
@@ -330,39 +388,71 @@ fun LogViewerScreen(onBack: () -> Unit) {
 @Composable
 private fun LogLine(line: String) {
     val colorScheme = MaterialTheme.colorScheme
-    val color = when {
-        // Level codes come after the timestamp: "... E/Tag:" or "... W/Tag:"
-        // Uses file-level precompiled regexes to avoid allocation on every recomposition.
-        RE_LEVEL_ANY.containsMatchIn(line) -> {
-            when {
-                RE_LEVEL_E.containsMatchIn(line) -> colorScheme.error
-                RE_LEVEL_W.containsMatchIn(line) -> colorScheme.tertiary
-                RE_LEVEL_I.containsMatchIn(line) -> colorScheme.onSurface
-                RE_LEVEL_D.containsMatchIn(line) -> colorScheme.onSurfaceVariant
-                else -> colorScheme.onSurfaceVariant
-            }
+    val level = logLevelMarker(line)
+    val color = when (level) {
+        LogLevel.E -> colorScheme.error
+        LogLevel.W -> colorScheme.tertiary
+        LogLevel.I -> colorScheme.onSurface
+        LogLevel.D -> colorScheme.onSurfaceVariant
+        null -> when {
+            // Stack trace lines
+            line.trimStart().startsWith("at ") -> colorScheme.onSurfaceVariant
+            // Crash report header lines (=== ... ===)
+            line.startsWith("=") -> colorScheme.primary
+            else -> colorScheme.onSurfaceVariant
         }
-        // Stack trace lines
-        line.trimStart().startsWith("at ") -> colorScheme.onSurfaceVariant
-        // Crash report header lines (=== ... ===)
-        line.startsWith("=") -> colorScheme.primary
-        else -> colorScheme.onSurfaceVariant
     }
 
-    // A6: soft-wrap long lines so everything is visible without horizontal scrolling
-    Text(
-        text = line,
-        style = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-        ),
-        color = color,
-        softWrap = true,
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 1.dp),
-    )
+        verticalAlignment = Alignment.Top,
+    ) {
+        // Leading marker: E/W/I get a StatusXxx icon (LucideIcons role reuse); D has
+        // no clean status-icon role, so it falls back to a compact text badge.
+        when (level) {
+            LogLevel.E -> Icon(
+                imageVector = LucideIcons.StatusErr,
+                contentDescription = stringResource(R.string.log_level_error),
+                tint = color,
+                modifier = Modifier.size(11.dp),
+            )
+            LogLevel.W -> Icon(
+                imageVector = LucideIcons.StatusWarn,
+                contentDescription = stringResource(R.string.log_level_warning),
+                tint = color,
+                modifier = Modifier.size(11.dp),
+            )
+            LogLevel.I -> Icon(
+                imageVector = LucideIcons.StatusInfo,
+                contentDescription = stringResource(R.string.log_level_info),
+                tint = color,
+                modifier = Modifier.size(11.dp),
+            )
+            LogLevel.D -> Text(
+                text = "D",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = CpTypography.micro.fontSize,
+                ),
+                color = color,
+            )
+            null -> {}
+        }
+        // A6: soft-wrap long lines so everything is visible without horizontal scrolling
+        Text(
+            text = line,
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            ),
+            color = color,
+            softWrap = true,
+            modifier = Modifier.padding(start = if (level != null) 4.dp else 0.dp),
+        )
+    }
 }
 
 // ── Pre-compiled log-level regexes (hoisted to avoid per-line-per-recomposition allocation) ──
@@ -418,7 +508,7 @@ private fun readLogs(context: android.content.Context): LogReadResult {
         val toRead = share.coerceAtMost(byteBudget)
         if (toRead <= 0L) continue
 
-        allLines.add("── ${file.name} (${formatSize(fileSize)}) ──")
+        allLines.add("── ${file.name} (${formatSize(context, fileSize)}) ──")
 
         val content: String
         if (fileSize <= toRead) {
@@ -433,7 +523,7 @@ private fun readLogs(context: android.content.Context): LogReadResult {
             // Find first newline so we don't start mid-line
             val firstNl = content.indexOf('\n')
             val trimmed = if (firstNl >= 0) content.substring(firstNl + 1) else content
-            allLines.add("  [… ${formatSize(skip)} omitted — showing last ${formatSize(toRead)} …]")
+            allLines.add("  [… ${formatSize(context, skip)} omitted — showing last ${formatSize(context, toRead)} …]")
             allLines.addAll(trimmed.lines())
             truncated = true
             byteBudget -= toRead
@@ -447,7 +537,7 @@ private fun readLogs(context: android.content.Context): LogReadResult {
     // Use removeAt(size-1) instead of removeLast() — removeLast() is API 35+ on java.util.List.
     while (allLines.isNotEmpty() && allLines.last().isBlank()) allLines.removeAt(allLines.size - 1)
 
-    val sizeDesc = "${formatSize(totalBytes)} across ${files.size} file${if (files.size == 1) "" else "s"}"
+    val sizeDesc = "${formatSize(context, totalBytes)} across ${files.size} file${if (files.size == 1) "" else "s"}"
     return LogReadResult(allLines, sizeDesc, truncated)
 }
 
@@ -462,10 +552,8 @@ private fun clearLogs(context: android.content.Context) {
     }
 }
 
-private fun formatSize(bytes: Long): String {
-    return when {
-        bytes >= 1024 * 1024 -> "%.1f MB".format(bytes.toDouble() / (1024 * 1024))
-        bytes >= 1024 -> "${bytes / 1024} KB"
-        else -> "$bytes B"
-    }
+// Locale-aware short size format (e.g. "1.2 MB") via the platform formatter
+// instead of a hand-rolled, English-only unit string.
+private fun formatSize(context: android.content.Context, bytes: Long): String {
+    return android.text.format.Formatter.formatShortFileSize(context, bytes)
 }

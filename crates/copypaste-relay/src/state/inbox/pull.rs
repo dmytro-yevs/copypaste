@@ -5,6 +5,19 @@ use crate::models::PullItem;
 
 use super::super::MAX_PULL_BYTES_BUDGET;
 
+/// A page returned by [`RelayStore::pull_items`], plus whether more qualifying
+/// items exist beyond what was returned.
+///
+/// `has_more` is `true` when either the byte-budget cap ([`MAX_PULL_BYTES_BUDGET`])
+/// broke the collection loop before `limit` items were gathered, or the inbox
+/// held more than `limit` qualifying items past the cursor (or both) — see
+/// [`RelayStore::pull_items`] (CopyPaste-8ebg.58).
+#[derive(Debug, Clone)]
+pub struct PullPage {
+    pub items: Vec<PullItem>,
+    pub has_more: bool,
+}
+
 impl super::super::RelayStore {
     /// Return up to `limit` items in `device_id`'s sync inbox strictly after the
     /// `(since, since_id)` composite cursor, ordered ascending.
@@ -42,13 +55,24 @@ impl super::super::RelayStore {
     /// returns — it never clones+sorts the whole inbox under the global mutex
     /// (M4). A `limit` of `0` is treated as "no items" rather than "unbounded";
     /// callers wanting the whole window pass a large explicit cap.
+    ///
+    /// # `has_more` (CopyPaste-8ebg.58)
+    ///
+    /// A short return (fewer than `limit` items) is ambiguous on its own: it
+    /// can mean either "the inbox is exhausted" or "the
+    /// [`MAX_PULL_BYTES_BUDGET`] byte cap was hit mid-page" (see the `break`
+    /// below). [`PullPage::has_more`] disambiguates this explicitly: it is
+    /// `true` when the byte-budget broke the loop before `limit` items were
+    /// collected, OR when there were more than `limit` qualifying items past
+    /// the cursor to begin with (or both) — so callers no longer need to infer
+    /// "caught up" from `items.len() < limit`.
     pub fn pull_items(
         &self,
         device_id: &str,
         since: u64,
         since_id: Option<i64>,
         limit: usize,
-    ) -> Result<Vec<PullItem>, RelayError> {
+    ) -> Result<PullPage, RelayError> {
         let inbox = self
             .sync_items
             .get(device_id)
@@ -73,9 +97,14 @@ impl super::super::RelayStore {
         // of cloning while holding the lock, stalling all other requests (DoS).
         let mut budget_remaining = MAX_PULL_BYTES_BUDGET;
         let mut result = Vec::new();
-        for item in inbox[start..].iter().take(limit) {
+        // Truncation cause (a): the byte budget broke the loop before `limit`
+        // items (or the whole qualifying window) were collected.
+        let mut budget_truncated = false;
+        let qualifying = &inbox[start..];
+        for item in qualifying.iter().take(limit) {
             let item_bytes = item.content_b64.len();
             if item_bytes > budget_remaining {
+                budget_truncated = true;
                 break;
             }
             budget_remaining -= item_bytes;
@@ -88,7 +117,15 @@ impl super::super::RelayStore {
             });
         }
 
-        Ok(result)
+        // Truncation cause (b): there were more qualifying items than `limit`
+        // itself, independent of the byte budget.
+        let limit_truncated = qualifying.len() > limit;
+        let has_more = budget_truncated || limit_truncated;
+
+        Ok(PullPage {
+            items: result,
+            has_more,
+        })
     }
 }
 
@@ -118,7 +155,8 @@ mod tests {
         push_text(&mut store, &device_a_id(), 3000);
         let items = store
             .pull_items(&device_a_id(), 1000, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].wall_time, 2000);
         assert_eq!(items[1].wall_time, 3000);
@@ -139,7 +177,8 @@ mod tests {
         push_text(&mut store, &device_a_id(), 200);
         let items = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(items.len(), 2);
     }
 
@@ -159,7 +198,8 @@ mod tests {
         push_text(&mut store, &device_a_id(), 2000);
         let items = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         let times: Vec<u64> = items.iter().map(|i| i.wall_time).collect();
         assert_eq!(times, vec![1000, 2000, 3000]);
     }
@@ -183,7 +223,7 @@ mod tests {
         for t in 1u64..=10 {
             push_text(&mut store, &device_a_id(), t);
         }
-        let page = store.pull_items(&device_a_id(), 0, None, 3).unwrap();
+        let page = store.pull_items(&device_a_id(), 0, None, 3).unwrap().items;
         assert_eq!(page.len(), 3, "limit must cap the page size");
         assert_eq!(
             page.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
@@ -205,7 +245,10 @@ mod tests {
         let mut seen = Vec::new();
         let mut since = 0u64;
         loop {
-            let page = store.pull_items(&device_a_id(), since, None, 2).unwrap();
+            let page = store
+                .pull_items(&device_a_id(), since, None, 2)
+                .unwrap()
+                .items;
             if page.is_empty() {
                 break;
             }
@@ -228,7 +271,7 @@ mod tests {
         let id2 = push_text(&mut store, &device_a_id(), 10);
         let id3 = push_text(&mut store, &device_a_id(), 10);
 
-        let page1 = store.pull_items(&device_a_id(), 0, None, 2).unwrap();
+        let page1 = store.pull_items(&device_a_id(), 0, None, 2).unwrap().items;
         assert_eq!(page1.len(), 2);
         assert_eq!(
             page1.iter().map(|i| i.id).collect::<Vec<_>>(),
@@ -238,7 +281,8 @@ mod tests {
         let last = page1.last().unwrap();
         let page2 = store
             .pull_items(&device_a_id(), last.wall_time, Some(last.id), 2)
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(
             page2.iter().map(|i| i.id).collect::<Vec<_>>(),
             vec![id3],
@@ -252,7 +296,8 @@ mod tests {
         loop {
             let page = store
                 .pull_items(&device_a_id(), since, since_id, 2)
-                .unwrap();
+                .unwrap()
+                .items;
             if page.is_empty() {
                 break;
             }
@@ -276,7 +321,8 @@ mod tests {
         }
         let items = store
             .pull_items(&device_a_id(), 0, None, usize::MAX)
-            .unwrap();
+            .unwrap()
+            .items;
         assert_eq!(
             items.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
             vec![10, 20, 30, 40, 50]

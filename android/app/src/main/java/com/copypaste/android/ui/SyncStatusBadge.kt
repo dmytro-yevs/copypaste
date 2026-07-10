@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -56,8 +57,8 @@ import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.R
 import com.copypaste.android.RECENT_SYNC_MS
 import com.copypaste.android.Settings
-import java.text.DateFormat
-import java.util.Date
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.relativeSyncLabel
 import kotlinx.coroutines.delay
 
 /**
@@ -357,7 +358,7 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                     Text(
                         text = "Misconfig",
                         color = MaterialTheme.colorScheme.tertiary,
-                        fontSize = 10.sp,
+                        fontSize = CpTypography.micro.fontSize,
                         fontWeight = FontWeight.Medium,
                     )
                 }
@@ -412,19 +413,7 @@ private fun SyncStatusSheet(
     val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
     // Relative last-sync label matching the DevicesScreen PeerRow format exactly.
-    val lastSyncLabel: String = if (lastActivityMs <= 0L) {
-        "Never"
-    } else {
-        val elapsed = (nowMs - lastActivityMs) / 1_000L
-        when {
-            elapsed < 60      -> "${elapsed}s ago"
-            elapsed < 3_600   -> "${elapsed / 60}m ago"
-            elapsed < 86_400  -> "${elapsed / 3_600}h ago"
-            // Older than a day: fall back to a short locale date+time.
-            else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                .format(Date(lastActivityMs))
-        }
-    }
+    val lastSyncLabel: String = relativeSyncLabel(nowMs, lastActivityMs)
 
     // Masked email: show "u***r@example.com" style. If blank, omit the row.
     // settings.supabaseEmail is wired in SyncStatusBadge already (same Settings
@@ -468,7 +457,7 @@ private fun SheetContent(
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(0.dp)) {
         Text(
-            text = "Sync status",
+            text = stringResource(R.string.sync_status_sheet_title),
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
@@ -476,7 +465,10 @@ private fun SheetContent(
 
         Spacer(Modifier.height(16.dp))
 
-        SheetRow(label = "Devices connected", value = if (count > 0) "$count" else "None")
+        SheetRow(
+            label = stringResource(R.string.sync_devices_connected_label),
+            value = if (count > 0) "$count" else stringResource(R.string.sync_devices_connected_none),
+        )
 
         HorizontalDivider(
             modifier = Modifier.padding(vertical = 8.dp),
@@ -484,7 +476,7 @@ private fun SheetContent(
             thickness = 1.dp,
         )
 
-        SheetRow(label = "Last sync", value = lastSyncLabel)
+        SheetRow(label = stringResource(R.string.meta_label_last_sync), value = lastSyncLabel)
 
         if (maskedEmail != null) {
             HorizontalDivider(
@@ -492,7 +484,7 @@ private fun SheetContent(
                 color = MaterialTheme.colorScheme.outlineVariant,
                 thickness = 1.dp,
             )
-            SheetRow(label = "Account", value = maskedEmail)
+            SheetRow(label = stringResource(R.string.sync_status_account_label), value = maskedEmail)
         }
     }
 }
@@ -510,12 +502,12 @@ private fun SheetRow(label: String, value: String) {
         Text(
             text = label,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 13.sp,
+            fontSize = CpTypography.bodyMono.fontSize,
         )
         Text(
             text = value,
             color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 13.sp,
+            fontSize = CpTypography.bodyMono.fontSize,
         )
     }
 }
@@ -740,8 +732,13 @@ internal enum class IpcSyncBadgeState(val wireValue: String) {
  *  - Device count > 0 → appended "· N device(s)"
  *  - No devices → appended "· No paired devices"
  *
- * Pure function — usable in JVM unit tests (no Compose runtime needed).
+ * CopyPaste-myh8.13 S13 Wave a: now @Composable (was a "pure function" per this
+ * comment's original claim, but its only call site is inline inside a @Composable
+ * body — see [SyncStatusBadge] — and no JVM unit test called it directly, so the
+ * purity contract was aspirational, not load-bearing) so the relative-time portion
+ * can share [relativeSyncLabel] instead of re-duplicating the s/m/h-ago buckets.
  */
+@Composable
 internal fun buildSyncTooltip(
     badgeState: SyncBadgeState,
     lastActivityMs: Long,
@@ -752,30 +749,28 @@ internal fun buildSyncTooltip(
 
     when (badgeState) {
         SyncBadgeState.NetworkOffline,
-        SyncBadgeState.DaemonUnreachable -> parts += "Daemon unreachable"
+        SyncBadgeState.DaemonUnreachable -> parts += stringResource(R.string.sync_tooltip_daemon_unreachable)
         // CopyPaste-5qbe: Idle shows last-sync time (or "No sync yet"), not "Daemon unreachable".
         // Mirrors macOS SyncStatusChip buildTooltip: idle/offline-state check is only
         // for state === "offline"; idle falls through to the lastSyncMs branch.
         SyncBadgeState.Idle,
         SyncBadgeState.Connected -> {
             if (lastActivityMs > 0L) {
-                val elapsed = (nowMs - lastActivityMs) / 1_000L
-                val rel = when {
-                    elapsed < 60      -> "${elapsed}s ago"
-                    elapsed < 3_600   -> "${elapsed / 60}m ago"
-                    elapsed < 86_400  -> "${elapsed / 3_600}h ago"
-                    else              -> DateFormat.getDateTimeInstance(
-                        DateFormat.SHORT, DateFormat.SHORT
-                    ).format(Date(lastActivityMs))
-                }
-                parts += "Last sync: $rel"
+                parts += stringResource(
+                    R.string.sync_tooltip_last_sync_format,
+                    relativeSyncLabel(nowMs, lastActivityMs),
+                )
             } else {
-                parts += "No sync yet"
+                parts += stringResource(R.string.sync_tooltip_no_sync_yet)
             }
         }
     }
 
-    parts += if (count > 0) "$count device${if (count != 1) "s" else ""}" else "No paired devices"
+    parts += if (count > 0) {
+        pluralStringResource(R.plurals.sync_tooltip_device_count, count, count)
+    } else {
+        stringResource(R.string.sync_tooltip_no_paired_devices)
+    }
 
     return parts.joinToString(" · ")
 }

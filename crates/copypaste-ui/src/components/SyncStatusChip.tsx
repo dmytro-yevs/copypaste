@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatWallTime } from "../lib/ipc";
-import type { SyncBadgeState } from "../lib/ipc";
+import type { PairedDevice, SyncBadgeState } from "../lib/ipc";
 
 // ---------------------------------------------------------------------------
 // SyncState — canonical six-state display model (CMP-7 parity with Android)
@@ -53,6 +53,15 @@ interface SyncInfo {
    * be true, but the amber chip is driven by this field independently.
    */
   cloudMisconfig: boolean;
+  /**
+   * CopyPaste-8ebg.26: count of paired peers that individually look stalled
+   * (see `isPeerStalled`), even though the overall `state` above is derived
+   * from the daemon's *global* `badge_state` and can stay green as long as
+   * ONE peer is healthy. Surfaced as a separate warning pill so a peer with
+   * a broken key (e.g. rekey failures — see `fanout.rs` `RekeyOutcome::Failed`)
+   * does not silently hide behind a healthy sibling peer.
+   */
+  stalledPeerCount: number;
 }
 
 /**
@@ -88,9 +97,52 @@ export const SYNC_POLL_INTERVAL_MS = 2_000;
  */
 export const PEERS_POLL_INTERVAL_MS = 10_000;
 
+/**
+ * CopyPaste-8ebg.26: how stale an individual peer's `last_sync_at` must be
+ * (in ms) before it is flagged as "stalled" in the per-peer warning pill.
+ *
+ * Deliberately much longer than `SYNC_BADGE_RECENT_MS` (5 min, used for the
+ * *global* badge dot): brief offline blips are normal and must not spam a
+ * warning. This threshold targets the audit scenario — a peer with a broken
+ * sync key that silently receives nothing for a long time while the badge
+ * stays green because a different peer is healthy.
+ */
+export const PEER_STALL_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * CopyPaste-8ebg.26: per-peer stall predicate — the piece the global badge
+ * cannot express. A peer counts as stalled when:
+ *   - it has a non-zero `rekey_failures` count (CopyPaste-ptgcc) — a broken
+ *     pairwise key is a definite, immediate failure and supersedes waiting
+ *     out `PEER_STALL_THRESHOLD_MS` for `last_sync_at` to go stale, or
+ *   - it has synced before but `last_sync_at` is older than
+ *     `PEER_STALL_THRESHOLD_MS`, or
+ *   - it has NEVER synced (`last_sync_at === null`) despite having been
+ *     paired (`added_at`) longer than the same threshold — covers a broken
+ *     key/handshake that never produced a single successful exchange.
+ *
+ * Freshly-paired peers (within the threshold) are never flagged on the time
+ * checks — pairing and the first catch-up replay legitimately take a little
+ * while — but a non-zero `rekey_failures` still flags immediately regardless
+ * of how recently the peer was paired or last synced.
+ */
+export function isPeerStalled(peer: PairedDevice, nowMs: number): boolean {
+  if ((peer.rekey_failures ?? 0) > 0) {
+    return true;
+  }
+  if (peer.last_sync_at !== null) {
+    return nowMs - peer.last_sync_at * 1000 > PEER_STALL_THRESHOLD_MS;
+  }
+  if (peer.added_at > 0) {
+    return nowMs - peer.added_at * 1000 > PEER_STALL_THRESHOLD_MS;
+  }
+  // No last_sync_at and no known added_at — nothing to compare against.
+  return false;
+}
 
 /**
  * Map the daemon's canonical `SyncBadgeState` to the component's internal
@@ -169,6 +221,15 @@ function buildTooltip(info: SyncInfo): string {
     parts.push(info.email);
   }
 
+  // CopyPaste-8ebg.26: call out stalled peers explicitly — this is exactly
+  // the case the global `state` above cannot express (it can read "synced"
+  // while one paired peer has been silently receiving nothing for a while).
+  if (info.stalledPeerCount > 0) {
+    parts.push(
+      `${info.stalledPeerCount} peer${info.stalledPeerCount !== 1 ? "s" : ""} not syncing`
+    );
+  }
+
   return parts.join(" · ");
 }
 
@@ -192,6 +253,7 @@ export function SyncStatusChip() {
     lastSyncMs: null,
     email: null,
     cloudMisconfig: false,
+    stalledPeerCount: 0,
   });
 
   // VISM-12: track previous state so we can detect the transition INTO
@@ -226,7 +288,7 @@ export function SyncStatusChip() {
     // If the sync-status call itself failed → daemon is offline (IPC socket down).
     // CMP-7: use "offline" (IPC unreachable) — not "error" (backend error).
     if (syncResult[0].status === "rejected") {
-      setInfo({ state: "offline", deviceCount: 0, lastSyncMs: null, email: null, cloudMisconfig: false });
+      setInfo({ state: "offline", deviceCount: 0, lastSyncMs: null, email: null, cloudMisconfig: false, stalledPeerCount: 0 });
       return;
     }
 
@@ -263,13 +325,17 @@ export function SyncStatusChip() {
     }
     prevStateRef.current = state;
 
-    setInfo({
+    // Functional update: refreshSync (2s) must not clobber stalledPeerCount,
+    // which is computed independently by refreshPeers (10s) — same pattern
+    // refreshPeers already uses in reverse to avoid clobbering `state`.
+    setInfo((prev) => ({
       state,
       deviceCount,
       lastSyncMs,
       email: sync.email ?? null,
       cloudMisconfig,
-    });
+      stalledPeerCount: prev.stalledPeerCount,
+    }));
   }, []); // no external deps — api is module-level stable, setInfo/peerCountRef are stable
 
   // Stable peer-count poll (10s). Decoupled from the 2s sync-status poll so
@@ -283,8 +349,15 @@ export function SyncStatusChip() {
       if (cancelRef.current) return;
       const count = peers.length;
       peerCountRef.current = count;
-      // Patch only deviceCount — leave all other SyncInfo fields intact.
-      setInfo((prev) => ({ ...prev, deviceCount: count }));
+      // CopyPaste-8ebg.26: per-peer stall check, independent of the global
+      // badge_state — a single healthy peer must not hide a stalled one.
+      const nowMs = Date.now();
+      const stalledPeerCount = peers.reduce(
+        (n: number, peer: PairedDevice) => (isPeerStalled(peer, nowMs) ? n + 1 : n),
+        0
+      );
+      // Patch only deviceCount/stalledPeerCount — leave all other SyncInfo fields intact.
+      setInfo((prev) => ({ ...prev, deviceCount: count, stalledPeerCount }));
     } catch {
       // Keep last known count on error — daemon may be briefly unavailable.
       // refreshSync will flip to "offline" if getSyncStatus also fails.
@@ -316,44 +389,70 @@ export function SyncStatusChip() {
       ? "var(--err)"
       : "var(--faint)";
 
+  // CopyPaste-8ebg.52: the daemon dying mid-session (IPC socket rejected, or
+  // the daemon reporting a hard backend error) was previously represented
+  // only by a 6px dot flipping to red plus a hover-only tooltip — easy to
+  // miss entirely, especially since the chip lives in a corner of the chrome.
+  // Surface it as a visible banner too, reusing the existing `.banner`
+  // pattern (patterns.css) already used for the same class of message
+  // elsewhere (StatusBanners.tsx) — no new CSS.
+  const daemonDown = info.state === "offline" || info.state === "error";
+
   return (
-    <div
-      className="chip"
-      title={tooltip}
-      aria-label={`Sync: ${info.state}. ${tooltip}`}
-    >
-      {/* Coloured status dot; one-shot .online-pulse on transition INTO a green state (VISM-12).
-          CMP-7: green states are "synced" and "syncing" (isConnectedState).
-          1jms.27: when state is "syncing", apply .syncing-dot (gentle opacity
-          breathe) to distinguish an active in-flight sync from a completed one.
-          The .online-pulse class is removed after the 2 s animation ends to allow re-trigger.
-          Note: .online-pulse and .syncing-dot share the same element; in the
-          brief overlap at connect-time, online-pulse (forwards) takes visual
-          precedence then ends, leaving syncing-dot if still syncing. */}
-      <span
-        className="dot"
-        style={{ background: dotColor }}
-        data-pulsing={pulsing}
-        onAnimationEnd={() => setPulsing(false)}
-      />
-      {/* Device count — only shown when at least one peer is paired */}
-      {info.deviceCount > 0 && (
-        <span>
-          {info.deviceCount}
-        </span>
-      )}
-      {/* PG-44 / CopyPaste-k1jo: visible cloud-misconfig chip (Android parity).
-          Android shows a badge when cloud sync is misconfigured; macOS was
-          tooltip-only. Show a compact warning pill so the state is visible
-          without hovering. Only rendered when supabase_url is set but the
-          daemon reports supabase_configured===false. */}
-      {info.cloudMisconfig && (
+    <>
+      <div
+        className="chip"
+        title={tooltip}
+        aria-label={`Sync: ${info.state}. ${tooltip}`}
+      >
+        {/* Coloured status dot; one-shot .online-pulse on transition INTO a green state (VISM-12).
+            CMP-7: green states are "synced" and "syncing" (isConnectedState).
+            1jms.27: when state is "syncing", apply .syncing-dot (gentle opacity
+            breathe) to distinguish an active in-flight sync from a completed one.
+            The .online-pulse class is removed after the 2 s animation ends to allow re-trigger.
+            Note: .online-pulse and .syncing-dot share the same element; in the
+            brief overlap at connect-time, online-pulse (forwards) takes visual
+            precedence then ends, leaving syncing-dot if still syncing. */}
         <span
-          aria-label="Cloud sync misconfigured"
-        >
-          Misconfig
-        </span>
+          className="dot"
+          style={{ background: dotColor }}
+          data-pulsing={pulsing}
+          onAnimationEnd={() => setPulsing(false)}
+        />
+        {/* Device count — only shown when at least one peer is paired */}
+        {info.deviceCount > 0 && (
+          <span>
+            {info.deviceCount}
+          </span>
+        )}
+        {/* PG-44 / CopyPaste-k1jo: visible cloud-misconfig chip (Android parity).
+            Android shows a badge when cloud sync is misconfigured; macOS was
+            tooltip-only. Show a compact warning pill so the state is visible
+            without hovering. Only rendered when supabase_url is set but the
+            daemon reports supabase_configured===false. */}
+        {info.cloudMisconfig && (
+          <span
+            aria-label="Cloud sync misconfigured"
+          >
+            Misconfig
+          </span>
+        )}
+        {/* CopyPaste-8ebg.26: per-peer stall warning — rendered independently
+            of `dotColor`/`info.state` so it stays visible even when the
+            global badge is green because a DIFFERENT peer is healthy. */}
+        {info.stalledPeerCount > 0 && (
+          <span
+            aria-label={`${info.stalledPeerCount} peer${info.stalledPeerCount !== 1 ? "s" : ""} not syncing`}
+          >
+            ⚠ {info.stalledPeerCount}
+          </span>
+        )}
+      </div>
+      {daemonDown && (
+        <div className="banner banner--err" role="alert" data-testid="sync-daemon-down-banner">
+          <span className="banner__x">Background service unreachable — clipboard sync paused.</span>
+        </div>
       )}
-    </div>
+    </>
   );
 }

@@ -120,6 +120,19 @@ pub struct RelayStore {
     /// the previous behaviour.
     pub(self) reg_attempts: HashMap<(Option<IpAddr>, String), VecDeque<Instant>>,
 
+    /// Operator-configured ceiling on registration attempts per
+    /// `(client_ip, device_id)` within `REG_LIMIT_WINDOW` (CopyPaste-vgpy).
+    /// Sourced from `RelayConfig.reg_limit_max_attempts` (env:
+    /// `RELAY_REG_LIMIT_MAX_ATTEMPTS`). Defaults to `REG_LIMIT_MAX_ATTEMPTS`
+    /// (5) when constructed via `new()`/`new_with_cap()`/`new_persistent()` —
+    /// callers that need a non-default ceiling call
+    /// [`RelayStore::set_reg_limit_max_attempts`] after construction. Kept as
+    /// a post-construction setter (rather than a `new_persistent` parameter)
+    /// so this change does not ripple the constructor's positional signature
+    /// across its ~15 existing test call sites (CopyPaste-vgpy was split off
+    /// specifically to avoid that ripple).
+    pub(self) reg_limit_max_attempts: usize,
+
     // -----------------------------------------------------------------------
     // Prometheus metrics counters (see api/metrics.rs)
     // -----------------------------------------------------------------------
@@ -251,6 +264,7 @@ impl RelayStore {
             sync_items: HashMap::new(),
             next_sync_id_per_device: HashMap::new(),
             reg_attempts: HashMap::new(),
+            reg_limit_max_attempts: REG_LIMIT_MAX_ATTEMPTS,
             items_total: Arc::new(AtomicU64::new(0)),
             evictions_total: Arc::new(AtomicU64::new(0)),
             max_items_per_device,
@@ -262,6 +276,18 @@ impl RelayStore {
         };
         store.rehydrate_from_db()?;
         Ok(store)
+    }
+
+    /// Override the registration rate-limit ceiling (default
+    /// `REG_LIMIT_MAX_ATTEMPTS`) from `RelayConfig.reg_limit_max_attempts`
+    /// (CopyPaste-vgpy). Called by `main.rs` once at startup, after
+    /// construction — see the field doc comment on `reg_limit_max_attempts`
+    /// for why this is a setter rather than a constructor parameter.
+    // `main.rs` is the sole caller, but integration tests compile this module
+    // standalone via `#[path]` without `main.rs`, so it reads as dead there.
+    #[allow(dead_code)]
+    pub fn set_reg_limit_max_attempts(&mut self, max_attempts: usize) {
+        self.reg_limit_max_attempts = max_attempts;
     }
 
     /// Load every persisted device, token set and inbox from the backing

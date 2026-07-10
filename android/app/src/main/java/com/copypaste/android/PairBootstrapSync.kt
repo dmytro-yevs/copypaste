@@ -296,6 +296,13 @@ internal fun PairController.finalizeSync(peer: ScannedPairing, bootstrap: Bootst
                         // CopyPaste-3k6m (ABI 17): persist the peer's stable device UUID.
                         peerDeviceId = bootstrap.peerDeviceId?.takeIf { it.isNotBlank() }
                             ?: peer.deviceId.takeIf { it.isNotBlank() },
+                        // CopyPaste-6udn (ABI 19): persist the peer's linked Supabase
+                        // account id. No fallback source exists — DiscoveredPeer/
+                        // ScannedPairing carry no supabase-account field — so this is
+                        // the bootstrap value straight through.
+                        // Normalize blank to null for parity with peerDeviceId above —
+                        // putOpt would otherwise persist an empty-string key.
+                        peerSupabaseAccountId = bootstrap.peerSupabaseAccountId?.takeIf { it.isNotBlank() },
                     )
                 )
                 pairedFingerprint = bootstrap.peerFingerprint

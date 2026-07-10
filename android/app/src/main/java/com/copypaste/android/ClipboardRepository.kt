@@ -527,6 +527,13 @@ class ClipboardRepository(context: Context) {
     ): String = exportHistoryImpl(encryptionKey, includeSensitive)
 
     // Extracted to ClipboardRepositorySync.kt (CopyPaste-ra15.4).
-    suspend fun importHistory(json: String, encryptionKey: ByteArray): Int =
-        importHistoryImpl(json, encryptionKey)
+    //
+    // CopyPaste-myh8.9: [settings] threaded in so file-type items whose declared
+    // byte size exceeds [Settings.maxFileSizeBytes] are skipped rather than
+    // imported. Today's exportHistoryImpl only ever emits content_type="text"
+    // items (binary items are explicitly excluded from export), so this gate is
+    // forward-compatible dead code against the current export format — it guards
+    // any FUTURE non-text item a differently-produced import JSON might carry.
+    suspend fun importHistory(json: String, encryptionKey: ByteArray, settings: Settings): Int =
+        importHistoryImpl(json, encryptionKey, settings)
 }

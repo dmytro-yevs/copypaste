@@ -27,20 +27,26 @@ export function ClipPreview({ entry, masked, onReveal, mono }: ClipPreviewProps)
   const cls = mono ? "row__title mono" : "row__title";
 
   if (masked) {
+    // CopyPaste-8ebg.55: a real <button> instead of a span+onClick — native
+    // button semantics give this Tab-stop focus and Enter/Space activation
+    // for free, fixing the keyboard-unreachable reveal affordance. The mask
+    // stays `aria-hidden` (the accessible name must never leak the plaintext
+    // preview — X6), so the button carries its own explicit aria-label.
     const reveal = (e: MouseEvent) => {
       e.stopPropagation();
       onReveal();
     };
     return (
       <div className={cls}>
-        <span
+        <button
+          type="button"
           className="mask"
-          aria-hidden="true"
+          aria-label="Sensitive content hidden — activate to reveal"
           title="Click to reveal sensitive content"
           onClick={reveal}
         >
-          {entry.preview}
-        </span>
+          <span aria-hidden="true">{entry.preview}</span>
+        </button>
       </div>
     );
   }

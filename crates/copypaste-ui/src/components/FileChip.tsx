@@ -141,9 +141,13 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
 
   return (
     <span ref={mountedRefCallback}>
-      {/* Filename + optional size — file identity chip. */}
-      <span className="chip chip--ct" style={{ "--ct": "var(--c-file)" } as CSSProperties}>
-        <span title={filename}>
+      {/* Filename + optional size — file identity chip.
+          CopyPaste-f72f: long paths/filenames truncate from the *start*
+          (filechip__name, direction:rtl trick) so the meaningful tail —
+          the actual filename + extension — stays visible instead of being
+          cut off by end-truncating ellipsis. */}
+      <span className="chip chip--ct filechip" style={{ "--ct": "var(--c-file)" } as CSSProperties}>
+        <span className="filechip__name" title={filename}>
           {filename}
         </span>
         {resolvedSize !== null && (

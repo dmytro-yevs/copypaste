@@ -73,6 +73,13 @@ pub struct BootstrapResult {
     /// `OriginDeviceFilter` can resolve clipboard item names by UUID instead of
     /// falling back to the TLS cert fingerprint.
     pub peer_device_id: Option<String>,
+    /// ABI 19 (CopyPaste-gldr): the PEER's non-secret Supabase/cloud account
+    /// id, learned in-band over the authenticated bootstrap tunnel (sourced
+    /// from `BootstrapPairing.peer_supabase_account_id`). `None` for legacy
+    /// peers or peers with no cloud account configured. Kotlin persists it on
+    /// the `PairedPeer` so cross-account pairing mismatches can be detected,
+    /// at parity with the macOS daemon (CopyPaste-yw2k).
+    pub peer_supabase_account_id: Option<String>,
 }
 
 /// FFI mirror of [`copypaste_p2p::bootstrap::SyncProvisioning`].
@@ -268,8 +275,9 @@ pub fn build_android_peer_meta(
     }
 }
 
-/// HB-1b (ABI 14): map a completed `BootstrapPairing` into the FFI
-/// [`BootstrapResult`], carrying the PEER's `peer_*` metadata through so Kotlin
+/// HB-1b (ABI 14) / ABI 19 (CopyPaste-gldr): map a completed
+/// `BootstrapPairing` into the FFI [`BootstrapResult`], carrying the PEER's
+/// `peer_*` metadata (including `peer_supabase_account_id`) through so Kotlin
 /// can persist + render it. Shared by the QR-initiator path (the discovery paths
 /// build a [`pairing::ConfirmedPairing`] instead).
 pub fn bootstrap_result_from_pairing(
@@ -286,13 +294,16 @@ pub fn bootstrap_result_from_pairing(
         peer_local_ip: pairing.peer_local_ip,
         peer_public_ip: pairing.peer_public_ip,
         peer_device_id: pairing.peer_device_id,
+        peer_supabase_account_id: pairing.peer_supabase_account_id,
     }
 }
 
-/// HB-1b (ABI 14): map a completed `BootstrapPairing` into the discovery-path
-/// [`pairing::ConfirmedPairing`], carrying the PEER's `peer_*` metadata through
-/// so the polled [`pairing::PairStatus`] surfaces it to Kotlin on `confirmed`.
-/// Shared by both discovery paths (standing responder + `pair_with_discovered`).
+/// HB-1b (ABI 14) / ABI 19 (CopyPaste-gldr): map a completed
+/// `BootstrapPairing` into the discovery-path [`pairing::ConfirmedPairing`],
+/// carrying the PEER's `peer_*` metadata (including
+/// `peer_supabase_account_id`) through so the polled [`pairing::PairStatus`]
+/// surfaces it to Kotlin on `confirmed`. Shared by both discovery paths
+/// (standing responder + `pair_with_discovered`).
 pub fn confirmed_pairing_from(
     p: copypaste_p2p::bootstrap::BootstrapPairing,
 ) -> pairing::ConfirmedPairing {
@@ -307,6 +318,7 @@ pub fn confirmed_pairing_from(
         peer_local_ip: p.peer_local_ip,
         peer_public_ip: p.peer_public_ip,
         peer_device_id: p.peer_device_id,
+        peer_supabase_account_id: p.peer_supabase_account_id,
     }
 }
 
@@ -333,7 +345,7 @@ mod tests {
             peer_public_ip: Some("203.0.113.7".to_string()),
             peer_device_id: Some("device-uuid-abc123".to_string()),
             peer_provisioning: None,
-            peer_supabase_account_id: None,
+            peer_supabase_account_id: Some("supabase-acct-xyz789".to_string()),
         }
     }
 
@@ -432,6 +444,10 @@ mod tests {
         assert_eq!(result.peer_local_ip.as_deref(), Some("10.0.0.2"));
         assert_eq!(result.peer_public_ip.as_deref(), Some("203.0.113.7"));
         assert_eq!(result.peer_device_id.as_deref(), Some("device-uuid-abc123"));
+        assert_eq!(
+            result.peer_supabase_account_id.as_deref(),
+            Some("supabase-acct-xyz789")
+        );
         assert!(result.peer_provisioning.is_none());
     }
 
@@ -454,6 +470,10 @@ mod tests {
         assert_eq!(
             confirmed.peer_device_id.as_deref(),
             Some("device-uuid-abc123")
+        );
+        assert_eq!(
+            confirmed.peer_supabase_account_id.as_deref(),
+            Some("supabase-acct-xyz789")
         );
         assert!(confirmed.peer_provisioning.is_none());
     }

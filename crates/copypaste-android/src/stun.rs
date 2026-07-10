@@ -1,14 +1,16 @@
 //! Best-effort public / WAN IP discovery via STUN for Android.
 //!
 //! Sends a single RFC 5389 STUN Binding Request to a public STUN server
-//! (`stun.l.google.com:19302` by default) over UDP, then parses the
-//! XOR-MAPPED-ADDRESS attribute from the response to learn the reflexive
-//! (NAT-external) address.
+//! (see `copypaste_core::net::STUN_SERVERS`, tried in order) over UDP, then
+//! parses the XOR-MAPPED-ADDRESS attribute from the response to learn the
+//! reflexive (NAT-external) address.
 //!
 //! This is the Android-side counterpart of `copypaste_daemon::public_ip`.
-//! The logic is byte-for-byte equivalent: same STUN server, same 5-second
-//! timeout, same parse/XOR logic.  Factored here rather than in the daemon
-//! so the Android FFI can call it without depending on `copypaste-daemon`.
+//! The logic is byte-for-byte equivalent: same STUN server list, same
+//! 5-second timeout, same parse/XOR logic.  Factored here rather than in
+//! the daemon so the Android FFI can call it without depending on
+//! `copypaste-daemon`. The server list itself lives in `copypaste-core`,
+//! which both crates already depend on (CopyPaste-8ebg.60).
 //!
 //! ## Opt-out
 //! The FFI wrapper (`resolve_stun_public_ip`) is always available, but
@@ -20,12 +22,10 @@
 //! All errors are logged at `debug` level and return `None` — they MUST NOT
 //! propagate to the caller.
 
+use copypaste_core::net::STUN_SERVERS;
 use std::net::UdpSocket;
 use std::time::Duration;
 use tracing::debug;
-
-/// STUN server used for the Binding Request.
-const STUN_SERVER: &str = "stun.l.google.com:19302";
 
 /// Total wall-clock budget for the STUN exchange.
 const STUN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -49,8 +49,13 @@ const MAGIC_COOKIE: u32 = 0x2112_A442;
 /// This is a **blocking** function (uses `UdpSocket` with a read timeout).
 /// Kotlin MUST call this from a background thread / IO dispatcher and MUST
 /// gate the call behind the user's `collect_public_ip` setting.
+///
+/// Tries each server in [`STUN_SERVERS`] in order, returning the first
+/// success (CopyPaste-8ebg.60: fallback list, was a single hardcoded server).
 pub fn resolve_public_ip() -> Option<String> {
-    resolve_public_ip_via(STUN_SERVER)
+    STUN_SERVERS
+        .iter()
+        .find_map(|server| resolve_public_ip_via(server))
 }
 
 /// Same as [`resolve_public_ip`] but accepts a custom server address.

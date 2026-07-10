@@ -36,6 +36,24 @@ impl IpcServer {
                     // request, matching Maccy-style recency ordering.
                     let db_arc2 = self.db.clone();
                     let item_id_bump = item.id.clone();
+                    // CopyPaste-8ebg.2: read the live sensitive TTL so a
+                    // re-copied sensitive item's expires_at is recomputed
+                    // from now instead of staying pinned to the original
+                    // capture's deadline (the CopyPaste-89ib fix never took
+                    // effect because every call site passed None). 0 is the
+                    // "auto-wipe disabled" sentinel — pass None for that case
+                    // so bump_item_recency leaves expires_at untouched.
+                    let sensitive_ttl_ms = self
+                        .core_config
+                        .as_ref()
+                        .and_then(|arc| arc.read().ok())
+                        .and_then(|cfg| {
+                            if cfg.sensitive_ttl_secs == 0 {
+                                None
+                            } else {
+                                Some(cfg.sensitive_ttl_secs as i64 * 1000)
+                            }
+                        });
                     // P1: surface bump errors via tracing instead of
                     // double-swallowing (let _ spawn + let _ inside).
                     // Promote-on-copy is best-effort — a failure must
@@ -58,9 +76,7 @@ impl IpcServer {
                             .map(|r| r.lamport_ts)
                             .unwrap_or(0);
                         let new_lamport = copypaste_core::next_lamport_ts(prev_lamport, now_ms);
-                        // Pass None: ipc recopy path doesn't know sensitive TTL;
-                        // delete_expired picks up expires_at set at capture time.
-                        bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, None)
+                        bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, sensitive_ttl_ms)
                     })
                     .await
                     {
@@ -158,6 +174,24 @@ impl IpcServer {
                     // request, matching Maccy-style recency ordering.
                     let db_arc2 = self.db.clone();
                     let item_id_bump = item.id.clone();
+                    // CopyPaste-8ebg.2: read the live sensitive TTL so a
+                    // re-copied sensitive item's expires_at is recomputed
+                    // from now instead of staying pinned to the original
+                    // capture's deadline (the CopyPaste-89ib fix never took
+                    // effect because every call site passed None). 0 is the
+                    // "auto-wipe disabled" sentinel — pass None for that case
+                    // so bump_item_recency leaves expires_at untouched.
+                    let sensitive_ttl_ms = self
+                        .core_config
+                        .as_ref()
+                        .and_then(|arc| arc.read().ok())
+                        .and_then(|cfg| {
+                            if cfg.sensitive_ttl_secs == 0 {
+                                None
+                            } else {
+                                Some(cfg.sensitive_ttl_secs as i64 * 1000)
+                            }
+                        });
                     // P1: surface bump errors via tracing instead of
                     // double-swallowing (let _ spawn + let _ inside).
                     match tokio::task::spawn_blocking(move || {
@@ -176,9 +210,7 @@ impl IpcServer {
                             .map(|r| r.lamport_ts)
                             .unwrap_or(0);
                         let new_lamport = copypaste_core::next_lamport_ts(prev_lamport, now_ms);
-                        // Pass None: ipc recopy path doesn't know sensitive TTL;
-                        // delete_expired picks up expires_at set at capture time.
-                        bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, None)
+                        bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, sensitive_ttl_ms)
                     })
                     .await
                     {

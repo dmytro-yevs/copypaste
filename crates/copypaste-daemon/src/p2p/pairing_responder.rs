@@ -174,6 +174,18 @@ pub(super) async fn standing_pairing_responder_loop(
         // while satisfying the `move` + `Send + Sync` bounds required by
         // `tokio::spawn` in the calling scope.
         let rl_for_confirm = Arc::clone(&pairing_rate_limiter);
+        // CopyPaste-8ebg.25: tracks whether THIS iteration's confirm callback
+        // actually claimed the coordinator (`try_begin` returned `true`). When
+        // the coordinator is busy with an UNRELATED pairing (outbound
+        // initiator flow, or a still-active previous inbound one),
+        // `try_begin` refuses and the confirm callback returns `false`
+        // WITHOUT ever owning the shared `pairing` state. The `Err(e)` handler
+        // below must not call `pairing.finish(Rejected)` in that case — doing
+        // so would stomp the *other*, still-in-progress pairing's state,
+        // falsely reporting it as user-rejected even though nobody rejected
+        // anything (it is simply a different, unrelated pairing attempt).
+        let claimed_coordinator = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let claimed_for_confirm = Arc::clone(&claimed_coordinator);
         // Claim the single-active-pairing slot LAZILY inside the confirm
         // callback is too late (the handshake already ran); instead we gate at
         // the SAS step: the confirm callback only runs after frame 9, and we
@@ -181,6 +193,7 @@ pub(super) async fn standing_pairing_responder_loop(
         let confirm = move |sas: &str, peer_fp: &str| {
             let coordinator = Arc::clone(&coordinator);
             let rl = Arc::clone(&rl_for_confirm);
+            let claimed = Arc::clone(&claimed_for_confirm);
             let sas = sas.to_string();
             let peer_fp = peer_fp.to_string();
             // CopyPaste-n3bc: the verified inbound TLS peer fingerprint is now
@@ -204,22 +217,35 @@ pub(super) async fn standing_pairing_responder_loop(
                         "LAN/SAS: rate-limiting inbound pairing attempt \
                          (CopyPaste-1hw5: per-fingerprint budget exhausted)"
                     );
-                    return false;
+                    return copypaste_p2p::bootstrap::ConfirmOutcome::Reject;
                 }
                 // Single active pairing: if the coordinator is busy, reject.
+                // CopyPaste-njt8.25 (was CopyPaste-8ebg.25): this now sends the
+                // dedicated `ConfirmOutcome::Busy` wire signal (frame 10a
+                // `SAS_BUSY`) instead of an indistinguishable `false` — we never
+                // claimed the coordinator, so `claimed_coordinator` stays false
+                // and the caller below must not touch the (unrelated) active
+                // pairing's state. The initiator now renders this honestly as
+                // "peer is busy" instead of the old ambiguous "rejected or
+                // busy" message.
                 if !coordinator.try_begin(crate::pairing_sm::PairingRole::Responder, snap.clone()) {
-                    tracing::warn!("LAN/SAS: inbound pairing rejected — another pairing active");
-                    return false;
+                    tracing::warn!(
+                        "LAN/SAS: inbound pairing rejected — another pairing already active \
+                         (busy, not a human decline)"
+                    );
+                    return copypaste_p2p::bootstrap::ConfirmOutcome::Busy;
                 }
+                claimed.store(true, std::sync::atomic::Ordering::Release);
                 let rx = coordinator.enter_awaiting_sas(
                     sas,
                     crate::pairing_sm::PairingRole::Responder,
                     snap,
                 );
                 match tokio::time::timeout(crate::pairing_sm::SAS_CONFIRM_TIMEOUT, rx).await {
-                    Ok(Ok(accept)) => accept,
-                    // Sender dropped (pair_abort) or timed out → reject.
-                    _ => false,
+                    Ok(Ok(accept)) => accept.into(),
+                    // Sender dropped (pair_abort) or timed out → reject (an
+                    // actual human decision path, not "busy").
+                    _ => copypaste_p2p::bootstrap::ConfirmOutcome::Reject,
                 }
             }
         };
@@ -289,10 +315,21 @@ pub(super) async fn standing_pairing_responder_loop(
                 // Reject / mismatch / timeout / no inbound connection within the
                 // accept window. NO persist, NO rotate_peer — the session key
                 // already dropped/zeroized inside `run_with_confirm`. Only move
-                // to a terminal state if we had actually begun a pairing (a bare
-                // accept-timeout never claimed the coordinator).
-                let snap = pairing.snapshot();
-                if snap.is_active() {
+                // to a terminal state if WE had actually begun this pairing.
+                //
+                // CopyPaste-8ebg.25: the previous check here was
+                // `pairing.snapshot().is_active()`, which is true whenever
+                // *any* pairing (not necessarily this one) is in flight. When
+                // this inbound attempt was refused for being BUSY (the
+                // coordinator was already claimed by an unrelated pairing —
+                // see `claimed_coordinator` above), that read would find the
+                // OTHER pairing still active and incorrectly finish it as
+                // `Rejected`, falsely telling that unrelated peer's initiator
+                // "SAS rejected by user" when nobody rejected anything. Gate
+                // on whether THIS callback actually claimed the coordinator
+                // instead, so a busy-refusal never touches state it doesn't
+                // own.
+                if claimed_coordinator.load(std::sync::atomic::Ordering::Acquire) {
                     pairing.finish(crate::pairing_sm::PairingState::Rejected);
                 }
                 tracing::debug!("LAN/SAS inbound pairing ended without success: {e}");

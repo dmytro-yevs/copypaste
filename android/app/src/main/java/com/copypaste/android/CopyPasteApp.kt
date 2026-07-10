@@ -2,6 +2,7 @@ package com.copypaste.android
 
 import android.app.Application
 import android.os.Build
+import com.copypaste.android.ui.theme.AppearanceStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -89,6 +90,11 @@ class CopyPasteApp : Application() {
         // One-time: drop stale Liquid-Glass appearance keys (palette/skin/density/
         // motion/contrast) so the two-axis isDark × accent defaults apply.
         settings.migrateThemeForTwoAxis()
+        // android-appearance D6 ordering: seed the app-scoped committed-appearance
+        // state (AppearanceStore) AFTER migration and BEFORE any Activity composes
+        // CommittedCopyPasteTheme, so the very first themed frame reads the
+        // migrated, canonical theme_mode/accent values.
+        AppearanceStore.init(settings)
         LogcatCaptureService.syncState(this, settings)
 
         // CopyPaste-jhz2: re-establish the foreground ClipboardService after a

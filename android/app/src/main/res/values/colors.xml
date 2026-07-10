@@ -2,4 +2,15 @@
 <resources>
     <!-- Adaptive launcher icon background (the launcher icon needs this). -->
     <color name="ic_launcher_background">#FFFFFF</color>
+
+    <!--
+        First-paint window background (design.md D16 part 1 / android-design-system
+        task 1.7): paints android:windowBackground BEFORE Compose runs, so the
+        window never flashes the wrong theme's background. Value MUST track
+        CpColors.bg (ui/theme/Color.kt LightColors.bg) — light variant here,
+        dark variant in values-night/colors.xml. The full splash-screen /
+        Android-12 splash wiring is S12's job (component-inventory resource
+        table); this token is the value S12 will consume.
+    -->
+    <color name="cp_window_background">#F5F6F8</color>
 </resources>

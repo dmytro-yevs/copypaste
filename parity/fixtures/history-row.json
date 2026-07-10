@@ -1,0 +1,26 @@
+{
+  "fixture": "history-row",
+  "schemaNote": "STYLEGUIDE §9.5 row anatomy: tile, preview (single line), meta (kind · sourceApp · relTime · originDevice), pin, actions. Owning slice: android-history (S5) — HistoryRow.kt does not exist yet; this is schema-only scaffolding, not yet backed by an Android composable.",
+  "android": { "component": "HistoryRow.kt", "status": "Deferred", "owner": "android-history (S5)" },
+  "desktop": { "component": "HistoryRow.tsx", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    {
+      "kind": "URL",
+      "preview": "https://example.com/docs/getting-started",
+      "sourceApp": "com.android.chrome",
+      "relTime": "2h",
+      "originDevice": "MacBook Pro",
+      "pinned": false,
+      "sensitive": false
+    },
+    {
+      "kind": "CODE",
+      "preview": "fn main() { println!(\"hi\"); }",
+      "sourceApp": "com.copypaste.android",
+      "relTime": "5m",
+      "originDevice": null,
+      "pinned": true,
+      "sensitive": false
+    }
+  ]
+}

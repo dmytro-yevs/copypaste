@@ -28,15 +28,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
+import com.copypaste.android.ui.theme.AccentColor
+import com.copypaste.android.ui.theme.AppearanceStore
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CommittedCopyPasteTheme
+import com.copypaste.android.ui.theme.CommittedAppearance
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.resolveIsDark
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
@@ -44,6 +51,7 @@ import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -60,11 +68,17 @@ class SettingsActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             SecureWindowChrome {
-                SettingsScreen(
-                    showBackButton = true,
-                    onBack = { finish() },
-                    onSaved = { finish() },
-                )
+                // android-appearance D5: standalone-launch root reads the same
+                // committed-appearance state as the embedded MainActivity tab;
+                // SettingsScreen's own nested CopyPasteTheme (live-preview draft)
+                // shadows this for its own subtree only.
+                CommittedCopyPasteTheme {
+                    SettingsScreen(
+                        showBackButton = true,
+                        onBack = { finish() },
+                        onSaved = { finish() },
+                    )
+                }
             }
         }
     }
@@ -76,6 +90,46 @@ private const val TAB_DISPLAY       = 1
 private const val TAB_SYNC          = 2
 private const val TAB_STORAGE       = 3
 private const val TAB_NOTIFICATIONS = 4
+
+/**
+ * CopyPaste-26zi: whether the Supabase poll worker should run — gates on
+ * [Settings.supabaseEnabled] and [Settings.isSupabaseConfigured] directly,
+ * mirroring [SupabasePollWorker]'s own self-gate in `doWork()`, rather than the
+ * legacy `syncBackend == SyncBackend.SUPABASE` enum hint.
+ *
+ * Split into a pure boolean overload + a [Settings]-reading convenience overload
+ * so the gate logic is unit-testable without touching [Settings.cloudSyncPassphrase]
+ * / [Settings.cloudSyncKeyDirect] (both keystore-backed — real AndroidKeyStore is
+ * unavailable under this module's Robolectric JVM tests; see KeystoreSecretStoreTest).
+ */
+internal fun shouldScheduleSupabasePoll(supabaseEnabled: Boolean, isSupabaseConfigured: Boolean): Boolean =
+    supabaseEnabled && isSupabaseConfigured
+
+internal fun shouldScheduleSupabasePoll(settings: Settings): Boolean =
+    shouldScheduleSupabasePoll(settings.supabaseEnabled, settings.isSupabaseConfigured)
+
+/**
+ * The Settings screen's appearance draft/commit contract (android-appearance
+ * D5, S4 review finding). [commit] is the ONLY function that may publish a
+ * draft to [AppearanceStore] — discarding a draft (the user backs out or taps
+ * Cancel) is simply never calling it, which [SettingsScreen] already does by
+ * construction (its Discard path never reaches [commitSave]). Reads the
+ * current draft through the supplied lambdas (backed by the
+ * Composable-local `mutableStateOf` fields declared in [SettingsScreen]) so
+ * this contract is unit-testable without a full Compose UI test harness —
+ * see `AppearanceStateTest` "discarding a draft change never touches
+ * AppearanceStore committed state" / "committing a draft publishes it".
+ */
+class AppearanceDraft(
+    private val themeMode: () -> ThemeMode,
+    private val accent: () -> AccentColor,
+    private val translucency: () -> Boolean,
+) {
+    /** Publishes the current draft app-wide. Callers MUST only invoke this after a successful persist (D5/R17). */
+    fun commit() {
+        AppearanceStore.publish(CommittedAppearance(themeMode(), accent(), translucency()))
+    }
+}
 
 /**
  * Expose the unsaved-changes guard to external navigation controllers
@@ -112,6 +166,9 @@ fun SettingsScreen(
 
     // ── Draft dirty flag — true once any setting is changed, reset to false after save ──
     var dirty by remember { mutableStateOf(false) }
+    // Wave 3: transient "Saved" acknowledgement on the header Save button — set true
+    // on a successful commitSave(), auto-reset by the LaunchedEffect near commitSave().
+    var justSaved by remember { mutableStateOf(false) }
     // ── Discard-confirmation dialog state ──
     var showDiscardDialog by remember { mutableStateOf(false) }
     var pendingProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -138,6 +195,15 @@ fun SettingsScreen(
     var revealGuard by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var translucency by remember { mutableStateOf(settings.translucency) }
+    // android-appearance D5: live-preview DRAFT — hoisted above the CopyPasteTheme
+    // wrap below so changing these re-themes this screen immediately, without
+    // writing to Settings or AppearanceStore until Save (see commitSave()).
+    var themeMode by remember { mutableStateOf(settings.themeMode) }
+    var accent by remember { mutableStateOf(settings.accent) }
+    val appearanceDraft = remember {
+        AppearanceDraft(themeMode = { themeMode }, accent = { accent }, translucency = { translucency })
+    }
+    val isDark = resolveIsDark(themeMode)
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
     // §3/P1#9: preview lines per history row (mirrors web niApp, 1–6).
@@ -201,6 +267,14 @@ fun SettingsScreen(
 
     // bd CopyPaste-44rq.22: toast state for export/import feedback.
     val toastState = remember { GlassToastState() }
+    // CopyPaste-myh8.13 S13 Wave a: captured here (composable scope) — the
+    // test-connection toast fires from settingsScope.launch(Dispatchers.IO), where
+    // stringResource() cannot be called (not a @Composable context).
+    val syncTestNoTransportEnabled = stringResource(R.string.sync_test_no_transport_enabled)
+    val syncTestRelayOk = stringResource(R.string.sync_test_relay_ok)
+    val syncTestRelayFailed = stringResource(R.string.sync_test_relay_failed)
+    val syncTestSupabaseOk = stringResource(R.string.sync_test_supabase_ok)
+    val syncTestSupabaseFailed = stringResource(R.string.sync_test_supabase_failed)
     // CopyPaste-5917.17: scope for GlassToast.show (suspend) from non-composable callbacks
     // (AdbCmdRow tap, log export error). Hoisted at screen level so any tab can use it.
     val settingsScope = rememberCoroutineScope()
@@ -228,16 +302,25 @@ fun SettingsScreen(
 
     // ── Helper: persist ALL settings in one commit (called only on explicit Save) ──
     // Also writes the password/passphrase fields that previously had separate write paths.
-    fun persistAll() {
+    //
+    // android-appearance "Committed persistence, commit-failure handling" (R17):
+    // returns the atomic saveScreenSettings commit() result. On failure NONE of
+    // the trailing non-batched writes below run either — a partial save (some
+    // fields persisted, others silently dropped because the batch failed) would
+    // be a worse, harder-to-diagnose outcome than reporting the whole Save as
+    // failed and leaving the draft dirty for a retry.
+    fun persistAll(): Boolean {
         settings.cloudSyncPassphrase = cloudPassphrase
         settings.supabasePassword = supabasePassword
-        settings.saveScreenSettings(
+        val committed = settings.saveScreenSettings(
             captureEnabled = settings.captureEnabled,
             privateMode = privateMode,
             syncEnabled = syncEnabled,
             notifyOnSensitiveSkip = showWarnings, // CopyPaste-bdac.32: renamed param
             maskSensitiveContent = maskSensitive,
             translucency = translucency,
+            themeMode = themeMode,
+            accent = accent,
             imageMaxHeight = imageMaxHeight,
             previewDelayMs = previewDelay.toLong(),
             maxTextSizeBytes = maxTextSizeBytes,
@@ -254,30 +337,39 @@ fun SettingsScreen(
             notifyOnCopy = notifyOnCopy,
             soundOnCopy = soundOnCopy,
             logcatCaptureEnabled = logcatEnabled,
+            // CopyPaste-myh8.9 wave 0: folded into the atomic batch — these used to
+            // be separate apply()-based setter calls below, each independently
+            // droppable by a force-stop right after Save.
+            collectPublicIp = collectPublicIp,
+            pasteAsPlainText = pasteAsPlainText,
+            excludedAppBundleIds = excludedApps,
+            showSensitiveWarnings = revealGuard,
+            autoApplySyncedClip = autoApplySyncedClip,
+            maxFileSizeBytes = maxFileSizeBytes,
+            sensitiveTtlSecs = sensitiveTtlSecs,
+            // §3/P1#9: preview-lines pref is pref-only (no daemon IPC), like density.
+            previewLines = previewLines,
+            // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
+            maxHistoryItems = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
         )
-        settings.maxFileSizeBytes = maxFileSizeBytes
-        settings.sensitiveTtlSecs = sensitiveTtlSecs
-        // §3/P1#9: preview-lines pref is pref-only (no daemon IPC), like density.
-        settings.previewLines = previewLines
-        // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
-        settings.maxHistoryItems = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        if (!committed) return false
         // CopyPaste-iovc: apply the cap immediately so stored/displayed history is
         // trimmed right away — without waiting for the next clipboard capture.
         ClipboardRepository(ctx).applyHistoryCap()
-        settings.collectPublicIp = collectPublicIp
-        settings.pasteAsPlainText = pasteAsPlainText
-        settings.excludedAppBundleIds = excludedApps
-        // CopyPaste-bdac.35: persist reveal-guard toggle (not in saveScreenSettings batch).
-        settings.showSensitiveWarnings = revealGuard
-        // CopyPaste-44rq.24: persist auto-apply-synced-clip toggle.
-        settings.autoApplySyncedClip = autoApplySyncedClip
-        SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
+        SupabasePollWorker.schedule(ctx, enabled = shouldScheduleSupabasePoll(settings))
         LogcatCaptureService.syncState(ctx, settings)
+        return true
     }
 
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Sync", "Storage", "Notifications")
+
+    // android-appearance D5: the live-preview DRAFT (themeMode/accent/translucency,
+    // hoisted above this call) re-themes everything below — dialogs and the tab
+    // panel — instantly on change, without touching Settings or AppearanceStore
+    // until Save (commitSave() publishes the SAME draft values on success).
+    CopyPasteTheme(isDark = isDark, accent = accent, translucency = translucency) {
 
     // ── Discard-changes confirmation dialog ──
     if (showDiscardDialog) {
@@ -318,10 +410,31 @@ fun SettingsScreen(
 
     // Shared save action — called from both the header button and the sticky bottom bar.
     // Extracted here so neither call site duplicates the persistence / dirty-reset logic.
+    //
+    // android-appearance "Commit failure keeps dirty state": on a failed commit,
+    // `dirty` stays true, `onSaved()` is not called, and AppearanceStore is never
+    // published (D5/R17 — the app-scoped state must not diverge from a failed
+    // preference commit).
     fun commitSave() {
-        persistAll()
-        dirty = false
-        onSaved()
+        if (persistAll()) {
+            dirty = false
+            justSaved = true
+            appearanceDraft.commit()
+            onSaved()
+        } else {
+            settingsScope.launch {
+                toastState.show(ctx.getString(R.string.toast_settings_save_failed), GlassToastKind.DANGER)
+            }
+        }
+    }
+
+    // Wave 3: transient "Saved" label on the header Save button, auto-reset after
+    // ~1200ms — a lightweight visual acknowledgement, not a new toast.
+    LaunchedEffect(justSaved) {
+        if (justSaved) {
+            delay(1200)
+            justSaved = false
+        }
     }
 
     // CopyPaste-bdac.88: gate Save behind a confirmation when lowering the
@@ -351,7 +464,13 @@ fun SettingsScreen(
             onDismissRequest = { showCapReductionConfirm = false },
             title = { Text(stringResource(R.string.dialog_max_items_reduce_title)) },
             text = {
-                Text(stringResource(R.string.dialog_max_items_reduce_body, pendingCapPruneCount))
+                Text(
+                    pluralStringResource(
+                        R.plurals.dialog_max_items_reduce_body,
+                        pendingCapPruneCount,
+                        pendingCapPruneCount,
+                    ),
+                )
             },
             confirmButton = {
                 CopyPasteButton(
@@ -390,7 +509,12 @@ fun SettingsScreen(
                         variant = ButtonVariant.PRIMARY,
                         enabled = dirty,
                     ) {
-                        Text(text = stringResource(R.string.btn_save))
+                        Text(
+                            text = if (justSaved && !dirty)
+                                stringResource(R.string.btn_save_saved)
+                            else
+                                stringResource(R.string.btn_save),
+                        )
                     }
                 },
             )
@@ -458,6 +582,11 @@ fun SettingsScreen(
                         onMaskSensitiveChange = { maskSensitive = it; dirty = true },
                         translucency = translucency,
                         onTranslucencyChange = { translucency = it; dirty = true },
+                        themeMode = themeMode,
+                        onThemeModeChange = { themeMode = it; dirty = true },
+                        accent = accent,
+                        onAccentChange = { accent = it; dirty = true },
+                        isDark = isDark,
                         imageMaxHeight = imageMaxHeight,
                         onImageMaxHeightChange = { imageMaxHeight = it; dirty = true },
                         previewDelay = previewDelay,
@@ -483,6 +612,12 @@ fun SettingsScreen(
                         // (in onExportHistory below) so the SAF result callback always sees the
                         // value the user had selected when they pressed "Export".
                         var exportIncludeSensitive by remember { mutableStateOf(false) }
+                        // Wave 3: transient loading states for the Storage tab's async actions,
+                        // hoisted here so they survive the file-picker round trip and drive
+                        // StorageTab's per-button spinners.
+                        var exportInFlight by remember { mutableStateOf(false) }
+                        var importInFlight by remember { mutableStateOf(false) }
+                        var vacuumInFlight by remember { mutableStateOf(false) }
                         val exportLauncher = rememberLauncherForActivityResult(
                             androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
                         ) { uri ->
@@ -490,6 +625,7 @@ fun SettingsScreen(
                             // Capture the flag into a local val so the coroutine closure is stable
                             // even if a recomposition updates the outer var before the IO work runs.
                             val includeSensitive = exportIncludeSensitive
+                            exportInFlight = true
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val key = settings.encryptionKey
@@ -502,6 +638,8 @@ fun SettingsScreen(
                                 } catch (e: Exception) {
                                     android.util.Log.e("SettingsActivity", "Export failed: ${e.message}", e)
                                     toastState.show(ctx.getString(R.string.history_export_failed), GlassToastKind.DANGER)
+                                } finally {
+                                    exportInFlight = false
                                 }
                             }
                         }
@@ -512,20 +650,27 @@ fun SettingsScreen(
                             androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
                         ) { uri ->
                             if (uri == null) return@rememberLauncherForActivityResult
+                            importInFlight = true
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val json = ctx.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }
                                         ?: return@launch
                                     val key = settings.encryptionKey
-                                    val count = repository.importHistory(json, key)
+                                    val count = repository.importHistory(json, key, settings)
                                     android.util.Log.i("SettingsActivity", "Imported $count items from $uri")
                                     toastState.show(
-                                        ctx.getString(R.string.history_import_ok, count),
+                                        ctx.resources.getQuantityString(
+                                            R.plurals.history_import_ok,
+                                            count,
+                                            count,
+                                        ),
                                         GlassToastKind.SUCCESS,
                                     )
                                 } catch (e: Exception) {
                                     android.util.Log.e("SettingsActivity", "Import failed: ${e.message}", e)
                                     toastState.show(ctx.getString(R.string.history_import_failed), GlassToastKind.DANGER)
+                                } finally {
+                                    importInFlight = false
                                 }
                             }
                         }
@@ -575,25 +720,33 @@ fun SettingsScreen(
                             // mirrors the conventional FFI live-DB location. With the native
                             // library absent the call is a validated no-op (stub mode, still Ok).
                             onVacuumDatabase = {
+                                vacuumInFlight = true
                                 scope.launch(Dispatchers.IO) {
-                                    val dbPath = ctx.getDatabasePath("copypaste.db").absolutePath
-                                    val ok = runCatching {
-                                        val key = settings.encryptionKey
-                                        dbVacuum(dbPath, key)
-                                    }.isSuccess
-                                    if (ok) {
-                                        toastState.show(
-                                            ctx.getString(R.string.toast_compact_db_ok),
-                                            GlassToastKind.SUCCESS,
-                                        )
-                                    } else {
-                                        toastState.show(
-                                            ctx.getString(R.string.toast_compact_db_fail),
-                                            GlassToastKind.DANGER,
-                                        )
+                                    try {
+                                        val dbPath = ctx.getDatabasePath("copypaste.db").absolutePath
+                                        val ok = runCatching {
+                                            val key = settings.encryptionKey
+                                            dbVacuum(dbPath, key)
+                                        }.isSuccess
+                                        if (ok) {
+                                            toastState.show(
+                                                ctx.getString(R.string.toast_compact_db_ok),
+                                                GlassToastKind.SUCCESS,
+                                            )
+                                        } else {
+                                            toastState.show(
+                                                ctx.getString(R.string.toast_compact_db_fail),
+                                                GlassToastKind.DANGER,
+                                            )
+                                        }
+                                    } finally {
+                                        vacuumInFlight = false
                                     }
                                 }
                             },
+                            exportInFlight = exportInFlight,
+                            importInFlight = importInFlight,
+                            vacuumInFlight = vacuumInFlight,
                         )
                     }
                     TAB_SYNC -> SyncTab(
@@ -646,7 +799,7 @@ fun SettingsScreen(
 
                                 if (!spec.relay && !spec.supabase) {
                                     toastState.show(
-                                        "No enabled transport to test — enable Relay or Supabase above.",
+                                        syncTestNoTransportEnabled,
                                         GlassToastKind.DANGER,
                                     )
                                     return@launch
@@ -659,7 +812,7 @@ fun SettingsScreen(
                                     val ok = runCatching {
                                         RelayClient(draftRelayUrl).health()
                                     }.getOrDefault(false)
-                                    parts += if (ok) "Relay: OK" else "Relay: failed"
+                                    parts += if (ok) syncTestRelayOk else syncTestRelayFailed
                                     if (!ok) allOk = false
                                 }
 
@@ -667,7 +820,7 @@ fun SettingsScreen(
                                     val ok = runCatching {
                                         SupabaseClient(draftSupabaseUrl, draftAnonKey).health()
                                     }.getOrDefault(false)
-                                    parts += if (ok) "Supabase: OK" else "Supabase: failed"
+                                    parts += if (ok) syncTestSupabaseOk else syncTestSupabaseFailed
                                     if (!ok) allOk = false
                                 }
 
@@ -693,4 +846,5 @@ fun SettingsScreen(
         // matching the HistoryActivity pattern (replaces Log.i/Log.e-only feedback).
         GlassToastHost(state = toastState)
     }
+    } // end CopyPasteTheme (live-preview draft, android-appearance D5)
 }

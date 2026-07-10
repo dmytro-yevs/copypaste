@@ -69,6 +69,11 @@ class ConfigKnobsStoreTest {
             maxTextSizeBytes = 1_000L,
             maxImageSizeBytes = 2_000L,
             storageQuotaBytes = 3_000L,
+            maxFileSizeBytes = s.maxFileSizeBytes,
+            sensitiveTtlSecs = s.sensitiveTtlSecs,
+            collectPublicIp = s.collectPublicIp,
+            pasteAsPlainText = s.pasteAsPlainText,
+            excludedAppBundleIds = s.excludedAppBundleIds,
         )
         assertEquals(1_000L, clamped.maxTextSizeBytes.toLong())
         assertEquals(2_000L, clamped.maxImageSizeBytes.toLong())

@@ -106,7 +106,8 @@ class OnboardingPermissions(
         // caps the dialog after 2 denials) a launch() is a silent no-op. Route the
         // user to the app-notification-settings screen instead so the Grant button
         // is never dead.
-        if (NotificationPermissionHelper.isPermanentlyDenied(activity)) {
+        val status = NotificationPermissionHelper.notificationPermissionStatus(activity)
+        if (status == PermissionStatus.PERMANENTLY_DENIED) {
             Log.i(TAG, "POST_NOTIFICATIONS permanently denied — opening app notification settings")
             launchGated(NotificationPermissionHelper.appNotificationSettingsIntents(activity))
             return
@@ -122,7 +123,7 @@ class OnboardingPermissions(
             listOf(
                 Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    android.net.Uri.parse("package:\${packageName}")
+                    android.net.Uri.fromParts("package", activity.packageName, null)
                 ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         )

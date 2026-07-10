@@ -143,6 +143,21 @@ export function AboutContent() {
             docs/privacy/telemetry-policy.md); linked via GitHub since no separate
             hosted URLs exist. window.open used so Tauri opens the system browser. */}
         <div className="about__links">
+          {/* CopyPaste-8ebg.63: no in-app updater exists yet (no
+              tauri-plugin-updater / update-check IPC command) — DEFERRED, see
+              bd notes. This button gives users a working action today by
+              opening the GitHub releases page, matching the Changelog/Privacy
+              policy links below. Swap the handler for the real updater once
+              that infra lands. */}
+          <button
+            type="button"
+            className="btn sm btn--secondary"
+            onClick={() =>
+              window.open(`${GITHUB_BASE}/releases/latest`, "_blank")
+            }
+          >
+            Check for Updates <ExternalLink aria-hidden="true" />
+          </button>
           <button
             type="button"
             className="btn sm btn--secondary"

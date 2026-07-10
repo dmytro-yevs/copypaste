@@ -3,6 +3,7 @@ import org.gradle.api.tasks.Exec
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.paparazzi)
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +112,14 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a")
+            // CopyPaste-k1l0: the ubuntu+KVM instrumented-test CI job boots an
+            // x86_64 AVD (arm64 AVDs cannot use KVM acceleration on x86_64
+            // runners), so the APK under test needs an x86_64 .so too. Gated
+            // behind a property so local dev (`assembleDebug` with no -P
+            // override) keeps packaging arm64-v8a only, unchanged.
+            if ((project.findProperty("includeX86_64Abi") as String?) == "true") {
+                abiFilters += "x86_64"
+            }
         }
     }
 
@@ -261,6 +270,14 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // app.cash.paparazzi:paparazzi-gradle-plugin:1.3.4's POM pins
+        // kotlin-gradle-plugin 1.9.24 as a runtime dependency, which Gradle's
+        // plugin-classpath resolution (highest-version-wins) elevates to the
+        // effective Kotlin compiler version for this module regardless of the
+        // `kotlin` version in libs.versions.toml (also 1.9.24, matching what
+        // actually resolves). Compose Compiler 1.5.14 is the officially
+        // blessed pairing for Kotlin 1.9.24 (developer.android.com/jetpack/
+        // androidx/releases/compose-kotlin) — no suppression flag needed.
     }
     // Jetpack Compose (beta-bonus history / pair / settings screens).
     buildFeatures {
@@ -273,6 +290,19 @@ android {
     }
     composeOptions {
         kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
+    }
+    lint {
+        // android-material3-redesign task 2.7 "Lint warnings-as-errors". A
+        // bare `warningsAsErrors = true` would fail on the 261 pre-existing
+        // lint warnings across files this slice does not own (out of S2
+        // scope to mass-edit — see tasks.md's "scope the strictness" landmine
+        // guidance). `baseline` grandfathers everything present the first
+        // time this ran (android/app/lint-baseline.xml, committed) so the
+        // gate is enforced from S2 onward for NEW issues only; each owning
+        // slice is expected to shrink the baseline as it restyles its files.
+        warningsAsErrors = true
+        abortOnError = true
+        baseline = file("lint-baseline.xml")
     }
     sourceSets {
         getByName("main") {
@@ -298,6 +328,8 @@ android {
 dependencies {
     implementation(libs.core.ktx)
     implementation(libs.appcompat)
+    // core-splashscreen (task 0.10, S12): installSplashScreen() + Theme.CopyPaste.Splash.
+    implementation(libs.core.splashscreen)
     implementation(libs.material)
     implementation(libs.kotlinx.coroutines.android)
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
@@ -310,7 +342,6 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
-    implementation(libs.compose.material.icons)
     implementation(libs.compose.runtime.livedata)
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.viewmodel.compose)
@@ -368,6 +399,14 @@ dependencies {
     // testImplementation only — zero impact on the APK.
     testImplementation("org.json:json:20240303")
 
+    // Robolectric (task 0.12/2.7, pinned 4.15 — see libs.versions.toml): the S1/S3
+    // window/system-bar appearance matrix tests and any other JVM test that needs a
+    // real (not isReturnDefaultValues-stubbed) Android Context/ContentResolver.
+    testImplementation(libs.robolectric)
+    // ApplicationProvider.getApplicationContext() — the standard Robolectric entry
+    // point for a real (Robolectric-shadowed) Context in a JVM unit test.
+    testImplementation("androidx.test:core:1.5.0")
+
     // Instrumented tests (androidTest) — cross-language crypto conformance.
     // AndroidX Test runner + ext-junit drive CryptoConformanceTest on a device
     // or emulator. JNA is already an `implementation` dep (loaded into the app
@@ -390,3 +429,61 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
+// ---------------------------------------------------------------------------
+// android-material3-redesign S2.5: app.cash.paparazzi:1.3.4's plugin replaces
+// AGP's isReturnDefaultValues "mockable android.jar" on testDebugUnitTest's
+// SHARED classpath with the real platform android.jar (needed for its
+// layoutlib bridge) — :app:createMockableJar becomes a no-action placeholder
+// once Paparazzi is applied (verified via --info: "has no actions"), so the
+// safe stub jar this project's pre-existing tests relied on is gone for
+// EVERY test in the module, not just Paparazzi's own. Confirmed upstream,
+// currently-unresolved (cashapp/paparazzi#1908 "Tink SDK unit tests are
+// failing if paparazzi plugin is enabled" — identical
+// `UnsatisfiedLinkError: android.util.Log.logger_entry_max_payload_native`
+// stack trace; #1331/#1922 are the same root cause for Mockito/ContentResolver
+// call sites; zero maintainer-confirmed workaround as of 2026-07-02).
+//
+// testDebugUnitTestPreExisting reruns the SAME compiled test classes (minus
+// Paparazzi's own) with Paparazzi/layoutlib stripped from the classpath, so
+// the pre-existing suite (unaffected by this redesign) keeps passing. This
+// is a build-config-only mitigation — no test file is touched. `check`/`test`
+// depend on it so `./gradlew check` still covers everything; the previously
+// SHALL-pinned single command `:app:testDebugUnitTest` (android-visual-
+// regression spec) no longer alone covers 100% of JVM tests — see this
+// slice's handoff notes for the exact two-command replacement and the
+// follow-up (proper module separation) this documents but does not implement.
+// Compiles the android.util.Log shim (src/androidLogStub) — placed FIRST on
+// testDebugUnitTestPreExisting's classpath below so it shadows the real
+// platform android.jar's throwing Log class.
+val compileAndroidLogStub by tasks.registering(JavaCompile::class) {
+    source = fileTree("src/androidLogStub/java")
+    destinationDirectory = layout.buildDirectory.dir("androidLogStub/classes")
+    classpath = files()
+}
+
+afterEvaluate {
+    val paparazziMarkers = listOf("app.cash.paparazzi", "com.android.tools.layoutlib", "layoutlib-native")
+    tasks.named<Test>("testDebugUnitTest") { filter { includeTestsMatching("com.copypaste.android.paparazzi.*") } }
+    tasks.register<Test>("testDebugUnitTestPreExisting") {
+        group = "verification"
+        description = "Pre-existing JVM unit tests (android-material3-redesign S2.5 Paparazzi-classpath workaround, see build.gradle.kts comment above)."
+        val original = tasks.named<Test>("testDebugUnitTest").get()
+        // Reuses testDebugUnitTest's compiled classes/classpath inputs, so it
+        // must depend on everything that produced them (Gradle's task-output
+        // validation flags an implicit dependency otherwise).
+        dependsOn(compileAndroidLogStub, original.taskDependencies.getDependencies(original))
+        testClassesDirs = original.testClassesDirs
+        // Stub dir FIRST: JVM classpath resolution is first-match-wins, so
+        // android.util.Log resolves from the no-op shim, not the real jar
+        // still present later in the list (needed for any other android.*
+        // reference these tests might make).
+        classpath = files(compileAndroidLogStub.get().destinationDirectory) + files(
+            original.classpath.files.filterNot { f -> paparazziMarkers.any { f.path.contains(it) } },
+        )
+        filter { excludeTestsMatching("com.copypaste.android.paparazzi.*") }
+    }
+    tasks.named("test") { dependsOn("testDebugUnitTestPreExisting") }
+    tasks.named("check") { dependsOn("testDebugUnitTestPreExisting") }
+}
+

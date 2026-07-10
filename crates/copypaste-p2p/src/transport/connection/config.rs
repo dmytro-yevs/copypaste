@@ -47,18 +47,20 @@ pub const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 ///
 /// The data plane carries serialized `WireItem`s. The largest payload is an
 /// image item whose ciphertext the relay caps at 10 MiB
-/// (`RELAY_MAX_ITEM_BYTES`); base64/JSON framing of that blob plus item
-/// metadata can roughly inflate it, so we size the ceiling to match
+/// (`copypaste_ipc::RELAY_MAX_ITEM_BYTES`); base64/JSON framing of that blob
+/// plus item metadata can roughly inflate it, so we size the ceiling to match
 /// `copypaste_sync::engine::MAX_FRAME_BYTES` (16 MiB) rather than relying on
 /// tokio-util's silent 8 MiB `LengthDelimitedCodec::new()` default, which would
 /// truncate large images and stall the link. A peer that sends a frame above
 /// this ceiling has its connection torn down (DoS guard).
 ///
-/// CopyPaste-w47w #1: this constant MUST stay equal to
-/// `copypaste_sync::engine::MAX_FRAME_BYTES`.  A compile-time equality assertion
-/// lives in `copypaste-daemon/tests/frame_consts.rs` (which has both crates as
-/// dev-deps) — any change here must update that constant too.
-pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+/// Re-exported from [`copypaste_ipc::MAX_FRAME_BYTES`] (CopyPaste-1d5l.59) —
+/// the same canonical value `copypaste_sync::engine::MAX_FRAME_BYTES` aliases,
+/// so the two crates (which do not depend on each other) cannot drift. A
+/// compile-time equality assertion also lives in
+/// `copypaste-daemon/tests/frame_consts.rs` (CopyPaste-w47w #1) as a belt-
+/// and-suspenders regression guard.
+pub const MAX_FRAME_BYTES: usize = copypaste_ipc::MAX_FRAME_BYTES;
 
 /// Build the length-delimited codec used for every data-plane stream, with the
 /// frame ceiling explicitly set to [`MAX_FRAME_BYTES`] (16 MiB).
@@ -73,7 +75,11 @@ pub(super) fn length_codec() -> LengthDelimitedCodec {
 }
 
 /// Idle time before the OS starts sending TCP keepalive probes.
-const TCP_KEEPALIVE_TIME: Duration = Duration::from_secs(20);
+///
+/// `pub` (CopyPaste-vgpy) so `copypaste-daemon`'s `p2p::framed_pump::WRITE_TIMEOUT`
+/// can assert its ordering against this constant at compile time — see that
+/// assertion for the invariant this protects.
+pub const TCP_KEEPALIVE_TIME: Duration = Duration::from_secs(20);
 
 /// Interval between successive TCP keepalive probes once they start.
 const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);

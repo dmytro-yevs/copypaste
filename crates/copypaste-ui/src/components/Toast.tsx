@@ -61,11 +61,19 @@ function GlassToastItem({
 }) {
   const duration = msg.duration ?? 3000;
 
-  // Auto-dismiss timer
+  // CopyPaste-8ebg.55: pause the auto-dismiss timer while the user is
+  // hovering or has focus inside the toast (e.g. tabbed to the Dismiss
+  // button) — otherwise a toast can vanish mid-read/mid-interaction.
+  // `paused` only gates whether a NEW timer is armed; the remaining time is
+  // not tracked precisely (a toast is a low-stakes transient notice), so on
+  // resume it simply restarts a full-duration timer.
+  const [paused, setPaused] = useState(false);
+
   useEffect(() => {
+    if (paused) return;
     const t = setTimeout(() => onDismiss(msg.id), duration);
     return () => clearTimeout(t);
-  }, [msg.id, duration, onDismiss]);
+  }, [msg.id, duration, onDismiss, paused]);
 
   return (
     // .toast/.show: patterns.css toast pill (design.md Decision 13/X5).
@@ -74,6 +82,10 @@ function GlassToastItem({
       role="status"
       aria-live="polite"
       className="toast show"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={() => setPaused(false)}
     >
       {/* VISM-11: leading semantic colour dot — visual consistency with HistoryView toasts */}
       <span
@@ -102,16 +114,21 @@ function ToastContainer({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismi
   if (toasts.length === 0) return null;
   return ReactDOM.createPortal(
     <div
-      // Stack at bottom-center, same as iOS toast convention. z-40 keeps it
-      // below modals (z-50) but above regular content. Mirrors the undo-toast
+      // Stack at bottom-center, same as iOS toast convention. Mirrors the undo-toast
       // in HistoryView (SCRH-12) — transient notifications must not occlude dialogs.
+      //
+      // CopyPaste-8ebg.38: `.toast-stack` positions/stacks the whole group (patterns.css);
+      // individual `.toast` items are laid out in normal flow inside it via
+      // flex-direction: column-reverse (newest message added last in the array, so
+      // column-reverse puts it visually first/closest to the screen edge) instead of
+      // every toast independently self-positioning to the same fixed spot and
+      // rendering exactly on top of each other.
+      className="toast-stack"
       aria-live="polite"
       aria-atomic="false"
     >
       {toasts.map((msg) => (
-        <div key={msg.id}>
-          <GlassToastItem msg={msg} onDismiss={onDismiss} />
-        </div>
+        <GlassToastItem key={msg.id} msg={msg} onDismiss={onDismiss} />
       ))}
     </div>,
     document.body,

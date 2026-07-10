@@ -1,0 +1,14 @@
+{
+  "fixture": "sas-dialog",
+  "schemaNote": "Six-digit SAS confirm (Match/Doesn't-match), full fingerprint supplemental only. Owning slice: android-pairing (S8) — SasPairingDialog.kt already exists pre-redesign but is not yet re-based on tokens; schema-only scaffolding for the redesigned structural fixture.",
+  "android": { "component": "SasPairingDialog.kt", "status": "Deferred", "owner": "android-pairing (S8)" },
+  "desktop": { "component": "Pair views (SAS step)", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    {
+      "sasDigits": "482 913",
+      "peerName": "MacBook Pro",
+      "fingerprintSupplemental": "a1b2c3d4e5f6a1b2…a1b2c3d4e5f6a1b2",
+      "state": "waiting"
+    }
+  ]
+}

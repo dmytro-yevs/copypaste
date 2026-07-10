@@ -1967,6 +1967,134 @@ async fn history_page_unpinned_item_reverts_to_recency_order() {
     );
 }
 
+/// CopyPaste-a3nu: `history_page` supports keyset (seek) pagination via an
+/// optional `cursor` param, in addition to the existing `offset` param
+/// (dual-mode, backward compatible). This test proves the actual bug that
+/// motivates the cursor: with OFFSET pagination, inserting a new row between
+/// two page fetches shifts the whole window down, so the *next* offset-based
+/// page re-fetches (duplicates) whatever row that shift pushed back into
+/// view. A cursor page, seeked from the last row's own sort key rather than
+/// a position, must return neither a duplicate of page 1 nor skip a row.
+#[tokio::test]
+async fn history_page_cursor_pagination_stable_under_concurrent_insert() {
+    let dir = safe_tempdir();
+    let sock = dir.path().join("hp_cursor.sock");
+    let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+    // Seed 5 items with distinct, increasing wall_time.
+    {
+        let guard = db.lock().await;
+        for i in 0..5 {
+            let mut item =
+                copypaste_core::ClipboardItem::new_text(vec![i as u8], vec![0u8; 24], i as i64);
+            item.wall_time = 1_000 + i as i64;
+            copypaste_core::insert_item(&guard, &item).unwrap();
+        }
+    }
+
+    // Page 1: first 2 items via the existing offset path (unchanged).
+    let page1 = call_one(
+        &sock,
+        r#"{"id":"hpc-p1","method":"history_page","params":{"limit":2,"offset":0}}"#,
+    )
+    .await;
+    assert_eq!(page1["ok"], true, "page1 must succeed: {page1}");
+    let page1_items = page1["data"]["items"].as_array().unwrap();
+    assert_eq!(page1_items.len(), 2);
+    let page1_ids: Vec<String> = page1_items
+        .iter()
+        .map(|it| it["id"].as_str().unwrap().to_string())
+        .collect();
+    let next_cursor = page1["data"]["next_cursor"].clone();
+    assert!(
+        !next_cursor.is_null(),
+        "next_cursor must be present when more pages remain: {page1}"
+    );
+
+    // Simulate a capture landing mid-scroll: insert a brand-new, newest item
+    // — this is exactly the row that would shift an OFFSET-based page 2.
+    {
+        let guard = db.lock().await;
+        let mut item = copypaste_core::ClipboardItem::new_text(vec![0xFF], vec![0u8; 24], 99);
+        item.wall_time = 5_000; // newest — sorts before everything above.
+        copypaste_core::insert_item(&guard, &item).unwrap();
+    }
+
+    // Page 2: fetched via the cursor from page 1, not via offset.
+    let page2_req = serde_json::json!({
+        "id": "hpc-p2",
+        "method": "history_page",
+        "params": {"limit": 2, "cursor": next_cursor},
+    });
+    let page2 = call_one(&sock, &page2_req.to_string()).await;
+    assert_eq!(page2["ok"], true, "page2 must succeed: {page2}");
+    let page2_items = page2["data"]["items"].as_array().unwrap();
+    let page2_ids: Vec<String> = page2_items
+        .iter()
+        .map(|it| it["id"].as_str().unwrap().to_string())
+        .collect();
+
+    // The exact offset-drift bug: zero overlap with page1, zero skipped rows.
+    for id in &page2_ids {
+        assert!(
+            !page1_ids.contains(id),
+            "cursor page must not re-fetch a row already returned by page1: {id}"
+        );
+    }
+    assert_eq!(
+        page2_ids.len(),
+        2,
+        "cursor page must return a full page, not skip a row: {page2}"
+    );
+}
+
+/// A `cursor` param that is present but missing the required fields must be
+/// rejected as an invalid argument, NOT silently treated as "no cursor" (which
+/// would mask the client's bug by silently paginating from offset-mode page 1).
+#[tokio::test]
+async fn history_page_rejects_cursor_missing_required_fields() {
+    let dir = safe_tempdir();
+    let sock = dir.path().join("hp_cursor_garbage.sock");
+    start_test_server(&sock).await;
+
+    let resp = call_one(
+        &sock,
+        r#"{"id":"hpc-bad1","method":"history_page","params":{"limit":2,"cursor":{"garbage":true}}}"#,
+    )
+    .await;
+    assert_eq!(
+        resp["ok"], false,
+        "a cursor missing wall_time/id must error, not silently paginate: {resp}"
+    );
+    assert_eq!(
+        resp["error_code"], "invalid_argument",
+        "must be tagged as a client argument error: {resp}"
+    );
+}
+
+/// A `cursor` param whose `wall_time` is the wrong JSON type (string instead
+/// of number) must likewise be rejected, not silently dropped to `None`.
+#[tokio::test]
+async fn history_page_rejects_cursor_with_wrong_typed_field() {
+    let dir = safe_tempdir();
+    let sock = dir.path().join("hp_cursor_wrongtype.sock");
+    start_test_server(&sock).await;
+
+    let resp = call_one(
+        &sock,
+        r#"{"id":"hpc-bad2","method":"history_page","params":{"limit":2,"cursor":{"wall_time":"not-a-number","id":"x"}}}"#,
+    )
+    .await;
+    assert_eq!(
+        resp["ok"], false,
+        "a wrong-typed cursor field must error, not silently paginate: {resp}"
+    );
+    assert_eq!(
+        resp["error_code"], "invalid_argument",
+        "must be tagged as a client argument error: {resp}"
+    );
+}
+
 /// In-process burst that exercises the same accept-spawn path used by
 /// the binary subprocess test, but without requiring a built binary.
 /// 10 tokio tasks each issue a status+stats roundtrip on its own
@@ -3899,10 +4027,6 @@ async fn cloud_sign_out_clears_signed_in_flag() {
 #[cfg(feature = "cloud-sync")]
 #[tokio::test]
 async fn cloud_sign_in_returns_invalid_argument_when_not_configured() {
-    // Ensure no env override leaks from a parent shell.
-    std::env::remove_var("SUPABASE_URL");
-    std::env::remove_var("SUPABASE_ANON_KEY");
-
     let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
     let private_mode = Arc::new(AtomicBool::new(false));
     let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
@@ -3918,6 +4042,17 @@ async fn cloud_sign_in_returns_invalid_argument_when_not_configured() {
         &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
         dir.path(),
     );
+    // Ensure no env override leaks from a parent shell. Must happen AFTER
+    // `_env` is constructed (it holds `TEST_ENV_LOCK` for its lifetime) —
+    // doing this before the guard existed let it race unguarded against any
+    // other EnvGuard-holding test also touching these two vars in parallel
+    // (this was the root cause of the intermittent
+    // `apply_peer_provisioning_fills_missing_fields` flake).
+    // SAFETY: serialised via `_env` holding `TEST_ENV_LOCK`.
+    unsafe {
+        std::env::remove_var("SUPABASE_URL");
+        std::env::remove_var("SUPABASE_ANON_KEY");
+    }
 
     let server = IpcServer::new(db, private_mode, local_key, device_pub).with_cloud_sync_state(
         sync_key,
@@ -5159,6 +5294,143 @@ async fn list_peers_online_true_from_live_mtls_allowlist() {
     // Ensure the receiver stays alive until after the assertion so the
     // sender is not marked closed prematurely.
     drop(_peer_rx);
+}
+
+/// `list_peers` must surface the per-peer rekey-failure counter
+/// (CopyPaste-ptgcc) as `rekey_failures` when the live-sinks slot is
+/// populated (P2P running) AND at least one failure was recorded — and must
+/// omit the field entirely when the live-sinks slot is absent (P2P not
+/// started), mirroring the `rtt_snapshot` gating.
+#[tokio::test]
+async fn list_peers_surfaces_rekey_failure_count() {
+    let dir = safe_tempdir();
+    let sock = dir.path().join("lp_rekey.sock");
+    let cfg_home = dir.path().join("cfg_rekey");
+    let _env = EnvGuard::set_all(
+        &[
+            "COPYPASTE_CONFIG_DIR",
+            "COPYPASTE_DATA_DIR",
+            "HOME",
+            "XDG_CONFIG_HOME",
+        ],
+        &cfg_home,
+    );
+    std::fs::create_dir_all(&cfg_home).unwrap();
+
+    let fp_display = "a1:b2:c3:d4:e5:f6:07:18";
+    let fp_canonical = canonical_fingerprint(fp_display);
+
+    let peers_json = cfg_home.join("peers.json");
+    let peers = serde_json::json!([
+        {"name": "Desktop", "fingerprint": fp_display, "added_at": 1}
+    ]);
+    std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+    // Record two rekey failures for this peer before P2P is "running".
+    let device_fp = copypaste_p2p::DeviceFingerprint(fp_canonical.clone());
+    crate::p2p::record_rekey_failure(&device_fp);
+    crate::p2p::record_rekey_failure(&device_fp);
+
+    let (peer_tx, _peer_rx) = tokio::sync::mpsc::channel::<copypaste_sync::protocol::PeerFrame>(1);
+    let sinks_map: crate::p2p::LivePeerSinks =
+        Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::from([
+            (device_fp.clone(), peer_tx),
+        ])));
+
+    let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+    let cert = copypaste_p2p::cert::SelfSignedCert::generate("mtls-test").unwrap();
+    let server = IpcServer::new(
+        db,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+        Arc::new([0u8; 32]),
+    )
+    .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()));
+
+    // Populate the live-sinks slot so `list_peers` treats P2P as running and
+    // gates `rekey_snapshot` on (mirrors `list_peers_online_true_from_live_mtls_allowlist`).
+    {
+        let slot = server.live_peer_sinks_slot();
+        let mut guard = slot.lock().unwrap();
+        *guard = Some(Arc::clone(&sinks_map));
+    }
+
+    let listener = tokio::net::UnixListener::bind(&sock).expect("test socket bind must succeed");
+    tokio::spawn(async move {
+        let _ = server.serve_on(listener, CancellationToken::new()).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let resp = call_one(&sock, r#"{"id":"lp5","method":"list_peers","params":{}}"#).await;
+    assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+    let peer_arr = resp["data"]["peers"].as_array().expect("data.peers array");
+    assert_eq!(peer_arr.len(), 1);
+
+    let peer = &peer_arr[0];
+    assert_eq!(
+        peer["rekey_failures"].as_u64(),
+        Some(2),
+        "peer with 2 recorded rekey failures must surface rekey_failures=2: {peer}"
+    );
+
+    drop(_peer_rx);
+    // Clean up the process-global counter so it doesn't leak into other
+    // tests running in the same test binary.
+    crate::p2p::clear_rekey_failure(&device_fp);
+}
+
+/// `list_peers` must NOT include `rekey_failures` at all when the live-sinks
+/// slot is not populated (P2P not started) — mirrors the `rtt_snapshot`
+/// None-gating even if a stale counter happens to exist in the process-global
+/// map from a prior test/failure.
+#[tokio::test]
+async fn list_peers_omits_rekey_failures_when_p2p_not_running() {
+    let dir = safe_tempdir();
+    let sock = dir.path().join("lp_rekey_absent.sock");
+    let cfg_home = dir.path().join("cfg_rekey_absent");
+    let _env = EnvGuard::set_all(
+        &[
+            "COPYPASTE_CONFIG_DIR",
+            "COPYPASTE_DATA_DIR",
+            "HOME",
+            "XDG_CONFIG_HOME",
+        ],
+        &cfg_home,
+    );
+    std::fs::create_dir_all(&cfg_home).unwrap();
+
+    let fp_display = "b2:c3:d4:e5:f6:07:18:29";
+    let peers_json = cfg_home.join("peers.json");
+    let peers = serde_json::json!([
+        {"name": "Laptop", "fingerprint": fp_display, "added_at": 1}
+    ]);
+    std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+    let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+    let server = IpcServer::new(
+        db,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+        Arc::new([0u8; 32]),
+    );
+    // live_peer_sinks_slot is left as None (P2P not started).
+
+    let listener = tokio::net::UnixListener::bind(&sock).expect("test socket bind must succeed");
+    tokio::spawn(async move {
+        let _ = server.serve_on(listener, CancellationToken::new()).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let resp = call_one(&sock, r#"{"id":"lp6","method":"list_peers","params":{}}"#).await;
+    assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+    let peer_arr = resp["data"]["peers"].as_array().expect("data.peers array");
+    assert_eq!(peer_arr.len(), 1);
+
+    let peer = &peer_arr[0];
+    assert!(
+        peer.get("rekey_failures").is_none(),
+        "rekey_failures must be absent when P2P is not running: {peer}"
+    );
 }
 
 /// `persist_paired_peer` must populate the `name` field from `PeerMeta.device_name`

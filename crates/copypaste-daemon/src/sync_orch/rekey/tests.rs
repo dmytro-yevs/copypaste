@@ -98,8 +98,12 @@ fn rekey_round_trip_makes_item_readable_on_peer_with_different_local_key() {
     let crypto_b = SyncCrypto::new(seed_b, peers_b);
 
     // INBOUND: unwrap with shared key, re-wrap under B's local v2 key.
-    let (stored, recovered_pt) =
-        rekey_inbound(&crypto_b, wire).expect("B must unwrap the sync-key-wrapped item");
+    let (stored, recovered_pt) = rekey_inbound(
+        &crypto_b,
+        wire,
+        copypaste_core::config::MAX_DECODED_IMAGE_MB,
+    )
+    .expect("B must unwrap the sync-key-wrapped item");
     assert_eq!(
         recovered_pt.as_deref(),
         Some(plaintext.as_slice()),
@@ -355,7 +359,8 @@ fn rekey_inbound_3_device_tries_all_keys() {
 
     // rekey_inbound must succeed even if K_AB is iterated before K_AC.
     let (stored, fts_plaintext) =
-        rekey_inbound(&crypto, wire).expect("must decrypt under K_AC (CopyPaste-kw2 fix)");
+        rekey_inbound(&crypto, wire, copypaste_core::config::MAX_DECODED_IMAGE_MB)
+            .expect("must decrypt under K_AC (CopyPaste-kw2 fix)");
 
     assert_eq!(
         fts_plaintext.as_deref(),

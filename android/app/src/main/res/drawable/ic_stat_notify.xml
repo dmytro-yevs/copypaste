@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Status-bar notification icon. Must stay alpha-only per Android guidelines:
+  the OS renders this as a solid-color silhouette, so any RGB is ignored/blown out.
+  Simplified silhouette of the brand mark (two offset rounded-rect "cards" — see
+  assets/logo/copypaste.svg for the full-color source this was derived from).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6.89,5.16
+            H15.62
+            A1.73,1.73 0 0 1 17.35,6.89
+            V17.49
+            A1.73,1.73 0 0 1 15.62,19.22
+            H6.89
+            A1.73,1.73 0 0 1 5.16,17.49
+            V6.89
+            A1.73,1.73 0 0 1 6.89,5.16
+            Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8.86,7.13
+            H17.59
+            A1.73,1.73 0 0 1 19.32,8.86
+            V19.46
+            A1.73,1.73 0 0 1 17.59,21.19
+            H8.86
+            A1.73,1.73 0 0 1 7.13,19.46
+            V8.86
+            A1.73,1.73 0 0 1 8.86,7.13
+            Z" />
+</vector>

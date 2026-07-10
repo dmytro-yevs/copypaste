@@ -15,6 +15,7 @@ fn confirmed_sample() -> ConfirmedPairing {
         peer_local_ip: Some("10.0.0.2".to_string()),
         peer_public_ip: Some("203.0.113.7".to_string()),
         peer_device_id: Some("device-uuid-abc123".to_string()),
+        peer_supabase_account_id: Some("supabase-acct-xyz789".to_string()),
     }
 }
 
@@ -133,6 +134,11 @@ fn confirmed_carries_ffi_outputs_for_persistence() {
     assert_eq!(out.peer_app_version.as_deref(), Some("0.6.1"));
     assert_eq!(out.peer_local_ip.as_deref(), Some("10.0.0.2"));
     assert_eq!(out.peer_public_ip.as_deref(), Some("203.0.113.7"));
+    // ABI 19 (CopyPaste-gldr): the peer's Supabase account id round-trips too.
+    assert_eq!(
+        out.peer_supabase_account_id.as_deref(),
+        Some("supabase-acct-xyz789")
+    );
 
     // PairStatus surfaces the peer_* only on confirmed.
     let status = PairStatus::from_state(&s);
@@ -145,6 +151,10 @@ fn confirmed_carries_ffi_outputs_for_persistence() {
     assert_eq!(status.peer_app_version.as_deref(), Some("0.6.1"));
     assert_eq!(status.peer_local_ip.as_deref(), Some("10.0.0.2"));
     assert_eq!(status.peer_public_ip.as_deref(), Some("203.0.113.7"));
+    assert_eq!(
+        status.peer_supabase_account_id.as_deref(),
+        Some("supabase-acct-xyz789")
+    );
 }
 
 #[test]

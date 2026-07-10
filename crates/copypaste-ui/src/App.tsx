@@ -175,7 +175,7 @@ export default function App() {
       setProtocolMismatch(daemonVersion);
     });
     return () => { setProtocolMismatchHandler(null); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   const showMismatchBanner = protocolMismatch !== null && !mismatchDismissed;
@@ -190,7 +190,7 @@ export default function App() {
 
     void getDaemonError().then((err) => {
       if (!cancelled && err) {
-        // eslint-disable-next-line no-console
+         
         console.error("[CopyPaste] daemon spawn error:", err);
         setDaemonError(err);
       }
@@ -201,7 +201,7 @@ export default function App() {
       void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
         if (cancelled) return;
         if (!event.payload.ok && event.payload.error) {
-          // eslint-disable-next-line no-console
+           
           console.error("[CopyPaste] daemon-spawn-result error:", event.payload.error);
           setDaemonError(event.payload.error);
         } else if (event.payload.ok) {
@@ -287,6 +287,39 @@ export default function App() {
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // CopyPaste-8ebg.39: banner priority queue.
+  // ---------------------------------------------------------------------------
+  // Four independent `role="alert"` mechanisms (daemon spawn error, protocol
+  // mismatch, stale daemon, accessibility permission) used to render with no
+  // shared ordering or dedup — all four could be visible stacked on top of
+  // each other at once (e.g. a stale daemon that also mismatches protocol
+  // AND lacks Accessibility permission). Rank them by severity and show only
+  // the single highest-priority one; the others stay queued (their own state
+  // is untouched, so they still don't need re-triggering once they become
+  // the winner).
+  //
+  //   1. daemonError    — P0: the background service failed to start at all;
+  //                       nothing else works, and this one isn't dismissible.
+  //   2. mismatch       — P1: app/daemon protocol version mismatch.
+  //   3. staleDaemon     — P1: same tier as mismatch; kept second (existing
+  //                       ordering) since a mismatch is usually the more
+  //                       actionable/urgent of the two.
+  //   4. accessibility  — P2: a single feature (global paste/hotkeys) is
+  //                       degraded; the rest of the app remains fully usable.
+  type BannerKind = "daemon-error" | "protocol-mismatch" | "stale-daemon" | "accessibility";
+  const showAxBanner = !axGranted && !axDismissed;
+  const activeBanner: BannerKind | null =
+    daemonError !== null
+      ? "daemon-error"
+      : showMismatchBanner
+        ? "protocol-mismatch"
+        : showStaleBanner
+          ? "stale-daemon"
+          : showAxBanner
+            ? "accessibility"
+            : null;
+
   // Dev-only: render the gallery instead of the app when ?view=gallery is set.
   // Guarded by import.meta.env.DEV so this whole branch (and the dynamic import
   // above) is eliminated from production bundles.
@@ -294,12 +327,24 @@ export default function App() {
     return GalleryComp ? <GalleryComp /> : <div className="empty">Loading gallery…</div>;
   }
 
+  // CopyPaste-8ebg.12: a SINGLE outer ErrorBoundary used to wrap the entire
+  // `.app` shell (Sidebar + banners + view-host). A crash anywhere inside
+  // (the banner block, Sidebar, or a chip deep in a view) unmounted the
+  // WHOLE tree, including navigation, and the fallback rendered bare — it
+  // replaced `.app` itself, so it never got that div's shell layout
+  // (height/background/padding, shell.css `.app`). Fix: `.app` (the shell)
+  // is never itself inside a boundary, and Sidebar and the main pane get
+  // their OWN boundaries as siblings within it. A crash in one no longer
+  // takes down the other, and every fallback renders inside the always-on
+  // `.app` shell instead of against a bare document body.
   return (
-    <ErrorBoundary>
-      <div className="app">
+    <div className="app">
+      <ErrorBoundary label="Navigation">
         <Sidebar />
+      </ErrorBoundary>
+      <ErrorBoundary label="Main">
         <div className="main">
-          {daemonError !== null && (
+          {activeBanner === "daemon-error" && (
             <div className="banner banner--err" role="alert">
               <ServerCrash aria-hidden="true" />
               <span className="banner__x">
@@ -309,7 +354,7 @@ export default function App() {
             </div>
           )}
 
-          {showMismatchBanner && (
+          {activeBanner === "protocol-mismatch" && (
             <div
               className="banner banner--warn"
               role="alert"
@@ -331,7 +376,7 @@ export default function App() {
             </div>
           )}
 
-          {showStaleBanner && (
+          {activeBanner === "stale-daemon" && (
             <div className="banner banner--warn" role="alert">
               <AlertTriangle aria-hidden="true" />
               <span className="banner__x">
@@ -356,18 +401,34 @@ export default function App() {
             </div>
           )}
 
-          <AccessibilityBanner
-            axGranted={axGranted}
-            axDismissed={axDismissed}
-            onDismiss={() => setAxDismissed(true)}
-            onOpenSettings={() => { void handleOpenAxSettings(); }}
-          />
+          {/* CopyPaste-8ebg.39: only mounted when it's the queue's winner (or
+              already granted/dismissed, in which case it renders null anyway)
+              — a higher-priority banner above pre-empts it instead of both
+              stacking. The one-time "permission granted" confirmation
+              (role="status", not "alert") is unaffected by this queue; it
+              only competes with the other role="alert" banners while still
+              pending. */}
+          {(activeBanner === "accessibility" || activeBanner === null) && (
+            <AccessibilityBanner
+              axGranted={axGranted}
+              axDismissed={axDismissed}
+              onDismiss={() => setAxDismissed(true)}
+              onOpenSettings={() => { void handleOpenAxSettings(); }}
+            />
+          )}
 
           <main className="view-host">
             <CrossfadeContainer viewKey={view}>
               <ErrorBoundary label={label}>
                 {view === "devices" ? (
-                  <DevicesView incomingPairing={incomingPairing} />
+                  <DevicesView
+                    incomingPairing={incomingPairing}
+                    // CopyPaste-8ebg.28: reset once DevicesView has copied the
+                    // payload into its own local state, so a later mount
+                    // (e.g. tab away then back to Devices) doesn't re-seed a
+                    // phantom SAS modal from the same stale pairing episode.
+                    onIncomingPairingHandled={() => setIncomingPairing(null)}
+                  />
                 ) : (
                   <View />
                 )}
@@ -375,7 +436,7 @@ export default function App() {
             </CrossfadeContainer>
           </main>
         </div>
-      </div>
-    </ErrorBoundary>
+      </ErrorBoundary>
+    </div>
   );
 }

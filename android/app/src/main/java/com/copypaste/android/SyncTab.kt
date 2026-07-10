@@ -21,11 +21,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.theme.BannerVariant
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.CpBanner
 import com.copypaste.android.ui.theme.SectionLabel
-import java.text.DateFormat
-import java.util.Date
+import com.copypaste.android.ui.theme.relativeSyncLabel
 
 // RECENT_SYNC_MS is defined in DevicesActivity.kt as internal const val.
 
@@ -77,33 +78,32 @@ internal fun SyncTab(
             androidx.compose.foundation.layout.Spacer(
                 modifier = Modifier.height(4.dp),
             )
-            androidx.compose.material3.Card(
-                colors = androidx.compose.material3.CardDefaults.cardColors(
-                    containerColor = if (syncErrorIsUnauthorized)
-                        MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
-                    else
-                        MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp),
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = if (syncErrorIsUnauthorized) "Sync: authentication failed" else "Sync error",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    Text(
-                        text = if (syncErrorIsUnauthorized)
-                            "$syncError\n\nCheck your passphrase / credentials below and save."
-                        else
-                            syncError,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                }
+            if (syncErrorIsUnauthorized) {
+                // Unauthorized (401-shaped) → ERROR variant: this needs a credentials
+                // fix, not a retry (a retry with the same bad creds will just fail again).
+                CpBanner(
+                    message = stringResource(R.string.sync_error_unauthorized, syncError),
+                    variant = BannerVariant.ERROR,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            } else {
+                // Generic/transient failure → WARN variant with a Retry action wired to
+                // the caller's probe when available (CopyPaste-bdac.42's onTestConnection).
+                CpBanner(
+                    message = syncError,
+                    variant = BannerVariant.WARN,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    actions = {
+                        if (onTestConnection != null) {
+                            CopyPasteButton(
+                                onClick = onTestConnection,
+                                variant = ButtonVariant.GHOST,
+                            ) {
+                                Text(stringResource(R.string.btn_retry))
+                            }
+                        }
+                    },
+                )
             }
         }
         SectionLabel(stringResource(R.string.section_sync))
@@ -206,6 +206,10 @@ internal fun SyncTab(
                         hint = "https://your-project.supabase.co",
                         value = supabaseUrl,
                         onValueChange = onSupabaseUrlChange,
+                        // Mirrors the https:// prefix check in SyncDiagnosticsCard's
+                        // supabaseHint (below), reached only once the field is non-blank.
+                        isError = supabaseUrl.isNotBlank() && !supabaseUrl.startsWith("https://"),
+                        errorText = stringResource(R.string.setting_supabase_url_invalid),
                     )
                     SettingsTextField(
                         label = stringResource(R.string.setting_supabase_anon_key_label),
@@ -237,28 +241,13 @@ internal fun SyncTab(
             val localAccountId = settings.supabaseEmail.ifBlank { null }
             val peerAccountIds: List<String?> = emptyList()
             if (detectCloudAccountMismatch(localAccountId, peerAccountIds)) {
-                androidx.compose.material3.Card(
-                    colors = androidx.compose.material3.CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp),
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = stringResource(R.string.setting_cloud_account_mismatch_title),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.tertiary,
-                        )
-                        Text(
-                            text = stringResource(R.string.setting_cloud_account_mismatch_body),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                }
+                CpBanner(
+                    message = stringResource(
+                        R.string.setting_cloud_account_mismatch_title,
+                    ) + "\n" + stringResource(R.string.setting_cloud_account_mismatch_body),
+                    variant = BannerVariant.INFO,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
             }
             SettingsCard {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -324,6 +313,12 @@ internal fun SyncTab(
                 hint = "http://localhost:8080",
                 value = relayUrl,
                 onValueChange = onRelayUrlChange,
+                // Mirrors the localhost/blank check in SyncDiagnosticsCard's relayHint
+                // (below).
+                isError = relayUrl.isBlank() ||
+                    relayUrl.contains("localhost") ||
+                    relayUrl.contains("127.0.0.1"),
+                errorText = stringResource(R.string.setting_relay_url_invalid),
             )
         }
 
@@ -433,18 +428,8 @@ private fun SyncDiagnosticsCard(
         BackendConnState.Unknown   -> "Not reporting yet" to onSurfaceVariantColor
     }
 
-    fun lastSyncLabel(lastSuccessMs: Long): String = if (lastSuccessMs <= 0L) {
-        "Never"
-    } else {
-        val elapsed = (nowMs - lastSuccessMs) / 1_000L
-        when {
-            elapsed < 60     -> "${elapsed}s ago"
-            elapsed < 3_600  -> "${elapsed / 60}m ago"
-            elapsed < 86_400 -> "${elapsed / 3_600}h ago"
-            else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                .format(Date(lastSuccessMs))
-        }
-    }
+    @Composable
+    fun lastSyncLabel(lastSuccessMs: Long): String = relativeSyncLabel(nowMs, lastSuccessMs)
 
     // Misconfig hints — actionable text per ENABLED transport (draft-aware).
     val supabaseHint: String? = when {
@@ -492,7 +477,7 @@ private fun SyncDiagnosticsCard(
             if (!first) DiagnosticsDivider()
             val peerCount = if (liveOnlineCount >= 0) liveOnlineCount else 0
             DiagnosticsRow(
-                label = "Peers online (P2P)",
+                label = stringResource(R.string.sync_peers_online_label),
                 value = peerCount.toString(),
                 valueColor = if (peerCount > 0) primaryColor else onSurfaceVariantColor,
             )

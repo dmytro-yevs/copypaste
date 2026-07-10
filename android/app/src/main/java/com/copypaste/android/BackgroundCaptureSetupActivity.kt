@@ -22,13 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.outlined.Battery5Bar
-import androidx.compose.material.icons.outlined.CheckCircle
-import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.PhonelinkSetup
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,17 +36,17 @@ import androidx.compose.runtime.setValue
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
+import com.copypaste.android.ui.theme.icons.LucideIcons
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpSpacing
 import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 
@@ -320,31 +313,38 @@ fun BackgroundCaptureSetupScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             // ── Step 1: SYSTEM_ALERT_WINDOW ────────────────────────────────────
-            BgCaptureCard(
-                icon = Icons.Outlined.Layers,
+            // S10 Wave D (CopyPaste-myh8.10): overlay/battery have no
+            // rationale/permanent-denial concept — map Boolean true->GRANTED,
+            // false->DENIED (see the Wave A convention note).
+            PermissionCard(
+                icon = LucideIcons.PermissionOverlay,
                 title = stringResource(R.string.bg_capture_overlay_title),
                 description = stringResource(R.string.bg_capture_overlay_desc),
-                granted = overlayGranted,
+                status = booleanGrantStatus(overlayGranted),
                 buttonLabel = if (overlayGranted)
                     stringResource(R.string.bg_capture_overlay_granted)
                 else
                     stringResource(R.string.bg_capture_overlay_grant),
                 onClick = onRequestOverlay,
                 required = true,
+                alwaysShowButton = true,
+                showStatusPill = true,
             )
 
             // ── Step 2: Battery Optimization exemption ─────────────────────────
-            BgCaptureCard(
-                icon = Icons.Outlined.Battery5Bar,
+            PermissionCard(
+                icon = LucideIcons.PermissionBattery,
                 title = stringResource(R.string.bg_capture_battery_title),
                 description = stringResource(R.string.bg_capture_battery_desc),
-                granted = batteryExempt,
+                status = booleanGrantStatus(batteryExempt),
                 buttonLabel = if (batteryExempt)
                     stringResource(R.string.bg_capture_battery_granted)
                 else
                     stringResource(R.string.bg_capture_battery_grant),
                 onClick = onRequestBattery,
                 required = true,
+                alwaysShowButton = true,
+                showStatusPill = true,
             )
 
             // ── Step 3: OEM autostart ──────────────────────────────────────────
@@ -357,28 +357,33 @@ fun BackgroundCaptureSetupScreen(
                         append(stringResource(R.string.bg_capture_oem_desc_this_device, oemLabel))
                     }
                 }
-                BgCaptureCard(
-                    icon = Icons.Outlined.PhonelinkSetup,
+                // OEM autostart state cannot be reliably detected without root —
+                // indeterminate maps to DENIED with required=false, showStatusPill=false
+                // (pixel-identical to the old null rendering; see the Wave A convention).
+                PermissionCard(
+                    icon = LucideIcons.PermissionOemSetup,
                     title = stringResource(R.string.bg_capture_oem_title),
                     description = oemDesc,
-                    // OEM autostart state cannot be reliably detected without root.
-                    granted = null,
+                    status = PermissionStatus.DENIED,
                     buttonLabel = stringResource(R.string.bg_capture_oem_button),
                     onClick = onOpenOemAutoStart,
                     required = false,
+                    alwaysShowButton = true,
                     onAcknowledge = onAcknowledgeOem,
                     acknowledgeLabel = stringResource(R.string.bg_capture_oem_ack),
                 )
             } else if (oemAcknowledged) {
                 // User has confirmed they enabled OEM autostart — show a compact granted card.
-                BgCaptureCard(
-                    icon = Icons.Outlined.PhonelinkSetup,
+                PermissionCard(
+                    icon = LucideIcons.PermissionOemSetup,
                     title = stringResource(R.string.bg_capture_oem_title),
                     description = stringResource(R.string.bg_capture_oem_ack_done),
-                    granted = true,
+                    status = PermissionStatus.GRANTED,
                     buttonLabel = stringResource(R.string.bg_capture_oem_button),
                     onClick = onOpenOemAutoStart,
                     required = false,
+                    alwaysShowButton = true,
+                    showStatusPill = true,
                 )
             } else {
                 // Stock Android / Pixel: no OEM power-management layer present.
@@ -386,10 +391,10 @@ fun BackgroundCaptureSetupScreen(
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4),
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.PhonelinkSetup,
+                                imageVector = LucideIcons.PermissionOemSetup,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -415,10 +420,10 @@ fun BackgroundCaptureSetupScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4),
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.PlayArrow,
+                            imageVector = LucideIcons.ActionPlay,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.tertiary,
                         )
@@ -443,114 +448,3 @@ fun BackgroundCaptureSetupScreen(
     } // end Box
 }
 
-/**
- * Status card for the Background Capture Setup screen.
- *
- * [granted] semantics:
- *  - `true`  → success border + CheckCircle icon.
- *  - `false` → danger border + ErrorOutline icon (when [required]).
- *  - `null`  → neutral border — OEM autostart: state not queryable.
- *
- * The button is always enabled so the user can revisit the system Settings
- * screen at any time (matches PermissionsSettingsActivity design).
- *
- * [onAcknowledge] / [acknowledgeLabel] — optional secondary action shown when the
- * card state is not deterministic (OEM autostart). Tapping it persists the
- * acknowledgement flag so the card hides on the next recomposition (ANDO-6).
- */
-@Composable
-private fun BgCaptureCard(
-    icon: ImageVector,
-    title: String,
-    description: String,
-    granted: Boolean?,
-    buttonLabel: String,
-    onClick: () -> Unit,
-    required: Boolean,
-    onAcknowledge: (() -> Unit)? = null,
-    acknowledgeLabel: String? = null,
-) {
-    CopyPasteCard {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (granted == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f),
-                )
-                if (required) {
-                    Text(
-                        text = stringResource(R.string.label_required),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Live status badge — only when state is deterministic.
-            if (granted != null) {
-                Row(
-                    // CopyPaste-aod: merge the status icon + text into ONE node so
-                    // TalkBack reads "Granted" / "Not granted" as a single element
-                    // rather than announcing the icon and text separately.
-                    modifier = Modifier.semantics(mergeDescendants = true) {},
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        imageVector = if (granted) Icons.Outlined.CheckCircle
-                                      else Icons.Filled.ErrorOutline,
-                        contentDescription = null,
-                        tint = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    )
-                    Text(
-                        text = if (granted)
-                            stringResource(R.string.status_granted)
-                        else
-                            stringResource(R.string.status_not_granted),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            CopyPasteButton(
-                onClick = onClick,
-                enabled = true, // always enabled — user can revisit at any time
-                variant = ButtonVariant.PRIMARY,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(buttonLabel)
-            }
-            // ANDO-6: secondary "Done" button for OEM cards whose state is not queryable.
-            if (onAcknowledge != null && acknowledgeLabel != null) {
-                Spacer(modifier = Modifier.height(6.dp))
-                CopyPasteButton(
-                    onClick = onAcknowledge,
-                    enabled = true,
-                    variant = ButtonVariant.SECONDARY,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(acknowledgeLabel)
-                }
-            }
-        }
-    }
-}

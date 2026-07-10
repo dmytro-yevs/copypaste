@@ -9,50 +9,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.annotation.StringRes
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
-import com.copypaste.android.ui.SyncStatusBadge
+import com.copypaste.android.ui.shell.MainShell
+import com.copypaste.android.ui.theme.CommittedCopyPasteTheme
 import com.copypaste.android.ui.theme.SecureWindowChrome
-import androidx.compose.material3.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -127,6 +89,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // installSplashScreen() must be called BEFORE super.onCreate() (library
+        // contract — it reads/replaces the current theme's windowBackground
+        // before the Activity's own onCreate has a chance to set content).
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
         // SecureWindowChrome applies FLAG_SECURE centrally when allowScreenshots=false (the default).
@@ -181,7 +147,12 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SecureWindowChrome {
-                MainShell(viewModel = viewModel)
+                // android-appearance D5: committed-appearance root — wraps ALL
+                // three tabs (Clips/Devices/Settings) so a Save from the embedded
+                // Settings tab re-themes the whole shell without recreate().
+                CommittedCopyPasteTheme {
+                    MainShell(viewModel = viewModel)
+                }
             }
         }
     }
@@ -233,206 +204,5 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val KEY_ONBOARDING_SHOWN = "onboarding_shown_this_session"
-    }
-}
-
-// ── Navigation structure ───────────────────────────────────────────────────────
-
-// Internal so NavTabTest (pure-JVM unit test) can verify the tab set.
-// `labelRes` is the bottom-nav label string resource. HB-6: the DEVICES tab now
-// reads R.string.title_devices ("Devices") instead of the old hardcoded "Pair",
-// matching the Devices screen title — pairing lives INSIDE that screen now.
-internal enum class NavTab(@StringRes val labelRes: Int) {
-    CLIPS(R.string.title_history),
-    DEVICES(R.string.title_devices),
-    SETTINGS(R.string.title_settings),
-}
-
-@Composable
-private fun MainShell(viewModel: ClipboardViewModel) {
-    var selectedTab by rememberSaveable { mutableIntStateOf(NavTab.CLIPS.ordinal) }
-    // Unsaved-changes guard registered by SettingsScreen. When the user has
-    // pending edits and tries to switch tabs via the navbar, we route the tab
-    // change through this guard so the Discard/Keep-editing dialog intercepts it
-    // (parity with the back-press / top-bar back-arrow guard). Null when not on
-    // Settings or when there are no unsaved changes.
-    var settingsNavGuard by remember {
-        mutableStateOf<((proceed: () -> Unit) -> Unit)?>(null)
-    }
-
-    val density = LocalDensity.current
-
-    // Styleguide floating tab bar geometry:
-    //   side margin 12 dp, bottom margin 10 dp (matching web `.tabbar` margin)
-    //   radius 28 dp, internal padding 8 dp top/sides + 12 dp bottom
-    //   height driven by content — no fixed min-height (Android wraps tightly)
-    val tabBarShape = RoundedCornerShape(28.dp)
-    // Bottom safe-area (nav bar) inset so the bar clears the system nav buttons.
-    val navBarInsetDp = WindowInsets.navigationBars
-        .asPaddingValues()
-        .calculateBottomPadding()
-    // Measured height of the FloatingTabBar, updated via onSizeChanged once the
-    // bar lays out. 74.dp is the initial fallback (icon + label at normal density)
-    // so content padding is reasonable on the first frame before measurement fires.
-    // Using onSizeChanged avoids over-padding on low-density and clipping on
-    // high-density / large-font-scale devices (CopyPaste-10tp item 4).
-    var tabBarHeightDp by remember { mutableStateOf(74.dp) }
-    val contentBottomPadding = tabBarHeightDp + 10.dp + navBarInsetDp
-
-    Box(
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            // Zero all Scaffold insets: the TOP inset is handled by each screen's own
-            // TopAppBar, and the BOTTOM is handled by explicit content padding below so
-            // the list clears the floating tab bar. Applying insets here would double-
-            // inset the top (status-bar) on every screen that already adds it.
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        ) { innerPadding ->
-            // CopyPaste-r3qq fix: use fillMaxSize instead of Column(padding(innerPadding))
-            // to eliminate the grey strip that the inner padding + Column produced above
-            // the floating bar. contentBottomPadding ensures the list clears the bar.
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(bottom = contentBottomPadding),
-            ) {
-                when (NavTab.entries[selectedTab]) {
-                    NavTab.CLIPS -> HistoryScreen(
-                        viewModel = viewModel,
-                        showBackButton = false,
-                        onBack = {},
-                        // Shell already paints the full-window gradient backdrop behind everything.
-                        paintCanvasBackdrop = false,
-                    )
-                    NavTab.DEVICES -> DevicesScreen(
-                        showBackButton = false,
-                        onBack = {},
-                        paintCanvasBackdrop = false,
-                    )
-                    NavTab.SETTINGS -> SettingsScreen(
-                        showBackButton = false,
-                        onBack = {},
-                        onRegisterNavGuard = { guard -> settingsNavGuard = guard },
-                        paintCanvasBackdrop = false,
-                        // CopyPaste-u30t: navigate to the History/home tab after saving.
-                        onSaved = { selectedTab = NavTab.CLIPS.ordinal },
-                    )
-                }
-                // CopyPaste-r3qq: SyncStatusBadge overlaid at bottom-center as a Box
-                // child so it floats above the screen content rather than being pushed
-                // below the tab bar by Column layout. z-order: content < badge < tab bar.
-                Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-                    SyncStatusBadge()
-                }
-            }
-        }
-
-        // ── Floating glass tab bar ──────────────────────────────────────────
-        // Detached from the Scaffold bottomBar slot so it floats over the content
-        // with side margins (12 dp) and a rounded glass pill (radius 28 dp).
-        // Positioned via Alignment.BottomCenter + padding, clears the system nav bar.
-        FloatingTabBar(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .onSizeChanged { size ->
-                    tabBarHeightDp = with(density) { size.height.toDp() }
-                },
-            selectedTab = selectedTab,
-            tabBarShape = tabBarShape,
-            navBarBottomPadding = navBarInsetDp,
-            onTabSelected = { index ->
-                val leavingSettings =
-                    NavTab.entries[selectedTab] == NavTab.SETTINGS && index != selectedTab
-                val guard = settingsNavGuard
-                if (leavingSettings && guard != null) {
-                    // Intercept: the guard shows the Discard dialog and
-                    // only runs `proceed` if the user confirms (or there
-                    // are no unsaved changes).
-                    guard { selectedTab = index }
-                } else {
-                    selectedTab = index
-                }
-            },
-        )
-    }
-}
-
-/**
- * Floating tab bar (styleguide `.tabbar` floating treatment).
- *
- * Detached from the screen edge — sits 10 dp above the system navigation bar,
- * with 12 dp side margins and a 28 dp corner radius.
- *
- * Active tab: accent-tinted pill background + primary-colored icon/label
- * + a spring pop scale (0.94 → 1.06 → 1.0).
- * Inactive: onSurfaceVariant icon/label, no background.
- */
-@Composable
-private fun FloatingTabBar(
-    modifier: Modifier = Modifier,
-    selectedTab: Int,
-    tabBarShape: RoundedCornerShape,
-    navBarBottomPadding: androidx.compose.ui.unit.Dp,
-    onTabSelected: (Int) -> Unit,
-) {
-    // Spring spec for the active-tab scale pop: stiffness Low → smooth spring,
-    // dampingRatio NoBouncy → one clean overshoot then settle.
-    val springSpec = spring<Float>(
-        dampingRatio = Spring.DampingRatioLowBouncy,
-        stiffness = Spring.StiffnessMedium,
-    )
-
-    Surface(
-        shape = tabBarShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(bottom = navBarBottomPadding),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NavTab.entries.forEachIndexed { index, tab ->
-                val isSelected = selectedTab == index
-                val label = stringResource(tab.labelRes)
-
-                // Spring pop on selection: 0.94 → 1.06 → 1.0 (matches web activeTabPop
-                // keyframes @0%:scale(.94), @60%:scale(1.06), @100%:scale(1)).
-                val scale by animateFloatAsState(
-                    targetValue = if (isSelected) 1.0f else 0.97f,
-                    animationSpec = springSpec,
-                    label = "tabScale_$index",
-                )
-
-                val activeTextColor = MaterialTheme.colorScheme.primary
-                val textColor = if (isSelected) activeTextColor else MaterialTheme.colorScheme.onSurfaceVariant
-                val pillColor = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .scale(scale)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(pillColor)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            role = Role.Tab,
-                            onClick = { onTabSelected(index) },
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = label,
-                        color = textColor,
-                    )
-                }
-            }
-        }
     }
 }

@@ -21,8 +21,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -36,8 +37,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.copypaste.android.ui.theme.LocalCpColors
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -99,6 +102,10 @@ internal fun HistoryList(
     // during scroll recomposition. A single read here is stable for the list's
     // lifetime.
     val c = MaterialTheme.colorScheme
+    // android-history D2: single content-color source, hoisted once at list
+    // scope (same CopyPaste-998 jank-avoidance reason as `c` above) and passed
+    // down to every row.
+    val cp = LocalCpColors.current
     // E: hoist settings reads via a version token so they're re-read once per
     // settings-change event rather than on every recomposition frame.
     // A DisposableEffect observes the settings SharedPreferences and increments
@@ -272,108 +279,153 @@ internal fun HistoryList(
     }
 
     // Hoist entrance duration once at list scope so it is NOT recomputed per row
-    // inside itemsIndexed (avoids per-item composition state entries).
+    // inside the entries loop (avoids per-item composition state entries).
     val rowEnterDurMs = 300
     // STYLEGUIDE §9.5: rows are divider-separated (LINE), no inset gap.
     val rowGap = 0.dp
     val isInset = false
+
+    // android-history §9.6 date-group headers: fold the already-sorted `items`
+    // into a flat header/row sequence once per list identity change (pure,
+    // no Compose dependency — see HistoryDateGroups.kt). `nowMs` is captured
+    // once per fold rather than re-read every recomposition; a boundary
+    // crossing midnight simply waits for the next time `items` changes to
+    // re-bucket, an accepted staleness window matching every other
+    // "relative time" label in this row (see `relativeTime`).
+    val entries = remember(items) { buildHistoryListEntries(items, System.currentTimeMillis()) }
+
+    // MainShell D7 edge-to-edge backdrop (S5 carried task): [padding]'s TOP/
+    // START/END insets (top-bar clearance, cutout) are applied as a Modifier —
+    // they bound where the list's OWN box may draw. The BOTTOM inset (nav-pill
+    // clearance when embedded) is applied as `contentPadding` bottom instead:
+    // the LazyColumn's box still extends to the full available height, so the
+    // last row's real pixels are laid out and scroll BEHIND the floating pill
+    // (letting the pill's backdrop blur sample real content) — only the
+    // scroll position itself is clamped clear of the pill.
+    val layoutDirection = LocalLayoutDirection.current
 
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(c.background)
-            .padding(padding),
+            .padding(
+                start = padding.calculateStartPadding(layoutDirection),
+                top = padding.calculateTopPadding(),
+                end = padding.calculateEndPadding(layoutDirection),
+            ),
         contentPadding = PaddingValues(
             // A-C1 INSET: add top+bottom content padding equal to rowGap so the first and
             // last rows are also visually separated from the list edges. CARD/LINE: no padding.
             top = if (isInset) rowGap else 0.dp,
-            bottom = if (isInset) rowGap else 0.dp,
+            bottom = (if (isInset) rowGap else 0.dp) + padding.calculateBottomPadding(),
         ),
         // A-C1: row spacing — CARD/LINE=0dp (divider-separated), INSET=tok.rowGap (card-spaced).
         // Classic: spacedBy(0.dp) — identical to previous Arrangement.spacedBy(0.dp).
         verticalArrangement = Arrangement.spacedBy(rowGap),
     ) {
         val pinnedCount = items.count { it.pinned }
-        itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
-            // G: only animate on the first appearance of this id; subsequent re-emits
-            // (same id, same data) are already mounted and should skip animation.
-            val isNewMount = !mountedIds.contains(item.id)
-            if (isNewMount) mountedIds.add(item.id)
-            // CopyPaste-z89 (stagger): ~20ms step, cap 10 rows (was 150ms,
-            // i.e. up to 1.3s — far too slow). Matches PARITY-SPEC §11 (18–20ms / cap 10).
-            val mountDelay = if (isNewMount)
-                (index * ROW_STAGGER_STEP_MS).coerceAtMost(10 * ROW_STAGGER_STEP_MS)
-            else 0
-            // Styleguide .listItemIn: translateX(-12px) → 0, 0.55s out-expo — horizontal
-            // slide from left matches the web parity spec. rowEnterDurMs is hoisted at
-            // list scope to avoid per-item composition state entries.
-            AnimatedVisibility(
-                visible = true,
-                enter = if (!isNewMount) androidx.compose.animation.EnterTransition.None
-                        else fadeIn(
-                            animationSpec = tween(
-                                durationMillis = rowEnterDurMs,
-                                delayMillis = mountDelay,
-                                easing = FastOutSlowInEasing,
-                            )
-                        ) + slideInHorizontally(
-                            animationSpec = tween(
-                                durationMillis = rowEnterDurMs,
-                                delayMillis = mountDelay,
-                                easing = FastOutSlowInEasing,
-                            ),
-                            // Styleguide: translateX(-12px) — small left-offset entrance.
-                            initialOffsetX = { -it / 5 },
-                        ),
-            ) {
-                // A-C1: INSET rows wrap in a horizontally-inset Column with rounded corners
-                // (Vapor inset card look). CARD/LINE rows use the flat Column (byte-identical).
-                Column(
-                    modifier = Modifier
-                        .previewPeekGesture(
-                            itemId = item.id,
-                            selectionMode = selectionMode,
-                            onPeeking = onPreviewPeek,
-                            onPinned = onPreviewPin,
-                            onDismissPeek = onPreviewDismiss,
-                        )
-                    ,
-                ) {
-                    HistoryRow(
-                        item = item,
-                        colors = c,
-                        repository = repository,
-                        maskSensitive = maskSensitive,
-                        imageMaxHeightDp = imageMaxHeightDp,
-                        previewDelayMs = previewDelayMs,
-                        previewLines = previewLines,
-                        selectionMode = selectionMode,
-                        isSelected = selectedIds.contains(item.id),
-                        reorderMode = reorderMode,
-                        pinnedIndex = item.pinnedSortIndex,
-                        pinnedCount = pinnedCount,
-                        ownDeviceId = ownDeviceId,
-                        peers = peers,
-                        onDelete = onDelete,
-                        onSetPinned = onSetPinned,
-                        onMoveUp = { onReorderPinned(item.id, -1) },
-                        onMoveDown = { onReorderPinned(item.id, +1) },
-                        onCopy = { copyItemById(item) },
-                        onLongPress = { onLongPress(item.id) },
-                        onCheckboxTap = { onCheckboxTap(item.id) },
-                        onSensitiveTap = onSensitiveTap,
-                        onSaveFile = { onSaveFile(item.id) },
-                        onOpenFile = { onOpenFile(item.id) },
-                        onPreviewPeek = onPreviewPeek,
-                        onPreviewPin = onPreviewPin,
-                        onPreviewDismiss = onPreviewDismiss,
-                    )
-                    // STYLEGUIDE §9.5 / §3.2: a single hairline row divider.
-                    HorizontalDivider(
-                        color = c.outlineVariant,
-                        thickness = 1.dp,
-                    )
+        // Row-only position (headers do not consume a slot) — preserves the
+        // exact pre-date-header stagger semantics, where `index` was the row's
+        // position within the flat `items` list.
+        var rowIndex = 0
+        // Per-OCCURRENCE counter (not per-group-value): when `sortByDevice` is
+        // true the same HistoryDateGroup can legitimately repeat once per
+        // device section (see HistoryDateGroups.kt's fold kdoc) — a key keyed
+        // only on the group name would collide across those repeats and crash
+        // (`stickyHeader` keys must be unique across the whole LazyColumn).
+        var headerIndex = 0
+        entries.forEach { entry ->
+            when (entry) {
+                is HistoryListEntry.Header -> stickyHeader(key = "header_${entry.group.name}_${headerIndex++}") {
+                    HistoryDateHeaderRow(group = entry.group)
+                }
+                is HistoryListEntry.Row -> {
+                    val item = entry.item
+                    val index = rowIndex++
+                    item(key = item.id) {
+                        // G: only animate on the first appearance of this id; subsequent re-emits
+                        // (same id, same data) are already mounted and should skip animation.
+                        val isNewMount = !mountedIds.contains(item.id)
+                        if (isNewMount) mountedIds.add(item.id)
+                        // CopyPaste-z89 (stagger): ~20ms step, cap 10 rows (was 150ms,
+                        // i.e. up to 1.3s — far too slow). Matches PARITY-SPEC §11 (18–20ms / cap 10).
+                        val mountDelay = if (isNewMount)
+                            (index * ROW_STAGGER_STEP_MS).coerceAtMost(10 * ROW_STAGGER_STEP_MS)
+                        else 0
+                        // Styleguide .listItemIn: translateX(-12px) → 0, 0.55s out-expo — horizontal
+                        // slide from left matches the web parity spec. rowEnterDurMs is hoisted at
+                        // list scope to avoid per-item composition state entries.
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = if (!isNewMount) androidx.compose.animation.EnterTransition.None
+                                    else fadeIn(
+                                        animationSpec = tween(
+                                            durationMillis = rowEnterDurMs,
+                                            delayMillis = mountDelay,
+                                            easing = FastOutSlowInEasing,
+                                        )
+                                    ) + slideInHorizontally(
+                                        animationSpec = tween(
+                                            durationMillis = rowEnterDurMs,
+                                            delayMillis = mountDelay,
+                                            easing = FastOutSlowInEasing,
+                                        ),
+                                        // Styleguide: translateX(-12px) — small left-offset entrance.
+                                        initialOffsetX = { -it / 5 },
+                                    ),
+                        ) {
+                            // A-C1: INSET rows wrap in a horizontally-inset Column with rounded corners
+                            // (Vapor inset card look). CARD/LINE rows use the flat Column (byte-identical).
+                            Column(
+                                modifier = Modifier
+                                    .previewPeekGesture(
+                                        itemId = item.id,
+                                        selectionMode = selectionMode,
+                                        onPeeking = onPreviewPeek,
+                                        onPinned = onPreviewPin,
+                                        onDismissPeek = onPreviewDismiss,
+                                    )
+                                ,
+                            ) {
+                                HistoryRow(
+                                    item = item,
+                                    colors = c,
+                                    cpColors = cp,
+                                    repository = repository,
+                                    maskSensitive = maskSensitive,
+                                    imageMaxHeightDp = imageMaxHeightDp,
+                                    previewDelayMs = previewDelayMs,
+                                    previewLines = previewLines,
+                                    selectionMode = selectionMode,
+                                    isSelected = selectedIds.contains(item.id),
+                                    reorderMode = reorderMode,
+                                    pinnedIndex = item.pinnedSortIndex,
+                                    pinnedCount = pinnedCount,
+                                    ownDeviceId = ownDeviceId,
+                                    peers = peers,
+                                    onDelete = onDelete,
+                                    onSetPinned = onSetPinned,
+                                    onMoveUp = { onReorderPinned(item.id, -1) },
+                                    onMoveDown = { onReorderPinned(item.id, +1) },
+                                    onCopy = { copyItemById(item) },
+                                    onLongPress = { onLongPress(item.id) },
+                                    onCheckboxTap = { onCheckboxTap(item.id) },
+                                    onSensitiveTap = onSensitiveTap,
+                                    onSaveFile = { onSaveFile(item.id) },
+                                    onOpenFile = { onOpenFile(item.id) },
+                                    onPreviewPeek = onPreviewPeek,
+                                    onPreviewPin = onPreviewPin,
+                                    onPreviewDismiss = onPreviewDismiss,
+                                )
+                                // STYLEGUIDE §9.5 / §3.2: a single hairline row divider.
+                                HorizontalDivider(
+                                    color = c.outlineVariant,
+                                    thickness = 1.dp,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -36,6 +36,12 @@ use crate::state::AppState;
 /// user, short enough that abandoned registrations don't leak forever. A device
 /// whose inbox has *any* item is always retained regardless of age (see
 /// [`crate::state::RelayStore::cleanup_inactive_devices`]).
+///
+/// CopyPaste-8ebg.58: intentionally shorter than the 1-year bearer-token
+/// lifetime minted in `state::registration` — this threshold reclaims
+/// abandoned registrations (never received a single fan-out item), not active
+/// devices, so it does not need to match the auth-token expiry. A device that
+/// is actually in use never reaches this path.
 const DEVICE_INACTIVE_THRESHOLD_SECS: u64 = 30 * 24 * 3600;
 
 /// Inner async loop body for the TTL evictor (CopyPaste-bp3o).

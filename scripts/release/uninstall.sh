@@ -50,6 +50,9 @@ KEYCHAIN_SERVICE="copypaste-master-key"
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 LAUNCHD_SCRIPT="${SCRIPT_DIR}/uninstall-launchd.sh"
+
+# shellcheck source=../lib/release-identity.sh
+source "${SCRIPT_DIR}/../lib/release-identity.sh"   # sets DAEMON_LABEL
 # ----------------------------------------------------------------------------
 
 DRY_RUN=0
@@ -119,8 +122,8 @@ if [[ -x "$LAUNCHD_SCRIPT" ]]; then
     fi
 else
     echo "WARN: ${LAUNCHD_SCRIPT} not found or not executable — falling back to inline removal" >&2
-    run "launchctl bootout 'gui/$(id -u)/com.copypaste.daemon' 2>/dev/null || true"
-    run "rm -f '$HOME/Library/LaunchAgents/com.copypaste.daemon.plist'"
+    run "launchctl bootout 'gui/$(id -u)/${DAEMON_LABEL}' 2>/dev/null || true"
+    run "rm -f '$HOME/Library/LaunchAgents/${DAEMON_LABEL}.plist'"
 fi
 
 # ---- 2. Application bundle + CLI symlinks ----------------------------------

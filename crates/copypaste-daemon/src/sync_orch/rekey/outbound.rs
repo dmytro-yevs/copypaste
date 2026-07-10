@@ -50,7 +50,12 @@ pub enum RekeyOutcome {
 ///
 /// So a file can be storable yet un-syncable: local storage and sync are
 /// deliberately decoupled, and the UI tells the user where the sync line sits.
-pub const SYNC_MAX_BLOB_BYTES: usize = 8 * 1024 * 1024;
+///
+/// Re-exported from [`copypaste_ipc::SYNC_MAX_BLOB_BYTES`] (CopyPaste-1d5l.58)
+/// — the same canonical value `copypaste_relay::quota::Tier::max_item_bytes`
+/// uses for its text-item quota, so the two crates (which do not depend on
+/// each other) cannot drift.
+pub const SYNC_MAX_BLOB_BYTES: usize = copypaste_ipc::SYNC_MAX_BLOB_BYTES;
 
 /// Reassemble an image/file item's at-rest chunk blob back into plaintext.
 ///

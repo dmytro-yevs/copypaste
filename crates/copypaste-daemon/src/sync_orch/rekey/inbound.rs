@@ -31,10 +31,15 @@ use super::crypto_ctx::SyncCrypto;
 // directory level deeper — into `sync_orch::rekey::inbound` — so it needs one
 // extra `super` to reach the same `sync_orch`-wide audience the flat
 // `rekey.rs` file exposed; consumed by `sync_orch::merge`).
+// CopyPaste-8ebg.7: max_decoded_image_mb is threaded from the caller's live
+// AppConfig instead of the hardcoded copypaste_core::config::MAX_DECODED_IMAGE_MB
+// default, so a user-raised/lowered decode-bomb budget is honoured on rekey
+// (previously large screenshots silently failed to reproduce on peers).
 #[allow(clippy::result_large_err)]
 pub(in super::super) fn rekey_inbound(
     crypto: &SyncCrypto,
     wire: WireItem,
+    max_decoded_image_mb: u32,
 ) -> Result<(ClipboardItem, Option<Vec<u8>>), Box<WireItem>> {
     // Marker: a sync-key-wrapped payload carries content but no nonce.
     let is_blob = wire.content_type == "image" || wire.content_type == "file";
@@ -62,7 +67,7 @@ pub(in super::super) fn rekey_inbound(
         // attempt, hand it back on failure, and on the final failure return.
         let mut wire_box = Box::new(wire);
         for key in &peer_keys {
-            match rewrap_inbound_blob(crypto, *wire_box, key) {
+            match rewrap_inbound_blob(crypto, *wire_box, key, max_decoded_image_mb) {
                 Ok(pair) => return Ok(pair),
                 Err(w) => {
                     wire_box = w;
@@ -204,6 +209,7 @@ pub(super) fn rewrap_inbound_blob(
     crypto: &SyncCrypto,
     wire: WireItem,
     shared: &SyncKey,
+    max_decoded_image_mb: u32,
 ) -> Result<(ClipboardItem, Option<Vec<u8>>), Box<WireItem>> {
     // F2: decrypt borrows the at-rest blob in place — no `.clone()` of the
     // (potentially multi-MiB) ciphertext. We still hand `wire` back intact on
@@ -280,7 +286,7 @@ pub(super) fn rewrap_inbound_blob(
                 &crypto.v1_key,
                 &file_id,
                 copypaste_core::MAX_IMAGE_BYTES,
-                copypaste_core::config::MAX_DECODED_IMAGE_MB,
+                max_decoded_image_mb,
             ) {
                 Ok((meta, chunks)) => {
                     let blob = match copypaste_core::chunks_to_blob(&chunks) {

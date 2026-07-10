@@ -1,5 +1,6 @@
 package com.copypaste.android
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,12 +19,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.CpBadgeChip
+import com.copypaste.android.ui.theme.CpDimensions
+import com.copypaste.android.ui.theme.CpSpacing
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.LocalCpColors
+import com.copypaste.android.ui.theme.icons.LucideIcons
 import uniffi.copypaste_android.BootstrapResult
 import uniffi.copypaste_android.ScannedPairing
 
@@ -33,6 +40,11 @@ import uniffi.copypaste_android.ScannedPairing
 // copy-to-clipboard + toast side effect was factored out to an [onCopyFingerprint]
 // callback so these composables have no LocalClipboardManager/toast dependency
 // of their own.
+// CopyPaste-myh8.8 (S8): re-based on CpColors/CpTypography tokens; this file
+// is PAIRING UI (the scan-review + paired-summary cards), not the Devices
+// roster. Fixed two pre-existing rendering no-ops discovered while re-skinning
+// (both boxes were sized/clipped but never carried a `.background()`, so they
+// painted nothing): the avatar tile fill and the paired-device status dot.
 
 /**
  * Rich scanned-peer confirmation card, shown INSTEAD of the own-QR once a peer
@@ -59,62 +71,70 @@ internal fun ScannedPeerReviewCard(
     onCancel: () -> Unit,
     onCopyFingerprint: (String) -> Unit,
 ) {
+    val cp = LocalCpColors.current
+    val accent = MaterialTheme.colorScheme.primary
+    val cdCopyFingerprint = stringResource(R.string.cd_copy_fingerprint)
+
     // 6i0w: replace raw Material Card with CopyPasteCard (glass surface).
     CopyPasteCard {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(CpSpacing.s4),
         ) {
-            // lclr: avatar tile — 38dp accent-tint rounded tile with device initial.
+            // lclr: avatar tile — accent-tint rounded tile with device initial.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                val displayName = peer.deviceName.ifBlank { "Unknown device" }
+                val displayName = peer.deviceName.ifBlank { stringResource(R.string.s8_pair_unknown_device) }
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp)),
+                        .size(CpDimensions.tileMd)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(accent.copy(alpha = 0.16f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = displayName.take(1).uppercase(),
-                        style = MaterialTheme.typography.titleMedium,
+                        style = CpTypography.bodyEmphasis,
+                        color = accent,
                     )
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                     Text(
-                        text = "Device to pair with",
-                        style = MaterialTheme.typography.labelLarge,
+                        text = stringResource(R.string.pair_review_title),
+                        style = CpTypography.micro,
+                        color = cp.faint,
                     )
                     // Device name (from QR payload field 5)
                     Text(
                         text = displayName,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = CpTypography.bodyEmphasis,
+                        color = cp.text,
                     )
                 }
             }
 
-            // 483o: transport chip pill — pill shape + hairline border + glyph.
-            Row(
-                modifier = Modifier
-                    .padding(horizontal = 9.dp, vertical = 3.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(text = "⟲", fontSize = 11.sp)
+            if (pendingBootstrap == null) {
                 Text(
-                    text = "P2P",
-                    fontSize = 11.sp,
-                    style = MaterialTheme.typography.labelSmall,
+                    text = stringResource(R.string.pair_review_subtitle),
+                    style = CpTypography.meta,
+                    color = cp.faint,
                 )
             }
+
+            // 483o: transport pill — STYLEGUIDE §9.4 pill/chip primitive.
+            CpBadgeChip(
+                text = stringResource(R.string.s8_pair_transport_p2p),
+                color = cp.info,
+            )
 
             // Address (host:port from QR payload field 6, if present)
             if (peer.addrHint.isNotBlank()) {
                 Text(
-                    text = "Address: ${peer.addrHint}",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = stringResource(R.string.s8_pair_address_format, peer.addrHint),
+                    style = CpTypography.body,
+                    color = cp.dim,
                 )
             }
             // 65gv (PG-47): show the FULL fingerprint in the SAS confirmation
@@ -122,12 +142,13 @@ internal fun ScannedPeerReviewCard(
             // defeats its purpose. The user must compare the whole value with
             // the peer device. Matches macOS SAS modal which shows 64 chars.
             Text(
-                text = "Fingerprint: ${peer.fingerprint}",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                ),
-                modifier = Modifier.clickable { onCopyFingerprint(peer.fingerprint) },
+                text = stringResource(R.string.s8_pair_fingerprint_format, peer.fingerprint),
+                style = CpTypography.bodyMono,
+                color = cp.text,
+                modifier = Modifier.clickable(
+                    onClickLabel = cdCopyFingerprint,
+                    role = Role.Button,
+                ) { onCopyFingerprint(peer.fingerprint) },
             )
 
             // CopyPaste-1jms.33: after PAKE bootstrap completes, show the
@@ -142,7 +163,7 @@ internal fun ScannedPeerReviewCard(
                     peerAppVersion = bs.peerAppVersion,
                 )
                 if (metaRows.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                         metaRows.forEach { (labelKey, value) ->
                             // Resolve the string resource by name.
                             // The label keys map 1:1 to strings.xml entries
@@ -156,6 +177,12 @@ internal fun ScannedPeerReviewCard(
                             MetaRow(label = label, value = value)
                         }
                     }
+                } else {
+                    Text(
+                        text = stringResource(R.string.pair_review_no_meta),
+                        style = CpTypography.meta,
+                        color = cp.faint,
+                    )
                 }
             }
         }
@@ -218,51 +245,59 @@ internal fun PairedDeviceSummaryCard(
     syncAddr: String,
     onCopyFingerprint: (String) -> Unit,
 ) {
+    val cp = LocalCpColors.current
+    val accent = MaterialTheme.colorScheme.primary
+    val cdCopyFingerprint = stringResource(R.string.cd_copy_fingerprint)
+
     // 6i0w: replace raw Material Card with CopyPasteCard.
     CopyPasteCard {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // lclr: avatar tile — 38dp accent-tint rounded tile.
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(CpSpacing.s4)) {
+            // lclr: avatar tile — accent-tint rounded tile with a device glyph
+            // (LucideIcons.NavDevices — replaces the former raw "📱" emoji, which
+            // renders inconsistently across OEM emoji fonts).
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(10.dp)),
+                        .size(CpDimensions.tileMd)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(accent.copy(alpha = 0.16f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // Device glyph placeholder — phone icon initial.
-                    Text(
-                        text = "📱",
-                        fontSize = 18.sp,
+                    Icon(
+                        imageVector = LucideIcons.NavDevices,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(CpDimensions.glyphBox),
                     )
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s1)) {
                     Text(
-                        text = "Paired device",
-                        style = MaterialTheme.typography.labelLarge,
+                        text = stringResource(R.string.s8_paired_device_label),
+                        style = CpTypography.micro,
+                        color = cp.faint,
                     )
-                    // prld: status dot — danger for offline (unknown reachability here),
-                    // no redundant "Online/Offline" text label per styleguide.
+                    // prld: status dot — CopyPaste-5917.49: neutral (mute), not danger —
+                    // this card has no liveness signal for the peer, so a colored dot
+                    // would misleadingly imply online/offline. Danger is only correct
+                    // once reachability is confirmed unreachable.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s3),
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
-                                .clip(CircleShape),
-                            // CopyPaste-5917.49: was c.err (hardcoded red even
-                            // when peer is reachable). PairScreen has no liveness
-                            // signal for the peer, so a neutral (no tint) dot
-                            // avoids misleading the user. Danger would only be
-                            // appropriate when confirmed unreachable.
+                                .clip(CircleShape)
+                                .background(cp.mute),
                         )
                         if (syncAddr.isNotBlank()) {
                             Text(
                                 text = syncAddr,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = CpTypography.body,
+                                color = cp.dim,
                             )
                         }
                     }
@@ -273,11 +308,12 @@ internal fun PairedDeviceSummaryCard(
             val truncatedFp = formatPeerFingerprint(fingerprint)
             Text(
                 text = truncatedFp,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                ),
-                modifier = Modifier.clickable { onCopyFingerprint(fingerprint) },
+                style = CpTypography.bodyMono,
+                color = cp.text,
+                modifier = Modifier.clickable(
+                    onClickLabel = cdCopyFingerprint,
+                    role = Role.Button,
+                ) { onCopyFingerprint(fingerprint) },
             )
         }
     }

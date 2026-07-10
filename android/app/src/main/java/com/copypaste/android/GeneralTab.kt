@@ -96,7 +96,7 @@ internal fun GeneralTab(
         // ── DIAGNOSTICS section card ──────────────────────────────────────
         SectionLabel(stringResource(R.string.section_diagnostics))
         SettingsCard {
-            // CopyPaste-5917.77: NavIcons.Logs (doc.text SF-like icon) — parity with macOS Logs tab.
+            // CopyPaste-5917.77: LucideIcons.NavLogs (file-text glyph) — parity with macOS Logs tab.
             // Android intentionally routes Logs via Settings rather than a bottom-nav tab;
             // see NavTabTest which asserts the 3-tab (Clips/Devices/Settings) nav is canonical.
             SettingsNavRow(

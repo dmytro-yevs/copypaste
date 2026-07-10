@@ -28,7 +28,7 @@ use crate::ipc::IpcClient;
 /// Maximum import file size accepted before reading into memory.
 ///
 /// The daemon's IPC framing caps any single request at 16 MiB
-/// (`MAX_REQUEST_BYTES`). Because the CLI wraps the entire file contents in a
+/// ([`copypaste_ipc::MAX_IPC_REQUEST_BYTES`]). Because the CLI wraps the entire file contents in a
 /// single `import` JSON-RPC frame (plus `{"method":"import","params":{"items":`
 /// envelope overhead), we cap the **source file** at 12 MiB — safely under
 /// 16 MiB after serialisation overhead — and surface a clear error here rather
@@ -39,8 +39,12 @@ use crate::ipc::IpcClient;
 const MAX_IMPORT_FILE_BYTES: u64 = 12 * 1024 * 1024; // 12 MiB (IPC limit headroom)
 
 /// The daemon's IPC frame limit, mirrored here for the error message.
-/// Keep this in sync with `MAX_REQUEST_BYTES` in `copypaste-daemon/src/ipc.rs`.
-const DAEMON_MAX_REQUEST_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
+///
+/// CopyPaste-8ebg.59: derived from [`copypaste_ipc::MAX_IPC_REQUEST_BYTES`],
+/// the single shared source of truth also used by the daemon's Unix-socket
+/// server and the frozen Windows named-pipe skeleton — this used to be an
+/// independent `16 * 1024 * 1024` literal kept in sync only by a comment.
+const DAEMON_MAX_REQUEST_BYTES: u64 = copypaste_ipc::MAX_IPC_REQUEST_BYTES as u64;
 
 pub fn run(socket_path: &Path, file: &str) -> Result<()> {
     // Pre-check file size before reading into memory.  read_to_string would

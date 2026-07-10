@@ -41,13 +41,33 @@ export function fuzzyMatch(query: string, text: string): FuzzyResult | null {
   const tLen = t.length;
   const qLen = q.length;
 
-  // Fast path: not even a subsequence.
+  // CopyPaste-f72f: prefer a literal contiguous substring match over the
+  // scattered subsequence match below. The plain greedy subsequence scan
+  // picks the *earliest* occurrence of each query char independently, which
+  // can highlight isolated letters spread across unrelated words even when
+  // the query also occurs as one contiguous run elsewhere in the text (e.g.
+  // "cat" against "concatenate" — greedy subsequence lights up "c-o-n-CAT-…"
+  // scattered, when the literal "cat" substring is right there). When the
+  // query is a literal substring, treat it as one contiguous highlighted
+  // run — much easier to read — and let the earliness/prefix scoring below
+  // still apply unchanged (match ordering is not affected: this only changes
+  // which character *positions* get highlighted for an already-matching
+  // item, not whether an item matches or how it's ranked among matches with
+  // different substring/subsequence status, since ordering was already
+  // subsequence-based and a substring is always also a valid subsequence).
+  const substrIndex = t.indexOf(q);
   const positions: number[] = [];
   let qi = 0;
-  for (let ti = 0; ti < tLen && qi < qLen; ti++) {
-    if (t[ti] === q[qi]) {
-      positions.push(ti);
-      qi++;
+  if (substrIndex !== -1) {
+    for (let i = 0; i < qLen; i++) positions.push(substrIndex + i);
+    qi = qLen;
+  } else {
+    // Fast path: not even a subsequence.
+    for (let ti = 0; ti < tLen && qi < qLen; ti++) {
+      if (t[ti] === q[qi]) {
+        positions.push(ti);
+        qi++;
+      }
     }
   }
   if (qi < qLen) return null; // not a full subsequence

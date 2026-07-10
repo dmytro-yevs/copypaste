@@ -48,6 +48,17 @@ use super::PeerSinks;
 /// Returns `true` if a live session entry was found and removed; `false` if the
 /// peer had no active sink (was already disconnected or never connected).
 pub async fn send_unpair_and_close_session(peer_sinks: &PeerSinks, canonical_fp: &str) -> bool {
+    // CopyPaste-nzdf6: prune the fanout in-process maps for this peer
+    // regardless of whether a live sink was found — a peer can accumulate a
+    // rekey-failure count or an outbound-stamp entry while offline (e.g. a
+    // failed send queued before disconnect), and neither map is otherwise
+    // pruned anywhere else on unpair. Unbounded otherwise: these `HashMap`s
+    // only ever grow, one entry per distinct fingerprint ever seen, until
+    // the daemon restarts.
+    let fp = DeviceFingerprint(canonical_fp.to_string());
+    super::fanout::clear_rekey_failure(&fp);
+    super::fanout::clear_outbound_stamp(&fp);
+
     let mut sinks = peer_sinks.lock().await;
     match sinks.remove(canonical_fp) {
         None => {
@@ -100,6 +111,15 @@ pub async fn send_unpair_and_close_session(peer_sinks: &PeerSinks, canonical_fp:
 /// allowlist entry is gone immediately — without waiting for a daemon restart.
 /// Passing `None` (as the unit tests do for the file-only path) skips that step.
 pub(super) fn evict_peer_local(peer_fp: &str, live_peers: Option<&PairedPeers>) {
+    // CopyPaste-nzdf6: prune the fanout in-process maps (rekey-failure
+    // counter + outbound-stamp throttle) for this peer — mirrors the send
+    // side in `send_unpair_and_close_session`. Neither map is otherwise
+    // pruned on unpair, so a re-paired device with the same fingerprint
+    // would inherit a stale counter/throttle from the previous pairing.
+    let fp = DeviceFingerprint(peer_fp.to_string());
+    super::fanout::clear_rekey_failure(&fp);
+    super::fanout::clear_outbound_stamp(&fp);
+
     let peers_path = crate::ipc::peers_file_path();
     let mut peers = crate::peers::load_peers(&peers_path);
     let before = peers.len();
@@ -136,12 +156,23 @@ pub(super) fn evict_peer_local(peer_fp: &str, live_peers: Option<&PairedPeers>) 
     }
 }
 
-/// Stamp first/last sync timestamps for a freshly-established peer connection.
+/// Stamp first/last sync timestamps for `peer_fp`.
 ///
-/// Called ONCE per established connection (both the accept and connector paths),
-/// right after the sync-on-connect catch-up. This per-connection cadence is the
-/// throttle: `peers.json` is rewritten when a link comes up, never per synced
-/// item, so there is no write amplification under a busy stream.
+/// CopyPaste-dkwl: originally called only once per established connection
+/// (both the accept and connector paths, right after the sync-on-connect
+/// catch-up). That connection-only cadence let a peer that connects but then
+/// fails every application-level exchange (e.g. persistent
+/// `RekeyOutcome::Failed` in `fanout.rs`) look perpetually "fresh" — a
+/// long-lived connection stamps once at handshake and never again, and a
+/// flaky one that keeps reconnecting re-stamps on every reconnect regardless
+/// of whether anything actually synced.
+///
+/// This function is now ALSO called from `framed_pump.rs` on a successful
+/// inbound `Data` frame and from `fanout.rs` on a successful outbound send
+/// (i.e. `RekeyOutcome` was not `Failed` and the frame was actually
+/// enqueued), each throttled independently (≥ 60 s) at the call site so
+/// `peers.json` is not rewritten per synced item under a busy stream — this
+/// function itself still does no throttling.
 ///
 /// `peer_fp` is the verified mTLS certificate fingerprint (colon-free hex);
 /// [`crate::peers::touch_sync_times`] canonicalises it against the colon-hex
@@ -185,6 +216,8 @@ mod tests {
                 os_version: None,
                 app_version: None,
                 local_ip: None,
+                // Fresh test fixture, no prior device to carry a device_id from.
+                device_id: None,
                 public_ip: None,
                 first_sync_at: None,
                 last_sync_at: None,
@@ -257,6 +290,8 @@ mod tests {
                     os_version: None,
                     app_version: None,
                     local_ip: None,
+                    // Fresh test fixture, no prior device to carry a device_id from.
+                    device_id: None,
                     public_ip: None,
                     first_sync_at: None,
                     last_sync_at: None,
@@ -274,6 +309,8 @@ mod tests {
                     os_version: None,
                     app_version: None,
                     local_ip: None,
+                    // Fresh test fixture, no prior device to carry a device_id from.
+                    device_id: None,
                     public_ip: None,
                     first_sync_at: None,
                     last_sync_at: None,
@@ -335,6 +372,8 @@ mod tests {
                 os_version: None,
                 app_version: None,
                 local_ip: None,
+                // Fresh test fixture, no prior device to carry a device_id from.
+                device_id: None,
                 public_ip: None,
                 first_sync_at: None,
                 last_sync_at: None,

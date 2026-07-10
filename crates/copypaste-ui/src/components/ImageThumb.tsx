@@ -211,16 +211,38 @@ export function ImageThumb({ id, maxHeight }: ImageThumbProps) {
     });
   }, [id]);
 
+  // CopyPaste-8ebg.55: `.thumb-ph` (patterns.css) is a fixed 32x32 swatch, but
+  // the real <img> below renders up to 340 x maxHeight — so the placeholder
+  // was ~5x smaller than the thumbnail it stands in for, and the row visibly
+  // grew/jumped the instant the fetch resolved. Sizing the placeholder inline
+  // to the same box the real image will occupy (340 width cap, maxHeight cap)
+  // reserves the final footprint up front without touching patterns.css.
+  const placeholderStyle = { width: 340, height: maxHeight, maxWidth: "100%" };
+
   if (src === null) {
     // SCRH-11: Still loading — render a skeleton placeholder that occupies the
     // reserved row height so the row doesn't visually collapse while the fetch is
     // in flight. Previously returned null which left a blank gap in the list.
-    return <span className="thumb-ph" aria-label="Loading image…" aria-busy="true" />;
+    return (
+      <span
+        className="thumb-ph"
+        style={placeholderStyle}
+        aria-label="Loading image…"
+        aria-busy="true"
+      />
+    );
   }
 
   if (src === FETCH_FAILED) {
     // Fetch failed — render a small faint placeholder so the row isn't blank.
-    return <span className="thumb-ph thumb-ph--err" aria-label="Image unavailable" title="Image unavailable" />;
+    return (
+      <span
+        className="thumb-ph thumb-ph--err"
+        style={placeholderStyle}
+        aria-label="Image unavailable"
+        title="Image unavailable"
+      />
+    );
   }
 
   return (

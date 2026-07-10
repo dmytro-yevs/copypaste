@@ -1,6 +1,8 @@
 package com.copypaste.android
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -125,5 +127,26 @@ class HistoryScreenStateTest {
             fullMatchQuery = "old query",
         )
         assertEquals(emptyList<String>(), result.map { it.id })
+    }
+
+    // ── clearsDegradedState (android-history 5.3 — NEW error/degraded state) ──
+
+    @Test
+    fun `clearsDegradedState is true once a load finishes with data`() {
+        assertTrue(clearsDegradedState(loading = false, hasItems = true))
+    }
+
+    @Test
+    fun `clearsDegradedState stays false while a load is in flight`() {
+        assertFalse(clearsDegradedState(loading = true, hasItems = true))
+        assertFalse(clearsDegradedState(loading = true, hasItems = false))
+    }
+
+    @Test
+    fun `clearsDegradedState stays false when a finished load still has zero items`() {
+        // Conservative: a real "cleared history" and a still-failing daemon
+        // connection are indistinguishable from items/loading alone — see the
+        // kdoc on clearsDegradedState for why this does NOT auto-recover.
+        assertFalse(clearsDegradedState(loading = false, hasItems = false))
     }
 }

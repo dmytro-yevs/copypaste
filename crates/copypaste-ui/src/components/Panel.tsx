@@ -16,7 +16,16 @@ interface PanelProps {
 
 export function Panel({ children }: PanelProps) {
   return (
-    <div className="set-grp">
+    // CopyPaste-8ebg.35: bare div gave no ARIA grouping, so the row-group had
+    // no boundary for the rotor. role="group" matches the pattern already
+    // used elsewhere in this codebase (GalleryView, DisplayTab — role="group"
+    // aria-label="…"). Panel is always paired with a sibling SectionHeader
+    // that now renders role="heading" (see SectionHeader.tsx); Panel and
+    // SectionHeader are siblings, not nested, so there is no shared id to
+    // wire into aria-labelledby without also touching every call site — out
+    // of scope for this fix (touch-only-these-2-files constraint). An
+    // unnamed group still gives AT a real boundary instead of an opaque div.
+    <div className="set-grp" role="group">
       {children}
     </div>
   );

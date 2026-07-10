@@ -1,0 +1,18 @@
+{
+  "fixture": "masked-row",
+  "schemaNote": "Sensitive/masked variant of history-row.json — SECRET visual kind (android-design-system 'Content visual-kind resolver', S1.8) + STYLEGUIDE masking pipeline (blur API31+ / geometry-preserving opaque overlay <31). placeholder is a SYNTHETIC value, never a real secret (android-visual-regression 'Masked-sensitive fixture uses a placeholder').",
+  "android": { "component": "HistoryRow.kt (masked state)", "status": "Deferred", "owner": "android-history (S5)" },
+  "desktop": { "component": "HistoryRow.tsx (masked state)", "status": "Blocked", "owner": "desktop epic (not yet landed)" },
+  "records": [
+    {
+      "kind": "SECRET",
+      "placeholder": "•••••••• (synthetic — never real plaintext)",
+      "sourceApp": "com.example.passwordmanager",
+      "relTime": "1m",
+      "originDevice": null,
+      "pinned": false,
+      "sensitive": true,
+      "revealed": false
+    }
+  ]
+}

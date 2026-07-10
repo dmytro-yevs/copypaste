@@ -130,6 +130,264 @@ pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
     Ok(items)
 }
 
+// ---------------------------------------------------------------------------
+// CopyPaste-8ebg.57: keyset (seek) pagination primitives.
+//
+// `get_page` / `get_page_pinned_first` / `get_page_pinned_first_lamport` /
+// `get_page_meta` above all page via `LIMIT ?1 OFFSET ?2`. Under concurrent
+// writes (a new item is captured while the caller is mid-scroll) OFFSET
+// pagination is not stable: a numeric offset names a *position*, not a row,
+// so a row inserted above the window shifts every row below it down by one —
+// the next page re-fetches (duplicates) the row that shift pushed back into
+// view, or skips the row that shift pushed out of it. Keyset pagination seeks
+// from the last-seen row's own sort key instead of a position, so it is
+// immune to that shift: two consecutive fetches with the same page size never
+// duplicate or skip a row that existed, unmoved, between fetches.
+//
+// These are ADDITIVE new entry points (the existing offset-based functions
+// above are unchanged, and every existing call site — IPC handlers, Android
+// FFI, tests — keeps working exactly as before). Wiring a caller onto the
+// cursor path is opt-in: swap an `offset: usize` call for the matching
+// `*_seek` call with an `Option<Cursor>` (`None` = first page).
+//
+// # Why the pinned-first cursors use a boolean-OR expansion, not a SQL
+// row-value comparison
+//
+// `get_page` / `get_page_meta` sort by a single DESC key (`wall_time`, tied
+// by `id`), so their cursor predicate is a simple 2-column comparison.
+// `get_page_pinned_first(_lamport)` sort by FIVE columns with MIXED
+// directions (bucket ASC, pin_order-is-null ASC, pin_order ASC, then
+// wall_time/lamport_ts DESC, then id ASC as a deterministic final tiebreak
+// this cursor variant adds). A single SQLite row-value comparison
+// `(a,b,c,d,e) < (v1,v2,v3,v4,v5)` assumes ALL columns compare the same
+// direction, so it cannot express a mixed-direction composite key. The
+// portable fix is the standard keyset expansion: `col1 >? v1 OR (col1 =? v1
+// AND col2 >? v2) OR ...` — one OR-branch per sort column, `>` flipped to `<`
+// on the DESC columns — which is what `PinnedCursor`/`PinnedLamportCursor`
+// build below.
+
+/// Seek cursor for [`get_page_seek`] / [`get_page_meta_seek`]: the
+/// `(wall_time, id)` of the last row of the previous page. `None` requests
+/// the first page.
+#[derive(Debug, Clone)]
+pub struct WallCursor {
+    pub wall_time: i64,
+    pub id: String,
+}
+
+/// `LIMIT`-only, cursor-seeked variant of [`get_page`]. Ordered
+/// `wall_time DESC, id DESC` (the `id` tiebreak makes the order total, which
+/// keyset pagination requires — `get_page` had no such tiebreak because
+/// OFFSET does not need one).
+pub fn get_page_seek<D: DbRead + ?Sized>(
+    db: &D,
+    limit: usize,
+    cursor: Option<&WallCursor>,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let sql = format!(
+        "SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items \
+         WHERE deleted = 0 AND (?1 = 0 OR wall_time < ?2 OR (wall_time = ?2 AND id < ?3)) \
+         ORDER BY wall_time DESC, id DESC LIMIT ?4"
+    );
+    let mut stmt = db.conn().prepare_cached(&sql)?;
+    let (has_cursor, wall, id): (i64, i64, &str) = match cursor {
+        Some(c) => (1, c.wall_time, c.id.as_str()),
+        None => (0, 0, ""),
+    };
+    let items = stmt
+        .query_map(params![has_cursor, wall, id, limit_i64], row_to_item)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items)
+}
+
+/// `LIMIT`-only, cursor-seeked variant of [`get_page_meta`] (omits `content`).
+/// Same `(wall_time, id)` cursor contract as [`get_page_seek`].
+pub fn get_page_meta_seek<D: DbRead + ?Sized>(
+    db: &D,
+    limit: usize,
+    cursor: Option<&WallCursor>,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let sql = "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
+         FROM clipboard_items
+         WHERE deleted = 0 AND (?1 = 0 OR wall_time < ?2 OR (wall_time = ?2 AND id < ?3))
+         ORDER BY wall_time DESC, id DESC LIMIT ?4";
+    let mut stmt = db.conn().prepare_cached(sql)?;
+    let (has_cursor, wall, id): (i64, i64, &str) = match cursor {
+        Some(c) => (1, c.wall_time, c.id.as_str()),
+        None => (0, 0, ""),
+    };
+    let items = stmt
+        .query_map(params![has_cursor, wall, id, limit_i64], row_to_item)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items)
+}
+
+/// Seek cursor for [`get_page_pinned_first_seek`]: the full composite sort
+/// key of the last row of the previous page, matching the
+/// `CASE WHEN pinned THEN 0 ELSE 1 END, pin_order IS NULL, pin_order,
+/// wall_time DESC, id` order. `None` requests the first page.
+#[derive(Debug, Clone)]
+pub struct PinnedCursor {
+    /// `0` when the row was pinned, `1` otherwise (matches the `CASE` bucket).
+    pub bucket: i64,
+    /// `1` when `pin_order IS NULL`, else `0`.
+    pub pin_order_is_null: i64,
+    pub pin_order: Option<f64>,
+    pub wall_time: i64,
+    pub id: String,
+}
+
+/// `LIMIT`-only, cursor-seeked variant of [`get_page_pinned_first`]. See the
+/// module-level note above for why this uses a boolean-OR keyset expansion
+/// instead of a row-value comparison (the sort mixes ASC and DESC columns).
+pub fn get_page_pinned_first_seek<D: DbRead + ?Sized>(
+    db: &D,
+    limit: usize,
+    cursor: Option<&PinnedCursor>,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let sql = format!(
+        "SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items \
+         WHERE deleted = 0 AND (?1 = 0 OR \
+           (CASE WHEN pinned = 1 THEN 0 ELSE 1 END) > ?2 OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) > ?3) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS NOT ?4 AND (pin_order > ?4 OR ?4 IS NULL)) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS ?4 AND wall_time < ?5) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS ?4 AND wall_time = ?5 AND id > ?6)) \
+         ORDER BY \
+           CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC, \
+           pin_order IS NULL ASC, \
+           pin_order ASC, \
+           wall_time DESC, \
+           id ASC \
+         LIMIT ?7"
+    );
+    let mut stmt = db.conn().prepare_cached(&sql)?;
+    let (has_cursor, bucket, po_null, pin_order, wall, id): (
+        i64,
+        i64,
+        i64,
+        Option<f64>,
+        i64,
+        &str,
+    ) = match cursor {
+        Some(c) => (
+            1,
+            c.bucket,
+            c.pin_order_is_null,
+            c.pin_order,
+            c.wall_time,
+            c.id.as_str(),
+        ),
+        None => (0, 0, 0, None, 0, ""),
+    };
+    let items = stmt
+        .query_map(
+            params![has_cursor, bucket, po_null, pin_order, wall, id, limit_i64],
+            row_to_item,
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items)
+}
+
+/// Seek cursor for [`get_page_pinned_first_lamport_seek`]: mirrors
+/// [`PinnedCursor`] but tie-breaks unpinned rows by
+/// `lamport_ts DESC, wall_time DESC, origin_device_id ASC, id ASC` instead of
+/// `wall_time DESC, id ASC`.
+#[derive(Debug, Clone)]
+pub struct PinnedLamportCursor {
+    pub bucket: i64,
+    pub pin_order_is_null: i64,
+    pub pin_order: Option<f64>,
+    pub lamport_ts: i64,
+    pub wall_time: i64,
+    pub origin_device_id: String,
+    pub id: String,
+}
+
+/// `LIMIT`-only, cursor-seeked variant of [`get_page_pinned_first_lamport`].
+/// See the module-level note above for the boolean-OR keyset rationale.
+pub fn get_page_pinned_first_lamport_seek<D: DbRead + ?Sized>(
+    db: &D,
+    limit: usize,
+    cursor: Option<&PinnedLamportCursor>,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let sql = format!(
+        "SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items \
+         WHERE deleted = 0 AND (?1 = 0 OR \
+           (CASE WHEN pinned = 1 THEN 0 ELSE 1 END) > ?2 OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) > ?3) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS NOT ?4 AND (pin_order > ?4 OR ?4 IS NULL)) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS ?4 AND lamport_ts < ?5) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS ?4 AND lamport_ts = ?5 AND wall_time < ?6) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS ?4 AND lamport_ts = ?5 AND wall_time = ?6 AND origin_device_id > ?7) OR \
+           ((CASE WHEN pinned = 1 THEN 0 ELSE 1 END) = ?2 AND \
+             (CASE WHEN pin_order IS NULL THEN 1 ELSE 0 END) = ?3 AND \
+             pin_order IS ?4 AND lamport_ts = ?5 AND wall_time = ?6 AND origin_device_id = ?7 \
+             AND id > ?8)) \
+         ORDER BY \
+           CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC, \
+           pin_order IS NULL ASC, \
+           pin_order ASC, \
+           lamport_ts DESC, \
+           wall_time DESC, \
+           origin_device_id ASC, \
+           id ASC \
+         LIMIT ?9"
+    );
+    let mut stmt = db.conn().prepare_cached(&sql)?;
+    let (has_cursor, bucket, po_null, pin_order, lamport, wall, origin, id): (
+        i64,
+        i64,
+        i64,
+        Option<f64>,
+        i64,
+        i64,
+        &str,
+        &str,
+    ) = match cursor {
+        Some(c) => (
+            1,
+            c.bucket,
+            c.pin_order_is_null,
+            c.pin_order,
+            c.lamport_ts,
+            c.wall_time,
+            c.origin_device_id.as_str(),
+            c.id.as_str(),
+        ),
+        None => (0, 0, 0, None, 0, 0, "", ""),
+    };
+    let items = stmt
+        .query_map(
+            params![has_cursor, bucket, po_null, pin_order, lamport, wall, origin, id, limit_i64],
+            row_to_item,
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items)
+}
+
 /// Bump an existing item's recency fields to `now_ms` without changing its
 /// content, sensitive-flag, or any other metadata.
 ///

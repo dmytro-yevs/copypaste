@@ -36,14 +36,6 @@ object ClipboardCapturePipeline {
     private const val TAG = "ClipboardService"
 
     /**
-     * CopyPaste-lk5m: hard cap on bytes read for a FILE capture, in bytes.
-     * Mirrors copypaste-core's file ceiling (defaults.rs: 64 MiB). This is the
-     * backstop that protects against a content provider that under-reports its
-     * OpenableColumns.SIZE (the ShareReceiverActivity pre-check is advisory).
-     */
-    private const val MAX_FILE_CAPTURE_BYTES = 64L * 1024 * 1024
-
-    /**
      * CopyPaste-lk5m: hard cap on decoded-image pixel budget (in pixels), used to
      * reject decompression bombs before allocating the full Bitmap. 100 MiB image
      * ceiling / 4 bytes-per-ARGB-pixel ~= 26.2M px; we use a generous 32M-pixel
@@ -56,8 +48,14 @@ object ClipboardCapturePipeline {
      * exceeds the limit (so the caller can reject it instead of OOMing).
      * Reads incrementally so an over-limit stream is aborted early rather than
      * fully buffered. Returns the read bytes when within the limit.
+     *
+     * CopyPaste-myh8.9: [limit] is [Settings.maxFileSizeBytes] — the user-facing
+     * setting REPLACES the previous hardcoded 64 MiB constant. Visible for
+     * testing (RepairedSettingsConsumersTest exercises the gate directly since
+     * the full [captureFileClip] path requires the native encryption library,
+     * which is unavailable in the JVM unit-test environment).
      */
-    private fun readBytesCapped(input: java.io.InputStream, limit: Long): ByteArray? {
+    internal fun readBytesCapped(input: java.io.InputStream, limit: Long): ByteArray? {
         val buffer = ByteArrayOutputStream()
         val chunk = ByteArray(64 * 1024)
         var total = 0L
@@ -304,6 +302,7 @@ object ClipboardCapturePipeline {
             val sensitive = isSensitive(text)
             if (sensitive) {
                 Log.d(TAG, "Sensitive item captured — stored locally, upload suppressed")
+                notifySensitiveSkipIfEnabled(context, settings)
             } else if (settings.syncEnabled) {
                 notifySyncManager(
                     itemId = storedId,
@@ -566,16 +565,19 @@ object ClipboardCapturePipeline {
         // The item will be stored with is_sensitive=true + TTL if the CONTENT
         // is sensitive, not based on a URI-path heuristic.
 
-        // Read raw bytes from the content provider, capped at MAX_FILE_CAPTURE_BYTES.
+        // Read raw bytes from the content provider, capped at settings.maxFileSizeBytes.
         // CopyPaste-lk5m: readBytesCapped aborts early once the cap is exceeded so a
         // hostile/huge content:// URI cannot OOM the process (the previous
         // it.readBytes() buffered the entire stream unconditionally).
+        // CopyPaste-myh8.9: the user-configurable Settings.maxFileSizeBytes now
+        // REPLACES the previous hardcoded 64 MiB constant entirely.
+        val maxFileCaptureBytes = settings.maxFileSizeBytes
         val fileBytes: ByteArray = try {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                readBytesCapped(input, MAX_FILE_CAPTURE_BYTES) ?: run {
+                readBytesCapped(input, maxFileCaptureBytes) ?: run {
                     Log.w(
                         TAG,
-                        "captureFileClip: stream exceeds ${MAX_FILE_CAPTURE_BYTES} byte cap for $uri — rejecting",
+                        "captureFileClip: stream exceeds $maxFileCaptureBytes byte cap for $uri — rejecting",
                     )
                     return
                 }
@@ -662,6 +664,54 @@ object ClipboardCapturePipeline {
                 syncManager = syncManager,
                 lamportTs = lamportTs,
             )
+        }
+    }
+
+    /**
+     * CopyPaste-myh8.9: gate for [ClipboardService]'s `onSyncedTextClip` callbacks
+     * (registered on both [SupabaseRealtimeClient] and [FgsSyncLoop]).
+     *
+     * [settings] is read HERE, at event time — not captured at registration time —
+     * so a user flipping [Settings.autoApplySyncedClip] mid-session takes effect on
+     * the very next synced text clip without requiring a service restart. Callers
+     * pass a fresh [settings] instance/reference (the live field on [ClipboardService]),
+     * mirroring how [dispatchClipData] reads `settings.excludedAppBundleIds` fresh on
+     * every callback invocation rather than a value snapshotted at construction time.
+     */
+    fun applySyncedTextIfEnabled(settings: Settings, text: String, apply: (String) -> Unit) {
+        if (settings.autoApplySyncedClip) {
+            apply(text)
+        } else {
+            Log.d(TAG, "autoApplySyncedClip disabled — not writing synced text clip to system clipboard")
+        }
+    }
+
+    /**
+     * CopyPaste-myh8.9: gate for the sensitive-upload-suppressed notification.
+     * Extracted so the decision (opt-in via [Settings.notifyOnSensitiveSkip]) is
+     * directly testable in isolation from the surrounding capture pipeline, which
+     * requires the native encryption library (unavailable in the JVM unit-test
+     * environment) before this branch is ever reached.
+     *
+     * [postNotification] defaults to the real [ServiceNotifications.postSensitiveSkipNotification]
+     * and is overridable in tests: this project's JVM unit tests run WITHOUT merged
+     * Android resources (`includeAndroidResources` is not enabled — confirmed by zero
+     * `context.getString(R.string...)` calls anywhere in the existing suite), so
+     * [ServiceNotifications.postSensitiveSkipNotification]'s `context.getString(...)`
+     * calls throw `Resources$NotFoundException` under Robolectric here. Tests inject a
+     * recording fake instead of exercising the real string-resource-dependent builder.
+     *
+     * The notification text is a GENERIC localized string — [text] is intentionally
+     * NOT a parameter to this function (nor to [postNotification]'s signature), so it
+     * is structurally impossible for the clip content to leak into the notification.
+     */
+    internal fun notifySensitiveSkipIfEnabled(
+        context: Context,
+        settings: Settings,
+        postNotification: (Context) -> Unit = ServiceNotifications::postSensitiveSkipNotification,
+    ) {
+        if (settings.notifyOnSensitiveSkip) {
+            postNotification(context)
         }
     }
 

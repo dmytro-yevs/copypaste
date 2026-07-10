@@ -37,7 +37,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          targets: aarch64-linux-android
+          # x86_64-linux-android (CopyPaste-k1l0): the android-instrumented job
+          # below boots an x86_64 AVD under KVM (ubuntu-latest), so this job
+          # must also emit an x86_64 .so for it to download and package.
+          targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Cache cargo + Android NDK
         uses: actions/cache@v4
@@ -72,9 +75,14 @@ jobs:
         run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
 
       - name: Build .so libraries via cargo-ndk
+        # x86_64 (CopyPaste-k1l0): built in addition to arm64-v8a so the
+        # ubuntu+KVM instrumented-test job (x86_64 AVD) has a native lib to
+        # load. Local dev builds are unaffected — buildCargoNdk in
+        # build.gradle.kts still defaults to arm64-v8a only.
         run: |
           cargo ndk \
             -t arm64-v8a \
+            -t x86_64 \
             -o android/app/src/main/jniLibs \
             build --profile release-size -p copypaste-android
 
@@ -84,6 +92,8 @@ jobs:
           find android/app/src/main/jniLibs -type f | sort
           test -f android/app/src/main/jniLibs/arm64-v8a/libcopypaste_android.so || \
             { echo "ERROR: arm64-v8a .so missing"; exit 1; }
+          test -f android/app/src/main/jniLibs/x86_64/libcopypaste_android.so || \
+            { echo "ERROR: x86_64 .so missing"; exit 1; }
 
       - name: Upload .so artifact
         uses: actions/upload-artifact@v4
@@ -276,6 +286,83 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  # Paparazzi golden screenshots (android-material3-redesign task 2.5/2.7) —
+  # JVM-only visual regression, no device/emulator. Runs verifyPaparazziDebug
+  # (never recordPaparazziDebug in CI — cross-platform-parity.md "Baseline
+  # Update Approval Gate": a changed baseline is reviewed like any other PR
+  # diff, never auto-accepted). Explicit JDK 17: the machine/runner default
+  # Java may not match (design.md Paparazzi pin note).
+  android-paparazzi:
+    name: Paparazzi golden verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-paparazzi-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-paparazzi-${{ runner.os }}-
+
+      - name: Generate fallback debug keystore (CopyPaste-d41w.4)
+        run: |
+          KS=android/app/debug.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug keystore at $KS"
+          fi
+
+      - name: Paparazzi verify
+        working-directory: android
+        # -x buildCargoNdk: pure-Kotlin/UI task, no native .so needed.
+        run: ./gradlew :app:verifyPaparazziDebug -x buildCargoNdk
+
+      - name: Upload Paparazzi failure diffs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: paparazzi-failure-diffs
+          path: android/app/build/paparazzi/**
+          retention-days: 7
+          if-no-files-found: warn
+
+  # Hardcoded-user-text + localization-completeness gates (android-material3-
+  # redesign task 2.6/2.7). Node-only, no Android SDK/emulator needed.
+  android-l10n-gates:
+    name: Hardcoded-text + l10n-completeness gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Hardcoded-user-text gate
+        run: node scripts/check-hardcoded-text.mjs
+
+      - name: Localization-completeness gate
+        run: node scripts/check-l10n-completeness.mjs
+
   # Instrumented tests — run on an AVD emulator (CopyPaste-ojas.5).
   # CryptoConformanceTest and LiveP2pSyncTest require a connected device/emulator
   # because they exercise real cross-language crypto conformance and live P2P sync.
@@ -287,23 +374,33 @@ jobs:
   # the native .so is present in jniLibs before connectedDebugAndroidTest runs.
   android-instrumented:
     name: Android instrumented tests (AVD)
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     needs: build-android-ndk
-    # NON-BLOCKING (CopyPaste-k1l0): the managed AVD does not boot on any runner
-    # currently available to this repo. GitHub's macos-latest is arm64, where the
-    # emulator process launches but `adb` never attaches (HVF/accel limitation) —
-    # both the x86_64 and arm64-v8a system images time out with
-    # "Timeout waiting for emulator to boot". The build-android-ndk job emits an
-    # arm64-v8a .so only, so the documented reliable path (ubuntu-latest + KVM +
-    # x86_64 AVD) additionally needs an x86_64 .so build. Until that migration
-    # (CopyPaste-k1l0) lands, this job runs for visibility but MUST NOT block the
-    # workflow: a perma-red required check is worse than a documented soft one,
-    # and it would mask real regressions in the hard Android gates (lint, .so
-    # build, JVM unit tests). The instrumented suite is therefore deferred, not
-    # silently passing — see CopyPaste-k1l0.
+    # CopyPaste-k1l0: migrated from macos-latest to ubuntu-latest + KVM + an
+    # x86_64 AVD. macOS arm64 runners could launch the emulator process but
+    # `adb` never attached (HVF/accel limitation) — both x86_64 and arm64-v8a
+    # system images timed out with "Timeout waiting for emulator to boot".
+    # ubuntu-latest + nested KVM is the documented reliable path for
+    # reactivecircus/android-emulator-runner. build-android-ndk now also
+    # builds an x86_64 .so (see that job) so this AVD has a native lib to load.
+    #
+    # continue-on-error is KEPT for now: this migration has not yet had two
+    # consecutive green CI runs to prove KVM + x86_64 stability at this repo's
+    # runner tier. Flip to a required (blocking) check once that is observed —
+    # do not flip on the strength of local reasoning alone.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Enable KVM group perms
+        # Standard reactivecircus/android-emulator-runner ubuntu+KVM setup:
+        # grants the runner's default user access to /dev/kvm so the AVD can
+        # use hardware acceleration instead of falling back to slow software
+        # emulation (or failing to boot within the job's timeout).
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -341,12 +438,17 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 33
-          arch: arm64-v8a
+          # x86_64 (not arm64-v8a): KVM acceleration on an ubuntu-latest x86_64
+          # runner only works with an x86_64 system image.
+          arch: x86_64
           target: google_apis
           profile: Nexus 6
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: cd android && ./gradlew :app:connectedDebugAndroidTest -x buildCargoNdk
+          # -PincludeX86_64Abi=true (build.gradle.kts): packages the x86_64 .so
+          # downloaded above into the test APK. Local dev builds never set
+          # this property and stay arm64-v8a-only.
+          script: cd android && ./gradlew :app:connectedDebugAndroidTest -x buildCargoNdk -PincludeX86_64Abi=true
 
       - name: Upload instrumented test results
         if: always()

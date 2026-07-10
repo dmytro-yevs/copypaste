@@ -429,6 +429,7 @@ async fn e2e_live_round_trip_a_push_b_pull() {
                     .map(str::to_owned)
                     .unwrap_or_default(),
                 &zeroize::Zeroizing::new(local_key_b),
+                copypaste_core::config::MAX_DECODED_IMAGE_MB,
             )
             .expect("B build_local_item");
             insert_item(&db_b, &b_item).expect("B insert_item");

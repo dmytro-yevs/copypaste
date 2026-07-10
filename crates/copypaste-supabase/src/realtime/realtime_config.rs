@@ -132,6 +132,17 @@ impl RealtimeConfig {
     /// Optional:
     /// - `SUPABASE_REALTIME_TOPIC` — channel topic (default: `realtime:clipboard_items`)
     /// - `SUPABASE_REALTIME_DISABLED=1` — set to `1` to disable
+    /// - `SUPABASE_REALTIME_HEARTBEAT_SECS` — heartbeat interval (default: 30)
+    /// - `SUPABASE_REALTIME_INITIAL_BACKOFF_SECS` — initial reconnect delay (default: 1)
+    /// - `SUPABASE_REALTIME_MAX_BACKOFF_SECS` — maximum reconnect delay (default: 60)
+    /// - `SUPABASE_REALTIME_CHANNEL_CAPACITY` — outbound event channel capacity (default: 256)
+    ///
+    /// CopyPaste-8ebg.65: these four tunables previously had no env-override
+    /// path, unlike sibling configs (e.g. `SUPABASE_REALTIME_TOPIC`,
+    /// `SUPABASE_REALTIME_DISABLED`) — operators could not tune reconnect
+    /// backoff or heartbeat cadence without a code change. A malformed or
+    /// non-positive value for any of these is ignored (falls back to the
+    /// default) rather than treated as fatal.
     pub fn from_env() -> Result<Self, RealtimeError> {
         let supabase_url = std::env::var("SUPABASE_URL")
             .map_err(|_| RealtimeError::Config("SUPABASE_URL env var not set".into()))?;
@@ -149,14 +160,27 @@ impl RealtimeConfig {
         let topic = std::env::var("SUPABASE_REALTIME_TOPIC")
             .unwrap_or_else(|_| Self::DEFAULT_TOPIC.to_owned());
 
-        Ok(Self::with_jwt_and_user_id(
-            supabase_url,
-            anon_key,
-            topic,
-            None,
-            None,
-            enabled,
-        ))
+        let mut config =
+            Self::with_jwt_and_user_id(supabase_url, anon_key, topic, None, None, enabled);
+
+        if let Some(secs) = env_secs_override("SUPABASE_REALTIME_HEARTBEAT_SECS") {
+            config.heartbeat_interval = Duration::from_secs(secs);
+        }
+        if let Some(secs) = env_secs_override("SUPABASE_REALTIME_INITIAL_BACKOFF_SECS") {
+            config.initial_backoff = Duration::from_secs(secs);
+        }
+        if let Some(secs) = env_secs_override("SUPABASE_REALTIME_MAX_BACKOFF_SECS") {
+            config.max_backoff = Duration::from_secs(secs);
+        }
+        if let Ok(v) = std::env::var("SUPABASE_REALTIME_CHANNEL_CAPACITY") {
+            if let Ok(capacity) = v.trim().parse::<usize>() {
+                if capacity > 0 {
+                    config.channel_capacity = capacity;
+                }
+            }
+        }
+
+        Ok(config)
     }
 
     /// Construct config programmatically (no user JWT — anon scope).
@@ -224,6 +248,15 @@ impl RealtimeConfig {
             spki_pins: SpkiPins::default(),
         }
     }
+}
+
+/// Parse a positive-seconds env-var override, ignoring the var when unset,
+/// non-numeric, or zero (a zero-second backoff/heartbeat would busy-loop).
+fn env_secs_override(var: &str) -> Option<u64> {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
 }
 
 /// Whether an env-var string represents a truthy/enabled flag value.
@@ -511,6 +544,56 @@ mod tests {
         unsafe { std::env::remove_var("SUPABASE_REALTIME_DISABLED") };
         unsafe { std::env::remove_var("SUPABASE_URL") };
         unsafe { std::env::remove_var("SUPABASE_ANON_KEY") };
+    }
+
+    // ── Env overrides for backoff/heartbeat/capacity (CopyPaste-8ebg.65) ──────
+
+    #[test]
+    #[serial]
+    fn from_env_applies_backoff_and_capacity_overrides() {
+        unsafe { std::env::set_var("SUPABASE_URL", "https://test.supabase.co") };
+        unsafe { std::env::set_var("SUPABASE_ANON_KEY", "k") };
+        unsafe { std::env::set_var("SUPABASE_REALTIME_HEARTBEAT_SECS", "15") };
+        unsafe { std::env::set_var("SUPABASE_REALTIME_INITIAL_BACKOFF_SECS", "2") };
+        unsafe { std::env::set_var("SUPABASE_REALTIME_MAX_BACKOFF_SECS", "120") };
+        unsafe { std::env::set_var("SUPABASE_REALTIME_CHANNEL_CAPACITY", "64") };
+
+        let cfg = RealtimeConfig::from_env().expect("config builds");
+
+        unsafe { std::env::remove_var("SUPABASE_URL") };
+        unsafe { std::env::remove_var("SUPABASE_ANON_KEY") };
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_HEARTBEAT_SECS") };
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_INITIAL_BACKOFF_SECS") };
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_MAX_BACKOFF_SECS") };
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_CHANNEL_CAPACITY") };
+
+        assert_eq!(cfg.heartbeat_interval, Duration::from_secs(15));
+        assert_eq!(cfg.initial_backoff, Duration::from_secs(2));
+        assert_eq!(cfg.max_backoff, Duration::from_secs(120));
+        assert_eq!(cfg.channel_capacity, 64);
+    }
+
+    #[test]
+    #[serial]
+    fn from_env_ignores_malformed_and_zero_overrides() {
+        unsafe { std::env::set_var("SUPABASE_URL", "https://test.supabase.co") };
+        unsafe { std::env::set_var("SUPABASE_ANON_KEY", "k") };
+        unsafe { std::env::set_var("SUPABASE_REALTIME_HEARTBEAT_SECS", "not-a-number") };
+        unsafe { std::env::set_var("SUPABASE_REALTIME_INITIAL_BACKOFF_SECS", "0") };
+        unsafe { std::env::set_var("SUPABASE_REALTIME_CHANNEL_CAPACITY", "0") };
+
+        let cfg = RealtimeConfig::from_env().expect("config builds");
+
+        unsafe { std::env::remove_var("SUPABASE_URL") };
+        unsafe { std::env::remove_var("SUPABASE_ANON_KEY") };
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_HEARTBEAT_SECS") };
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_INITIAL_BACKOFF_SECS") };
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_CHANNEL_CAPACITY") };
+
+        // Falls back to the compiled-in defaults rather than a bogus value.
+        assert_eq!(cfg.heartbeat_interval, Duration::from_secs(30));
+        assert_eq!(cfg.initial_backoff, Duration::from_secs(1));
+        assert_eq!(cfg.channel_capacity, 256);
     }
 
     // ── RealtimeConfig ────────────────────────────────────────────────────────

@@ -57,26 +57,26 @@ pub(crate) use setup::setup_main_window;
 // still needs the bare fn names to resolve (passed as an arg to the `__cmd__`
 // wrapper macro), so all five plain fn names are re-exported alongside their
 // `__cmd__`/`__tauri_command_name_` macros.
-pub(crate) use paste::{focus_main_window, paste_plain_text, paste_to_frontmost};
-pub(crate) use paste::{play_copy_sound, show_main};
 pub(crate) use paste::{
     __cmd__focus_main_window, __cmd__paste_plain_text, __cmd__paste_to_frontmost,
     __cmd__play_copy_sound, __tauri_command_name_focus_main_window,
     __tauri_command_name_paste_plain_text, __tauri_command_name_paste_to_frontmost,
     __tauri_command_name_play_copy_sound,
 };
+pub(crate) use paste::{focus_main_window, paste_plain_text, paste_to_frontmost};
+pub(crate) use paste::{play_copy_sound, show_main};
 
 // `check_accessibility_permission`, `request_accessibility_permission`, and
 // `set_native_appearance` are reached only via `generate_handler!` — see the
 // `hide_popup` note above for why the plain fn names must also be re-exported.
 pub(crate) use commands_macos::{
-    check_accessibility_permission, request_accessibility_permission, set_native_appearance,
-};
-pub(crate) use commands_macos::{
     __cmd__check_accessibility_permission, __cmd__request_accessibility_permission,
     __cmd__set_native_appearance, __tauri_command_name_check_accessibility_permission,
     __tauri_command_name_request_accessibility_permission,
     __tauri_command_name_set_native_appearance,
+};
+pub(crate) use commands_macos::{
+    check_accessibility_permission, request_accessibility_permission, set_native_appearance,
 };
 
 // `position` has no direct `popup::` caller — only `window::toggle_popup`

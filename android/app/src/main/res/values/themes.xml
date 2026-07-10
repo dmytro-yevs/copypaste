@@ -9,8 +9,11 @@
         <!-- Edge-to-edge: transparent system bars; Compose applies the insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <!-- Dark icons on light background (SecureWindowChrome SideEffect updates at runtime). -->
+        <!-- Dark icons on light background (CopyPasteTheme SideEffect updates at runtime — D16). -->
         <item name="android:windowLightStatusBar">true</item>
+        <!-- First-paint background (D16 part 1) — paints before Compose runs, so the
+             window never flashes the wrong theme's background; tracks CpColors.bg. -->
+        <item name="android:windowBackground">@color/cp_window_background</item>
         <!-- Render into display cutout on short edges. -->
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
     </style>
@@ -26,5 +29,22 @@
         <item name="android:backgroundDimEnabled">false</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowAnimationStyle">@null</item>
+    </style>
+
+    <!--
+        Splash theme (task 0.10, S12) — MainActivity only. androidx.core:core-
+        splashscreen handles the pre-S/S+ split internally; this single style
+        works down to minSdk 26. `postSplashScreenTheme` is what
+        installSplashScreen() switches the window to once the splash exits, so
+        the handoff to Theme.CopyPaste is seamless (same windowBackground
+        color as `windowSplashScreenBackground` below — no flash).
+    -->
+    <style name="Theme.CopyPaste.Splash" parent="Theme.SplashScreen">
+        <item name="postSplashScreenTheme">@style/Theme.CopyPaste</item>
+        <item name="windowSplashScreenBackground">@color/cp_window_background</item>
+        <!-- No explicit windowSplashScreenAnimatedIcon: the library defaults to
+             the app's launcher icon (mipmap-anydpi-v26/ic_launcher.xml), which
+             already carries the monochrome/adaptive layers this app ships —
+             a second bespoke splash asset would just duplicate it. -->
     </style>
 </resources>

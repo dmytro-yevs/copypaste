@@ -107,7 +107,11 @@ pub(super) async fn supervise_forward_task(handle: tokio::task::JoinHandle<()>) 
 /// Waits on `notify` when the ring is empty, then forwards as many items as
 /// are available in one lock-hold before waiting again. Exits when the
 /// downstream `send().await` returns `Err` (receiver dropped / shutdown).
-async fn forward_loop(state: Arc<Mutex<InboxState>>, notify: Arc<Notify>, downstream: mpsc::Sender<WireItem>) {
+async fn forward_loop(
+    state: Arc<Mutex<InboxState>>,
+    notify: Arc<Notify>,
+    downstream: mpsc::Sender<WireItem>,
+) {
     loop {
         // Wait until at least one item is enqueued.
         notify.notified().await;

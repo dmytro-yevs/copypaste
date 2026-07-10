@@ -45,13 +45,20 @@ pub struct AppConfig {
     pub max_image_size_bytes: u64,
     pub max_file_size_bytes: u64,
     pub storage_quota_bytes: u64,
-    pub sync_ttl_secs: u64,
-    pub sensitive_ttl_relay_secs: u64,
-    pub sensitive_ttl_local_secs: u64,
+    // CopyPaste-8ebg.8: `sync_ttl_secs`, `sensitive_ttl_relay_secs`,
+    // `sensitive_ttl_local_secs`, and `encryption_chunk_kb` were removed here
+    // (2026-07-03 audit) — none had a reader anywhere in the workspace despite
+    // being fully wired through serde/clamp. `sensitive_ttl_relay_secs` and
+    // `sync_ttl_secs` duplicated `copypaste-relay::config::RelayConfig`'s own
+    // (correctly wired) fields of the same name; `sensitive_ttl_local_secs`
+    // was superseded by `sensitive_ttl_secs` (see CopyPaste-8ebg.1); no
+    // `encrypt_chunks` call site ever read `encryption_chunk_kb` (all are
+    // hardcoded to 512 KiB). Old config.toml files that still carry these keys
+    // load cleanly — serde ignores unknown fields (see
+    // `image_quality_absent_from_app_config` for the established pattern).
     /// Local auto-wipe TTL for sensitive items (seconds). Default: 30.
     pub sensitive_ttl_secs: u64,
     pub sqlite_cache_mb: u32,
-    pub encryption_chunk_kb: u32,
     pub sync_on_wifi_only: bool,
     pub max_bandwidth_kbps: u32,
     pub max_decoded_image_mb: u32,
@@ -151,12 +158,8 @@ impl Default for AppConfig {
             max_image_size_bytes: MAX_IMAGE_SIZE_BYTES,
             max_file_size_bytes: MAX_FILE_SIZE_BYTES,
             storage_quota_bytes: STORAGE_QUOTA_BYTES,
-            sync_ttl_secs: SYNC_TTL_SECS,
-            sensitive_ttl_relay_secs: SENSITIVE_TTL_RELAY_SECS,
-            sensitive_ttl_local_secs: SENSITIVE_TTL_LOCAL_SECS,
             sensitive_ttl_secs: SENSITIVE_TTL_SECS,
             sqlite_cache_mb: SQLITE_CACHE_MB,
-            encryption_chunk_kb: ENCRYPTION_CHUNK_KB,
             sync_on_wifi_only: false,
             max_bandwidth_kbps: MAX_BANDWIDTH_KBPS,
             max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
@@ -250,7 +253,6 @@ impl AppConfig {
         self.poll_interval_ms = self
             .poll_interval_ms
             .clamp(POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
-        self.encryption_chunk_kb = self.encryption_chunk_kb.clamp(16, 4096);
         // Bound the SQLite page-cache knob so a bad/hand-edited config cannot
         // request a 0 MiB (ineffective) or multi-GiB (memory-pinning) cache.
         self.sqlite_cache_mb = self
@@ -533,6 +535,43 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "config_version = 1\nimage_quality = 85\n").unwrap();
         AppConfig::load(&path).expect("old config with image_quality must load without error");
+    }
+
+    /// CopyPaste-8ebg.8: `sync_ttl_secs`, `sensitive_ttl_relay_secs`,
+    /// `sensitive_ttl_local_secs`, and `encryption_chunk_kb` were removed as
+    /// dead config surface (zero readers in the workspace). Mirrors
+    /// `image_quality_absent_from_app_config`: verify none of them appear in
+    /// a freshly-serialized config, and that an old config.toml which still
+    /// carries them loads cleanly (serde silently ignores unknown fields).
+    #[test]
+    fn dead_ttl_and_chunk_fields_absent_from_app_config() {
+        let cfg = AppConfig::default();
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        for key in [
+            "sync_ttl_secs",
+            "sensitive_ttl_relay_secs",
+            "sensitive_ttl_local_secs",
+            "encryption_chunk_kb",
+        ] {
+            assert!(
+                !toml_str.contains(key),
+                "{key} must not appear in serialized AppConfig after removal: {toml_str}"
+            );
+        }
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "config_version = 1\n\
+             sync_ttl_secs = 2592000\n\
+             sensitive_ttl_relay_secs = 1800\n\
+             sensitive_ttl_local_secs = 1800\n\
+             encryption_chunk_kb = 64\n",
+        )
+        .unwrap();
+        AppConfig::load(&path)
+            .expect("old config with removed TTL/chunk fields must load without error");
     }
 
     // ── lan_visibility tests ──────────────────────────────────────────────────

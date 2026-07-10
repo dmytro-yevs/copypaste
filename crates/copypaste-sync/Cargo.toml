@@ -11,6 +11,11 @@ crate-type = ["rlib"]
 [dependencies]
 base64.workspace = true
 copypaste-core = { path = "../copypaste-core" }
+# CopyPaste-1d5l.59: single source of truth for MAX_FRAME_BYTES (16 MiB),
+# shared with copypaste-p2p (which already depends on copypaste-ipc for
+# QR_PAIRING_TTL_SECS). copypaste-ipc is a tiny types-only crate (serde +
+# serde_json + home), so the coupling cost is negligible.
+copypaste-ipc = { path = "../copypaste-ipc" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

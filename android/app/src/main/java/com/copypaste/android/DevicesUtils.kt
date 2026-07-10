@@ -3,6 +3,7 @@ package com.copypaste.android
 import android.util.Log
 import java.text.DateFormat
 import java.util.Date
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -10,6 +11,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.copypaste.android.ui.theme.CpTypography
+import com.copypaste.android.ui.theme.LocalCpColors
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §7 Liquid Glass Devices parity — pure logic helpers (testable without SDK)
@@ -82,14 +92,14 @@ internal fun transportChipFor(
 }
 
 /**
- * Format the own-device fingerprint: always shown in full (no truncation).
- * Mirrors §7 "full fingerprint+copy on own".
- */
-internal fun formatOwnFingerprint(fp: String): String = fp
-
-/**
- * Format a peer fingerprint: take(16)+"…"+takeLast(8).
- * Mirrors §7 "16…8 truncated+hover-copy on peers".
+ * Format a fingerprint for on-card display: take(16)+"…"+takeLast(8).
+ *
+ * android-devices spec "Fingerprint tap-to-copy parity": the SAME truncation
+ * applies to every surface — own device, every paired-peer card, and the
+ * pairing roster. Own-device previously showed the full 64-hex value via a
+ * non-interactive [MetaRow] (no truncation, no copy); that superset behaviour
+ * is superseded by this parity requirement — tap-to-copy now surfaces the
+ * full value on demand instead of always rendering it inline.
  */
 internal fun formatPeerFingerprint(fp: String): String =
     fp.take(16) + "…" + fp.takeLast(8)
@@ -250,30 +260,71 @@ internal fun RowDivider() {
 }
 
 /**
- * Two-column-ish table row used in device rows: a label followed by a value.
+ * Fixed label-column width for [MetaRow]'s baseline-aligned two-column grid
+ * (android-devices spec §9.7 "natural-height, baseline-aligned grid"). Wide
+ * enough for the longest label in either grid ("Public IP" / "Last sync")
+ * without wrapping.
+ */
+internal val META_LABEL_WIDTH = 84.dp
+
+/**
+ * Two-column baseline-aligned table row used in device field grids: a dim
+ * label followed by a faint mono tabular-nums value (STYLEGUIDE §9.7).
+ *
+ * [onClick]/[onClickLabel] make the row tap-to-copy (android-devices spec
+ * "Fingerprint tap-to-copy parity") — when non-null the row is exposed as a
+ * `Role.Button` with [onClickLabel] as its accessibility action name, so
+ * TalkBack announces e.g. "Copy fingerprint" instead of a bare tap gesture.
  */
 // CopyPaste-jkbo: promoted from private to internal so future screens can reuse.
 @Composable
-internal fun MetaRow(label: String, value: String) {
+internal fun MetaRow(
+    label: String,
+    value: String,
+    onClick: (() -> Unit)? = null,
+    onClickLabel: String? = null,
+) {
+    val cp = LocalCpColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) {
+                    // mergeDescendants=true folds the label+value Text children's
+                    // semantics into this Row's own node, so the row (not an
+                    // unreachable child) is what exposes the Role.Button click
+                    // action and text together — required for the action to be
+                    // reachable both by TalkBack and by semantics-tree UI tests.
+                    Modifier
+                        .semantics(mergeDescendants = true) { role = Role.Button }
+                        .clickable(onClickLabel = onClickLabel, onClick = onClick)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(vertical = 2.dp),
     ) {
-        Text(text = label)
+        Text(text = label, style = CpTypography.meta, color = cp.dim, modifier = Modifier.width(META_LABEL_WIDTH))
         Text(
             text = value,
+            style = CpTypography.bodyMono.copy(fontSize = 11.sp),
+            color = cp.faint,
             modifier = Modifier.weight(1f),
         )
     }
 }
 
+/** Unicode em dash — the shared "unknown/absent" field-grid placeholder value. */
+internal const val EM_DASH = "—"
+
 /**
  * Format a Unix epoch-millisecond timestamp as a short locale date+time string
- * for device-info fields. Returns "—" for zero / negative values (unknown).
+ * for device-info fields. Returns [EM_DASH] for zero / negative values (unknown).
  * Mirrors macOS formatEpochSecs (which uses toLocaleString()).
  */
 internal fun formatEpochMs(ms: Long): String {
-    if (ms <= 0L) return "—"
+    if (ms <= 0L) return EM_DASH
     return DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         .format(Date(ms))
 }

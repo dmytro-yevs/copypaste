@@ -166,6 +166,9 @@ class PeerRosterStore(
                 // CopyPaste-27m7: peer UUID for origin-device-filter name resolution.
                 // Absent in legacy roster entries → null (backward-compatible).
                 peerDeviceId = o.optString("peerDeviceId", "").ifBlank { null },
+                // CopyPaste-6udn: peer's linked Supabase account id (ABI 19).
+                // Absent in legacy roster entries → null (backward-compatible).
+                peerSupabaseAccountId = o.optString("peerSupabaseAccountId", "").ifBlank { null },
             )
         }.filter { it.fingerprint.isNotBlank() }
     }.getOrElse { e ->
@@ -193,6 +196,8 @@ class PeerRosterStore(
                 .putOpt("peerPublicIp", p.peerPublicIp)
                 // CopyPaste-27m7: peer UUID for origin-device-filter (null → omitted).
                 .putOpt("peerDeviceId", p.peerDeviceId)
+                // CopyPaste-6udn: peer's linked Supabase account id (null → omitted).
+                .putOpt("peerSupabaseAccountId", p.peerSupabaseAccountId)
             arr.put(o)
         }
         return arr.toString()
