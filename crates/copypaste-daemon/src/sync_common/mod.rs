@@ -47,7 +47,12 @@ mod wifi_gate;
 /// block the whole sync loop permanently.
 pub(crate) const SYNC_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+// Consumed only by `cloud::*` (cloud-sync) and `relay::*` (relay-sync) call
+// sites; gate the re-exports so a build with neither feature doesn't trip
+// `-D unused-imports`.
+#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
 pub(crate) use decrypt::{decrypt_item_plaintext, decrypt_item_plaintext_blocking};
+#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
 pub(crate) use envelope::{decode_payload_ct, wrap_and_check_cloud_upload_plaintext};
 pub(crate) use local_crypto::encrypt_v2_for_local_storage;
 // `decode_cloud_file_payload` / `encode_cloud_file_payload` / the
@@ -63,6 +68,8 @@ pub(crate) use envelope::{
     decode_cloud_file_payload, encode_cloud_file_payload, CLOUD_FILE_HEADER_VERSION,
     CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME,
 };
+#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
 pub(crate) use rebuild::build_local_item;
+#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
 pub(crate) use storage::replace_cloud_item_by_item_id;
 pub use wifi_gate::should_skip_on_cellular;

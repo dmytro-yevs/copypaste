@@ -17,7 +17,7 @@ mod supabase_password;
 pub use device_key::delete_stored;
 pub use device_key::load_or_create;
 pub use fingerprint::own_fingerprint;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "cloud-sync"))]
 pub(crate) use secure_write::set_generic_password_locked_down;
 pub use supabase_password::{
     delete_supabase_password_from_keychain, read_supabase_password_from_keychain,

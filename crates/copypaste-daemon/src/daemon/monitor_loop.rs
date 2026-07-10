@@ -4,7 +4,10 @@
 
 use crate::clipboard::ClipboardMonitor;
 use copypaste_core::{AppConfig, ClipboardItem, Database};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+// Ordering is only consulted by the macOS quit-flag poll/store sites below.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;

@@ -393,7 +393,10 @@ mod tests {
         let ffi: SyncProvisioning = original.clone().into();
         let back: copypaste_p2p::bootstrap::SyncProvisioning = ffi.into();
 
-        assert_eq!(back, original, "SyncProvisioning must round-trip losslessly");
+        assert_eq!(
+            back, original,
+            "SyncProvisioning must round-trip losslessly"
+        );
     }
 
     /// Characterization test: `build_android_peer_meta` must map every input

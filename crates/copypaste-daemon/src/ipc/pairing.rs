@@ -408,6 +408,7 @@ pub(crate) fn display_fingerprint(fp: &str) -> String {
 /// - **No panic**: all `Mutex::lock` failures (poisoned lock) are silently
 ///   swallowed so a prior panic cannot prevent the caller from returning a
 ///   success response.
+///
 /// Gap A (durable unpair): record a pending `ControlMsg::Unpair` delivery in
 /// `pending_unpair.json` so the P2P connector loop can dial the (possibly
 /// offline) peer on its next reconnect and deliver the signal there.

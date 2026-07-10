@@ -11,5 +11,7 @@ mod meta;
 mod monitor;
 
 pub use content::{ClipboardContent, ClipboardError, SKIPPED_BATCH_THRESHOLD};
-pub use meta::{build_file_meta_json, build_image_meta_json, image_content_hash, image_thumb_file_id};
+pub use meta::{
+    build_file_meta_json, build_image_meta_json, image_content_hash, image_thumb_file_id,
+};
 pub use monitor::ClipboardMonitor;

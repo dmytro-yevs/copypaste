@@ -303,6 +303,13 @@ android {
         warningsAsErrors = true
         abortOnError = true
         baseline = file("lint-baseline.xml")
+        // Version pins here are deliberate (AGP 8.3.2 is load-bearing for
+        // Paparazzi 1.3.4; deps are bumped via the RustSec/audit cadence, not
+        // ad-hoc). Lint's "newer version available" checks are time-varying —
+        // CI's fresh lint DB flags new upstream releases the moment they ship,
+        // re-breaking the build on every AGP/dependency release regardless of
+        // any baseline. Disable rather than baseline them.
+        disable += setOf("AndroidGradlePluginVersion", "GradleDependency", "NewerVersionAvailable")
     }
     sourceSets {
         getByName("main") {

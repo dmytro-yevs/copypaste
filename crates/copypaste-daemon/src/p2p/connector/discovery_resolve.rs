@@ -121,15 +121,12 @@ pub(in crate::p2p) fn refresh_peer_meta_from_discovery(
 
     let discovered = match persisted_device_id {
         Some(device_id) if !device_id.is_empty() => {
-            // Stable-key match: same mDNS device_id, regardless of IP.
-            match discovery.resolve_peer(&device_id) {
-                Some(p) => Some(p),
-                // No match under the stable key — do NOT silently fall back to
-                // IP correlation here: a device_id is present, so IP drift is
-                // exactly the case this path exists to heal, and falling back
-                // to IP would just reproduce the original bug for this peer.
-                None => None,
-            }
+            // Stable-key match: same mDNS device_id, regardless of IP. No match
+            // under the stable key — do NOT silently fall back to IP correlation
+            // here: a device_id is present, so IP drift is exactly the case this
+            // path exists to heal, and falling back to IP would just reproduce
+            // the original bug for this peer.
+            discovery.resolve_peer(&device_id)
         }
         // Legacy peer (paired before device_id was persisted) — fall back to
         // the original IP-correlation heuristic.

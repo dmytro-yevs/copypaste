@@ -299,12 +299,12 @@ async fn gap_a_shared_live_allowlist_never_populated_during_pending_unpair_deliv
     // A's accept() call must never have succeeded for B either (a timeout or
     // a handshake/verification error are both acceptable "rejected"
     // outcomes; only Ok would be a regression).
-    match a_accept.await.unwrap() {
-        Ok(Ok((_, fp, _))) => panic!(
+    // timeout or handshake/verification error are the only other outcomes — expected.
+    if let Ok(Ok((_, fp, _))) = a_accept.await.unwrap() {
+        panic!(
             "CopyPaste-8ebg.5 regression: A accepted an inbound connection from \
              revoked peer {fp:?} during pending-unpair delivery"
-        ),
-        _ => {} // timeout or handshake/verification error — expected.
+        )
     }
 
     assert!(

@@ -178,7 +178,8 @@ pub(in super::super) async fn push_loop(
     let key_present_at_start = {
         // Sweep + re-encrypt the startup backlog under the single per-account
         // sync key so existing history uploads under the same key new captures use.
-        let key_snapshot: Option<[u8; 32]> = super::super::snapshot_cloud_key_bytes(&sync_key).await;
+        let key_snapshot: Option<[u8; 32]> =
+            super::super::snapshot_cloud_key_bytes(&sync_key).await;
         match key_snapshot {
             Some(key_bytes) => {
                 run_backlog_sweep(&db, &local_key, &key_bytes, &mut retry_queue).await;

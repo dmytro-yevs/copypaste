@@ -18,9 +18,7 @@ pub(super) fn build_paired_peers(allowed: &[String]) -> PairedPeers {
 }
 
 /// Build a fresh `HashMap` of fingerprint → session key from the FFI list.
-pub(super) fn build_session_key_map(
-    session_keys: Vec<PeerSessionKey>,
-) -> HashMap<String, Vec<u8>> {
+pub(super) fn build_session_key_map(session_keys: Vec<PeerSessionKey>) -> HashMap<String, Vec<u8>> {
     let mut map = HashMap::with_capacity(session_keys.len());
     for sk in session_keys {
         map.insert(sk.fingerprint, sk.session_key);

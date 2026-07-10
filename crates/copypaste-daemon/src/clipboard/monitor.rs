@@ -7,7 +7,10 @@
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::content::{ClipboardContent, ClipboardError, SKIPPED_BATCH_THRESHOLD};
+use super::content::{ClipboardContent, ClipboardError};
+// SKIPPED_BATCH_THRESHOLD is only consulted by the macOS pasteboard poll path.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+use super::content::SKIPPED_BATCH_THRESHOLD;
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 use super::macos_util::{log_unsupported_once, mime_from_path, percent_decode_path};
 

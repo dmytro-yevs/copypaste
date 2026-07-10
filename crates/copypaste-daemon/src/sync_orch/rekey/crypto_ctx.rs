@@ -264,8 +264,8 @@ mod tests {
 
         let crypto = SyncCrypto::new([1u8; 32], peers_path);
         assert!(crypto.has_cached_sync_key());
-        assert_eq!(crypto.sync_key_for_peer("11:22:33:44").is_some(), true);
-        assert_eq!(crypto.sync_key_for_peer("aa:bb:cc:dd").is_some(), false);
+        assert!(crypto.sync_key_for_peer("11:22:33:44").is_some());
+        assert!(crypto.sync_key_for_peer("aa:bb:cc:dd").is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
