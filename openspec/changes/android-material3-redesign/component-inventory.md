@@ -209,6 +209,70 @@ slice adds its baselines → S14 audits coverage (not S14-only).
 | LogLine | LogViewerActivity.kt | row | Restyle (level via icon/text + color) |
 | rememberReducedMotion | SyncStatusBadge.kt | Helper | Preserve |
 
+### 11.1 Feedback-producer inventory (task #15)
+
+One row per producer call site. Mechanism: `Toast`=GlassToast (`toastState.show`), `Banner`=`CpBanner`,
+`Dialog`=`GlassAlertDialog`, `Notif`=system notification (`ServiceNotifications`), `Toast.makeText`=legacy
+Android toast fallback. Kind: success/danger/info/accent/warn/error, or n/a for dialogs (neutral confirm).
+
+| Owning screen/service | File:line | Mechanism | Kind | Message source | Action/retry | Migration slice |
+|---|---|---|---|---|---|---|
+| BackgroundCaptureSetupScreen (OEM autostart hint) | BackgroundCaptureSetupActivity.kt:254 | Toast | info | caller-passed `oemHint` string (resource, OEM-specific copy) | no | S10 |
+| HistoryScreen (load error) | HistoryScreen.kt:151 | Toast | danger | `ErrorMessages.friendlyOperationError(msg)` (sanitized) | no | S6 |
+| HistoryScreen (clearAll error) | HistoryScreen.kt:177 | Toast | danger | `ErrorMessages.friendlyOperationError(msg)` (sanitized) | no | S6 |
+| HistoryScreen (file picker captured/failed) | HistoryScreen.kt:127-128 | Toast | success/danger | `R.string.snackbar_file_captured` / `R.string.error_file_pick_failed` | no | S6 |
+| HistoryScreen (single delete) | HistoryScreen.kt:213-218 | Toast | info | `R.string.snackbar_item_deleted` | yes: `R.string.snackbar_undo` (5s window) | S6 |
+| HistoryScreen (bulk copy) | HistoryScreen.kt:293,295-298 | Toast | info/success | `R.string.snackbar_bulk_copied_no_text` / `R.string.snackbar_bulk_copied` (formatted) | no | S6 |
+| HistoryScreen (sensitive-item tap) | HistoryScreen.kt:414 | Toast | info | `R.string.sensitive_tap_hint` | no | S6 |
+| HistoryScreen (save file, row) | HistoryScreen.kt:424,426 | Toast | success/danger | `R.string.file_saved_ok` / `R.string.file_save_failed` | no | S6 |
+| HistoryScreen (open file, row) | HistoryScreen.kt:437,440 | Toast | danger | `R.string.file_open_no_app` / `resolution.nameOrError` (may be resource or sanitized error) | no | S6 |
+| HistoryScreen (media copy-as-text) | HistoryScreen.kt:459 | Toast | info | caller-passed `msg` (resource) | no | S6 |
+| HistoryScreen (save/open file, preview overlay) | HistoryScreen.kt:510,512,524,527 | Toast | success/danger | same resources as row variants above | no | S6 |
+| PermissionsSettingsActivity (OEM autostart hint) | PermissionsSettingsActivity.kt:239 | Toast | info | caller-passed `oemHint` (resource) | no | S10 |
+| PermissionsSettingsActivity (bg-capture ADB step) | PermissionsSettingsActivity.kt:310 | Toast | success | caller-passed `msg` via `onToastRequest` (resource) | no | S10 |
+| LogViewerActivity (export error) | LogViewerActivity.kt:231 | Toast | danger | `LogExportHelper.shareLogsZip` `onError` `msg` (mix: resource + one hardcoded empty-files string) | no | S11 |
+| LogViewerActivity (export success) | LogViewerActivity.kt:235 | Toast | success | `exportedMsg` (resource) | no | S11 |
+| LogViewerActivity (clear-logs dialog) | LogViewerActivity.kt:159 | Dialog | n/a (destructive confirm) | **HARDCODED**: "Clear Logs" / "Delete all log files…" / "Clear" / "Cancel" | yes: Clear (destructive) / Cancel | S11 — pre-existing, needs resource extraction |
+| SettingsActivity (settings save failed) | SettingsActivity.kt:417 | Toast | danger | `R.string.toast_settings_save_failed` | no | S9 |
+| SettingsActivity (generic toast passthrough) | SettingsActivity.kt:559 | Toast | (caller-chosen) | caller-passed `msg` via `onToastRequest` | no | S9 |
+| SettingsActivity (history export ok/failed) | SettingsActivity.kt:622,625 | Toast | success/danger | `R.string.history_export_ok` / `R.string.history_export_failed` | no | S9 |
+| SettingsActivity (history import ok/failed) | SettingsActivity.kt:646-649,652 | Toast | success/danger | `R.string.history_import_ok` (formatted count) / `R.string.history_import_failed` | no | S9 |
+| SettingsActivity (compact DB ok/fail) | SettingsActivity.kt:713-716,718-721 | Toast | success/danger | `R.string.toast_compact_db_ok` / `R.string.toast_compact_db_fail` | no | S9 |
+| SettingsActivity (test-connection: no transport) | SettingsActivity.kt:782-785 | Toast | danger | **HARDCODED**: "No enabled transport to test — enable Relay or Supabase above." | no | S9 — pre-existing, needs resource extraction |
+| SettingsActivity (test-connection: per-transport result) | SettingsActivity.kt:789-810 | Toast | success/danger | **HARDCODED**: "Relay: OK" / "Relay: failed" / "Supabase: OK" / "Supabase: failed" (joined) | no | S9 — pre-existing, needs resource extraction |
+| SettingsActivity (discard-changes dialog) | SettingsActivity.kt:367 | Dialog | n/a | `R.string.dialog_unsaved_title` / `R.string.dialog_unsaved_body` | yes: discard / cancel | S9 |
+| SettingsActivity (max-items cap-reduction dialog) | SettingsActivity.kt:454 | Dialog | n/a | `R.string.dialog_max_items_reduce_title` / `R.string.dialog_max_items_reduce_body` (formatted) | yes: confirm / cancel | S9 |
+| StorageTab (clear-history dialog) | StorageTab.kt:255 | Dialog | n/a | `R.string.dialog_clear_all_title` / `R.string.setting_clear_history_label` | yes: clear / cancel | S9 |
+| StorageTab (reset-DB dialog) | StorageTab.kt:282 | Dialog | n/a | `R.string.dialog_reset_db_title` / `R.string.dialog_reset_db_body` | yes: reset / cancel | S9 |
+| SyncTab (sync error, unauthorized) | SyncTab.kt:85-89 | Banner | error | `R.string.sync_error_unauthorized` (formatted) | no (credentials fix, not retry) | S11 |
+| SyncTab (sync error, generic/transient) | SyncTab.kt:93-108 | Banner | warn | live `syncError` string (source: `FgsSyncLoop`/`SupabasePollWorker`, not a resource key) | yes: `R.string.btn_retry` → `onTestConnection` | S11 |
+| SyncTab (cloud-account mismatch) | SyncTab.kt:245-251 | Banner | info | `R.string.setting_cloud_account_mismatch_title` + `_body` | no | S11 |
+| OnboardingScreen (OEM autostart hint) | OnboardingScreen.kt:78 | Toast | info | caller-passed `oemHint` (resource) | no | S10 |
+| OnboardingScreen (bg-capture ADB step) | OnboardingScreen.kt:159 | Toast | success | caller-passed `msg` via `onToastRequest` (resource) | no | S10 |
+| OnboardingDialogs (crash-detected) | OnboardingDialogs.kt:20 | Dialog | n/a | `R.string.crash_detected_title` / `_message` / `_export` | yes: export | S10 |
+| DevicesScreen (fingerprint copied) | DevicesScreen.kt:92 | Toast | accent | `R.string.devices_fingerprint_copied` | no | (Devices, not S11) |
+| DevicesDialogs (forget/unpair, revoke, rotate, revoke-error, revoke-all, scanner-unavailable) | DevicesDialogs.kt:53,97,153,216,235,284 | Dialog | n/a | all `R.string.dialog_*`/`R.string.devices_*` resources | yes on 4 of 6 (unpair/revoke/rotate/revoke-all confirm) | (Devices, not S11) |
+| HistorySelectionBar (bulk-delete confirm) | HistorySelectionBar.kt:145 | Dialog | n/a | caller-passed `title`/`message` (resource) | yes: confirm | (History, not S11) |
+| SasPairingDialog (pairing SAS) | SasPairingDialog.kt:381 | Dialog | n/a | `R.string.sas_dialog_title` (formatted) + conditional body | yes: confirm/reject | (Devices, not S11) |
+| PairSuccessPopup (pair success) | PairSuccessPopup.kt:57 | Dialog | n/a | `R.string.s8_pair_success_title` | no (dismiss only) | (Devices, not S11) |
+| PairScreen (fingerprint copied) | PairScreen.kt:85 | Toast | accent | **HARDCODED**: "Fingerprint copied" | no | (Devices, not S11) — pre-existing, needs resource extraction |
+| PairScreen (deep-link error) | PairScreen.kt:216 | Toast | danger | caller-passed `errMsg` (resource/sanitized) | no | (Devices, not S11) |
+| PairScreen (controller error) | PairScreen.kt:224 | Toast | danger | `controller.errorMessage` — pre-sanitized via `ErrorMessages.friendly*` | no | (Devices, not S11) |
+| AboutScreen (no browser handler) | AboutActivity.kt:203 | Toast | danger | `linkFailedMsg` (resource) | no | S11 |
+| LogExportHelper (no-callback fallback) | LogExportHelper.kt:48 | Toast.makeText | (system default) | `msg` passed by caller (resource: `R.string.log_export_empty` or an error string) — legacy fallback path, only hit if caller omits `onError` | no | S11 (verify all current callers supply `onError` so this path stays unreached in-app) |
+| ServiceNotifications (copy event) | ServiceNotifications.kt:88-121 | Notif | (silent, badge only) | `R.string.notif_copy_event_title` / `_content` | no | S12 (full per-channel table there) |
+| ServiceNotifications (sensitive-skip) | ServiceNotifications.kt:135-161 | Notif | (silent, badge only) | `R.string.notif_sensitive_skip_title` / `_content` | no | S12 |
+| ServiceNotifications (incoming pair request) | ServiceNotifications.kt:248-282 | Notif | (high-priority) | `R.string.notif_pair_request_title` / `_content` (formatted) / `_content_unknown` | yes: `R.string.notif_pair_action_confirm` → `DevicesActivity` SAS | S12 |
+| ServiceNotifications (foreground service) | ServiceNotifications.kt:292,408-422 | Notif | (ongoing) | `buildNotification` resources | n/a (persistent, not dismissible) | S12 |
+
+**Hardcoded producer strings found (pre-existing, outside S11 file scope except LogViewerActivity's clear-logs
+dialog): `SettingsActivity.kt` sync test-connection toasts (lines 782-785, 796, 804), `PairScreen.kt:85`
+("Fingerprint copied" — note `DevicesScreen.kt` has the equivalent already resourced as
+`R.string.devices_fingerprint_copied`, so `PairScreen` is the odd one out), and `LogViewerActivity.kt:159`
+(clear-logs `GlassAlertDialog` title/text/buttons). These predate this slice; migration to `ui/GlassToast`/
+banners on status tokens (task 11.1) should also extract them to string resources, but that migration is not
+part of this wave's diff — flagged here per the inventory mandate, not fixed silently.
+
 ## S12 — System & invisible surfaces  (`android-system-surfaces`, PRESERVE — no golden)
 
 | Component | File | Kind | Disposition |
@@ -226,12 +290,12 @@ slice adds its baselines → S14 audits coverage (not S14-only).
 | Surface | Disposition | Slice |
 |---|---|---|
 | Launcher / adaptive icon | Restyle/confirm brand mark | S1 |
-| Splash / starting window (Android 12) | Restyle → canonical first paint (no flash) | S1 |
+| Splash / starting window (Android 12) | Done — `androidx.core:core-splashscreen` + `Theme.CopyPaste.Splash` | S12 |
 | XML themes + `values-night` | Restyle (resolved-theme; drive first paint) | S1 |
 | Status/navigation-bar icon appearance | New (D16, resolved-theme) | S1/S4 |
 | Recents thumbnail | Preserve privacy (FLAG_SECURE where sensitive) | S1/S12 |
 | Sharesheet target label/icon | Preserve/localize | S12 |
-| Notification small icon | Restyle/confirm | S12 |
+| Notification small icon | Done (alpha-only `ic_stat_notify` + monochrome adaptive layer) | S12 |
 
 ## Notes on model types (review M4)
 
