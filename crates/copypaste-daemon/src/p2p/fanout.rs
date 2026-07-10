@@ -31,6 +31,60 @@ fn last_outbound_stamp_map() -> &'static Mutex<HashMap<DeviceFingerprint, Instan
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Per-peer rekey-failure counter (CopyPaste-ptgcc).
+///
+/// In-process only (reset on daemon restart) — mirrors
+/// `last_outbound_stamp_map` in shape/lock strategy. Incremented each time
+/// [`fanout_to_peers`] hits `RekeyOutcome::Failed` for a peer, cleared on the
+/// next successful outbound send so a peer that recovers (e.g. re-paired) is
+/// un-flagged immediately rather than waiting out `PEER_STALL_THRESHOLD_MS`.
+fn rekey_failure_map() -> &'static Mutex<HashMap<DeviceFingerprint, u32>> {
+    static MAP: OnceLock<Mutex<HashMap<DeviceFingerprint, u32>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Record one rekey failure for `peer` (insert-or-increment).
+pub(crate) fn record_rekey_failure(peer: &DeviceFingerprint) {
+    let mut map = rekey_failure_map()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *map.entry(peer.clone()).or_insert(0) += 1;
+}
+
+/// Clear the rekey-failure counter for `peer` (called on recovery —
+/// untreated by any throttle, so recovery is surfaced immediately).
+pub(crate) fn clear_rekey_failure(peer: &DeviceFingerprint) {
+    let mut map = rekey_failure_map()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.remove(peer);
+}
+
+/// Drop `peer`'s entry from [`last_outbound_stamp_map`] (CopyPaste-nzdf6).
+///
+/// Mirrors `clear_rekey_failure` — called from the unpair path (both the
+/// send side, `send_unpair_and_close_session`, and the receive side,
+/// `evict_peer_local`) so a re-paired device with the same fingerprint does
+/// not inherit a stale throttle window from the previous pairing, and so
+/// these in-process maps don't grow unboundedly across repeated pair/unpair
+/// cycles for many distinct peers over a long daemon uptime.
+pub(crate) fn clear_outbound_stamp(peer: &DeviceFingerprint) {
+    let mut map = last_outbound_stamp_map()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.remove(peer);
+}
+
+/// Snapshot the rekey-failure map as `{fingerprint_string: count}` — same
+/// shape as `rtt_snapshot` in `ipc/handlers_peers.rs` so it can be merged
+/// into `list_peers` output the same way.
+pub(crate) fn rekey_failure_snapshot() -> HashMap<String, u32> {
+    let map = rekey_failure_map()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+}
+
 /// Stamp `last_sync_at` for `peer` following a successful outbound send,
 /// throttled to at most once per [`OUTBOUND_STAMP_THROTTLE`] per peer.
 ///
@@ -221,16 +275,10 @@ pub(super) async fn fanout_to_peers(
                     // side and goes stale, instead of looking healthy forever
                     // off the one-time connection stamp.
                     //
-                    // Still deferred (CopyPaste-dkwl notes): a REAL per-peer
-                    // rekey-failure counter/flag surfaced to `list_peers`/
-                    // Devices, so a stuck peer can be flagged immediately
-                    // rather than waiting out `PEER_STALL_THRESHOLD_MS` (30
-                    // min) for `last_sync_at` to go stale. That needs a
-                    // shared counter threaded in from `p2p/mod.rs::start_p2p`
-                    // alongside `peer_sinks`, PLUS a decision on how to
-                    // surface it (new IPC/`list_peers` field vs. folding into
-                    // an existing one) and a client (SyncStatusChip.tsx)
-                    // change to consume it — out of scope for this fix.
+                    // CopyPaste-ptgcc: the deferred per-peer rekey-failure
+                    // counter, surfaced to `list_peers`/Devices — see
+                    // `record_rekey_failure`/`rekey_failure_snapshot`.
+                    record_rekey_failure(&key);
                     tracing::warn!(
                         peer = %key,
                         item_id = %item.item_id,
@@ -255,6 +303,11 @@ pub(super) async fn fanout_to_peers(
                 // this peer and the frame was actually enqueued — see
                 // `stamp_outbound_success`.
                 stamp_outbound_success(&key);
+                // CopyPaste-ptgcc: un-flag the peer immediately on recovery
+                // — untreated by any throttle, unlike `stamp_outbound_success`,
+                // since a stuck-peer flag must clear the moment the peer is
+                // healthy again, not up to 60s later.
+                clear_rekey_failure(&key);
             }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!(
@@ -334,4 +387,97 @@ pub(super) fn spawn_outbound_loop(
         )
         .await;
     });
+}
+
+#[cfg(test)]
+mod rekey_failure_tests {
+    use super::*;
+
+    #[test]
+    fn record_rekey_failure_increments_on_double_record() {
+        let peer = DeviceFingerprint(format!("test-peer-{}", uuid::Uuid::new_v4()));
+        record_rekey_failure(&peer);
+        record_rekey_failure(&peer);
+        let snap = rekey_failure_snapshot();
+        assert_eq!(snap.get(peer.as_str()), Some(&2));
+    }
+
+    #[test]
+    fn clear_rekey_failure_removes_the_entry() {
+        let peer = DeviceFingerprint(format!("test-peer-{}", uuid::Uuid::new_v4()));
+        record_rekey_failure(&peer);
+        clear_rekey_failure(&peer);
+        let snap = rekey_failure_snapshot();
+        assert_eq!(snap.get(peer.as_str()), None);
+    }
+
+    #[test]
+    fn rekey_failure_counters_are_independent_per_peer() {
+        let peer_a = DeviceFingerprint(format!("test-peer-a-{}", uuid::Uuid::new_v4()));
+        let peer_b = DeviceFingerprint(format!("test-peer-b-{}", uuid::Uuid::new_v4()));
+        record_rekey_failure(&peer_a);
+        record_rekey_failure(&peer_a);
+        record_rekey_failure(&peer_b);
+        let snap = rekey_failure_snapshot();
+        assert_eq!(snap.get(peer_a.as_str()), Some(&2));
+        assert_eq!(snap.get(peer_b.as_str()), Some(&1));
+    }
+
+    /// CopyPaste-nzdf6: `clear_outbound_stamp` drops the peer's entry from
+    /// `last_outbound_stamp_map` — the unpair-path prune added in
+    /// `unpair::send_unpair_and_close_session` / `unpair::evict_peer_local`
+    /// so a re-paired device with the same fingerprint does not inherit a
+    /// stale outbound-stamp throttle window from the previous pairing.
+    #[test]
+    fn clear_outbound_stamp_removes_the_entry() {
+        let peer = DeviceFingerprint(format!("test-peer-{}", uuid::Uuid::new_v4()));
+        {
+            let mut map = last_outbound_stamp_map()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            map.insert(peer.clone(), Instant::now());
+        }
+        clear_outbound_stamp(&peer);
+        let map = last_outbound_stamp_map()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(
+            !map.contains_key(&peer),
+            "clear_outbound_stamp must remove the peer's stamp entry"
+        );
+    }
+
+    /// Both fanout maps (rekey-failure counter + outbound-stamp throttle)
+    /// must drop a peer's entries once both clear functions run — proving
+    /// the pair of calls added at both unpair call sites (send side
+    /// `send_unpair_and_close_session`, receive side `evict_peer_local`)
+    /// fully prunes the in-process state for that fingerprint.
+    #[test]
+    fn unpair_prunes_both_fanout_maps() {
+        let peer = DeviceFingerprint(format!("test-peer-{}", uuid::Uuid::new_v4()));
+        record_rekey_failure(&peer);
+        {
+            let mut map = last_outbound_stamp_map()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            map.insert(peer.clone(), Instant::now());
+        }
+
+        // The exact two calls the unpair path makes.
+        clear_rekey_failure(&peer);
+        clear_outbound_stamp(&peer);
+
+        assert_eq!(
+            rekey_failure_snapshot().get(peer.as_str()),
+            None,
+            "rekey-failure entry must be gone after unpair-path prune"
+        );
+        let map = last_outbound_stamp_map()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(
+            !map.contains_key(&peer),
+            "outbound-stamp entry must be gone after unpair-path prune"
+        );
+    }
 }

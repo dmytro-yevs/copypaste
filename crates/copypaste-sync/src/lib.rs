@@ -80,7 +80,7 @@ pub mod protocol;
 // code: do not delete them when pruning unused exports.
 pub use clock::LamportClock;
 pub use engine::{PeerState, SyncEngine, SyncError, SyncResult};
-pub use inbox::{SyncInboxForwarder, SyncInboxSender};
+pub use inbox::{ReplayGuard, SyncInboxForwarder, SyncInboxSender, REPLAY_GUARD_CAPACITY};
 pub use merge::{local_to_wire, local_to_wire_owned, resolve, wire_to_local, MergeOutcome};
 pub use metrics::SyncLagCounter;
 pub use protocol::{ControlMsg, Message, PeerFrame, WireItem};

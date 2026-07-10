@@ -48,6 +48,17 @@ use super::PeerSinks;
 /// Returns `true` if a live session entry was found and removed; `false` if the
 /// peer had no active sink (was already disconnected or never connected).
 pub async fn send_unpair_and_close_session(peer_sinks: &PeerSinks, canonical_fp: &str) -> bool {
+    // CopyPaste-nzdf6: prune the fanout in-process maps for this peer
+    // regardless of whether a live sink was found — a peer can accumulate a
+    // rekey-failure count or an outbound-stamp entry while offline (e.g. a
+    // failed send queued before disconnect), and neither map is otherwise
+    // pruned anywhere else on unpair. Unbounded otherwise: these `HashMap`s
+    // only ever grow, one entry per distinct fingerprint ever seen, until
+    // the daemon restarts.
+    let fp = DeviceFingerprint(canonical_fp.to_string());
+    super::fanout::clear_rekey_failure(&fp);
+    super::fanout::clear_outbound_stamp(&fp);
+
     let mut sinks = peer_sinks.lock().await;
     match sinks.remove(canonical_fp) {
         None => {
@@ -100,6 +111,15 @@ pub async fn send_unpair_and_close_session(peer_sinks: &PeerSinks, canonical_fp:
 /// allowlist entry is gone immediately — without waiting for a daemon restart.
 /// Passing `None` (as the unit tests do for the file-only path) skips that step.
 pub(super) fn evict_peer_local(peer_fp: &str, live_peers: Option<&PairedPeers>) {
+    // CopyPaste-nzdf6: prune the fanout in-process maps (rekey-failure
+    // counter + outbound-stamp throttle) for this peer — mirrors the send
+    // side in `send_unpair_and_close_session`. Neither map is otherwise
+    // pruned on unpair, so a re-paired device with the same fingerprint
+    // would inherit a stale counter/throttle from the previous pairing.
+    let fp = DeviceFingerprint(peer_fp.to_string());
+    super::fanout::clear_rekey_failure(&fp);
+    super::fanout::clear_outbound_stamp(&fp);
+
     let peers_path = crate::ipc::peers_file_path();
     let mut peers = crate::peers::load_peers(&peers_path);
     let before = peers.len();

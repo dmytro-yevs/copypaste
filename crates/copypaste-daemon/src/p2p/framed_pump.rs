@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 
 use copypaste_p2p::transport::{DeviceFingerprint, PairedPeers};
 use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
+use copypaste_sync::{ReplayGuard, REPLAY_GUARD_CAPACITY};
 
 use super::unpair::{evict_peer_local, stamp_peer_sync};
 use super::{PeerRttMs, PendingPings};
@@ -144,6 +145,12 @@ pub(super) async fn run_peer_connection_framed<S>(
     // see `INBOUND_STAMP_THROTTLE`.
     let mut last_inbound_stamp: Option<Instant> = None;
 
+    // CopyPaste-sreb: per-connection replay guard. Constructed inline (not
+    // shared) so a compromised or buggy peer can only replay within its own
+    // connection's window, matching the "per-sender" guarantee documented on
+    // `ReplayGuard` itself.
+    let mut replay_guard = ReplayGuard::new(REPLAY_GUARD_CAPACITY);
+
     loop {
         tokio::select! {
             // Inbound: peer sent a frame — deserialise and dispatch.
@@ -152,6 +159,15 @@ pub(super) async fn run_peer_connection_framed<S>(
                     Some(Ok(frame)) => {
                         match serde_json::from_slice::<PeerFrame>(&frame) {
                             Ok(PeerFrame::Data(wire)) => {
+                                if replay_guard.is_replay(&wire.item_id, wire.lamport_ts) {
+                                    tracing::debug!(
+                                        peer = %peer_fp,
+                                        item_id = %wire.item_id,
+                                        lamport_ts = wire.lamport_ts,
+                                        "dropping replayed item (CopyPaste-sreb)"
+                                    );
+                                    continue;
+                                }
                                 if incoming_tx.send(wire).await.is_err() {
                                     // incoming_tx closed means sync_orch shut down.
                                     tracing::debug!("incoming_tx closed, dropping peer connection");
@@ -458,5 +474,204 @@ mod tests {
             peer_tx.is_closed(),
             "peer sink Sender must be closed after the pump tears down a stuck writer"
         );
+    }
+
+    /// Encode a `PeerFrame::Data(item)` as a length-delimited frame and write
+    /// it into `sink`, mirroring what a real peer's `framed.send()` produces.
+    async fn send_data_frame<S>(
+        sink: &mut tokio_util::codec::Framed<S, tokio_util::codec::LengthDelimitedCodec>,
+        item: WireItem,
+    ) where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        let payload = serde_json::to_vec(&PeerFrame::Data(item)).unwrap();
+        sink.send(Bytes::from(payload)).await.unwrap();
+    }
+
+    fn new_pending_and_rtt() -> (PendingPings, PeerRttMs) {
+        (
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+    }
+
+    /// CopyPaste-sreb: a per-connection `ReplayGuard` is now constructed
+    /// inline in `run_peer_connection_framed`, so a duplicate
+    /// `(item_id, lamport_ts)` delivered twice on the same connection must
+    /// only reach `incoming_tx` once.
+    #[tokio::test]
+    async fn duplicate_item_within_one_connection_is_dropped() {
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        let mut client = tokio_util::codec::Framed::new(
+            client_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+        let server = tokio_util::codec::Framed::new(
+            server_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+
+        let (_peer_tx, peer_rx) = mpsc::channel::<PeerFrame>(8);
+        let (incoming_tx, mut incoming_rx) = mpsc::channel::<WireItem>(8);
+        let (pending, rtt_ms) = new_pending_and_rtt();
+
+        let handle = tokio::spawn(run_peer_connection_framed(
+            server,
+            peer_rx,
+            incoming_tx,
+            copypaste_p2p::DeviceFingerprint("testpeer".to_string()),
+            None,
+            pending,
+            rtt_ms,
+        ));
+
+        let mut item = test_wire_item("dup-item");
+        item.lamport_ts = 1;
+        send_data_frame(&mut client, item.clone()).await;
+        send_data_frame(&mut client, item.clone()).await;
+
+        let first = tokio::time::timeout(Duration::from_secs(5), incoming_rx.recv())
+            .await
+            .expect("timed out waiting for first delivery")
+            .expect("first delivery must arrive");
+        assert_eq!(first.item_id, "dup-item");
+
+        // The duplicate must never arrive: dropping the client sink closes
+        // the connection, which lets the pump task return; then incoming_rx
+        // must be empty (and closed) rather than yielding a second item.
+        drop(client);
+        let second = tokio::time::timeout(Duration::from_secs(5), incoming_rx.recv())
+            .await
+            .expect("pump must exit promptly after client closes");
+        assert!(second.is_none(), "duplicate item must have been dropped");
+
+        handle.await.expect("pump task must not panic");
+    }
+
+    /// Same item_id but a strictly higher lamport_ts is a legitimate CRDT
+    /// update, not a replay — it must pass through.
+    #[tokio::test]
+    async fn higher_lamport_ts_same_item_passes_through() {
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        let mut client = tokio_util::codec::Framed::new(
+            client_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+        let server = tokio_util::codec::Framed::new(
+            server_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+
+        let (_peer_tx, peer_rx) = mpsc::channel::<PeerFrame>(8);
+        let (incoming_tx, mut incoming_rx) = mpsc::channel::<WireItem>(8);
+        let (pending, rtt_ms) = new_pending_and_rtt();
+
+        let handle = tokio::spawn(run_peer_connection_framed(
+            server,
+            peer_rx,
+            incoming_tx,
+            copypaste_p2p::DeviceFingerprint("testpeer".to_string()),
+            None,
+            pending,
+            rtt_ms,
+        ));
+
+        let mut item_v1 = test_wire_item("evolving-item");
+        item_v1.lamport_ts = 1;
+        let mut item_v2 = test_wire_item("evolving-item");
+        item_v2.lamport_ts = 2;
+
+        send_data_frame(&mut client, item_v1).await;
+        send_data_frame(&mut client, item_v2).await;
+
+        let first = tokio::time::timeout(Duration::from_secs(5), incoming_rx.recv())
+            .await
+            .expect("timed out waiting for first delivery")
+            .expect("first delivery must arrive");
+        assert_eq!(first.lamport_ts, 1);
+
+        let second = tokio::time::timeout(Duration::from_secs(5), incoming_rx.recv())
+            .await
+            .expect("timed out waiting for second delivery")
+            .expect("higher lamport_ts update must arrive");
+        assert_eq!(second.lamport_ts, 2);
+
+        drop(client);
+        handle.await.expect("pump task must not panic");
+    }
+
+    /// The `ReplayGuard` is constructed per-connection, so two independent
+    /// connections (e.g. one inbound + one outbound to different peers)
+    /// sharing one `incoming_tx` must not share replay state: the identical
+    /// `(item_id, lamport_ts)` pair sent on both connections must be admitted
+    /// on each.
+    #[tokio::test]
+    async fn guards_are_independent_across_two_connections() {
+        let (incoming_tx, mut incoming_rx) = mpsc::channel::<WireItem>(16);
+
+        let (client_a_io, server_a_io) = tokio::io::duplex(4096);
+        let mut client_a = tokio_util::codec::Framed::new(
+            client_a_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+        let server_a = tokio_util::codec::Framed::new(
+            server_a_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+
+        let (client_b_io, server_b_io) = tokio::io::duplex(4096);
+        let mut client_b = tokio_util::codec::Framed::new(
+            client_b_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+        let server_b = tokio_util::codec::Framed::new(
+            server_b_io,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+
+        let (_peer_tx_a, peer_rx_a) = mpsc::channel::<PeerFrame>(8);
+        let (_peer_tx_b, peer_rx_b) = mpsc::channel::<PeerFrame>(8);
+        let (pending_a, rtt_ms_a) = new_pending_and_rtt();
+        let (pending_b, rtt_ms_b) = new_pending_and_rtt();
+
+        let handle_a = tokio::spawn(run_peer_connection_framed(
+            server_a,
+            peer_rx_a,
+            incoming_tx.clone(),
+            copypaste_p2p::DeviceFingerprint("peer-a".to_string()),
+            None,
+            pending_a,
+            rtt_ms_a,
+        ));
+        let handle_b = tokio::spawn(run_peer_connection_framed(
+            server_b,
+            peer_rx_b,
+            incoming_tx,
+            copypaste_p2p::DeviceFingerprint("peer-b".to_string()),
+            None,
+            pending_b,
+            rtt_ms_b,
+        ));
+
+        let mut item = test_wire_item("shared-item");
+        item.lamport_ts = 7;
+
+        send_data_frame(&mut client_a, item.clone()).await;
+        send_data_frame(&mut client_b, item.clone()).await;
+
+        let mut seen = Vec::new();
+        for _ in 0..2 {
+            let received = tokio::time::timeout(Duration::from_secs(5), incoming_rx.recv())
+                .await
+                .expect("timed out waiting for delivery")
+                .expect("both connections must independently admit the item");
+            seen.push(received.item_id);
+        }
+        assert_eq!(seen, vec!["shared-item", "shared-item"]);
+
+        drop(client_a);
+        drop(client_b);
+        handle_a.await.expect("pump task a must not panic");
+        handle_b.await.expect("pump task b must not panic");
     }
 }

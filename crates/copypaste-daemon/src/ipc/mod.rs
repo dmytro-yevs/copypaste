@@ -36,6 +36,9 @@ use copypaste_core::{
     get_device_names,
     get_item_by_id,
     get_page_pinned_first,
+    // CopyPaste-a3nu: cursor (keyset) pagination for `history_page`, opt-in
+    // via an optional `cursor` param — the offset path above is unchanged.
+    get_page_pinned_first_seek,
     is_sensitive_for_autowipe,
     pin_item,
     reorder_pinned,

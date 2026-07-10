@@ -180,18 +180,69 @@ impl IpcServer {
             .get("offset")
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as usize;
+        // CopyPaste-a3nu: optional keyset (seek) cursor — opt-in, dual-mode
+        // alongside the `offset` param above. Present -> seek from the last
+        // row of the previous page (immune to concurrent-insert drift);
+        // absent -> existing offset path, byte-for-byte unchanged.
+        // Flat structured JSON, not an opaque token: {wall_time, id, pinned,
+        // pin_order} mirrors the fields already returned per-item, so a
+        // client just echoes back the last item off the previous page.
+        //
+        // "cursor absent" (None) and "cursor present but unparseable" are
+        // distinct: the former is a valid request for the first page (or a
+        // caller intentionally using the offset path); the latter means a
+        // client THINKS it sent a valid cursor and must be told it didn't —
+        // silently falling back to offset-mode page 1 would mask that client
+        // bug (matches the `extract_str_param` error style used elsewhere in
+        // this file for malformed params).
+        let cursor: Option<copypaste_core::PinnedCursor> = match req.params.get("cursor") {
+            None => None,
+            Some(c) => {
+                let parsed = (|| {
+                    let wall_time = c.get("wall_time")?.as_i64()?;
+                    let id = c.get("id")?.as_str()?.to_string();
+                    let pinned = c.get("pinned").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let pin_order = c.get("pin_order").and_then(|v| v.as_f64());
+                    Some(copypaste_core::PinnedCursor {
+                        bucket: if pinned { 0 } else { 1 },
+                        pin_order_is_null: if pin_order.is_none() { 1 } else { 0 },
+                        pin_order,
+                        wall_time,
+                        id,
+                    })
+                })();
+                match parsed {
+                    Some(cursor) => Some(cursor),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "invalid cursor: expected {wall_time: number, id: string, \
+                             pinned?: bool, pin_order?: number|null}",
+                        )
+                    }
+                }
+            }
+        };
         // CopyPaste-crh3.86: with_read_db centralises the pool/writer
         // fallback; build_page already accepts &dyn DbRead so the branch
         // collapses to a single call.
         let join = self
             .with_read_db(move |db| {
                 // Helper: build json_items + total from any DbRead source.
+                // `cursor: Some(_)` seeks (keyset); `None` uses `offset`
+                // (existing, unchanged path).
                 fn build_page(
                     db: &dyn copypaste_core::DbRead,
                     limit: usize,
                     offset: usize,
-                ) -> anyhow::Result<(Vec<serde_json::Value>, i64)> {
-                    let items = get_page_pinned_first(db, limit, offset)?;
+                    cursor: Option<&copypaste_core::PinnedCursor>,
+                ) -> anyhow::Result<(Vec<serde_json::Value>, i64, Option<serde_json::Value>)>
+                {
+                    let items = match cursor {
+                        Some(c) => get_page_pinned_first_seek(db, limit, Some(c))?,
+                        None => get_page_pinned_first(db, limit, offset)?,
+                    };
                     let total = count_items(db).unwrap_or(0);
                     // Build a device-id → name map once per page so we can
                     // resolve each item's origin without a per-row JOIN.
@@ -294,21 +345,39 @@ impl IpcServer {
                             })
                         })
                         .collect();
-                    Ok((json_items, total))
+                    // CopyPaste-a3nu: next_cursor is derived from the LAST
+                    // returned item's own fields (not the internal
+                    // bucket/pin_order_is_null encoding) — a full page
+                    // (items.len() == limit) implies more rows may follow;
+                    // a short page is the last one, so next_cursor is null.
+                    let next_cursor = if items.len() == limit {
+                        items.last().map(|item| {
+                            serde_json::json!({
+                                "wall_time": item.wall_time,
+                                "id": item.id,
+                                "pinned": item.pinned,
+                                "pin_order": item.pin_order,
+                            })
+                        })
+                    } else {
+                        None
+                    };
+                    Ok((json_items, total, next_cursor))
                 }
 
-                build_page(db, limit, offset)
+                build_page(db, limit, offset, cursor.as_ref())
             })
             .await;
         // Snapshot the own device id outside the blocking task (it lives on self).
         let own_device_id = self.local_device_id.clone().unwrap_or_default();
         match join {
-            Ok(Ok((json_items, total))) => Response::ok(
+            Ok(Ok((json_items, total, next_cursor))) => Response::ok(
                 req.id,
                 serde_json::json!({
                     "items": json_items,
                     "total": total,
                     "own_device_id": own_device_id,
+                    "next_cursor": next_cursor,
                 }),
             ),
             Ok(Err(e)) => Response::err(req.id, e.to_string()),

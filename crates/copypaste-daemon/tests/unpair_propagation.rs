@@ -248,12 +248,53 @@ async fn gap_a_shared_live_allowlist_never_populated_during_pending_unpair_deliv
     // The core regression guard: B dialing IN to A during the delivery window
     // must be rejected — the shared live allowlist was never populated with
     // B's revoked fingerprint.
+    // A client-side `connect()` Ok is NOT proof of server acceptance: under
+    // TLS 1.3, the client can send its own Finished and report the handshake
+    // established (half-RTT) before the server's client-cert verdict — which
+    // runs `PeerCertVerifier::verify_client_cert` against `a_live` — has been
+    // decided and relayed back. So accept EITHER outcome from `connect()`
+    // itself, but if it returned `Ok`, probe with an application-data
+    // round-trip and require an EXPLICIT teardown signal (send error, read
+    // error, or clean EOF). A real frame arriving back is a hard regression.
+    // A probe timeout with the connection still open is treated as ambiguous
+    // and PANICS — the Unpair protocol is one-directional (the accept side
+    // never replies, see `gap_a_pending_unpair_delivered_on_reconnect` above),
+    // so silence alone cannot distinguish "rejected" from "accepted but
+    // nothing sent yet"; letting a timeout pass would make this assertion
+    // vacuous.
     let b_dial_result = b_dial.await.unwrap();
-    assert!(
-        b_dial_result.is_err(),
-        "CopyPaste-8ebg.5 regression: a revoked peer must NOT be accepted via \
-         A's shared live allowlist during pending-unpair delivery"
-    );
+    match b_dial_result {
+        Err(_) => {
+            // Client-side already observed the rejection — satisfies the
+            // invariant on its own.
+        }
+        Ok(mut stream) => {
+            let payload = serde_json::to_vec(&PeerFrame::Control(ControlMsg::Unpair)).unwrap();
+            let probe = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                if stream.send(Bytes::from(payload)).await.is_err() {
+                    return; // send error — definite rejection.
+                }
+                match stream.next().await {
+                    None => {}         // clean EOF — definite rejection.
+                    Some(Err(_)) => {} // read error — definite rejection.
+                    Some(Ok(frame)) => panic!(
+                        "CopyPaste-8ebg.5 regression: a revoked peer received a real \
+                         frame back ({frame:?}) — A's shared live allowlist accepted \
+                         B during pending-unpair delivery"
+                    ),
+                }
+            })
+            .await;
+            assert!(
+                probe.is_ok(),
+                "CopyPaste-8ebg.5 regression check is ambiguous: the app-data round-trip \
+                 timed out with the connection still open. The Unpair protocol is \
+                 one-directional (no reply is ever sent), so silence alone cannot prove \
+                 server-side rejection — teardown must be observable (send/read error or \
+                 EOF) within the probe window, or this assertion is vacuous."
+            );
+        }
+    }
 
     // A's accept() call must never have succeeded for B either (a timeout or
     // a handshake/verification error are both acceptable "rejected"

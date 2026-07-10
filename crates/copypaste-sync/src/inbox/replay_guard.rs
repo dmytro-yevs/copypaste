@@ -1,8 +1,13 @@
 //! Replay-attack protection (CopyPaste-4cyh).
 //!
-//! [`SyncInboxSender::try_enqueue`](super::SyncInboxSender::try_enqueue) passes
-//! each incoming [`WireItem`](crate::protocol::WireItem) through a per-sender
-//! [`ReplayGuard`] before enqueuing it.  The guard maintains a bounded set of
+//! [`SyncInboxSender::try_enqueue`](super::SyncInboxSender::try_enqueue) can
+//! pass each incoming [`WireItem`](crate::protocol::WireItem) through a
+//! per-sender [`ReplayGuard`] before enqueuing it, but the daemon's actual
+//! P2P pump does not currently route through `SyncInboxSender`: it
+//! constructs its own `ReplayGuard` inline, per-connection, in
+//! `copypaste-daemon`'s `p2p::framed_pump::run_peer_connection_framed`
+//! (CopyPaste-sreb) — see the `inbox` module doc for why. The guard maintains
+//! a bounded set of
 //! `(item_id, lamport_ts)` pairs seen in this session.  An exact duplicate —
 //! same item_id AND same lamport_ts — is silently dropped; only the first
 //! delivery is enqueued.

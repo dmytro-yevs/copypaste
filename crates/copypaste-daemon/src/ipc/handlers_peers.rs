@@ -158,6 +158,13 @@ impl IpcServer {
                             }
                         };
 
+                        // Snapshot the per-peer rekey-failure counter
+                        // (CopyPaste-ptgcc). Gated on `live_fps.is_some()`
+                        // like `rtt_snapshot` — the counter is only
+                        // meaningful while P2P (and thus fanout) is running.
+                        let rekey_snapshot: Option<std::collections::HashMap<String, u32>> =
+                            live_fps.is_some().then(crate::p2p::rekey_failure_snapshot);
+
                         // CopyPaste-1jms.32: Determine which non-P2P transport is
                         // active for this daemon so offline peers can be labelled
                         // "Relay" or "Supabase" rather than a generic "Cloud".
@@ -227,6 +234,14 @@ impl IpcServer {
                                     .as_ref()
                                     .and_then(|m| m.get(&peer_fp_canonical).copied());
 
+                                // rekey_failures: current rekey-failure count
+                                // for this peer (CopyPaste-ptgcc). Present
+                                // only when P2P is running AND at least one
+                                // failure has been recorded.
+                                let rekey_failures: Option<u32> = rekey_snapshot
+                                    .as_ref()
+                                    .and_then(|m| m.get(&peer_fp_canonical).copied());
+
                                 if let Some(obj) = peer.as_object_mut() {
                                     obj.insert(
                                         "online".to_string(),
@@ -240,6 +255,12 @@ impl IpcServer {
                                         obj.insert(
                                             "latency_ms".to_string(),
                                             serde_json::Value::Number(ms.into()),
+                                        );
+                                    }
+                                    if let Some(count) = rekey_failures {
+                                        obj.insert(
+                                            "rekey_failures".to_string(),
+                                            serde_json::Value::Number(count.into()),
                                         );
                                     }
                                     // CopyPaste-vypo: surface trust status honestly.
