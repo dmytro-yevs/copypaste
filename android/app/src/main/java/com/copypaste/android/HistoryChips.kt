@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -190,7 +191,18 @@ internal fun ContentIconTile(
     Box(
         modifier = Modifier
             .size(size)
-            .background(color = tint.copy(alpha = 0.14f), shape = RoundedCornerShape(CpShapes.chip)),
+            // CopyPaste-fqpjr: `.background(color, shape)` lets Compose pick between its
+            // fast-path `drawRoundRect` and a generic outline/path fill depending on the
+            // shape — for a couple of CODE/JSON's kind-tint values that fast path rasterized
+            // as a fully-transparent tile on Linux-hosted layoutlib-native's bundled Skia
+            // build while macOS rendered it correctly (CI paparazzi diff, 2026-07-10).
+            // Splitting into an explicit `.clip(shape)` + `.background(color)` forces the
+            // portable RenderNode-clip-then-fill path on every host instead of leaving the
+            // shape-fill strategy to a per-OS-Skia-build implementation choice. Same 14%-alpha
+            // technique (android-history "Content-Type Tile Rendering"), same pixels on
+            // macOS — only the compositing path is pinned.
+            .clip(RoundedCornerShape(CpShapes.chip))
+            .background(color = tint.copy(alpha = 0.14f)),
         contentAlignment = Alignment.Center,
     ) {
         // CopyPaste-5917.15: decorative — the row's own semantics already
