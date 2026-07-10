@@ -125,7 +125,7 @@ export function LogContent({ filter: filterProp, onFilterChange }: LogContentPro
     } catch (err) {
       // Log raw error for diagnostics — never render raw FS paths or IPC strings
       // in the DOM (CopyPaste-mtvx).
-      // eslint-disable-next-line no-console
+       
       console.error("[LogView] failed to load logs:", err);
       if (err instanceof IpcError && err.code === "daemon_offline") {
         setError("The clipboard daemon is not running. Start it to view logs.");

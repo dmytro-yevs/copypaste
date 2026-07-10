@@ -429,7 +429,7 @@ export function HistoryViewInner() {
         handleDelete(selectedId, entry?.preview ?? "");
       }
     },
-    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy, handleDelete, items]
+    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, showToast, handleCopy, handleDelete, items]
   );
 
   // -------------------------------------------------------------------------
@@ -525,7 +525,7 @@ export function HistoryViewInner() {
       // so the bulk action bar is never permanently disabled (V-13).
       setBulkBusy(false);
     }
-  }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast, sigRef]);
+  }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast, sigRef, setBulkBusy]);
 
   const handleBulkPin = useCallback(
     async (targetPinned: boolean) => {
@@ -556,7 +556,7 @@ export function HistoryViewInner() {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, multiSelectedIds, clearSelection, load, showToast, sigRef]
+    [bulkBusy, multiSelectedIds, clearSelection, load, showToast, sigRef, setBulkBusy]
   );
 
   /**
@@ -619,7 +619,7 @@ export function HistoryViewInner() {
       // so the bulk action bar is never permanently disabled (V-13).
       setBulkBusy(false);
     }
-  }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast, playSoundOnCopy, notifyOnCopy]);
+  }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast, playSoundOnCopy, notifyOnCopy, setBulkBusy]);
 
 
   // Destructive database reset — the recovery escape hatch when the daemon is

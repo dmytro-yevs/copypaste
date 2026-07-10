@@ -62,7 +62,7 @@ export function useQrCode() {
       // contain the daemon Unix socket path (/Users/<username>/…) which would
       // leak the local username into the DOM, screen recordings, and the
       // accessibility tree (CopyPaste-tzzu).
-      // eslint-disable-next-line no-console
+       
       console.error("[DevicesView] QR generation failed:", err);
       // bdac.36: canonical term "clipboard service" — never "daemon" in user-facing strings.
       const next: QrState = { status: "error", message: "Could not generate pairing code. Make sure the clipboard service is running and try again." };

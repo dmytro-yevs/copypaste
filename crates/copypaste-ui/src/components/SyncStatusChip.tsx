@@ -116,16 +116,24 @@ export const PEER_STALL_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 /**
  * CopyPaste-8ebg.26: per-peer stall predicate — the piece the global badge
  * cannot express. A peer counts as stalled when:
+ *   - it has a non-zero `rekey_failures` count (CopyPaste-ptgcc) — a broken
+ *     pairwise key is a definite, immediate failure and supersedes waiting
+ *     out `PEER_STALL_THRESHOLD_MS` for `last_sync_at` to go stale, or
  *   - it has synced before but `last_sync_at` is older than
  *     `PEER_STALL_THRESHOLD_MS`, or
  *   - it has NEVER synced (`last_sync_at === null`) despite having been
  *     paired (`added_at`) longer than the same threshold — covers a broken
  *     key/handshake that never produced a single successful exchange.
  *
- * Freshly-paired peers (within the threshold) are never flagged — pairing
- * and the first catch-up replay legitimately take a little while.
+ * Freshly-paired peers (within the threshold) are never flagged on the time
+ * checks — pairing and the first catch-up replay legitimately take a little
+ * while — but a non-zero `rekey_failures` still flags immediately regardless
+ * of how recently the peer was paired or last synced.
  */
 export function isPeerStalled(peer: PairedDevice, nowMs: number): boolean {
+  if ((peer.rekey_failures ?? 0) > 0) {
+    return true;
+  }
   if (peer.last_sync_at !== null) {
     return nowMs - peer.last_sync_at * 1000 > PEER_STALL_THRESHOLD_MS;
   }

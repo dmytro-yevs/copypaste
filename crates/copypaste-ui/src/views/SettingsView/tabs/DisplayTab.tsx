@@ -11,6 +11,7 @@ import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
 import { SliderRow } from "../../../components/SliderRow";
+import { AccentSwatch } from "../../../components/AccentSwatch";
 import { InfoPopover } from "../components/InfoPopover";
 import { THEME_VALUES, ACCENT_VALUES } from "../../../lib/theme/prefsSchema";
 import type { UIPrefs } from "../../../store";
@@ -87,19 +88,13 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
         >
           <div className="swatches" role="group" aria-label="Accent">
             {ACCENT_VALUES.map((a) => (
-              // Each swatch is its own nested theme-scope so var(--accent)
-              // resolves to THAT swatch's accent value, not the page's live
-              // accent (matches GalleryView's swatch-preview pattern).
-              <span key={a} className="theme-scope" data-accent={a}>
-                <button
-                  type="button"
-                  className="swatch"
-                  aria-label={a}
-                  aria-pressed={prefs.accent === a}
-                  style={{ background: "var(--accent)" }}
-                  onClick={() => setPrefs({ accent: a })}
-                />
-              </span>
+              <AccentSwatch
+                key={a}
+                accent={a}
+                selected={prefs.accent === a}
+                onSelect={(accent) => setPrefs({ accent })}
+                className="swatch"
+              />
             ))}
           </div>
         </SettingsRow>

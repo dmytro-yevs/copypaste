@@ -337,7 +337,7 @@
   .dev-hint {
     font-size: var(--fs-xs);
     color: var(--faint);
-    padding: 2px 14px 8px;
+    padding: var(--s-1) var(--s-6) var(--s-4);
     display: flex;
     align-items: center;
     gap: var(--s-3);
@@ -376,7 +376,7 @@
     align-items: center;
     gap: var(--gap-field);
     width: 100%;
-    padding: 12px 14px;
+    padding: 12px var(--s-6);
     text-align: left;
     cursor: pointer;
     transition: background var(--dur-fast) var(--ease);
@@ -429,8 +429,8 @@
        on a wide card yet never squeezes below a 150px floor on a narrow one;
        auto-fit reflows on the grid's OWN width, not the viewport (g27b.33). */
     grid-template-columns: repeat(auto-fit, minmax(max(150px, 19%), 1fr));
-    gap: 8px 22px;
-    padding: 12px 16px 14px;
+    gap: var(--s-4) 22px;
+    padding: 12px var(--s-7) var(--s-6);
     border-top: var(--stroke-1) solid var(--divider);
   }
   .cfield {
@@ -483,18 +483,18 @@
   .qr {
     width: 150px;
     height: 150px;
-    margin: 4px auto 14px;
+    margin: var(--s-2) auto var(--s-6);
     border-radius: var(--r-window);
     background: #fff;
     padding: 12px;
     display: grid;
     grid-template-columns: repeat(11, 1fr);
     grid-template-rows: repeat(11, 1fr);
-    gap: 2px;
+    gap: var(--s-1);
   }
   .qr i { background: #000; border-radius: 1px; }
   .qr i.o { background: transparent; }
-  .sas { display: flex; gap: var(--s-3); justify-content: center; margin: 6px 0 16px; }
+  .sas { display: flex; gap: var(--s-3); justify-content: center; margin: var(--s-3) 0 var(--s-7); }
   .sas span {
     width: 34px;
     height: 42px;
@@ -515,7 +515,7 @@
     display: flex;
     align-items: center;
     gap: var(--s-5);
-    padding: 11px 14px;
+    padding: var(--s-5) var(--s-6);
     border-radius: var(--r-card);
     font-size: var(--fs-125);
     border: var(--stroke-1) solid transparent;
@@ -523,10 +523,13 @@
   .banner svg { font-size: var(--icon-md); flex: none; }
   .banner__x { flex: 1; min-width: 0; }
   .banner__act { display: flex; gap: var(--s-3); flex: none; }
-  .banner--warn { background: color-mix(in srgb, var(--warn) 11%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); color: var(--warn); }
+  .banner--warn { background: color-mix(in srgb, var(--warn) 11%, transparent); border-color: color-mix(in srgb, var(--warn) 32%, transparent); color: var(--warn-strong); }
   .banner--err { background: color-mix(in srgb, var(--err) 11%, transparent); border-color: color-mix(in srgb, var(--err) 32%, transparent); color: var(--err); }
   .banner--info { background: color-mix(in srgb, var(--info) 11%, transparent); border-color: color-mix(in srgb, var(--info) 32%, transparent); color: var(--info); }
-  .banner--ok { background: color-mix(in srgb, var(--ok) 11%, transparent); border-color: color-mix(in srgb, var(--ok) 32%, transparent); color: var(--ok); }
+  /* CopyPaste-wrfn: text color was var(--ok) (2.73:1 on the tint in light —
+     axe color-contrast on .banner__x, "Sync ready" banner). --ok-strong is the
+     text-safe variant already used by .badge--verified for the same reason. */
+  .banner--ok { background: color-mix(in srgb, var(--ok) 11%, transparent); border-color: color-mix(in srgb, var(--ok) 32%, transparent); color: var(--ok-strong); }
   .banner b { color: var(--text); }
 
   /* --- Toast (slice 5) — aria-live status pill ------------------------------ */
@@ -562,7 +565,7 @@
     border: var(--stroke-1) solid var(--border);
     font-size: var(--fs-125);
     font-weight: var(--fw-semibold);
-    padding: 9px 14px;
+    padding: 9px var(--s-6);
     border-radius: var(--r-pill);
     box-shadow: var(--sh3);
     pointer-events: auto;
@@ -586,6 +589,17 @@
   .ctl--tight { gap: var(--s-2); }
   .ctl--stack { flex-direction: column; align-items: stretch; gap: var(--s-3); }
   .ctl--col { flex-direction: column; align-items: flex-end; gap: var(--s-2); }
+  /* CopyPaste-wrfn: align-items:flex-end (above) sizes .ctl--col's children to
+     content width on the cross axis, so .field--grow-full's flex:1 (a main-axis
+     property in this column-direction container) never took effect — Supabase
+     URL / Relay URL stayed clamped to the input's ~146px intrinsic width and
+     clipped their default value (axe/manual: scrollWidth > clientWidth). Widen
+     the cross axis back to the container width only when a grow-full field is
+     present, so the trailing error note underneath still keeps its own sizing.
+     `.ctl--col` is itself flex:0 1 auto (content-sized) inside `.srow__c` — even
+     stretched, the field can only fill `.ctl--col`'s own width, so `.ctl--col`
+     also needs flex:1 here to actually claim the row's grown width. */
+  .ctl--col:has(.field--grow-full) { align-items: stretch; flex: 1; min-width: 0; }
   .ctl--wrap { flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3); }
   /* g27b.34: a single very long bundle id must not push its chip past the card
      edge — cap the chip and ellipsis-truncate its label (the × stays visible).
@@ -618,7 +632,7 @@
   .field-note { font-size: var(--fs-sm); color: var(--faint); }
   .field-note--err { color: var(--err); }
   .field-note--ok { color: var(--ok); }
-  .field-note--warn { color: var(--warn); }
+  .field-note--warn { color: var(--warn-strong); }
   .field-note--dim { color: var(--dim); }
   .field-note--mono { font-family: var(--f-mono); }
   .field-note--row { padding: var(--s-2) 0; }

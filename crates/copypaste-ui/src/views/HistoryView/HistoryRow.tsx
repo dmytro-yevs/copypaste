@@ -149,7 +149,7 @@ export const HistoryRow = React.memo(function HistoryRow({
     if (!revealed) return;
     const t = setTimeout(() => setRevealed(false), 10_000);
     return () => clearTimeout(t);
-  }, [revealed]);
+  }, [revealed, setRevealed]);
 
   // Whether this row should be visually blurred right now (X6 sensitive masking).
   const blurred = shouldMask(entry, maskSensitive) && !revealed;

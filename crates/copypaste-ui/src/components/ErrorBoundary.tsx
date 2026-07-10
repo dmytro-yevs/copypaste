@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<
   componentDidCatch(error: Error, info: ErrorInfo) {
     // Surface to the console for diagnostics; never re-throw (that would blank
     // the window again).
-    // eslint-disable-next-line no-console
+     
     console.error("[ErrorBoundary] caught render/effect error:", error, info);
   }
 

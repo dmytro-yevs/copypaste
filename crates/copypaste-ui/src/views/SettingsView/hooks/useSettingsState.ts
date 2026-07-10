@@ -461,7 +461,7 @@ export function useSettingsState() {
       cancelled = true;
       if (syncRestartTimerRef.current !== null) clearTimeout(syncRestartTimerRef.current);
     };
-  }, [reloadKey]);
+  }, [reloadKey, setPrefs]);
 
   // Re-sync the daemon-backed Private mode toggle whenever the window regains
   // focus or becomes visible. The value is loaded once on mount, but if the

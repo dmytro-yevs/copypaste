@@ -41,7 +41,7 @@
     display: flex;
     align-items: center;
     gap: var(--s-5);
-    padding: 8px 10px;
+    padding: var(--s-4) 10px;
     border-radius: 9px;
     color: var(--dim);
     font-size: var(--fs-md);
@@ -69,7 +69,7 @@
   }
   .sb__foot {
     margin-top: auto;
-    padding: 10px 8px 4px;
+    padding: 10px var(--s-4) var(--s-2);
     border-top: var(--stroke-1) solid var(--divider);
     display: flex;
     align-items: center;
@@ -111,7 +111,7 @@
     display: flex;
     align-items: center;
     gap: var(--s-5);
-    padding: 12px 14px;
+    padding: 12px var(--s-6);
     border-bottom: var(--stroke-1) solid var(--divider);
   }
   /* Header actions slot (History toolbar, Logs filter+buttons, Devices Revoke).
@@ -151,13 +151,13 @@
     flex: none;
     flex-wrap: wrap;
     gap: var(--s-1);
-    padding: 8px 12px 0;
+    padding: var(--s-4) 12px 0;
     border-bottom: var(--stroke-1) solid var(--divider);
   }
   .set-tab {
     font-size: var(--fs-125);
     font-weight: var(--fw-semibold);
-    padding: 8px 11px;
+    padding: var(--s-4) var(--s-5);
     color: var(--dim);
     border-bottom: var(--stroke-2) solid transparent;
     margin-bottom: -1px;
@@ -185,11 +185,11 @@
     .set-tabs::-webkit-scrollbar { display: none; }
     .set-tab {
       flex: none;
-      padding: 8px 9px;
+      padding: var(--s-4) 9px;
       gap: var(--s-2);
     }
   }
-  .set-body { padding: 18px 20px; flex: 1; min-height: 0; overflow-y: auto; }
+  .set-body { padding: 18px var(--s-8); flex: 1; min-height: 0; overflow-y: auto; }
   .set-pane { display: none; }
   .set-pane.on { display: block; animation: viewIn var(--dur) var(--ease); }
   .set-grp { margin-bottom: 22px; }
@@ -252,7 +252,7 @@
 
   /* --- Logs ----------------------------------------------------------------- */
   /* Logs toolbar (filter + Refresh + Export) — top bar when Logs is a Settings tab. */
-  .logs-toolbar { flex: none; display: flex; padding: 12px 14px; border-bottom: var(--stroke-1) solid var(--divider); }
+  .logs-toolbar { flex: none; display: flex; padding: 12px var(--s-6); border-bottom: var(--stroke-1) solid var(--divider); }
   /* CopyPaste-g27b.31: at narrow width the filter field + Refresh + Export
      no longer fit in one row; wrap instead of pushing the buttons
      off-screen. min-width:0 lets the filter field shrink to make room
@@ -393,7 +393,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--s-4);
-    padding: 7px 11px;
+    padding: 7px var(--s-5);
     border: var(--stroke-1) solid var(--border);
     border-radius: var(--r-ctl);
     background: var(--elevated);
@@ -408,7 +408,7 @@
     justify-content: space-between;
     align-items: center;
     gap: var(--gap-row);
-    padding: 14px;
+    padding: var(--s-6);
     border-bottom: var(--stroke-1) solid var(--divider);
     flex-wrap: wrap;
   }

@@ -3,6 +3,7 @@ import { ActionButton } from "../../components/ActionButton";
 import { Toggle } from "../../components/Toggle";
 import { ConfirmModal } from "../../components/ConfirmModal";
 import { DeviceBadge } from "../../components/DeviceBadge";
+import { AccentSwatch } from "../../components/AccentSwatch";
 import { FIXTURE_OWN_DEVICE_ID } from "../../lib/fixtures";
 import {
   ACCENT_VALUES,
@@ -95,18 +96,14 @@ export function GalleryView() {
         </div>
         <div className="gallery__swatches" role="group" aria-label="Accent">
           {ACCENT_VALUES.map((a) => (
-            // Each swatch is its own nested theme-scope so var(--accent) resolves
-            // to that swatch's accent value (theme-aware) — not the wrapper's.
-            <span key={a} className="theme-scope" data-theme={theme} data-accent={a}>
-              <button
-                type="button"
-                className="gallery__swatch"
-                aria-label={a}
-                aria-pressed={a === accent}
-                style={{ background: "var(--accent)" }}
-                onClick={() => setAccent(a)}
-              />
-            </span>
+            <AccentSwatch
+              key={a}
+              accent={a}
+              theme={theme}
+              selected={a === accent}
+              onSelect={setAccent}
+              className="gallery__swatch"
+            />
           ))}
         </div>
         <label className="gallery__row">

@@ -175,7 +175,7 @@ export default function App() {
       setProtocolMismatch(daemonVersion);
     });
     return () => { setProtocolMismatchHandler(null); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   const showMismatchBanner = protocolMismatch !== null && !mismatchDismissed;
@@ -190,7 +190,7 @@ export default function App() {
 
     void getDaemonError().then((err) => {
       if (!cancelled && err) {
-        // eslint-disable-next-line no-console
+         
         console.error("[CopyPaste] daemon spawn error:", err);
         setDaemonError(err);
       }
@@ -201,7 +201,7 @@ export default function App() {
       void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
         if (cancelled) return;
         if (!event.payload.ok && event.payload.error) {
-          // eslint-disable-next-line no-console
+           
           console.error("[CopyPaste] daemon-spawn-result error:", event.payload.error);
           setDaemonError(event.payload.error);
         } else if (event.payload.ok) {
