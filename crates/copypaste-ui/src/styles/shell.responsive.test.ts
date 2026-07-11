@@ -101,3 +101,19 @@ describe("shell.css sidebar compact native scale (CopyPaste-7w060.5)", () => {
     expect(body).toMatch(/flex:\s*none/);
   });
 });
+
+describe("shell.css constrained preference layout (CopyPaste-7w060.7)", () => {
+  it(".set-body caps to --content-max-width and centers, so .srow doesn't spread across the full window", () => {
+    const body = ruleBody(SHELL_CSS, ".set-body");
+    expect(body).toMatch(/max-width:\s*var\(--content-max-width\)/);
+    expect(body).toMatch(/margin-inline:\s*auto/);
+  });
+
+  it("--content-max-width is defined in tokens.css", () => {
+    const TOKENS_CSS = readFileSync(
+      resolve(process.cwd(), "src/styles/tokens.css"),
+      "utf8",
+    );
+    expect(TOKENS_CSS).toMatch(/--content-max-width:\s*\d/);
+  });
+});

@@ -168,8 +168,8 @@
     /* CopyPaste-7w060.15 (B1, native shell): shared cap for single-column
        view-body content width (Settings/About-style bodies) so text lines
        don't stretch full-pane-width once the bordered-card framing that
-       used to constrain the pane visually is gone. Defined here for the
-       shell to adopt; not yet wired to a view body in this change. */
+       used to constrain the pane visually is gone. Wired to .set-body in
+       CopyPaste-7w060.7; other view bodies may opt in later. */
     --content-max-width:640px;
 
     /* Component metrics — control paddings, fixed anatomy dimensions, and the

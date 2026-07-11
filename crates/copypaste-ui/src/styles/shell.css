@@ -216,7 +216,10 @@
       gap: var(--s-2);
     }
   }
-  .set-body { padding: 18px var(--s-8); flex: 1; min-height: 0; overflow-y: auto; }
+  /* CopyPaste-7w060.7: cap the single-column body at --content-max-width and
+     center it so .srow's space-between reads as a compact preference row
+     instead of spreading label/control across the full window. */
+  .set-body { padding: 18px var(--s-8); flex: 1; min-height: 0; overflow-y: auto; max-width: var(--content-max-width); margin-inline: auto; }
   .set-pane { display: none; }
   .set-pane.on { display: block; animation: viewIn var(--dur) var(--ease); }
   .set-grp { margin-bottom: 22px; }
