@@ -568,3 +568,55 @@ test("composition: devices content column respects --content-max-width @ 1440", 
     `Devices content column width=${result.width}px exceeds --content-max-width token (${tokenPx}px) at 1440px viewport`,
   ).toBeLessThanOrEqual(tokenPx + TOL);
 });
+
+// Storage tab sliders/actions (CopyPaste-7w060.12): before the fix every
+// .srow used the two-column space-between layout, which left the control
+// (slider or Export/Import/Vacuum/Clear button) stranded far to the right of
+// its label with a large dead zone in between. The fullWidth SettingsRow
+// variant stacks title above control, so the two columns must now overlap
+// horizontally (no side-by-side dead zone) with the control's top at or
+// below the label's bottom.
+test("composition: Storage tab sliders/actions sit near their labels (no far-right stranding)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: HEIGHT });
+  await gotoMockApp(page);
+  await navigateToView(page, "Settings");
+  await clickSettingsTab(page, "Storage");
+  await page.waitForTimeout(150);
+  const rows = await page.evaluate(() => {
+    const pane = document.querySelector(".set-pane.on");
+    if (!pane) return null;
+    return Array.from(pane.querySelectorAll(".srow")).map((row) => {
+      const label = row.querySelector(".srow__l");
+      const ctl = row.querySelector(".srow__c");
+      const lr = label ? label.getBoundingClientRect() : null;
+      const cr = ctl ? ctl.getBoundingClientRect() : null;
+      return {
+        title: label ? (label.textContent || "").trim().slice(0, 40) : "?",
+        lLeft: lr ? lr.left : null,
+        lBottom: lr ? lr.bottom : null,
+        cLeft: cr ? cr.left : null,
+        cTop: cr ? cr.top : null,
+      };
+    });
+  });
+  expect(rows, ".set-pane.on not found on the Storage surface").not.toBeNull();
+  expect(rows!.length, "no .srow rows found in the Storage pane").toBeGreaterThan(0);
+  const TOL = 2;
+  const offenders = rows!.filter((r) => {
+    // "Database" is a read-only status line, intentionally left as a normal
+    // two-column row (not a slider or destructive action) — see plan step
+    // for CopyPaste-7w060.12.
+    if (r.title === "Database") return false;
+    if (r.lLeft === null || r.lBottom === null || r.cLeft === null || r.cTop === null) return false;
+    // Stacked layout: control starts at/after the label's bottom edge, and
+    // shares the label's left edge (no horizontal space-between gap).
+    const stacked = r.cTop >= r.lBottom - TOL;
+    const leftAligned = Math.abs(r.cLeft - r.lLeft) <= TOL;
+    return !(stacked && leftAligned);
+  });
+  expect(
+    offenders.length,
+    `Storage rows still using the far-right two-column layout instead of stacked fullWidth:\n` +
+      offenders.map((o) => `  "${o.title}" label=(${o.lLeft},${o.lBottom}) ctl=(${o.cLeft},${o.cTop})`).join("\n"),
+  ).toBe(0);
+});

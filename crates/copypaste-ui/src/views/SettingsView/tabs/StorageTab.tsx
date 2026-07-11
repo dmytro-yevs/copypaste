@@ -117,8 +117,8 @@ export function StorageTab({
     const idx = steps.indexOf(value);
     const safeIdx = idx < 0 ? 0 : idx;
     return (
-      <SettingsRow title={label} info={info}>
-        <div className="ctl">
+      <SettingsRow title={label} info={info} fullWidth>
+        <div className="ctl ctl--grow">
           <SliderRow
             min={0}
             max={maxIdx}
@@ -250,7 +250,7 @@ export function StorageTab({
       />
       <Panel>
         {/* Export row — Q3: clicking opens a confirmation modal (see below) */}
-        <SettingsRow title="Export backup">
+        <SettingsRow title="Export backup" fullWidth>
           <div className="ctl">
             {exportMsg !== null && (
               <span className={`field-note `}>
@@ -270,7 +270,7 @@ export function StorageTab({
         </SettingsRow>
 
         {/* Import row — bdac.73: renamed "Restore backup" → "Import history" for parity with Android */}
-        <SettingsRow title="Import history">
+        <SettingsRow title="Import history" fullWidth>
           <div className="ctl">
             {importMsg !== null && (
               <span className={`field-note `}>
@@ -314,7 +314,7 @@ export function StorageTab({
           </SettingsRow>
         )}
         {/* gq51: Vacuum button — compacts the SQLite WAL to reclaim disk space */}
-        <SettingsRow title="Compact database">
+        <SettingsRow title="Compact database" fullWidth>
           <div className="ctl">
             {vacuumMsg !== null && (
               <span className={`field-note `}>
@@ -331,7 +331,7 @@ export function StorageTab({
             </button>
           </div>
         </SettingsRow>
-        <SettingsRow title="Clear clipboard history">
+        <SettingsRow title="Clear clipboard history" fullWidth>
           <div className="ctl">
             {deleteMsg !== null && (
               <span className={`field-note `}>
