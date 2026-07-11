@@ -424,11 +424,16 @@
   .cfields {
     display: grid;
     /* Equal columns that FILL the full card width (auto-fit + 1fr stretches the
-       tracks), ~4-5 across on a wide window and dropping responsively as the
-       panel narrows. The column min is max(150px, 19%) so it targets ~5 columns
-       on a wide card yet never squeezes below a 150px floor on a narrow one;
-       auto-fit reflows on the grid's OWN width, not the viewport (g27b.33). */
-    grid-template-columns: repeat(auto-fit, minmax(max(150px, 19%), 1fr));
+       tracks), dropping responsively as the panel narrows; auto-fit reflows
+       on the grid's OWN width, not the viewport (g27b.33). The column min is
+       max(230px, 24%): a column must clear the 70px .cfield__k label + 11px
+       --s-5 gap + 18px .cfield padding (9px/side) = 99px fixed overhead
+       before .cfield__v gets any room, and a single-token mono value (an
+       IPv4 address, "macOS 27.0") needs ~110px as one unbreakable run, so
+       the floor is 99+110=209px rounded up to 230px (CopyPaste-7w060.4 —
+       150px left .cfield__v only ~51-91px, forcing overflow-wrap: anywhere
+       to split mid-digit even though the value had nowhere natural to break). */
+    grid-template-columns: repeat(auto-fit, minmax(max(230px, 24%), 1fr));
     gap: var(--s-4) 22px;
     padding: 12px var(--s-7) var(--s-6);
     border-top: var(--stroke-1) solid var(--divider);
