@@ -534,21 +534,24 @@
 
   /* --- Toast (slice 5) — aria-live status pill ------------------------------ */
   /* CopyPaste-8ebg.38: the group of toasts is positioned/stacked as ONE unit —
-     `.toast-stack` owns the fixed bottom-center placement, and lays its children
+     `.toast-stack` owns the fixed bottom placement, and lays its children
      out with column-reverse so multiple toasts fan out upward instead of every
      `.toast` independently self-positioning to the same fixed spot (which made
      them render exactly on top of each other, despite the doc comment above
      GlassToast claiming "stacked"). pointer-events is off on the stack itself
-     (empty gaps between pills shouldn't eat clicks) and back on per-toast. */
+     (empty gaps between pills shouldn't eat clicks) and back on per-toast.
+     CopyPaste-7w060.2: anchored bottom-RIGHT (not viewport-center) because the
+     shell reserves a fixed-width left sidebar (shell.css .sb) whose footer
+     (SyncStatusChip) sits in the same bottom band — centering on the full
+     window bled the stack into that sidebar footer at narrow window widths. */
   .toast-stack {
     position: fixed;
     bottom: 22px;
-    left: 50%;
-    transform: translateX(-50%);
+    right: 22px;
     z-index: var(--z-toast);
     display: flex;
     flex-direction: column-reverse;
-    align-items: center;
+    align-items: flex-end;
     gap: var(--s-4);
     pointer-events: none;
   }
@@ -573,6 +576,9 @@
     align-items: center;
     gap: var(--s-4);
     animation: toastIn var(--dur) var(--ease);
+    /* Bounds a long message so a bottom-right-anchored pill never runs off
+       the main pane's right edge at the app's minWidth (720px). */
+    max-width: min(420px, calc(100vw - 44px));
   }
   @keyframes toastIn {
     from { opacity: 0; transform: translateY(14px); }

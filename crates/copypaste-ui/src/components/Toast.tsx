@@ -107,15 +107,18 @@ function GlassToastItem({
 }
 
 // ---------------------------------------------------------------------------
-// ToastContainer — portal that renders all active toasts at bottom-center
+// ToastContainer — portal that renders all active toasts at bottom-right
 // ---------------------------------------------------------------------------
 
 function ToastContainer({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: (id: string) => void }) {
   if (toasts.length === 0) return null;
   return ReactDOM.createPortal(
     <div
-      // Stack at bottom-center, same as iOS toast convention. Mirrors the undo-toast
-      // in HistoryView (SCRH-12) — transient notifications must not occlude dialogs.
+      // CopyPaste-7w060.2: stack at bottom-right, not bottom-center — the shell's
+      // persistent left sidebar (and its footer SyncStatusChip) occupies the same
+      // bottom band, so centering on the full viewport bled the stack into it at
+      // narrow window widths. Mirrors the undo-toast in HistoryView (SCRH-12) —
+      // transient notifications must not occlude dialogs.
       //
       // CopyPaste-8ebg.38: `.toast-stack` positions/stacks the whole group (patterns.css);
       // individual `.toast` items are laid out in normal flow inside it via
