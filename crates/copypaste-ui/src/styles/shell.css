@@ -427,7 +427,11 @@
   .pop {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    /* Fixed to the native window's logical size (POPUP_W_LOGICAL/POPUP_H_LOGICAL
+       in src-tauri/src/popup/window.rs:15-16) so the shell stays a compact
+       command-palette footprint even outside that exact host viewport. */
+    width: 403px;
+    height: 624px;
     background: var(--chrome-bg);
     border: var(--stroke-1) solid var(--border);
     border-radius: var(--r-window);
