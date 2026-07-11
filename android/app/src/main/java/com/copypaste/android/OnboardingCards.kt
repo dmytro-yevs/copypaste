@@ -7,10 +7,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -101,9 +104,13 @@ internal fun PermissionCard(
     )
 
     CopyPasteCard(accent = borderColor, modifier = Modifier.alpha(alpha)) {
-        Column {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (icon != null) {
                     Icon(
@@ -122,8 +129,10 @@ internal fun PermissionCard(
                     // Required badge — accent-tinted chip pill
                     Box(
                         modifier = Modifier
-                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f), RoundedCornerShape(CpShapes.ctl))
-                            .border(0.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(CpShapes.ctl)),
+                            .clip(RoundedCornerShape(CpShapes.ctl))
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
+                            .border(0.5.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(CpShapes.ctl))
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.label_required),
@@ -135,6 +144,7 @@ internal fun PermissionCard(
             if (showStatusPill) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
                         imageVector = if (satisfied) LucideIcons.StatusOk else LucideIcons.StatusErr,

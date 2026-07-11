@@ -131,6 +131,24 @@ class PermissionCardSnapshotTest {
     }
 
     @Test
+    fun `dark theme, long title wraps without colliding with required badge`() {
+        paparazzi.snapshot {
+            CardFixture(isDark = true) {
+                PermissionCard(
+                    icon = LucideIcons.PermissionNotifications,
+                    title = "Permission to show notifications during background clipboard sync",
+                    description = "Show a status notification while syncing.",
+                    status = PermissionStatus.DENIED,
+                    buttonLabel = "Request",
+                    onClick = {},
+                    required = true,
+                    showStatusPill = true,
+                )
+            }
+        }
+    }
+
+    @Test
     fun `light theme, granted with icon and status pill`() {
         paparazzi.snapshot {
             CardFixture(isDark = false) {
