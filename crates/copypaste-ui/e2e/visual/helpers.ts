@@ -92,3 +92,23 @@ export async function clickSettingsTab(
   await page.getByRole("tab", { name: label }).click();
   await page.waitForTimeout(150);
 }
+
+/**
+ * Trigger the bulk-copy toast on the History surface (CopyPaste-7w060.9).
+ *
+ * The single-row click-to-copy path (HistoryView.tsx) does not toast; the
+ * only deterministic toast trigger reachable in the mock harness is the
+ * multi-select bulk-copy action. The `.chk` selection checkbox is
+ * `display:none` (zero-size, so even a forced Playwright click has no
+ * coordinate to target) until `.list.selecting` is applied by React state,
+ * so the first activation is dispatched as a raw DOM click event — it flips
+ * selectionMode on, which then reveals the checkbox for real (same end
+ * state a real drag-select / long-press entry point would produce).
+ */
+export async function triggerHistoryToast(page: Page): Promise<void> {
+  await page.locator(".row .chk").first().dispatchEvent("click");
+  await page
+    .getByRole("button", { name: "Copy selected items" })
+    .click();
+  await page.waitForSelector(".toast-stack .toast", { timeout: 5_000 });
+}

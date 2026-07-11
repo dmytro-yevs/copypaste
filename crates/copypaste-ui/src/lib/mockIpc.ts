@@ -604,6 +604,13 @@ export async function mockInvoke(
         });
 
       case "list_peers":
+        // CopyPaste-7w060.9: `?peersEmpty=1` (mock-mode only, mirrors the
+        // `?mock=1` gate at transport.ts:32) exercises the Devices
+        // empty-state branch, which the fixed PAIRED_DEVICES fixture above
+        // otherwise makes unreachable from e2e.
+        if (new URLSearchParams(window.location.search).has("peersEmpty")) {
+          return ok({ peers: [] });
+        }
         return ok({ peers: PAIRED_DEVICES });
 
       case "poll_peer_events":

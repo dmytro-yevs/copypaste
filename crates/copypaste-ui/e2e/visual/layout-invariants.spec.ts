@@ -18,6 +18,15 @@
  *      `text-overflow: ellipsis` truncation contract.
  *   3. No content spilling past a clipping ancestor's edge (the "value cut off
  *      on the right" class — user #7/#11).
+ *   4. Structural composition checks (CopyPaste-7w060.9): geometry-only probes
+ *      above never look at how two elements relate to each other, so a toast
+ *      overlapping the sidebar footer, a view rendering both its empty and
+ *      populated states at once, an illegibly-short or runaway-tall row, and
+ *      an unbounded-width shell all shipped green under invariants 1-3 alone.
+ *      This class asserts: toast-stack vs sidebar/footer bounding-box
+ *      non-intersection, Devices populated-list XOR empty-state, History row
+ *      height bounds, and rendered content width vs the --content-max-width
+ *      token.
  * Plus an @axe-core/playwright scan: zero serious/critical a11y violations.
  *
  * Runs headless against the Vite mock harness (?mock=1) — fully local, no
@@ -34,6 +43,7 @@ import {
   applyTheme,
   navigateToView,
   clickSettingsTab,
+  triggerHistoryToast,
 } from "./helpers";
 
 // Narrow (a tight window / small display), normal, and wide. The narrow width
@@ -384,4 +394,152 @@ test("tabbar-fit: settings tablist fits at 720px minWidth", async ({ page }) => 
     tabs!.scrollW,
     `Settings tab bar overflows horizontally at 720px (scrollW=${tabs!.scrollW} > clientW=${tabs!.clientW}) — tabs hidden behind a scroll instead of wrapping`,
   ).toBeLessThanOrEqual(tabs!.clientW + 2);
+});
+
+// --- Structural composition assertions (CopyPaste-7w060.9 / A1.3). --------
+// The geometry probe above only ever measures ONE element's own box against
+// itself or its ancestor. None of the below classes intersect that: they
+// need two elements' rects compared, a mutually-exclusive-state check across
+// a whole subtree, a per-row height band, or a live token-vs-render compare.
+
+/** Axis-aligned rectangle intersection (same rounding tolerance style as `probe`). */
+function rectsIntersect(
+  a: { top: number; right: number; bottom: number; left: number },
+  b: { top: number; right: number; bottom: number; left: number },
+): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+// 7w060.2 fixed the toast stack bleeding into the sidebar footer's band at
+// narrow window widths — anchoring it bottom-right instead of center. Assert
+// this permanently: the toast-stack must never overlap either sidebar rect.
+for (const width of [720, 900] as const) {
+  test(`composition: toast-stack does not overlap sidebar @ ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: HEIGHT });
+    await gotoMockApp(page);
+    await triggerHistoryToast(page);
+    const rects = await page.evaluate(() => {
+      const rectOf = (sel: string) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { top: r.top, right: r.right, bottom: r.bottom, left: r.left };
+      };
+      return {
+        toast: rectOf(".toast-stack"),
+        sidebar: rectOf(".sb"),
+        sidebarFoot: rectOf(".sb__foot"),
+      };
+    });
+    expect(rects.toast, ".toast-stack not found after triggering bulk-copy toast").not.toBeNull();
+    expect(rects.sidebar, ".sb (sidebar) not found").not.toBeNull();
+    expect(rects.sidebarFoot, ".sb__foot not found").not.toBeNull();
+    const overlapsSidebar = rectsIntersect(rects.toast!, rects.sidebar!);
+    const overlapsFooter = rectsIntersect(rects.toast!, rects.sidebarFoot!);
+    expect(
+      overlapsSidebar || overlapsFooter,
+      `toast-stack ${JSON.stringify(rects.toast)} overlaps sidebar ${JSON.stringify(rects.sidebar)} / footer ${JSON.stringify(rects.sidebarFoot)} @ ${width}px`,
+    ).toBe(false);
+  });
+}
+
+// The Devices "no other devices paired" EmptyState and the populated peer
+// list (.devrow) must be strictly mutually exclusive — never both, never
+// neither. Exercised via the `?peersEmpty=1` mock scenario flag (mockIpc.ts),
+// which makes the previously-unreachable empty branch testable.
+test("composition: devices — populated list XOR empty state (default fixture)", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: HEIGHT });
+  await gotoMockApp(page);
+  await navigateToView(page, "Devices");
+  await page.waitForTimeout(150);
+  const hasRows = (await page.locator(".dev-list").first().locator(".devrow:not(.this)").count()) > 0;
+  const hasEmpty = (await page.locator(".empty").count()) > 0;
+  expect(
+    hasRows !== hasEmpty,
+    `expected exactly one of {populated .devrow list, .empty state} with the default (non-empty) peers fixture; got hasRows=${hasRows} hasEmpty=${hasEmpty}`,
+  ).toBe(true);
+  expect(hasRows, "default fixture has peers — expected .devrow rows to render").toBe(true);
+});
+
+test("composition: devices — populated list XOR empty state (?peersEmpty=1)", async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: HEIGHT });
+  await page.goto("/?mock=1&peersEmpty=1");
+  await page.waitForSelector("nav button", { timeout: 15_000 });
+  await page.waitForTimeout(200);
+  await navigateToView(page, "Devices");
+  await page.waitForTimeout(150);
+  const hasRows = (await page.locator(".dev-list").first().locator(".devrow:not(.this)").count()) > 0;
+  const hasEmpty = (await page.locator(".empty").count()) > 0;
+  expect(
+    hasRows !== hasEmpty,
+    `expected exactly one of {populated .devrow list, .empty state} with an empty peers fixture; got hasRows=${hasRows} hasEmpty=${hasEmpty}`,
+  ).toBe(true);
+  expect(hasEmpty, "empty fixture (?peersEmpty=1) — expected the EmptyState, not .devrow rows").toBe(true);
+});
+
+// History row density bounds — a row can be internally non-overflowing (the
+// existing row-fit check passes) yet still be visually absurd: collapsed to
+// illegibility or stretched unboundedly tall. Bounds derived from the row
+// primitive's own contract: patterns.css's default --row-max is 74px; a
+// multi-line/image row may override --row-max higher, so the ceiling is
+// generous enough to cover that case without being meaningless.
+const ROW_MIN_HEIGHT = 40;
+const ROW_MAX_HEIGHT = 160;
+for (const width of WIDTHS) {
+  test(`composition: history row heights within sane bounds @ ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: HEIGHT });
+    await gotoMockApp(page);
+    await page.waitForTimeout(150);
+    const heights = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll(".row")).map((r) => {
+        const rect = r.getBoundingClientRect();
+        return {
+          cls: (r.getAttribute("class") || "").slice(0, 40),
+          height: rect.height,
+          text: (r.textContent || "").trim().slice(0, 40),
+        };
+      });
+    });
+    const outOfBand = heights.filter(
+      (h) => h.height < ROW_MIN_HEIGHT || h.height > ROW_MAX_HEIGHT,
+    );
+    expect(
+      outOfBand.length,
+      `History rows outside the [${ROW_MIN_HEIGHT}, ${ROW_MAX_HEIGHT}]px band @ ${width}px:\n` +
+        outOfBand
+          .map((h) => `  ${h.cls} height=${h.height.toFixed(1)} "${h.text}"`)
+          .join("\n"),
+    ).toBe(0);
+  });
+}
+
+// Content max-width — the shared --content-max-width token (tokens.css,
+// wired to Settings' .set-body by CopyPaste-7w060.7) must actually cap the
+// rendered content column on a wide desktop; an unbounded shell was one of
+// the audited defect classes. Checked against Settings, the surface the
+// token is currently wired to (per decision B1's "for view bodies" — other
+// surfaces are a separate rollout, out of scope for this test-only issue).
+test("composition: settings content column respects --content-max-width @ 1440", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: HEIGHT });
+  await gotoMockApp(page);
+  await navigateToView(page, "Settings");
+  await clickSettingsTab(page, "General");
+  await page.waitForTimeout(150);
+  const result = await page.evaluate(() => {
+    const tokenRaw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--content-max-width")
+      .trim();
+    const body = document.querySelector(".set-body");
+    const width = body ? body.getBoundingClientRect().width : null;
+    return { tokenRaw, width };
+  });
+  expect(result.tokenRaw, "--content-max-width is not defined on :root").not.toBe("");
+  const tokenPx = parseFloat(result.tokenRaw);
+  expect(Number.isNaN(tokenPx), `--content-max-width value "${result.tokenRaw}" is not a parseable px length`).toBe(false);
+  expect(result.width, ".set-body not found on the Settings surface").not.toBeNull();
+  const TOL = 2;
+  expect(
+    result.width!,
+    `Settings content column width=${result.width}px exceeds --content-max-width token (${tokenPx}px) at 1440px viewport`,
+  ).toBeLessThanOrEqual(tokenPx + TOL);
 });
