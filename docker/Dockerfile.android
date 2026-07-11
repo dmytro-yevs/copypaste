@@ -50,8 +50,12 @@ RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
     && sdkmanager --install "ndk;${NDK_VERSION}" "platform-tools" >/dev/null
 
 # ----- Layer 3: Rust targets + cargo-ndk -------------------------------------
+# cargo-ndk pinned to 3.5.4: newer releases (e.g. 4.1.2) bump the MSRV past
+# the rustc pinned by the base image above, so an unpinned install breaks
+# whenever upstream cargo-ndk raises its MSRV. Keep this pin in lockstep with
+# the base image's rustc version.
 RUN rustup target add aarch64-linux-android armv7-linux-androideabi \
-    && cargo install cargo-ndk --locked
+    && cargo install cargo-ndk --locked --version 3.5.4
 
 # Sanity: cargo-ndk on PATH and NDK reachable.
 RUN cargo ndk --version && ls ${ANDROID_NDK_HOME}/source.properties
