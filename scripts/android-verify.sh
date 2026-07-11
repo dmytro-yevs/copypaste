@@ -302,8 +302,12 @@ _resolve_jdk_le21() {
         fi
       done
     fi
-    echo "  WARNING: Java ${major} detected (> 21) and no ≤ 21 JDK found." >&2
-    echo "  Gradle 8.7 may fail. Install temurin-17 or set JAVA_HOME manually." >&2
+    echo "  Java ${major} detected (> 21) and no <= 21 JDK found via /usr/libexec/java_home." >&2
+    echo "  Gradle 8.7's bundled Kotlin DSL compiler cannot parse JDK 22+ version" >&2
+    echo "  strings and will crash compiling settings.gradle.kts before any of our" >&2
+    echo "  build-script code runs. Install a JDK 17-21 (e.g. temurin-17) or set" >&2
+    echo "  JAVA_HOME manually to one, then re-run." >&2
+    fail "JDK guard: no supported JDK (17-21) found for Gradle 8.7"
   fi
 }
 _resolve_jdk_le21

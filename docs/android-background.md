@@ -89,3 +89,20 @@ These cannot be granted programmatically and require user action:
 - `ServiceRestartWorker` expedited execution timing on devices with low memory or Doze active.
 - Samsung "App power management" auto-adds recently-unused apps to the sleeping list — this is
   a user-side action that overrides our battery exemption; users must remove the app from the list.
+
+## Toolchain Requirements (JDK)
+
+Gradle 8.7 bundles Kotlin 1.9.22's embedded compiler for its Kotlin DSL support
+(`settings.gradle.kts`, `build.gradle.kts`). That compiler's `JavaVersion.parse()`
+cannot handle JDK 22+ version strings and crashes with
+`java.lang.IllegalArgumentException: <version>` while bootstrapping — before any
+of our own build-script code runs. Recognise this symptom: a bare
+`IllegalArgumentException` naming a JDK version, thrown from
+`org.jetbrains.kotlin.com.intellij.util.lang.JavaVersion.parse`.
+
+- **Supported/pinned JDK**: 17-21 (Temurin 17 recommended). On this dev machine
+  it is installed at `/Library/Java/JavaVirtualMachines/temurin-17.jdk`.
+- Both `android/gradlew` (direct invocation) and `scripts/android-verify.sh`
+  (scripted path) now fail fast with an actionable message when an unsupported
+  JDK is active, instead of surfacing the bare `IllegalArgumentException`.
+- To select a supported JDK on macOS: `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`.
