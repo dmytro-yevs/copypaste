@@ -181,10 +181,24 @@
     padding: var(--s-4) 12px 0;
     border-bottom: var(--stroke-1) solid var(--divider);
   }
+  /* CopyPaste-7w060.8: cap and center the tab strip like .set-body (below) so
+     its full-width band doesn't visually detach from the narrower centered
+     content column it governs on wide windows. Scoped to the single-row wrap
+     mode only (>500px, see the condensed-scroll media query below) — applying
+     max-width + margin-inline:auto together with the <500px nowrap +
+     overflow-x:auto condensed mode corrupts the flex stretch-fit width
+     calculation (Chromium resolves the item's cross size to max-width instead
+     of the available container width, pushing it off-screen). */
+  @media (min-width: 501px) {
+    .set-tabs {
+      max-width: var(--content-max-width);
+      margin-inline: auto;
+    }
+  }
   .set-tab {
     font-size: var(--fs-125);
     font-weight: var(--fw-semibold);
-    padding: var(--s-4) var(--s-5);
+    padding: var(--s-3) var(--s-4);
     color: var(--dim);
     border-bottom: var(--stroke-2) solid transparent;
     margin-bottom: -1px;
@@ -193,7 +207,7 @@
     align-items: center;
     gap: var(--s-3);
   }
-  .set-tab svg { font-size: var(--fs-lg); }
+  .set-tab svg { font-size: var(--fs-base); }
   .set-tab:hover { color: var(--text); }
   .set-tab.on,
   .set-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }

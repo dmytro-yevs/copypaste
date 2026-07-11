@@ -542,6 +542,35 @@ test("composition: settings content column respects --content-max-width @ 1440",
   ).toBeLessThanOrEqual(tokenPx + TOL);
 });
 
+// CopyPaste-7w060.8 — the Settings tab strip (.set-tabs) must respect the
+// same --content-max-width contract as .set-body so the tab band's footprint
+// aligns with the content column it governs, instead of spanning the full
+// pane above a much narrower centered column.
+test("composition: settings tab strip respects --content-max-width @ 1440", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: HEIGHT });
+  await gotoMockApp(page);
+  await navigateToView(page, "Settings");
+  await page.waitForSelector('[role="tablist"]', { timeout: 10_000 });
+  await page.waitForTimeout(150);
+  const result = await page.evaluate(() => {
+    const tokenRaw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--content-max-width")
+      .trim();
+    const tabs = document.querySelector('[role="tablist"]');
+    const width = tabs ? tabs.getBoundingClientRect().width : null;
+    return { tokenRaw, width };
+  });
+  expect(result.tokenRaw, "--content-max-width is not defined on :root").not.toBe("");
+  const tokenPx = parseFloat(result.tokenRaw);
+  expect(Number.isNaN(tokenPx), `--content-max-width value "${result.tokenRaw}" is not a parseable px length`).toBe(false);
+  expect(result.width, "[role=tablist] not found on the Settings surface").not.toBeNull();
+  const TOL = 2;
+  expect(
+    result.width!,
+    `Settings tab strip width=${result.width}px exceeds --content-max-width token (${tokenPx}px) at 1440px viewport`,
+  ).toBeLessThanOrEqual(tokenPx + TOL);
+});
+
 // Devices view: same contract as Settings above — .dev-scroll must respect
 // --content-max-width so device rows don't stretch full-pane-width and
 // detach identity (left) from summary/actions (right) across an empty gap.
