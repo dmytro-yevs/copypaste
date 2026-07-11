@@ -22,13 +22,10 @@ import org.junit.Test
 
 // ---------------------------------------------------------------------------
 // android-history / android-visual-regression (S5 5.5) — component-level
-// goldens for the pieces this slice introduced or rewrote. Deliberately
-// hermetic (no ClipboardItem/ClipboardRepository/FFI/Activity — S2.9 Paparazzi
-// seam rule): a full "populated HistoryRow" golden would need
-// ClipboardRepository as a non-optional constructor parameter, which this
-// slice intentionally does NOT instantiate in a JVM/Robolectric golden test
-// (see bd notes — tracked as a follow-up needing a repository-free row-body
-// extraction). Covers instead:
+// goldens for the pieces this slice introduced or rewrote. Hermetic (no
+// FFI/Activity — S2.9 Paparazzi seam rule); a real populated-row golden with
+// a constructed [com.copypaste.android.ClipboardRepository] lives in
+// [HistoryListSnapshotTest] (CopyPaste-f0f3a.4). Covers here instead:
 //   - content-type tiles (§9.4/§3.7), one per major ContentVisualKind incl. SECRET
 //   - the pre-API-31 masked-row sanitized-overlay treatment (§"List Masking
 //     Contract") in isolation from HistoryRow's SDK-branching
