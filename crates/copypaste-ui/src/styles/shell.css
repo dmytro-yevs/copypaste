@@ -413,7 +413,13 @@
      an expanded device card's metadata/actions extend past the viewport with no
      way to scroll down to them (History scrolls via its virtualiser; Devices had
      no scroll container of its own). */
-  .dev-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+  .dev-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    max-width: var(--content-max-width);
+    margin-inline: auto;
+  }
 
   /* Excluded-apps: each bundle id on its own full-width row (not inline-wrapped
      chips that ran together). */

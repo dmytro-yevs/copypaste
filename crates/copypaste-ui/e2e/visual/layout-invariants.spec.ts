@@ -514,11 +514,9 @@ for (const width of WIDTHS) {
 }
 
 // Content max-width — the shared --content-max-width token (tokens.css,
-// wired to Settings' .set-body by CopyPaste-7w060.7) must actually cap the
-// rendered content column on a wide desktop; an unbounded shell was one of
-// the audited defect classes. Checked against Settings, the surface the
-// token is currently wired to (per decision B1's "for view bodies" — other
-// surfaces are a separate rollout, out of scope for this test-only issue).
+// wired to Settings' .set-body by CopyPaste-7w060.7, and to Devices' .dev-scroll
+// by CopyPaste-7w060.14) must actually cap the rendered content column on a
+// wide desktop; an unbounded shell was one of the audited defect classes.
 test("composition: settings content column respects --content-max-width @ 1440", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: HEIGHT });
   await gotoMockApp(page);
@@ -541,5 +539,32 @@ test("composition: settings content column respects --content-max-width @ 1440",
   expect(
     result.width!,
     `Settings content column width=${result.width}px exceeds --content-max-width token (${tokenPx}px) at 1440px viewport`,
+  ).toBeLessThanOrEqual(tokenPx + TOL);
+});
+
+// Devices view: same contract as Settings above — .dev-scroll must respect
+// --content-max-width so device rows don't stretch full-pane-width and
+// detach identity (left) from summary/actions (right) across an empty gap.
+test("composition: devices content column respects --content-max-width @ 1440", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: HEIGHT });
+  await gotoMockApp(page);
+  await navigateToView(page, "Devices");
+  await page.waitForTimeout(150);
+  const result = await page.evaluate(() => {
+    const tokenRaw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--content-max-width")
+      .trim();
+    const scroll = document.querySelector(".dev-scroll");
+    const width = scroll ? scroll.getBoundingClientRect().width : null;
+    return { tokenRaw, width };
+  });
+  expect(result.tokenRaw, "--content-max-width is not defined on :root").not.toBe("");
+  const tokenPx = parseFloat(result.tokenRaw);
+  expect(Number.isNaN(tokenPx), `--content-max-width value "${result.tokenRaw}" is not a parseable px length`).toBe(false);
+  expect(result.width, ".dev-scroll not found on the Devices surface").not.toBeNull();
+  const TOL = 2;
+  expect(
+    result.width!,
+    `Devices content column width=${result.width}px exceeds --content-max-width token (${tokenPx}px) at 1440px viewport`,
   ).toBeLessThanOrEqual(tokenPx + TOL);
 });
