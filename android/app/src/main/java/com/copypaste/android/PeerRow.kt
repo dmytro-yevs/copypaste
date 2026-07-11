@@ -179,24 +179,29 @@ internal fun PeerRow(
 
         HorizontalDivider(modifier = Modifier.padding(top = 12.dp))
 
-        // ── §9.9 danger footer — equal-width Unpair / Revoke ───────────────
-        // CopyPaste-jkbo: replaced raw M3 Button/ButtonDefaults with shared
-        // CopyPasteButton(DANGER) which applies the styleguide bg=danger@9%,
-        // fg=danger recipe automatically (matching web spec §9.1).
+        // ── §9.9 danger footer — compact, right-aligned, distinct severity ──
+        // CopyPaste-f0f3a.6: demoted from an edge-to-edge equal-width bar
+        // (two DANGER buttons at weight(1f)) that visually outweighed the
+        // identity header and field grid above. Now sized to content and
+        // right-aligned, matching the web parity fix (DeviceCard.tsx
+        // `.devrow__foot`, "Decision 16 superseded"): Unpair reads as the
+        // milder action (SECONDARY — Android has no WARNING variant, see
+        // Components.kt ButtonVariant), Revoke stays DANGER.
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4, Alignment.End),
         ) {
             CopyPasteButton(
                 onClick = onUnpair,
-                variant = ButtonVariant.DANGER,
-                modifier = Modifier.weight(1f),
+                variant = ButtonVariant.SECONDARY,
             ) {
                 Text(stringResource(R.string.btn_unpair))
             }
             CopyPasteButton(
                 onClick = onRevoke,
                 variant = ButtonVariant.DANGER,
-                modifier = Modifier.weight(1f),
             ) {
                 Text(stringResource(R.string.btn_revoke))
             }
