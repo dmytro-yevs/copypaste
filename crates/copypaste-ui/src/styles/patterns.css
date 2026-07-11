@@ -88,9 +88,14 @@
     }
   }
 
+  /* CopyPaste-7w060.13: cap growth so leftover flex space lands past
+     .row__right (trailing edge) instead of opening a gap between the
+     content and the action buttons on wide windows. Also applies to
+     PopupRow, which shares this class but is narrower than the cap. */
   .row__body {
     flex: 1;
     min-width: 0;
+    max-width: 600px;
   }
   .row__title {
     font-size: var(--fs-base);
