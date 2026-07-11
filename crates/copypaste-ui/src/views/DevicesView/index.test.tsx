@@ -116,3 +116,24 @@ describe("DevicesView — confirm-modal stacking (CopyPaste-g27b.36a)", () => {
     ).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// DevicesView — own-device card + no-peers empty state (CopyPaste-f0f3a.5 /
+// CopyPaste-7w060.3)
+//
+// Regression coverage: when the own device resolves but there are zero
+// paired peers, the view must show the own-device card AND an empty state
+// that is scoped to "other/remote" devices, not a device-agnostic "No
+// paired devices" message that contradicts the own-device card sitting
+// right above it.
+// ---------------------------------------------------------------------------
+describe("DevicesView — own device with zero peers (CopyPaste-f0f3a.5+7w060.3)", () => {
+  it("shows the own-device card alongside a remote-scoped empty state", async () => {
+    apiMocks.listPeers.mockResolvedValueOnce({ peers: [] });
+    render(<DevicesView />);
+
+    expect(await screen.findByText("My Mac")).toBeInTheDocument();
+    expect(await screen.findByText("No other devices paired")).toBeInTheDocument();
+    expect(screen.queryByText("No paired devices")).not.toBeInTheDocument();
+  });
+});

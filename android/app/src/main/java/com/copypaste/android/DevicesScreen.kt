@@ -252,9 +252,11 @@ fun DevicesScreen(
             // §9.10 empty state — driven purely by the paired-roster count, NOT
             // by [deviceRows] (which also carries the own-device row and the
             // unrelated LAN-discovery section). android-devices spec "Empty
-            // state when no peers are paired": renders alongside the own-device
-            // card above when present, and stands alone (old fallback shape)
-            // when [DevicesController.ownIdentity] is also unresolved.
+            // state when no peers are paired": the copy is scoped to "other/
+            // remote" devices (devices_no_peer_title = "No other devices
+            // paired"), so it stays non-contradictory when rendered alongside
+            // the own-device card above; it also stands alone (old fallback
+            // shape) when [DevicesController.ownIdentity] is unresolved.
             if (controller.peers.isEmpty()) {
                 NoPeerCard(
                     onPair = {

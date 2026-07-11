@@ -465,7 +465,7 @@
     <string name="meta_label_fingerprint">Fingerprint</string>
 
     <!-- Devices screen — NoPeerCard (ojsq) -->
-    <string name="devices_no_peer_title">No paired devices</string>
+    <string name="devices_no_peer_title">No other devices paired</string>
     <string name="devices_no_peer_body">Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.</string>
     <string name="devices_btn_pair_device">Pair a device</string>
 

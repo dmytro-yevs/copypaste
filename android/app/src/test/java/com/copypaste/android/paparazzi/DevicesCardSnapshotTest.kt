@@ -5,10 +5,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
@@ -17,12 +21,16 @@ import com.copypaste.android.OwnDeviceRow
 import com.copypaste.android.P2pIdentity
 import com.copypaste.android.PairedPeer
 import com.copypaste.android.PeerRow
+import com.copypaste.android.R
+import com.copypaste.android.RowDivider
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.CpTypography
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalCpColors
+import com.copypaste.android.ui.theme.SectionLabel
 import org.junit.Rule
 import org.junit.Test
 
@@ -112,6 +120,57 @@ class DevicesCardSnapshotTest {
         paparazzi.snapshot {
             CardFixture(isDark = true) {
                 NoPeerCard(onPair = {})
+            }
+        }
+    }
+
+    // CopyPaste-f0f3a.5 / CopyPaste-7w060.3: full-screen scenario proving the
+    // own-device card and the (now remote-scoped) no-peers empty state render
+    // together without contradicting each other, in the exact row order
+    // DevicesScreen.kt builds them in (own device card, then LAN-discovery
+    // section, then the standalone NoPeerCard below it).
+    @Test
+    fun `dark theme, own device + zero peers + discovery section`() {
+        paparazzi.snapshot {
+            CopyPasteTheme(isDark = true) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(LocalCpColors.current.bg)
+                        .padding(16.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        CopyPasteCard {
+                            OwnDeviceRow(
+                                identity = P2pIdentity(
+                                    deviceId = "own-device",
+                                    fingerprint = "0123456789abcdef".repeat(4),
+                                    certDer = ByteArray(0),
+                                    keyDer = ByteArray(0),
+                                ),
+                                nowMs = fixedNowMs,
+                                ownPublicIp = "203.0.113.10",
+                                localIpOverrideForTest = "10.1.0.82",
+                            )
+                            RowDivider()
+                            SectionLabel(stringResource(R.string.devices_discovered_section))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.no_devices_nearby),
+                                    style = CpTypography.meta,
+                                    color = LocalCpColors.current.faint,
+                                )
+                            }
+                        }
+                        NoPeerCard(onPair = {})
+                    }
+                }
             }
         }
     }

@@ -364,7 +364,7 @@ function DevicesViewInner({
         {loadState === "ready" && peers.length === 0 && (
           <EmptyState
             icon={<Briefcase aria-hidden="true" />}
-            title="No paired devices"
+            title="No other devices paired"
             body="Pair your phone or another Mac to sync your clipboard — end-to-end encrypted."
           />
         )}
