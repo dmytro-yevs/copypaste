@@ -297,11 +297,6 @@ export function GeneralTab({
           info={<InfoPopover text="When off (default), CopyPaste is excluded from screenshots and screen recordings (macOS NSWindowSharingNone / Android FLAG_SECURE). Enable only if you need to record or share your screen while using CopyPaste. The preference is applied immediately to all open windows." />}
         >
           <div className="ctl">
-            {allowScreenshots && (
-              <span role="note" className="field-note">
-                Clipboard content may be captured by screenshots and screen recordings.
-              </span>
-            )}
             {allowScreenshotsError !== null && (
               <span className="field-note field-note--err">{allowScreenshotsError}</span>
             )}
@@ -312,6 +307,14 @@ export function GeneralTab({
             />
           </div>
         </SettingsRow>
+        {/* CopyPaste-7w060.1: long advisory moved out of .ctl (nowrap flex row)
+            into a full-width sibling block, matching the sync_enabled stub
+            warning pattern above — keeps the row title/toggle from colliding. */}
+        {allowScreenshots && (
+          <div role="note" className="field-note">
+            Clipboard content may be captured by screenshots and screen recordings.
+          </div>
+        )}
         {/* fullWidth: a label+info + input/add-button row + chip list doesn't
             fit the two-column SettingsRow layout — stacks title above the
             full-width control per SettingsRow's fullWidth contract. */}
