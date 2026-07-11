@@ -2,6 +2,7 @@ package com.copypaste.android.ui.theme
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import com.copypaste.android.ui.theme.icons.LucideIcons
 
 // ---------------------------------------------------------------------------
@@ -47,6 +49,14 @@ private fun BannerVariant.glyph(): ImageVector = when (this) {
 }
 
 /**
+ * Above this system fontScale, the horizontal `[icon] message [action(s)]`
+ * strip no longer fits: status text wraps to multiple oversized lines and
+ * squeezes actions into a cramped right column. CpBanner reflows to a
+ * vertical layout instead (message stays full-width, actions move below).
+ */
+private const val LARGE_FONT_SCALE_THRESHOLD = 1.3f
+
+/**
  * A single actionable banner: `[icon] message [action(s)]`. Callers own
  * dismiss-ability (STYLEGUIDE: "dismissible only where it's safe to ignore")
  * by conditionally omitting [actions] / not rendering the banner at all —
@@ -57,31 +67,66 @@ fun CpBanner(
     message: String,
     variant: BannerVariant,
     modifier: Modifier = Modifier,
-    actions: @Composable () -> Unit = {},
+    actions: (@Composable () -> Unit)? = null,
 ) {
     val cp = LocalCpColors.current
     val tint = variant.tint(cp)
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(CpShapes.chip))
-            .background(tint.copy(alpha = 0.12f))
-            .padding(horizontal = CpSpacing.s6, vertical = CpSpacing.s5),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s5),
-    ) {
-        Icon(
-            imageVector = variant.glyph(),
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(CpDimensions.iconMeta),
-        )
-        Text(
-            text = message,
-            style = CpTypography.body,
-            color = cp.text,
-            modifier = Modifier.weight(1f),
-        )
-        actions()
+    val isLargeFontScale = LocalDensity.current.fontScale >= LARGE_FONT_SCALE_THRESHOLD
+    val containerModifier = modifier
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(CpShapes.chip))
+        .background(tint.copy(alpha = 0.12f))
+        .padding(horizontal = CpSpacing.s6, vertical = CpSpacing.s5)
+
+    if (isLargeFontScale) {
+        Column(
+            modifier = containerModifier,
+            verticalArrangement = Arrangement.spacedBy(CpSpacing.s5),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(CpSpacing.s5),
+            ) {
+                Icon(
+                    imageVector = variant.glyph(),
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(CpDimensions.iconMeta),
+                )
+                Text(
+                    text = message,
+                    style = CpTypography.body,
+                    color = cp.text,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (actions != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    actions()
+                }
+            }
+        }
+    } else {
+        Row(
+            modifier = containerModifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(CpSpacing.s5),
+        ) {
+            Icon(
+                imageVector = variant.glyph(),
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(CpDimensions.iconMeta),
+            )
+            Text(
+                text = message,
+                style = CpTypography.body,
+                color = cp.text,
+                modifier = Modifier.weight(1f),
+            )
+            actions?.invoke()
+        }
     }
 }

@@ -126,6 +126,83 @@ class LocalizationFontScaleSnapshotTest {
             }
         }
     }
+
+    @Test
+    fun `200 percent font scale, error banner no actions`() {
+        paparazzi.snapshot {
+            BannerFixture {
+                CpBanner(
+                    message = stringResource(
+                        R.string.sync_error_unauthorized,
+                        "401 Unauthorized",
+                    ),
+                    variant = BannerVariant.ERROR,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `200 percent font scale, warn banner with retry`() {
+        paparazzi.snapshot {
+            BannerFixture {
+                CpBanner(
+                    message = "Relay sync failed. Verify the relay URL and that the relay server is running.",
+                    variant = BannerVariant.WARN,
+                    actions = {
+                        CopyPasteButton(onClick = {}, variant = ButtonVariant.GHOST) {
+                            Text(stringResource(R.string.btn_retry))
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `200 percent font scale, warn banner no actions`() {
+        paparazzi.snapshot {
+            BannerFixture {
+                CpBanner(
+                    message = "Relay sync failed. Verify the relay URL and that the relay server is running.",
+                    variant = BannerVariant.WARN,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `200 percent font scale, info banner with action`() {
+        paparazzi.snapshot {
+            BannerFixture {
+                CpBanner(
+                    message = stringResource(
+                        R.string.setting_cloud_account_mismatch_title,
+                    ) + "\n" + stringResource(R.string.setting_cloud_account_mismatch_body),
+                    variant = BannerVariant.INFO,
+                    actions = {
+                        CopyPasteButton(onClick = {}, variant = ButtonVariant.GHOST) {
+                            Text(stringResource(R.string.btn_retry))
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `200 percent font scale, info banner no actions`() {
+        paparazzi.snapshot {
+            BannerFixture {
+                CpBanner(
+                    message = stringResource(
+                        R.string.setting_cloud_account_mismatch_title,
+                    ) + "\n" + stringResource(R.string.setting_cloud_account_mismatch_body),
+                    variant = BannerVariant.INFO,
+                )
+            }
+        }
+    }
 }
 
 private const val LONG_STRESS_MESSAGE =
