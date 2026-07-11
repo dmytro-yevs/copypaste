@@ -81,7 +81,7 @@ export function Sidebar() {
         )}
 
         <div className="sb__foot">
-          <span>CopyPaste</span>
+          <span className="sb__foot-label">CopyPaste</span>
           <SyncStatusChip />
         </div>
       </nav>

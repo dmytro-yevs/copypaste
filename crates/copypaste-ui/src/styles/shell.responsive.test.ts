@@ -70,3 +70,34 @@ describe("shell.css responsive fixes (CopyPaste-g27b.31)", () => {
     expect(body).toMatch(/min-width:\s*\d/);
   });
 });
+
+describe("shell.css sidebar compact native scale (CopyPaste-7w060.5)", () => {
+  it(".sb__item uses the tighter row rhythm (var(--s-3) padding, var(--s-4) gap)", () => {
+    const body = ruleBody(SHELL_CSS, ".sb__item");
+    expect(body).toMatch(/padding:\s*var\(--s-3\)\s*var\(--s-4\)/);
+    expect(body).toMatch(/gap:\s*var\(--s-4\)/);
+  });
+
+  it(".sb__item svg icon is scaled down to var(--fs-lg) to match the compact row", () => {
+    const body = ruleBody(SHELL_CSS, ".sb__item svg");
+    expect(body).toMatch(/font-size:\s*var\(--fs-lg\)/);
+  });
+
+  it(".sb__item.on::before accent bar insets match the new compact padding", () => {
+    const body = ruleBody(SHELL_CSS, ".sb__item.on::before");
+    expect(body).toMatch(/top:\s*var\(--s-3\)/);
+    expect(body).toMatch(/bottom:\s*var\(--s-3\)/);
+  });
+
+  it(".sb__foot-label ellipsizes instead of clipping under the compact footer", () => {
+    const body = ruleBody(SHELL_CSS, ".sb__foot-label");
+    expect(body).toMatch(/text-overflow:\s*ellipsis/);
+    expect(body).toMatch(/white-space:\s*nowrap/);
+    expect(body).toMatch(/min-width:\s*0/);
+  });
+
+  it(".sb__foot > .chip never shrinks so the label ellipsizes first", () => {
+    const body = ruleBody(SHELL_CSS, ".sb__foot > .chip");
+    expect(body).toMatch(/flex:\s*none/);
+  });
+});

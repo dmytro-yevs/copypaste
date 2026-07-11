@@ -41,11 +41,14 @@
     display: flex;
     flex-direction: column;
   }
+  /* CopyPaste-7w060.5: compact native-utility row density (System Settings
+     sidebar reference) — was sized for the pre-B1 framed/card sidebar and
+     read oversized once the shell became a flat, continuous surface. */
   .sb__item {
     display: flex;
     align-items: center;
-    gap: var(--s-5);
-    padding: var(--s-4) 10px;
+    gap: var(--s-4);
+    padding: var(--s-3) var(--s-4);
     border-radius: 9px;
     color: var(--dim);
     font-size: var(--fs-md);
@@ -58,29 +61,45 @@
       background var(--dur-fast) var(--ease),
       color var(--dur-fast) var(--ease);
   }
-  .sb__item svg { font-size: var(--fs-xl); }
+  .sb__item svg { font-size: var(--fs-lg); }
   .sb__item:hover { background: var(--hover); color: var(--text); }
   .sb__item.on { background: var(--selected); color: var(--text); }
   .sb__item.on::before {
     content: "";
     position: absolute;
     left: 0;
-    top: var(--s-4);
-    bottom: var(--s-4);
+    /* Insets tied to .sb__item's vertical padding (var(--s-3)) above — keep
+       these in sync so the accent bar stays inset on the row, not overshooting
+       it. */
+    top: var(--s-3);
+    bottom: var(--s-3);
     width: var(--sel-bar-w);
     border-radius: 0 var(--sel-bar-r) var(--sel-bar-r) 0;
     background: var(--accent);
   }
   .sb__foot {
     margin-top: auto;
-    padding: 10px var(--s-4) var(--s-2);
+    min-width: 0;
+    padding: var(--s-3) var(--s-4) var(--s-2);
     border-top: var(--stroke-1) solid var(--divider);
     display: flex;
     align-items: center;
-    gap: var(--s-4);
+    gap: var(--s-3);
     font-size: var(--fs-xs);
     color: var(--faint);
   }
+  /* Label shrinks/ellipsizes first under the compact footer so the sync
+     status chip (flex:none in .chip, primitives.css) never gets clipped. */
+  .sb__foot-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  /* Footer-scoped override (not the shared .chip primitive, which is reused
+     elsewhere e.g. filter chips) — the sync status chip must never shrink,
+     only the label above does. */
+  .sb__foot > .chip { flex: none; }
 
   /* --- Main pane + view header ---------------------------------------------- */
   /* CopyPaste-7w060.15 (B1): border+border-radius removed for the native
