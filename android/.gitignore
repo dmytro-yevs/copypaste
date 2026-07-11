@@ -1,4 +1,8 @@
 
+# Gradle build output for every module (e.g. app/build/) — includes Paparazzi
+# failure/delta PNGs, which must never be checked in as stale gate artifacts.
+build/
+
 # Local Android SDK path (machine-specific)
 local.properties
 
