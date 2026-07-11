@@ -620,3 +620,66 @@ test("composition: Storage tab sliders/actions sit near their labels (no far-rig
       offenders.map((o) => `  "${o.title}" label=(${o.lLeft},${o.lBottom}) ctl=(${o.cLeft},${o.cTop})`).join("\n"),
   ).toBe(0);
 });
+
+// CopyPaste-7w060.11 — the originally-reported defect: Supabase URL/anon
+// key/email/password/relay URL spanning the pane, Save/Save & test detached
+// from their fields, and the passphrase eye-toggle/"Set passphrase" button
+// drifting to the far right of an unconstrained row. CopyPaste-7w060.7
+// capped .set-body at --content-max-width with a fixed label rail, which
+// already bounds all of this — this test pins that contract to the Sync
+// tab specifically so a regression here is caught by id.
+test("composition: Sync tab credential fields and actions stay grouped (CopyPaste-7w060.11)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: HEIGHT });
+  await gotoMockApp(page);
+  await navigateToView(page, "Settings");
+  await clickSettingsTab(page, "Sync");
+  await page.waitForTimeout(150);
+  const result = await page.evaluate(() => {
+    const pane = document.querySelector(".set-pane.on");
+    if (!pane) return null;
+    const panels = Array.from(pane.querySelectorAll(".set-grp"));
+    // Cloud sync is the panel containing the Supabase URL field.
+    const cloudPanel = panels.find((p) => p.querySelector('input[placeholder*="supabase.co"]')) ?? null;
+    if (!cloudPanel) return { cloudPanelFound: false };
+    const panelRect = cloudPanel.getBoundingClientRect();
+    const fields = Array.from(cloudPanel.querySelectorAll(".field--grow-full input")) as HTMLInputElement[];
+    const fieldRects = fields.map((f) => f.getBoundingClientRect().width);
+    const saveBtn = Array.from(cloudPanel.querySelectorAll("button")).find((b) =>
+      (b.textContent || "").includes("Save") && !(b.textContent || "").includes("test"),
+    );
+    const testBtn = Array.from(cloudPanel.querySelectorAll("button")).find((b) =>
+      (b.textContent || "").includes("test"),
+    );
+    const passInput = cloudPanel.querySelector('input[placeholder="Shared passphrase…"]');
+    const setPassBtn = Array.from(cloudPanel.querySelectorAll("button")).find((b) =>
+      (b.textContent || "").includes("Set passphrase"),
+    );
+    return {
+      cloudPanelFound: true,
+      panelLeft: panelRect.left,
+      panelRight: panelRect.right,
+      fieldWidths: fieldRects,
+      saveInPanel: saveBtn ? cloudPanel.contains(saveBtn) : false,
+      testInPanel: testBtn ? cloudPanel.contains(testBtn) : false,
+      passLeft: passInput ? passInput.getBoundingClientRect().left : null,
+      setPassBtnLeft: setPassBtn ? setPassBtn.getBoundingClientRect().left : null,
+    };
+  });
+  expect(result, ".set-pane.on not found on the Sync surface").not.toBeNull();
+  expect(result!.cloudPanelFound, "Cloud sync panel (containing the Supabase URL field) not found").toBe(true);
+  const tokenPx = 640;
+  const panelWidth = result!.panelRight! - result!.panelLeft!;
+  expect(
+    panelWidth,
+    `Cloud sync panel width=${panelWidth}px exceeds the --content-max-width contract (${tokenPx}px)`,
+  ).toBeLessThanOrEqual(tokenPx + 2);
+  expect(result!.saveInPanel, "Save button is not inside the Cloud sync panel it acts on").toBe(true);
+  expect(result!.testInPanel, "Save & test connection button is not inside the Cloud sync panel it acts on").toBe(true);
+  // The passphrase input and its "Set passphrase" button must sit on the same
+  // row within a small horizontal span — not drifted across an unbounded window.
+  const passGap = result!.setPassBtnLeft! - result!.passLeft!;
+  expect(
+    passGap,
+    `"Set passphrase" button is ${passGap}px right of the passphrase input — expected them grouped on the same row`,
+  ).toBeLessThan(400);
+});
