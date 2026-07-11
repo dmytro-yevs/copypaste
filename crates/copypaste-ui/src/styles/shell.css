@@ -5,12 +5,14 @@
      Theme-varying design constants (color/background/border/radius/shadow/motion)
      go through tokens; on-scale spacing uses --s-*, one-off layout px stay literal. */
 
+  /* CopyPaste-7w060.15 (B1): native shell — sidebar and main pane form one
+     continuous surface (like Mail/System Settings), not two bordered cards
+     in a padded gutter. No outer padding/gap; the hairline divider between
+     .sb and .main (below) is the only seam. */
   .app {
     display: flex;
     height: 100%;
     background: var(--bg);
-    padding: var(--s-4);
-    gap: var(--s-4);
   }
 
   /* --- Sidebar -------------------------------------------------------------- */
@@ -31,8 +33,10 @@
     background: var(--chrome-bg);
     -webkit-backdrop-filter: var(--frost-filter);
     backdrop-filter: var(--frost-filter);
-    border: var(--stroke-1) solid var(--border);
-    border-radius: var(--r-card);
+    /* B1: flat pane divider, not a card outline — --divider (hairline token,
+       also used for .vhead/.sb__foot borders below) instead of the stronger
+       --border card-outline color. */
+    border-right: var(--stroke-1) solid var(--divider);
     padding: var(--s-4);
     display: flex;
     flex-direction: column;
@@ -79,14 +83,18 @@
   }
 
   /* --- Main pane + view header ---------------------------------------------- */
+  /* CopyPaste-7w060.15 (B1): border+border-radius removed for the native
+     single-surface look (sidebar + main read as one continuous pane, seamed
+     only by .sb's hairline divider). overflow:hidden is retained purely to
+     bound the flex column's scroll regions (.view-host, .about, .logs) —
+     NOT for corner clipping; .view-host owns its own independent
+     overflow:hidden rectangle, so nothing here depends on a rounded clip. */
   .main {
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
     background: var(--panel);
-    border: var(--stroke-1) solid var(--border);
-    border-radius: var(--r-card);
     overflow: hidden;
   }
   /* View region inside the (overflow:hidden) pane: owns its own scroll so

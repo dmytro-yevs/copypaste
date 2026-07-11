@@ -165,6 +165,12 @@
        their own overflow rule — never rely on a fixed English string width. */
     --main-min-w:640px; --main-min-h:480px;
     --popup-w:400px;
+    /* CopyPaste-7w060.15 (B1, native shell): shared cap for single-column
+       view-body content width (Settings/About-style bodies) so text lines
+       don't stretch full-pane-width once the bordered-card framing that
+       used to constrain the pane visually is gone. Defined here for the
+       shell to adopt; not yet wired to a view body in this change. */
+    --content-max-width:640px;
 
     /* Component metrics — control paddings, fixed anatomy dimensions, and the
        extra radius/stroke/fill design constants the primitives layer needs, so
