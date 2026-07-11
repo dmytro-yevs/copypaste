@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -83,7 +84,7 @@ internal fun ExcludedAppsRow(
         newApp = ""
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(
             text = stringResource(R.string.setting_excluded_apps_subtitle),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -308,7 +309,7 @@ internal fun StorageTab(
             // CopyPaste-8jx8: Export history — produces a JSON file with text items
             // via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
             // CopyPaste-crh3.40: Include-sensitive-items toggle (parity with macOS).
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -369,7 +370,9 @@ internal fun StorageTab(
             // CopyPaste-8jx8: Import history — reads a previously exported JSON file
             // and inserts new items (deduplication by ID, re-encrypted with device key).
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -401,7 +404,9 @@ internal fun StorageTab(
             }
             SettingsCardDivider()
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -421,7 +426,9 @@ internal fun StorageTab(
             // Wipes the entire clipboard store including pinned items. Intended as a
             // last resort when the DB is corrupted and normal operations fail.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -448,7 +455,9 @@ internal fun StorageTab(
             // onVacuumDatabase is null until the FFI exposes a vacuum entry point;
             // in that case the button is shown as disabled with an explanatory note.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {

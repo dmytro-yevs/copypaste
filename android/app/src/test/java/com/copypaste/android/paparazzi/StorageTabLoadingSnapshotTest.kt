@@ -110,7 +110,9 @@ private fun ActionsFixture(
 @Composable
 private fun ActionRow(label: String, buttonLabel: String, inFlight: Boolean) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
