@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -91,15 +93,16 @@ internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = 
                 accent = MaterialTheme.colorScheme.outline, // neutral border, not semantic
             ) {
                 Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     // Icon container: accent@15% bg with gradient shimmer border.
                     Box(
                         modifier = Modifier
-                            .background(
-                                color = c.primary.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(20.dp),
-                            )
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(color = c.primary.copy(alpha = 0.15f))
                             .border(
                                 width = 1.dp,
                                 color = c.primary.copy(alpha = 0.28f),
@@ -158,15 +161,16 @@ internal fun EmptySearchState(padding: PaddingValues, query: String) {
                 accent = MaterialTheme.colorScheme.outline,
             ) {
                 Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     // Icon container: accent@12% bg, no halo for search-empty.
                     Box(
                         modifier = Modifier
-                            .background(
-                                color = c.primary.copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(20.dp),
-                            )
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(color = c.primary.copy(alpha = 0.12f))
                             .border(
                                 width = 1.dp,
                                 color = c.primary.copy(alpha = 0.24f),
