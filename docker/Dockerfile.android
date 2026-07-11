@@ -78,6 +78,9 @@ RUN cargo ndk --version && ls ${ANDROID_NDK_HOME}/source.properties
 #
 # Versions pinned for reproducibility; bump when the workspace's Cargo.lock
 # advances openssl-src / libsqlite3-sys major versions.
+# no-docs is not passed to Configure below: it only exists on OpenSSL >= 3.2
+# and is redundant anyway, since we only run `make install_sw` (never
+# `make install_docs`).
 ARG OPENSSL_VERSION=3.0.13
 ARG SQLCIPHER_VERSION=4.5.6
 
@@ -89,7 +92,7 @@ RUN mkdir -p /opt/prebuilt/openssl /opt/prebuilt/sqlcipher \
     && ./Configure linux-x86_64 \
          --prefix=/opt/prebuilt/openssl \
          --openssldir=/opt/prebuilt/openssl/ssl \
-         no-shared no-tests no-docs \
+         no-shared no-tests \
     && make -j"$(nproc)" \
     && make install_sw \
     && cd /tmp \
