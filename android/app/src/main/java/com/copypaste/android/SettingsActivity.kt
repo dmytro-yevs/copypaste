@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
@@ -39,7 +40,6 @@ import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CommittedCopyPasteTheme
 import com.copypaste.android.ui.theme.CommittedAppearance
 import com.copypaste.android.ui.theme.CopyPasteButton
-import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.SecureWindowChrome
 import com.copypaste.android.ui.theme.CopyPasteTopBar
@@ -160,6 +160,13 @@ fun SettingsScreen(
     paintCanvasBackdrop: Boolean = true,
     /** Called after the user confirms Save and all settings are persisted. */
     onSaved: () -> Unit = {},
+    /**
+     * Test-only seam (CopyPaste-f0f3a.11): selects the initial tab index
+     * (0=General .. 4=Notifications) for deterministic Paparazzi goldens.
+     * `selectedTab` is otherwise internal `rememberSaveable` state with no
+     * external override.
+     */
+    initialTab: Int = TAB_GENERAL,
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -362,7 +369,7 @@ fun SettingsScreen(
     }
 
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
-    var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
+    var selectedTab by rememberSaveable { mutableStateOf(initialTab) }
     val tabs = listOf("General", "Display", "Sync", "Storage", "Notifications")
 
     // android-appearance D5: the live-preview DRAFT (themeMode/accent/translucency,
@@ -520,17 +527,10 @@ fun SettingsScreen(
             )
         },
     ) { innerPadding ->
-        // CopyPaste-sk02: wrap the entire tab panel (tab row + tab content) in a
-        // CopyPasteCard so the settings panel floats as a single glass block over
-        // the screen canvas, matching DevicesView/HistoryView patterns.
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-        ) {
-        CopyPasteCard(
-            modifier = Modifier.fillMaxSize(),
-            translucent = translucency,
         ) {
             // AND3 / CopyPaste-g5u1: bare ScrollableTabRow — default M3 indicator,
             // no custom animation/offset/width.
@@ -553,7 +553,8 @@ fun SettingsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
                 when (selectedTab) {
                     TAB_GENERAL -> GeneralTab(
@@ -839,7 +840,6 @@ fun SettingsScreen(
                     )
                 }
             }
-        } // end CopyPasteCard
         } // end outer Column
         // bd CopyPaste-44rq.22: glass toast host for export/import feedback.
         // Inside Scaffold so it overlays the settings panel bottom-center,
