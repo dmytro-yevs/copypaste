@@ -699,18 +699,12 @@ export function HistoryViewInner() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter…"
-          // CopyPaste-8ebg.64: the shortcut itself has zero discoverability from
-          // the input alone — the title tooltip plus the visible field-note hint
-          // below are the two affordances that surface it.
-          title="Search (⌘F)"
+          // CopyPaste-7w060.6: Cmd+F/Cmd+A/Option+Enter (handleKeyDown above) are
+          // discoverable via this hover tooltip instead of a permanently-visible
+          // field-note hint that crowded the header and read as disabled text.
+          title="Search (⌘F) · ⌘A select all · ⌥⏎ paste as plain text"
         />
       </div>
-      {/* CopyPaste-8ebg.64: Cmd+F / Cmd+A / Option+Enter (handleKeyDown above) have
-          no menu and no visible affordance anywhere in the UI — surface them as a
-          compact field-note hint so they're discoverable without reading docs. */}
-      <span className="field-note" title="Keyboard shortcuts">
-        ⌘F search · ⌘A select all · ⌥⏎ paste as plain text
-      </span>
 
       {/* D2: hidden file input (triggered via the attach button below) */}
       <input
