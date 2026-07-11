@@ -61,7 +61,19 @@ jobs:
         id: date
         run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9'
+
       - name: Build macOS arm64 (bin + .app)
+        # build-macos.sh runs `pnpm tauri build` internally (crates/copypaste-ui)
+        # when the Tauri bundle is missing, so pnpm/node must be on PATH here.
         run: bash scripts/build-macos.sh arm64
 
       - name: Build DMG

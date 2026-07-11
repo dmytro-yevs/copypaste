@@ -82,6 +82,16 @@ bundle_app() {
   cp "$src_dir/copypaste"          target/release/
   cp "$src_dir/copypaste-relay"    target/release/
 
+  # make_app_bundle.sh requires target/release/bundle/macos/CopyPaste.app, which
+  # is produced only by `pnpm tauri build` (src-tauri is a workspace member, so
+  # the Tauri bundler writes to the WORKSPACE-ROOT target/, not crate-local).
+  # Build it here if missing so every caller of this script (nightly + manual)
+  # produces a complete .app, mirroring release.yml's "Build Tauri app" step.
+  if [[ ! -d "target/release/bundle/macos/CopyPaste.app" ]]; then
+    echo "  -> Tauri bundle missing, running 'pnpm tauri build' in crates/copypaste-ui"
+    (cd crates/copypaste-ui && pnpm install --frozen-lockfile && pnpm tauri build)
+  fi
+
   # Derive version from the workspace Cargo.toml ([workspace.package] version).
   local cargo_version
   cargo_version="$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
