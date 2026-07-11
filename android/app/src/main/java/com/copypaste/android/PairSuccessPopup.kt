@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
@@ -65,7 +66,7 @@ internal fun PairedSuccessPopup(
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(CpSpacing.s8)) {
                 // ── Avatar + name + status row ────────────────────────────────
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -125,12 +126,20 @@ internal fun PairedSuccessPopup(
                     }
                     // 10hh: mono truncated fingerprint — 16…8 (via formatPeerFingerprint).
                     val shortFp = formatPeerFingerprint(peer.fingerprint)
-                    PopupMetaRow(label = stringResource(R.string.meta_label_fingerprint), value = shortFp)
+                    PopupMetaRow(
+                        label = stringResource(R.string.meta_label_fingerprint),
+                        value = shortFp,
+                        maxLines = 2,
+                    )
                 }
             }
         },
         confirmButton = {
-            CopyPasteButton(onClick = onDismiss, variant = ButtonVariant.PRIMARY) {
+            CopyPasteButton(
+                onClick = onDismiss,
+                variant = ButtonVariant.PRIMARY,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 // voyf: PRIMARY variant uses accent color — drop explicit color override.
                 Text(text = stringResource(R.string.s8_pair_success_done))
             }
@@ -138,20 +147,28 @@ internal fun PairedSuccessPopup(
     )
 }
 
-/** Single label+value row for [PairedSuccessPopup]. */
+/**
+ * Single label+value metadata row for [PairedSuccessPopup].
+ *
+ * Stacked (label above value) rather than side-by-side so the value gets the
+ * row's full width — the fingerprint value alone can run to 25 monospace
+ * chars and would otherwise dominate/wrap unpredictably against its label on
+ * a Pixel-5-width dialog.
+ */
 @Composable
-private fun PopupMetaRow(label: String, value: String) {
+private fun PopupMetaRow(label: String, value: String, maxLines: Int = 1) {
     val cp = LocalCpColors.current
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(CpSpacing.s4),
+        verticalArrangement = Arrangement.spacedBy(CpSpacing.s1),
     ) {
         Text(text = label, style = CpTypography.meta, color = cp.faint)
         Text(
             text = value,
             style = CpTypography.bodyMono,
             color = cp.text,
-            modifier = Modifier.weight(1f),
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
