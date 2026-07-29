@@ -1,0 +1,102 @@
+# Build artifacts
+/target/
+/dist/
+
+# Playwright/Chrome-devtools MCP runtime artifacts (regenerated each session)
+.playwright-mcp/
+
+# Multi-platform build outputs (per-platform binaries).
+# Ignore everything under builds/ EXCEPT .gitkeep so the directory is tracked.
+builds/*
+!builds/.gitkeep
+
+# Ruflo/claude-flow runtime
+.swarm/
+.claude-flow/
+ruvector.db
+agentdb.rvf
+agentdb.rvf.lock
+
+# Ruflo session artifacts (regenerated each session)
+ruflo-fix.sh
+ruflo-reinit.sh
+ruflo-setup-log.md
+
+# IDE
+.idea/
+
+# Claude config
+.claude/
+.claude/worktrees/
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+.agents/
+.codex/
+.mcp.json
+.beads/
+docs/superpowers/
+
+# OS
+.DS_Store
+
+# Personal status reports (ephemeral, not version-controlled)
+reports/
+
+# cargo-fuzz runtime (build outputs, corpora, crash reproducers)
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/Cargo.lock
+
+# Coverage reports (cargo-llvm-cov output: HTML, LCOV, JSON)
+coverage/
+
+# stray build artifact
+rust_out
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# Local dev artifacts (release-prep screenshots + docker cargo/target cache)
+# CopyPaste-d41w.12: .docker-target/ (~5 GB) and .docker-cargo/ (~0.5 GB) are
+# the Docker-build cargo target + registry caches from `make android-docker`.
+# They are git-ignored (never committed) but accumulate on local disk; reclaim
+# any time with `rm -rf .docker-target .docker-cargo` — the next docker build
+# regenerates them (slower first build only).
+/*.png
+.docker-cargo/
+.docker-target/
+.docker-check.log
+*.jks
+*.keystore
+/.audit/
+
+# CopyPaste-d41w.38: root-level agent/audit scratch reports must never be
+# committed (one-time outputs, explicitly marked stale by .audit/_SCHEMA.md).
+# Keep them as local untracked files or under /.audit/.
+/AUDIT_*.md
+/FEATURE_GAP_REPORT.md
+/FEATURE_IMPROVEMENT_ROADMAP.md
+/FEATURE_INVENTORY.md
+/FIX_ORCHESTRATION_PLAN.md
+/PARITY_MATRIX.md
+/PLATFORM_GAP_REPORT.md
+/PRODUCT_COMPLETENESS_AUDIT.md
+/VERIFICATION_REPORT.md
+
+# graphify graph artifact (per-machine, regenerated)
+graphify-out/
+
+# Playwright visual-gate run outputs
+crates/copypaste-ui/playwright-report/
+crates/copypaste-ui/test-results/
+
+# Compatibility evidence from v0.4.1 — committed on purpose.
+# The generic *.db rule above silently excluded these once already; git add
+# gives no warning for an ignored path, so the test suite referenced fixtures
+# that were never in the repository.
+!compat/golden-v0.4.1/*.db
