@@ -1,0 +1,90 @@
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-linux-android" },
+]
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+version = 2
+ignore = [
+    # proc-macro-error 1.0.4 unmaintained.
+    # Transitive via tray-icon -> muda/libappindicator -> gtk -> glib-macros/gtk3-macros.
+    # No safe upgrade upstream. Revisit when tray-icon migrates off gtk3.
+    "RUSTSEC-2024-0370",
+    # gtk-rs GTK3 bindings unmaintained (atk, gdk, gdk-pixbuf, gdk-sys, gio,
+    # gtk, gtk-sys, pango). Transitive via tray-icon -> libappindicator -> gtk.
+    # No safe upgrade upstream until tray-icon migrates off gtk3.
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    # More gtk-rs GTK3 X11/Wayland backend bindings unmaintained (same tray-icon ->
+    # libappindicator -> gtk chain; Linux UI only, not built on macOS/Android).
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    # unic-* unmaintained (char-range/common/char-property/ucd-version/ucd-ident).
+    # Transitive via urlpattern -> tauri-utils -> copypaste-ui (UI build only).
+    # No safe upgrade upstream; not on the core crypto/IPC path.
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+    # paste 1.0.x unmaintained. No safe upgrade upstream.
+    "RUSTSEC-2024-0436",
+    # bincode 1.3.3 unmaintained (team disbanded after harassment incident).
+    # Transitive via ruflo/agentdb dependencies. v1 is considered feature-complete
+    # upstream; migration to alternatives (postcard, rkyv) is non-trivial.
+    "RUSTSEC-2025-0141",
+    # NOTE: RUSTSEC-2024-0429 (glib 0.18.5 VariantStrIter unsound, Linux/webkit2gtk
+    # only) was removed from this list 2026-06-30: cargo-deny v2 does not raise
+    # `unsound` informational advisories (only `unmaintained`/`vulnerability`), so
+    # the ignore matched no advisory and failed the `advisories` check with
+    # `advisory-not-detected`. The glib path is still Linux-webkit2gtk-only and
+    # unreachable on the shipped macOS/Android targets; re-add here only if a
+    # future cargo-deny/advisory-db actually raises it (see bd CopyPaste-8p37).
+]
+
+[licenses]
+version = 2
+# cargo-deny 0.14+ removed `deny`, `copyleft`, `allow-osi-fsf-free`, `default`
+# (see EmbarkStudios/cargo-deny#611). Anything not in `allow` is implicitly
+# denied — including GPL-2.0 / GPL-3.0 / AGPL-3.0.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "BSL-1.0",                # Boost Software License — clipboard-win
+    "CC0-1.0",                # public-domain dedication used by a few transitives
+    "CDLA-Permissive-2.0",    # webpki-roots (transitive via reqwest/hyper-rustls in copypaste-supabase)
+]
+confidence-threshold = 0.8
+
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
