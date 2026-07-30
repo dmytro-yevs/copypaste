@@ -115,6 +115,15 @@ pub enum StoreError {
     #[error("database could not be opened with the supplied key")]
     InvalidKey,
 
+    /// A database written by v0.4.x. Its own code because the recovery is a
+    /// human decision — keep the old history and downgrade, or start fresh —
+    /// and never a retry. v2 shares no formats with it (CLAUDE.md rule 3), and
+    /// nothing here opens, migrates or removes it.
+    #[error(
+        "this is a CopyPaste 0.4 history; this version cannot read it, and has left it as it was"
+    )]
+    LegacyDatabase,
+
     /// `PRAGMA integrity_check` returned something other than `ok`. The key was
     /// right and the pages are not: a candidate file in this state must not
     /// replace a working one.

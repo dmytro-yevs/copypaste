@@ -13,7 +13,9 @@
 //!
 //! * [`Detector::is_sensitive`] — *any* validated rule matched. Gates the
 //!   search index (manifest I4 / ADR-015: `is_sensitive = 1` ⇒ never written to
-//!   FTS, never returned by search). Deliberately inclusive.
+//!   FTS, never returned by search), at capture and again in
+//!   [`purge_indexed_secrets`] for rows the ruleset had not yet learned to
+//!   catch. Deliberately inclusive.
 //! * [`Severity`] on the [`Finding`] — only `HighConfidence` (confidence ≥ the
 //!   0.70 auto-wipe floor) may drive automatic deletion, through
 //!   [`Detector::may_auto_wipe`] and its one caller [`sweep_sensitive`].
@@ -37,6 +39,7 @@
 mod engine;
 mod finding;
 mod normalise;
+mod purge;
 mod rules;
 mod spec;
 mod validators;
@@ -44,4 +47,5 @@ mod wipe;
 
 pub use engine::{Detector, DetectorError};
 pub use finding::{Finding, Severity};
+pub use purge::{purge_indexed_secrets, PurgeReport};
 pub use wipe::{sweep_sensitive, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED};

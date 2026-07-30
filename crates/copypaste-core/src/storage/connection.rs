@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn database_is_encrypted_on_disk_and_in_wal_mode() {
         let dir = TempDir::new().unwrap();
-        let path = dir.path().join("clipboard.db");
+        let path = dir.path().join("copypaste-v2.db");
         let s = Store::open(&path, &KEY).unwrap();
         s.insert(item("plaintext marker chinchilla", T0)).unwrap();
         {
