@@ -1,8 +1,9 @@
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { execa, type ResultPromise } from "execa";
+import { execa } from "execa";
 
 import { RUN_ROOT, cliBinary, daemonBinary, freePort } from "./env.js";
+import { track } from "./process.js";
 
 export interface Daemon {
   /** Injected into the app process so the bridge finds this daemon's socket. */
@@ -33,15 +34,13 @@ export async function startDaemon(): Promise<Daemon> {
   // Peer listener port: the default is fixed, so two runs on one host collide.
   const peerPort = await freePort();
 
-  const proc = execa(daemonBinary(), ["--foreground", "--port", String(peerPort)], {
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-    reject: false,
-  });
-
-  const log: string[] = [];
-  proc.stdout?.on("data", (c: Buffer) => log.push(c.toString()));
-  proc.stderr?.on("data", (c: Buffer) => log.push(c.toString()));
+  const child = track(
+    execa(daemonBinary(), ["--foreground", "--port", String(peerPort)], {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      reject: false,
+    }),
+  );
 
   const cli = (args: string[]) =>
     execa(cliBinary(), args, { env, reject: false, timeout: 20_000 });
@@ -50,11 +49,11 @@ export async function startDaemon(): Promise<Daemon> {
   for (;;) {
     const probe = await cli(["--json", "status"]);
     if (probe.exitCode === 0) break;
-    if (proc.exitCode !== null && proc.exitCode !== undefined) {
-      throw new Error(`daemon exited early (${proc.exitCode}):\n${log.join("")}`);
+    if (child.exited()) {
+      throw new Error(`the daemon exited during startup:\n${child.log()}`);
     }
     if (Date.now() > deadline) {
-      throw new Error(`daemon never became reachable:\n${log.join("")}`);
+      throw new Error(`the daemon never became reachable:\n${child.log()}`);
     }
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -83,7 +82,9 @@ export async function startDaemon(): Promise<Daemon> {
       for (const content of contents) await add(content);
     },
     async items() {
-      const result = await cli(["--json", "list"]);
+      // `list` defaults to 50; the UI asks for PAGE_SIZE (200), so anything
+      // less here silently disagrees with what is on screen.
+      const result = await cli(["--json", "list", "--limit", "1000"]);
       if (result.exitCode !== 0) throw new Error(`\`copypaste list\` failed`);
       return (JSON.parse(result.stdout) as { data: CliItem[] }).data;
     },
@@ -103,12 +104,7 @@ export async function startDaemon(): Promise<Daemon> {
       // app teardown stops it again.
       if (stopped) return;
       stopped = true;
-      proc.kill("SIGTERM");
-      await Promise.race([
-        proc.catch(() => undefined),
-        new Promise((r) => setTimeout(r, 5_000)),
-      ]);
-      proc.kill("SIGKILL");
+      await child.stop();
       rmSync(dataHome, { recursive: true, force: true });
     },
   };
