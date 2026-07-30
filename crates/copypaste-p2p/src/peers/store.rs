@@ -27,9 +27,9 @@ use std::sync::RwLock;
 use zeroize::Zeroizing;
 
 use super::file::{parse, warn_if_permissive, write_atomically, State};
-use super::{Peer, PeerStoreError, RevokedDevice, PAIRING_CODE_TTL};
+use super::{Peer, PeerStoreError, RevokedDevice, MAX_PAIRINGS, PAIRING_CODE_TTL};
 use crate::now_ms;
-use crate::transport::TOKEN_LEN;
+use crate::transport::PskCandidate;
 
 /// The paired-device list: backed by a file, cached in memory, shareable behind
 /// an `Arc`. Every mutation rewrites the whole file atomically — there are a
@@ -132,6 +132,8 @@ impl PeerStore {
     ///
     /// [`PeerStoreError::Revoked`] if this pairing was cut off — a revoked
     /// pairing id never comes back, so a code someone kept cannot re-add it;
+    /// `TooManyPairings` if this would be a *new* pairing past
+    /// [`MAX_PAIRINGS`], which never applies to one already stored;
     /// `Invalid` if the record does not validate, in which case nothing is
     /// written; `Io` if the file could not be replaced; `Poisoned` if another
     /// thread panicked holding the lock.
@@ -141,6 +143,13 @@ impl PeerStore {
         let pairing_id = peer.pairing_id.clone();
         if guard.revoked.contains_key(&pairing_id) {
             return Err(PeerStoreError::Revoked);
+        }
+        // Only an id that is not here yet is capped: refusing an update would
+        // strand every stored device the moment the list filled, because the
+        // end of every successful session writes one.
+        if !guard.peers.contains_key(&pairing_id) && usable_count(&guard, now_ms()) >= MAX_PAIRINGS
+        {
+            return Err(PeerStoreError::TooManyPairings);
         }
 
         let established = peer.last_seen_ms > 0;
@@ -355,14 +364,41 @@ impl PeerStore {
     /// iteration and is therefore reproducible. An expired or revoked pairing is
     /// absent, which is what makes an aged-out code stop authenticating.
     ///
-    /// These are copies of live key material and are **not** zeroized for you.
-    /// Bind the result to a `zeroize::Zeroizing` if it outlives the handshake.
+    /// # Security
+    ///
+    /// This runs on every inbound connection, before the dialler has proved
+    /// anything, so an attacker who never completes a handshake decides how
+    /// often the whole key set is copied. Two things keep those copies out of
+    /// freed heap (security review F-8):
+    ///
+    /// * The return type is `Zeroizing`, so the wipe cannot be lost by a caller
+    ///   binding it to a plain local, and each [`PskCandidate`] wipes itself on
+    ///   drop as well.
+    /// * The buffer is allocated once, up front, and never grown. A `Vec` that
+    ///   grows memcpies the keys it already holds into a new allocation and
+    ///   frees the old one intact, where no `Drop` will ever reach them.
     #[must_use]
-    pub fn psks(&self) -> Vec<(String, [u8; TOKEN_LEN])> {
-        self.list()
-            .iter()
-            .map(|peer| (peer.pairing_id.clone(), peer.psk))
-            .collect()
+    pub fn psks(&self) -> Zeroizing<Vec<PskCandidate>> {
+        let Ok(guard) = self.state.read() else {
+            // Fail closed, as `list` does: no candidates authenticates nobody.
+            tracing::error!("paired-devices store lock is poisoned");
+            return Zeroizing::new(Vec::new());
+        };
+        let now = now_ms();
+        let mut candidates = Vec::with_capacity(guard.peers.len());
+        for peer in guard.peers.values() {
+            if is_expired(&guard, &peer.pairing_id, now) {
+                continue;
+            }
+            candidates.push(PskCandidate {
+                pairing_id: peer.pairing_id.clone(),
+                // `[u8; 32]` is `Copy`, so this reads the field rather than
+                // moving out of a type that has a `Drop`.
+                psk: peer.psk,
+            });
+        }
+        candidates.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
+        Zeroizing::new(candidates)
     }
 
     /// How many usable peers are known.
@@ -376,6 +412,18 @@ impl PeerStore {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+/// Pairings that count against [`MAX_PAIRINGS`]: the ones whose keys a
+/// handshake is still offered. An aged-out code authenticates nothing and is
+/// erased by [`PeerStore::prune_expired`], so holding a slot open for it would
+/// refuse a real device on behalf of one that no longer exists.
+fn usable_count(state: &State, now_ms: i64) -> usize {
+    state
+        .peers
+        .keys()
+        .filter(|id| !is_expired(state, id, now_ms))
+        .count()
 }
 
 /// Has this pairing's unredeemed code aged out?
@@ -406,7 +454,7 @@ mod tests {
     use super::*;
     use crate::peers::testutil::{peer, redeemed, store_path, unredeemed};
     use crate::peers::DEFAULT_FILE_NAME;
-    use crate::transport::PairingToken;
+    use crate::transport::{PairingToken, TOKEN_LEN};
 
     /// Move an unredeemed pairing's deadline into the past, through the file, so
     /// the test does not have to wait five minutes and the on-disk shape is
@@ -469,14 +517,16 @@ mod tests {
         let psks = reopened.psks();
         assert_eq!(psks.len(), 2);
         assert_eq!(
-            psks.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            psks.iter()
+                .map(|c| c.pairing_id.clone())
+                .collect::<Vec<_>>(),
             expected
         );
         let stored = psks
             .iter()
-            .find(|(id, _)| *id == laptop_id)
+            .find(|c| c.pairing_id == laptop_id)
             .expect("laptop psk");
-        assert_eq!(stored.1, laptop_psk);
+        assert_eq!(stored.psk, laptop_psk);
     }
 
     #[test]
@@ -790,6 +840,109 @@ mod tests {
         assert!(matches!(store.upsert(future), Err(PeerStoreError::Revoked)));
     }
 
+    /// Security review F-8. The listener copies this set on every inbound
+    /// connection, before anything is authenticated, so the copies have to wipe
+    /// themselves. Pinned as a type annotation (port manifest 02, I-12): a
+    /// `psks` that went back to a plain `Vec` fails to compile here.
+    #[test]
+    fn psks_are_handed_out_wiped_on_drop() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        store.upsert(peer("Laptop")).expect("upsert");
+
+        let candidates: Zeroizing<Vec<PskCandidate>> = store.psks();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates.capacity(),
+            candidates.len(),
+            "the candidate list must be sized once, not grown"
+        );
+    }
+
+    /// Security review F-13. The bound is a refusal, and refusing must never be
+    /// a way to lose a device the user still owns (`CLAUDE.md` rule 4).
+    #[test]
+    fn the_pairing_list_is_capped_by_refusing_not_by_evicting() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+
+        let ids: Vec<String> = (0..MAX_PAIRINGS)
+            .map(|i| {
+                let p = peer(&format!("device-{i}"));
+                let id = p.pairing_id.clone();
+                store.upsert(p).expect("up to the cap must fit");
+                id
+            })
+            .collect();
+
+        let refused = peer("one too many");
+        let refused_id = refused.pairing_id.clone();
+        assert!(matches!(
+            store.upsert(refused),
+            Err(PeerStoreError::TooManyPairings)
+        ));
+
+        // Nothing was made room for: every device the user has is still here,
+        // still authenticates, and survives a restart.
+        assert_eq!(store.len(), MAX_PAIRINGS);
+        assert_eq!(store.psks().len(), MAX_PAIRINGS);
+        assert!(store.get(&refused_id).is_none());
+        let reopened = PeerStore::open(&path).expect("reopen");
+        for id in &ids {
+            assert!(reopened.get(id).is_some(), "lost {id}");
+        }
+
+        // An *existing* pairing is never refused, or the end-of-session write
+        // would fail for every device once the list filled.
+        let established = reopened.get(&ids[0]).expect("present");
+        reopened
+            .upsert(Peer {
+                pairing_id: ids[0].clone(),
+                name: "renamed at the cap".to_string(),
+                psk: established.psk,
+                last_addr: None,
+                last_seen_ms: 1_753_900_000_001,
+            })
+            .expect("updating a stored pairing must still work at the cap");
+        assert_eq!(
+            reopened.get(&ids[0]).expect("present").name,
+            "renamed at the cap"
+        );
+
+        // And the remedy the error names actually works.
+        assert!(reopened.remove(&ids[1]).expect("unpair"));
+        reopened
+            .upsert(peer("the replacement"))
+            .expect("a freed slot must be usable");
+    }
+
+    /// A code that aged out authenticates nothing and is about to be pruned, so
+    /// it must not hold a slot against a device the user is trying to add.
+    #[test]
+    fn an_expired_pairing_does_not_occupy_a_slot() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+
+        let stale = unredeemed("never claimed");
+        let stale_id = stale.pairing_id.clone();
+        store.upsert(stale).expect("upsert");
+        for i in 1..MAX_PAIRINGS {
+            store.upsert(peer(&format!("device-{i}"))).expect("upsert");
+        }
+        assert!(matches!(
+            store.upsert(peer("full")),
+            Err(PeerStoreError::TooManyPairings)
+        ));
+
+        age_out(&path, &stale_id);
+        let store = PeerStore::open(&path).expect("reopen");
+        store
+            .upsert(peer("fits now"))
+            .expect("an aged-out code must not block a real device");
+    }
+
     #[test]
     fn concurrent_upserts_all_land() {
         use std::sync::Arc;
@@ -799,7 +952,11 @@ mod tests {
         let store = Arc::new(PeerStore::open(&path).expect("open"));
 
         let mut handles = Vec::new();
-        for i in 0..8 {
+        // Eight threads writing four pairings each would be 32, past
+        // `MAX_PAIRINGS`; the property under test is that no thread's rewrite
+        // drops another's record, which needs concurrency, not volume.
+        let threads = MAX_PAIRINGS / 4;
+        for i in 0..threads {
             let store = Arc::clone(&store);
             handles.push(std::thread::spawn(move || {
                 let mut ids = Vec::new();
