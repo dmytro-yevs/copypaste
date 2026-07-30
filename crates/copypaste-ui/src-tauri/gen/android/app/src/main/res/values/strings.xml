@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">"CopyPaste"</string>
+    <string name="main_activity_title">"CopyPaste"</string>
+    <!-- The share-sheet entry, the text-selection action, and the tile all
+         share one label: they are one gesture to the user. -->
+    <string name="capture_action">"Save to CopyPaste"</string>
+</resources>
