@@ -1,13 +1,7 @@
 /**
- * The service chip in the sidebar footer (manifest §3.8).
- *
- * State comes from the status query, which polls at 2000ms so "offline"
- * surfaces within one cycle — a 10s poll left v1's chip green long after the
- * service had died (CopyPaste-f701).
- *
- * The accessible name is the whole sentence, not just the state word, so a
- * screen reader user gets the same information the tooltip gives a pointer
- * user. No error string is ever interpolated into it (INV-12).
+ * The accessible name is the whole sentence, not the state word alone: a screen
+ * reader user gets what the tooltip gives a pointer user. No error string is
+ * interpolated into it (INV-12).
  */
 import { useStatus } from "@/hooks/useHistory";
 import { classifyError } from "@/lib/errors";

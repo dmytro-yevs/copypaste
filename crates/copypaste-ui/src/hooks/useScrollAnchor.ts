@@ -1,28 +1,14 @@
 /**
- * INV-1 (content-anchored scrolling) and INV-6 (shrink clamp).
+ * INV-1 (content-anchored scrolling) and INV-6 (the shrink clamp). §9.1 is
+ * explicit that TanStack Virtual does not give you either for a list that
+ * mutates, so the arithmetic is ours.
  *
- * Manifest 06 flags this as the highest-risk regression in the UI rewrite, and
- * §9.1 is explicit that TanStack Virtual does **not** give it to you: the
- * library only anchors by key when `anchorTo: "end"` is set (the chat-style
- * stick-to-bottom case). A history list anchors to the start, so this is ours
- * to implement.
+ * The anchor is **item id + intra-row offset** — never an index, because a poll
+ * can reorder between two frames (CopyPaste-8ebg.44). If the anchor row is gone
+ * it was the one deleted (AT-3): fall through and clamp, never throw.
  *
- * The contract:
- *
- *   - The anchor is **item id + intra-row offset**, never a pixel offset and
- *     never an index — a poll can reorder or prepend between two frames.
- *   - When the list mutates (a poll prepends, a pin re-sorts, a delete removes
- *     a row), the anchored row stays under the same point on screen.
- *   - If the anchor row is gone — it was the one deleted (AT-3) — fall through
- *     to the natural position and clamp; never throw.
- *   - When the content shrinks below the current scroll offset, both the
- *     virtualizer's tracked offset and the real DOM `scrollTop` clamp
- *     immediately, not on the next user scroll (INV-6, AT-4).
- *
- * The one deliberate exception: at `scrollTop === 0` the view is pinned to the
- * top, so a prepend reveals the new item instead of pushing the old first row
- * back under the cursor. Anchoring an already-top-most view would be a visible
- * jump, which is the thing INV-1 exists to prevent.
+ * One deliberate exception: at `scrollTop === 0` nothing is anchored, so a
+ * prepend reveals the new item instead of pushing it out of view.
  */
 import { type RefObject, useCallback, useLayoutEffect, useRef } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
@@ -39,13 +25,8 @@ interface Options {
   scrollRef: RefObject<HTMLDivElement | null>;
   virtualizer: Virtualizer<HTMLDivElement, Element>;
   items: readonly Item[];
-  /**
-   * The live preview-line setting. It is here for INV-6 rather than for
-   * measurement: changing it re-sizes every row at once, which is the one
-   * mutation that shrinks total height without changing the item list, and
-   * AT-4 requires the clamp to run *immediately* on that — not on the next
-   * user scroll.
-   */
+  /** Here for INV-6, not for measurement: it is the one mutation that shrinks
+   *  total height without changing the list, and AT-4 wants the clamp *now*. */
   previewLines: number;
 }
 
@@ -59,12 +40,8 @@ export function useScrollAnchor({
   const previousItems = useRef<readonly Item[] | null>(null);
   const previousLines = useRef(previewLines);
 
-  /**
-   * Record which row the user is looking at. Called on every scroll event, so
-   * the anchor is always current with respect to the last thing the user did.
-   * `getVirtualItemForOffset` binary-searches the measurement table, so it
-   * resolves rows outside the rendered window too.
-   */
+  /** `getVirtualItemForOffset` binary-searches the measurement table, so this
+   *  resolves rows outside the rendered window too. */
   const captureAnchor = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -81,11 +58,9 @@ export function useScrollAnchor({
       : null;
   }, [scrollRef, virtualizer]);
 
-  // Runs after every render, but only acts when the item array identity
-  // actually changed — which, thanks to React Query's structural sharing
-  // (INV-2), an idle poll does not do. `useVirtualizer` registers its own
-  // layout effects earlier in this component, so by the time this runs the
-  // measurement table already reflects the new list.
+  // Acts only when the item array identity changed, which an idle poll does
+  // not do (INV-2). `useVirtualizer` registers its layout effects earlier in
+  // the component, so the measurement table is already current here.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -98,9 +73,8 @@ export function useScrollAnchor({
     previousItems.current = items;
     if (!hadItems) return; // first paint: nothing to preserve
 
-    // Called first on purpose: getTotalSize() is what recomputes the
-    // measurement table, and measurementsCache is only index-aligned with the
-    // current item list once it has run.
+    // First on purpose: getTotalSize() recomputes the measurement table, and
+    // measurementsCache is only index-aligned with the list once it has run.
     const max = Math.max(0, virtualizer.getTotalSize() - el.clientHeight);
 
     const anchor = anchorRef.current;
@@ -112,15 +86,14 @@ export function useScrollAnchor({
         const measurement = virtualizer.measurementsCache[index];
         if (measurement) desired = measurement.start + anchor.offset;
       }
-      // index < 0: the anchor row was deleted. Keep the natural offset and let
-      // the clamp below deal with it.
+      // index < 0: the anchor row was deleted; the clamp below handles it.
     }
 
     const next = Math.min(Math.max(desired, 0), max);
 
     if (Math.abs(next - el.scrollTop) > 0.5) {
-      // scrollToOffset writes the DOM scrollTop *and* the virtualizer's own
-      // tracked offset, so the two cannot disagree for a frame (INV-6).
+      // Writes the DOM scrollTop *and* the virtualizer's tracked offset, so
+      // the two cannot disagree for a frame (INV-6).
       virtualizer.scrollToOffset(next, { align: "start", behavior: "auto" });
     }
   });

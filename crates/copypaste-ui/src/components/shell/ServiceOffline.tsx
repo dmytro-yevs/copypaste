@@ -1,19 +1,12 @@
 /**
- * "The clipboard service isn't running."
+ * A screen with an offer, not an empty list: an empty list says "you have
+ * copied nothing" when the truth is "nothing is listening" — the same defect as
+ * bdac.2, one screen over.
  *
- * This is a **screen with an offer**, not an empty list. An empty list here is
- * a lie — it says "you have copied nothing" when the truth is "nothing is
- * listening" — and it was one of v1's recorded defects in the neighbouring case
- * (bdac.2: a loading state that fell through to the main layout and read as
- * "no devices").
- *
- * The offer degrades honestly. If the bridge routes `start_service`, the button
- * starts it. If it does not — the command is not implemented yet, see the table
- * in `lib/ipc.ts` — the failure is `unavailable`, and rather than reporting an
- * error we swap in the manual instruction and a button that copies the command
- * to the clipboard. Either way the user is told what to do next, and no
- * filesystem path appears in any of it (INV-12): `copypaste-daemon` is a
- * command name, not a path.
+ * `start_service` is not routed yet, so a refusal swaps in the manual
+ * instruction rather than reporting an error the user cannot act on. No
+ * filesystem path appears in either branch (INV-12): `copypaste-daemon` is a
+ * command name.
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -37,15 +30,11 @@ export function ServiceOffline() {
     setStarting(true);
     try {
       await startService();
-      // Every screen reads from the service; a successful start invalidates
-      // all of it rather than one query.
       await qc.invalidateQueries();
     } catch (raw) {
-      // Not routed by the bridge yet: fall back to telling the user how,
-      // rather than showing them a failure they cannot act on.
       if (isUnavailable(raw)) setManual(true);
     } finally {
-      // INV-30: the busy flag is released whatever happened.
+      // INV-30: released whatever happened.
       setStarting(false);
     }
   }
@@ -56,8 +45,7 @@ export function ServiceOffline() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // A clipboard write is the one thing this screen can afford to lose
-      // silently — the command is on screen either way.
+      // The command is on screen either way.
     }
   }
 
