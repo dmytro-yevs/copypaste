@@ -86,11 +86,19 @@ impl Settings {
     /// Persisting before publishing is deliberate: a value the daemon is acting
     /// on but did not manage to write would come back as its old self at the
     /// next start, which is the more confusing of the two failures.
+    /// One write lock spans all four steps. Reading the current value under a
+    /// separate read lock let two overlapping patches see the same "before",
+    /// so the second write erased the field the first had set — a patch that
+    /// silently loses the other patch's change is the one thing patches exist
+    /// to prevent. `meta.set_state` runs under the lock as a result; settings
+    /// writes are rare and readers only ever block behind one of them.
     pub fn apply(&self, meta: &Meta, patch: &ConfigPatch) -> Result<ConfigData, SettingsError> {
-        let next = {
-            let current = self.get();
-            patch.apply(&current)?
-        };
+        let mut current = self
+            .current
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let next = patch.apply(&current)?;
 
         let encoded = serde_json::to_string(&next).map_err(|e| {
             warn!(error = %e, "settings could not be encoded");
@@ -98,10 +106,7 @@ impl Settings {
         })?;
         meta.set_state(KEY_SETTINGS, &encoded)?;
 
-        *self
-            .current
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next.clone();
+        *current = next.clone();
         Ok(next)
     }
 }
