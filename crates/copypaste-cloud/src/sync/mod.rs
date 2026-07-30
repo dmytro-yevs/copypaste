@@ -49,7 +49,7 @@ pub mod transport;
 #[cfg(test)]
 mod fakes;
 
-pub use cadence::{MAX_POLL_INTERVAL, MIN_POLL_INTERVAL};
+pub use cadence::{MAX_POLL_INTERVAL, MAX_POLL_INTERVAL_WITHOUT_PUSH, MIN_POLL_INTERVAL};
 pub use driver::CloudSync;
 pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
@@ -115,9 +115,12 @@ mod tests {
             &self,
             token: &str,
             since_ms: i64,
+            after_item_id: Option<&str>,
             limit: u32,
         ) -> Result<Vec<CloudItem>, TransportFault> {
-            self.0.fetch_since(token, since_ms, limit).await
+            self.0
+                .fetch_since(token, since_ms, after_item_id, limit)
+                .await
         }
         async fn upsert(&self, token: &str, items: &[CloudItem]) -> Result<(), TransportFault> {
             self.0.upsert(token, items).await
@@ -131,6 +134,8 @@ mod tests {
     fn the_tunables_are_the_documented_ones() {
         assert_eq!(MIN_POLL_INTERVAL, Duration::from_secs(5));
         assert_eq!(MAX_POLL_INTERVAL, Duration::from_secs(300));
+        // Manifest 05 §4.8's "WS down / never connected" interval, exactly.
+        assert_eq!(MAX_POLL_INTERVAL_WITHOUT_PUSH, Duration::from_secs(10));
         assert_eq!(RETRY_AFTER_FALLBACK, Duration::from_secs(1));
         assert_eq!(MAX_RETRY_AFTER, Duration::from_secs(30));
         // Mirrors `copypaste_p2p::sync::MAX_FUTURE_SKEW_MS`; the two transports

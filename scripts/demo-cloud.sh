@@ -12,8 +12,9 @@
 # sensitive item never leaves the device that captured it; the backend receives
 # ciphertext only (asserted against the stub's dump of every row it was given);
 # and the client's request shapes are the ones PostgREST needs — the stub
-# rejects an exclusive cursor bound or a newest-first page, the two shapes
-# manifest 05 §4.4 records as shipped v1 bugs.
+# rejects a newest-first page and a strict bound on the millisecond alone, the
+# two shapes manifest 05 §4.4 records as shipped v1 bugs, and it implements the
+# compound `(created_at, item_id)` keyset the client pages with.
 #
 # What a pass does not mean: that Supabase accepts any of it. Nothing here has
 # ever spoken to a deployment.

@@ -56,21 +56,25 @@ jobs:
       - run: cargo +1.96 fmt --all --check
 
   file-size:
-    name: file-size budget (advisory)
+    name: file-size budget
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      # CLAUDE.md rule 5 targets <=500 source lines per file. The script is
-      # advisory by design (its own header says so), and this job preserves
-      # that: it always reports, and it never fails the build.
-      #
-      # It writes the result to the run summary so the number is visible
-      # without opening logs, and emits a GitHub warning annotation per
-      # offending file so the count shows up on the PR itself.
+      # A gate, not an annotation. `scripts/check-file-size.sh`'s header records
+      # v1's argument against a hard check — that it forces artificial splits —
+      # and CLAUDE.md rule 5 already answers it: a file that is one indivisible
+      # responsibility is exempt, provided its module header names what was
+      # considered for extraction and why doing it would make the code worse.
+      # EXEMPT is where that claim is registered, in the same commit as the
+      # header line. Nothing else about rule 5 is enforced anywhere.
       - name: check-file-size.sh
         run: |
           set -uo pipefail
+
+          # Paths relative to crates/, one per line. Empty on purpose.
+          EXEMPT=""
+
           out="$(./scripts/check-file-size.sh 500 || true)"
           printf '%s\n' "$out"
 
@@ -82,12 +86,18 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Annotate each offender. Field 1 is the path relative to crates/.
-          printf '%s\n' "$out" \
-            | awk '/^[^ ]+\.rs[[:space:]]+[0-9]+$/ { print $1, $2 }' \
-            | while read -r file lines; do
-                echo "::warning file=crates/${file}::${lines} source lines, over the 500-line budget (CLAUDE.md rule 5)"
-              done
+          fail=0
+          while read -r file lines; do
+            [ -n "$file" ] || continue
+            if printf '%s\n' "$EXEMPT" | grep -qxF "$file"; then
+              echo "::notice file=crates/${file}::${lines} source lines, exempt (rule 5)"
+              continue
+            fi
+            echo "::error file=crates/${file}::${lines} source lines, over the 500-line budget (CLAUDE.md rule 5). Split it, or claim the indivisible-responsibility exemption in the module header and add it to EXEMPT in .github/workflows/ci.yml."
+            fail=1
+          done < <(printf '%s\n' "$out" | awk '/^[^ ]+\.rs[[:space:]]+[0-9]+$/ { print $1, $2 }')
+
+          exit "$fail"
 
   # ---------------------------------------------------------------------------
   # The Rust gate. Clippy and the test suite share one runner so SQLCipher and
@@ -245,13 +255,11 @@ jobs:
         with:
           shared-key: macos-14-1.96
 
-      # README and SECURITY.md both list the macOS clipboard backend and the
-      # Keychain device-secret store as "written, never compiled, because
-      # development happens on Linux". This step is the cheapest possible
-      # correction of that: it will not run them, but it will no longer be true
-      # that nothing has ever type-checked them.
-      #
-      # `--all-features` reaches the `macos-keychain` feature.
+      # `--all-features` reaches the `macos-keychain` feature, so this is what
+      # type-checks the NSPasteboard backend and the Keychain device-secret
+      # store. It does not execute either: no test drives a real pasteboard or
+      # a real keychain entry, which is why README and SECURITY.md still list
+      # both as unverified.
       - name: cargo clippy (macOS paths)
         run: cargo +1.96 clippy --workspace --all-targets --all-features --locked -- -D warnings
 

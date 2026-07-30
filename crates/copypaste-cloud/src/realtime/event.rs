@@ -23,7 +23,19 @@ use crate::rest::CloudItem;
 pub enum RealtimeEvent {
     Insert(CloudItem),
     Update(CloudItem),
-    Delete { item_id: String },
+    Delete {
+        item_id: String,
+    },
+    /// The socket dropped and the channel has re-joined.
+    ///
+    /// Not a row: it is the one moment at which the at-most-once property
+    /// above is *known* to have bitten. Nothing that happened while the socket
+    /// was down is replayed, so a subscriber must run a poll round on this
+    /// rather than wait out its idle interval (manifest 05 §5.1 row 9a). It is
+    /// delivered on re-join, never on the first connect — that one is
+    /// [`RealtimeSubscription::connect`](super::RealtimeSubscription::connect)
+    /// returning.
+    Resubscribed,
 }
 
 /// Failures this module can produce.

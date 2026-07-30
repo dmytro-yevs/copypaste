@@ -114,6 +114,10 @@ pub(super) struct FakeSource {
     outgoing: Mutex<Vec<LocalItem>>,
     stored: Mutex<HashMap<String, LocalItem>>,
     watermark: Mutex<i64>,
+    /// The tie-break half, for the sources that keep one. `None` in the
+    /// default fake, which is the weaker cursor most of these tests exercise.
+    watermark_item_id: Mutex<Option<String>>,
+    keyset: bool,
     /// Tracked separately from the watermark, as a real source must — see
     /// [`CloudSource::upload_floor`].
     floor: Mutex<i64>,
@@ -125,6 +129,15 @@ impl FakeSource {
     pub(super) fn with_outgoing(items: Vec<LocalItem>) -> Self {
         Self {
             outgoing: Mutex::new(items),
+            ..Self::default()
+        }
+    }
+
+    /// A source that persists both halves of the keyset cursor, as a real one
+    /// should.
+    pub(super) fn with_keyset_watermark() -> Self {
+        Self {
+            keyset: true,
             ..Self::default()
         }
     }
@@ -179,6 +192,10 @@ impl CloudSource for FakeSource {
         Ok(*self.watermark.lock().unwrap())
     }
 
+    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
+        Ok(self.watermark_item_id.lock().unwrap().clone())
+    }
+
     fn upload_floor(&self) -> Result<i64, SyncError> {
         Ok(*self.floor.lock().unwrap())
     }
@@ -189,6 +206,18 @@ impl CloudSource for FakeSource {
         // hand back a lower cursor than it was given.
         assert!(ms >= *w, "the watermark moved backwards: {} -> {ms}", *w);
         *w = ms;
+        *self.watermark_item_id.lock().unwrap() = None;
+        Ok(())
+    }
+
+    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
+        if !self.keyset {
+            return self.set_watermark(ms);
+        }
+        let mut w = self.watermark.lock().unwrap();
+        assert!(ms >= *w, "the watermark moved backwards: {} -> {ms}", *w);
+        *w = ms;
+        *self.watermark_item_id.lock().unwrap() = Some(item_id.to_owned());
         Ok(())
     }
 }
@@ -264,10 +293,13 @@ impl FakeRest {
 }
 
 impl RestApi for FakeRest {
+    /// Pages exactly as the deployment does: inclusive on the millisecond
+    /// alone, strictly after the pair once the tie-break is known.
     async fn fetch_since(
         &self,
         token: &str,
         since_ms: i64,
+        after_item_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<CloudItem>, TransportFault> {
         if let Some(fault) = self.next(token) {
@@ -277,7 +309,10 @@ impl RestApi for FakeRest {
         Ok(self
             .sorted_rows()
             .into_iter()
-            .filter(|r| r.created_at >= since_ms)
+            .filter(|r| match after_item_id {
+                Some(id) => (r.created_at, r.item_id.as_str()) > (since_ms, id),
+                None => r.created_at >= since_ms,
+            })
             .take(limit as usize)
             .collect())
     }

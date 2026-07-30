@@ -224,16 +224,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "backoff"
-version = "0.4.0"
+name = "backon"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b62ddb9cb1ec0a098ad4bbf9344d0713fa193ae1a80af55febcff2627b6a00c1"
+checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
 dependencies = [
- "futures-core",
- "getrandom 0.2.17",
- "instant",
- "pin-project-lite",
- "rand 0.8.7",
+ "fastrand",
  "tokio",
 ]
 
@@ -663,7 +659,7 @@ name = "copypaste-cloud"
 version = "2.0.0-alpha.1"
 dependencies = [
  "argon2",
- "backoff",
+ "backon",
  "base64 0.22.1",
  "chacha20poly1305",
  "futures-util",
@@ -715,7 +711,6 @@ name = "copypaste-daemon"
 version = "2.0.0-alpha.1"
 dependencies = [
  "anyhow",
- "backoff",
  "clap",
  "copypaste-cloud",
  "copypaste-core",
@@ -730,6 +725,7 @@ dependencies = [
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
  "rusqlite",
+ "rustix",
  "security-framework",
  "serde",
  "serde_json",
@@ -780,6 +776,7 @@ dependencies = [
 name = "copypaste-ui"
 version = "2.0.0-alpha.1"
 dependencies = [
+ "backon",
  "copypaste-core",
  "copypaste-ipc",
  "copypaste-p2p",
@@ -2278,15 +2275,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "instant"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
-dependencies = [
- "cfg-if",
 ]
 
 [[package]]

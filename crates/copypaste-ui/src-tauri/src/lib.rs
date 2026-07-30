@@ -11,8 +11,10 @@
 //!   on both platforms is what stops the React side growing platform branches.
 //! * [`model`] — the boundary that discards a sensitive item's plaintext before
 //!   it can reach the WebView.
-//! * [`shell`] — desktop-only: menu-bar item, popover behaviour, global hotkey,
-//!   launch at login. All Tauri plugins; no native code in this crate.
+//! * [`service`] — who starts and stops the daemon. The app does, and it stops
+//!   only what it started (ADR-0004).
+//! * [`shell`] — menu-bar item, popover placement, global hotkey, launch at
+//!   login. All Tauri plugins; no native code in this crate.
 //!
 //! # What has been verified, and what has not
 //!
@@ -35,11 +37,11 @@
 pub mod backend;
 pub mod commands;
 pub mod model;
-
-#[cfg(not(target_os = "android"))]
+pub mod service;
 pub mod shell;
 
 use backend::SelectedBackend;
+use service::Supervisor;
 use tauri::Manager as _;
 
 /// Build and run the app.
@@ -57,6 +59,7 @@ pub fn run() {
     builder
         .setup(|app| {
             app.manage(make_backend(app)?);
+            app.manage(Supervisor::default());
 
             // A menu-bar app, not a windowed one: no Dock icon, no app menu,
             // and the popover does not steal the active application. Without
@@ -80,6 +83,28 @@ pub fn run() {
                 }
             }
 
+            // ADR-0004: opening the app starts the background service.
+            //
+            // Spawned rather than awaited. `setup` blocks the first paint, and
+            // a cold start opens SQLCipher and derives a key — the user would
+            // watch a blank window do it. The frontend already has a state for
+            // "not running yet" and picks the service up when it answers, so
+            // the slow path is visible instead of invisible.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let backend = handle.state::<SelectedBackend>();
+                let supervisor = handle.state::<Supervisor>();
+                if let Err(error) = supervisor.start(backend.inner()).await {
+                    // Not fatal: the offline screen offers the same start
+                    // again, with a sentence the user can act on.
+                    tracing::warn!(%error, "the background service was not started");
+                }
+            });
+
+            // The change stream, for as long as the app runs. Falls back to
+            // the frontend's poll whenever it is not delivering (finding 15).
+            service::push::spawn(app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|_window, _event| {
@@ -96,17 +121,36 @@ pub fn run() {
             commands::history::delete_item,
             commands::history::delete_all,
             commands::history::set_pinned,
+            commands::history::reorder_pinned,
             // state
             commands::status::status,
+            // the background service, and the window
+            commands::service::service_state,
+            commands::service::start_service,
+            commands::service::restart_service,
+            commands::service::hide_window,
             // peers
             commands::peers::pair_create,
             commands::peers::pair_accept,
             commands::peers::peers,
             commands::peers::unpair,
             commands::peers::sync_now,
+            commands::peers::discovered,
+            commands::peers::rescan,
         ])
-        .run(tauri::generate_context!())
-        .expect("could not start CopyPaste");
+        .build(tauri::generate_context!())
+        .expect("could not start CopyPaste")
+        .run(|app, event| {
+            // ADR-0004: quitting the app stops the service it started. `Exit`
+            // rather than `ExitRequested` because the latter can be cancelled,
+            // and a cancelled quit that had already killed the daemon would
+            // leave a running app with no history.
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(supervisor) = app.try_state::<Supervisor>() {
+                    supervisor.stop();
+                }
+            }
+        });
 }
 
 /// Construct the backend this target uses.

@@ -28,23 +28,24 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use copypaste_ipc::{
-    socket_path, Item, Method, PairingData, PeerInfo, Request, Response, ResponseData, StatusData,
-    SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    socket_path, DiscoveredDevice, EventData, Item, Method, PairingData, PeerInfo, Request,
+    Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::UnixStream;
+use tokio::sync::mpsc::{self, Receiver};
 use tokio_util::codec::{Framed, LinesCodec};
 
-use super::{Backend, BackendError, Result};
+use super::{Backend, BackendError, Page, Result};
 
 /// Ids only have to be unique within this process; the daemon echoes them back
 /// so a reply can be matched to its request.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Why `get` refuses. See the method for the full argument.
-const MSG_NO_REVEAL: &str =
-    "Revealing a hidden item isn't available yet. You can still copy it — the item goes \
-     to the clipboard without being shown.";
+/// Why `reorder_pinned` refuses. See the method for the full argument.
+const MSG_NO_REORDER: &str =
+    "Reordering pinned items isn't available yet. Pinned items keep the order they \
+     were pinned in.";
 
 /// Talks to the daemon. Holds nothing, so it is trivially `Send + Sync`.
 #[derive(Debug, Default, Clone, Copy)]
@@ -110,10 +111,17 @@ pub(super) fn into_data(response: Response) -> Result<Option<ResponseData>> {
     ))
 }
 
-fn expect_items(data: Option<ResponseData>) -> Result<Vec<Item>> {
+fn expect_page(data: Option<ResponseData>) -> Result<Page> {
     match data {
-        Some(ResponseData::Items(items)) => Ok(items),
-        _ => Err(BackendError::wrong_shape("a list of items")),
+        Some(ResponseData::Page(page)) => Ok(Page::from(page)),
+        _ => Err(BackendError::wrong_shape("a page of items")),
+    }
+}
+
+fn expect_discovered(data: Option<ResponseData>) -> Result<Vec<DiscoveredDevice>> {
+    match data {
+        Some(ResponseData::Discovered(found)) => Ok(found.devices),
+        _ => Err(BackendError::wrong_shape("a list of nearby devices")),
     }
 }
 
@@ -166,12 +174,12 @@ fn expect_count(data: Option<ResponseData>) -> Result<u64> {
 }
 
 impl Backend for DaemonBackend {
-    async fn list(&self, limit: u32, offset: u32) -> Result<Vec<Item>> {
-        expect_items(self.call(Method::List { limit, offset }).await?)
+    async fn list(&self, limit: u32, offset: u32) -> Result<Page> {
+        expect_page(self.call(Method::List { limit, offset }).await?)
     }
 
-    async fn search(&self, query: &str, limit: u32) -> Result<Vec<Item>> {
-        expect_items(
+    async fn search(&self, query: &str, limit: u32) -> Result<Page> {
+        expect_page(
             self.call(Method::Search {
                 query: query.to_string(),
                 limit,
@@ -189,34 +197,14 @@ impl Backend for DaemonBackend {
         )
     }
 
-    /// Blocked on a daemon method that does not exist yet.
+    /// `Method::Get`, never `Method::Copy`.
     ///
-    /// `get` must read one item **without side effects**, because its only
-    /// caller is the reveal gesture — a user asking to *look* at a secret.
-    /// `copypaste_ipc::Method` has no such verb: the closest is `Copy`, which
-    /// puts the content on the system pasteboard.
-    ///
-    /// Routing reveal through `Copy` was the first shape of this function and
-    /// it is wrong. It would mean that looking at a password silently published
-    /// it to every app on the machine that reads the pasteboard — including,
-    /// on macOS 16, raising the system's new paste alert — as a side effect of
-    /// a gesture that promised only to show it. "Reveal" and "copy" are two
-    /// buttons on the row precisely because they are two intentions, and a
-    /// clipboard manager quietly collapsing them is a security bug, not a
-    /// convenience.
-    ///
-    /// `Method::List` does return sensitive plaintext, so the bridge could
-    /// page history looking for the id. That is O(history), breaks past the
-    /// server's 1 000-row clamp, and would put a secret in a response the
-    /// caller did not ask for.
-    ///
-    /// The fix is a `Method::Get { id }` in `copypaste-ipc` plus an arm in the
-    /// daemon's dispatcher — small, but in two crates this change does not own.
-    /// Until then this refuses, which leaves the reveal button broken and
-    /// visibly so. That is the better failure: the alternative leaves it
-    /// working and quietly unsafe.
-    async fn get(&self, _id: &str) -> Result<Item> {
-        Err(BackendError::Unsupported(MSG_NO_REVEAL))
+    /// Its only caller is the reveal gesture — a user asking to *look* at a
+    /// secret. Routing that through `Copy` would publish the password to every
+    /// app on the machine that reads the pasteboard, as a side effect of a
+    /// gesture that promised only to show it.
+    async fn get(&self, id: &str) -> Result<Item> {
+        expect_item(self.call(Method::Get { id: id.to_string() }).await?)
     }
 
     async fn copy(&self, id: &str) -> Result<Item> {
@@ -240,6 +228,18 @@ impl Backend for DaemonBackend {
             })
             .await?,
         )
+    }
+
+    /// Blocked on a wire verb that does not exist.
+    ///
+    /// `copypaste_ipc::Method` has no reorder, so there is nothing to send.
+    /// The alternative — unpin and re-pin every item in the wanted order —
+    /// would work by accident of `set_pinned` appending at `MAX(pin_order) + 1`
+    /// and is not worth having: it is N round trips, it is not atomic, and a
+    /// failure halfway leaves the pinned section in an order the user never
+    /// asked for. Refusing keeps the gap visible (parity finding 19).
+    async fn reorder_pinned(&self, _ids: &[String]) -> Result<()> {
+        Err(BackendError::Unsupported(MSG_NO_REORDER))
     }
 
     async fn status(&self) -> Result<StatusData> {
@@ -285,6 +285,76 @@ impl Backend for DaemonBackend {
             .await?,
         )
     }
+
+    async fn discovered(&self) -> Result<Vec<DiscoveredDevice>> {
+        expect_discovered(self.call(Method::Discovered).await?)
+    }
+
+    async fn rescan(&self) -> Result<Vec<DiscoveredDevice>> {
+        expect_discovered(self.call(Method::Rescan).await?)
+    }
+
+    /// The one call that keeps its connection.
+    ///
+    /// Every other method connects, asks and hangs up — see the module docs.
+    /// This one cannot: `Method::Watch` turns the connection *into* the
+    /// subscription, so the socket is the thing being held. The reader task
+    /// owns it and ends when the receiver is dropped, which is what makes the
+    /// lifetime the caller's rather than a background task's.
+    async fn watch(&self) -> Result<Receiver<EventData>> {
+        let stream = UnixStream::connect(socket_path())
+            .await
+            .map_err(|_| BackendError::Unreachable)?;
+        let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let line = serde_json::to_string(&Request {
+            id,
+            protocol_version: PROTOCOL_VERSION,
+            method: Method::Watch,
+        })
+        .map_err(|_| BackendError::Internal("Could not encode the request.".into()))?;
+        framed
+            .send(line)
+            .await
+            .map_err(|_| BackendError::Unreachable)?;
+
+        // The acknowledgement is read here rather than in the task, so a
+        // daemon that refuses `watch` — an older one, or one at its watcher
+        // cap — is an error the caller can fall back from instead of a
+        // subscription that silently never delivers anything.
+        match framed.next().await {
+            Some(Ok(reply)) => {
+                let response: Response = serde_json::from_str(&reply).map_err(|_| {
+                    BackendError::Internal("Could not understand the daemon\'s reply.".into())
+                })?;
+                into_data(response)?;
+            }
+            Some(Err(_)) | None => return Err(BackendError::Unreachable),
+        }
+
+        // Depth 1: events say only *that* something changed, so a backlog of
+        // them is one event repeated. A full channel means the consumer is
+        // still handling the last change, and the next poll or the next event
+        // covers whatever it missed.
+        let (tx, rx) = mpsc::channel(1);
+        tokio::spawn(async move {
+            while let Some(Ok(line)) = framed.next().await {
+                let Ok(response) = serde_json::from_str::<Response>(&line) else {
+                    continue;
+                };
+                if let Ok(Some(ResponseData::Event(event))) = into_data(response) {
+                    // `send` failing means the receiver was dropped: the
+                    // screen went away, so hang up rather than hold the socket.
+                    if tx.send(event).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
+    }
 }
 
 #[cfg(test)]
@@ -308,23 +378,22 @@ mod tests {
 
     #[test]
     fn items_deserialise_into_the_shared_wire_type() {
-        let items = expect_items(
+        let page = expect_page(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":[{"id":"a","content":"hi","content_type":"text/plain",
-                   "created_at":5,"pinned":true,"is_sensitive":false}]}"#,
+                r#"{"id":1,"ok":true,"data":{"items":[{"id":"a","content":"hi",
+                   "content_type":"text/plain","created_at":5,"pinned":true,
+                   "is_sensitive":false}],"skipped_undecryptable":0}}"#,
             ))
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(items[0].content, "hi");
-        assert!(items[0].pinned);
+        assert_eq!(page.items[0].content, "hi");
+        assert!(page.items[0].pinned);
     }
 
     #[test]
     fn a_wrong_shape_is_reported_rather_than_silently_defaulted() {
-        assert!(
-            expect_items(into_data(parse(r#"{"id":1,"ok":true,"data":{}}"#)).unwrap()).is_err()
-        );
+        assert!(expect_page(into_data(parse(r#"{"id":1,"ok":true,"data":{}}"#)).unwrap()).is_err());
     }
 
     #[test]
@@ -398,23 +467,55 @@ mod tests {
     /// through it would look correct in every test that only checks the
     /// returned content — while publishing a secret to the system pasteboard.
     #[tokio::test]
-    async fn revealing_refuses_rather_than_copying_a_secret_to_the_clipboard() {
+    async fn revealing_asks_for_the_item_and_never_puts_it_on_the_clipboard() {
+        // No daemon is listening here, so the assertion is about which request
+        // was built rather than about the reply: `Unreachable` proves it tried
+        // to send something, and the only send path `get` has is `Method::Get`.
         let err = DaemonBackend::new().get("any-id").await.unwrap_err();
-        assert!(
-            matches!(err, BackendError::Unsupported(_)),
-            "reveal must refuse structurally, got {err:?}"
-        );
-        // Specifically it must not be `Unreachable`, which is what a real
-        // socket call would produce here — that would mean it tried.
-        let shown = err.to_string();
-        assert!(!shown.contains("copypaste-daemon"), "{shown}");
-        assert!(!shown.contains('/'), "{shown}");
+        assert!(matches!(err, BackendError::Unreachable), "{err:?}");
+
+        let method = serde_json::to_string(&Method::Get { id: "x".into() }).unwrap();
+        assert!(method.contains("\"get\""), "{method}");
+        assert!(!method.contains("copy"), "{method}");
     }
 
+    /// Refusing has to leave the user something true to do, and must not read
+    /// as a transient failure they could retry away.
+    #[tokio::test]
+    async fn reordering_refuses_structurally_rather_than_faking_it() {
+        let err = DaemonBackend::new()
+            .reorder_pinned(&["a".into(), "b".into()])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, BackendError::Unsupported(_)), "{err:?}");
+        assert!(!MSG_NO_REORDER.contains('/'));
+    }
+
+    /// Parity finding 17: a page that dropped rows has to say how many, or a
+    /// short page and a small history are the same thing to the user.
     #[test]
-    fn the_reveal_refusal_offers_the_safe_alternative() {
-        assert!(MSG_NO_REVEAL.contains("copy"));
-        assert!(!MSG_NO_REVEAL.contains('/'));
+    fn a_page_carries_the_count_of_rows_that_would_not_open() {
+        let page = expect_page(
+            into_data(parse(
+                r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":3}}"#,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(page.items.is_empty());
+        assert_eq!(page.skipped_undecryptable, 3);
+    }
+
+    /// The untagged decoder takes the first variant that fits, so a page must
+    /// not arrive as `Empty {}`. `ResponseData` documents the ordering rule;
+    /// this is the client-side guard that it still holds.
+    #[test]
+    fn a_page_does_not_decode_as_the_empty_variant() {
+        let data = into_data(parse(
+            r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":0}}"#,
+        ))
+        .unwrap();
+        assert!(matches!(data, Some(ResponseData::Page(_))), "{data:?}");
     }
 
     #[test]

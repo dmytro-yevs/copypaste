@@ -7,8 +7,12 @@ pub mod sensitive;
 pub mod storage;
 
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
-pub use sensitive::{Detector, Finding, Severity};
-pub use storage::{NewItem, Store, StoreError, StoredItem};
+pub use sensitive::{
+    sweep_sensitive, Detector, Finding, Severity, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
+};
+pub use storage::{
+    compute_content_hash, Ingest, ItemCursor, NewItem, Page, Store, StoreError, StoredItem,
+};
 
 /// Milliseconds since the Unix epoch.
 ///

@@ -27,6 +27,11 @@ pub enum PeerStoreError {
     #[error("peer record is invalid: {0}")]
     Invalid(&'static str),
 
+    /// This pairing was revoked, and a revocation is final. Saving it again
+    /// would undo the one gesture that cuts off a lost device.
+    #[error("that device was revoked and cannot be paired again")]
+    Revoked,
+
     /// A thread panicked while holding the store's lock. Surfaced rather than
     /// swallowed: the map may have been observed mid-update, and its contents
     /// decide who is allowed to connect.
@@ -45,6 +50,7 @@ mod tests {
             PeerStoreError::Corrupt,
             PeerStoreError::Legacy,
             PeerStoreError::Invalid("pairing id is empty"),
+            PeerStoreError::Revoked,
             PeerStoreError::Poisoned,
         ];
         for err in &errors {

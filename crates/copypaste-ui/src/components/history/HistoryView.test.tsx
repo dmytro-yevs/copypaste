@@ -12,7 +12,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { HistoryView } from "@/components/history/HistoryView";
 import { historyCount } from "@/components/history/SearchBar";
 import { IpcFailure } from "@/lib/errors";
-import { items, status, withClient, withUser } from "@/test/harness";
+import { items, page, status, withClient, withUser } from "@/test/harness";
 import { useUi } from "@/store/ui";
 
 const listItems = vi.fn();
@@ -69,14 +69,14 @@ describe("the service is not running", () => {
 
 describe("empty and filtered states", () => {
   it("says nothing has been copied when the list is genuinely empty", async () => {
-    listItems.mockResolvedValue([]);
+    listItems.mockResolvedValue(page([]));
     withClient(<HistoryView />);
     await waitFor(() => expect(screen.getByText("Nothing copied yet")).toBeTruthy());
   });
 
   it("reports a search with no matches as a search result, not as empty", async () => {
-    listItems.mockResolvedValue([]);
-    searchItems.mockResolvedValue([]);
+    listItems.mockResolvedValue(page([]));
+    searchItems.mockResolvedValue(page([]));
     useUi.setState({ query: "needle" });
     withClient(<HistoryView />);
     await waitFor(() =>
@@ -85,7 +85,7 @@ describe("empty and filtered states", () => {
   });
 
   it("renders rows when there are some", async () => {
-    listItems.mockResolvedValue(items(3));
+    listItems.mockResolvedValue(page(items(3)));
     withClient(<HistoryView />);
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
   });
@@ -110,7 +110,7 @@ describe("the count badge follows the filter (AT-68)", () => {
 
 describe("clear all", () => {
   it("is offered when there is something to clear", async () => {
-    listItems.mockResolvedValue(items(2));
+    listItems.mockResolvedValue(page(items(2)));
     withClient(<HistoryView />);
     await waitFor(() =>
       expect(
@@ -120,7 +120,7 @@ describe("clear all", () => {
   });
 
   it("is not offered when there is nothing to clear", async () => {
-    listItems.mockResolvedValue([]);
+    listItems.mockResolvedValue(page([]));
     withClient(<HistoryView />);
     await waitFor(() => expect(screen.getByText("Nothing copied yet")).toBeTruthy());
     expect(
@@ -131,7 +131,7 @@ describe("clear all", () => {
   it("asks first, and the prompt names what is lost and what is kept", async () => {
     // Destructive and un-undoable: 5j9x / kayk / fjvz / vcnv / w6xc are all
     // the same defect, a destructive action one misclick away.
-    listItems.mockResolvedValue(items(2));
+    listItems.mockResolvedValue(page(items(2)));
     const { user } = withUser(<HistoryView />);
     await waitFor(() =>
       expect(

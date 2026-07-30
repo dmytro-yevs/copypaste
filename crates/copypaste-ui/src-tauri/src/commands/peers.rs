@@ -16,6 +16,7 @@
 //! | the list of known devices | [`peers`] |
 //! | forget one | [`unpair`] |
 //! | sync now, with per-device results | [`sync_now`] |
+//! | the devices on this network | [`discovered`] / [`rescan`] |
 //!
 //! # The code is a secret
 //!
@@ -29,7 +30,7 @@
 use tauri::State;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
-use crate::model::{UiPairing, UiPeer, UiSyncResult};
+use crate::model::{UiDiscovered, UiPairing, UiPeer, UiSyncResult};
 
 type Result<T> = std::result::Result<T, BackendError>;
 
@@ -121,4 +122,29 @@ mod tests {
             assert!(!shown.contains('/'), "{shown}");
         }
     }
+}
+
+/// Devices this network has advertised, paired or not.
+///
+/// The reason pairing can be a gesture rather than a transcription: without it
+/// the accepting device has to be told a `host:port` as well as a 52-character
+/// code, and both by hand.
+///
+/// **Nothing here is authenticated.** Name, address and pairing id are what an
+/// mDNS record claimed; only the Noise handshake proves any of it, so the UI
+/// labels these as unverified (manifest 06, INV-15).
+#[tauri::command]
+pub async fn discovered(backend: State<'_, SelectedBackend>) -> Result<Vec<UiDiscovered>> {
+    backend.discovered().await
+}
+
+/// Advertise and browse again, then answer as [`discovered`] does.
+///
+/// A user-visible verb because multicast is unreliable in exactly the places
+/// people try to pair — a phone that just joined the network, a Mac that just
+/// woke — and "nothing found" needs a way to be retried that is not "quit the
+/// app".
+#[tauri::command]
+pub async fn rescan(backend: State<'_, SelectedBackend>) -> Result<Vec<UiDiscovered>> {
+    backend.rescan().await
 }

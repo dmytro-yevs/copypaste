@@ -237,6 +237,47 @@ mod tests {
         assert_eq!(merge_decision(&s, "d", &s, "d"), MergeDecision::KeepLocal);
     }
 
+    /// A re-copy restamps `created_at` (`copypaste_core::Store::insert_or_bump`),
+    /// and `created_at` is key 1 — so a bump is a version and it travels. The
+    /// property that makes that safe is that it settles: the peer takes it once
+    /// and the next round is a tie.
+    #[test]
+    fn a_recopy_bump_travels_once_and_then_settles() {
+        let before = summary("x", 100, "h", false);
+        let bumped = summary("x", 500, "h", false);
+        // Same item, same content, same origin — only the stamp moved.
+        assert_eq!(
+            merge_decision(&before, "a", &bumped, "a"),
+            MergeDecision::TakeRemote
+        );
+        assert_eq!(
+            merge_decision(&bumped, "a", &before, "a"),
+            MergeDecision::KeepLocal,
+            "the device that bumped must not take its own older copy back"
+        );
+        assert_eq!(
+            merge_decision(&bumped, "a", &bumped, "a"),
+            MergeDecision::KeepLocal,
+            "a second round must change nothing"
+        );
+    }
+
+    /// A bump must never outrank a delete of the same item made later. Key 1
+    /// decides it, and a tombstone carries the time of the deletion.
+    #[test]
+    fn a_bump_cannot_resurrect_a_later_delete() {
+        let bumped = summary("x", 500, "h", false);
+        let deleted = summary("x", 900, "h", true);
+        assert_eq!(
+            merge_decision(&bumped, "a", &deleted, "b"),
+            MergeDecision::TakeRemote
+        );
+        assert_eq!(
+            merge_decision(&deleted, "b", &bumped, "a"),
+            MergeDecision::KeepLocal
+        );
+    }
+
     #[test]
     fn an_older_live_version_cannot_resurrect_a_newer_tombstone() {
         let dead = summary("i", 200, "h", true);

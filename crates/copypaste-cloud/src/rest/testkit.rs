@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use backoff::{ExponentialBackoff, ExponentialBackoffBuilder};
+use backon::ExponentialBuilder;
 
 use super::{CloudItem, SupabaseRest};
 use crate::auth::stub::Stub;
@@ -18,12 +18,11 @@ pub(super) const TOKEN: &str = "user-access-token";
 
 /// A retry policy that finishes in milliseconds, so a test that exercises the
 /// transient path does not sleep for seconds.
-pub(super) fn fast_retry() -> ExponentialBackoff {
-    ExponentialBackoffBuilder::new()
-        .with_initial_interval(Duration::from_millis(1))
-        .with_max_interval(Duration::from_millis(2))
-        .with_max_elapsed_time(Some(Duration::from_millis(10)))
-        .build()
+pub(super) fn fast_retry() -> ExponentialBuilder {
+    ExponentialBuilder::new()
+        .with_min_delay(Duration::from_millis(1))
+        .with_max_delay(Duration::from_millis(2))
+        .with_max_times(3)
 }
 
 pub(super) fn client(stub: &Stub) -> SupabaseRest {

@@ -53,8 +53,10 @@
 //! create unique index clipboard_items_user_item_uidx
 //!     on public.clipboard_items (user_id, item_id);
 //!
-//! -- The read path: `user_id` from RLS, then the (created_at asc, item_id
-//! -- desc) keyset this module orders on.
+//! -- The read path: `user_id` from RLS, then the `(created_at asc, item_id
+//! -- asc)` keyset this module orders and pages on. Ascending on both: the
+//! -- index has to match `order=created_at.asc,item_id.asc` or every page
+//! -- costs an incremental sort.
 //! create index clipboard_items_user_created_idx
 //!     on public.clipboard_items (user_id, created_at, item_id);
 //!
@@ -124,7 +126,7 @@
 //!   back a dead token (manifest AT-36).
 //! * `429` is surfaced with its `Retry-After` rather than slept on, for the
 //!   same reason: the caller owns the schedule.
-//! * `5xx` and network faults retry under the crate's single `backoff` policy.
+//! * `5xx` and network faults retry under the crate's single `backon` policy.
 //! * No error variant can hold a filesystem path or a token — the only free
 //!   text any of them carries is a `&'static str` written in this module.
 //!

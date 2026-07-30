@@ -12,26 +12,30 @@ Useful in a report: the affected component (`core`, `daemon`, `cli`, `p2p`,
 
 ## Status
 
-**v2 is alpha and has not been audited.** Several components have never been
-executed on their target platform — see [Unverified](#unverified), which is the
-section to read before trusting anything else on this page.
+**v2 is alpha and has not been audited.** Parts of it have never executed on a
+platform we ship to — [Unverified](#unverified) is the section to read before
+trusting anything else here.
 
-This document describes v2. The previous implementation is preserved on
-`archive/v0.4.1-pre-rewrite` and differed in ways that matter here — most
-sharply, it synced sensitive items and v2 does not. Do not read v1 documentation
-as describing this code.
+An adversarial source review of this branch is at
+[`docs/rewrite/security-review.md`](docs/rewrite/security-review.md): fourteen
+findings, none critical, several still open. It tests the claims on this page
+against the code, so where the two disagree, believe it.
+
+This document describes v2 only. v0.4.1 survives on
+`archive/v0.4.1-pre-rewrite` and differs in ways that matter — most sharply, it
+synced sensitive items and v2 does not.
 
 ## At rest
 
-- **Content** is sealed with XChaCha20-Poly1305. The item id is bound as
-  associated data, so a row's ciphertext cannot be moved to another row — it
-  fails authentication instead.
-- **The database** is SQLCipher, keyed with a raw 32-byte key: the page key is
+- **Content** is sealed with XChaCha20-Poly1305, with the item id bound as
+  associated data: a row's ciphertext cannot be moved to another row, it fails
+  authentication instead.
+- **The database** is SQLCipher keyed with a raw 32-byte key — the page key is
   supplied directly, so there is no passphrase KDF pass and no cipher parameter
   is set.
-- **Key derivation** is HKDF-SHA256 from a device secret — one extract, two
-  expands: `copypaste/v2/sqlcipher-db-key` and `copypaste/v2/item-content-key`.
-  Neither key is the stored secret itself.
+- **Key derivation** is HKDF-SHA256 from a device secret: one extract, two
+  expands (`copypaste/v2/sqlcipher-db-key`, `copypaste/v2/item-content-key`).
+  Neither key is the stored secret.
 - **Crypto fails closed.** A wrong key, a wrong AAD or a tampered ciphertext
   gives an authentication error with no detail and no fallback read.
 - Key material is zeroized on drop; secret comparisons are constant-time.
@@ -50,10 +54,10 @@ orphan the existing database.
 
 ## Sensitive content
 
-A detector flags clipboard content that looks like a credential — around 42
-rules, taken from gitleaks where an equivalent exists, with NFKC normalisation,
-Luhn validation for card numbers, and entropy and allowlist gates against false
-positives.
+A detector flags clipboard content that looks like a credential — the ruleset in
+`crates/copypaste-core/src/sensitive/rules.rs`, taken from gitleaks where an
+equivalent exists, with NFKC normalisation, Luhn validation for card numbers, and
+entropy and allowlist gates against false positives.
 
 What follows from a match:
 
@@ -61,23 +65,21 @@ What follows from a match:
   at read time.
 - **It never leaves the device.** Peer sync does not list it and cloud sync
   refuses to upload it. This inverts v1, which synced sensitive items encrypted
-  and treated sensitivity as metadata for the receiver to re-evaluate.
+  and left the receiver to re-evaluate.
 - **It is not deleted automatically.** Only rules above a confidence floor are
-  eligible for any destructive action, and no automatic deletion is implemented
-  today. A false positive destroying unrecoverable user data is the worse
-  outcome.
+  eligible for a destructive action, and no automatic deletion is implemented. A
+  false positive destroying unrecoverable user data is the worse outcome.
 
-Detection is best-effort and will miss things. Do not rely on it as the only
-control over what reaches your clipboard history.
+Detection is best-effort and will miss things — the security review found two
+whole classes it was missing (F-1, F-2). Do not rely on it as the only control
+over what reaches your clipboard history.
 
 ## Local IPC
 
 The daemon listens on a Unix domain socket at mode `0600`, owned by the running
-user. There is no network listener for IPC and no auth token — the filesystem
-permission is the boundary.
-
-Any process running as the same user can therefore read the whole history. That
-is the trust boundary the system clipboard already has.
+user. There is no network listener for IPC and no auth token: the filesystem
+permission is the boundary, so any process running as the same user can read the
+whole history. That is the trust boundary the system clipboard already has.
 
 **No user-facing error may contain a filesystem path**, because the socket path
 discloses the local username. Enforced in the daemon and again by a redaction
@@ -89,7 +91,8 @@ pass shared by every client, with tests asserting it.
   secrecy from the pairing key alone.
 - The pairing token is 256 bits from the OS CSPRNG, shown as a Crockford base32
   code. Possession is the authentication — there is no password, so there is no
-  dictionary to attack. Treat a code like a password; it is shown once.
+  dictionary to attack. Treat a code like a password; it is shown once, and
+  nothing expires or burns it.
 - A wrong key fails the handshake on the first message. There is no
   unauthenticated mode to fall back to.
 - A session poisons itself after any authentication failure rather than
@@ -99,8 +102,10 @@ pass shared by every client, with tests asserting it.
   receiver re-encrypts under its own key. Confidentiality comes from the
   transport, not a second envelope — the sender's ciphertext is bound to a key
   the receiver does not have.
-- mDNS advertises only a non-secret pairing id — never a token, and deliberately
-  not a digest of one.
+- mDNS advertises a `pairing_id`: a domain-separated BLAKE2s of the token,
+  truncated to 128 bits. It is one-way and not usable as a credential, but it is
+  derived from the token rather than independent of it, and it is a stable
+  identifier broadcast on every network the device joins (F-7).
 
 A peer's item stamped more than 24 hours in the future is skipped, so a device
 with a broken clock cannot win every comparison for an item and censor it
@@ -108,27 +113,31 @@ everywhere.
 
 ## Cloud sync
 
-**Wired into the daemon, and never once spoken to a real Supabase project.**
-Two separate facts; both matter.
+**Wired into the daemon and the CLI, and never once spoken to a real Supabase
+project.** `scripts/demo-cloud.sh` drives two real daemons against a local stub
+(`scripts/cloud-stub.py`) imitating GoTrue and PostgREST; it asserts
+convergence, that a sensitive item never leaves its device, and that only
+ciphertext reaches the backend. It cannot tell you a real deployment accepts any
+of it.
 
-Rows are sealed client-side under an Argon2id key derived from a passphrase
-that never leaves the device, so the server holds ciphertext and metadata only.
+Rows are sealed client-side under an Argon2id key derived from a passphrase that
+never leaves the device, so the server holds ciphertext and metadata only.
 Row-level security is the second layer — a misconfigured policy would expose
 rows that remain unreadable.
 
 The daemon stores the access token, the rotated refresh token and the derived
 sync key in the SQLCipher database, under the device key from the OS keystore.
-Never the account password and never the passphrase, so a stolen database
-yields a session that expires and a key for one account — not the means to
-re-derive it. Sign-out clears all three and keeps the deployment URL and anon
-key, which are configuration rather than credentials.
+Never the account password and never the passphrase, so a stolen database yields
+a session that expires and a key for one account — not the means to re-derive
+it. Sign-out clears all three and keeps the deployment URL and anon key, which
+are configuration rather than credentials.
 
 Sign-in carries three secrets over the `0600` IPC socket, which is the only
 authentication boundary. The CLI takes the password and passphrase from the
 environment or stdin and has no flag for either: process arguments are readable
 by every process running as the same user. The passphrase is zeroized once the
-key is derived; the request frame it arrived in is not, so it is "not
-persisted" rather than "not in memory".
+key is derived; the request frame it arrived in is not, so it is "not persisted"
+rather than "not in memory".
 
 What leaves the device is gated twice — the outbound query never lists a
 sensitive row, and the driver re-checks each item against the same detector
@@ -140,64 +149,58 @@ Metadata the backend sees that v1's account-less relay did not: account email,
 end-to-end encrypted; the metadata surface is a real regression, and sync now
 requires an account.
 
-`scripts/demo-cloud.sh` drives two real daemons against a local **stub**
-(`scripts/cloud-stub.py`), not Supabase. It asserts convergence, that a
-sensitive item never leaves its device, and that only ciphertext reaches the
-backend. It cannot tell you a real deployment accepts any of it.
-
 ## Unverified
 
-Written, never observed working. Treat these claims as unproven:
+Written, never observed working on a platform we ship to:
 
-- The **macOS Keychain** backend and the **NSPasteboard** capture path. CI's
-  `macos-check` job compiles and lints them on `macos-14` with `--all-features`,
-  so "never compiled" is no longer true — but nothing *runs* them: no test
-  drives a pasteboard or a keychain entry.
+- The **macOS Keychain** store and the **NSPasteboard** capture path. CI's
+  `macos-check` job compiles and lints them on `macos-14` with `--all-features`
+  and runs the portable half of the suite there, so "never compiled" is no
+  longer true. Nothing drives a real pasteboard or a real keychain entry.
+- **Cloud sync against a live Supabase project.** Unit tests use in-process
+  fakes; the demo uses a local stub. No deployment has ever had `supabase/`'s
+  schema and RLS policies applied to it.
 - **mDNS discovery** — the development container has no multicast; pairing is
   exercised only over explicit addresses.
-- **Cloud sync against a live Supabase project.** The unit tests use in-process
-  fakes and `scripts/demo-cloud.sh` uses a local stub that imitates GoTrue and
-  PostgREST. Nothing here has ever authenticated against Supabase, and no
-  deployment has ever had the schema and row-level-security policies in
-  `crates/copypaste-cloud/src/rest/mod.rs` applied to it.
-- The **app on either target**. The Tauri shell builds and launches on Linux,
-  but WebKitGTK executes no JavaScript under headless Xvfb, so what it renders
-  is covered only by jsdom unit tests. It has never been built for macOS or
-  Android.
+- **The app on either shipping target.** The `e2e/` suite drives it through a
+  real WebKitGTK WebView on Linux, which is neither WKWebView nor Android's
+  WebView, and no macOS `.app` or Android APK has been produced.
 
 ## Not implemented
 
-Age-based retention, private mode, an application exclusion list, rate limiting
-on any surface, and telemetry.
+Age-based retention, sensitive-item auto-wipe, private mode, an application
+exclusion list, device revocation and sync-key rotation, expiring or single-use
+pairing codes, rate limiting on any surface, and telemetry.
+
+The full accounting of what v0.4.1 did that this does not is
+[`docs/rewrite/parity-audit.md`](docs/rewrite/parity-audit.md); two of its
+findings are security-relevant on their own — the socket bind is TOCTOU-racy,
+and the IPC accept loop has no connection cap and no read or write timeouts.
 
 ## macOS permissions
 
 **The app requests no TCC permission** — not Accessibility, not Input
-Monitoring. Reading `NSPasteboard` needs none, the global hotkey goes through
-Carbon `RegisterEventHotKey` rather than an event tap, and selecting an item
-puts it on the clipboard instead of synthesising Cmd+V.
+Monitoring. Reading `NSPasteboard` needs none, and selecting an item puts it on
+the clipboard instead of synthesising Cmd+V. The global hotkey goes through
+Carbon `RegisterEventHotKey`; `shell::hotkey::is_permission_free` refuses the
+media keys, which `global-hotkey` binds with an event tap instead and which
+would therefore cost an Accessibility grant. That no prompt appears is inferred
+from documentation, not observed.
 
-This is a security property and also a distribution constraint: the app is
-ad-hoc signed, so macOS would tie any grant to a code hash that changes on
-every build and revoke it on every update. See
+This is a security property and a distribution constraint at once: the app is
+ad-hoc signed, so macOS would tie any grant to a code hash that changes on every
+build and revoke it on every update. See
 [ADR-0001](docs/adr/0001-macos-distribution-without-a-developer-id.md).
-
-An earlier version of this document claimed clipboard monitoring requires
-accessibility permission on macOS. That was wrong.
 
 ## Known limitations
 
-- Android restricts clipboard reads to foreground apps.
+- Android restricts clipboard reads to foreground apps; see
+  [`docs/rewrite/android-clipboard-access.md`](docs/rewrite/android-clipboard-access.md).
 - Windows and Linux desktop are out of scope.
-
-## Backward compatibility
-
-v2 reads nothing written by v0.4.x, and uses a distinct database filename so an
-older file is never opened, modified, or reported as corrupt.
+- v2 reads nothing written by v0.4.x, and uses a distinct database filename so
+  an older file is never opened, modified, or reported as corrupt.
 
 ## Dependency auditing
 
-```bash
-cargo deny check   # requires cargo-deny
-cargo audit        # requires cargo-audit
-```
+`cargo deny check` and `cargo audit`, both run in CI by
+`.github/workflows/supply-chain.yml` on every push and weekly on a schedule.

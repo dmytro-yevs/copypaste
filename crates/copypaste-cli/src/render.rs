@@ -6,8 +6,8 @@
 
 use comfy_table::{presets, ContentArrangement, Table};
 use copypaste_ipc::{
-    CloudStatusData, CloudSyncData, Item, PairingData, PeerInfo, StatusData, SyncResult,
-    PROTOCOL_VERSION,
+    CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredDevice, EventData, EventKind,
+    ExportData, Item, PairingData, PeerInfo, StatusData, SyncResult, PROTOCOL_VERSION,
 };
 
 /// Stand-in printed instead of a sensitive item's content.
@@ -175,6 +175,128 @@ pub fn peers_table(peers: &[PeerInfo], now_ms: i64, empty: &str) -> String {
         ]);
     }
     table.to_string()
+}
+
+/// Render LAN devices, or `empty` when none are visible.
+///
+/// "None visible" is a normal answer, not a failure: discovery may be switched
+/// off and multicast is filtered on plenty of networks. The empty message says
+/// what to do instead rather than implying something is broken.
+pub fn discovered_table(devices: &[DiscoveredDevice], now_ms: i64, empty: &str) -> String {
+    if devices.is_empty() {
+        return format!(
+            "{empty}\n\nPair with an address instead: copypaste pair create, then \
+             copypaste pair accept CODE --addr HOST:PORT on the other device."
+        );
+    }
+
+    let mut table = Table::new();
+    table.load_preset(presets::UTF8_HORIZONTAL_ONLY);
+    table.set_content_arrangement(ContentArrangement::Disabled);
+    table.set_header(vec!["PAIRING ID", "NAME", "ADDRESS", "SEEN", "STATUS"]);
+
+    for device in devices {
+        table.add_row(vec![
+            device.pairing_id.clone(),
+            // Advertised by whoever is on the network, so it is truncated and
+            // stripped like any other untrusted string and never used as an
+            // identity.
+            one_line(&device.name, 24),
+            device.addr.clone(),
+            relative_time(device.last_seen_ms, now_ms),
+            if device.paired { "paired" } else { "new" }.to_string(),
+        ]);
+    }
+    table.to_string()
+}
+
+/// What an export left behind, for stderr.
+///
+/// Every count is printed, including zero, for the same reason `withheld` is in
+/// [`cloud_sync_text`]: a number that only appears when it is non-zero is one
+/// nobody knows to look for.
+pub fn export_summary(export: &ExportData) -> String {
+    let mut lines = vec![format!(
+        "exported {} items; withheld {} sensitive, skipped {} non-text, {} unreadable",
+        export.items.len(),
+        export.skipped_sensitive,
+        export.skipped_non_text,
+        export.skipped_undecryptable,
+    )];
+    if export.skipped_sensitive > 0 {
+        lines.push(
+            "Sensitive items are withheld by default. Pass --include-sensitive to \
+             include them — the export is a plaintext file."
+                .to_string(),
+        );
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+/// Render the daemon's settings, and anything that needs a restart.
+pub fn config_text(applied: &ConfigApplied) -> String {
+    let config = &applied.config;
+    let mut lines = vec![
+        setting("poll interval", format!("{} ms", config.poll_interval_ms)),
+        setting("history limit", format!("{} items", config.history_limit)),
+        setting(
+            "retention",
+            match config.retention_days {
+                0 => "off".to_string(),
+                days => format!("{days} days"),
+            },
+        ),
+        setting(
+            "dedup window",
+            format!("{} s", config.dedup_window_secs),
+        ),
+        setting("max item size", format!("{} bytes", config.max_item_bytes)),
+        setting(
+            "sensitive ttl",
+            match config.sensitive_ttl_secs {
+                // `0` is "never delete", not "delete immediately". Rendering it
+                // as a number would read as the opposite of what it means.
+                0 => "off".to_string(),
+                secs => format!("{secs} s"),
+            },
+        ),
+        setting(
+            "excluded apps",
+            if config.excluded_app_bundle_ids.is_empty() {
+                "none".to_string()
+            } else {
+                config.excluded_app_bundle_ids.join(", ")
+            },
+        ),
+        setting("lan visibility", yes_no(config.lan_visibility)),
+        setting("sync", yes_no(config.sync_enabled)),
+    ];
+
+    if !applied.restart_required.is_empty() {
+        lines.push(String::new());
+        lines.push(format!(
+            "changed, but not yet in effect: {}. Restart the daemon to apply.",
+            applied.restart_required.join(", ")
+        ));
+    }
+    lines.join("\n")
+}
+
+fn setting(name: &str, value: String) -> String {
+    format!("{name:<16} {value}")
+}
+
+fn yes_no(value: bool) -> String {
+    if value { "on" } else { "off" }.to_string()
+}
+
+/// One line per change event, for `copypaste watch`.
+pub fn event_text(event: &EventData) -> String {
+    match event.event {
+        EventKind::Items => format!("items changed ({} in history)", event.item_count),
+        EventKind::Peers => "paired devices changed".to_string(),
+    }
 }
 
 /// Render one sync run, one row per peer.

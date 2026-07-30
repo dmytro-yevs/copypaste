@@ -49,6 +49,39 @@ pub struct NewItem {
     pub created_at: i64,
 }
 
+/// What [`super::Store::insert_or_bump`] did with a capture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ingest {
+    /// The content was new to this device's history.
+    Inserted(StoredItem),
+    /// The content was already here, and this row's `created_at` was moved to
+    /// the new capture time. The row is the *existing* one, under its original
+    /// id — never the rejected candidate (manifest 01 I-28: broadcasting the
+    /// candidate's id makes every subscriber look up a row that does not exist).
+    Bumped(StoredItem),
+}
+
+impl Ingest {
+    #[must_use]
+    pub fn item(&self) -> &StoredItem {
+        match self {
+            Ingest::Inserted(item) | Ingest::Bumped(item) => item,
+        }
+    }
+
+    #[must_use]
+    pub fn into_item(self) -> StoredItem {
+        match self {
+            Ingest::Inserted(item) | Ingest::Bumped(item) => item,
+        }
+    }
+
+    #[must_use]
+    pub fn is_bump(&self) -> bool {
+        matches!(self, Ingest::Bumped(_))
+    }
+}
+
 /// A row as it comes back out. The plaintext never leaves the store: callers
 /// decrypt `content_ciphertext` themselves.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +117,12 @@ pub enum StoreError {
 
     #[error("item not found")]
     NotFound,
+
+    /// A pagination cursor this build did not write. Refused rather than
+    /// treated as "start from the top", which would silently make a load-more
+    /// repeat the whole history.
+    #[error("that page marker is not valid")]
+    InvalidCursor,
 }
 
 pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {

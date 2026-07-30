@@ -565,6 +565,31 @@ by `item_id` or via the history list. ADR-015 explicitly rejects a user opt-in
 
 ### 6.2 Sensitive TTL / expiry
 
+**v2 amendment — the deadline is derived, not stored.** The rules below are
+binding; the `expires_at` *column* is not. v2 has no such column: a sensitive
+row's deadline is `created_at + ttl`, evaluated by the one predicate in
+`copypaste_core::sensitive::sweep_sensitive`. Three of the four bugs in this
+section are shapes of "the deadline was stored, and the store drifted from the
+rule" — `CopyPaste-3e7y` (two predicates disagreed and a row with no
+`expires_at` outlived its TTL), `CopyPaste-44rq.62` (backfill and delete in
+separate transactions) and `CopyPaste-8ebg.2` (a dedup bump inherited a stale
+deadline). None of them is reachable without the column: there is nothing to
+backfill, nothing to keep atomic with the delete, and the bump resets the
+deadline for free because it restamps `created_at`. The `0` sentinel, the pinned
+exemption, the cheap existence probe and the startup purge are unchanged and
+implemented.
+
+**v2 amendment — the wipe decision is re-derived from the plaintext.** v1
+stamped wipe eligibility at capture. v2 re-scans the candidate row at wipe time
+and requires `Severity::HighConfidence` then, so a row is deleted only if it was
+flagged at capture *and* is still above the floor. Deleting on a flag written by
+a ruleset that has since changed is a decision nobody can review before it
+fires, and `CLAUDE.md` rule 4 ranks that above the cost of one AEAD per expired
+candidate.
+
+**Consequence, stated rather than hidden:** changing the TTL re-dates every
+existing sensitive item rather than only new ones.
+
 | Property | Value |
 |---|---|
 | Config field | `sensitive_ttl_secs`, default **30** |

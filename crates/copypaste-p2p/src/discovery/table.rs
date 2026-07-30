@@ -3,7 +3,9 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+
+pub(super) use crate::now_ms;
 
 /// How long a peer stays in the table after it was last seen. mdns-sd publishes
 /// host records with a 120 s TTL and refreshes ahead of expiry, so three minutes
@@ -127,15 +129,6 @@ impl PeerTable {
     pub(super) fn clear(&mut self) {
         self.entries.clear();
     }
-}
-
-/// Milliseconds since the Unix epoch. Local because `copypaste-p2p` does not
-/// depend on `copypaste-core`, where the shared helper lives.
-pub(super) fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

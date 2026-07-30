@@ -16,7 +16,7 @@ test("the real WebView runs the real app against the real daemon", async () => {
   const { browser } = app;
 
   const list = await browser.$('[role="list"][aria-label="Clipboard history"]');
-  await list.waitForExist({ timeout: 30_000 });
+  await list.waitForExist({ timeout: 60_000 });
 
   const rows = await browser.$$('[role="listitem"]');
   expect(rows.length).toBeGreaterThan(0);

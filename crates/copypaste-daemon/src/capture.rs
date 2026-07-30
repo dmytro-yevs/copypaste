@@ -18,30 +18,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use copypaste_core::storage::DEDUP_WINDOW_MS;
 use copypaste_core::{CryptoError, NewItem, StoreError, StoredItem};
 use tokio::sync::watch;
-use tokio::time::{interval, MissedTickBehavior};
 use tracing::{debug, error, info, warn};
 
 use crate::AppState;
 
-/// Manifest 01 §4: 500 ms is the perceived-instant default. Below ~100 ms the
-/// poll loop's own cost becomes visible; above ~5 s bursts become the norm
-/// rather than the exception.
-pub const POLL_INTERVAL: Duration = Duration::from_millis(500);
-
-/// How much local history the daemon keeps, in live items.
-///
-/// `Store::evict_over_cap` counts rows, not bytes — v1's only bound was a
-/// 10 GiB byte quota, so this number is a new decision rather than a ported
-/// one. 10 000 is the top of the range the UI offers as a render limit
-/// (manifest 06: `historyDisplayLimit`, default 1 000), so the daemon holding
-/// more than the UI shows stays true at every setting below "Unlimited".
-///
-/// Pinned items are exempt inside the store (manifest 03 I9), and so is the
-/// newest unpinned item — copying something huge must never make it vanish.
-pub const MAX_HISTORY_ITEMS: u64 = 10_000;
+// Manifest 01 §4's 500 ms perceived-instant default now lives in
+// `copypaste_ipc::ConfigData::default`, because it is a setting rather than a
+// constant. Below ~100 ms the poll loop's own cost becomes visible; above ~5 s
+// bursts become the norm rather than the exception, which is what the bounds in
+// `copypaste_ipc::config` encode.
 
 /// What a successful ingest did.
 #[derive(Debug)]
@@ -71,6 +58,8 @@ impl Ingested {
 pub enum IngestError {
     #[error("clipboard content was empty")]
     Empty,
+    #[error("the item is larger than the configured size limit")]
+    TooLarge,
     #[error("the item could not be encrypted")]
     Crypto(#[from] CryptoError),
     #[error("the item could not be stored")]
@@ -78,23 +67,27 @@ pub enum IngestError {
 }
 
 /// Poll the clipboard until shutdown.
+///
+/// The interval is read from the settings at every tick rather than captured
+/// into a `tokio::time::Interval` once. That is what makes `poll_interval_ms` a
+/// live setting: v1 had hot-reload for it and the parity audit records losing
+/// that as a consequence of losing config altogether.
 pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
-    let mut ticker = interval(POLL_INTERVAL);
-    // A late tick must not cause a burst of catch-up ticks: the clipboard has
-    // no backlog to drain, only a current value.
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
     state.set_capture_running(true);
     info!(
         backend = state.backend_name(),
-        interval_ms = POLL_INTERVAL.as_millis() as u64,
+        interval_ms = state.settings.get().poll_interval_ms,
         "clipboard capture started"
     );
 
     loop {
+        let wait = Duration::from_millis(state.settings.get().poll_interval_ms);
         tokio::select! {
             _ = shutdown.changed() => break,
-            _ = ticker.tick() => {
+            // `sleep` rather than a ticker: a late tick must not cause a burst
+            // of catch-up ticks — the clipboard has no backlog to drain, only a
+            // current value — and the wait is recomputed each time round.
+            _ = tokio::time::sleep(wait) => {
                 let state = Arc::clone(&state);
                 // The pasteboard read, the AEAD seal and the SQLite write are
                 // all blocking. Running them on a worker keeps the reactor free
@@ -113,6 +106,28 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
     info!("clipboard capture stopped");
 }
 
+/// Delete detected secrets whose TTL has elapsed.
+///
+/// Best-effort, and deliberately never fatal to a tick: the sweep deletes user
+/// data, so a failure must leave the data alone and retry, not stop capture
+/// (CLAUDE.md rule 4). `0` disables it, and that is the default until a user
+/// asks for it.
+fn sweep_sensitive_items(state: &AppState) {
+    let ttl = Duration::from_secs(state.settings.get().sensitive_ttl_secs);
+    let removed = copypaste_core::sensitive::sweep_sensitive(
+        &state.store,
+        &state.detector,
+        &state.keyring.item_key(),
+        ttl,
+        copypaste_core::now_ms(),
+    );
+    match removed {
+        Ok(0) => {}
+        Ok(_) => state.note_local_change(),
+        Err(e) => warn!(error = ?e, "the sensitive-item sweep failed"),
+    }
+}
+
 /// One poll. Returns `Ok(())` when there was nothing to capture.
 fn tick(state: &AppState) -> Result<(), IngestError> {
     // The guard is taken for the pasteboard read alone and dropped before the
@@ -120,12 +135,23 @@ fn tick(state: &AppState) -> Result<(), IngestError> {
     // database write.
     let capture = state.clipboard().poll();
     let Some(capture) = capture else {
+        sweep_sensitive_items(state);
         return Ok(());
     };
+
+    // The auto-wipe sweep rides the poll loop rather than owning a timer:
+    // `sweep_sensitive` short-circuits on a cheap "is there anything wipeable"
+    // probe, and a TTL measured to the nearest poll interval is exactly as
+    // precise as the capture that started it.
+    sweep_sensitive_items(state);
 
     match ingest(state, &capture.content, &capture.content_type) {
         Ok(Ingested::Stored(item)) => {
             debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
+            // Wakes the watchers and pulls both sync loops to their floor, so a
+            // copy here shows up over there in seconds rather than at whatever
+            // interval the loops had drifted to.
+            state.note_local_change();
             Ok(())
         }
         Ok(Ingested::Duplicate(item)) => {
@@ -134,6 +160,12 @@ fn tick(state: &AppState) -> Result<(), IngestError> {
         }
         // An empty clipboard is not a failure, and there is nothing to store.
         Err(IngestError::Empty) => Ok(()),
+        // Over the size cap the user set. Reported once, at debug, rather than
+        // as a tick failure: it is a decision they made, not a fault.
+        Err(IngestError::TooLarge) => {
+            debug!("clipboard item is over the configured size limit; not captured");
+            Ok(())
+        }
         Err(e) => Err(e),
     }
 }
@@ -148,12 +180,30 @@ pub fn ingest(
     content: &str,
     content_type: &str,
 ) -> Result<Ingested, IngestError> {
+    ingest_at(state, content, content_type, copypaste_core::now_ms())
+}
+
+/// [`ingest`] with the item's own timestamp, for an import.
+///
+/// A restored item keeps the moment it was originally captured, which is what
+/// keeps a restored history in order and its ages honest. The dedup window is
+/// applied around *that* stamp, not around now, so importing a file twice
+/// collapses rather than doubling.
+pub fn ingest_at(
+    state: &AppState,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+) -> Result<Ingested, IngestError> {
+    let settings = state.settings.get().clone();
     let outcome = ingest_into(
         &state.store,
         &state.detector,
         &state.keyring,
         content,
         content_type,
+        created_at,
+        &settings,
     )?;
 
     // This device captured it, so this device is its origin — the one thing a
@@ -178,15 +228,23 @@ pub fn ingest(
 /// (see the module header). Nothing below mentions the daemon, so the move is a
 /// cut-and-paste plus a re-export, taking [`Ingested`], [`IngestError`],
 /// [`MAX_HISTORY_ITEMS`] and their tests with it.
+#[allow(clippy::too_many_arguments)]
 pub fn ingest_into(
     store: &copypaste_core::Store,
     detector: &copypaste_core::Detector,
     keyring: &copypaste_core::Keyring,
     content: &str,
     content_type: &str,
+    created_at: i64,
+    settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
+    }
+    // Refusing a capture is data loss, so the cap has to be a *user's* number
+    // rather than a compiled-in one — and the refusal is reported, not silent.
+    if content.len() as u64 > settings.max_item_bytes {
+        return Err(IngestError::TooLarge);
     }
 
     let hash = content_hash(content.as_bytes());
@@ -197,7 +255,7 @@ pub fn ingest_into(
     // Passing the window width itself would compare every row's timestamp
     // against 60000 ms after 1970 and match the entire history, silently
     // collapsing all repeats of a value into the first one ever stored.
-    let cutoff_ms = copypaste_core::now_ms() - DEDUP_WINDOW_MS;
+    let cutoff_ms = created_at - dedup_window_ms(settings);
     let recent = match store.find_recent_by_hash(&hash, cutoff_ms) {
         Ok(found) => found,
         Err(e) => {
@@ -236,14 +294,22 @@ pub fn ingest_into(
         } else {
             Some(content.to_string())
         },
-        created_at: copypaste_core::now_ms(),
+        created_at,
     })?;
 
     // Best-effort, and deliberately after the insert: the item is already
     // durable, and a failed sweep must never turn a stored capture into a lost
     // one.
-    if let Err(e) = store.evict_over_cap(MAX_HISTORY_ITEMS) {
+    if let Err(e) = store.evict_over_cap(u64::from(settings.history_limit)) {
         warn!(error = ?e, "history cap eviction failed");
+    }
+    // Age-based retention, disabled by the `0` sentinel. Best-effort and after
+    // the insert, for the same reason the cap sweep is.
+    if settings.retention_days > 0 {
+        let cutoff = created_at - i64::from(settings.retention_days) * 86_400_000;
+        if let Err(e) = store.evict_older_than(cutoff) {
+            warn!(error = ?e, "age-based retention failed");
+        }
     }
 
     Ok(Ingested::Stored(stored))
@@ -261,4 +327,14 @@ pub fn ingest_into(
 /// content identity.
 fn content_hash(bytes: &[u8]) -> String {
     copypaste_core::storage::compute_content_hash(bytes)
+}
+
+/// The dedup window, in milliseconds.
+///
+/// `copypaste_core::storage::DEDUP_WINDOW_MS` is the default this setting
+/// starts at; the setting is what is in force. Two definitions of "the same
+/// thing twice" is exactly the duplication rule 1 is about, so the constant is
+/// referenced only in `ConfigData::default`.
+fn dedup_window_ms(settings: &copypaste_ipc::ConfigData) -> i64 {
+    i64::from(settings.dedup_window_secs) * 1_000
 }

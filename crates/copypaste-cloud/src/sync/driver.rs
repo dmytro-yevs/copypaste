@@ -6,6 +6,7 @@
 //! they share — the session behind its mutex, the key, the guard — and the
 //! ordering constraint between them ([`CloudSync::sync`]).
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -33,6 +34,10 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     pub(super) session: Mutex<Session>,
     pub(super) sensitive: SensitiveGuard,
     pub(super) idle: Mutex<Duration>,
+    /// Whether a Realtime channel is currently confirmed joined. Decides the
+    /// idle ceiling: the long one is only honest while something else is
+    /// carrying the latency (see [`super::cadence`]).
+    pub(super) push_channel: AtomicBool,
     /// Scale applied to every retry sleep. `1.0` in production.
     ///
     /// The tests set it to zero so the recovery rules can be asserted without
@@ -70,6 +75,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             session: Mutex::new(session),
             sensitive,
             idle: Mutex::new(MIN_POLL_INTERVAL),
+            push_channel: AtomicBool::new(false),
             delay_scale: 1.0,
         }
     }

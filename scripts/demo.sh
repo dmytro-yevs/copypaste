@@ -94,6 +94,69 @@ step "Delete"
 if "$CLI" list --limit 20 --json | grep -q "$FIRST_ID"; then fail "item survived delete"; fi
 ok "item deleted"
 
+step "Settings — changed live, and a bad value changes nothing"
+"$CLI" config set --poll-interval-ms 250 >/dev/null || fail "a valid setting was refused"
+"$CLI" config show | grep -q "250 ms" || fail "the new poll interval was not applied"
+if "$CLI" config set --poll-interval-ms 1 2>/dev/null; then
+    fail "an out-of-range setting was accepted"
+fi
+"$CLI" config show | grep -q "250 ms" || fail "a rejected setting changed the daemon"
+ok "poll interval is 250 ms; an out-of-range value was refused and changed nothing"
+
+step "Export — sensitive items are withheld by default and the count is reported"
+EXPORT="$DATA_DIR/history.json"
+"$CLI" export --output "$EXPORT" 2>"$DATA_DIR/export.err" || fail "export failed"
+if grep -q "AKIAIOSFODNN7EXAMPLE" "$EXPORT"; then
+    fail "A SENSITIVE ITEM WAS WRITTEN TO THE EXPORT BY DEFAULT"
+fi
+grep -q "withheld 1 sensitive" "$DATA_DIR/export.err" || fail "the export did not report what it withheld"
+ok "secret withheld, and the export said so"
+
+step "Import — the detector runs again, so an edited export cannot smuggle one back"
+sed 's/"content": "note two"/"content": "AKIAIOSFODNN7EXAMPLE"/' "$EXPORT" > "$DATA_DIR/tampered.json"
+"$CLI" import "$DATA_DIR/tampered.json" >/dev/null || fail "import failed"
+if "$CLI" search "AKIAIOSFODNN7EXAMPLE" --json | grep -q "AKIAIOSFODNN7EXAMPLE"; then
+    fail "AN IMPORTED CREDENTIAL REACHED THE SEARCH INDEX"
+fi
+ok "re-detected on the way in, and kept out of the index"
+
+step "Backup and restore — a damaged backup cannot replace a working history"
+BACKUP="$DATA_DIR/history.backup"
+"$CLI" backup "$BACKUP" >/dev/null || fail "backup failed"
+BEFORE=$("$CLI" status | awk '/^items/{print $2}')
+
+printf 'not a database at all' > "$DATA_DIR/junk.backup"
+if "$CLI" restore "$DATA_DIR/junk.backup" --yes 2>/dev/null; then
+    fail "a corrupt backup was accepted"
+fi
+AFTER=$("$CLI" status | awk '/^items/{print $2}')
+[[ "$BEFORE" == "$AFTER" ]] || fail "a refused restore changed history: $BEFORE -> $AFTER"
+
+"$CLI" add "written after the backup" >/dev/null
+"$CLI" restore "$BACKUP" --yes >/dev/null || fail "restore failed"
+if "$CLI" search "written after the backup" --json | grep -q "written after the backup"; then
+    fail "the restore did not replace history"
+fi
+ok "corrupt backup refused with history intact; a good one restored"
+
+step "Discovery is reachable from a client"
+"$CLI" discover >/dev/null || fail "discover failed"
+ok "listed (empty is a normal answer with multicast filtered)"
+
+step "Watch — a push, not a poll"
+"$CLI" watch > "$DATA_DIR/watch.out" &
+WATCH_PID=$!
+sleep 0.5
+"$CLI" add "this should be pushed" >/dev/null
+for _ in $(seq 1 25); do
+    grep -q "items changed" "$DATA_DIR/watch.out" && break
+    sleep 0.2
+done
+kill "$WATCH_PID" 2>/dev/null || true
+wait "$WATCH_PID" 2>/dev/null || true
+grep -q "items changed" "$DATA_DIR/watch.out" || fail "no change was pushed to the subscriber"
+ok "the daemon pushed a change event"
+
 step "Done"
 "$CLI" status
 printf '\n\033[1;32mMVP demo passed.\033[0m\n'

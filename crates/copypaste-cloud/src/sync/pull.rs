@@ -76,13 +76,26 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// A row that will not decrypt is **not** an error: it is skipped, counted,
     /// and the cursor still advances past it (INV-N3, INV-I4).
     pub async fn pull(&self, source: &dyn CloudSource) -> Result<SyncStats, SyncError> {
-        let mut cursor = source.watermark()?;
+        let mut cursor = Cursor {
+            created_at: source.watermark()?,
+            item_id: source.watermark_item_id()?,
+        };
         let mut stats = SyncStats::default();
 
         for _ in 0..MAX_PAGES_PER_PULL {
             let mut rows = self
-                .execute(|token| async move {
-                    self.rest.fetch_since(&token, cursor, PULL_PAGE_LIMIT).await
+                .execute(|token| {
+                    let after = cursor.item_id.clone();
+                    async move {
+                        self.rest
+                            .fetch_since(
+                                &token,
+                                cursor.created_at,
+                                after.as_deref(),
+                                PULL_PAGE_LIMIT,
+                            )
+                            .await
+                    }
                 })
                 .await?;
             let page_len = rows.len();
@@ -90,7 +103,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             sort_page(&mut rows);
 
             let now = now_ms();
-            let mut advanced = cursor;
+            let mut advanced = cursor.clone();
 
             for row in rows {
                 let created_at = clamp_stamp(row.created_at);
@@ -125,14 +138,15 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                                 item_id = %row.item_id,
                                 "skipping a row this device cannot decrypt"
                             );
-                            advanced = advanced.max(created_at);
+                            advanced.advance_past(created_at, &row.item_id);
                             continue;
                         }
                     }
                 };
 
+                let item_id = row.item_id;
                 let applied = source.apply_remote(LocalItem {
-                    item_id: row.item_id,
+                    item_id: item_id.clone(),
                     content,
                     content_type: row.content_type,
                     created_at,
@@ -142,14 +156,17 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 if applied {
                     stats.applied += 1;
                 }
-                advanced = advanced.max(created_at);
+                advanced.advance_past(created_at, &item_id);
             }
 
             // Persist per page, so an interrupted drain resumes from the last
             // completed page rather than from the start. Monotonic by
-            // construction: `advanced` starts at the current cursor.
-            if advanced > cursor {
-                source.set_watermark(advanced)?;
+            // construction: `advanced` starts at the current cursor and
+            // `advance_past` only ever moves it forward.
+            if advanced != cursor {
+                if let Some(item_id) = advanced.item_id.as_deref() {
+                    source.set_watermark_keyset(advanced.created_at, item_id)?;
+                }
             }
 
             // Short page: caught up.
@@ -169,6 +186,35 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         }
 
         Ok(stats)
+    }
+}
+
+/// Where the download has reached, as a keyset over `(created_at, item_id)`.
+///
+/// The pair, not the millisecond: a millisecond is not unique, so a cursor that
+/// carries only one cannot be advanced past a millisecond that holds more than
+/// a page of rows — every pull re-fetches the same first page of them and the
+/// rest never download (INV-N1, manifest 05 §5.1 row 6). `item_id` is `None`
+/// only before the first row of a round has been seen, which is the inclusive
+/// `gte` case in [`RestApi::fetch_since`](super::RestApi::fetch_since).
+#[derive(Clone, PartialEq, Eq)]
+struct Cursor {
+    created_at: i64,
+    item_id: Option<String>,
+}
+
+impl Cursor {
+    /// Move to this row's position, if it is ahead of where we are.
+    ///
+    /// Guarded rather than assigned: pages arrive sorted, but a cursor that
+    /// could move backwards would re-download history on the next round, and
+    /// the "only ever forward" property is what INV-N5 leans on.
+    fn advance_past(&mut self, created_at: i64, item_id: &str) {
+        let ahead = (created_at, Some(item_id)) > (self.created_at, self.item_id.as_deref());
+        if ahead {
+            self.created_at = created_at;
+            self.item_id = Some(item_id.to_owned());
+        }
     }
 }
 
@@ -445,6 +491,44 @@ mod tests {
             sync.rest.fetches.load(Ordering::SeqCst) >= 2,
             "a full page did not trigger a burst drain"
         );
+    }
+
+    /// AT-24 / INV-N1, in the shape that survived into v2: more than one page
+    /// of rows stamped inside a single millisecond. A cursor carrying only the
+    /// millisecond cannot advance past them — every pull re-fetches the same
+    /// first page by `item_id` and the rest never arrive.
+    #[tokio::test]
+    async fn a_millisecond_holding_more_than_one_page_still_drains() {
+        let burst = PULL_PAGE_LIMIT as usize * 2 + 7;
+        let rows: Vec<CloudItem> = (0..burst)
+            .map(|i| cloud_row(&format!("item-{i:04}"), 1_000, "bulk import"))
+            .collect();
+        let source = FakeSource::default();
+        let sync = driver(FakeRest::seeded(rows), FakeAuth::default());
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.applied, burst, "rows behind the boundary millisecond");
+        assert_eq!(source.watermark().unwrap(), 1_000);
+    }
+
+    #[tokio::test]
+    async fn a_source_that_persists_the_tie_break_never_refetches_the_boundary() {
+        let source = FakeSource::with_keyset_watermark();
+        let sync = driver(
+            FakeRest::seeded(vec![
+                cloud_row("a", 1_000, "first"),
+                cloud_row("b", 1_000, "same millisecond"),
+            ]),
+            FakeAuth::default(),
+        );
+
+        assert_eq!(sync.pull(&source).await.unwrap().applied, 2);
+        // The second round starts strictly after `(1_000, "b")`, so it fetches
+        // nothing at all rather than re-offering the pair.
+        let second = sync.pull(&source).await.unwrap();
+        assert_eq!(second.downloaded, 0);
+        assert_eq!(source.watermark_item_id().unwrap().as_deref(), Some("b"));
     }
 
     #[tokio::test]

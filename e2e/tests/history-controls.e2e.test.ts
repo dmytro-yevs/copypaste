@@ -1,0 +1,174 @@
+/**
+ * The toolbar, selection mode and the quick-copy hint, in a real WebView.
+ *
+ * These are the parts of parity finding 19 that jsdom can assert the structure
+ * of but not the *rendering* of: a `<select>` that the engine lays out at zero
+ * height, a bulk bar that overlaps the list, a hint strip behind a media query.
+ * jsdom has no layout, so it would pass on all three while the screen was
+ * unusable.
+ *
+ * Caveat that applies to the whole suite: this is WebKitGTK on Linux. macOS
+ * ships WKWebView and Android the system WebView, so green here is not evidence
+ * about either shipping platform.
+ */
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+
+import { startApp, type App } from "../src/harness/app.js";
+import { ROW, rowBoxes, waitForRows } from "../src/harness/ui.js";
+
+let app: App;
+
+beforeAll(async () => {
+  app = await startApp({
+    seed: [
+      "https://example.com/one",
+      "https://example.com/two",
+      "just some words",
+      "more plain words",
+    ],
+  });
+  await waitForRows(app.browser, 4);
+}, 300_000);
+
+afterAll(async () => {
+  await app?.stop();
+});
+
+/** Every control the toolbar offers, sized as the engine laid it out. */
+async function controlBoxes(browser: App["browser"]) {
+  return (await browser.execute(function () {
+    const labels = [
+      "Search clipboard history",
+      "Filter by kind",
+      "Sort order",
+      "Select multiple items",
+    ];
+    return labels.map(function (label) {
+      const el = document.querySelector(
+        '[aria-label="' + label + '"]',
+      ) as HTMLElement | null;
+      const rect = el?.getBoundingClientRect();
+      return {
+        label,
+        present: Boolean(el),
+        width: rect ? rect.width : 0,
+        height: rect ? rect.height : 0,
+      };
+    });
+  })) as Array<{ label: string; present: boolean; width: number; height: number }>;
+}
+
+describe("the toolbar", () => {
+  test("lays every control out with a real box", async () => {
+    for (const control of await controlBoxes(app.browser)) {
+      expect(control.present, control.label).toBe(true);
+      expect(control.width, control.label).toBeGreaterThan(0);
+      // 24px is well under any of them; the assertion is against a control
+      // that collapsed, not a claim about the design.
+      expect(control.height, control.label).toBeGreaterThan(24);
+    }
+  });
+
+  test("filtering by kind removes the rows that do not match", async () => {
+    const before = await rowBoxes(app.browser);
+    expect(before.length).toBe(4);
+
+    await app.browser.execute(function () {
+      const select = document.querySelector(
+        '[aria-label="Filter by kind"]',
+      ) as HTMLSelectElement;
+      select.value = "url";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await app.browser.waitUntil(
+      async () => (await rowBoxes(app.browser)).length === 2,
+      { timeout: 5_000, timeoutMsg: "the kind filter did not narrow the list" },
+    );
+
+    // Put it back for the tests after this one.
+    await app.browser.execute(function () {
+      const select = document.querySelector(
+        '[aria-label="Filter by kind"]',
+      ) as HTMLSelectElement;
+      select.value = "all";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await app.browser.waitUntil(
+      async () => (await rowBoxes(app.browser)).length === 4,
+    );
+  });
+});
+
+describe("selection mode", () => {
+  test("shows checkboxes and a bulk bar, and neither overlaps the list", async () => {
+    await app.browser.$('[aria-label="Select multiple items"]').click();
+
+    await app.browser.waitUntil(
+      async () => (await app.browser.$$('[role="checkbox"]')).length > 0,
+      { timeout: 5_000, timeoutMsg: "no checkboxes appeared" },
+    );
+
+    const layout = (await app.browser.execute(function (rowSelector: string) {
+      const bar = document.querySelector(
+        '[role="region"][aria-label="Selection actions"]',
+      ) as HTMLElement | null;
+      const firstRow = document.querySelector(rowSelector) as HTMLElement | null;
+      const box = document.querySelector('[role="checkbox"]') as HTMLElement | null;
+      return {
+        barBottom: bar ? bar.getBoundingClientRect().bottom : NaN,
+        rowTop: firstRow ? firstRow.getBoundingClientRect().top : NaN,
+        checkbox: box
+          ? {
+              width: box.getBoundingClientRect().width,
+              height: box.getBoundingClientRect().height,
+            }
+          : null,
+      };
+    }, ROW)) as {
+      barBottom: number;
+      rowTop: number;
+      checkbox: { width: number; height: number } | null;
+    };
+
+    // The bar sits above the list rather than floating over it: a floating bar
+    // covers the rows the user is choosing between.
+    expect(layout.barBottom).toBeLessThanOrEqual(layout.rowTop + 1);
+    expect(layout.checkbox).not.toBeNull();
+    expect(layout.checkbox!.width).toBeGreaterThan(8);
+  });
+
+  test("leaves the mode again without stranding the checkboxes", async () => {
+    await app.browser.$('[aria-label="Leave selection mode"]').click();
+    await app.browser.waitUntil(
+      async () => (await app.browser.$$('[role="checkbox"]')).length === 0,
+      { timeout: 5_000, timeoutMsg: "the checkboxes stayed after leaving" },
+    );
+  });
+});
+
+describe("the quick-copy hint", () => {
+  /**
+   * ADR-0001: choosing an item makes it the clipboard and the user presses ⌘V.
+   * Without this line on screen the app looks broken to anyone who expects the
+   * paste to happen — they press ⌘3, the window goes away, and nothing
+   * appears. So it must be *rendered*, not merely present in the markup.
+   */
+  test("tells the user they still have to paste", async () => {
+    const hint = (await app.browser.execute(function () {
+      const nodes = Array.prototype.slice.call(document.querySelectorAll("p"));
+      for (const node of nodes) {
+        const el = node as HTMLElement;
+        if (el.innerText.indexOf("to paste") !== -1) {
+          const rect = el.getBoundingClientRect();
+          return { text: el.innerText, width: rect.width, height: rect.height };
+        }
+      }
+      return null;
+    })) as { text: string; width: number; height: number } | null;
+
+    expect(hint, "no visible hint about pasting").not.toBeNull();
+    expect(hint!.height).toBeGreaterThan(0);
+    expect(hint!.text).toContain("⌘V");
+  });
+});

@@ -13,7 +13,6 @@ copypaste-cloud = { path = "../copypaste-cloud" }
 tokio.workspace = true
 tokio-util.workspace = true
 futures-util.workspace = true
-backoff.workspace = true
 serde.workspace = true
 # `raw_value` so a received sync message can be handed to
 # `SyncMessage::decode` verbatim: the bounds and the timestamp clamp live in
@@ -33,6 +32,10 @@ directories.workspace = true
 rusqlite.workspace = true
 hex.workspace = true
 zeroize.workspace = true
+# flock(2) around the socket-bind critical section (CopyPaste-ah1m). A
+# maintained syscall wrapper rather than a raw libc call, and it is already in
+# the tree; covers macOS and Android (CLAUDE.md rules 1 and 7).
+rustix.workspace = true
 # Local interface addresses for the `listen_addr` a freshly minted pairing
 # reports. `getifaddrs` behind a maintained crate rather than a hand-rolled
 # `SIOCGIFCONF` walk or a "connect a UDP socket and read its local end" trick;

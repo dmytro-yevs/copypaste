@@ -6,9 +6,7 @@
 
 use std::fmt;
 
-use backoff::backoff::Backoff;
-use backoff::future::retry;
-use backoff::{Error as Retryable, ExponentialBackoff};
+use backon::{ExponentialBuilder, Retryable};
 use reqwest::Client;
 
 use super::error::{classify, RestError};
@@ -25,7 +23,7 @@ use crate::CloudConfig;
 pub struct SupabaseRest {
     config: CloudConfig,
     http: Client,
-    retry: ExponentialBackoff,
+    retry: ExponentialBuilder,
 }
 
 impl fmt::Debug for SupabaseRest {
@@ -48,23 +46,40 @@ impl SupabaseRest {
     /// Replace the retry policy — for tests, and for a caller with its own
     /// idea of how long a transient failure may take.
     #[must_use]
-    pub fn with_retry_policy(mut self, policy: ExponentialBackoff) -> Self {
+    pub fn with_retry_policy(mut self, policy: ExponentialBuilder) -> Self {
         self.retry = policy;
         self
     }
 
-    /// Newest-first page of rows whose version timestamp is at or after
-    /// `since_ms`.
+    /// One page of rows, oldest first, positioned by the keyset cursor.
     ///
-    /// The bound is **inclusive** (`gte`), not `gt`: `created_at` has
-    /// millisecond granularity, and a strict `gt` silently drops every row that
-    /// shares the boundary millisecond with the last row of the previous page —
-    /// the worst silent-data-loss bug in v1 (manifest §4.4, INV-N1). Re-offered
-    /// boundary rows are free to absorb, because applying a version already
-    /// applied is a no-op (INV-I1).
+    /// The cursor has two halves, and which of them the caller holds decides
+    /// the bound this sends:
     ///
-    /// The order is **ascending** — `(created_at asc, item_id asc)` — a compound
-    /// key with no ties, so paging is deterministic.
+    /// * `after_item_id = None` — the caller knows only the millisecond, so the
+    ///   bound is **inclusive** (`created_at=gte.…`). A strict `gt` on a
+    ///   millisecond alone silently drops every row that shares the boundary
+    ///   millisecond with the last row of the previous page — the worst
+    ///   silent-data-loss bug in v1 (manifest §4.4, INV-N1). Re-offered
+    ///   boundary rows are free to absorb, because applying a version already
+    ///   applied is a no-op (INV-I1).
+    /// * `after_item_id = Some(id)` — the caller knows the full position, so the
+    ///   bound is the compound keyset
+    ///   `or=(created_at.gt.M,and(created_at.eq.M,item_id.gt.ID))`: everything
+    ///   strictly after the pair `(M, ID)` in the page order. Exclusive is
+    ///   correct *here* and only here, because `(created_at, item_id)` is a
+    ///   total order with no ties, so "strictly after the last row I applied"
+    ///   cannot skip a row it has not seen.
+    ///
+    /// The millisecond-only form is what stalls once more than one page of rows
+    /// shares a single `created_at`: the watermark cannot advance past that
+    /// millisecond, so the same first page comes back forever and the rows
+    /// behind it never download (manifest §5.1 row 6, INV-N1, AT-24). The
+    /// compound form is what v1 sent and is why it did not have that problem.
+    ///
+    /// The order is **ascending** — `(created_at asc, item_id asc)` — and it is
+    /// the order the keyset is expressed in; the deployment's
+    /// `(user_id, created_at, item_id)` index serves both.
     ///
     /// Ascending is load-bearing, not a preference. A forward cursor cannot
     /// drain a newest-first page: take the newest `limit` rows and advance past
@@ -82,16 +97,24 @@ impl SupabaseRest {
         &self,
         token: &str,
         since_ms: i64,
+        after_item_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<CloudItem>, RestError> {
         let limit = limit.clamp(1, MAX_PAGE_LIMIT);
+        let since_ms = since_ms.max(0);
         let url = self.table_url();
-        let query = [
+        let mut query = vec![
             ("select", SELECT_COLUMNS.to_string()),
-            ("created_at", format!("gte.{}", since_ms.max(0))),
             ("order", "created_at.asc,item_id.asc".to_string()),
             ("limit", limit.to_string()),
         ];
+        match after_item_id {
+            Some(item_id) => {
+                validate_item_id(item_id)?;
+                query.push(("or", keyset_after(since_ms, item_id)));
+            }
+            None => query.push(("created_at", format!("gte.{since_ms}"))),
+        }
 
         let body = self
             .send(token, || {
@@ -220,11 +243,8 @@ impl SupabaseRest {
     where
         F: Fn() -> reqwest::RequestBuilder,
     {
-        let mut policy = self.retry.clone();
-        policy.reset();
         let build = &build;
-
-        retry(policy, move || async move {
+        let attempt = || async move {
             let sent = build()
                 .timeout(REST_TIMEOUT)
                 .header("apikey", self.config.anon_key.as_str())
@@ -232,22 +252,30 @@ impl SupabaseRest {
                 .send()
                 .await;
 
-            let err = match sent {
-                Ok(response) => match classify(response).await {
-                    Ok(body) => return Ok(body),
-                    Err(err) => err,
-                },
-                Err(err) => RestError::from_reqwest(err),
-            };
-
-            if err.is_transient() {
-                Err(Retryable::transient(err))
-            } else {
-                Err(Retryable::permanent(err))
+            match sent {
+                Ok(response) => classify(response).await,
+                Err(err) => Err(RestError::from_reqwest(err)),
             }
-        })
-        .await
+        };
+
+        attempt
+            .retry(self.retry)
+            .when(RestError::is_transient)
+            .await
     }
+}
+
+/// PostgREST's spelling of "strictly after the pair `(created_at, item_id)`".
+///
+/// The `and(…)` arm is what makes the bound safe to make exclusive: without it
+/// a strict `gt` on the millisecond alone loses every row sharing it, and an
+/// inclusive bound on the millisecond alone cannot get past a millisecond that
+/// holds more than one page (INV-N1).
+///
+/// `item_id` is `[A-Za-z0-9_-]` by [`validate_item_id`], checked by the caller,
+/// so it cannot close the parenthesis or add a disjunct.
+fn keyset_after(created_at: i64, item_id: &str) -> String {
+    format!("(created_at.gt.{created_at},and(created_at.eq.{created_at},item_id.gt.{item_id}))")
 }
 
 /// PostgREST's `in.(…)` filter value.
@@ -275,7 +303,7 @@ mod tests {
     async fn fetch_since_asks_for_an_inclusive_bound_and_a_total_order() {
         let stub = Stub::start(vec![Reply::json(200, "[]")]).await;
         client(&stub)
-            .fetch_since(TOKEN, 1_700_000_000_000, 20)
+            .fetch_since(TOKEN, 1_700_000_000_000, None, 20)
             .await
             .expect("fetch");
 
@@ -296,10 +324,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_known_tie_break_becomes_a_compound_keyset() {
+        // INV-N1 / AT-24. The millisecond alone cannot be paged past once one
+        // millisecond holds more than a page of rows; the pair can.
+        let stub = Stub::start(vec![Reply::json(200, "[]")]).await;
+        client(&stub)
+            .fetch_since(TOKEN, 1_700_000_000_000, Some("item-42"), 20)
+            .await
+            .expect("fetch");
+
+        let pairs = query_pairs(&stub.only_request().target);
+        assert_eq!(
+            value_of(&pairs, "or"),
+            "(created_at.gt.1700000000000,and(created_at.eq.1700000000000,item_id.gt.item-42))"
+        );
+        assert!(
+            !pairs.iter().any(|(k, _)| k == "created_at"),
+            "the keyset replaces the bare bound rather than joining it: {pairs:?}"
+        );
+        assert_eq!(value_of(&pairs, "order"), "created_at.asc,item_id.asc");
+    }
+
+    #[tokio::test]
+    async fn a_hostile_tie_break_cannot_rewrite_the_filter() {
+        let stub = Stub::start(vec![Reply::json(200, "[]")]).await;
+        let err = client(&stub)
+            .fetch_since(TOKEN, 1, Some("a),or=(deleted.eq.false"), 10)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, RestError::InvalidItem { .. }), "{err:?}");
+        assert_eq!(stub.request_count(), 0);
+    }
+
+    #[tokio::test]
     async fn fetch_since_sends_both_the_apikey_and_the_user_token() {
         let stub = Stub::start(vec![Reply::json(200, "[]")]).await;
         client(&stub)
-            .fetch_since(TOKEN, 0, 10)
+            .fetch_since(TOKEN, 0, None, 10)
             .await
             .expect("fetch");
 
@@ -316,7 +377,7 @@ mod tests {
     async fn the_page_size_is_bounded_in_both_directions() {
         let stub = Stub::start(vec![Reply::json(200, "[]")]).await;
         client(&stub)
-            .fetch_since(TOKEN, 0, 100_000)
+            .fetch_since(TOKEN, 0, None, 100_000)
             .await
             .expect("fetch");
         assert_eq!(
@@ -325,7 +386,10 @@ mod tests {
         );
 
         let stub = Stub::start(vec![Reply::json(200, "[]")]).await;
-        client(&stub).fetch_since(TOKEN, 0, 0).await.expect("fetch");
+        client(&stub)
+            .fetch_since(TOKEN, 0, None, 0)
+            .await
+            .expect("fetch");
         assert_eq!(
             value_of(&query_pairs(&stub.only_request().target), "limit"),
             "1"
@@ -336,7 +400,7 @@ mod tests {
     async fn a_negative_watermark_is_floored_at_zero() {
         let stub = Stub::start(vec![Reply::json(200, "[]")]).await;
         client(&stub)
-            .fetch_since(TOKEN, -42, 10)
+            .fetch_since(TOKEN, -42, None, 10)
             .await
             .expect("fetch");
         assert_eq!(
@@ -357,7 +421,7 @@ mod tests {
         ]"#;
         let stub = Stub::start(vec![Reply::json(200, body)]).await;
         let rows = client(&stub)
-            .fetch_since(TOKEN, 0, 10)
+            .fetch_since(TOKEN, 0, None, 10)
             .await
             .expect("fetch");
 
@@ -372,7 +436,10 @@ mod tests {
     #[tokio::test]
     async fn a_body_that_is_not_a_row_array_is_malformed() {
         let stub = Stub::start(vec![Reply::json(200, r#"{"message":"nope"}"#)]).await;
-        let err = client(&stub).fetch_since(TOKEN, 0, 10).await.unwrap_err();
+        let err = client(&stub)
+            .fetch_since(TOKEN, 0, None, 10)
+            .await
+            .unwrap_err();
         assert!(matches!(err, RestError::Malformed), "{err:?}");
     }
 

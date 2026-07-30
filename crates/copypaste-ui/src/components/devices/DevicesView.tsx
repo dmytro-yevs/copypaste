@@ -80,7 +80,7 @@ export function DevicesView() {
         </Button>
         <Button size="sm" variant="outline" onClick={() => setAccepting(true)}>
           <Link2 aria-hidden="true" />
-          Enter a code
+          Add a device
         </Button>
         <Button
           size="sm"

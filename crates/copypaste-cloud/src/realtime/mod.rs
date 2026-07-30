@@ -17,19 +17,41 @@
 //! joined delivers nothing at all, and backing off on it would halve the sync
 //! rate for no reason.
 //!
+//! # Using this from a process that stays up for days
+//!
+//! Four obligations, each of which is a way this goes quiet rather than a way
+//! it fails loudly:
+//!
+//! 1. **Hand every refreshed JWT to
+//!    [`RealtimeSubscription::set_access_token`].** Supabase closes a channel
+//!    whose token has expired; a subscription that never re-authenticates dies
+//!    about an hour in, and the only symptom is that events stop.
+//! 2. **Run a round on [`RealtimeEvent::Resubscribed`].** It is the one moment
+//!    at which the at-most-once property is known to have bitten.
+//! 3. **Report the channel's state to
+//!    [`CloudSync::note_push_channel`](crate::sync::CloudSync::note_push_channel)** —
+//!    on a confirmed join, and again when it drops. The long idle poll ceiling
+//!    is only defensible while this module is carrying the latency.
+//! 4. **Treat an `Err` as information, not as an end.** The task keeps
+//!    reconnecting on its own schedule; `None` from
+//!    [`RealtimeSubscription::next_event`] is the only terminal signal. A
+//!    repeated [`RealtimeError::JoinRefused`] usually means the token, so
+//!    refresh the session and push it down rather than rebuilding the
+//!    subscription.
+//!
 //! # Why this speaks Phoenix by hand
 //!
 //! `CLAUDE.md` rule 1 says reach for a crate first. There is no maintained Rust
 //! client for Supabase Realtime, and the Phoenix subset actually used here is
-//! four message shapes: `phx_join`, `phx_reply`, `heartbeat`, `phx_leave`, plus
-//! the `postgres_changes` payload. The v1 audit reached the same conclusion and
+//! five message shapes: `phx_join`, `phx_reply`, `heartbeat`, `access_token`,
+//! `phx_leave`, plus the `postgres_changes` payload. The v1 audit reached the same conclusion and
 //! it still holds under exemption 1 — but it holds only for *this* subset. This
 //! module is not a Phoenix client library: there is no channel registry, no
 //! push/ref correlation table, no presence, no generic event router. Adding one
 //! would be the wheel this rule exists to prevent.
 //!
 //! What is *not* hand-rolled: the websocket itself (`tokio-tungstenite`), the
-//! JSON (`serde_json`), and the reconnect schedule (`backoff`).
+//! JSON (`serde_json`), and the reconnect schedule (`backon`).
 //!
 //! # The wire format
 //!

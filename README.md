@@ -1,142 +1,92 @@
 # CopyPaste
 
-Encrypted clipboard manager for macOS and Android.
+Encrypted clipboard manager for macOS and Android. One app — Tauri v2 + React —
+on both platforms, over a shared Rust core. On desktop the app talks to a local
+daemon; on Android it links the core in-process
+([ADR-0003](docs/adr/0003-one-command-surface-two-backends.md)).
 
-**Status: v2.0.0-alpha.1 — a working core, on a rewrite branch.** The daemon
-captures, encrypts, stores and searches; the CLI drives all of it over a local
-socket; two devices pair and sync over a Noise channel. What is *not* yet
-verified is listed below, in detail, because most of it is unverifiable on the
-Linux host this is developed on.
+**v2.0.0-alpha.1, on the `v2-main` rewrite branch, unaudited.** `main` was reset
+to an empty history on 2026-07-29; v0.4.1 remains intact at
+`archive/v0.4.1-pre-rewrite` (2,153 commits). v2 reads nothing that version
+wrote and uses a distinct database filename, `copypaste-v2.db`, so an old file
+is never opened — [CLAUDE.md](CLAUDE.md) rule 3 has the reasoning and the one
+obligation it creates.
 
-**One cross-platform app: Tauri v2 + React, for macOS and Android both.**
-`crates/copypaste-ui` is the product surface, not a placeholder — see
-[ADR-0002](docs/adr/0002-one-cross-platform-app.md), which reverses an earlier
-decision to write a SwiftUI app and a Compose app. v1's visual design is not
-being carried over: the new look is undecided, so the design tokens in
-`design/` still hold v1's values and those values are placeholders, not the
-target.
-
----
-
-## Why the rewrite
-
-`main` was reset to an empty history on 2026-07-29. The previous
-implementation is preserved in full at **`archive/v0.4.1-pre-rewrite`** (2,153
-commits) — nothing was lost, it is one `git switch` away.
-
-An audit of all eight subsystems of v0.4.1 found ~150k lines of Rust and ~22k of
-TypeScript for a clipboard manager, with the same problems solved repeatedly:
-six independent retry/backoff implementations, three rate limiters, three models
-of one wire contract, two hand-written ASN.1 parsers, two regex secret engines.
-Alongside that, several subsystems were dead — a complete HELLO/HAVE/WANT sync
-engine (~5k lines including tests) that the daemon never instantiated, and a
-telemetry crate whose own documentation stated it was never wired to a caller.
-
-The cause was a "prefer hand-rolling" norm that had outlived the document
-defining it. v2 inverts that default: **a dependency is the default, and
-hand-rolling needs a written reason.** See [CLAUDE.md](CLAUDE.md).
-
-Current size, for comparison: ~25k lines of Rust across seven crates and ~2k of
-TypeScript, with roughly 520 Rust tests and 10 frontend tests.
+The rewrite exists because v0.4.1 had grown to ~150k lines of Rust with six
+retry implementations, three rate limiters and three models of one wire
+contract. v2 inverts the norm that produced them: **a dependency is the default,
+and hand-rolling needs a written reason.**
 
 ## Status
 
-Three columns, and the middle one is the honest part. "Unverified" does not mean
-"probably fine" — it means written against the manifests, compiled where the
-host allows, and never observed doing its job.
+Three columns. The middle one is the point: *unverified* means written, compiled
+and reviewed, and never observed doing its job on a platform we ship to.
 
-### Works — exercised by tests, and by the demo scripts end to end
+### Works — covered by tests, and by the demo scripts where a script reaches
 
-| Area | Crate | Notes |
-|---|---|---|
-| Crypto | `copypaste-core` | XChaCha20-Poly1305 + HKDF-SHA256, item id bound as AAD, fail-closed on a wrong key or AAD, zeroization |
-| Storage | `copypaste-core` | One SQLCipher schema (no migration ladder), r2d2 pool, FTS5 search, tombstones, pins, keyset pagination, cap eviction |
-| Secret detection | `copypaste-core` | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence model; sensitive items never reach the index |
-| Capture pipeline | `copypaste-daemon` | Clipboard behind a trait: `changeCount` change detection, burst handling, self-write suppression and the `org.nspasteboard.*` opt-outs are tested against the fake source on any host |
-| IPC | `copypaste-ipc`, `copypaste-daemon` | `0600` Unix socket, newline-JSON, `LinesCodec` framing, one typed contract crate shared by daemon, CLI and UI bridge |
-| CLI | `copypaste-cli` | `list search add copy delete clear pin unpin status pair peers unpair sync`; `--json` for scripting |
-| Peer sync | `copypaste-p2p`, `copypaste-daemon` | Noise `NNpsk0` over TCP, pairing codes, LWW merge, delete-wins, sensitive items never leave their origin device |
-| Design-token pipeline | `design/` | One DTCG source compiled by Style Dictionary per platform. The pipeline works; the *values* in it are v1's and are placeholders (see below) |
-| Interim history window | `crates/copypaste-ui` | React 19 + Tailwind v4 + React Query + TanStack Virtual; `npm run build` and `npm test` pass, and the Tauri shell builds and launches on Linux. Temporary — see the note at the top |
-
-`scripts/demo.sh` drives the built binaries through capture → encrypt → store →
-search → paste-back, and asserts the security rules. `scripts/demo-p2p.sh`
-stands up two daemons with separate data directories and ports and asserts
-pairing, two-way convergence, a no-op second sync, refusal of a wrong code, and
-unpairing. Both pass.
-
-### Unverified — written, but never observed working
-
-| Thing | Why not |
+| Area | Notes |
 |---|---|
-| macOS NSPasteboard backend | Compiled and lint-clean on `macos-14` in CI, never executed. The shared change-detection state machine it uses *is* tested; the binding-level assumptions are not. The daemon reports which backend is live (`status`), so a demo cannot be mistaken for the real thing. |
-| macOS Keychain device-secret store | Same: compiled in CI, never executed. Behind the `macos-keychain` feature; on Linux the daemon falls back to a `0600` file store, which is a development posture and not a shipping one. |
-| The UI as a *view* | WebKitGTK executes no JavaScript under headless Xvfb without a GPU. Confirmed rather than assumed: a stub daemon on the socket saw zero requests from the launched app, while the same probe against the CLI proved the harness worked. The shell is verified; what it renders is covered only by jsdom unit tests. |
-| mDNS discovery | The container has no multicast. Discovery is a convenience only — an explicit `--addr` always works, and that is the path the demo and the tests take. |
-| `copypaste-cloud` against a live Supabase project | Wired into the daemon and the CLI, and exercised end to end by `scripts/demo-cloud.sh` — **against a local stub, not Supabase.** Nothing has ever spoken to a real deployment. |
+| Crypto | XChaCha20-Poly1305 + HKDF-SHA256, item id bound as AAD, fail-closed, zeroized |
+| Storage | One SQLCipher schema, r2d2 pool, FTS5 search, tombstones, pins, cap eviction |
+| Secret detection | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence bands; a flagged item never reaches the index and never leaves the device |
+| Capture | Clipboard behind a trait, so `changeCount` detection, burst handling, self-write suppression and the `org.nspasteboard.*` opt-outs are all tested against the fake source on any host |
+| IPC | `0600` Unix socket, newline-JSON, `LinesCodec` framing; `copypaste-ipc` is the only model of the contract, shared by daemon, CLI and the Tauri bridge |
+| CLI | `list search add copy get delete clear pin unpin status pair peers unpair sync cloud`, `--json` for scripting |
+| Peer sync | Noise `NNpsk0` over TCP, pairing codes, LWW merge, delete-wins |
+| Cloud sync | Supabase auth, PostgREST, Realtime, rows sealed client-side under an Argon2id key; wired to the daemon and the CLI — but see below |
+| App | History, search, devices/pairing, settings; menu-bar item, popover, global hotkey and launch-at-login via Tauri plugins |
+| Design tokens | One DTCG source compiled by Style Dictionary; shadcn/ui on Tailwind v4, zinc base in OKLCH, with contrast measured and gated (`design/README.md`) |
 
-### Not built
+### Unverified
 
-**The Android target** of the Tauri app, which needs the bridge to embed the
-core in-process rather than speak to a daemon (ADR-0002), and **the new visual
-design**. Also: image, file and rich-text capture (text only today) ·
-frontmost-app attribution, private mode, the app-exclusion list · cloud sync
-wired to the daemon, with its quota/TTL job and signed LWW metadata ·
-age-based retention (`evict_older_than` exists, no loop calls it) · rate
-limiting (`governor` is declared in the workspace manifest and unused) ·
-release packaging — the Homebrew tap and its cask, per
-[ADR-0001](docs/adr/0001-macos-distribution-without-a-developer-id.md) ·
-telemetry.
-
-## What is here
-
-| Path | What it is |
+| Thing | What is and is not established |
 |---|---|
-| `crates/copypaste-core` | Crypto, storage, secret detection. No async, no IO beyond SQLite and the key store. |
-| `crates/copypaste-daemon` | Clipboard capture, the IPC server, the peer listener. The only crate that holds a key and a database at the same time. |
-| `crates/copypaste-cli` | `copypaste`. Speaks IPC and nothing else — it cannot open the database or decide what is sensitive. |
-| `crates/copypaste-ipc` | The one model of the wire contract, plus the path redactor every client shares. |
-| `crates/copypaste-p2p` | Noise `NNpsk0` transport, pairing, the LWW merge, mDNS discovery. |
-| `crates/copypaste-cloud` | Supabase auth, PostgREST, Realtime, client-side encryption, the sync driver. |
-| `crates/copypaste-ui` | The app: Tauri v2 + React 19, and the bridge to the daemon socket. macOS and Android both. |
-| `design/` | The Style Dictionary pipeline. One token source compiled per target; its current values are v1's and are placeholders. |
-| `scripts/` | `demo.sh` and `demo-p2p.sh`. |
-| `docs/rewrite/port-manifest/` | ~9,100 lines of specification harvested from v1 and its tests: ~500 acceptance tests, 200+ recovered bug IDs. **The behaviour in them is the requirements.** |
-| `docs/rewrite/target-architecture.md` | The library-first stack, per subsystem, the things that stay custom on purpose, and the three decisions taken since it was written. |
-| `docs/rewrite/design-reference.html` | Visual reference for the **v1** UI. Historical: v1's design is not being carried over. |
-| `docs/adr/` | Decisions with consequences that outlive the commit that took them. |
-| `CLAUDE.md` | The working rules. |
+| macOS `NSPasteboard` capture, macOS Keychain device-secret store | CI's `macos-check` job compiles and lints them on `macos-14` with `--all-features`, and runs the portable half of the suite there. Nothing drives a real pasteboard or a real keychain entry. On Linux the daemon falls back to a `0600` file store — a development posture, not a shipping one. |
+| Cloud sync against Supabase | `scripts/demo-cloud.sh` drives two daemons through sign-in, convergence and sensitive-item refusal against a **local stub** (`scripts/cloud-stub.py`). Nothing has ever spoken to a real project, and no deployment has had `supabase/`'s schema and RLS policies applied. |
+| The app as a rendered view | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. The suite is in flight, and WebKitGTK is neither WKWebView nor Android's WebView, so a green run is evidence about Linux only. |
+| Packaging and release | `.github/workflows/release.yml`, `scripts/release/`, `Casks/` and `packaging/` are written from documentation and v1's scripts. No step of it — `codesign`, `hdiutil`, the Tauri macOS bundler — has run on a Mac. |
+| mDNS discovery | This container has no multicast. Discovery is a convenience; an explicit `--addr` always works and is what the demo and the tests use. |
 
-`compat/` no longer exists. It held the evidence that v2 could still open v1
-data; it was removed when backward compatibility was dropped (`e148e3c1`). The
-fixtures remain reachable on the pre-rewrite branches.
+### Missing
 
-## No upgrade path
+A [parity audit](docs/rewrite/parity-audit.md) against v0.4.1 found nineteen
+capabilities that were neither ported nor recorded as dropped. Pairing UI and
+the popup/hotkey shell have since landed; the rest have not. In rough order of
+what a user loses: no sensitive-item auto-wipe, no export/import, no
+backup/restore, no device revocation or key rotation, dedup only inside a
+60-second window (so re-copying an old item makes a second row), no daemon
+config or server-owned settings, pairing codes that never expire, no streaming
+updates, no discovery listing, no notifications, no bulk actions. The audit is
+the list; it and the [security review](docs/rewrite/security-review.md) also
+name two safety gaps — the socket bind is TOCTOU-racy, and the IPC accept loop
+has no connection cap and no read or write timeouts.
 
-v2 does not read data written by v0.4.x. Existing installs lose their clipboard
-history and their paired devices; devices must be paired again.
+Also absent: image, file and rich-text capture (text only), frontmost-app
+attribution — which manifest 07 makes an independent *sensitivity* signal, not
+just metadata — private mode, the app-exclusion list, rate limiting, and
+telemetry. Two capabilities exist in `copypaste-core` with no caller:
+`retention::evict_older_than` (age-based retention) and `page::list_from`
+(keyset pagination — the wire and the app still page by offset).
 
-This is deliberate. It removes the migration ladder, `key_version` dispatch, the
-rotation and repair sweeps, and every wart kept only for bug-compatibility — a
-large share of the complexity this rewrite exists to shed. v2 stores its history
-in `copypaste-v2.db`, a distinct filename, so an old file is never opened or
-modified and remains on disk if you downgrade.
+## Build and run
 
-## Building
-
-Rust 1.96 (see `rust-toolchain.toml`). SQLCipher is built from source by
-`rusqlite`'s `bundled-sqlcipher` feature, so the first build is slow and needs a
-C toolchain.
+MSRV 1.96 (`rust-version` in `Cargo.toml`; `rust-toolchain.toml` tracks
+`stable`). SQLCipher is compiled from C source by `rusqlite`'s
+`bundled-sqlcipher` feature, so the first build is slow and needs a C toolchain.
+The Tauri crate is a workspace member, so `--workspace` also needs
+`libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev
+libayatana-appindicator3-dev libxdo-dev` on Linux.
 
 ```sh
 cargo build --release -p copypaste-daemon -p copypaste-cli
 cargo test --workspace
 
-./scripts/demo.sh        # capture → encrypt → store → search → paste back
-./scripts/demo-p2p.sh    # two daemons, pairing, two-way convergence
+./scripts/demo.sh          # capture → encrypt → store → search → paste back
+./scripts/demo-p2p.sh      # two daemons, pairing, two-way convergence
+./scripts/demo-cloud.sh    # two daemons against the local Supabase stub
 ```
 
-The daemon does not fork; backgrounding is the service manager's job.
+The daemon never forks; backgrounding is the service manager's job.
 
 ```sh
 target/release/copypaste-daemon --foreground &
@@ -144,37 +94,33 @@ target/release/copypaste list
 ```
 
 On Linux the clipboard source is a fake, drivable from `COPYPASTE_FAKE_CLIPBOARD`
-or over IPC, so the pipeline is demonstrable off a mac. `copypaste status`
-always names the live backend.
-
-The interim window, for as long as it exists:
+or over IPC, so the pipeline is demonstrable off a Mac. `copypaste status` always
+names the live backend, so a demo cannot be mistaken for the real thing.
 
 ```sh
-cd crates/copypaste-ui
-npm install
-npm run build && npm test
-npm run tauri dev        # needs a GPU-backed display; see "Unverified" above
+(cd crates/copypaste-ui && npm ci && npm run build && npm test)
+(cd design && npm ci && npm run rebuild)   # tokens, then the contrast gate
 ```
 
-## The manifests
+`e2e/README.md` covers the real-WebView suite and what the host needs for it.
 
-| Manifest | Subject |
-|---|---|
-| 01 | Clipboard capture — NSPasteboard quirks, privacy markers, 39 invariants |
-| 02 | Crypto — key derivation, AAD binding, fail-closed semantics |
-| 03 | Storage — schema, retention, the sensitive-never-in-FTS rule, SQLCipher parameters |
-| 04 | IPC — the method catalogue and the error-code taxonomy |
-| 05 | Sync — merge ordering, and the relay→Supabase parity checklist |
-| 06 | UI — behaviour contract and accessibility (binding), v1's design tokens (reference) |
-| 07 | Secret detection — the full ruleset with confidence thresholds |
+## The specification
 
-[`docs/rewrite/port-manifest/README.md`](docs/rewrite/port-manifest/README.md)
-records, per manifest, which sections are binding requirements and which became
-reference material — dropping backward compatibility retired the *formats*, and
-rejecting v1's design retired the *visuals*. Read it before treating any
-manifest section as a requirement. What neither decision touched is the
-behaviour: several hundred acceptance tests encoding bugs someone already paid
-for.
+`docs/rewrite/port-manifest/` is ~9,000 lines harvested from v0.4.1 and its
+tests: ~500 acceptance tests and 200+ recovered bug ids. A subsystem is not done
+until its manifest's tests pass.
+
+Read [`port-manifest/README.md`](docs/rewrite/port-manifest/README.md) first. It
+records, per manifest, which sections still bind and which became reference
+material: dropping backward compatibility retired the *formats*, and rejecting
+v1's design retired the *visuals*. Behaviour — platform quirks, security
+properties, the accessibility contract, the detection ruleset — binds
+throughout.
+
+## Decisions
+
+[`docs/README.md`](docs/README.md) indexes every ADR, audit and study, with the
+question each one settles. Start there rather than here.
 
 ## Licence
 

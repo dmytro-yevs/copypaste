@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, watch, Notify};
 use tokio::task::JoinHandle;
 
 use super::channel::{jwt_subject, open_channel, websocket_url};
@@ -26,6 +26,7 @@ const EVENT_QUEUE: usize = 64;
 /// channel down immediately instead of waiting for a heartbeat timeout.
 pub struct RealtimeSubscription {
     events: mpsc::Receiver<Result<RealtimeEvent, RealtimeError>>,
+    token: watch::Sender<String>,
     shutdown: Arc<Notify>,
     task: JoinHandle<()>,
 }
@@ -45,11 +46,12 @@ impl RealtimeSubscription {
     /// silent no-op. Everything after that — disconnects, reconnects,
     /// heartbeats — is handled by the background task.
     ///
-    /// `access_token` is the current user JWT. It is read at *every* reconnect
-    /// from the value passed here, so a long-lived subscription should be
-    /// dropped and re-created when the session is refreshed; a JWT captured once
-    /// and used forever silently re-joins with a dead token (manifest 05 §4.7,
-    /// non-negotiable 1).
+    /// `access_token` is the current user JWT, and it is the *initial* value of
+    /// something the caller must keep current: every session refresh has to
+    /// reach this subscription through
+    /// [`RealtimeSubscription::set_access_token`]. A JWT captured once and used
+    /// forever expires on a connection that stays open for hours, and re-joins
+    /// with a dead token after that (manifest 05 §4.7, non-negotiable 1).
     ///
     /// # Errors
     ///
@@ -68,12 +70,13 @@ impl RealtimeSubscription {
         let stream = open_channel(&url, &anon_key, &token, &user_id).await?;
 
         let (tx, events) = mpsc::channel(EVENT_QUEUE);
+        let (token_tx, token_rx) = watch::channel(token);
         let shutdown = Arc::new(Notify::new());
         let task = tokio::spawn(run(
             stream,
             url,
             anon_key,
-            token,
+            token_rx,
             user_id,
             tx,
             Arc::clone(&shutdown),
@@ -81,9 +84,25 @@ impl RealtimeSubscription {
 
         Ok(Self {
             events,
+            token: token_tx,
             shutdown,
             task,
         })
+    }
+
+    /// Hand the socket a refreshed JWT.
+    ///
+    /// Call this on every session refresh. It pushes an `access_token` frame
+    /// down the live channel — Supabase closes a channel whose token has
+    /// expired, so a long-lived subscription that never re-authenticates dies
+    /// quietly an hour in — and it is what the next reconnect will join with.
+    ///
+    /// Cheap and idempotent: a token identical to the current one still counts
+    /// as a change, which is harmless.
+    pub fn set_access_token(&self, access_token: &str) {
+        // An error means the socket task has stopped, in which case the
+        // subscription is finished and the token no longer matters.
+        let _ = self.token.send(access_token.to_owned());
     }
 
     /// The next event, or `None` once the subscription has stopped for good.

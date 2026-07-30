@@ -24,6 +24,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::plan::plan;
 use super::{SyncChannel, SyncError, SyncOutcome, SyncSource, SyncStats};
+use crate::now_ms;
 use crate::protocol::{
     content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
     MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
@@ -345,17 +346,6 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
     }
 
     chan.send(SyncMessage::Done).await
-}
-
-/// Milliseconds since the Unix epoch. Local because this crate does not depend
-/// on `copypaste-core`, where the shared helper lives. A clock before the epoch
-/// reads as 0, which loses every comparison — the safe direction.
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

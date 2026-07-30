@@ -21,4 +21,5 @@
 
 pub mod history;
 pub mod peers;
+pub mod service;
 pub mod status;

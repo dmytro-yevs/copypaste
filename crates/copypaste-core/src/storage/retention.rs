@@ -1,54 +1,47 @@
-//! What stays and what goes: the dedup window that decides whether a capture is
-//! a *new* clipboard event, and the two sweeps that enforce the history cap and
-//! the TTL.
+//! What stays and what goes: the lookup and the restamp behind dedup, and the
+//! sweeps that enforce the history cap, the age limit and the sensitive TTL.
 //!
-//! One rule spans both halves and is the reason they share a module: **a pinned
-//! item is never removed by anything in here.** Dedup will not fold one away,
-//! and neither eviction path can select one.
+//! One rule spans all of it and is the reason they share a module: **a pinned
+//! item is never removed by anything in here.** Dedup folds one into a bump
+//! rather than away, and no sweep can select one.
 
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
-use super::model::{item_columns, row_to_item, StoreError, StoredItem};
+use super::connection::write_tx;
+use super::model::{is_constraint_violation, item_columns, row_to_item, StoreError, StoredItem};
 use super::store::Store;
 
-/// Dedup window: two captures of identical content inside this interval are the
-/// same clipboard event.
+/// Width of the UNIQUE-index dedup bucket, in milliseconds.
+///
+/// This is **not** a dedup window — [`Store::insert_or_bump`] matches across all
+/// of history (manifest 01 I-23) and this only sizes the buckets of the index
+/// that backstops it against a concurrent double-insert. Two captures further
+/// apart than this land in different buckets and the index lets both through;
+/// the application-level probe is what collapses them.
 ///
 /// A genuine 60-second interval. v1 bucketed on `(wall_time / 60)` where
 /// `wall_time` is *milliseconds*, so its "minute" bucket was really 60 ms; that
 /// wart is reference-only now.
 pub const DEDUP_WINDOW_MS: i64 = 60_000;
 
-/// Width of the storage-level dedup bucket, in milliseconds. Kept equal to
-/// [`DEDUP_WINDOW_MS`] so the UNIQUE-index backstop and the application probe
-/// agree about what "the same clipboard event" means.
+/// The same number, named for the schema's `created_at / 60000`. Kept equal to
+/// [`DEDUP_WINDOW_MS`] so the index and the code that resolves its violations
+/// agree about where a bucket starts.
 const DEDUP_BUCKET_MS: i64 = DEDUP_WINDOW_MS;
 
 impl Store {
     /// Most recent live item with this content hash at or after `since_ms`.
     ///
-    /// Callers pass `now_ms - DEDUP_WINDOW_MS`. `deleted = 0` is mandatory:
-    /// tombstones keep their `content_hash`, and without the filter a re-copy of
-    /// a deleted item would match the tombstone and never come back.
+    /// A bounded probe, for callers that want "was this copied *recently*".
+    /// Dedup itself does not use it — [`Store::insert_or_bump`] searches all of
+    /// history — so passing `i64::MIN` is the unbounded question.
     pub fn find_recent_by_hash(
         &self,
         content_hash: &str,
         since_ms: i64,
     ) -> Result<Option<StoredItem>, StoreError> {
-        if content_hash.is_empty() {
-            return Ok(None);
-        }
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(concat!(
-            "SELECT ",
-            item_columns!(),
-            " FROM clipboard_items \
-              WHERE content_hash = ?1 AND created_at >= ?2 AND deleted = 0 \
-              ORDER BY created_at DESC, id DESC LIMIT 1"
-        ))?;
-        Ok(stmt
-            .query_row(params![content_hash, since_ms], row_to_item)
-            .optional()?)
+        Ok(newest_live_with_hash(&conn, content_hash, since_ms)?)
     }
 
     /// Enforces the history cap: hard-deletes the oldest unpinned items until at
@@ -65,7 +58,7 @@ impl Store {
     /// a user-visible delete event to propagate.
     pub fn evict_over_cap(&self, max_items: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
-        let tx = conn.transaction()?;
+        let tx = write_tx(&mut conn)?;
 
         let live: i64 = tx.query_row(
             "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
@@ -110,7 +103,7 @@ impl Store {
     /// Pinned items are never TTL-deleted (I9).
     pub fn evict_older_than(&self, cutoff_ms: i64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
-        let tx = conn.transaction()?;
+        let tx = write_tx(&mut conn)?;
         let victims: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT id FROM clipboard_items \
@@ -122,6 +115,123 @@ impl Store {
         let removed = hard_delete_in_tx(&tx, &victims)?;
         tx.commit()?;
         Ok(removed)
+    }
+
+    /// Is there anything the sensitive sweep could possibly delete?
+    ///
+    /// `CopyPaste-98ja`: on a machine that has never copied a secret, the sweep's
+    /// select-and-delete transaction otherwise ran every few seconds forever for
+    /// nothing. Answers `true` on a query error so a broken probe can never
+    /// suppress the sweep — the TTL is a security guarantee and the probe is
+    /// only an optimisation.
+    #[must_use]
+    pub(crate) fn has_wipeable_sensitive(&self) -> bool {
+        let Ok(conn) = self.conn() else {
+            return true;
+        };
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM clipboard_items \
+                            WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0)",
+            [],
+            |r| r.get::<_, bool>(0),
+        )
+        .unwrap_or(true)
+    }
+
+    /// Sensitive, unpinned, live rows whose capture is older than `cutoff_ms`.
+    ///
+    /// Candidates for the auto-wipe, not victims of it: whether a row may
+    /// actually be deleted is decided from its plaintext against the confidence
+    /// floor, in [`crate::sensitive::sweep_sensitive`]. Pinned rows are excluded
+    /// here rather than at the delete, so no later edit can lose the exemption
+    /// (manifest 03 I9).
+    pub(crate) fn expired_sensitive(&self, cutoff_ms: i64) -> Result<Vec<StoredItem>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ",
+            item_columns!(),
+            " FROM clipboard_items \
+              WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0 AND created_at < ?1 \
+              ORDER BY created_at ASC, id ASC"
+        ))?;
+        let rows = stmt.query_map([cutoff_ms], row_to_item)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Removes rows and their index entries outright.
+    ///
+    /// Crate-private, and the only destructive path that is not driven by a
+    /// count or an age: its one caller is the sensitive sweep, which has already
+    /// proved every id against the auto-wipe floor. A hard delete rather than a
+    /// tombstone because a tombstone would travel — and a secret this device
+    /// decided to wipe must not become a delete event that destroys another
+    /// device's copy on this device's say-so.
+    pub(crate) fn hard_delete(&self, ids: &[String]) -> Result<u64, StoreError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let removed = hard_delete_in_tx(&tx, ids)?;
+        tx.commit()?;
+        Ok(removed)
+    }
+}
+
+/// Newest live row carrying `content_hash`, at or after `since_ms`.
+///
+/// One body for both callers: the bounded probe [`Store::find_recent_by_hash`]
+/// exposes, and the unbounded one [`Store::insert_or_bump`] runs inside its
+/// transaction with `i64::MIN`. v1 grew a second dedup lookup here and the two
+/// disagreed about tombstones.
+///
+/// `deleted = 0` is mandatory: tombstones keep their `content_hash`, and without
+/// the filter a re-copy of a deleted item would match the tombstone and never
+/// come back.
+pub(super) fn newest_live_with_hash(
+    conn: &Connection,
+    content_hash: &str,
+    since_ms: i64,
+) -> rusqlite::Result<Option<StoredItem>> {
+    if content_hash.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare_cached(concat!(
+        "SELECT ",
+        item_columns!(),
+        " FROM clipboard_items \
+          WHERE content_hash = ?1 AND created_at >= ?2 AND deleted = 0 \
+          ORDER BY created_at DESC, id DESC LIMIT 1"
+    ))?;
+    stmt.query_row(params![content_hash, since_ms], row_to_item)
+        .optional()
+}
+
+/// Moves a row's version stamp to `created_at`, in the caller's transaction.
+///
+/// Forward only (T-37). `pinned` and `pin_order` are untouched, so a re-copied
+/// pin keeps its slot instead of jumping to the top of the list (INV-31).
+pub(super) fn bump_in_tx(
+    tx: &Transaction<'_>,
+    existing: &StoredItem,
+    created_at: i64,
+) -> rusqlite::Result<StoredItem> {
+    if created_at <= existing.created_at {
+        return Ok(existing.clone());
+    }
+    match tx.execute(
+        "UPDATE clipboard_items SET created_at = ?2 WHERE id = ?1 AND deleted = 0",
+        params![&existing.id, created_at],
+    ) {
+        Ok(_) => Ok(StoredItem {
+            created_at,
+            ..existing.clone()
+        }),
+        // The new stamp lands in a dedup bucket another live row already holds.
+        // Leaving the row where it is costs a recency bump; failing here would
+        // cost the capture, and data loss is the worse outcome.
+        Err(e) if is_constraint_violation(&e) => Ok(existing.clone()),
+        Err(e) => Err(e),
     }
 }
 
@@ -222,10 +332,85 @@ mod tests {
         let again = s.insert(item("same content", T0 + 5_000)).unwrap();
         assert_eq!(again.id, first.id);
         assert_eq!(s.count().unwrap(), 1);
+    }
 
-        let later = s.insert(item("same content", T0 + 120_000)).unwrap();
-        assert_ne!(later.id, first.id);
-        assert_eq!(s.count().unwrap(), 2);
+    /// Manifest 01 I-23 / T-36 / T-39: dedup has no window. A re-copy of
+    /// something captured long ago promotes the original row; it does not make a
+    /// second one. Until this landed, `Ingested::Duplicate` was only reachable
+    /// inside 60 s and history grew a copy every time after that.
+    #[test]
+    fn a_recopy_far_outside_any_window_bumps_the_original_row() {
+        let s = store();
+        let first = s.insert(item("same content", T0)).unwrap();
+        s.insert(item("something else", T0 + 60_000)).unwrap();
+
+        let a_week_later = s
+            .insert_or_bump(item("same content", T0 + 7 * 86_400_000))
+            .unwrap();
+        assert!(a_week_later.is_bump());
+        assert_eq!(a_week_later.item().id, first.id);
+        assert_eq!(a_week_later.item().created_at, T0 + 7 * 86_400_000);
+        assert_eq!(s.count().unwrap(), 2, "history must not have grown");
+
+        // ...and the bump is what puts it back on top (D9).
+        assert_eq!(s.list(10, 0).unwrap()[0].id, first.id);
+    }
+
+    /// T-37: a bump never moves a stamp backwards. An out-of-order or
+    /// clock-skewed capture must not demote the row it matched, or a peer that
+    /// already holds the later version would win the merge and undo it.
+    #[test]
+    fn a_bump_only_ever_moves_the_stamp_forward() {
+        let s = store();
+        let first = s.insert(item("same content", T0 + 600_000)).unwrap();
+        let earlier = s.insert_or_bump(item("same content", T0)).unwrap();
+        assert!(earlier.is_bump());
+        assert_eq!(earlier.item().created_at, T0 + 600_000);
+        assert_eq!(
+            s.get(&first.id).unwrap().unwrap().created_at,
+            T0 + 600_000
+        );
+    }
+
+    /// T-39 names pinned rows explicitly, and INV-31 says what a bump may not
+    /// do to one: the stamp moves, the pinned slot does not.
+    #[test]
+    fn a_pinned_row_is_bumped_in_place_rather_than_jumping_to_the_top() {
+        let s = store();
+        let pinned = s.insert(item("worth keeping", T0)).unwrap();
+        let other_pin = s.insert(item("also pinned", T0 + 1_000)).unwrap();
+        s.insert(item("ordinary", T0 + 2_000)).unwrap();
+        s.set_pinned(&pinned.id, true).unwrap();
+        s.set_pinned(&other_pin.id, true).unwrap();
+
+        let again = s
+            .insert_or_bump(item("worth keeping", T0 + 900_000))
+            .unwrap();
+        assert!(again.is_bump());
+        assert_eq!(again.item().id, pinned.id);
+        assert!(again.item().pinned, "the pin must survive the bump");
+
+        let ids: Vec<String> = s.list(10, 0).unwrap().into_iter().map(|i| i.id).collect();
+        assert_eq!(
+            ids[0], pinned.id,
+            "pin order decides the pinned section, not recency"
+        );
+        assert_eq!(ids[1], other_pin.id);
+    }
+
+    /// A re-copy after a delete is a genuinely new item: the tombstone keeps its
+    /// content hash, and matching against it would mean deleted content could
+    /// never come back.
+    #[test]
+    fn a_recopy_after_a_delete_is_a_fresh_row_not_a_bump() {
+        let s = store();
+        let first = s.insert(item("gone", T0)).unwrap();
+        s.delete(&first.id).unwrap();
+
+        let again = s.insert_or_bump(item("gone", T0 + 120_000)).unwrap();
+        assert!(!again.is_bump());
+        assert_ne!(again.item().id, first.id);
+        assert_eq!(s.count().unwrap(), 1);
     }
 
     #[test]

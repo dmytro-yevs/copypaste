@@ -12,14 +12,32 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
 
-import { HistoryList } from "@/components/history/HistoryList";
+import { HistoryList, quickSlot } from "@/components/history/HistoryList";
 import { items } from "@/test/harness";
+import type { Selection } from "@/hooks/useSelection";
 import type { Item } from "@/lib/ipc";
+
+/** A selection that records what was asked of it, so a test can assert on the
+ *  gesture rather than on the hook's internals. */
+function fakeSelection(over: Partial<Selection> = {}): Selection {
+  return {
+    selecting: false,
+    selected: new Set<string>(),
+    items: [],
+    allPinned: false,
+    begin: vi.fn(),
+    end: vi.fn(),
+    toggle: vi.fn(),
+    selectAll: vi.fn(),
+    ...over,
+  };
+}
 
 function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {}) {
   const listRef = createRef<HTMLDivElement>();
   const onActiveIdChange = vi.fn();
   const onCopy = vi.fn();
+  const onQuickCopy = vi.fn();
   const onDelete = vi.fn();
   const data = items(count);
 
@@ -34,15 +52,29 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
     onReveal: vi.fn(),
     onHide: vi.fn(),
     onCopy,
+    onQuickCopy,
     onTogglePin: vi.fn(),
     onDelete,
     onLoadMore: vi.fn(),
     listRef,
+    searching: false,
+    selection: fakeSelection(),
+    hasMore: false,
+    loadingMore: false,
     ...over,
   };
 
   const view = render(<HistoryList {...props} />);
-  return { ...view, props, data, listRef, onActiveIdChange, onCopy, onDelete };
+  return {
+    ...view,
+    props,
+    data,
+    listRef,
+    onActiveIdChange,
+    onCopy,
+    onQuickCopy,
+    onDelete,
+  };
 }
 
 describe("list semantics", () => {
@@ -147,5 +179,96 @@ describe("keyboard (AT-10)", () => {
     const { listRef, onActiveIdChange } = setup(3, { activeId: "row-1" });
     fireEvent.keyDown(listRef.current!, { key: "Escape" });
     expect(onActiveIdChange).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("⌘1–⌘9 quick copy", () => {
+  /**
+   * The fastest path in a clipboard manager: hotkey, glance, ⌘3. v1 had it and
+   * v2 did not (manifest 06 §3.5.3).
+   */
+  it("copies the nth row and asks for the window to go away", () => {
+    const { data, onQuickCopy, onCopy, listRef } = setup(5);
+    fireEvent.keyDown(listRef.current!, { key: "3", metaKey: true });
+    expect(onQuickCopy).toHaveBeenCalledWith(data[2]);
+    // Not the ordinary copy path: that one leaves the window up.
+    expect(onCopy).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for a slot with no row behind it", () => {
+    const { onQuickCopy, listRef } = setup(2);
+    fireEvent.keyDown(listRef.current!, { key: "7", metaKey: true });
+    expect(onQuickCopy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Inactive while searching. The digits address positions in the history, and
+   * a filtered list renumbers them under the user's fingers between keystrokes
+   * — so ⌘3 would copy a different item depending on how fast they typed.
+   */
+  it("is inactive while a search is running", () => {
+    const { onQuickCopy, listRef } = setup(5, { searching: true });
+    fireEvent.keyDown(listRef.current!, { key: "1", metaKey: true });
+    expect(onQuickCopy).not.toHaveBeenCalled();
+    expect(quickSlot("1", true)).toBeNull();
+    expect(quickSlot("1", false)).toBe(0);
+  });
+
+  it("rejects a digit outside the nine slots", () => {
+    expect(quickSlot("0", false)).toBeNull();
+    expect(quickSlot("9", false)).toBe(8);
+    expect(quickSlot("a", false)).toBeNull();
+  });
+});
+
+describe("selection mode", () => {
+  it("⌘A selects everything currently on screen", () => {
+    const selection = fakeSelection();
+    const { listRef } = setup(4, { selection });
+    fireEvent.keyDown(listRef.current!, { key: "a", metaKey: true });
+    expect(selection.selectAll).toHaveBeenCalledTimes(1);
+  });
+
+  /** §3.1.4: Escape clears the multi-selection first, and only then the single
+   *  one — otherwise leaving selection mode takes two presses that look alike. */
+  it("Escape leaves selection mode before it clears the active row", () => {
+    const selection = fakeSelection({ selecting: true });
+    const { listRef, onActiveIdChange } = setup(3, { selection });
+    fireEvent.keyDown(listRef.current!, { key: "Escape" });
+    expect(selection.end).toHaveBeenCalledTimes(1);
+    expect(onActiveIdChange).not.toHaveBeenCalled();
+  });
+
+  /** Delete must not act on the active row while a multi-selection is live:
+   *  the bulk bar's Delete is the one that means the selection. */
+  it("Delete does nothing while selecting", () => {
+    const rows = items(3);
+    const selection = fakeSelection({ selecting: true });
+    const { listRef, onDelete } = setup(3, {
+      selection,
+      items: rows,
+      activeId: rows[0]!.id,
+    });
+    fireEvent.keyDown(listRef.current!, { key: "Delete" });
+    expect(onDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("load more", () => {
+  /**
+   * A filtered list can be three rows long with a thousand unpaged matches
+   * behind it, and three rows do not scroll — so the near-bottom trigger alone
+   * strands the user on a result that looks empty and is not.
+   */
+  it("offers an explicit control when there are more pages", () => {
+    const { props } = setup(3, { hasMore: true });
+    const button = screen.getByRole("button", { name: /load more/i });
+    fireEvent.click(button);
+    expect(props.onLoadMore).toHaveBeenCalled();
+  });
+
+  it("offers nothing when the history is fully loaded", () => {
+    setup(3, { hasMore: false });
+    expect(screen.queryByRole("button", { name: /load more/i })).toBeNull();
   });
 });

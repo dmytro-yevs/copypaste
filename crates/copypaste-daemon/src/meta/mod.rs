@@ -55,6 +55,7 @@ mod write;
 mod testutil;
 
 pub use error::MetaError;
+pub(crate) use error::is_not_a_database;
 pub use open::Meta;
 
 use copypaste_p2p::protocol::ItemSummary;

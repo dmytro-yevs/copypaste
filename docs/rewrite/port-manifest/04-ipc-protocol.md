@@ -450,6 +450,25 @@ is `Uuid::from_bytes(file_id)`.
 
 ### 4.6 Config (`handlers_config.rs`)
 
+> **Amended for v2 (2026-07-30).** Implemented as `Method::{GetConfig,
+> SetConfig}` over `copypaste_ipc::config`, which is the single model of the
+> settings — bounds, validation and the per-field "does this take effect without
+> a restart" answer all live there, so the daemon, the CLI and the Settings UI
+> cannot disagree about them. Ten fields rather than v1's 21; the type's doc
+> comment names every one that was dropped and why, including one that was
+> **considered and refused** (a user-settable sensitive-content confidence
+> threshold, which would let a slider authorise auto-deletion).
+>
+> Three behaviours are binding and are implemented: `set_config` takes a *patch*
+> rather than a whole record, so two open Settings tabs cannot lose each other's
+> writes; a value out of range is rejected whole and the daemon keeps running on
+> the last good configuration; and no error names the config store. The record
+> lives in `sync_device_state` inside the SQLCipher database rather than in a
+> `config.toml`, which is what makes the last of those structural — there is no
+> path to leak — and is why a restore deliberately leaves that table alone.
+> Implemented in `crates/copypaste-ipc/src/config.rs`,
+> `crates/copypaste-daemon/src/settings.rs` and `server/config.rs`.
+
 | # | Method | Params | Success `data` | Errors | DB | Source |
 |---|---|---|---|---|---|---|
 | 20 | `get_config` | none | `AppConfigResponse` (see below) | untagged `err` (serialise failure); `internal_error` (`"get_config blocking task failed: {e}"`) | no | `:7` |
@@ -600,6 +619,22 @@ Phase B quiesces, moves the live DB aside, copies in, reopens, and rebuilds the 
 read pool so reads stop serving stale data. Any Phase-B failure rolls back. `force`
 only controls whether the aside safety copy is deleted on success.
 
+> **Amended for v2 (2026-07-30).** Phase A is binding and is implemented as
+> written. **Phase B is not**: v2 replaces the restored tables' contents inside a
+> single SQLite transaction over an `ATTACH`ed staging database instead of moving
+> files. The reason is inodes — the store's r2d2 pool and `daemon/src/meta` both
+> hold open connections to the live file, so a rename leaves them reading and
+> writing an unlinked one, and "rebuild the read pool" does not reach the second
+> connection at all. A transaction keeps every connection valid, makes rollback
+> the database's job, and removes the `-wal`/`-shm` juggling a rename needs.
+> Two consequences worth stating: `force` and the aside safety copy no longer
+> exist (there is nothing to keep or delete), and `sync_device_state` is
+> deliberately **not** restored — it holds this device's identity, its cloud
+> session and its settings, and a restore must not make this device start
+> claiming to be the one the backup came from. A backup holding a table this
+> build does not know how to restore is refused rather than partially applied.
+> Implemented in `crates/copypaste-daemon/src/server/dbadmin.rs`.
+
 `reset_database` sets `ready = true` and clears `degraded_reason` in-place on
 success — the daemon recovers without a restart. The `reset` field is retained
 purely because the TypeScript `ResetDatabaseResult` interface reads `data.reset`.
@@ -734,6 +769,22 @@ log records the item COUNT only, never content.
 
 ---
 
+> **Amended for v2 (2026-07-30).** `export`/`import` are implemented as
+> `copypaste_ipc::Method::{Export, Import}`. The bodies differ from the table
+> above because v2 is text-only and keeps no wire compatibility (CLAUDE.md rule
+> 3): an item carries `content: String` rather than `content_bytes_b64`, so there
+> is no base64 layer and no `MAX_IMPORT_ITEM_BYTES` — the per-item bound is the
+> `max_item_bytes` setting, and the batch is bounded at 10 000 items.
+> `skipped_non_text` is kept and still counted (a peer or the cloud can deliver a
+> non-text type), and `skipped_sensitive` and `skipped_undecryptable` are added
+> beside it, because "the export is shorter than the history" needs an answer for
+> all three reasons rather than one. `include_sensitive` still defaults to false,
+> and PG-26's floor-not-ceiling rule for `is_sensitive` is implemented by routing
+> every imported item through the daemon's ordinary ingest path. Implemented in
+> `crates/copypaste-daemon/src/server/transfer.rs`.
+
+---
+
 ### 4.18 Streaming — `watch_subscribe` (`connection.rs:517`)
 
 | # | Method | Params | Framing | Source |
@@ -750,6 +801,20 @@ D→C  {"ok":true,"event":"subscribed","id":"<id>"}\n                        ←
 D→C  {"ok":true,"event":"new_item","id":"<id>","item_id":"<uuid>",
       "content_type":"<type>","wall_time":<i64 ms>,"is_sensitive":<bool>}\n  ← 0..n events
 ```
+
+> **Amended for v2 (2026-07-30).** v2's `watch` keeps the interception and the
+> gate ordering and changes the framing: an event is an ordinary `Response`
+> envelope carrying `ResponseData::Event`, with the subscription's `id` echoed,
+> so there is one frame type and one decoder on each side rather than two. The
+> payload is deliberately smaller — `{event, item_count}`, no item metadata —
+> because a subscriber re-reads through the ordinary methods, which keeps one set
+> of rules about what a client may see rather than letting the push channel
+> become a second, laxer one. The ack is sent **after** the daemon has
+> subscribed, so a client that has seen it cannot miss a change that follows.
+> Two bounds are new and are stated in `server/watch.rs`: a subscriber is exempt
+> from the 30 s read deadline (being silent is the point) and is counted against
+> a separate cap of 8, so watchers cannot consume the 64-connection budget.
+> Implemented in `crates/copypaste-daemon/src/server/{listener,watch}.rs`.
 
 Rules:
 

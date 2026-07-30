@@ -14,7 +14,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { HISTORY_KEY, useHistory } from "@/hooks/useHistory";
 import { IpcFailure } from "@/lib/errors";
 import { PAGE_SIZE } from "@/lib/layout";
-import { items, testClient } from "@/test/harness";
+import { items, page, testClient } from "@/test/harness";
 
 const listItems = vi.fn();
 const searchItems = vi.fn();
@@ -46,7 +46,7 @@ describe("an idle poll produces no new data (INV-2 / AT-5)", () => {
   it("hands back the identical array when the service returns identical rows", async () => {
     // Byte-identical, but a *fresh* object each call, exactly as a real IPC
     // round trip produces. Structural sharing is what has to collapse them.
-    listItems.mockImplementation(async () => items(3));
+    listItems.mockImplementation(async () => page(items(3)));
 
     const { client, Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
@@ -63,16 +63,16 @@ describe("an idle poll produces no new data (INV-2 / AT-5)", () => {
   });
 
   it("does produce a new array when a row actually changes (INV-3 / AT-6)", async () => {
-    listItems.mockImplementationOnce(async () => items(3));
-    listItems.mockImplementation(async () => items(4));
+    listItems.mockImplementationOnce(async () => page(items(3)));
+    listItems.mockImplementation(async () => page(items(4)));
 
     const { client, Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
-    await waitFor(() => expect(result.current.data).toHaveLength(3));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
 
     const first = result.current.data;
     await client.refetchQueries({ queryKey: HISTORY_KEY });
-    await waitFor(() => expect(result.current.data).toHaveLength(4));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(4));
     expect(result.current.data).not.toBe(first);
   });
 });
@@ -85,20 +85,20 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
       id: `p2-${entry.id}`,
     }));
     listItems.mockImplementation(async (_limit: number, offset: number) =>
-      offset === 0 ? page1 : page2,
+      offset === 0 ? page(page1) : page(page2),
     );
 
     const { client, Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
-    await waitFor(() => expect(result.current.data).toHaveLength(PAGE_SIZE));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE));
 
     await result.current.fetchNextPage();
-    await waitFor(() => expect(result.current.data).toHaveLength(PAGE_SIZE * 2));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE * 2));
 
     // The poll that follows must not collapse the list back to page 1 — this
     // is CopyPaste-8ebg.16, and it is why the query refetches every page.
     await client.refetchQueries({ queryKey: HISTORY_KEY });
-    await waitFor(() => expect(result.current.data).toHaveLength(PAGE_SIZE * 2));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE * 2));
   });
 
   it("de-duplicates by id, because a capture can shift the page offsets", async () => {
@@ -106,26 +106,26 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
     // Page 2 overlaps page 1 — what happens when something is prepended
     // between the two fetches.
     listItems.mockImplementation(async (_limit: number, offset: number) =>
-      offset === 0 ? page1 : [...page1.slice(-2), ...items(3)],
+      offset === 0 ? page(page1) : page([...page1.slice(-2), ...items(3)]),
     );
 
     const { Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
-    await waitFor(() => expect(result.current.data).toHaveLength(PAGE_SIZE));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE));
 
     await result.current.fetchNextPage();
     await waitFor(() =>
-      expect(new Set(result.current.data?.map((entry) => entry.id)).size).toBe(
-        result.current.data?.length,
+      expect(new Set(result.current.data?.items.map((e) => e.id)).size).toBe(
+        result.current.data?.items.length,
       ),
     );
   });
 
   it("stops paging when a short page comes back", async () => {
-    listItems.mockImplementation(async () => items(3));
+    listItems.mockImplementation(async () => page(items(3)));
     const { Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
-    await waitFor(() => expect(result.current.data).toHaveLength(3));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
     expect(result.current.hasNextPage).toBe(false);
   });
 });
@@ -134,12 +134,12 @@ describe("search", () => {
   it("asks the service rather than paging the client (AT-73)", async () => {
     // `search` runs against the whole database, so a match at index 800 is
     // found without loading 800 rows first (CopyPaste-crh3.106).
-    searchItems.mockImplementation(async () => items(1));
+    searchItems.mockImplementation(async () => page(items(1)));
     const { Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory("needle"), {
       wrapper: Wrapper,
     });
-    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(1));
     expect(searchItems).toHaveBeenCalledWith("needle", expect.any(Number));
     expect(listItems).not.toHaveBeenCalled();
     // No load-more while searching: the filtered view is not a page window.
@@ -147,17 +147,17 @@ describe("search", () => {
   });
 
   it("keeps the previous rows visible between keystrokes", async () => {
-    searchItems.mockImplementation(async () => items(2));
+    searchItems.mockImplementation(async () => page(items(2)));
     const { Wrapper } = wrapper();
     const { result, rerender } = renderHook(({ q }) => useHistory(q), {
       wrapper: Wrapper,
       initialProps: { q: "ab" },
     });
-    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
     rerender({ q: "abc" });
     // Not undefined, and not an empty list — the list must not blank while the
     // next query is in flight.
-    expect(result.current.data).toHaveLength(2);
+    expect(result.current.data?.items).toHaveLength(2);
   });
 });
 

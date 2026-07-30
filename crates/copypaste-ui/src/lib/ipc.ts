@@ -31,6 +31,20 @@ export interface Item {
 }
 
 
+/**
+ * A page of history, and how many rows in it would not decrypt.
+ *
+ * `skipped_undecryptable` is not an error: the items that *did* open are still
+ * the user's data. It is the difference between a short page and a small
+ * history, and without it the user sees fewer items and no reason (finding 17).
+ * Named exactly as `copypaste_ipc::ItemPage` names it.
+ */
+export interface ItemPage {
+  readonly items: readonly Item[];
+  readonly skipped_undecryptable: number;
+}
+
+
 export interface StatusData {
   readonly version: string;
   readonly protocol_version: number;
@@ -97,12 +111,12 @@ async function call<T>(
 
 /* --------------------------------------------------------------- history --- */
 
-export function listItems(limit: number, offset: number): Promise<Item[]> {
-  return call<Item[]>("list", { limit, offset });
+export function listItems(limit: number, offset: number): Promise<ItemPage> {
+  return call<ItemPage>("list", { limit, offset });
 }
 
-export function searchItems(query: string, limit: number): Promise<Item[]> {
-  return call<Item[]>("search", { query, limit });
+export function searchItems(query: string, limit: number): Promise<ItemPage> {
+  return call<ItemPage>("search", { query, limit });
 }
 
 export function copyItem(id: string): Promise<Item> {
@@ -135,6 +149,17 @@ export function setPinned(id: string, pinned: boolean): Promise<Item> {
   return call<Item>("set_pinned", { id, pinned });
 }
 
+/**
+ * The complete pinned list, in the order the user wants it.
+ *
+ * Not routed to anything yet: `copypaste_ipc::Method` has no reorder verb, so
+ * the bridge refuses with `unavailable` and the drag handles stay hidden.
+ * `useCapabilities` is what asks.
+ */
+export function reorderPinned(ids: readonly string[]): Promise<void> {
+  return call<void>("reorder_pinned", { ids });
+}
+
 export function getStatus(): Promise<StatusData> {
   return call<StatusData>("status");
 }
@@ -162,12 +187,70 @@ export function syncNow(pairingId?: string): Promise<SyncResult[]> {
   return call<SyncResult[]>("sync_now", { pairingId: pairingId ?? null });
 }
 
+/**
+ * A device seen on the LAN. **Nothing here is verified** — name, address and
+ * pairing id are what an unauthenticated mDNS record claimed, and only the
+ * Noise handshake proves any of it (INV-15).
+ */
+export interface DiscoveredDevice {
+  readonly pairing_id: string;
+  readonly name: string;
+  /** `host:port`, ready to hand to `pairAccept`. */
+  readonly addr: string;
+  readonly last_seen_ms: number;
+  readonly paired: boolean;
+}
+
+export function listDiscovered(): Promise<DiscoveredDevice[]> {
+  return call<DiscoveredDevice[]>("discovered");
+}
+
+/** Advertise and browse again. Multicast is unreliable exactly where people
+ *  pair, so "nothing found" needs a retry that is not "quit the app". */
+export function rescanDiscovered(): Promise<DiscoveredDevice[]> {
+  return call<DiscoveredDevice[]>("rescan");
+}
+
 /* --------------------------------------------------------------- service --- */
 
-/** Not routed yet: starting the service needs a daemon-lifecycle decision. The
- *  offline screen falls back to the manual instruction on `unavailable`. */
-export function startService(): Promise<void> {
-  return call<void>("start_service");
+/**
+ * What the background service is doing (ADR-0004).
+ *
+ * A tagged union rather than a boolean because four situations need four
+ * answers: nothing to start, something to start, running, and running on a
+ * version this app did not ship with — which is what an upgrade leaves behind.
+ */
+export type ServiceState =
+  | { readonly state: "running"; readonly version: string; readonly matches_app: boolean; readonly ours: boolean }
+  | { readonly state: "unhealthy" }
+  | { readonly state: "stopped" }
+  | { readonly state: "not_installed" };
+
+export function serviceState(): Promise<ServiceState> {
+  return call<ServiceState>("service_state");
+}
+
+/** Starts it if it is not running, and resolves only once it answers. */
+export function startService(): Promise<ServiceState> {
+  return call<ServiceState>("start_service");
+}
+
+/** Stops what this app started and starts it again. Refuses for a service it
+ *  did not start — see ADR-0004. */
+export function restartService(): Promise<ServiceState> {
+  return call<ServiceState>("restart_service");
+}
+
+/**
+ * Hide the window, through the backend (INV-25).
+ *
+ * The frontend must never reach for the window itself. On macOS the app is an
+ * `Accessory`, so hiding hands activation back to whatever the user was in —
+ * which is the point of quick-copy, because the app never synthesises a paste
+ * (ADR-0001) and the user presses ⌘V themselves.
+ */
+export function hideWindow(): Promise<void> {
+  return call<void>("hide_window");
 }
 
 /* -------------------------------------------------------------- shortcut --- */

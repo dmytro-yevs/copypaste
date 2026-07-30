@@ -297,6 +297,27 @@ and restored, each with a bug behind it:
 Local-only, must NOT travel: the row PK (R-ID-2), the image thumbnail
 (capture-time derived, backfilled locally — `merge.rs:150-153`), `is_synced`.
 
+> **v2 divergence, decided 2026-07-30: pin state does not travel over the cloud
+> transport.** `CloudItem` has no `pinned`/`pin_order`, the Supabase table has no
+> such columns, and T-6 therefore has nothing to apply to on this path. Pinning
+> is a local decision that syncs, if at all, over P2P.
+>
+> This is a divergence and not an oversight, so it is written here rather than
+> left implicit for a third time. What it costs: pin a row on device A and it
+> stays unpinned on device B until a P2P round carries it, and the pin/unpin is
+> not an LWW *version* on the cloud path at all — a cloud row that wins the merge
+> does not carry pin state with it, so the receiver keeps its own.
+>
+> What it entangles: the daemon **refuses a remote delete of a pinned row**
+> precisely because pin state does not sync — without that refusal, a device that
+> cannot see the pin would delete a row the user had pinned, and data loss is the
+> worst outcome (`CLAUDE.md` rule 4). The two decisions stand or fall together.
+> Carrying pin state means revisiting that refusal in the same change: it is
+> three fields (`pinned`, `pin_order` as explicit `null` per T-6, and both on
+> `LocalItem`), a column pair and a migration, and a `CloudSource` that can read
+> and write them — none of it hard, all of it across two crates and the
+> deployment. Until that happens, neither half may be changed alone.
+
 ### 3.7 Merge pseudocode (transport-agnostic)
 
 ```
@@ -708,6 +729,24 @@ running as the backstop; only its *interval* changes.
 |---|---|---|
 | WS channel join confirmed | 60 s (catch-up safety net) | `cloud/poll/mod.rs:44` |
 | WS down / never connected | 10 s (sole download path) | `cloud/poll/mod.rs:49` |
+
+> **v2 divergence, decided 2026-07-30, in the first row only.** v2's cadence is a
+> ladder rather than two fixed intervals: it starts at 5 s, doubles while nothing
+> happens, and snaps back to 5 s on any change — so it is *faster* than this table
+> whenever anything is going on, and slower only after a long quiet spell. The
+> ceiling with a confirmed channel is **300 s, not 60 s**, for battery on a phone.
+>
+> That is only defensible because of something v1 did not have: a reconnected
+> channel emits `RealtimeEvent::Resubscribed`, which forces a round immediately.
+> The window this ceiling bounds is therefore "an event the server never sent"
+> (a row over Realtime's 1 MiB per-record limit, or one dropped by a full
+> subscriber queue), not "everything that happened while the socket was down".
+>
+> The second row is **not** diverged from: with no confirmed channel the ceiling
+> is 10 s, and that is also what a caller gets by default until it reports a
+> join. The failure this closes is a real one — a driver whose caller never wired
+> Realtime up would otherwise put two idle devices ten minutes apart end to end
+> while its own comment claimed the push channel was carrying the latency.
 
 - The fast/slow switch is gated on **channel-join confirmation** (`phx_reply ok`),
   **not** on socket-open. A socket that is open but whose channel never joined

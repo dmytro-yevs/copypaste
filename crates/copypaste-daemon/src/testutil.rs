@@ -105,6 +105,7 @@ fn reopen_with(
     let peers = PeerStore::open(&dir.path().join("peers-v2.json")).expect("peer store");
     // Port 0 is never bound in these tests; discovery degrades either way.
     let discovery = Discovery::start(name, &[], 0).expect("discovery");
+    let settings = crate::settings::Settings::load(&meta);
 
     let state = AppState::new(
         store,
@@ -112,8 +113,10 @@ fn reopen_with(
         Arc::new(Detector::new().expect("detector")),
         clipboard,
         meta,
-        P2p::new(peers, discovery, 0),
+        P2p::new(peers, Some(discovery), 0),
         cloud,
+        settings,
+        db_path,
     );
     state.set_ready(true);
     (Arc::new(state), dir)

@@ -32,7 +32,11 @@ pub enum BackendError {
     /// (missing, refused, permission denied) is not actionably different to a
     /// user, and distinguishing it would tempt someone to include the path in
     /// order to explain the difference.
-    #[error("CopyPaste isn't running. Start the daemon with `copypaste-daemon`, then try again.")]
+    ///
+    /// The message names no command: the app starts the service itself
+    /// (ADR-0004), so telling a user to open a terminal would be advice for a
+    /// button that is already on screen.
+    #[error("The background service isn't running.")]
     Unreachable,
 
     /// The daemon answered, and said no.
@@ -148,12 +152,15 @@ mod tests {
         assert!(!err.to_string().contains("bob"), "{err}");
     }
 
-    /// The unreachable message must be actionable and must not name the socket.
+    /// The unreachable message must name the condition, name no path, and —
+    /// since ADR-0004 — name no terminal command either: the app owns the
+    /// service's lifetime, so the recovery is a button, not a shell.
     #[test]
-    fn the_unreachable_message_is_actionable_and_pathless() {
+    fn the_unreachable_message_names_no_path_and_no_command() {
         let shown = BackendError::Unreachable.to_string();
-        assert!(shown.contains("copypaste-daemon"), "{shown}");
         assert!(!shown.contains('/'), "{shown}");
+        assert!(!shown.contains("copypaste-daemon"), "{shown}");
+        assert!(shown.contains("background service"), "{shown}");
     }
 
     /// Every variant's rendered text, including the ones this crate authors,

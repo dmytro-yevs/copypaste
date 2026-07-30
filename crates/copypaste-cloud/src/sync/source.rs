@@ -107,6 +107,30 @@ pub trait CloudSource: Send + Sync {
     /// [`SyncError::Source`] for a store failure.
     fn watermark(&self) -> Result<i64, SyncError>;
 
+    /// The tie-break half of that cursor: the `item_id` of the last row the
+    /// millisecond covers, if this source persists one.
+    ///
+    /// The cursor is a keyset over `(created_at, item_id)`, because a
+    /// millisecond is not unique and a bound over a non-unique key cannot be
+    /// paged past: once more than one page of rows shares one `created_at`, a
+    /// millisecond-only cursor re-fetches the same first page forever and the
+    /// rows behind it never download (manifest 05 §5.1 row 6, INV-N1, AT-24).
+    ///
+    /// `None` — the default — keeps the millisecond-only behaviour *across*
+    /// rounds: the next round re-offers the boundary millisecond, which is free
+    /// (INV-I1), and [`CloudSync::pull`](super::CloudSync::pull) still carries
+    /// the full keyset from page to page *within* a round. That bounds the
+    /// stall at one drain's worth of rows rather than removing it. A source
+    /// that persists both halves has no stall at all, and it is two columns of
+    /// work.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Source`] for a store failure.
+    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
+        Ok(None)
+    }
+
     /// The cursor [`CloudSync::push`](super::CloudSync::push) offers from.
     ///
     /// Defaults to [`CloudSource::watermark`], which is what a source with
@@ -144,6 +168,21 @@ pub trait CloudSource: Send + Sync {
     ///
     /// [`SyncError::Source`] for a store failure.
     fn set_watermark(&self, ms: i64) -> Result<(), SyncError>;
+
+    /// Persist both halves of the cursor.
+    ///
+    /// `item_id` is the last row covered by `ms`. The default drops it, which
+    /// is the millisecond-only cursor described on
+    /// [`CloudSource::watermark_item_id`]; a source that overrides one of the
+    /// two should override both, or the halves disagree.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Source`] for a store failure.
+    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
+        let _ = item_id;
+        self.set_watermark(ms)
+    }
 }
 
 // ---------------------------------------------------------------------------

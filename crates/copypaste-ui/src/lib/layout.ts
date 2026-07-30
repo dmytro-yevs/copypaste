@@ -62,6 +62,9 @@ export const REVEAL_TIMEOUT_MS = 10_000;
  *  difference (s7ia B1). The backoff exists so a dead service is not hammered. */
 export const POLL_ACTIVE_MS = 3000;
 export const POLL_BACKOFF_MS = 5000;
+/** What the poll slows to while the change stream is delivering. Not zero —
+ *  `useHistory.pollInterval` says why. */
+export const POLL_PUSH_BACKSTOP_MS = 30_000;
 /** Faster than the list: a 10s poll left the chip green long after the service
   *  had died (CopyPaste-f701). */
 export const STATUS_POLL_MS = 2000;

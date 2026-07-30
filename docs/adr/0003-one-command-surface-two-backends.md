@@ -205,8 +205,13 @@ cannot add an item or sync, which means it is not shippable.
   and reading the clipboard in the background is restricted from Android 10 on.
   What items enter history and how is an undecided product question, not just
   missing code.
-* **Window positioning under the menu-bar item** (macOS) is not implemented; the
-  popover is centred.
+* **Window positioning under the menu-bar item** is now implemented —
+  `shell::window::anchor`, with the clamp and the scale-factor arithmetic, and
+  five tests over the cases that have a right answer (right-hand edge, a
+  monitor with a negative origin, a Retina scale factor, a window larger than
+  the screen). What cannot be tested here is everything around it: the tray
+  rect and the monitor list come from the platform, and this host has neither.
+  Confirming the popover actually lands under the icon needs a Mac.
 
 ## Verification status
 

@@ -1,24 +1,43 @@
 //! Item CRUD: everything that writes or reads a `clipboard_items` row without
 //! going through FTS or a retention sweep. Two invariants live here: layer 1 of
-//! the ADR-015 sensitive/FTS exclusion (in [`Store::insert`]), and that a
-//! delete is a *tombstone*, not a row removal.
+//! the ADR-015 sensitive/FTS exclusion (in [`Store::insert_or_bump`]), and that
+//! a delete is a *tombstone*, not a row removal.
 
 use rusqlite::{params, OptionalExtension};
 
+use super::connection::write_tx;
 use super::model::{
-    is_constraint_violation, item_columns, row_to_item, NewItem, StoreError, StoredItem,
+    is_constraint_violation, item_columns, row_to_item, Ingest, NewItem, StoreError, StoredItem,
 };
-use super::retention::find_in_bucket;
+use super::retention::{bump_in_tx, find_in_bucket, newest_live_with_hash};
 use super::search::upsert_fts_in_tx;
 use super::store::Store;
 
 impl Store {
-    /// Inserts an item and returns it as stored.
+    /// Stores a capture, or promotes the row that already holds this content.
     ///
-    /// Dedup: if an identical `content_hash` already occupies the same dedup
-    /// bucket, no new row is written and the existing item is returned, so the
-    /// call is idempotent under a race.
-    pub fn insert(&self, item: NewItem) -> Result<StoredItem, StoreError> {
+    /// Dedup is **unbounded**: a match is looked for across all live history,
+    /// not inside a recency window, and the survivor's `created_at` is moved to
+    /// the new capture time (manifest 01 I-23 / T-36 / T-39, manifest 03 D9).
+    /// Re-copying something from last week promotes it instead of growing a
+    /// second row, which is the behaviour a clipboard manager is judged on.
+    ///
+    /// # The bump is a version stamp, not a display hint
+    ///
+    /// `created_at` is merge key 1 on both sync transports
+    /// (`copypaste_p2p::sync::merge_decision`), so restamping it publishes a new
+    /// version: the peer takes it, and the item rises on that device too. That
+    /// is the intended reading of a re-copy — the user touched this item now, on
+    /// this device — and it converges, because the two sides then tie on all
+    /// four keys and `KeepLocal` ends it. The rejected alternative was a
+    /// local-only `bumped_at` used for ordering: it needs a second sort key that
+    /// the merge does not see, which is how the local list order and the synced
+    /// order come apart.
+    ///
+    /// A bump only ever moves the stamp *forward* (T-37), and it leaves
+    /// `pinned` / `pin_order` alone: a re-copied pin keeps its slot in the
+    /// pinned section rather than jumping to the top (manifest 06 INV-31).
+    pub fn insert_or_bump(&self, item: NewItem) -> Result<Ingest, StoreError> {
         // ADR-015 layer 1: unconditional, and it ignores what the caller
         // passed. A sensitive item is never indexed.
         let search_text = if item.is_sensitive {
@@ -36,7 +55,15 @@ impl Store {
         // against it (see `NewItem::id`).
         let id = item.id.clone();
         let mut conn = self.conn()?;
-        let tx = conn.transaction()?;
+        let tx = write_tx(&mut conn)?;
+
+        // The probe and the bump share the insert's transaction, so no third
+        // capture can land between finding the row and restamping it.
+        if let Some(existing) = newest_live_with_hash(&tx, &item.content_hash, i64::MIN)? {
+            let bumped = bump_in_tx(&tx, &existing, item.created_at)?;
+            tx.commit()?;
+            return Ok(Ingest::Bumped(bumped));
+        }
 
         let insert = tx.execute(
             "INSERT INTO clipboard_items \
@@ -57,14 +84,16 @@ impl Store {
         match insert {
             Ok(_) => {}
             Err(e) if is_constraint_violation(&e) => {
-                // The dedup backstop fired. Resolve the winner *inside* the same
-                // transaction so there is no TOCTOU gap between the failed
-                // INSERT and this lookup.
+                // The dedup backstop fired: a concurrent capture of the same
+                // content committed between the probe above and this INSERT.
+                // Resolve the winner *inside* the same transaction so there is
+                // no TOCTOU gap between the failed INSERT and this lookup.
                 let existing = find_in_bucket(&tx, &item.content_hash, item.created_at)?;
                 return match existing {
                     Some(existing) => {
-                        tx.rollback()?;
-                        Ok(existing)
+                        let bumped = bump_in_tx(&tx, &existing, item.created_at)?;
+                        tx.commit()?;
+                        Ok(Ingest::Bumped(bumped))
                     }
                     None => Err(e.into()),
                 };
@@ -77,7 +106,7 @@ impl Store {
         }
         tx.commit()?;
 
-        Ok(StoredItem {
+        Ok(Ingest::Inserted(StoredItem {
             id,
             content_ciphertext: item.content_ciphertext,
             nonce: item.nonce,
@@ -85,14 +114,23 @@ impl Store {
             created_at: item.created_at,
             pinned: false,
             is_sensitive: item.is_sensitive,
-        })
+        }))
     }
 
-    /// Pinned first, then newest first.
+    /// [`Store::insert_or_bump`] for callers that do not need to know which of
+    /// the two happened.
+    pub fn insert(&self, item: NewItem) -> Result<StoredItem, StoreError> {
+        self.insert_or_bump(item).map(Ingest::into_item)
+    }
+
+    /// Pinned first, then newest first, by offset.
     ///
     /// The order is *total* (`pinned DESC, pin_order, created_at DESC, id DESC`)
-    /// — the trailing `id` tiebreak is what a keyset cursor would seek on, and
-    /// it keeps offset pages stable when rows tie on `created_at`.
+    /// — the trailing `id` tiebreak keeps pages stable when rows tie on
+    /// `created_at`, and it is what [`Store::list_from`] seeks on.
+    ///
+    /// Prefer `list_from` for anything a user scrolls: an offset window shifts
+    /// under a list that grows at the top, which is `CopyPaste-8ebg.57`.
     pub fn list(&self, limit: u32, offset: u32) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(concat!(
@@ -124,7 +162,7 @@ impl Store {
     /// propagate the delete instead of resurrecting the item.
     pub fn delete(&self, id: &str) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
-        let tx = conn.transaction()?;
+        let tx = write_tx(&mut conn)?;
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
@@ -142,7 +180,7 @@ impl Store {
     /// Soft-deletes every live item, returning how many were affected.
     pub fn delete_all(&self) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
-        let tx = conn.transaction()?;
+        let tx = write_tx(&mut conn)?;
         // Pinned rows survive. Manifest 04 is explicit that delete_all
         // tombstones non-pinned rows only, and pinning is the one gesture by
         // which a user says "keep this" — clearing history must not be the
@@ -171,7 +209,7 @@ impl Store {
     /// section.
     pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
-        let tx = conn.transaction()?;
+        let tx = write_tx(&mut conn)?;
         let exists: Option<i64> = tx
             .query_row(
                 "SELECT 1 FROM clipboard_items WHERE id = ?1 AND deleted = 0",

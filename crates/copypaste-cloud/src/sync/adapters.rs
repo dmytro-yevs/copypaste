@@ -13,7 +13,7 @@ use crate::rest::CloudItem;
 /// `RestError` -> [`TransportFault`].
 ///
 /// The interesting arm is the transient one. `SupabaseRest` retries `Network`
-/// and `Server` under the crate's single `backoff` policy *before* surfacing
+/// and `Server` under the crate's single `backon` policy *before* surfacing
 /// them, so by the time one arrives here the 1 s → 30 s × 4 budget that
 /// manifest 05 §4.6.3 asks for has already been spent. It is still classified
 /// as [`TransportFault::Transient`] — that is what it is, and it is what a log
@@ -46,9 +46,10 @@ impl RestApi for crate::rest::SupabaseRest {
         &self,
         token: &str,
         since_ms: i64,
+        after_item_id: Option<&str>,
         limit: u32,
     ) -> Result<Vec<CloudItem>, TransportFault> {
-        crate::rest::SupabaseRest::fetch_since(self, token, since_ms, limit)
+        crate::rest::SupabaseRest::fetch_since(self, token, since_ms, after_item_id, limit)
             .await
             .map_err(classify_rest)
     }

@@ -144,7 +144,10 @@ Verified correct:
 * *"`evict_older_than` exists, no loop calls it"* — true; `grep` finds only test
   callers. And `evict_over_cap` **is** called (`capture.rs:216`), so the
   claim is precise rather than sweeping.
-* *"`governor` is declared in the workspace manifest and unused"* — true.
+* *"`governor` is declared in the workspace manifest and unused"* — was true;
+  the declaration was removed on 2026-07-30 rather than left standing as a claim
+  the code did not honour. Rate limiting is still unbuilt, which is now visible
+  as an absence instead of as a dependency.
 * *"cloud sync … not wired into the daemon or the CLI"* — true at `HEAD`: the
   `Method` enum has no cloud variants and `dispatch` is exhaustive without them.
   **[in flight]**.
@@ -641,7 +644,7 @@ Stated explicitly so none of it is miscounted as loss.
 | v1 | v2 | Sanctioned by |
 |---|---|---|
 | 6 retry/backoff implementations + an unused `BackoffScheduler` | one `cadence`/`retry` path in `copypaste-cloud` | CLAUDE.md rule 1 |
-| 3 rate limiters, `governor` already a dependency | none yet (declared) | README |
+| 3 rate limiters | none yet, and no dependency pretending otherwise | README |
 | 3 models of the wire contract, CLI importing none | one `Method` enum, both dispatchers exhaustive over it | manifest 04 §10.1 |
 | 4 Lamport-ordering implementations + a `LamportClock` with no production caller | one comparator on `created_at → content_hash → deleted → origin_device_id`, plus a future-stamp ceiling | port-manifest README; manifest 05 §7.2/§7.3 |
 | structural CRDT would be the "proper" answer | LWW over metadata, because items are opaque ciphertext at rest | CLAUDE.md rule 1 exemption 2, stated in `merge.rs`'s module doc |

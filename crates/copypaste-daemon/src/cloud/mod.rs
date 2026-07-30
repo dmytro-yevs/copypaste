@@ -17,6 +17,7 @@
 
 pub mod handlers;
 pub mod poll;
+pub mod realtime;
 pub mod source;
 
 use std::sync::atomic::{AtomicI64, Ordering};

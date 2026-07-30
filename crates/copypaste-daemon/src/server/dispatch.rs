@@ -11,12 +11,12 @@ use std::sync::Arc;
 use copypaste_ipc::{ErrorCode, Method, Request, Response, PROTOCOL_VERSION};
 use tracing::{debug, error};
 
-use super::items;
 use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
+use super::{config, dbadmin, items, transfer};
 use crate::AppState;
 
 /// Parse one request line, run the gates, dispatch.
-pub(super) fn dispatch_line(
+pub(crate) fn dispatch_line(
     state: &Arc<AppState>,
     line: &str,
 ) -> impl std::future::Future<Output = Response> {
@@ -98,6 +98,16 @@ fn protocol_gate(request: &Request) -> Option<Response> {
 fn requires_ready(method: &Method) -> bool {
     match method {
         Method::Status => false,
+        // Settings live in the database, so reading them needs it open. There
+        // is no degraded mode in v2 — a daemon whose database will not open
+        // does not finish starting — so nothing is lost by gating them, and
+        // `Status` remains the one question answerable before readiness.
+        | Method::GetConfig
+        | Method::SetConfig { .. }
+        // Discovery is a network table held in memory, and a client asking
+        // "what is on the LAN" has nothing to do with the database.
+        | Method::Discovered
+        | Method::Rescan => false,
         Method::List { .. }
         | Method::Search { .. }
         | Method::Copy { .. }
@@ -119,8 +129,20 @@ fn requires_ready(method: &Method) -> bool {
         // out what state the daemon is in.
         | Method::CloudSignIn { .. }
         | Method::CloudSignOut
-        | Method::CloudSyncNow => true,
+        | Method::CloudSyncNow
+        // Transfer and database administration all read or write history.
+        // `Restore` is manifest 04's "recovery escape hatch" and is gated here
+        // anyway, deliberately: v1 needed it ungated because it had a degraded
+        // mode to escape from, and v2 does not.
+        | Method::Export { .. }
+        | Method::Import { .. }
+        | Method::Backup { .. }
+        | Method::Restore { .. } => true,
         Method::CloudStatus => false,
+        // Intercepted in `server::listener` before dispatch — it changes what
+        // the connection is — and never reaches here. Listed rather than left
+        // to a `_` so a new method is still a compile error.
+        Method::Watch => false,
     }
 }
 
@@ -143,6 +165,8 @@ async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
         Method::SyncNow { pairing_id } => {
             crate::p2p::handlers::sync_now(state, id, pairing_id.as_deref()).await
         }
+        Method::Discovered => crate::p2p::handlers::discovered(state, id).await,
+        Method::Rescan => crate::p2p::handlers::rescan(state, id).await,
         Method::CloudSignIn {
             email,
             password,
@@ -167,7 +191,7 @@ async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
 }
 
 /// The blocking half of [`dispatch`]. Exhaustive over `Method` by design.
-pub(super) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
+pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
     match method {
         Method::Status => items::status(state, id),
         Method::List { limit, offset } => items::list(state, id, limit, offset),
@@ -181,6 +205,15 @@ pub(super) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             id: item_id,
             pinned,
         } => items::pin(state, id, &item_id, pinned),
+        Method::Export {
+            limit,
+            include_sensitive,
+        } => transfer::export(state, id, limit, include_sensitive),
+        Method::Import { items } => transfer::import(state, id, items),
+        Method::Backup { dest_path } => dbadmin::backup(state, id, &dest_path),
+        Method::Restore { src_path, confirm } => dbadmin::restore(state, id, &src_path, confirm),
+        Method::GetConfig => config::get(state, id),
+        Method::SetConfig { patch } => config::set(state, id, &patch),
         // Unreachable: `dispatch` takes these first. Spelled out rather than
         // left to a `_` so that adding a method to the enum is still a compile
         // error here, which is the whole point of dispatching on a type.
@@ -189,10 +222,13 @@ pub(super) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         | Method::Unpair { .. }
         | Method::Peers
         | Method::SyncNow { .. }
+        | Method::Discovered
+        | Method::Rescan
         | Method::CloudSignIn { .. }
         | Method::CloudSignOut
         | Method::CloudStatus
-        | Method::CloudSyncNow => {
+        | Method::CloudSyncNow
+        | Method::Watch => {
             error!("a network operation reached the blocking dispatcher");
             Response::err(id, ErrorCode::Internal, MSG_INTERNAL)
         }
@@ -265,6 +301,24 @@ mod tests {
         assert!(requires_ready(&Method::Pin {
             id: "x".into(),
             pinned: true
+        }));
+        assert!(requires_ready(&Method::Export {
+            limit: 0,
+            include_sensitive: false
+        }));
+        assert!(requires_ready(&Method::Import { items: Vec::new() }));
+        assert!(requires_ready(&Method::Backup {
+            dest_path: "x".into()
+        }));
+        assert!(requires_ready(&Method::Restore {
+            src_path: "x".into(),
+            confirm: true
+        }));
+        assert!(!requires_ready(&Method::Discovered));
+        assert!(!requires_ready(&Method::Rescan));
+        assert!(!requires_ready(&Method::GetConfig));
+        assert!(!requires_ready(&Method::SetConfig {
+            patch: copypaste_ipc::ConfigPatch::default()
         }));
     }
 

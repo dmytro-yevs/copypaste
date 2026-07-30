@@ -82,6 +82,9 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
             {
                 warn!(error = ?e, "could not advance the upload floor");
             }
+            if stats.applied > 0 {
+                state.note_remote_change();
+            }
             if stats.changed() || stats.skipped_sensitive > 0 {
                 info!(
                     uploaded = stats.uploaded,
