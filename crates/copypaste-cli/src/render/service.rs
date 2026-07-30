@@ -139,6 +139,19 @@ pub fn status_text(status: &StatusData) -> String {
         );
     }
 
+    if status.legacy_history_present {
+        // Names no path, deliberately: the location discloses the local
+        // username (CLAUDE.md rule 4), and the fact a user needs is that
+        // nothing was lost, not where it is.
+        lines.push(String::new());
+        lines.push(
+            "note: a CopyPaste 0.4 history is on this device. This version cannot read it \
+             and has not changed it, so an earlier build still opens it; this version has \
+             started a new history."
+                .to_string(),
+        );
+    }
+
     lines.join("\n")
 }
 
@@ -255,6 +268,7 @@ mod tests {
             item_count: 42,
             capture_running: true,
             clipboard_backend: backend.into(),
+            legacy_history_present: false,
         }
     }
 
@@ -278,6 +292,23 @@ mod tests {
     fn status_flags_a_fake_clipboard_backend() {
         let text = status_text(&status(PROTOCOL_VERSION, "fake"));
         assert!(text.contains("not the system clipboard"), "{text}");
+    }
+
+    /// CLAUDE.md rule 3's obligation, at the surface a user actually reads:
+    /// "still there" and "unchanged" are the two facts, and neither is
+    /// deducible from an empty history.
+    #[test]
+    fn status_says_a_v0_4_history_is_present_and_untouched() {
+        let quiet = status_text(&status(PROTOCOL_VERSION, "macos-pasteboard"));
+        assert!(!quiet.contains("0.4"), "{quiet}");
+
+        let text = status_text(&StatusData {
+            legacy_history_present: true,
+            ..status(PROTOCOL_VERSION, "macos-pasteboard")
+        });
+        assert!(text.contains("CopyPaste 0.4"), "{text}");
+        assert!(text.contains("not changed it"), "{text}");
+        assert!(!text.contains('/'), "no path may appear: {text}");
     }
 
     #[test]

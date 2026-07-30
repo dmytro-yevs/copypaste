@@ -8,9 +8,13 @@
 //! onto the wire.
 //!
 //! They are gathered in one file so `ALL_MESSAGES` below is provably the whole
-//! set: the test that pins the no-path rule is only as good as its list, and a
-//! message defined next to its handler is a message that can be added without
-//! anyone noticing.
+//! set *this module authors*: the test that pins the no-path rule is only as
+//! good as its list, and a message defined next to its handler is a message
+//! that can be added without anyone noticing.
+//!
+//! One set is not here: `crate::p2p::handlers` puts `copypaste_p2p::NodeError`
+//! straight onto the wire, so those sentences are pinned pathless by that
+//! crate's own test rather than by this one.
 
 use std::fmt::Display;
 
@@ -126,8 +130,9 @@ pub(super) fn decrypt_error(id: u64, error: &CryptoError) -> Response {
 mod tests {
     use super::*;
 
-    /// Every string this server can put in `Response.error`. Gathering the
-    /// constants in one file is what makes this list provably complete.
+    /// Every string this module puts in `Response.error`. Gathering the
+    /// constants in one file is what makes this list provably complete — see
+    /// the module header for the one set that is pinned elsewhere.
     const ALL_MESSAGES: &[&str] = &[
         MSG_NOT_READY,
         MSG_NOT_FOUND,
