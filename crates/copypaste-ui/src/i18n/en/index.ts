@@ -1,3 +1,4 @@
+import { capture } from "@/i18n/en/capture";
 import { common, errors, nav } from "@/i18n/en/common";
 import { devices } from "@/i18n/en/devices";
 import { history } from "@/i18n/en/history";
@@ -12,6 +13,7 @@ export const en = {
   history,
   devices,
   settings,
+  capture,
 } as const;
 
 export type Catalogue = typeof en;

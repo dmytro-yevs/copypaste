@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
+import { CaptureStatus } from "@/components/capture/CaptureStatus";
 import { EmptyState } from "@/components/EmptyState";
 import { BulkBar } from "@/components/history/BulkBar";
 import { HistoryList } from "@/components/history/HistoryList";
@@ -202,6 +203,10 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
           onCancel={selection.end}
         />
       )}
+
+      {/* §5 rule 1: which rung is live is visible wherever the history is,
+          not buried in a diagnostics screen. */}
+      <CaptureStatus />
 
       <SkippedNotice count={page.skipped} />
 

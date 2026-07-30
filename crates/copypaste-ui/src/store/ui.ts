@@ -8,7 +8,10 @@
  */
 import { create } from "zustand";
 
-export const VIEWS = ["history", "devices", "settings"] as const;
+/** `capture` is reachable but not navigable: it is opened from the status strip
+ *  and from the loss notification's re-arm request, and putting it in the tab
+ *  bar would give macOS — which has no ladder — a screen with nothing on it. */
+export const VIEWS = ["history", "devices", "settings", "capture"] as const;
 export type View = (typeof VIEWS)[number];
 
 /** Defensive narrowing, not state recovery: anything unrecognised is History
