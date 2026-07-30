@@ -1,0 +1,294 @@
+//! Getting history out of the service and back in: export, import, backup,
+//! restore.
+//!
+//! # The path never crosses the bridge
+//!
+//! Every one of these needs a file, and a file needs a path. The path is
+//! obtained here, from the platform's own panel, and used here; the WebView is
+//! given counts and nothing else. That is CLAUDE.md rule 4 held structurally
+//! rather than by remembering: there is no argument for React to pass and no
+//! field for it to render, so no authored string and no error can end up
+//! carrying the user's home directory.
+//!
+//! It also keeps the ACL surface at zero. The dialog plugin is called from
+//! Rust, and Tauri's capability files gate the JS bridge, so nothing in
+//! `capabilities/` has to be widened to make these work.
+//!
+//! # Cancelling is not failing
+//!
+//! Each command returns `Option<_>`, and `None` means the user closed the
+//! panel. A dismissed file picker rendered as an error is the shape of bug that
+//! teaches people to ignore error toasts.
+//!
+//! # What the counts are for
+//!
+//! An export withholds every item the detector flagged unless it is asked twice
+//! — the wire default is `false` and the caller has to opt in — and it
+//! *counts* what it withheld. A user who is not told believes they exported
+//! everything, which they find out at the moment the export was supposed to
+//! save them (`P2-tj9s`, `CopyPaste-93yr`). [`ExportReport`] therefore carries
+//! all three skip counts, always, including when they are zero.
+
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::PathBuf;
+
+use copypaste_ipc::{ExportData, ImportData};
+use serde::Serialize;
+use tauri::{AppHandle, Runtime, State};
+use tauri_plugin_dialog::{DialogExt, FilePath};
+
+use crate::backend::{Backend, BackendError, SelectedBackend};
+
+type Result<T> = std::result::Result<T, BackendError>;
+
+/// Suggested names. Not shown by this app — the platform's panel shows them,
+/// and the user may replace them — so neither is a string the catalogue owns.
+const EXPORT_NAME: &str = "copypaste-export.json";
+const BACKUP_NAME: &str = "copypaste-backup.cpbak";
+
+const MSG_NO_PLACE: &str =
+    "That location can't be written to directly. Pick a folder on this device instead.";
+const MSG_UNREADABLE: &str = "That file couldn't be read.";
+const MSG_NOT_AN_EXPORT: &str = "That file isn't a CopyPaste export.";
+const MSG_NOT_WRITTEN: &str = "The export couldn't be written.";
+const MSG_BACKUP_EXISTS: &str =
+    "There is already a file with that name. A backup is never written over an existing \
+     file — choose another name.";
+
+/// What an export contained, and everything it left out.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct ExportReport {
+    pub exported: u32,
+    /// Flagged items withheld because the caller did not ask for them.
+    pub skipped_sensitive: u32,
+    /// Items that are not text. v2 captures text only, but a peer can deliver
+    /// something else.
+    pub skipped_non_text: u32,
+    pub skipped_undecryptable: u32,
+}
+
+impl From<&ExportData> for ExportReport {
+    fn from(data: &ExportData) -> Self {
+        Self {
+            exported: u32::try_from(data.items.len()).unwrap_or(u32::MAX),
+            skipped_sensitive: data.skipped_sensitive,
+            skipped_non_text: data.skipped_non_text,
+            skipped_undecryptable: data.skipped_undecryptable,
+        }
+    }
+}
+
+/// Write history to a file the user picks.
+///
+/// `include_sensitive` is the second ask. The first is the dialog that offers
+/// it; passing `true` puts credentials in a plaintext file that leaves the
+/// app's control.
+#[tauri::command]
+pub async fn export_history<R: Runtime>(
+    app: AppHandle<R>,
+    backend: State<'_, SelectedBackend>,
+    include_sensitive: bool,
+) -> Result<Option<ExportReport>> {
+    // The read happens before the panel opens, so a build that cannot export
+    // says so instead of asking where to put nothing.
+    let data = backend.export(0, include_sensitive).await?;
+
+    let Some(dest) = save_panel(&app, EXPORT_NAME).await? else {
+        return Ok(None);
+    };
+
+    let encoded = serde_json::to_string_pretty(&data)
+        .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
+    write_owner_only(&dest, encoded.as_bytes())?;
+
+    Ok(Some(ExportReport::from(&data)))
+}
+
+/// Read a file written by an export back into history.
+///
+/// Every item goes through the same ingest a capture does, so the detector runs
+/// again over the plaintext and duplicates collapse. A malformed file is
+/// refused whole, before anything is written.
+#[tauri::command]
+pub async fn import_history<R: Runtime>(
+    app: AppHandle<R>,
+    backend: State<'_, SelectedBackend>,
+) -> Result<Option<ImportData>> {
+    let Some(src) = open_panel(&app).await? else {
+        return Ok(None);
+    };
+
+    let raw = std::fs::read_to_string(&src).map_err(|_| BackendError::Invalid(MSG_UNREADABLE))?;
+    let data: ExportData =
+        serde_json::from_str(&raw).map_err(|_| BackendError::Invalid(MSG_NOT_AN_EXPORT))?;
+
+    Ok(Some(backend.import(data.items).await?))
+}
+
+/// Copy the encrypted database to a file the user picks.
+///
+/// The copy is ciphertext and opens only with this device's key, so it is
+/// useless on another machine — which is also why it is not an export.
+#[tauri::command]
+pub async fn backup_database<R: Runtime>(
+    app: AppHandle<R>,
+    backend: State<'_, SelectedBackend>,
+) -> Result<Option<u64>> {
+    let Some(dest) = save_panel(&app, BACKUP_NAME).await? else {
+        return Ok(None);
+    };
+    // The service refuses to overwrite — the obvious mistake is naming the live
+    // database, and copying onto it would be a wipe. Checking here as well
+    // turns the panel's "replace?" into an answer the user gets straight away.
+    if dest.exists() {
+        return Err(BackendError::Invalid(MSG_BACKUP_EXISTS));
+    }
+    Ok(Some(backend.backup(&dest).await?.size_bytes))
+}
+
+/// Replace this device's history with a backup.
+///
+/// The most destructive thing the product does, and the only confirmation is
+/// the caller's: reaching here means the user has already answered a dialog
+/// naming what is about to be lost.
+///
+/// The service validates before it replaces — it stages the file, opens it with
+/// this device's real key and checks it — so a damaged or foreign file leaves
+/// history exactly as it was.
+#[tauri::command]
+pub async fn restore_database<R: Runtime>(
+    app: AppHandle<R>,
+    backend: State<'_, SelectedBackend>,
+) -> Result<bool> {
+    let Some(src) = open_panel(&app).await? else {
+        return Ok(false);
+    };
+    backend.restore(&src).await?;
+    Ok(true)
+}
+
+/// Ask where to write, and answer `None` if the user closed the panel.
+async fn save_panel<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<Option<PathBuf>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_file_name(name)
+        .save_file(move |chosen| {
+            let _ = tx.send(chosen);
+        });
+    to_path(rx.await.unwrap_or(None))
+}
+
+async fn open_panel<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PathBuf>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_file(move |chosen| {
+        let _ = tx.send(chosen);
+    });
+    to_path(rx.await.unwrap_or(None))
+}
+
+/// A picked location as a path this process can open.
+///
+/// Android's document picker answers with a `content://` URI rather than a
+/// path, and the service's file operations take paths. Refusing plainly beats
+/// handing something down that cannot be opened — and it is the same refusal
+/// the in-process backend already makes for these four operations, so the user
+/// is told once rather than twice.
+fn to_path(chosen: Option<FilePath>) -> Result<Option<PathBuf>> {
+    match chosen {
+        None => Ok(None),
+        Some(picked) => picked
+            .into_path()
+            .map(Some)
+            .map_err(|_| BackendError::Unsupported(MSG_NO_PLACE)),
+    }
+}
+
+/// Write owner-only, and create rather than truncate-in-place.
+///
+/// An export is every clipping the user has, in plaintext. The default mode
+/// would be world-readable on a shared machine, and the mode has to be set at
+/// `open` rather than after the write, or there is a window in which it is not.
+fn write_owner_only(dest: &PathBuf, bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(dest)
+        .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
+    file.write_all(bytes)
+        .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use copypaste_ipc::ExportItem;
+
+    fn data(items: usize, skipped_sensitive: u32) -> ExportData {
+        ExportData {
+            items: (0..items)
+                .map(|n| ExportItem {
+                    content: format!("clip {n}"),
+                    content_type: "text/plain".into(),
+                    created_at: 0,
+                    pinned: false,
+                    is_sensitive: false,
+                })
+                .collect(),
+            skipped_non_text: 1,
+            skipped_sensitive,
+            skipped_undecryptable: 2,
+        }
+    }
+
+    /// The count is the whole point: a shorter file and a smaller history are
+    /// the same thing to a user who is not told.
+    #[test]
+    fn the_report_carries_every_skip_count_including_zero() {
+        let report = ExportReport::from(&data(3, 0));
+        assert_eq!(report.exported, 3);
+        assert_eq!(report.skipped_sensitive, 0);
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"skipped_sensitive\":0"), "{json}");
+    }
+
+    #[test]
+    fn a_withheld_item_is_counted_rather_than_dropped_quietly() {
+        assert_eq!(ExportReport::from(&data(1, 4)).skipped_sensitive, 4);
+    }
+
+    /// Every sentence this file can show is authored here and holds no path.
+    #[test]
+    fn no_message_names_a_place() {
+        for message in [
+            MSG_NO_PLACE,
+            MSG_UNREADABLE,
+            MSG_NOT_AN_EXPORT,
+            MSG_NOT_WRITTEN,
+            MSG_BACKUP_EXISTS,
+        ] {
+            assert!(!message.contains('/'), "{message}");
+            assert!(!message.contains('~'), "{message}");
+        }
+    }
+
+    /// The file an export writes is the file an import reads. One shape, and it
+    /// is `copypaste_ipc::ExportData` — the same bytes `copypaste export -o`
+    /// produces, so a file moves between the CLI and the window.
+    #[test]
+    fn an_export_round_trips_through_the_form_it_is_written_in() {
+        let encoded = serde_json::to_string_pretty(&data(2, 0)).unwrap();
+        let decoded: ExportData = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.items.len(), 2);
+        assert_eq!(decoded.skipped_undecryptable, 2);
+    }
+
+    #[test]
+    fn something_that_is_not_an_export_is_refused_rather_than_half_read() {
+        assert!(serde_json::from_str::<ExportData>(r#"{"nope":true}"#).is_err());
+    }
+}

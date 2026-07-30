@@ -55,9 +55,11 @@ describe("the tab row (A11Y-6 / AT-18)", () => {
     );
   });
 
-  it("reaches the shortcut, sync and storage screens", () => {
+  it("reaches the shortcut, service, sync and storage screens", () => {
     withClient(<SettingsView />);
-    for (const label of ["Shortcut", "Sync", "Storage"]) {
+    // "Service" is the daemon's own configuration. Before it existed the app
+    // could not change a single one of those values (CLAUDE.md rule 6).
+    for (const label of ["Shortcut", "Service", "Sync", "Storage"]) {
       expect(screen.getByRole("tab", { name: label })).toBeTruthy();
     }
   });

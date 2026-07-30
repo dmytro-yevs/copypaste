@@ -12,6 +12,7 @@ import { useTranslation } from "@/i18n";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { AppearanceTab } from "@/components/settings/AppearanceTab";
 import { ListTab } from "@/components/settings/ListTab";
+import { ServiceTab } from "@/components/settings/ServiceTab";
 import { ShortcutTab } from "@/components/settings/ShortcutTab";
 import { StorageTab } from "@/components/settings/StorageTab";
 import { SyncTab } from "@/components/settings/SyncTab";
@@ -20,6 +21,7 @@ const TABS = [
   { value: "appearance", label: "settings.tabs.appearance", render: () => <AppearanceTab /> },
   { value: "list", label: "settings.tabs.list", render: () => <ListTab /> },
   { value: "shortcut", label: "settings.tabs.shortcut", render: () => <ShortcutTab /> },
+  { value: "service", label: "settings.tabs.service", render: () => <ServiceTab /> },
   { value: "sync", label: "settings.tabs.sync", render: () => <SyncTab /> },
   { value: "storage", label: "settings.tabs.storage", render: () => <StorageTab /> },
   { value: "about", label: "settings.tabs.about", render: () => <AboutTab /> },

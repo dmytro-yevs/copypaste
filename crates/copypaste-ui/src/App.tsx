@@ -17,6 +17,7 @@ import { useCaptureSync } from "@/hooks/useCapture";
 import { useStatus } from "@/hooks/useHistory";
 import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
+import { legacyHistoryPresent } from "@/lib/banners";
 import { classifyError } from "@/lib/errors";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
@@ -72,12 +73,17 @@ export default function App() {
         <BannerBar
           conditions={{
             serviceOffline: statusKind === "offline",
+            historyUnreadable:
+              statusKind === "legacy_database" || statusKind === "key_unusable"
+                ? statusKind
+                : null,
             protocolMismatch:
               status.data !== undefined &&
               status.data.protocol_version !== CURRENT_PROTOCOL_VERSION
                 ? status.data.protocol_version
                 : null,
             capturePaused: status.data?.capture_running === false,
+            legacyHistory: legacyHistoryPresent(status.data),
           }}
           onRetry={() => void qc.invalidateQueries()}
         />
