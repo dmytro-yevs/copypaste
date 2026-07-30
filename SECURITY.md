@@ -1,64 +1,152 @@
-# Security Policy
+# Security
 
-## Supported Versions
+## Reporting a vulnerability
 
-| Version | Supported |
-|---------|-----------|
-| main branch | ✅ Active |
-| Tagged releases | ✅ Latest only |
+**Do not open a public GitHub issue for anything exploitable.** Open a private
+security advisory on GitHub instead.
 
-## Reporting a Vulnerability
+Useful in a report: the affected component (`core`, `daemon`, `cli`, `p2p`,
+`cloud`), what an attacker must already have, and what they gain.
 
-**Do NOT open a public GitHub issue for security vulnerabilities.**
+---
 
-Report privately via email: security@copypaste.app
+## Status
 
-Include:
-- Description of the vulnerability
-- Steps to reproduce
-- Affected component (core/daemon/relay/cli)
-- Potential impact
+**v2 is alpha and has not been audited.** Several components have never been
+executed on their target platform — see [Unverified](#unverified), which is the
+section to read before trusting anything else on this page.
 
-Expected response: acknowledgement within 48 hours, fix timeline within 14 days for critical issues.
+This document describes v2. The previous implementation is preserved on
+`archive/v0.4.1-pre-rewrite` and differed in ways that matter here — most
+sharply, it synced sensitive items and v2 does not. Do not read v1 documentation
+as describing this code.
 
-## Security Architecture
+## At rest
 
-### Encryption
-- Clipboard items encrypted with **XChaCha20-Poly1305** before storage
-- Key derivation via **HKDF-SHA256** from X25519 ECDH shared secret
-- Local-only key derived from device secret via HKDF (`copypaste-local-storage-v1`)
-- Database at rest encrypted with **SQLCipher (AES-256-CBC)**
+- **Content** is sealed with XChaCha20-Poly1305. The item id is bound as
+  associated data, so a row's ciphertext cannot be moved to another row — it
+  fails authentication instead.
+- **The database** is SQLCipher, keyed with a raw 32-byte key: the page key is
+  supplied directly, so there is no passphrase KDF pass and no cipher parameter
+  is set.
+- **Key derivation** is HKDF-SHA256 from a device secret — one extract, two
+  expands: `copypaste/v2/sqlcipher-db-key` and `copypaste/v2/item-content-key`.
+  Neither key is the stored secret itself.
+- **Crypto fails closed.** A wrong key, a wrong AAD or a tampered ciphertext
+  gives an authentication error with no detail and no fallback read.
+- Key material is zeroized on drop; secret comparisons are constant-time.
 
-### Key Storage
-- macOS: **Keychain Services** (service: `com.copypaste.daemon`, `ThisDeviceOnly` accessibility)
-- Windows: **not implemented** — Windows support is frozen (ADR-012); the daemon uses an
-  ephemeral in-memory key that is lost on restart.
-- Linux: **not implemented** — the daemon uses an ephemeral in-memory key that is lost on
-  restart. A Secret Service integration (GNOME Keyring / KWallet) is planned but not shipped.
+### Where the device secret lives
 
-### Sensitive Data Detection
-- 20+ pattern types detected (AWS, GitHub, Stripe, OpenAI, JWT, SSH, etc.)
-- Sensitive items get automatic TTL expiry
-- Sensitive items **are synced encrypted** via relay/cloud/P2P; sensitivity is
-  re-evaluated by the receiving daemon. Items never leave any device in plaintext.
+| Platform | Store | State |
+|---|---|---|
+| macOS | Keychain, behind the `macos-keychain` cargo feature | Written, **never executed** |
+| Android | Android Keystore | Not built |
+| Linux | `0600` file under the data directory | Development fallback, **not a shipping posture** |
 
-### Relay Server
-- Relay stores **only ciphertext** — never has decryption keys
-- End-to-end encrypted: relay cannot read clipboard content
-- Bearer token auth: **random 16-byte token** (`OsRng`) encoded as 32 hex characters,
-  issued at registration — it is NOT derived from the public key or any other secret.
-  Tokens are compared constant-time via `subtle::ct_eq` (no timing oracle).
-- Per-device inbox with 500-item hard quota (oldest pruned on overflow)
+The keystore fails closed: only an unambiguous "no entry" mints a new secret.
+Any other error is surfaced rather than silently replacing a secret, which would
+orphan the existing database.
 
-### Known Limitations
-- Clipboard monitoring requires accessibility permissions on macOS
-- Android 10+ clipboard access restricted to foreground apps
-- Windows key storage is ephemeral (process-restart loses the key); Windows is frozen (ADR-012)
-- Linux key storage is ephemeral (process-restart loses the key); Secret Service integration planned
+## Sensitive content
 
-## Dependency Auditing
+A detector flags clipboard content that looks like a credential — around 42
+rules, taken from gitleaks where an equivalent exists, with NFKC normalisation,
+Luhn validation for card numbers, and entropy and allowlist gates against false
+positives.
+
+What follows from a match:
+
+- **It is never written to the search index.** Enforced at write time and again
+  at read time.
+- **It never leaves the device.** Peer sync does not list it and cloud sync
+  refuses to upload it. This inverts v1, which synced sensitive items encrypted
+  and treated sensitivity as metadata for the receiver to re-evaluate.
+- **It is not deleted automatically.** Only rules above a confidence floor are
+  eligible for any destructive action, and no automatic deletion is implemented
+  today. A false positive destroying unrecoverable user data is the worse
+  outcome.
+
+Detection is best-effort and will miss things. Do not rely on it as the only
+control over what reaches your clipboard history.
+
+## Local IPC
+
+The daemon listens on a Unix domain socket at mode `0600`, owned by the running
+user. There is no network listener for IPC and no auth token — the filesystem
+permission is the boundary.
+
+Any process running as the same user can therefore read the whole history. That
+is the trust boundary the system clipboard already has.
+
+**No user-facing error may contain a filesystem path**, because the socket path
+discloses the local username. Enforced in the daemon and again by a redaction
+pass shared by every client, with tests asserting it.
+
+## Peer-to-peer sync
+
+- The channel is Noise `NNpsk0` (`snow`): mutual authentication and forward
+  secrecy from the pairing key alone.
+- The pairing token is 256 bits from the OS CSPRNG, shown as a Crockford base32
+  code. Possession is the authentication — there is no password, so there is no
+  dictionary to attack. Treat a code like a password; it is shown once.
+- A wrong key fails the handshake on the first message. There is no
+  unauthenticated mode to fall back to.
+- A session poisons itself after any authentication failure rather than
+  continuing with a desynchronised nonce.
+- Peer keys live in a `0600` file, written atomically.
+- **Content crosses the wire as plaintext inside the Noise channel**, and the
+  receiver re-encrypts under its own key. Confidentiality comes from the
+  transport, not a second envelope — the sender's ciphertext is bound to a key
+  the receiver does not have.
+- mDNS advertises only a non-secret pairing id — never a token, and deliberately
+  not a digest of one.
+
+A peer's item stamped more than 24 hours in the future is skipped, so a device
+with a broken clock cannot win every comparison for an item and censor it
+everywhere.
+
+## Cloud sync
+
+**Not wired into the daemon.** The crate is built and tested against mocked
+HTTP; nothing calls it yet.
+
+By design: rows are sealed client-side under an Argon2id key derived from a
+passphrase that never leaves the device, so the server holds ciphertext and
+metadata only. Row-level security is the second layer — a misconfigured policy
+would expose rows that remain unreadable.
+
+## Unverified
+
+Written, never observed working. Treat these claims as unproven:
+
+- The **macOS Keychain** backend and the **NSPasteboard** capture path — never
+  compiled, because development happens on Linux.
+- **mDNS discovery** — the development container has no multicast; pairing is
+  exercised only over explicit addresses.
+- **Cloud sync against a live Supabase project** — every test uses in-process
+  fakes.
+- The **native apps** — neither has been built or run.
+
+## Not implemented
+
+Age-based retention, private mode, an application exclusion list, rate limiting
+on any surface, and telemetry.
+
+## Known limitations
+
+- Clipboard monitoring needs accessibility permission on macOS.
+- Android restricts clipboard reads to foreground apps.
+- Windows and Linux desktop are out of scope.
+
+## Backward compatibility
+
+v2 reads nothing written by v0.4.x, and uses a distinct database filename so an
+older file is never opened, modified, or reported as corrupt.
+
+## Dependency auditing
 
 ```bash
-cargo deny check  # requires cargo-deny
-cargo audit       # requires cargo-audit
+cargo deny check   # requires cargo-deny
+cargo audit        # requires cargo-audit
 ```
