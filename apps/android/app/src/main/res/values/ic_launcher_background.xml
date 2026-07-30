@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Placeholder. The icon is not a design decision this agent is entitled to
+      take: `docs/rewrite/port-manifest/README.md` says the new look has not
+      been decided and that replacements must not be invented in passing. This
+      is a neutral grey so the app installs and launches; it is a to-do, not a
+      proposal.
+    -->
+    <color name="ic_launcher_background">#FF5F6368</color>
+</resources>
