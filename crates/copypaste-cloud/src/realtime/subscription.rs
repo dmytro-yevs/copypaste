@@ -1,0 +1,108 @@
+//! The handle a caller holds, and the lifetime of the task behind it.
+
+use std::sync::Arc;
+
+use tokio::sync::{mpsc, Notify};
+use tokio::task::JoinHandle;
+
+use super::channel::{jwt_subject, open_channel, websocket_url};
+use super::event::{RealtimeError, RealtimeEvent};
+use super::socket::run;
+use crate::CloudConfig;
+
+/// Bounded queue between the socket task and [`RealtimeSubscription::next_event`].
+///
+/// Bounded on purpose. If the consumer stalls, backpressure reaches the socket
+/// and the server stops being told we are healthy, which is the correct signal;
+/// an unbounded queue would instead grow without limit holding decrypted-row
+/// metadata in memory. Missing an event is safe — the poll loop is the backstop.
+const EVENT_QUEUE: usize = 64;
+
+/// A live subscription to `clipboard_items`.
+///
+/// Owns a background task that holds the socket, sends heartbeats and
+/// reconnects. Drop it or call [`RealtimeSubscription::close`] to stop; `close`
+/// is preferable because it sends `phx_leave` first, so the server tears the
+/// channel down immediately instead of waiting for a heartbeat timeout.
+pub struct RealtimeSubscription {
+    events: mpsc::Receiver<Result<RealtimeEvent, RealtimeError>>,
+    shutdown: Arc<Notify>,
+    task: JoinHandle<()>,
+}
+
+impl std::fmt::Debug for RealtimeSubscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RealtimeSubscription")
+            .finish_non_exhaustive()
+    }
+}
+
+impl RealtimeSubscription {
+    /// Open the socket, join the channel, and start delivering events.
+    ///
+    /// The first connect and join happen before this returns, so a bad URL, a
+    /// rejected token or a missing subject claim surface here rather than as a
+    /// silent no-op. Everything after that — disconnects, reconnects,
+    /// heartbeats — is handled by the background task.
+    ///
+    /// `access_token` is the current user JWT. It is read at *every* reconnect
+    /// from the value passed here, so a long-lived subscription should be
+    /// dropped and re-created when the session is refreshed; a JWT captured once
+    /// and used forever silently re-joins with a dead token (manifest 05 §4.7,
+    /// non-negotiable 1).
+    ///
+    /// # Errors
+    ///
+    /// [`RealtimeError::MissingUserId`] if the token has no `sub` claim.
+    ///
+    /// [`RealtimeError::Connect`] if the socket cannot be opened.
+    ///
+    /// [`RealtimeError::JoinRefused`] if the channel join is not confirmed
+    /// within [`JOIN_TIMEOUT`](super::JOIN_TIMEOUT).
+    pub async fn connect(config: &CloudConfig, access_token: &str) -> Result<Self, RealtimeError> {
+        let user_id = jwt_subject(access_token).ok_or(RealtimeError::MissingUserId)?;
+        let url = websocket_url(&config.url);
+        let anon_key = config.anon_key.clone();
+        let token = access_token.to_owned();
+
+        let stream = open_channel(&url, &anon_key, &token, &user_id).await?;
+
+        let (tx, events) = mpsc::channel(EVENT_QUEUE);
+        let shutdown = Arc::new(Notify::new());
+        let task = tokio::spawn(run(
+            stream,
+            url,
+            anon_key,
+            token,
+            user_id,
+            tx,
+            Arc::clone(&shutdown),
+        ));
+
+        Ok(Self {
+            events,
+            shutdown,
+            task,
+        })
+    }
+
+    /// The next event, or `None` once the subscription has stopped for good.
+    ///
+    /// An `Err` here is informational: the task keeps running and reconnecting.
+    /// `None` is terminal.
+    pub async fn next_event(&mut self) -> Option<Result<RealtimeEvent, RealtimeError>> {
+        self.events.recv().await
+    }
+
+    /// Leave the channel and stop the background task.
+    ///
+    /// Waits for the task to finish so that the `phx_leave` and the close frame
+    /// are actually sent before the caller moves on.
+    pub async fn close(self) {
+        self.shutdown.notify_waiters();
+        // The task also observes the dropped receiver, so it cannot deadlock on
+        // a full queue while shutting down.
+        drop(self.events);
+        let _ = self.task.await;
+    }
+}

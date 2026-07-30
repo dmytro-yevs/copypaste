@@ -1,0 +1,139 @@
+//! The [`Store`] handle: what it takes to get a keyed, migrated, pooled
+//! connection, and nothing about what is then done with it.
+//!
+//! The queries live in [`super::items`], [`super::search`] and
+//! [`super::retention`], each adding its own `impl Store`.
+
+use std::path::Path;
+
+use r2d2::{Pool, PooledConnection};
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::Connection;
+
+use super::connection::{apply_connection_pragmas, apply_key, build_pool, validate_key};
+use super::model::StoreError;
+use super::schema::migrate;
+
+/// The clipboard store.
+///
+/// Cheap to clone (the pool is reference-counted) and safe to share across
+/// threads.
+#[derive(Clone)]
+pub struct Store {
+    pool: Pool<SqliteConnectionManager>,
+}
+
+impl std::fmt::Debug for Store {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Deliberately opaque: the pool's own Debug would print the database
+        // path, and a path discloses the local username.
+        f.write_str("Store { .. }")
+    }
+}
+
+impl Store {
+    /// Opens the database at `path`, creating it if absent, and migrates it to
+    /// the current schema. The parent directory must already exist.
+    ///
+    /// `db_key` is the raw 32-byte SQLCipher key. A key that does not open an
+    /// existing file yields [`StoreError::InvalidKey`]; there is no fallback
+    /// read and no unkeyed plaintext probe.
+    pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
+        // Probe on a private connection first so a wrong key surfaces as
+        // InvalidKey instead of an opaque pool-construction failure, and so the
+        // migration runs once rather than once per pooled connection.
+        let mut conn = Connection::open(path)?;
+        apply_key(&conn, db_key)?;
+        validate_key(&conn)?;
+        apply_connection_pragmas(&conn)?;
+        migrate(&mut conn)?;
+        drop(conn);
+
+        let pool = build_pool(SqliteConnectionManager::file(path), *db_key, false)?;
+        Ok(Self { pool })
+    }
+
+    /// Opens a private in-memory database.
+    ///
+    /// The pool shares one in-memory database through a named shared-cache URI
+    /// (`SqliteConnectionManager::memory()` would give every pooled connection
+    /// its *own* empty database), and keeps one connection permanently idle so
+    /// the database is not dropped when the pool goes quiet.
+    pub fn open_in_memory(db_key: &[u8; 32]) -> Result<Self, StoreError> {
+        let uri = format!(
+            "file:copypaste-{}?mode=memory&cache=shared",
+            uuid::Uuid::new_v4()
+        );
+        let manager = SqliteConnectionManager::file(&uri).with_flags(
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        );
+        let pool = build_pool(manager, *db_key, true)?;
+        let mut conn = pool.get()?;
+        migrate(&mut conn)?;
+        drop(conn);
+        Ok(Self { pool })
+    }
+
+    /// Checks a connection out of the pool. `pub(super)` so the query modules
+    /// share one pool without exposing it to callers.
+    pub(super) fn conn(&self) -> Result<PooledConnection<SqliteConnectionManager>, StoreError> {
+        Ok(self.pool.get()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::super::test_support::{item, store, KEY, OTHER_KEY, T0};
+    use super::*;
+
+    #[test]
+    fn file_backed_store_round_trips_and_rejects_a_wrong_key() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("clipboard.db");
+
+        let id = {
+            let s = Store::open(&path, &KEY).unwrap();
+            let stored = s.insert(item("persisted payload", T0)).unwrap();
+            assert_eq!(s.count().unwrap(), 1);
+            stored.id
+        };
+
+        // Re-opening with the right key is a no-op migration and keeps the data.
+        let s = Store::open(&path, &KEY).unwrap();
+        assert_eq!(
+            s.get(&id).unwrap().unwrap().content_ciphertext,
+            b"ct:persisted payload"
+        );
+        assert_eq!(s.search("persisted", 10).unwrap().len(), 1);
+        drop(s);
+
+        // The wrong key must fail closed — never a fallback read.
+        let err = Store::open(&path, &OTHER_KEY).unwrap_err();
+        assert!(
+            matches!(err, StoreError::InvalidKey),
+            "expected InvalidKey, got {err:?}"
+        );
+
+        // And the error must not leak the path (it discloses the username).
+        let rendered = err.to_string();
+        assert!(!rendered.contains(&*path.to_string_lossy()));
+        assert!(!rendered.contains("clipboard.db"));
+    }
+
+    #[test]
+    fn in_memory_pool_shares_one_database() {
+        // Every pooled connection must see the same in-memory database, so hold
+        // one while working through another.
+        let s = store();
+        let held = s.conn().unwrap();
+        let stored = s.insert(item("across connections", T0)).unwrap();
+        assert_eq!(s.count().unwrap(), 1);
+        assert!(s.get(&stored.id).unwrap().is_some());
+        drop(held);
+    }
+}
