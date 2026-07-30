@@ -102,6 +102,57 @@ enum Command {
 
     /// Report whether the daemon is running and what it is doing.
     Status,
+
+    /// Pair this device with another one.
+    Pair {
+        #[command(subcommand)]
+        action: PairAction,
+    },
+
+    /// List paired devices.
+    Peers,
+
+    /// Forget a paired device.
+    ///
+    /// Local and one-sided: the other device keeps its half until it also
+    /// unpairs.
+    Unpair {
+        /// The pairing id, as shown by `copypaste peers`.
+        pairing_id: String,
+    },
+
+    /// Sync clipboard history with paired devices.
+    Sync {
+        /// Sync with one device instead of all of them.
+        #[arg(long, value_name = "PAIRING_ID")]
+        peer: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PairAction {
+    /// Mint a pairing code on this device, to be entered on the other one.
+    ///
+    /// The code is a secret — anyone who has it can pair with this device — and
+    /// it is shown exactly once. It is never written to a log or stored in
+    /// readable form.
+    Create {
+        /// What to call the other device until it says its own name.
+        #[arg(long, short = 'n', default_value = "unnamed device")]
+        name: String,
+    },
+
+    /// Consume a code from another device and complete the pairing.
+    ///
+    /// The pairing is only kept if a sync session with that device succeeds, so
+    /// a wrong code or an unreachable address leaves nothing behind.
+    Accept {
+        /// The code shown by `copypaste pair create` on the other device.
+        code: String,
+        /// Where that device is listening, as `host:port`.
+        #[arg(long, value_name = "HOST:PORT")]
+        addr: String,
+    },
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -152,6 +203,20 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             pinned: false,
         },
         Command::Status => Method::Status,
+        Command::Pair { action } => match action {
+            PairAction::Create { name } => Method::PairCreate { name: name.clone() },
+            PairAction::Accept { code, addr } => Method::PairAccept {
+                code: code.clone(),
+                addr: addr.clone(),
+            },
+        },
+        Command::Peers => Method::Peers,
+        Command::Unpair { pairing_id } => Method::Unpair {
+            pairing_id: pairing_id.clone(),
+        },
+        Command::Sync { peer } => Method::SyncNow {
+            pairing_id: peer.clone(),
+        },
     };
 
     let response = client::request(method).await?;
@@ -194,6 +259,39 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             Some(count) => println!("deleted {count} {}", plural(count, "item", "items")),
             None => println!("cleared"),
         },
+        Command::Pair { action } => match action {
+            PairAction::Create { .. } => {
+                let pairing = client::expect_pairing(data)?;
+                // The only place a code is ever rendered. Straight to stdout,
+                // never through the logger, and the daemon does not keep a copy
+                // that could be asked for again.
+                println!("{}", render::pairing_text(&pairing));
+            }
+            PairAction::Accept { .. } => {
+                let peers = client::expect_peers(data)?;
+                match peers.first() {
+                    Some(peer) => println!("paired with {} ({})", peer.name, peer.pairing_id),
+                    None => println!("paired"),
+                }
+            }
+        },
+        Command::Peers => {
+            let peers = client::expect_peers(data)?;
+            println!(
+                "{}",
+                render::peers_table(&peers, now_ms(), "no paired devices")
+            );
+        }
+        Command::Unpair { pairing_id } => println!("unpaired {pairing_id}"),
+        Command::Sync { .. } => {
+            let results = client::expect_sync(data)?;
+            println!("{}", render::sync_table(&results, "no paired devices"));
+            // A run where every peer failed is not a success, even though the
+            // request itself was answered: a script must be able to tell.
+            if !results.is_empty() && results.iter().all(|r| r.error.is_some()) {
+                return Err(CliError::local("no peer could be synced"));
+            }
+        }
     }
 
     Ok(())
@@ -419,6 +517,103 @@ mod tests {
         for no in ["", "\n", "n", "no", "sure", "yep", "yeah"] {
             assert!(!is_affirmative(no), "{no:?}");
         }
+    }
+
+    #[test]
+    fn pair_create_defaults_its_name_and_accepts_one() {
+        match parse(&["copypaste", "pair", "create"]).command {
+            Command::Pair {
+                action: PairAction::Create { name },
+            } => assert_eq!(name, "unnamed device"),
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "pair", "create", "--name", "phone"]).command {
+            Command::Pair {
+                action: PairAction::Create { name },
+            } => assert_eq!(name, "phone"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn pair_accept_requires_both_a_code_and_an_address() {
+        assert!(Cli::try_parse_from(["copypaste", "pair", "accept"]).is_err());
+        assert!(Cli::try_parse_from(["copypaste", "pair", "accept", "CODE"]).is_err());
+        match parse(&[
+            "copypaste",
+            "pair",
+            "accept",
+            "ABCD-EFGH",
+            "--addr",
+            "127.0.0.1:47654",
+        ])
+        .command
+        {
+            Command::Pair {
+                action: PairAction::Accept { code, addr },
+            } => {
+                assert_eq!(code, "ABCD-EFGH");
+                assert_eq!(addr, "127.0.0.1:47654");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn sync_targets_everything_unless_a_peer_is_named() {
+        match parse(&["copypaste", "sync"]).command {
+            Command::Sync { peer } => assert!(peer.is_none()),
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "sync", "--peer", "abc123"]).command {
+            Command::Sync { peer } => assert_eq!(peer.as_deref(), Some("abc123")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn unpair_requires_a_pairing_id() {
+        assert!(Cli::try_parse_from(["copypaste", "unpair"]).is_err());
+        match parse(&["copypaste", "unpair", "abc123"]).command {
+            Command::Unpair { pairing_id } => assert_eq!(pairing_id, "abc123"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn peer_commands_map_onto_the_wire_methods() {
+        // The mapping is the whole of `run`'s first half; a typo here is a
+        // command that silently does something else.
+        for (args, expected) in [
+            (vec!["copypaste", "peers"], r#""method":"peers""#),
+            (vec!["copypaste", "sync"], r#""method":"sync_now""#),
+            (vec!["copypaste", "unpair", "x"], r#""method":"unpair""#),
+            (
+                vec!["copypaste", "pair", "create"],
+                r#""method":"pair_create""#,
+            ),
+        ] {
+            let method = method_for(&parse(&args).command).expect("a method");
+            let json = serde_json::to_string(&method).unwrap();
+            assert!(json.contains(expected), "{json}");
+        }
+    }
+
+    /// The method a command sends, for the cases that need no stdin or prompt.
+    fn method_for(command: &Command) -> Option<Method> {
+        Some(match command {
+            Command::Peers => Method::Peers,
+            Command::Sync { peer } => Method::SyncNow {
+                pairing_id: peer.clone(),
+            },
+            Command::Unpair { pairing_id } => Method::Unpair {
+                pairing_id: pairing_id.clone(),
+            },
+            Command::Pair {
+                action: PairAction::Create { name },
+            } => Method::PairCreate { name: name.clone() },
+            _ => return None,
+        })
     }
 
     #[test]

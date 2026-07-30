@@ -12,8 +12,8 @@
 
 use crate::error::CliError;
 use copypaste_ipc::{
-    socket_path, ErrorCode, Item, Method, Request, Response, ResponseData, StatusData,
-    MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    socket_path, ErrorCode, Item, Method, PairingData, PeerInfo, Request, Response, ResponseData,
+    StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::path::Path;
@@ -169,6 +169,37 @@ pub fn optional_count(data: &Option<ResponseData>) -> Option<u64> {
     match data {
         Some(ResponseData::Count(count)) => Some(*count),
         _ => None,
+    }
+}
+
+/// A response that must carry a freshly minted pairing.
+pub fn expect_pairing(data: Option<ResponseData>) -> Result<PairingData, CliError> {
+    match data {
+        Some(ResponseData::Pairing(pairing)) => Ok(pairing),
+        _ => Err(shape_error("a pairing")),
+    }
+}
+
+/// A response that must carry a list of peers.
+///
+/// `ResponseData` is an untagged union, so an *empty* JSON array matches the
+/// first array-shaped variant — `Items` — before it ever reaches `Peers`. That
+/// is a property of the wire encoding, not a daemon bug, so both spellings of
+/// "no peers" are accepted here rather than reported as a shape error.
+pub fn expect_peers(data: Option<ResponseData>) -> Result<Vec<PeerInfo>, CliError> {
+    match data {
+        Some(ResponseData::Peers(peers)) => Ok(peers),
+        Some(ResponseData::Items(items)) if items.is_empty() => Ok(Vec::new()),
+        _ => Err(shape_error("a list of peers")),
+    }
+}
+
+/// A response that must carry per-peer sync results. Empty lists as above.
+pub fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>, CliError> {
+    match data {
+        Some(ResponseData::Sync(results)) => Ok(results),
+        Some(ResponseData::Items(items)) if items.is_empty() => Ok(Vec::new()),
+        _ => Err(shape_error("sync results")),
     }
 }
 
@@ -413,6 +444,68 @@ mod tests {
         // v1 would have produced an empty list here via unwrap_or_default.
         let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":{}}"#).unwrap();
         assert!(expect_items(into_data(response).unwrap()).is_err());
+    }
+
+    #[test]
+    fn a_pairing_payload_reads_back_as_a_pairing() {
+        let line = r#"{"id":1,"ok":true,"data":{"code":"ABCD-EFGH",
+            "pairing_id":"0123456789abcdef","listen_addr":"192.168.1.24:47654"}}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        let pairing = expect_pairing(into_data(response).unwrap()).unwrap();
+        assert_eq!(pairing.code, "ABCD-EFGH");
+        assert_eq!(pairing.listen_addr.as_deref(), Some("192.168.1.24:47654"));
+    }
+
+    #[test]
+    fn a_peer_list_reads_back_as_peers_and_not_as_items() {
+        let line = r#"{"id":1,"ok":true,"data":[{"pairing_id":"abc","name":"phone",
+            "last_addr":null,"last_seen_ms":0,"online":true}]}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        let peers = expect_peers(into_data(response).unwrap()).unwrap();
+        assert_eq!(peers.len(), 1);
+        assert!(peers[0].online);
+        assert!(peers[0].last_addr.is_none());
+    }
+
+    #[test]
+    fn sync_results_read_back_as_sync_results() {
+        let line = r#"{"id":1,"ok":true,"data":[{"pairing_id":"abc","name":"phone",
+            "sent":2,"received":3,"error":null}]}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        let results = expect_sync(into_data(response).unwrap()).unwrap();
+        assert_eq!(results[0].sent, 2);
+        assert_eq!(results[0].received, 3);
+        assert!(results[0].error.is_none());
+    }
+
+    /// An empty JSON array cannot be told apart from an empty item list in an
+    /// untagged union, so "no peers" must not read as a protocol error.
+    #[test]
+    fn an_empty_list_is_no_peers_and_no_sync_results() {
+        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":[]}"#).unwrap();
+        let data = into_data(response).unwrap();
+        assert!(expect_peers(data.clone()).unwrap().is_empty());
+        assert!(expect_sync(data).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_wrongly_shaped_peer_reply_is_still_reported() {
+        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":9}"#).unwrap();
+        assert!(expect_peers(into_data(response).unwrap()).is_err());
+    }
+
+    #[test]
+    fn peer_methods_serialise_to_the_documented_envelope() {
+        let json = serde_json::to_string(&Method::PairAccept {
+            code: "ABCD".into(),
+            addr: "127.0.0.1:47654".into(),
+        })
+        .unwrap();
+        assert!(json.contains(r#""method":"pair_accept""#), "{json}");
+        assert!(json.contains(r#""code":"ABCD""#), "{json}");
+
+        let json = serde_json::to_string(&Method::SyncNow { pairing_id: None }).unwrap();
+        assert!(json.contains(r#""method":"sync_now""#), "{json}");
     }
 
     #[test]

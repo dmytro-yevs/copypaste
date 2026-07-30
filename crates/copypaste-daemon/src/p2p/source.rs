@@ -237,7 +237,7 @@ mod tests {
         let summaries = source.summaries().unwrap();
         assert!(summaries.iter().any(|s| s.item_id == id));
 
-        let items = source.fetch(&[id.clone()]).unwrap();
+        let items = source.fetch(std::slice::from_ref(&id)).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].content, "shared thing");
         assert_eq!(items[0].origin_device_id, source.device_id());
@@ -281,13 +281,8 @@ mod tests {
         // Readable through the daemon's own key...
         let row = state.store.get("peer-item").unwrap().expect("stored");
         let key = state.keyring.item_key();
-        let plain = copypaste_core::decrypt(
-            &row.content_ciphertext,
-            &row.nonce,
-            &key,
-            "peer-item",
-        )
-        .expect("the local key must open it");
+        let plain = copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, "peer-item")
+            .expect("the local key must open it");
         assert_eq!(String::from_utf8(plain).unwrap(), "from the other device");
 
         // ...and not present as plaintext on disk.
@@ -365,11 +360,19 @@ mod tests {
         let row = state.store.get("leaky").unwrap().expect("stored");
         assert!(row.is_sensitive, "the local detector must have the say");
         assert!(
-            state.store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty(),
+            state
+                .store
+                .search("AKIAIOSFODNN7EXAMPLE", 10)
+                .unwrap()
+                .is_empty(),
             "an applied secret reached the search index"
         );
         // And it does not go back out again.
-        assert!(!source.summaries().unwrap().iter().any(|s| s.item_id == "leaky"));
+        assert!(!source
+            .summaries()
+            .unwrap()
+            .iter()
+            .any(|s| s.item_id == "leaky"));
     }
 
     #[test]

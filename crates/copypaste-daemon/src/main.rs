@@ -4,7 +4,9 @@
 //!
 //! * [`capture`] — polls the clipboard and ingests what it finds,
 //! * [`server`] — answers `copypaste_ipc::Request`s on a `0600` Unix socket,
-//! * [`clipboard`] — the platform pasteboard behind a trait.
+//! * [`clipboard`] — the platform pasteboard behind a trait,
+//! * [`p2p`] — peer sync: an inbound listener on its own TCP port, mDNS
+//!   discovery, and the five pairing/sync IPC operations.
 //!
 //! Everything they share lives in one [`AppState`] behind one `Arc`. v1 grew a
 //! 38-field context with 13 `Arc<Mutex<Option<T>>>` slots and 20 builder
@@ -19,6 +21,7 @@
 
 mod capture;
 mod clipboard;
+mod p2p;
 mod server;
 
 use std::path::PathBuf;
@@ -28,11 +31,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use anyhow::Context;
 use clap::Parser;
 use copypaste_core::{Detector, Keyring, Store};
+use copypaste_p2p::discovery::Discovery;
+use copypaste_p2p::peers::PeerStore;
 use tokio::sync::watch;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::clipboard::ClipboardSource;
+use crate::p2p::meta::Meta;
+use crate::p2p::P2p;
 
 /// Reported by `status`. Single source: the crate version.
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -60,6 +67,23 @@ struct Args {
     /// its intent, and it suppresses the notice printed when it is absent.
     #[arg(long)]
     foreground: bool,
+
+    /// TCP port the peer listener binds.
+    ///
+    /// Fixed by default so an explicit address is short to type. Overriding it
+    /// is what lets two daemons run on one host, which is how the peer-sync
+    /// demo works; the pairing this daemon mints reports whichever port is in
+    /// use, so the other device does not have to be told separately.
+    #[arg(long, default_value_t = copypaste_p2p::DEFAULT_PORT)]
+    port: u16,
+
+    /// What peers call this device.
+    ///
+    /// Cosmetic and peer-visible. Stored on first run and kept afterwards, so
+    /// passing it once is enough and a hostname change does not rename the
+    /// device on every peer.
+    #[arg(long, value_name = "NAME")]
+    device_name: Option<String>,
 }
 
 /// Everything the daemon shares between the capture loop and the IPC server.
@@ -77,6 +101,10 @@ pub struct AppState {
     /// a `copy` request cannot be blocked behind a capture tick for longer than
     /// a single pasteboard access.
     clipboard: Mutex<Box<dyn ClipboardSource>>,
+    /// Peer sync: the paired devices, discovery, this device's sync identity,
+    /// and the metadata a session reads. Always present — a daemon with no
+    /// peers still has an identity and still listens.
+    pub p2p: P2p,
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
@@ -88,6 +116,7 @@ impl AppState {
         keyring: Keyring,
         detector: Detector,
         clipboard: Box<dyn ClipboardSource>,
+        p2p: P2p,
     ) -> Self {
         let backend_name = clipboard.backend_name();
         Self {
@@ -95,6 +124,7 @@ impl AppState {
             keyring,
             detector,
             clipboard: Mutex::new(clipboard),
+            p2p,
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
@@ -105,7 +135,9 @@ impl AppState {
     /// a previous pasteboard call panicked, not that the handle is unusable.
     /// Refusing every later `copy` would be a worse outcome than retrying.
     pub fn clipboard(&self) -> MutexGuard<'_, Box<dyn ClipboardSource>> {
-        self.clipboard.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.clipboard
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub fn backend_name(&self) -> &'static str {
@@ -140,6 +172,12 @@ async fn main() -> anyhow::Result<()> {
         Some(dir) => (dir.join("copypaste-v2.db"), dir.join("daemon.sock")),
         None => (copypaste_ipc::database_path(), copypaste_ipc::socket_path()),
     };
+    // The paired-device file lives beside the database, under whichever data
+    // directory is in force, so an isolated instance has isolated pairings too.
+    let peers_path = db_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join(copypaste_p2p::peers::DEFAULT_FILE_NAME);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).context("create the data directory")?;
     }
@@ -161,18 +199,69 @@ async fn main() -> anyhow::Result<()> {
     let detector = Detector::new().context("build the sensitive-content detector")?;
     let source = clipboard::new_source();
 
-    let state = Arc::new(AppState::new(store, keyring, detector, source));
+    // Peer sync. The metadata connection opens the database the store just
+    // migrated, so it must come second; the peer file and discovery do not
+    // depend on either.
+    let hostname = gethostname::gethostname().to_string_lossy().into_owned();
+    let mut meta =
+        Meta::open(&db_path, &keyring.db_key(), &hostname).context("open the sync metadata")?;
+    if let Some(name) = args.device_name.as_deref() {
+        meta.set_device_name(name).context("set the device name")?;
+    }
+    let peers = PeerStore::open(&peers_path).context("open the paired-device list")?;
+    // Never fatal: a host without multicast still pairs and still syncs to an
+    // explicit address, and that is the common case on a locked-down network.
+    let discovery = match Discovery::start(
+        meta.device_name(),
+        &peers
+            .list()
+            .iter()
+            .map(|peer| peer.pairing_id.clone())
+            .collect::<Vec<_>>(),
+        args.port,
+    ) {
+        Ok(discovery) => discovery,
+        Err(e) => {
+            warn!(error = %e, "could not start discovery; peers must be given an address");
+            Discovery::start("CopyPaste device", &[], args.port)
+                .context("start discovery with a fallback name")?
+        }
+    };
+    let device_id = meta.device_id().to_string();
+    let device_name = meta.device_name().to_string();
+    let p2p = P2p::new(meta, peers, discovery, args.port);
+
+    let state = Arc::new(AppState::new(store, keyring, detector, source, p2p));
     state.set_ready(true);
     info!(
         version = DAEMON_VERSION,
         backend = state.backend_name(),
+        %device_id,
+        %device_name,
+        peer_port = args.port,
         "daemon starting"
     );
 
     let listener = server::bind(&socket_path)?;
+    // A peer port already in use is not fatal: the rest of the daemon is still
+    // worth running, and this device can still sync by dialling out.
+    let peer_listener = match p2p::bind(args.port) {
+        Ok(listener) => tokio::net::TcpListener::from_std(listener).ok(),
+        Err(e) => {
+            warn!(error = %e, port = args.port, "could not bind the peer port; not accepting peers");
+            None
+        }
+    };
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let capture = tokio::spawn(capture::run(Arc::clone(&state), shutdown_rx.clone()));
+    let peers_task = peer_listener.map(|listener| {
+        tokio::spawn(p2p::listen(
+            listener,
+            Arc::clone(&state),
+            shutdown_rx.clone(),
+        ))
+    });
     let server = tokio::spawn(server::run(listener, Arc::clone(&state), shutdown_rx));
 
     wait_for_shutdown().await?;
@@ -185,6 +274,11 @@ async fn main() -> anyhow::Result<()> {
     // database.
     if let Err(e) = capture.await {
         warn!(error = ?e, "capture loop did not shut down cleanly");
+    }
+    if let Some(peers_task) = peers_task {
+        if let Err(e) = peers_task.await {
+            warn!(error = ?e, "peer listener did not shut down cleanly");
+        }
     }
     if let Err(e) = server.await {
         warn!(error = ?e, "ipc server did not shut down cleanly");

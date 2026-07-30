@@ -221,11 +221,7 @@ async fn serve_peer(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
 
     let mut channel = NoiseChannel::new(session);
     let source = StoreSource::new(Arc::clone(&state));
-    let outcome = tokio::time::timeout(
-        SESSION_TIMEOUT,
-        run_responder(&mut channel, &source),
-    )
-    .await;
+    let outcome = tokio::time::timeout(SESSION_TIMEOUT, run_responder(&mut channel, &source)).await;
     channel.close().await;
 
     match outcome {
@@ -303,6 +299,195 @@ pub mod tests {
         );
         state.set_ready(true);
         (Arc::new(state), dir)
+    }
+
+    /// Pair two states over loopback and hand back the address A listens on.
+    ///
+    /// Both halves get the same pre-shared key, which is the whole of the
+    /// pairing: the initiator dials, the listener recognises the key, and
+    /// neither side needs anything else.
+    async fn pair(
+        a: &Arc<AppState>,
+        b: &Arc<AppState>,
+        shutdown: watch::Receiver<bool>,
+    ) -> (String, SocketAddr) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(listen(listener, Arc::clone(a), shutdown));
+
+        let token = copypaste_p2p::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        a.p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "b".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+            })
+            .expect("store the pairing on A");
+        b.p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "a".into(),
+                psk: token.psk(),
+                last_addr: Some(addr),
+                last_seen_ms: 0,
+            })
+            .expect("store the pairing on B");
+        (pairing_id, addr)
+    }
+
+    fn add(state: &Arc<AppState>, content: &str) -> String {
+        crate::capture::ingest(state, content, "text")
+            .expect("ingest")
+            .into_item()
+            .id
+    }
+
+    fn contents(state: &Arc<AppState>) -> Vec<String> {
+        let key = state.keyring.item_key();
+        state
+            .store
+            .list(100, 0)
+            .expect("list")
+            .into_iter()
+            .map(|row| {
+                let plain =
+                    copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
+                        .expect("decrypt");
+                String::from_utf8(plain).expect("utf-8")
+            })
+            .collect()
+    }
+
+    /// The whole thing, in process: a listener, a dialler, two databases with
+    /// two different device secrets, and the three properties that matter.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn two_daemons_converge_without_leaking_a_secret() {
+        let (a, _da) = test_state("alpha");
+        let (b, _db) = test_state("beta");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (pairing_id, _addr) = pair(&a, &b, shutdown_rx).await;
+
+        add(&a, "from a");
+        add(&b, "from b");
+        add(&a, "AKIAIOSFODNN7EXAMPLE");
+
+        let response = crate::p2p::handlers::sync_now(&b, 1, Some(&pairing_id)).await;
+        assert!(response.ok, "{:?}", response.error);
+
+        let on_a = contents(&a);
+        let on_b = contents(&b);
+        for item in ["from a", "from b"] {
+            assert!(
+                on_a.iter().any(|c| c == item),
+                "A is missing {item}: {on_a:?}"
+            );
+            assert!(
+                on_b.iter().any(|c| c == item),
+                "B is missing {item}: {on_b:?}"
+            );
+        }
+        assert!(
+            on_a.iter().any(|c| c == "AKIAIOSFODNN7EXAMPLE"),
+            "the secret must stay on the device that captured it"
+        );
+        assert!(
+            !on_b.iter().any(|c| c == "AKIAIOSFODNN7EXAMPLE"),
+            "a sensitive item crossed the wire: {on_b:?}"
+        );
+
+        // The same item ids on both sides, which is what makes the second
+        // session free rather than a second copy of everything.
+        let ids_a: std::collections::HashSet<String> = a
+            .store
+            .list(100, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|row| !row.is_sensitive)
+            .map(|row| row.id)
+            .collect();
+        let ids_b: std::collections::HashSet<String> = b
+            .store
+            .list(100, 0)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.id)
+            .collect();
+        assert_eq!(ids_a, ids_b);
+
+        let _ = shutdown_tx.send(true);
+    }
+
+    /// A repeated session must move nothing: `plan` skips a tie, and `apply`
+    /// re-checks the merge, so replay is a no-op at two layers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_second_session_transfers_nothing() {
+        let (a, _da) = test_state("alpha");
+        let (b, _db) = test_state("beta");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (pairing_id, _addr) = pair(&a, &b, shutdown_rx).await;
+
+        add(&a, "from a");
+        add(&b, "from b");
+
+        let first = crate::p2p::handlers::sync_now(&b, 1, Some(&pairing_id)).await;
+        assert!(first.ok);
+        let second = crate::p2p::handlers::sync_now(&b, 2, Some(&pairing_id)).await;
+
+        let results = match second.data {
+            Some(copypaste_ipc::ResponseData::Sync(results)) => results,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].error, None);
+        assert_eq!(
+            (results[0].sent, results[0].received),
+            (0, 0),
+            "a replayed session moved data"
+        );
+
+        let _ = shutdown_tx.send(true);
+    }
+
+    /// The listener must refuse a dialler holding a key it does not know, and
+    /// say nothing about which keys it does know.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unknown_pairing_key_cannot_open_a_session() {
+        let (a, _da) = test_state("alpha");
+        let (b, _db) = test_state("beta");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (_pairing_id, addr) = pair(&a, &b, shutdown_rx).await;
+        add(&a, "not yours");
+
+        // A different pairing entirely: well-formed, and unknown to A.
+        let stranger = copypaste_p2p::transport::PairingToken::generate();
+        b.p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: stranger.pairing_id(),
+                name: "stranger".into(),
+                psk: stranger.psk(),
+                last_addr: Some(addr),
+                last_seen_ms: 0,
+            })
+            .unwrap();
+
+        let response = crate::p2p::handlers::sync_now(&b, 1, Some(&stranger.pairing_id())).await;
+        let results = match response.data {
+            Some(copypaste_ipc::ResponseData::Sync(results)) => results,
+            other => panic!("{other:?}"),
+        };
+        assert!(results[0].error.is_some(), "the handshake must fail");
+        assert!(
+            contents(&b).is_empty(),
+            "nothing may be transferred over a refused handshake"
+        );
+
+        let _ = shutdown_tx.send(true);
     }
 
     #[test]
