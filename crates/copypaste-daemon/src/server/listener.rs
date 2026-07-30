@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use copypaste_ipc::{ErrorCode, Method, Response, MAX_FRAME_BYTES};
+use copypaste_ipc::{ErrorCode, Method, Response, ResponseData, MAX_FRAME_BYTES};
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
@@ -231,6 +231,19 @@ async fn handle_connection(
             continue;
         }
 
+        // `shutdown` is taken here for the same reason `watch` is below: it
+        // changes what the connection is — this one ends, and so does the
+        // process. Handling it in the dispatcher could not order the two
+        // correctly, because `run` aborts the connection tasks as soon as it
+        // sees the signal, and the reply would be the thing aborted. Here the
+        // acknowledgement is written *first*, and only then is the signal sent.
+        if let Some(id) = shutdown_id(&line) {
+            info!("shutdown requested over ipc");
+            let _ = send(&mut writer, &Response::ok(id, ResponseData::Empty {})).await;
+            state.request_shutdown();
+            break;
+        }
+
         // `watch` turns the connection into a stream, so it is taken here
         // rather than in the dispatcher: from this point the loop above no
         // longer owns the read half's deadline.
@@ -245,12 +258,9 @@ async fn handle_connection(
             // the receiver afterwards would drop everything that happened in
             // between, which is a race a client cannot see or retry around.
             let events = state.subscribe();
-            if send(
-                &mut writer,
-                &Response::ok(id, copypaste_ipc::ResponseData::Empty {}),
-            )
-            .await
-            .is_err()
+            if send(&mut writer, &Response::ok(id, ResponseData::Empty {}))
+                .await
+                .is_err()
             {
                 break;
             }
@@ -275,6 +285,19 @@ async fn handle_connection(
 fn subscribe_id(line: &str) -> Option<u64> {
     let request: copypaste_ipc::Request = serde_json::from_str(line).ok()?;
     matches!(request.method, Method::Watch).then_some(request.id)
+}
+
+/// The request id when this line asks the daemon to stop, else `None`.
+///
+/// Deliberately not gated on readiness or on the protocol version. A client
+/// that speaks a version this daemon does not is *the* caller for this verb —
+/// that is the whole of ADR-0004's protocol-mismatch state — and refusing it
+/// with `protocol_mismatch` would leave the mismatch with no way out. The
+/// request shape is one word and cannot drift, and the socket is `0600`, so
+/// there is nothing here a version could disagree about.
+fn shutdown_id(line: &str) -> Option<u64> {
+    let request: copypaste_ipc::Request = serde_json::from_str(line).ok()?;
+    matches!(request.method, Method::Shutdown).then_some(request.id)
 }
 
 /// One request, one line, one response line.
@@ -310,7 +333,7 @@ pub(super) type Reader = FramedRead<OwnedReadHalf, LinesCodec>;
 mod tests {
     use super::*;
     use crate::testutil::test_state;
-    use copypaste_ipc::{Method, Request, ResponseData, PROTOCOL_VERSION};
+    use copypaste_ipc::{Method, Request, PROTOCOL_VERSION};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Barrier;
 
@@ -567,6 +590,70 @@ mod tests {
 
         shutdown_tx.send(true).unwrap();
         let _ = server.await;
+    }
+
+    /// The order is the whole point: the acknowledgement is written *before*
+    /// the signal, so a client learns the request was accepted rather than
+    /// inferring it from a closed socket. Doing it the other way round races
+    /// `run`'s teardown, which aborts the connection tasks — and the reply is
+    /// what would be aborted.
+    #[tokio::test]
+    async fn shutdown_is_acknowledged_and_then_acted_on() {
+        let (state, dir) = test_state("server");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
+
+        let mut stopping = state.shutdown_rx();
+        assert!(!*stopping.borrow(), "nothing has asked yet");
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let reply = Client::new(stream).call(request(7, Method::Shutdown)).await;
+        assert!(reply.ok, "{:?}", reply.error);
+        assert_eq!(reply.id, 7, "a client matches replies by id");
+
+        tokio::time::timeout(Duration::from_secs(5), stopping.changed())
+            .await
+            .expect("the signal must follow the reply")
+            .expect("the sender outlives this");
+        assert!(*stopping.borrow());
+
+        // And the accept loop unwinds on it, exactly as it does on SIGTERM.
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("the server must stop")
+            .expect("cleanly");
+    }
+
+    /// Answerable before readiness, deliberately: a daemon whose database will
+    /// not open is exactly the one a user needs to be able to stop, and every
+    /// other verb would answer `not_ready`.
+    #[tokio::test]
+    async fn shutdown_answers_even_when_the_daemon_is_not_ready() {
+        let (state, dir) = test_state("server");
+        state.set_ready(false);
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let mut client = Client::new(stream);
+        let refused = client
+            .call(request(
+                1,
+                Method::List {
+                    limit: 10,
+                    offset: 0,
+                },
+            ))
+            .await;
+        assert_eq!(refused.error_code, Some(ErrorCode::NotReady));
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let reply = Client::new(stream).call(request(2, Method::Shutdown)).await;
+        assert!(reply.ok, "{:?}", reply.error);
+
+        let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
     }
 
     /// The cap is non-blocking, so an over-cap connection is dropped rather

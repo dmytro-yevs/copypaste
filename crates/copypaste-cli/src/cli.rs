@@ -87,8 +87,27 @@ pub(crate) enum Command {
         id: String,
     },
 
+    /// Set the order pinned items are shown in.
+    ///
+    /// Takes the whole pinned list, first to last. Ids that are not pinned, or
+    /// no longer exist, are ignored; pinned items not named keep their order
+    /// and move behind the ones that are.
+    ///
+    /// The order is local to this device — a pin never travels to a peer.
+    Reorder {
+        /// The pinned item ids, in the order wanted.
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
+    },
+
     /// Report whether the daemon is running and what it is doing.
     Status,
+
+    /// Stop the daemon.
+    ///
+    /// It finishes what it is doing, removes its socket, and exits — the same
+    /// unwind a `SIGTERM` produces. History is untouched.
+    Shutdown,
 
     /// Pair this device with another one.
     Pair {
@@ -222,6 +241,15 @@ pub(crate) enum ConfigAction {
         /// Master switch for every sync transport.
         #[arg(long)]
         sync_enabled: Option<bool>,
+        /// Post a notification when something is captured in the background.
+        ///
+        /// The daemon records the preference; the app is what posts it, because
+        /// an unbundled background process cannot.
+        #[arg(long)]
+        notify_on_copy: Option<bool>,
+        /// Play a sound when something is captured. macOS only.
+        #[arg(long)]
+        sound_on_copy: Option<bool>,
     },
 }
 
@@ -295,6 +323,8 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         excluded_apps,
         lan_visibility,
         sync_enabled,
+        notify_on_copy,
+        sound_on_copy,
     } = action
     else {
         return ConfigPatch::default();
@@ -315,5 +345,7 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         }),
         lan_visibility: *lan_visibility,
         sync_enabled: *sync_enabled,
+        notify_on_copy: *notify_on_copy,
+        sound_on_copy: *sound_on_copy,
     }
 }

@@ -135,6 +135,7 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
         skipped_sensitive: count(stats.skipped_sensitive),
         skipped_undecryptable: count(stats.skipped_undecryptable),
         skipped_future: count(stats.skipped_future),
+        skipped_too_large: count(stats.skipped_too_large),
     }
 }
 

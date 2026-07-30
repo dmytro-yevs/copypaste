@@ -51,7 +51,17 @@ use crate::AppState;
 /// transaction readable).
 ///
 /// `sync_device_state` is absent on purpose; see the module header.
-const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_item_origin"];
+///
+/// `sync_device_name` **is** restored, with `sync_item_origin`, because the two
+/// are one fact: an origin is a device id, and restoring the id without the
+/// name it resolves to leaves every restored peer item labelled with a bare
+/// UUID. Nothing keys off a name, so a stale row costs a label at worst.
+const RESTORED_TABLES: &[&str] = &[
+    "clipboard_fts",
+    "clipboard_items",
+    "sync_device_name",
+    "sync_item_origin",
+];
 
 /// Every table this build knows how to restore, including the ones it leaves in
 /// place. A backup containing anything else is refused rather than partially
@@ -60,6 +70,7 @@ const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_ite
 const KNOWN_TABLES: &[&str] = &[
     "clipboard_items",
     "clipboard_fts",
+    "sync_device_name",
     "sync_device_state",
     "sync_item_origin",
 ];
@@ -142,6 +153,17 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
             // again.
             if let Ok(Some(oldest)) = state.meta.oldest_version_ms() {
                 crate::cloud::note_version_written(state, oldest);
+            }
+            // The name table came from the backup, so this device's own row in
+            // it is whatever it was called then. The *authority* on that name is
+            // `sync_device_state`, which a restore leaves alone (see the module
+            // header), so re-assert the row rather than leave the two
+            // disagreeing about what this device is called.
+            if let Err(e) = state
+                .meta
+                .record_device_name(state.meta.device_id(), state.meta.device_name())
+            {
+                warn!(error = ?e, "could not re-record this device's name after a restore");
             }
             state.note_local_change();
             info!("restored the history database from a backup");
@@ -228,6 +250,10 @@ fn swap(db_path: &Path, staging: &Path, key: &[u8; 32]) -> Result<(), crate::met
         )?;
         tx.execute(
             "INSERT INTO sync_item_origin SELECT * FROM restore_src.sync_item_origin",
+            [],
+        )?;
+        tx.execute(
+            "INSERT INTO sync_device_name SELECT * FROM restore_src.sync_device_name",
             [],
         )?;
         tx.commit()

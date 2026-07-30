@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod content_type;
 pub mod payload;
 pub mod redact;
 
@@ -100,6 +101,26 @@ pub enum Method {
     Pin {
         id: String,
         pinned: bool,
+    },
+    /// Rewrite the order of the pinned section.
+    ///
+    /// `ids` is the **complete** pinned ordering, first to last — not a
+    /// move-one-item instruction. A partial move ("put b after d") is ambiguous
+    /// the moment a peer pins something between the two, because the two
+    /// devices no longer agree on what is in between; a full ordering is the
+    /// only shape that survives a concurrent pin, and it is what the drag
+    /// gesture produces anyway.
+    ///
+    /// Ids that are not pinned, or no longer exist, are ignored rather than
+    /// refused: the list a client is holding was read a moment ago, and a peer
+    /// may have deleted one since. Pinned items the list does not name keep
+    /// their relative order and sort after the ones it does.
+    ///
+    /// The order is local. Nothing about a pin travels on either transport
+    /// (`meta::apply` preserves the local `pinned` and `pin_order` across an
+    /// incoming version), so reordering here does not reorder anywhere else.
+    ReorderPinned {
+        ids: Vec<String>,
     },
 
     // ---- peer-to-peer sync -------------------------------------------------
@@ -207,6 +228,28 @@ pub enum Method {
     /// silent is the point — and is counted against a separate, smaller cap so
     /// that watchers cannot consume every connection slot.
     Watch,
+
+    /// Stop the daemon.
+    ///
+    /// Acknowledged first and acted on second, so a client learns the request
+    /// was accepted rather than inferring it from a closed socket.
+    ///
+    /// **It confers no authority.** The socket is `0600`, so anyone who can
+    /// send this could already read every item, add one, or delete the lot —
+    /// and could signal the process besides. What it adds is doing it
+    /// *portably and politely*: the daemon unwinds through the same path
+    /// SIGTERM takes, finishing the capture it is in and removing its socket,
+    /// rather than being aborted and leaving a stale file behind.
+    ///
+    /// It exists because an app cannot stop a daemon it did not start. Without
+    /// it, ADR-0004's protocol-mismatch state can explain that the service is
+    /// the wrong version and then offer the user nothing: the app can start a
+    /// daemon, and it can restart one it launched itself, but the one already
+    /// running is somebody else's process.
+    ///
+    /// Answerable before readiness, deliberately — a daemon whose database will
+    /// not open is exactly the one a user needs to be able to stop.
+    Shutdown,
 }
 
 /// The settings as they now stand, plus what will not take effect yet.
@@ -238,6 +281,26 @@ pub struct EventData {
     /// Live item count at the time of the event, so a client can render a badge
     /// without a round trip.
     pub item_count: u64,
+    /// The change was a *capture* — something the user copied, as opposed to a
+    /// delete, a pin, an import, or a row arriving from a peer.
+    ///
+    /// This is what a client needs to post the notification and play the sound
+    /// that `ConfigData::notify_on_copy` and `ConfigData::sound_on_copy` gate.
+    /// A flag rather than a new [`EventKind`] variant so that a client built
+    /// against an older build still decodes the frame: an unknown enum variant
+    /// fails deserialisation, and a watcher that stops decoding stops updating.
+    ///
+    /// It carries no content and no id, for the reason [`Method::Watch`] gives:
+    /// a subscriber that wants the item re-reads it through the ordinary
+    /// methods, which keeps one set of rules about what a client may see.
+    ///
+    /// The daemon does **not** consult `notify_on_copy` before setting it. The
+    /// flag says what happened; the setting says what to do about it, and the
+    /// client that owns the notification is the one that should read it (the
+    /// daemon has no bundle and therefore cannot post one — see
+    /// `daemon/src/notify.rs`).
+    #[serde(default)]
+    pub captured: bool,
 }
 
 /// One reply. `ok` distinguishes success from failure without inspecting the

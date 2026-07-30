@@ -3,12 +3,18 @@
 //! Everything here is a pure function of typed [`copypaste_ipc`] values plus an
 //! explicit `now`, so the formatting is unit-testable without a daemon and
 //! without a wall clock.
+//!
+//! This file holds the tables — a row per record — and the two string helpers
+//! every one of them uses. [`service`] holds the key/value blocks.
+
+mod service;
+
+pub use service::{
+    cloud_status_text, cloud_sync_text, config_text, event_text, export_summary, status_text,
+};
 
 use comfy_table::{presets, ContentArrangement, Table};
-use copypaste_ipc::{
-    CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredDevice, EventData, EventKind,
-    ExportData, Item, PairingData, PeerInfo, StatusData, SyncResult, PROTOCOL_VERSION,
-};
+use copypaste_ipc::{DiscoveredDevice, Item, PairingData, PeerInfo, SyncResult};
 
 /// Stand-in printed instead of a sensitive item's content.
 ///
@@ -21,9 +27,13 @@ pub const REDACTED: &str = "***REDACTED***";
 pub const PIN_GLYPH: &str = "*";
 /// Marks a sensitive row.
 pub const SENSITIVE_GLYPH: &str = "!";
+/// Marks a row cloud sync will not carry, because it is over the per-item cap.
+pub const TOO_LARGE_GLYPH: &str = "~";
 
 /// How much of an item's content a table row shows.
 const CONTENT_WIDTH: usize = 56;
+/// How much of a device name a row shows.
+const DEVICE_WIDTH: usize = 16;
 
 /// Compact "how long ago", e.g. `12m ago`.
 ///
@@ -86,13 +96,17 @@ pub fn item_preview(item: &Item, max: usize) -> String {
     }
     let line = one_line(&item.content, max);
     if line.is_empty() {
-        // Non-text items (images, files) may carry no printable content.
-        return format!("[{}]", item.content_type);
+        // A representation with no printable form — an image, a file — says
+        // what it is rather than rendering as a blank row.
+        return format!(
+            "[{}]",
+            copypaste_ipc::content_type::label(&item.content_type)
+        );
     }
     line
 }
 
-/// Per-row flag glyphs: pinned and/or sensitive.
+/// Per-row flag glyphs: pinned, sensitive, and too large to sync.
 pub fn item_flags(item: &Item) -> String {
     let mut flags = String::new();
     if item.pinned {
@@ -101,7 +115,26 @@ pub fn item_flags(item: &Item) -> String {
     if item.is_sensitive {
         flags.push_str(SENSITIVE_GLYPH);
     }
+    if item.too_large_to_sync {
+        flags.push_str(TOO_LARGE_GLYPH);
+    }
     flags
+}
+
+/// Which device an item came from, as a column value.
+///
+/// The name when this device has been told one, and a short form of the id when
+/// it has not. Never blank and never silently "this device": an item whose
+/// origin is unknown is a different fact from an item captured here, and
+/// collapsing the two is the whole of UI audit finding 3.
+pub fn origin_label(item: &Item) -> String {
+    match &item.origin_device_name {
+        Some(name) => one_line(name, DEVICE_WIDTH),
+        None if item.origin_device_id.is_empty() => "unknown".to_string(),
+        // A UUID's first group is enough to tell two devices apart by eye, and
+        // the full id is on the wire for anything that needs to match on it.
+        None => item.origin_device_id.chars().take(8).collect(),
+    }
 }
 
 /// Render items as a table, or `empty` when there are none.
@@ -115,28 +148,30 @@ pub fn items_table(items: &[Item], now_ms: i64, empty: &str) -> String {
     // Disabled, not Dynamic: content is already truncated to a known width, and
     // a fixed arrangement keeps output identical in a pipe and in a terminal.
     table.set_content_arrangement(ContentArrangement::Disabled);
-    table.set_header(vec!["ID", "AGE", "FLAGS", "CONTENT"]);
+    table.set_header(vec!["ID", "AGE", "FROM", "FLAGS", "CONTENT"]);
 
     for item in items {
         table.add_row(vec![
             item.id.clone(),
             relative_time(item.created_at, now_ms),
+            origin_label(item),
             item_flags(item),
             item_preview(item, CONTENT_WIDTH),
         ]);
     }
 
     let mut out = table.to_string();
-    let any_pinned = items.iter().any(|i| i.pinned);
-    let any_sensitive = items.iter().any(|i| i.is_sensitive);
-    if any_pinned || any_sensitive {
-        let mut legend = Vec::new();
-        if any_pinned {
-            legend.push(format!("{PIN_GLYPH} pinned"));
-        }
-        if any_sensitive {
-            legend.push(format!("{SENSITIVE_GLYPH} sensitive (content hidden)"));
-        }
+    let mut legend = Vec::new();
+    if items.iter().any(|i| i.pinned) {
+        legend.push(format!("{PIN_GLYPH} pinned"));
+    }
+    if items.iter().any(|i| i.is_sensitive) {
+        legend.push(format!("{SENSITIVE_GLYPH} sensitive (content hidden)"));
+    }
+    if items.iter().any(|i| i.too_large_to_sync) {
+        legend.push(format!("{TOO_LARGE_GLYPH} too large to sync"));
+    }
+    if !legend.is_empty() {
         out.push('\n');
         out.push_str(&legend.join("   "));
     }
@@ -210,92 +245,6 @@ pub fn discovered_table(devices: &[DiscoveredDevice], now_ms: i64, empty: &str) 
     table.to_string()
 }
 
-/// What an export left behind, for stderr.
-///
-/// Every count is printed, including zero, for the same reason `withheld` is in
-/// [`cloud_sync_text`]: a number that only appears when it is non-zero is one
-/// nobody knows to look for.
-pub fn export_summary(export: &ExportData) -> String {
-    let mut lines = vec![format!(
-        "exported {} items; withheld {} sensitive, skipped {} non-text, {} unreadable",
-        export.items.len(),
-        export.skipped_sensitive,
-        export.skipped_non_text,
-        export.skipped_undecryptable,
-    )];
-    if export.skipped_sensitive > 0 {
-        lines.push(
-            "Sensitive items are withheld by default. Pass --include-sensitive to \
-             include them — the export is a plaintext file."
-                .to_string(),
-        );
-    }
-    lines.push(String::new());
-    lines.join("\n")
-}
-
-/// Render the daemon's settings, and anything that needs a restart.
-pub fn config_text(applied: &ConfigApplied) -> String {
-    let config = &applied.config;
-    let mut lines = vec![
-        setting("poll interval", format!("{} ms", config.poll_interval_ms)),
-        setting("history limit", format!("{} items", config.history_limit)),
-        setting(
-            "retention",
-            match config.retention_days {
-                0 => "off".to_string(),
-                days => format!("{days} days"),
-            },
-        ),
-        setting("dedup window", format!("{} s", config.dedup_window_secs)),
-        setting("max item size", format!("{} bytes", config.max_item_bytes)),
-        setting(
-            "sensitive ttl",
-            match config.sensitive_ttl_secs {
-                // `0` is "never delete", not "delete immediately". Rendering it
-                // as a number would read as the opposite of what it means.
-                0 => "off".to_string(),
-                secs => format!("{secs} s"),
-            },
-        ),
-        setting(
-            "excluded apps",
-            if config.excluded_app_bundle_ids.is_empty() {
-                "none".to_string()
-            } else {
-                config.excluded_app_bundle_ids.join(", ")
-            },
-        ),
-        setting("lan visibility", yes_no(config.lan_visibility)),
-        setting("sync", yes_no(config.sync_enabled)),
-    ];
-
-    if !applied.restart_required.is_empty() {
-        lines.push(String::new());
-        lines.push(format!(
-            "changed, but not yet in effect: {}. Restart the daemon to apply.",
-            applied.restart_required.join(", ")
-        ));
-    }
-    lines.join("\n")
-}
-
-fn setting(name: &str, value: String) -> String {
-    format!("{name:<16} {value}")
-}
-
-fn yes_no(value: bool) -> String {
-    if value { "on" } else { "off" }.to_string()
-}
-
-/// One line per change event, for `copypaste watch`.
-pub fn event_text(event: &EventData) -> String {
-    match event.event {
-        EventKind::Items => format!("items changed ({} in history)", event.item_count),
-        EventKind::Peers => "paired devices changed".to_string(),
-    }
-}
-
 /// Render one sync run, one row per peer.
 pub fn sync_table(results: &[SyncResult], empty: &str) -> String {
     if results.is_empty() {
@@ -356,136 +305,6 @@ pub fn pairing_text(pairing: &PairingData) -> String {
     lines.join("\n")
 }
 
-/// Render `status` as an aligned key/value block.
-pub fn status_text(status: &StatusData) -> String {
-    let mut lines = vec![
-        format!("{:<12} {}", "daemon", "running"),
-        format!("{:<12} {}", "version", status.version),
-        format!(
-            "{:<12} {} (this CLI: {})",
-            "protocol", status.protocol_version, PROTOCOL_VERSION
-        ),
-        format!("{:<12} {}", "items", status.item_count),
-        format!(
-            "{:<12} {}",
-            "capture",
-            if status.capture_running {
-                "running"
-            } else {
-                "stopped"
-            }
-        ),
-        format!("{:<12} {}", "clipboard", clipboard_backend(status)),
-    ];
-
-    if status.protocol_version != PROTOCOL_VERSION {
-        // Manifest 04 §6.2: a client must not silently continue across a
-        // protocol difference.
-        lines.push(String::new());
-        lines.push(
-            "warning: the daemon and this CLI speak different IPC protocol versions. \
-             Upgrade both to the same release and restart the daemon."
-                .to_string(),
-        );
-    }
-
-    lines.join("\n")
-}
-
-/// Render cloud sync status as an aligned key/value block.
-///
-/// Names no URL and no token: `configured` is the only thing a user needs to
-/// know about the deployment, and printing the project URL puts it in every
-/// screenshot of a bug report.
-pub fn cloud_status_text(status: &CloudStatusData, now_ms: i64) -> String {
-    if !status.configured {
-        return "cloud sync is not configured on this daemon\n\n\
-                Start the daemon with --cloud-url and --cloud-anon-key (or set \
-                COPYPASTE_CLOUD_URL and COPYPASTE_CLOUD_ANON_KEY) to enable it."
-            .to_string();
-    }
-
-    let mut lines = vec![
-        format!("{:<12} {}", "configured", "yes"),
-        format!(
-            "{:<12} {}",
-            "account",
-            status.email.as_deref().unwrap_or("signed out")
-        ),
-        format!(
-            "{:<12} {}",
-            "sync key",
-            if status.key_ready {
-                "unlocked"
-            } else {
-                "locked — sign in to derive it"
-            }
-        ),
-        format!(
-            "{:<12} {}",
-            "last sync",
-            match status.last_sync_ms {
-                Some(ms) => relative_time(ms, now_ms),
-                None => "never".to_string(),
-            }
-        ),
-        format!("{:<12} {}s", "polling", status.poll_interval_secs),
-    ];
-    if let Some(error) = &status.last_error {
-        lines.push(format!("{:<12} {}", "last error", error));
-    }
-    if !status.signed_in {
-        lines.push(String::new());
-        lines.push("Sign in with: copypaste cloud sign-in --email you@example.com".to_string());
-    }
-    lines.join("\n")
-}
-
-/// Render one cloud round.
-///
-/// `withheld` is always printed, including zero: it is the line a user checks
-/// the "a sensitive item is never uploaded" rule against, and a count that only
-/// appears when it is non-zero is one nobody knows to look for.
-pub fn cloud_sync_text(stats: &CloudSyncData) -> String {
-    let mut lines = vec![
-        format!("{:<12} {}", "uploaded", stats.uploaded),
-        format!("{:<12} {}", "deleted", stats.tombstoned),
-        format!("{:<12} {}", "downloaded", stats.downloaded),
-        format!("{:<12} {}", "applied", stats.applied),
-        format!(
-            "{:<12} {} (sensitive, never uploaded)",
-            "withheld", stats.skipped_sensitive
-        ),
-    ];
-    if stats.skipped_undecryptable > 0 {
-        lines.push(format!(
-            "{:<12} {} (not readable with this sync passphrase)",
-            "skipped", stats.skipped_undecryptable
-        ));
-    }
-    if stats.skipped_future > 0 {
-        lines.push(format!(
-            "{:<12} {} (stamped implausibly far in the future)",
-            "refused", stats.skipped_future
-        ));
-    }
-    lines.join("\n")
-}
-
-/// The backend string, annotated when it is not the real system clipboard.
-///
-/// `StatusData::clipboard_backend` exists so a demo cannot be mistaken for the
-/// real thing; passing it through unannotated would defeat that.
-fn clipboard_backend(status: &StatusData) -> String {
-    let backend = &status.clipboard_backend;
-    let lowered = backend.to_ascii_lowercase();
-    if lowered.contains("fake") || lowered.contains("mock") || lowered.contains("null") {
-        format!("{backend} (not the system clipboard)")
-    } else {
-        backend.clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,10 +313,13 @@ mod tests {
         Item {
             id: "3f2a91c4-0000-4000-8000-000000000001".into(),
             content: content.into(),
-            content_type: "text/plain".into(),
+            content_type: "text".into(),
             created_at: 1_000_000,
             pinned: false,
             is_sensitive: false,
+            origin_device_id: "9e1d0000-0000-4000-8000-00000000000a".into(),
+            origin_device_name: Some("This Mac".into()),
+            too_large_to_sync: false,
         }
     }
 
@@ -577,20 +399,38 @@ mod tests {
     }
 
     #[test]
-    fn empty_content_falls_back_to_the_content_type() {
+    fn a_representation_with_no_text_says_what_it_is() {
         let mut it = item("");
         it.content_type = "image/png".into();
-        assert_eq!(item_preview(&it, 56), "[image/png]");
+        assert_eq!(item_preview(&it, 56), "[image]");
+        it.content_type = "application/x-not-invented-yet".into();
+        assert_eq!(item_preview(&it, 56), "[unsupported]");
     }
 
     #[test]
-    fn flags_mark_pinned_and_sensitive() {
+    fn flags_mark_pinned_sensitive_and_unsyncable() {
         let mut it = item("x");
         assert_eq!(item_flags(&it), "");
         it.pinned = true;
         assert_eq!(item_flags(&it), PIN_GLYPH);
         it.is_sensitive = true;
         assert_eq!(item_flags(&it), format!("{PIN_GLYPH}{SENSITIVE_GLYPH}"));
+        it.too_large_to_sync = true;
+        assert_eq!(
+            item_flags(&it),
+            format!("{PIN_GLYPH}{SENSITIVE_GLYPH}{TOO_LARGE_GLYPH}")
+        );
+    }
+
+    /// An item that will never reach the other device must not look like one
+    /// that is still on its way (`CopyPaste-f72f`).
+    #[test]
+    fn an_unsyncable_item_is_marked_and_explained() {
+        let mut it = item("a very large clip");
+        it.too_large_to_sync = true;
+        let table = items_table(&[it], 1_000_000, "none");
+        assert!(table.contains(TOO_LARGE_GLYPH), "{table}");
+        assert!(table.contains("too large to sync"), "{table}");
     }
 
     #[test]
@@ -625,36 +465,29 @@ mod tests {
         assert!(out.contains("pinned"), "{out}");
     }
 
-    fn status(protocol_version: u32, backend: &str) -> StatusData {
-        StatusData {
-            version: "2.0.0-alpha.1".into(),
-            protocol_version,
-            item_count: 42,
-            capture_running: true,
-            clipboard_backend: backend.into(),
-        }
+    /// UI audit finding 3, in its command-line form: with sync on, a row from
+    /// the phone must not read as local.
+    #[test]
+    fn a_row_says_which_device_it_came_from() {
+        let table = items_table(&[item("hello")], 1_000_000, "none");
+        assert!(table.contains("This Mac"), "{table}");
+
+        let mut theirs = item("from the phone");
+        theirs.origin_device_name = Some("Phone".into());
+        let table = items_table(&[theirs], 1_000_000, "none");
+        assert!(table.contains("Phone"), "{table}");
     }
 
+    /// A device this one has never spoken to has an id and no name. Showing the
+    /// id is honest; showing this device's name would not be.
     #[test]
-    fn status_reports_the_essentials() {
-        let text = status_text(&status(PROTOCOL_VERSION, "macos-pasteboard"));
-        assert!(text.contains("2.0.0-alpha.1"), "{text}");
-        assert!(text.contains("42"), "{text}");
-        assert!(text.contains("running"), "{text}");
-        assert!(!text.contains("warning"), "{text}");
-    }
+    fn an_unnamed_origin_falls_back_to_a_short_id_never_to_this_device() {
+        let mut it = item("x");
+        it.origin_device_name = None;
+        assert_eq!(origin_label(&it), "9e1d0000");
 
-    #[test]
-    fn status_warns_on_a_protocol_difference() {
-        let text = status_text(&status(PROTOCOL_VERSION + 1, "macos-pasteboard"));
-        assert!(text.contains("warning"), "{text}");
-        assert!(text.contains("different IPC protocol versions"), "{text}");
-    }
-
-    #[test]
-    fn status_flags_a_fake_clipboard_backend() {
-        let text = status_text(&status(PROTOCOL_VERSION, "fake"));
-        assert!(text.contains("not the system clipboard"), "{text}");
+        it.origin_device_id = String::new();
+        assert_eq!(origin_label(&it), "unknown");
     }
 
     fn peer(name: &str) -> PeerInfo {
@@ -760,11 +593,5 @@ mod tests {
         });
         assert!(text.contains("HOST:PORT"), "{text}");
         assert!(text.contains("unknown"), "{text}");
-    }
-
-    #[test]
-    fn status_never_prints_a_path() {
-        let text = status_text(&status(PROTOCOL_VERSION, "macos-pasteboard"));
-        assert!(!text.contains('/'), "{text}");
     }
 }

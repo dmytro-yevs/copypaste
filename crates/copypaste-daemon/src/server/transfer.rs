@@ -174,7 +174,7 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
 
 /// v2 captures text only, but a peer or the cloud can deliver another type.
 fn is_text(content_type: &str) -> bool {
-    content_type == "text" || content_type.starts_with("text/")
+    copypaste_ipc::content_type::is_text(content_type)
 }
 
 #[cfg(test)]

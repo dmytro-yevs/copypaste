@@ -47,8 +47,9 @@ pub enum Liveness {
 /// * `sqlite_cache_mb`, `history_limit` (v1's deprecated twin of the byte
 ///   quota), `config_version` — implementation detail, dead, and unnecessary
 ///   without backward compatibility (CLAUDE.md rule 3).
-/// * `sound_on_copy` / `notify_on_copy` — parity finding 18, not yet built.
-///   Their absence here is a consequence of that, not a separate decision.
+///
+/// `sound_on_copy` and `notify_on_copy` were absent for the same reason and are
+/// now present: parity finding 18 is built.
 ///
 /// One field was **considered and refused**: a user-settable sensitive-content
 /// confidence threshold. Manifest 07 I4 makes index exclusion unconditional on
@@ -79,8 +80,32 @@ pub struct ConfigData {
     /// distinction is the whole of `CopyPaste-8ebg.1`, and getting it backwards
     /// destroys user data that is not recoverable (CLAUDE.md rule 4). **Live.**
     ///
-    /// Only findings above the detector's auto-wipe floor are ever deleted, so
-    /// lowering this cannot widen *what* is deleted, only hasten it.
+    /// Only findings above the detector's auto-wipe floor are ever deleted, and
+    /// `copypaste_core::sensitive::sweep_sensitive` re-scans the plaintext at
+    /// delete time rather than trusting a stored flag, so lowering this cannot
+    /// widen *what* is deleted, only hasten it.
+    ///
+    /// # Off by default, against the manifests
+    ///
+    /// Manifest 01 §4 and manifest 07 §6.2 both give `30` as v1's default, and
+    /// manifest 07 §1.2 says the entire confidence model exists to make that
+    /// default safe. v2 ships `0`, and both manifests are amended to say so.
+    ///
+    /// The reason is not the detector, which v2 improved — the three rules
+    /// manifest 07 §7.1 called out as unsafe above the floor are all fixed
+    /// here. It is that **v2 has nowhere to say it happened.** v1 shipped this
+    /// default beside a Settings tab that showed the value; v2's Settings has no
+    /// control for it, the sweep raises no notice, and a deleted item simply
+    /// stops being in the list. That is a silent, irreversible delete a user can
+    /// neither discover nor switch off from the product surface — CLAUDE.md
+    /// rule 4's worst outcome arrived at through rule 6's gap.
+    ///
+    /// The asymmetry decides it: a user who wants the wipe turns it on once,
+    /// while a user whose data went is not getting it back.
+    ///
+    /// **What flips this back to 30:** a Settings control for the TTL, and a
+    /// visible notice when the sweep deletes something. With both, the manifest
+    /// default is the right one and should be restored.
     pub sensitive_ttl_secs: u64,
     /// Bundle ids whose copies are never captured, e.g. a password manager.
     /// **Live.**
@@ -97,6 +122,36 @@ pub struct ConfigData {
     pub lan_visibility: bool,
     /// Master switch for every sync transport. **Live.**
     pub sync_enabled: bool,
+
+    /// Post a notification when something is captured while the app is in the
+    /// background. **Live.**
+    ///
+    /// Off by default. A clipboard manager captures every copy, and a
+    /// notification per copy is the behaviour users turn an app off for; the
+    /// switch exists because the opposite failure is worse in a different way —
+    /// a background capture is otherwise completely invisible, so a user who
+    /// cannot tell whether the app is working has no way to find out.
+    ///
+    /// **The daemon does not post the notification.** It has no application
+    /// bundle, and macOS will not let an unbundled background process post to
+    /// the notification centre at all. The daemon sets
+    /// [`crate::EventData::captured`] on the change event and the app posts it,
+    /// reading this field to decide whether to. Manifest 06 §3.6 describes
+    /// exactly that split ("respecting the daemon's `notify_on_copy`") and it
+    /// is why the setting lives here rather than in the app's own preferences:
+    /// the capture is the daemon's fact, and the setting has to be readable by
+    /// whichever surface is listening.
+    pub notify_on_copy: bool,
+
+    /// Play a short sound when something is captured. **Live.**
+    ///
+    /// Off by default, for the reason above. Unlike the notification, the
+    /// daemon *can* do this itself and does — see `daemon/src/notify.rs`. It is
+    /// suppressed whenever the clipboard backend is the fake one, which is what
+    /// runs in tests and on every non-macOS host (manifest 01 §3.23: sound must
+    /// be suppressed in test environments, and the player must not leave a
+    /// process behind).
+    pub sound_on_copy: bool,
 }
 
 impl Default for ConfigData {
@@ -107,14 +162,17 @@ impl Default for ConfigData {
             retention_days: 0,
             dedup_window_secs: 60,
             max_item_bytes: 4 * 1024 * 1024,
-            // Matches `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL`, and
-            // `defaults_agree_with_the_core_constants` in the daemon pins the
-            // two together — this crate cannot depend on core (the CLI depends
-            // on this one and must not be able to open a database).
-            sensitive_ttl_secs: 30,
+            // Auto-wipe off. `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL`
+            // is still 30 s and is still the right value *once switched on* —
+            // it is the suggestion, not the default. See the field's doc for
+            // why the two differ, and `the_sensitive_wipe_is_off_until_a_user_
+            // asks_for_it` for the assertion that keeps them apart.
+            sensitive_ttl_secs: 0,
             excluded_app_bundle_ids: Vec::new(),
             lan_visibility: true,
             sync_enabled: true,
+            notify_on_copy: false,
+            sound_on_copy: false,
         }
     }
 }
@@ -186,6 +244,10 @@ pub struct ConfigPatch {
     pub lan_visibility: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_on_copy: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound_on_copy: Option<bool>,
 }
 
 impl ConfigPatch {
@@ -236,6 +298,12 @@ impl ConfigPatch {
         if let Some(v) = self.sync_enabled {
             next.sync_enabled = v;
         }
+        if let Some(v) = self.notify_on_copy {
+            next.notify_on_copy = v;
+        }
+        if let Some(v) = self.sound_on_copy {
+            next.sound_on_copy = v;
+        }
         Ok(next)
     }
 }
@@ -255,6 +323,10 @@ impl ConfigData {
             ("excluded_app_bundle_ids", Liveness::Live),
             ("lan_visibility", Liveness::NeedsRestart),
             ("sync_enabled", Liveness::Live),
+            // Both are read at the moment a capture lands, so a change takes
+            // effect on the next copy.
+            ("notify_on_copy", Liveness::Live),
+            ("sound_on_copy", Liveness::Live),
         ]
     }
 
@@ -362,10 +434,55 @@ mod tests {
         ] {
             assert!(patch.apply(&base).is_ok(), "{patch:?}");
         }
-        // ...and the default is a real TTL, not the sentinel: v1 wiped a
-        // detected secret after 30 s and the parity audit records losing that
-        // as finding 3.
-        assert_eq!(ConfigData::default().sensitive_ttl_secs, 30);
+    }
+
+    /// **The assertion whose absence is why this survived.**
+    ///
+    /// A default of 30 hard-deletes anything the detector reads as a
+    /// high-confidence secret half a minute after it is copied, with no
+    /// Settings control to find it and no notice when it fires. CLAUDE.md rule
+    /// 4 puts unrecoverable data loss above everything; this is the line that
+    /// keeps the shipped value honest, and the field's doc records what would
+    /// justify changing it back.
+    #[test]
+    fn the_sensitive_wipe_is_off_until_a_user_asks_for_it() {
+        assert_eq!(
+            ConfigData::default().sensitive_ttl_secs,
+            0,
+            "auto-deletion is on by default; a false positive is not recoverable"
+        );
+
+        // Off is a *default*, not a removal: the setting still takes a real TTL.
+        let on = ConfigPatch {
+            sensitive_ttl_secs: Some(30),
+            ..Default::default()
+        }
+        .apply(&ConfigData::default())
+        .unwrap();
+        assert_eq!(on.sensitive_ttl_secs, 30);
+    }
+
+    /// Parity finding 18. Both are off out of the box: a clipboard manager
+    /// captures every copy, and a notification or a sound per copy is the
+    /// behaviour an app gets uninstalled for. The switch is what matters — a
+    /// background capture with neither is invisible.
+    #[test]
+    fn the_two_copy_feedback_switches_default_off_and_are_settable_apart() {
+        let base = ConfigData::default();
+        assert!(!base.notify_on_copy);
+        assert!(!base.sound_on_copy);
+
+        let next = ConfigPatch {
+            sound_on_copy: Some(true),
+            ..Default::default()
+        }
+        .apply(&base)
+        .unwrap();
+        assert!(next.sound_on_copy);
+        assert!(
+            !next.notify_on_copy,
+            "one switch turned the other one on too"
+        );
     }
 
     #[test]

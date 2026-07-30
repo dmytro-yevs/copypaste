@@ -40,9 +40,16 @@ Plus a content-independent signal:
 - A **false negative** means a secret is stored in plaintext in the FTS index,
   kept forever (no TTL), synced to peers/relay, and shown unmasked in history.
 - A **false positive** means user data is **silently deleted** 30 seconds after
-  it is copied (default `sensitive_ttl_secs = 30`,
+  it is copied (v1 default `sensitive_ttl_secs = 30`,
   `crates/copypaste-core/src/config/defaults.rs:51`). The user is not asked and
   is not told.
+
+  **v2 ships this default as `0` (off).** Not because the confidence model
+  failed — v2 fixed all three §7.1 rules — but because "is not told" became
+  literal: v2's Settings has no control for the TTL and the sweep raises no
+  notice, so the deletion is silent, irreversible and undiscoverable. The 30 s
+  default is correct and should be restored once a Settings control and a
+  visible notice both exist. See `copypaste_ipc::ConfigData::sensitive_ttl_secs`.
 
 The entire confidence model in §4 exists to make the second failure mode
 impossible for weakly-distinctive patterns.
@@ -255,7 +262,7 @@ example `pattern_name` (`ffi_sensitive.rs:73`) — that name does not exist.
 | Constant | Value | Where |
 |---|---|---|
 | `AUTOWIPE_CONFIDENCE_FLOOR` | **0.70** | `detector/engine.rs:141` |
-| Default sensitive TTL | **30 s** (`SENSITIVE_TTL_SECS`) | `config/defaults.rs:51` |
+| Default sensitive TTL | **30 s** in v1; **`0` (off)** in v2 — see §1.2 | `config/defaults.rs:51` |
 | `sensitive_ttl_secs == 0` | sentinel: **auto-wipe disabled**, never clamped away | `config/mod.rs:248`, `:286` |
 | FP-corpus budget | ≤ 5 % of benign corpus, floor of 2 absolute | `tests/false_positive_corpus.rs:91-103` |
 | TP-corpus recall | **100 %**, ≥ 20 entries | `tests/true_positive_corpus.rs:368-391` |
@@ -592,7 +599,7 @@ existing sensitive item rather than only new ones.
 
 | Property | Value |
 |---|---|
-| Config field | `sensitive_ttl_secs`, default **30** |
+| Config field | `sensitive_ttl_secs`, v1 default **30**, v2 default **0** (off — §1.2) |
 | `0` | "auto-wipe disabled" — a valid value, **explicitly not clamped** (`config/mod.rs:248`, `:286`) |
 | Stamped at capture | `expires_at = now_ms + ttl_secs * 1000` (`capture/text.rs:233`) |
 | Pinned items | never expire — excluded by both the backfill and the delete (`storage/items/delete.rs:130-131`, `:151`, `:166`) |

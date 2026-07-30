@@ -14,7 +14,7 @@ use tracing::{error, warn};
 
 use super::messages::{
     decrypt_error, storage_error, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT, MSG_NOT_FOUND,
-    MSG_TOO_BIG,
+    MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
 };
 use crate::capture::{self, IngestError};
 use crate::AppState;
@@ -26,6 +26,13 @@ const MAX_PAGE: u32 = 1_000;
 const DEFAULT_LIST_PAGE: u32 = 50;
 /// Applied when `search` is called with `limit = 0`.
 const DEFAULT_SEARCH_PAGE: u32 = 20;
+/// Ceiling on one `reorder_pinned` request.
+///
+/// The frame cap already bounds the bytes; this bounds the *work*, so one
+/// request cannot hold the write transaction over a list nobody could have
+/// dragged. It is above any plausible pinned section — the history cap itself
+/// is 10 000 items — so a real ordering is never refused.
+const MAX_REORDER_IDS: usize = 10_000;
 
 pub(super) fn status(state: &AppState, id: u64) -> Response {
     // `status` never fails: an unreadable count is reported as zero rather than
@@ -98,7 +105,7 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
     // Same ingest path as the capture loop: detector, encrypt, dedup, insert,
     // evict. `add` cannot skip the detector — an item entering here is exactly
     // as likely to be a credential as one copied from the pasteboard.
-    match capture::ingest(state, content, "text") {
+    match capture::ingest(state, content, copypaste_ipc::content_type::TEXT) {
         Ok(ingested) => match to_wire(state, ingested.into_item()) {
             Ok(item) => {
                 state.note_local_change();
@@ -204,13 +211,65 @@ pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Res
     }
 }
 
-/// Decrypt a stored row into its wire form.
+/// Rewrite the pinned ordering.
+///
+/// The whole ordering, applied in one transaction by `Store::reorder_pinned` —
+/// see [`copypaste_ipc::Method::ReorderPinned`] for why a move-one verb is not
+/// offered. Ids the caller no longer owns are ignored there rather than
+/// refused here, so a peer deleting a pinned item between the client's read and
+/// its write does not lose the reorder the user just made.
+///
+/// Answers with the count of rows renumbered — which may exceed `ids.len()`,
+/// because pinned rows the caller did not name are renumbered behind the ones
+/// it did.
+pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Response {
+    if ids.len() > MAX_REORDER_IDS {
+        return Response::err(id, ErrorCode::InvalidRequest, MSG_REORDER_TOO_MANY);
+    }
+    match state.store.reorder_pinned(ids) {
+        Ok(0) => Response::ok(id, ResponseData::Count(0)),
+        Ok(renumbered) => {
+            // A pin is local and never travels (`meta::apply` preserves both
+            // `pinned` and `pin_order` across an incoming version), so this
+            // wakes the watchers and nothing else. Waking the sync loops for a
+            // change no transport will carry would be a round trip per drag.
+            state.note_remote_change();
+            Response::ok(id, ResponseData::Count(renumbered))
+        }
+        Err(e) => storage_error(id, "reorder_pinned", e),
+    }
+}
+
+/// Decrypt a stored row into its wire form, resolving its origin as it goes.
+///
+/// One row, one origin lookup. [`decrypt_rows`] resolves a whole page in one
+/// query instead — see [`to_wire_with`], which is what the two share.
 fn to_wire(state: &AppState, row: StoredItem) -> Result<Item, copypaste_core::CryptoError> {
+    let origin = state.meta.origin_of(&row.id).unwrap_or_else(|e| {
+        // Attribution is advisory: a row whose origin cannot be read is still
+        // the user's item, and the fallback is the same one the origin table's
+        // absence already means — this device captured it.
+        warn!(error = ?e, "could not resolve an item's origin device");
+        state.meta.here()
+    });
+    to_wire_with(state, row, &origin)
+}
+
+/// [`to_wire`] with the origin already resolved.
+fn to_wire_with(
+    state: &AppState,
+    row: StoredItem,
+    origin: &crate::meta::Origin,
+) -> Result<Item, copypaste_core::CryptoError> {
     let key = state.keyring.item_key();
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (CLAUDE.md rule 4,
     // "fail closed on crypto").
     let plaintext = copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)?;
+    // Measured on the plaintext bytes, because that is what the cloud path
+    // measures: `LocalItem::content` is the opened payload, and the seal that
+    // follows is a fixed overhead the cap does not count.
+    let too_large_to_sync = crate::cloud::too_large_to_sync(&row.content_type, plaintext.len());
     Ok(Item {
         id: row.id,
         content: String::from_utf8_lossy(&plaintext).into_owned(),
@@ -218,6 +277,9 @@ fn to_wire(state: &AppState, row: StoredItem) -> Result<Item, copypaste_core::Cr
         created_at: row.created_at,
         pinned: row.pinned,
         is_sensitive: row.is_sensitive,
+        origin_device_id: origin.device_id.clone(),
+        origin_device_name: origin.device_name.clone(),
+        too_large_to_sync,
     })
 }
 
@@ -234,9 +296,18 @@ fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
         items: Vec::with_capacity(rows.len()),
         skipped_undecryptable: 0,
     };
+    // One query for the page's attribution rather than one per row: a page is
+    // up to `MAX_PAGE` items and this runs on every list and every search.
+    let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
+    let origins = state.meta.origins_for(&ids).unwrap_or_else(|e| {
+        warn!(error = ?e, "could not resolve the origin devices for a page");
+        std::collections::HashMap::new()
+    });
+    let here = state.meta.here();
     for row in rows {
         let row_id = row.id.clone();
-        match to_wire(state, row) {
+        let origin = origins.get(&row_id).unwrap_or(&here);
+        match to_wire_with(state, row, origin) {
             Ok(item) => page.items.push(item),
             Err(e) => {
                 warn!(id = %row_id, error = ?e, "skipping an item that failed to decrypt");
@@ -382,6 +453,142 @@ mod tests {
         let second = add(2);
         assert_eq!(first.id, second.id);
         assert_eq!(state.store.count().unwrap(), 1);
+    }
+
+    /// The whole ordering, applied at once. A partial move is not offered
+    /// because it is ambiguous once a peer pins something in between.
+    #[test]
+    fn reordering_rewrites_the_pinned_section() {
+        let (state, _dir) = test_state("server");
+        let ids: Vec<String> = ["alpha", "bravo", "charlie"]
+            .iter()
+            .map(|content| {
+                let added = match add(&state, 1, content).data {
+                    Some(ResponseData::Item(item)) => item,
+                    other => panic!("{other:?}"),
+                };
+                assert!(pin(&state, 2, &added.id, true).ok);
+                added.id
+            })
+            .collect();
+
+        let listed = |state: &AppState| match list(state, 3, 10, 0).data {
+            Some(ResponseData::Page(page)) => page
+                .items
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(listed(&state), ids, "pins list in the order they were made");
+
+        let reversed: Vec<String> = ids.iter().rev().cloned().collect();
+        match reorder_pinned(&state, 4, &reversed).data {
+            Some(ResponseData::Count(renumbered)) => assert_eq!(renumbered, 3),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(listed(&state), reversed);
+    }
+
+    /// An id the client no longer owns is ignored rather than refused: the list
+    /// it is reordering was read a moment ago, and a sync round may have taken
+    /// one since. Failing the whole gesture would lose the drag the user made.
+    #[test]
+    fn an_unknown_id_does_not_fail_the_reorder() {
+        let (state, _dir) = test_state("server");
+        let added = match add(&state, 1, "kept").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        assert!(pin(&state, 2, &added.id, true).ok);
+
+        let response = reorder_pinned(
+            &state,
+            3,
+            &["00000000-0000-4000-8000-000000000000".to_string(), added.id],
+        );
+        assert!(response.ok, "{:?}", response.error);
+    }
+
+    #[test]
+    fn an_implausibly_long_reorder_is_refused_before_the_transaction() {
+        let (state, _dir) = test_state("server");
+        let ids = vec!["x".to_string(); MAX_REORDER_IDS + 1];
+        let response = reorder_pinned(&state, 1, &ids);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+    }
+
+    /// UI audit finding 3: with sync on, a row must say which device it came
+    /// from. An item captured here reports this device, by name.
+    #[test]
+    fn a_listed_item_carries_its_origin_device() {
+        let (state, _dir) = test_state("server");
+        let mine = match add(&state, 1, "captured here").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(mine.origin_device_id, state.meta.device_id());
+        assert_eq!(
+            mine.origin_device_name.as_deref(),
+            Some(state.meta.device_name())
+        );
+
+        // A row that arrived from elsewhere must not read as local, and it has
+        // no name until a session with that device has told us one. Applied
+        // through the real merge path a peer's item takes, because
+        // `record_origin` deliberately refuses to restamp one already set.
+        crate::merge::apply_remote_version(
+            &state,
+            &crate::merge::RemoteVersion {
+                item_id: "from-the-phone",
+                content: "arrived over the peer transport",
+                content_type: copypaste_ipc::content_type::TEXT,
+                created_at: copypaste_core::now_ms(),
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "device-b",
+            },
+        )
+        .expect("the merge must take an unknown item");
+
+        match get(&state, 2, "from-the-phone").data {
+            Some(ResponseData::Item(item)) => {
+                assert_eq!(item.origin_device_id, "device-b");
+                assert_ne!(item.origin_device_id, state.meta.device_id());
+                assert_eq!(item.origin_device_name, None, "no session has named it yet");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        state.meta.record_device_name("device-b", "Phone").unwrap();
+        match list(&state, 3, 10, 0).data {
+            Some(ResponseData::Page(page)) => {
+                let theirs = page
+                    .items
+                    .iter()
+                    .find(|item| item.id == "from-the-phone")
+                    .expect("listed");
+                assert_eq!(theirs.origin_device_name.as_deref(), Some("Phone"));
+                let ours = page.items.iter().find(|item| item.id == mine.id).unwrap();
+                assert_eq!(
+                    ours.origin_device_name.as_deref(),
+                    Some(state.meta.device_name())
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// `CopyPaste-f72f` / UI audit finding 9. An ordinary clip is carryable and
+    /// must not be flagged; the flag itself is exercised against the cap in
+    /// `cloud::tests`, because a real one needs an 8 MiB item.
+    #[test]
+    fn an_ordinary_item_is_not_marked_too_large_to_sync() {
+        let (state, _dir) = test_state("server");
+        match add(&state, 1, "an ordinary clip").data {
+            Some(ResponseData::Item(item)) => assert!(!item.too_large_to_sync),
+            other => panic!("{other:?}"),
+        }
     }
 
     /// Empty content is a rejected request, not an empty row.

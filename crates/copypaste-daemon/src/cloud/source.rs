@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use copypaste_cloud::sync::{CloudSource, LocalItem, SyncError};
 use tracing::warn;
 
-use crate::cloud::{KEY_UPLOAD_FLOOR, KEY_WATERMARK};
+use crate::cloud::{KEY_UPLOAD_FLOOR, KEY_WATERMARK, KEY_WATERMARK_ITEM};
 use crate::merge::{apply_remote_version, open_version, RemoteVersion, MSG_STORE};
 use crate::meta::blocking;
 use crate::AppState;
@@ -159,11 +159,60 @@ impl CloudSource for StoreSource {
         })
     }
 
+    /// The tie-break half of the download cursor.
+    ///
+    /// Overridden — with [`CloudSource::set_watermark_keyset`], because a
+    /// source that persists one half and not the other has two cursors that
+    /// disagree. The default is millisecond-only, which re-offers the boundary
+    /// millisecond at the start of every round; that is free when the boundary
+    /// holds a handful of rows and is a stall when it holds more than a page,
+    /// because a bound over a non-unique key cannot be paged past (INV-N1,
+    /// AT-24). Two columns of work, as the trait's own doc says.
+    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
+        blocking(|| {
+            self.state
+                .meta
+                .state(KEY_WATERMARK_ITEM)
+                .map_err(source_error)
+        })
+    }
+
+    /// Persist the millisecond alone, forgetting any item id.
+    ///
+    /// Clearing is the point. This is called when the cursor moves to a
+    /// millisecond whose last row is not identified, and leaving the previous
+    /// round's id beside a newer millisecond would make the pull query skip
+    /// every row at that millisecond sorting below it.
     fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
         blocking(|| {
             self.state
                 .meta
-                .set_state_ms(KEY_WATERMARK, ms)
+                .set_state_all(&[
+                    (KEY_WATERMARK, &ms.max(0).to_string()),
+                    (KEY_WATERMARK_ITEM, ""),
+                ])
+                .map_err(source_error)
+        })
+    }
+
+    /// Persist both halves, in one transaction.
+    ///
+    /// Not two calls: a crash between them leaves a millisecond from one round
+    /// beside an item id from another, and the pull query trusts the pair.
+    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
+        // An empty id would be stored as "absent" by `set_state_all` anyway;
+        // routing it through `set_watermark` says so rather than relying on
+        // that.
+        if item_id.is_empty() {
+            return self.set_watermark(ms);
+        }
+        blocking(|| {
+            self.state
+                .meta
+                .set_state_all(&[
+                    (KEY_WATERMARK, &ms.max(0).to_string()),
+                    (KEY_WATERMARK_ITEM, item_id),
+                ])
                 .map_err(source_error)
         })
     }
@@ -302,8 +351,59 @@ mod tests {
     fn the_watermark_round_trips_and_starts_at_zero() {
         let (source, _state, _dir) = source("alpha");
         assert_eq!(source.watermark().unwrap(), 0);
+        assert_eq!(source.watermark_item_id().unwrap(), None);
         source.set_watermark(1_700_000_000_000).unwrap();
         assert_eq!(source.watermark().unwrap(), 1_700_000_000_000);
+    }
+
+    /// Both halves of the keyset survive a restart. Without the id, a boundary
+    /// millisecond holding more than one page of rows is re-offered every round
+    /// and the rows behind it never arrive (INV-N1, AT-24).
+    #[test]
+    fn both_halves_of_the_cursor_are_persisted_and_read_back() {
+        let (source, state, dir) = source("alpha");
+        source
+            .set_watermark_keyset(1_700_000_000_000, "item-b")
+            .unwrap();
+        assert_eq!(source.watermark().unwrap(), 1_700_000_000_000);
+        assert_eq!(
+            source.watermark_item_id().unwrap().as_deref(),
+            Some("item-b")
+        );
+        drop(state);
+
+        let (restarted, _dir) =
+            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
+        let source = StoreSource::new(restarted);
+        assert_eq!(source.watermark().unwrap(), 1_700_000_000_000);
+        assert_eq!(
+            source.watermark_item_id().unwrap().as_deref(),
+            Some("item-b")
+        );
+    }
+
+    /// The halves must never disagree. A millisecond written on its own has to
+    /// clear the id, or the pull query pages past rows at that millisecond that
+    /// sort below a name from an older round.
+    #[test]
+    fn advancing_the_millisecond_alone_forgets_the_previous_item_id() {
+        let (source, state, _dir) = source("alpha");
+        source.set_watermark_keyset(1_000, "item-b").unwrap();
+        source.set_watermark(2_000).unwrap();
+
+        assert_eq!(source.watermark().unwrap(), 2_000);
+        assert_eq!(source.watermark_item_id().unwrap(), None);
+        assert_eq!(state.meta.state(KEY_WATERMARK_ITEM).unwrap(), None);
+    }
+
+    /// An empty id is the same statement as "no id", not a third state.
+    #[test]
+    fn an_empty_item_id_is_stored_as_absent() {
+        let (source, _state, _dir) = source("alpha");
+        source.set_watermark_keyset(1_000, "item-b").unwrap();
+        source.set_watermark_keyset(2_000, "").unwrap();
+        assert_eq!(source.watermark().unwrap(), 2_000);
+        assert_eq!(source.watermark_item_id().unwrap(), None);
     }
 
     /// A round trip through the seam: a remote version arrives, is stored under

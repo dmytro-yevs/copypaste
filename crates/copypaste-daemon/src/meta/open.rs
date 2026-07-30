@@ -55,17 +55,25 @@ impl Meta {
              CREATE TABLE IF NOT EXISTS sync_item_origin (
                  item_id          TEXT PRIMARY KEY NOT NULL,
                  origin_device_id TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS sync_device_name (
+                 device_id TEXT PRIMARY KEY NOT NULL,
+                 name      TEXT NOT NULL
              );",
         )?;
 
         let device_id = load_or_set(&conn, KEY_DEVICE_ID, || uuid::Uuid::new_v4().to_string())?;
         let device_name = load_or_set(&conn, KEY_DEVICE_NAME, || sanitise_name(name_hint))?;
 
-        Ok(Self {
+        let meta = Self {
             conn: Mutex::new(conn),
             device_id,
             device_name,
-        })
+        };
+        // This device is a device like any other in the name registry, so the
+        // join in `origins_for` needs no special case for "the local one".
+        meta.record_device_name(&meta.device_id, &meta.device_name)?;
+        Ok(meta)
     }
 
     #[must_use]
@@ -90,6 +98,7 @@ impl Meta {
             )?;
         }
         self.device_name = name;
+        self.record_device_name(&self.device_id.clone(), &self.device_name.clone())?;
         Ok(())
     }
 
