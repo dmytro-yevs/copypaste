@@ -15,31 +15,38 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Row } from "@/components/settings/Row";
 import { useClearHistory, useStatus } from "@/hooks/useHistory";
+import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 
 export function StorageTab() {
+  const { t } = useTranslation();
   const status = useStatus();
   const clear = useClearHistory();
   const [confirming, setConfirming] = useState(false);
 
   return (
     <div className="flex flex-col">
-      <Row title="Items stored" description="Held by the background service for this device.">
+      <Row
+        title={t("settings.storage.stored.title")}
+        description={t("settings.storage.stored.description")}
+      >
         <span className="text-sm tabular-nums text-muted-foreground">
-          {status.data ? status.data.item_count.toLocaleString() : "—"}
+          {status.data
+            ? status.data.item_count.toLocaleString()
+            : t("common.noValue")}
         </span>
       </Row>
 
       <Row
-        title="How long items are kept"
-        description="The service enforces its own age and count limits. It exposes no command to read or change them, so this screen would be guessing if it showed a number."
+        title={t("settings.storage.retention.title")}
+        description={t("settings.storage.retention.description")}
       >
-        <Badge variant="secondary">Set by the service</Badge>
+        <Badge variant="secondary">{t("settings.storage.retention.badge")}</Badge>
       </Row>
 
       <Row
-        title="Clear history"
-        description="Deletes every unpinned item on this device. Pinned items are kept, and paired devices keep their own copies."
+        title={t("settings.storage.clear.title")}
+        description={t("settings.storage.clear.description")}
       >
         <Button
           variant="outline"
@@ -49,21 +56,20 @@ export function StorageTab() {
           onClick={() => setConfirming(true)}
         >
           <Trash2 aria-hidden="true" />
-          Clear history
+          {t("settings.storage.clear.action")}
         </Button>
       </Row>
 
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear all clipboard history?</AlertDialogTitle>
+            <AlertDialogTitle>{t("history.clear.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes every unpinned item on this device.
-              Pinned items are kept. This cannot be undone.
+              {t("history.clear.body")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
@@ -71,7 +77,7 @@ export function StorageTab() {
                 setConfirming(false);
               }}
             >
-              Clear all
+              {t("history.clear.action")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

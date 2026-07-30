@@ -1,21 +1,11 @@
 /**
- * "Add a device" — the other half of pairing, in three routes.
- *
- * **Scan**, which is the one that should be used: one QR carries the code and
- * the address together, so pairing is a gesture rather than a transcription.
- * **Pick**, when discovery has heard the device advertise itself — that fills
- * the address, leaving only the code. **Type**, which always works and is what
- * the other two degrade to.
- *
  * The bridge only keeps the pairing if a sync session with that device
  * succeeds, so a wrong code or an unreachable address leaves nothing behind.
- * That is what lets this dialog treat a failure as "nothing happened" and let
- * the user correct a typo, rather than having to offer an undo.
+ * That is what lets this dialog treat a failure as "nothing happened" rather
+ * than having to offer an undo.
  *
- * The failure is rendered from the error *kind* (INV-12) — the address the user
- * typed is echoed back to them, but nothing from the daemon's message is.
- *
- * # Discovered devices are unverified
+ * The failure is rendered from the error *kind* (INV-12) — nothing from the
+ * daemon's message is.
  *
  * INV-15: a name and an address off an mDNS record are what a device on the
  * network *claimed*. Only the Noise handshake proves any of it, so the list
@@ -36,6 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useDiscovered, usePairAccept, useRescan } from "@/hooks/useDevices";
+import { useTranslation } from "@/i18n";
 import { isUnavailable, toFriendly } from "@/lib/errors";
 import type { PairingPayload } from "@/lib/pairing";
 
@@ -57,6 +48,7 @@ interface PairAcceptDialogProps {
 }
 
 export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) {
+  const { t } = useTranslation();
   const accept = usePairAccept();
   const discovered = useDiscovered(open);
   const rescan = useRescan();
@@ -102,9 +94,9 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
       <DialogContent className="sm:max-w-[var(--modal-w-wide)]">
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
-            <DialogTitle>Add a device</DialogTitle>
+            <DialogTitle>{t("devices.accept.title")}</DialogTitle>
             <DialogDescription>
-              Scan the code shown on the other device, or enter it by hand.
+              {t("devices.accept.description")}
             </DialogDescription>
           </DialogHeader>
 
@@ -112,7 +104,7 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
             <Suspense
               fallback={
                 <p className="text-center text-xs text-muted-foreground">
-                  Starting the camera…
+                  {t("devices.accept.startingCamera")}
                 </p>
               }
             >
@@ -125,13 +117,15 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
               onClick={() => setScanning(true)}
             >
               <QrIcon aria-hidden="true" />
-              Scan a code
+              {t("devices.accept.scan")}
             </Button>
           )}
 
           {nearby.length > 0 && (
             <div className="flex flex-col gap-s-1">
-              <span className="text-sm font-medium">On this network</span>
+              <span className="text-sm font-medium">
+                {t("devices.accept.nearby")}
+              </span>
               <ul className="flex flex-col gap-s-1">
                 {nearby.map((device) => (
                   <li key={device.pairing_id}>
@@ -147,9 +141,7 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
                 ))}
               </ul>
               <p className="text-xs text-muted-foreground">
-                Unverified — these names are reported by the devices themselves
-                and are only confirmed once pairing succeeds. Choosing one fills
-                in the address; the code still has to come from that device.
+                {t("devices.accept.nearbyHint")}
               </p>
             </div>
           )}
@@ -163,12 +155,16 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
               onClick={() => rescan.mutate()}
             >
               <RefreshCw aria-hidden="true" />
-              {rescan.isPending ? "Looking…" : "Look for nearby devices"}
+              {t(
+                rescan.isPending
+                  ? "devices.accept.rescanning"
+                  : "devices.accept.rescan",
+              )}
             </Button>
           )}
 
           <div className="flex flex-col gap-s-1">
-            <Label htmlFor="accept-code">Pairing code</Label>
+            <Label htmlFor="accept-code">{t("devices.accept.codeLabel")}</Label>
             <Input
               id="accept-code"
               value={code}
@@ -182,18 +178,18 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
           </div>
 
           <div className="flex flex-col gap-s-1">
-            <Label htmlFor="accept-addr">Address</Label>
+            <Label htmlFor="accept-addr">{t("devices.accept.addrLabel")}</Label>
             <Input
               id="accept-addr"
               value={addr}
-              placeholder="192.168.1.24:7420"
+              placeholder={t("devices.accept.addrPlaceholder")}
               autoComplete="off"
               spellCheck={false}
               onChange={(event) => setAddr(event.target.value)}
               className="font-mono"
             />
             <p className="text-xs text-muted-foreground">
-              Shown on the other device under the code, as host:port.
+              {t("devices.accept.addrHint")}
             </p>
           </div>
 
@@ -205,8 +201,8 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
               <CircleAlert size={16} aria-hidden="true" className="mt-px shrink-0" />
               <span>
                 {isUnavailable(accept.error)
-                  ? "Pairing isn't available in this build yet. It runs in the background service, which this build doesn't reach."
-                  : `${toFriendly(accept.error)} Nothing was changed — check the code and the address and try again.`}
+                  ? t("devices.pairUnavailable")
+                  : `${toFriendly(accept.error)} ${t("devices.accept.retryHint")}`}
               </span>
             </p>
           )}
@@ -217,13 +213,13 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={!ready || accept.isPending}>
               {accept.isPending && (
                 <LoaderCircle aria-hidden="true" className="animate-spin" />
               )}
-              {accept.isPending ? "Pairing…" : "Pair"}
+              {t(accept.isPending ? "devices.accept.pairing" : "devices.accept.action")}
             </Button>
           </DialogFooter>
         </form>

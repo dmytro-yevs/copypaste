@@ -1,8 +1,7 @@
 /**
  * INV-20: the shell is **never** inside an error boundary — navigation and the
  * main pane get sibling boundaries, so a crash in a screen cannot take
- * navigation with it and the fallback renders inside the layout rather than
- * against a bare body (CopyPaste-8ebg.12).
+ * navigation with it (CopyPaste-8ebg.12).
  */
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,6 +14,7 @@ import { HistoryView } from "@/components/history/HistoryView";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { useStatus } from "@/hooks/useHistory";
 import { usePush } from "@/hooks/usePush";
+import { useTranslation } from "@/i18n";
 import { classifyError } from "@/lib/errors";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
@@ -24,22 +24,19 @@ import { useUi } from "@/store/ui";
 
 const SCREENS = {
   history: {
-    label: "History",
+    label: "nav.history",
     render: (pushLive: boolean) => <HistoryView pushLive={pushLive} />,
   },
-  devices: { label: "Devices", render: () => <DevicesView /> },
-  settings: { label: "Settings", render: () => <SettingsView /> },
+  devices: { label: "nav.devices", render: () => <DevicesView /> },
+  settings: { label: "nav.settings", render: () => <SettingsView /> },
 } as const;
 
 export default function App() {
+  const { t } = useTranslation();
   const view = useUi((s) => s.view);
-  // `useShallow` is load-bearing, not tidiness. `selectAppearance` builds a
-  // fresh object per call, and zustand v5 subscribes through
-  // `useSyncExternalStore`, which compares the snapshot by reference: a new
-  // object every call is a snapshot that never settles, so React re-renders,
-  // re-selects, and hits "Maximum update depth exceeded". The whole app
-  // unmounts and `#root` stays empty — measured at 55 renders in 2.5s against
-  // 1 for a primitive selector.
+  // `useShallow` is load-bearing: `selectAppearance` returns a fresh object,
+  // and zustand v5 compares snapshots by reference, so an unwrapped call is a
+  // render loop that unmounts the app — 55 renders in 2.5s, measured.
   const appearance = usePrefs(useShallow(selectAppearance));
   const status = useStatus();
   const qc = useQueryClient();
@@ -47,8 +44,7 @@ export default function App() {
   // the same queries twice for one change.
   const pushLive = usePush();
 
-  // main.tsx owns the first frame; this keeps the attributes in step, and
-  // subscribes *once* — v1 accumulated a matchMedia listener per re-apply
+  // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply
   // (CopyPaste-g27b.20).
   useEffect(() => {
     applyAppearance(appearance);
@@ -62,7 +58,7 @@ export default function App() {
     // `flex-col-reverse` puts the nav at the bottom of a phone screen — the
     // reachable band — while keeping it first in the DOM for reading order.
     <div className="flex h-full min-h-0 flex-col-reverse bg-background text-foreground sm:flex-row">
-      <Boundary label="Navigation">
+      <Boundary label={t("shell.boundary.navigation")}>
         <Sidebar />
       </Boundary>
 
@@ -80,7 +76,7 @@ export default function App() {
           onRetry={() => void qc.invalidateQueries()}
         />
 
-        <Boundary label={screen.label}>
+        <Boundary label={t(screen.label)}>
           {/* `display: contents`: the boundary must not join the flex height
               chain the scroll regions depend on. */}
           <div className="contents">{screen.render(pushLive)}</div>

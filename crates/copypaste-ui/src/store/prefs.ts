@@ -1,11 +1,8 @@
 /**
- * The state the daemon does **not** own. React Query holds what the service is
- * the source of truth for; this holds what only this window knows.
- *
  * INV-21: an invalid `theme` must not discard a valid `accent`, so every field
  * is parsed independently. INV-22: `readPrefs` is synchronous so `main.tsx` can
- * set the `<html>` attributes before first paint — v1 needed a second copy of
- * the schema in a pre-paint script, and AT-54 exists because that copy drifted.
+ * set the `<html>` attributes before first paint — AT-54 exists because v1 kept
+ * a second copy of the schema in a pre-paint script and it drifted.
  */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
@@ -33,11 +30,10 @@ export interface Prefs {
   /**
    * Ask before revealing a hidden sensitive item. Default on (n9gp).
    *
-   * v1 also had a "Mask sensitive data" toggle. There is deliberately no
-   * equivalent here: the bridge drops a sensitive item's plaintext before it
-   * crosses into the WebView, so nothing in this window *can* unmask one
-   * without asking for it. A toggle that cannot be honoured is worse than no
-   * toggle — see `lib/ipc.ts`.
+   * There is deliberately no "Mask sensitive data" toggle beside it: the bridge
+   * drops a sensitive item's plaintext before it crosses into the WebView, so
+   * nothing here *can* unmask one without asking. A toggle that cannot be
+   * honoured is worse than no toggle.
    */
   warnBeforeReveal: boolean;
 }
@@ -168,14 +164,11 @@ export const usePrefs = create<PrefsStore>()(
 );
 
 /**
- * Subscribing to one field keeps a slider from re-rendering the list.
- *
  * **Wrap this in `useShallow`.** It returns a fresh object per call, and
  * zustand v5 reads the store through `useSyncExternalStore`, which compares
  * snapshots by reference — an unwrapped call is an infinite render loop that
- * unmounts the whole app, not a performance smell. Every other selector in
- * this file and in `store/ui.ts` returns a primitive or a value held in state,
- * which is why this is the only one that needs it.
+ * unmounts the whole app, not a performance smell. It is the only selector
+ * here that does not return a primitive.
  */
 export const selectAppearance = (s: PrefsStore) => ({
   theme: s.theme,

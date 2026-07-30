@@ -9,6 +9,7 @@ import {
   acceleratorGlyphs,
   captureAccelerator,
 } from "@/lib/accelerator";
+import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { isUnavailable, toFriendly } from "@/lib/errors";
 import { getShortcut, setShortcut } from "@/lib/ipc";
@@ -31,6 +32,7 @@ function Keycaps({ accelerator }: { accelerator: string }) {
 }
 
 export function ShortcutTab() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const [capturing, setCapturing] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -86,14 +88,14 @@ export function ShortcutTab() {
   // A11Y-13: the raw accelerator, not the glyphs — screen readers handle
   // "CmdOrCtrl+Shift+V" and mangle "⌘⇧V" (CopyPaste-8ebg.53).
   const accessibleName = capturing
-    ? "Press a key combination"
-    : `Current shortcut: ${bound}. Click and press a new key combination.`;
+    ? t("settings.shortcut.capturingName")
+    : t("settings.shortcut.current", { accelerator: bound });
 
   return (
     <div className="flex flex-col">
       <Row
-        title="Quick-paste shortcut"
-        description="Opens CopyPaste from anywhere. Hold at least one modifier."
+        title={t("settings.shortcut.title")}
+        description={t("settings.shortcut.description")}
       >
         <div className="flex flex-col items-end gap-s-2">
           <button
@@ -114,7 +116,9 @@ export function ShortcutTab() {
             )}
           >
             {capturing ? (
-              <span className="text-muted-foreground">Press a key combination…</span>
+              <span className="text-muted-foreground">
+                {t("settings.shortcut.capturingPrompt")}
+              </span>
             ) : (
               <Keycaps accelerator={bound} />
             )}
@@ -127,7 +131,7 @@ export function ShortcutTab() {
             onClick={() => save.mutate(DEFAULT_SHORTCUT)}
           >
             <RotateCcw aria-hidden="true" />
-            Reset to default
+            {t("settings.shortcut.reset")}
           </Button>
         </div>
       </Row>
@@ -144,15 +148,13 @@ export function ShortcutTab() {
 
       {save.error !== null && !isUnavailable(save.error) && (
         <p role="alert" className="border-b border-divider py-s-3 text-sm text-err-strong">
-          {toFriendly(save.error)} The previous shortcut is still in effect.
+          {`${toFriendly(save.error)} ${t("settings.shortcut.saveFailed")}`}
         </p>
       )}
 
       {unavailable && (
         <p className="py-s-3 text-sm text-muted-foreground">
-          This build can't change the shortcut yet — the background service owns
-          it, and the app has no way to ask it to rebind. {DEFAULT_SHORTCUT} is
-          in effect.
+          {t("settings.shortcut.unavailable", { accelerator: DEFAULT_SHORTCUT })}
         </p>
       )}
     </div>

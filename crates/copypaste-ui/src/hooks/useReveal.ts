@@ -6,19 +6,10 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
+import { t } from "@/i18n";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { REVEAL_TIMEOUT_MS } from "@/lib/layout";
 import { revealItem } from "@/lib/ipc";
-
-/**
- * `reveal_item` refuses on desktop today, deliberately: the bridge's first
- * attempt routed it through `Copy`, which would have published the secret to
- * the system pasteboard as a side effect of *looking* at it. It stays refused
- * until a read-only `Get` lands in the wire contract, so the refusal is a
- * normal state with its own sentence.
- */
-const UNAVAILABLE_COPY =
-  "Showing this item isn't available yet. You can still copy it — its contents never enter this window.";
 
 interface Revealed {
   readonly id: string;
@@ -45,7 +36,15 @@ export function useReveal() {
       setRevealed(null);
       // INV-12: a kind, never the raw text.
       const kind = classifyError(raw);
-      setError(kind === "unavailable" ? UNAVAILABLE_COPY : friendlyError(kind));
+      // `reveal_item` refuses on desktop deliberately: the bridge's first
+      // attempt routed it through `Copy`, which would have published the
+      // secret to the system pasteboard as a side effect of *looking* at it.
+      // The refusal is a normal state with its own sentence.
+      setError(
+        kind === "unavailable"
+          ? t("history.reveal.unavailable")
+          : friendlyError(kind),
+      );
     } finally {
       setPendingId(null);
     }

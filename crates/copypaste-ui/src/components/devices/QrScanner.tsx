@@ -1,28 +1,21 @@
 /**
- * The camera half of QR pairing.
+ * Decoding is `@zxing/browser`, pure JavaScript rather than the WASM
+ * ponyfills, which fetch their binary from a CDN by default and would be the
+ * one thing in this app that needs the network to pair two devices on a LAN.
  *
- * Decoding is `@zxing/browser` — a maintained reader, not a hand-rolled one,
- * and pure JavaScript rather than the WASM ponyfills, which fetch their binary
- * from a CDN by default and would be the one thing in this app that needs the
- * network to pair two devices on a LAN.
+ * **It is allowed to be unavailable.** No camera, a refused permission and no
+ * secure context all resolve to the same state: the dialog falls back to
+ * typing. Pairing must never depend on a camera.
  *
- * # It is allowed to be unavailable
- *
- * There is no camera on a lot of desktops, the user can refuse the permission,
- * and a build in a plain browser tab may have no secure context. All of those
- * resolve to the same thing: the scanner reports that it cannot run and the
- * dialog falls back to typing. Pairing must never depend on a camera.
- *
- * # Nothing scanned is trusted
- *
- * A decode is a *string a camera saw*. It goes through `decodePairing`, which
- * refuses anything that is not our payload, before it reaches the caller —
- * so a Wi-Fi QR or a poster in the background cannot become a pairing attempt.
+ * **Nothing scanned is trusted.** A decode is a *string a camera saw*, so it
+ * goes through `decodePairing` before it reaches the caller — a Wi-Fi QR or a
+ * poster in the background cannot become a pairing attempt.
  */
 import { useEffect, useRef, useState } from "react";
 import { BrowserQRCodeReader } from "@zxing/browser";
 import { CameraOff } from "lucide-react";
 
+import { useTranslation } from "@/i18n";
 import { type PairingPayload, decodePairing } from "@/lib/pairing";
 
 type Phase = "starting" | "scanning" | "unavailable";
@@ -33,6 +26,7 @@ interface QrScannerProps {
 }
 
 export function QrScanner({ onScan }: QrScannerProps) {
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [phase, setPhase] = useState<Phase>("starting");
   // Held in a ref so the effect does not re-run when it changes, and so a
@@ -91,7 +85,7 @@ export function QrScanner({ onScan }: QrScannerProps) {
       <div className="flex flex-col items-center gap-s-2 rounded-md border border-divider bg-raised-1 px-s-3 py-s-3 text-center">
         <CameraOff size={18} aria-hidden="true" className="text-muted-foreground" />
         <p className="text-xs text-muted-foreground">
-          No camera is available, so enter the code below instead.
+          {t("devices.scanner.unavailable")}
         </p>
       </div>
     );
@@ -104,13 +98,15 @@ export function QrScanner({ onScan }: QrScannerProps) {
         // Muted and inline or a mobile WebView takes the video fullscreen.
         muted
         playsInline
-        aria-label="Camera, looking for a pairing code"
+        aria-label={t("devices.scanner.videoLabel")}
         className="aspect-square w-full max-w-[240px] rounded-md bg-black object-cover"
       />
       <p aria-live="polite" className="text-xs text-muted-foreground">
-        {phase === "starting"
-          ? "Starting the camera…"
-          : "Point the camera at the code on the other device."}
+        {t(
+          phase === "starting"
+            ? "devices.scanner.starting"
+            : "devices.scanner.scanning",
+        )}
       </p>
     </div>
   );

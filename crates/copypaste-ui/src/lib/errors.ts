@@ -2,11 +2,13 @@
  * INV-12 and CLAUDE.md rule 4: **no raw error string is ever rendered.** The
  * socket path contains the local username, so a transport error carrying it
  * would leak that into the DOM, screenshots and the accessibility tree. The raw
- * value is logged and dropped; only an `ErrorKind` crosses into the view layer.
+ * value is logged and dropped; only an `ErrorKind` crosses into the view layer,
+ * and the sentence the user reads comes from the catalogue.
  *
  * Vocabulary is "clipboard service" / "background service", never "daemon"
  * (bdac.34/36), American spelling.
  */
+import { t } from "@/i18n";
 
 /** `copypaste_ipc::ErrorCode`, plus the conditions the daemon cannot report
  *  about itself. */
@@ -78,21 +80,19 @@ export function classifyError(raw: unknown): ErrorKind {
   return "unknown";
 }
 
-const FRIENDLY: Record<ErrorKind, string> = {
-  offline: "The background service is not running.",
-  not_ready:
-    "The clipboard service is initializing. This will only take a moment.",
-  protocol_mismatch:
-    "CopyPaste and the background service are on incompatible versions. Restart both to resolve.",
-  not_found: "That item is no longer in your clipboard history.",
-  invalid_request: "The background service rejected that request.",
-  unavailable: "This build of CopyPaste cannot do that yet.",
-  internal: "The background service returned an error.",
-  unknown: "The background service returned an error.",
-};
+const FRIENDLY = {
+  offline: "errors.offline",
+  not_ready: "errors.not_ready",
+  protocol_mismatch: "errors.protocol_mismatch",
+  not_found: "errors.not_found",
+  invalid_request: "errors.invalid_request",
+  unavailable: "errors.unavailable",
+  internal: "errors.internal",
+  unknown: "errors.unknown",
+} as const satisfies Record<ErrorKind, string>;
 
 export function friendlyError(kind: ErrorKind): string {
-  return FRIENDLY[kind];
+  return t(FRIENDLY[kind]);
 }
 
 /** Convenience for the toast paths: classify and map in one step. */
