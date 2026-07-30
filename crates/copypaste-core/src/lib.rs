@@ -6,6 +6,7 @@ pub mod crypto;
 pub mod ingest;
 pub mod sensitive;
 pub mod storage;
+pub mod sync;
 
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
 pub use ingest::{ingest, ingest_into, IngestError, Ingested};
@@ -14,9 +15,11 @@ pub use sensitive::{
     DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
 };
 pub use storage::{
-    compute_content_hash, is_v1_database, v1_database_in, IndexedText, Ingest, ItemCursor, NewItem,
-    Page, Store, StoreError, StoredItem, V1_DATABASE_FILENAME,
+    compute_content_hash, is_v1_database, origin_or, v1_database_in, DeviceIdentity, IncomingItem,
+    IndexedText, Ingest, ItemCursor, NewItem, Page, Store, StoreError, StoredItem, Version,
+    V1_DATABASE_FILENAME,
 };
+pub use sync::{MergeError, RemoteVersion, StoreSource};
 
 /// Milliseconds since the Unix epoch.
 ///

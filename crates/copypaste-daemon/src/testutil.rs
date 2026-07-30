@@ -99,9 +99,9 @@ fn reopen_with(
     for (slot, byte) in secret.iter_mut().zip(name.bytes().cycle()) {
         *slot = byte;
     }
-    let keyring = Keyring::from_secret(&secret);
+    let keyring = Arc::new(Keyring::from_secret(&secret));
     let store = Store::open(&db_path, &keyring.db_key()).expect("store");
-    let meta = Meta::open(&db_path, &keyring.db_key(), name).expect("meta");
+    let meta = Meta::open(&store, name).expect("meta");
     let peers = PeerStore::open(&dir.path().join("peers-v2.json")).expect("peer store");
     // Port 0 is never bound in these tests; discovery degrades either way.
     let discovery = Discovery::start(name, &[], 0).expect("discovery");

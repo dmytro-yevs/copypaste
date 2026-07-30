@@ -10,7 +10,8 @@ use rusqlite::{ErrorCode, Row};
 /// the row mapper was the result (`CopyPaste-crh3.85`).
 macro_rules! item_columns {
     () => {
-        "id, content_ciphertext, nonce, content_type, created_at, pinned, is_sensitive"
+        "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
+         pinned, is_sensitive, deleted, origin_device_id"
     };
 }
 
@@ -19,8 +20,10 @@ macro_rules! item_columns {
 macro_rules! item_columns_ci {
     () => {
         "ci.id AS id, ci.content_ciphertext AS content_ciphertext, ci.nonce AS nonce, \
-         ci.content_type AS content_type, ci.created_at AS created_at, \
-         ci.pinned AS pinned, ci.is_sensitive AS is_sensitive"
+         ci.content_type AS content_type, ci.content_hash AS content_hash, \
+         ci.created_at AS created_at, ci.pinned AS pinned, \
+         ci.is_sensitive AS is_sensitive, ci.deleted AS deleted, \
+         ci.origin_device_id AS origin_device_id"
     };
 }
 
@@ -84,15 +87,31 @@ impl Ingest {
 
 /// A row as it comes back out. The plaintext never leaves the store: callers
 /// decrypt `content_ciphertext` themselves.
+///
+/// This is also what a sync session compares and serves. The four merge keys
+/// (`created_at`, `content_hash`, `deleted`, `origin_device_id`) are all here
+/// so that one row type answers both questions; carrying them in a second view
+/// on a second connection is what `crate::sync` was extracted from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredItem {
     pub id: String,
+    /// Empty on a tombstone: the soft delete wiped the payload.
     pub content_ciphertext: Vec<u8>,
+    /// Empty on a tombstone, for the same reason.
     pub nonce: Vec<u8>,
     pub content_type: String,
+    /// SHA-256 hex of the pre-encryption bytes, kept on tombstones on purpose —
+    /// a delete has to tie the version it deletes on merge key 2 so that key 3
+    /// decides it.
+    pub content_hash: String,
     pub created_at: i64,
     pub pinned: bool,
     pub is_sensitive: bool,
+    /// A tombstone. `Store::get` and `Store::list` never return one; the sync
+    /// reads in [`super::versions`] do, because a delete is a version.
+    pub deleted: bool,
+    /// Empty means "captured on this device" — see [`super::origin_or`].
+    pub origin_device_id: String,
 }
 
 /// Storage failures.
@@ -150,9 +169,12 @@ pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
             .unwrap_or_default(),
         nonce: row.get::<_, Option<Vec<u8>>>("nonce")?.unwrap_or_default(),
         content_type: row.get("content_type")?,
+        content_hash: row.get("content_hash")?,
         created_at: row.get("created_at")?,
         pinned: row.get("pinned")?,
         is_sensitive: row.get("is_sensitive")?,
+        deleted: row.get("deleted")?,
+        origin_device_id: row.get("origin_device_id")?,
     })
 }
 

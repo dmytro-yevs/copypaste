@@ -297,6 +297,27 @@ and restored, each with a bug behind it:
 Local-only, must NOT travel: the row PK (R-ID-2), the image thumbnail
 (capture-time derived, backfilled locally — `merge.rs:150-153`), `is_synced`.
 
+> **Amended in v2, 2026-07-30: "only stamp the local id when the field is empty
+> (legacy rows)" no longer describes a legacy case.** The rule itself is
+> unchanged and still binding — an origin is where a version was born, it is
+> preserved across hops, and a forwarding device never restamps it. What changed
+> is when the field is empty: in v1 that meant a row predating schema v3, and a
+> backfill closed it. In v2 every locally captured row stores `''`, deliberately
+> (manifest 03 §3.1 amendment), so the substitution is not a repair but the
+> normal read path, applied at the point of comparison rather than at rest.
+>
+> Two consequences worth naming. A version leaves this device with the id
+> already substituted, so nothing on the wire ever carries an empty origin —
+> which is what keeps a three-device tie-break deterministic. And an incoming
+> version *does* stamp the column, because that origin is a fact about another
+> device that this one has no other way to remember.
+>
+> One comparator, unchanged: `copypaste_p2p::sync::merge_decision`, called from
+> exactly one place (`copypaste_core::sync::merge::apply_remote_version`) by
+> both transports. INV-C2 is now structural rather than merely observed — there
+> is one `SyncSource` implementation, in `copypaste-core`, and the daemon and
+> the Android app construct the same one.
+
 > **v2 divergence, decided 2026-07-30: pin state does not travel over the cloud
 > transport.** `CloudItem` has no `pinned`/`pin_order`, the Supabase table has no
 > such columns, and T-6 therefore has nothing to apply to on this path. Pinning

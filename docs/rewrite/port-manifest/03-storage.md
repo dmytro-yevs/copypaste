@@ -244,6 +244,35 @@ CREATE TABLE revoked_devices (
 );
 ```
 
+> **Amended in v2, 2026-07-30: `origin_device_id` arrives with the schema, and
+> the empty string is permanent.** v1 added the column at ladder step 3 and had
+> the daemon run `backfill_origin_device_id` after open, stamping this device's
+> UUID onto every row whose value was `''`. v2 creates the column in
+> `SCHEMA_V1` and never backfills it: `''` is not a legacy artefact awaiting
+> repair, it is what *every* locally captured row stores, and readers substitute
+> this device's id through `copypaste_core::origin_or`.
+>
+> What that buys and what it costs, stated rather than left implicit. It buys a
+> capture path with no opinion about sync — `copypaste_core::ingest` never needs
+> a device id — and a column of repeated UUIDs that is never written. It costs
+> one rule that must hold everywhere: **any reader that compares or displays an
+> origin must go through `origin_or`**, because two rows from the same device
+> compare unequal on merge key 4 if one of them does not. The substitution has
+> exactly three call sites (the merge, the outbound `SyncItem`, and item
+> attribution for the UI) and each is tested.
+>
+> The same commit added `sync_device_state` and `sync_device_name` to
+> `SCHEMA_V1`. They are not v1 tables; they held this device's identity, both
+> transports' cursors and the peer-name registry, and they were being created
+> with `CREATE TABLE IF NOT EXISTS` on a *second* connection the daemon opened
+> onto the same file. That connection is gone — with it the last of v2's
+> "shadow the columns `StoredItem` does not carry" layer — and Android, which
+> has no daemon, gets a device identity from the store like everything else.
+>
+> `server::dbadmin` follows: `sync_item_origin` is no longer in `KNOWN_TABLES`
+> or `RESTORED_TABLES`, because the origin now travels with `clipboard_items`,
+> which a restore already replaces.
+
 > **Unit trap to preserve:** `clipboard_items.wall_time` / `expires_at` /
 > `lamport_ts` are **milliseconds**. `migration_state.started_at` /
 > `completed_at` and `revoked_devices.revoked_at` are **seconds**. The dedup

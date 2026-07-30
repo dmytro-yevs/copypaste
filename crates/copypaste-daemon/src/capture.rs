@@ -139,8 +139,6 @@ fn tick(state: &AppState) -> Result<(), IngestError> {
     }
 }
 
-/// [`copypaste_core::ingest_into`], plus the one thing the core cannot do:
-/// record which device captured the item.
 pub fn ingest(
     state: &AppState,
     content: &str,
@@ -162,7 +160,11 @@ pub fn ingest_at(
     created_at: i64,
 ) -> Result<Ingested, IngestError> {
     let settings = state.settings.get().clone();
-    let outcome = ingest_into(
+    // A capture records no origin: `origin_device_id` is left empty and every
+    // reader substitutes this device's id (`copypaste_core::origin_or`). The
+    // alternative — stamping the id on every row — costs a column of repeated
+    // UUIDs and an extra argument on a path that has no opinion about sync.
+    ingest_into(
         &state.store,
         &state.detector,
         &state.keyring,
@@ -170,18 +172,5 @@ pub fn ingest_at(
         content_type,
         created_at,
         &settings,
-    )?;
-
-    // This device captured it, so this device is its origin — the one thing a
-    // sync session needs about an item that the store has no column for. Read
-    // as advisory on the way out (`meta::local_version` treats an absent row as
-    // "captured here"), so a failure here costs nothing but is still worth
-    // reporting. It stays in the daemon because the origin table is the
-    // daemon's, not the store's.
-    if let Ingested::Stored(item) = &outcome {
-        if let Err(e) = state.meta.record_origin(&item.id, state.meta.device_id()) {
-            warn!(error = ?e, "could not record the origin of a captured item");
-        }
-    }
-    Ok(outcome)
+    )
 }

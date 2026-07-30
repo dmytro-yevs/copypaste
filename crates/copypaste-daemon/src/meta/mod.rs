@@ -1,124 +1,241 @@
-//! The sync view of the item table, plus this device's identity.
+//! This device's sync identity, and where an item came from.
 //!
-//! **One view, both transports.** The peer sessions in [`crate::p2p`] and the
-//! cloud rounds in [`crate::cloud`] read and write the same rows through this
-//! module, share the device id it mints, and keep their cursors in the same
-//! `sync_device_state` table ([`state`]). That is why it sits at the crate root
-//! rather than under either transport: manifest 05 INV-C2 is a bug that came
-//! from two transports holding two views of one history.
+//! Everything else this module used to be is now `copypaste_core::storage`: the
+//! summaries a session advertises, the last-write-wins write, the cursor table
+//! and the device-name registry are all `Store` methods, and
+//! [`copypaste_core::StoreSource`] is the one `SyncSource` both platforms
+//! construct. What is left here is the daemon's cache of the identity — read
+//! once at start, because every hello and every merge key 4 needs it — and
+//! [`Origin`], which is attribution for a *user*, not for the merge.
 //!
-//! # Why this module opens the database itself
-//!
-//! A sync session needs five things about an item: its id, its version stamp,
-//! its content hash, whether it is a tombstone, and which device first captured
-//! it. `copypaste_core::StoredItem` carries the first two. The next two are
-//! *columns that already exist* in `clipboard_items` (`content_hash`,
-//! `deleted`) but are not projected into `StoredItem`, and the last has no
-//! column at all.
-//!
-//! There were two ways to close that gap without touching `copypaste-core`:
-//!
-//! 1. Shadow the missing fields in a second store the daemon owns, writing
-//!    every hash, every tombstone and every timestamp twice.
-//! 2. Read the columns that are already there, on a second connection to the
-//!    same SQLCipher file, and add one table for the one genuinely new fact.
-//!
-//! The first is the failure mode `CLAUDE.md` rule 1 is written about: two
-//! implementations of "what is in this device's history", which drift the first
-//! time an eviction or a delete lands on one and not the other. So this module
-//! does the second. It owns exactly one new table — `sync_item_origin` — and
-//! otherwise only reads and updates rows the store already manages.
-//!
-//! **This is a layering compromise, and it should be repaid.** The clean fix is
-//! four additions to `copypaste-core::Store`, at which point every raw statement
-//! below deletes itself:
-//!
-//! * `content_hash` and `deleted` on `StoredItem`,
-//! * `Store::summaries()` — id, stamp, hash, tombstone flag, live and deleted,
-//! * `Store::upsert(NewItem, deleted: bool)` — the LWW write, which is the one
-//!   thing the insert-only API genuinely cannot express,
-//! * an `origin_device_id` column, so this module keeps only the device row.
-//!
-//! When those additions land, [`read`] and [`write`] are the two files that
-//! disappear. The split between them is the direction data moves, because that
-//! is the direction the rules run in: the `is_sensitive = 0` filter deciding
-//! what may leave the device is in [`read`], and the unconditional FTS delete
-//! keeping a sensitive or deleted version out of the index is in [`write`].
+//! Note the shape that went with it: this module used to open the SQLCipher
+//! file on a second connection to read columns `StoredItem` did not carry. Two
+//! writers on one file, and two answers to "what is in this device's history".
 
-mod devices;
 mod error;
-mod open;
-mod read;
-mod state;
-mod write;
 
-#[cfg(test)]
-mod testutil;
-
-pub use devices::Origin;
 pub(crate) use error::is_not_a_database;
 pub use error::MetaError;
-pub use open::Meta;
 
-use copypaste_p2p::protocol::ItemSummary;
+use std::collections::HashMap;
 
-/// Run a short blocking database call without stalling the reactor.
+use copypaste_core::{origin_or, Store, StoredItem};
+
+/// Where one item came from, as a user reads it.
 ///
-/// Every operation in this module is SQLite plus an AEAD, and both transports
-/// call it from inside an async task, so the work happens on whatever thread is
-/// driving that task. On the daemon's multi-threaded runtime `block_in_place`
-/// hands the other tasks to a different worker for the duration; on a
-/// current-thread runtime — which is what `#[tokio::test]` builds — it would
-/// panic, so there the call simply runs inline.
-pub fn blocking<T>(f: impl FnOnce() -> T) -> T {
-    use tokio::runtime::{Handle, RuntimeFlavor};
-    match Handle::try_current() {
-        Ok(handle) if matches!(handle.runtime_flavor(), RuntimeFlavor::MultiThread) => {
-            tokio::task::block_in_place(f)
+/// The id is the identity and the name is a label: it is whatever a peer said
+/// in its hello, two devices may report the same one, and `device_name` is
+/// `None` rather than a guess whenever this device has never been told one —
+/// the ordinary case for an item that arrived through a cloud account from a
+/// third device that was never paired directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin {
+    pub device_id: String,
+    pub device_name: Option<String>,
+}
+
+/// This device's sync identity.
+#[derive(Debug)]
+pub struct Meta {
+    store: Store,
+    device_id: String,
+    device_name: String,
+}
+
+impl Meta {
+    /// Resolve this device's identity from the history database, minting it on
+    /// first run.
+    ///
+    /// `name_hint` is used only when no name has been stored yet: the device
+    /// name is cosmetic and peer-visible, so it stays put across a hostname
+    /// change rather than churning on every restart.
+    pub fn open(store: &Store, name_hint: &str) -> Result<Self, MetaError> {
+        let identity = store.device_identity(name_hint)?;
+        Ok(Self {
+            store: store.clone(),
+            device_id: identity.device_id,
+            device_name: identity.device_name,
+        })
+    }
+
+    #[must_use]
+    pub fn device_id(&self) -> &str {
+        &self.device_id
+    }
+
+    #[must_use]
+    pub fn device_name(&self) -> &str {
+        &self.device_name
+    }
+
+    /// Replace the stored device name. Cosmetic; takes effect on the next hello.
+    pub fn set_device_name(&mut self, name: &str) -> Result<(), MetaError> {
+        self.device_name = self.store.set_device_name(&self.device_id, name)?;
+        Ok(())
+    }
+
+    pub fn record_device_name(&self, device_id: &str, name: &str) -> Result<(), MetaError> {
+        Ok(self.store.record_device_name(device_id, name)?)
+    }
+
+    /// This device, as an origin.
+    #[must_use]
+    pub fn here(&self) -> Origin {
+        Origin {
+            device_id: self.device_id.clone(),
+            device_name: Some(self.device_name.clone()),
         }
-        _ => f(),
+    }
+
+    /// The origin of each row, keyed by item id, resolved to a name where one
+    /// is known.
+    ///
+    /// One name query for a whole page rather than one per row: a page is up to
+    /// 1 000 items and this is on the path of every `list` and every `search`.
+    /// A row with no stored origin was captured here ([`origin_or`]).
+    pub fn origins_for(&self, rows: &[StoredItem]) -> Result<HashMap<String, Origin>, MetaError> {
+        let ids: Vec<String> = rows
+            .iter()
+            .map(|row| origin_or(&row.origin_device_id, &self.device_id).to_string())
+            .collect();
+        let names = self.store.device_names(&ids)?;
+        Ok(rows
+            .iter()
+            .zip(ids)
+            .map(|(row, device_id)| {
+                let device_name = names.get(&device_id).cloned();
+                (
+                    row.id.clone(),
+                    Origin {
+                        device_id,
+                        device_name,
+                    },
+                )
+            })
+            .collect())
+    }
+
+    /// The origin of one row.
+    pub fn origin_of(&self, row: &StoredItem) -> Result<Origin, MetaError> {
+        let device_id = origin_or(&row.origin_device_id, &self.device_id).to_string();
+        let names = self.store.device_names(std::slice::from_ref(&device_id))?;
+        let device_name = names.get(&device_id).cloned();
+        Ok(Origin {
+            device_id,
+            device_name,
+        })
+    }
+
+    pub fn oldest_version_ms(&self) -> Result<Option<i64>, MetaError> {
+        Ok(self.store.oldest_version_ms()?)
+    }
+
+    pub fn state(&self, key: &str) -> Result<Option<String>, MetaError> {
+        Ok(self.store.state(key)?)
+    }
+
+    pub fn set_state(&self, key: &str, value: &str) -> Result<(), MetaError> {
+        Ok(self.store.set_state(key, value)?)
+    }
+
+    pub fn set_state_all(&self, entries: &[(&str, &str)]) -> Result<(), MetaError> {
+        Ok(self.store.set_state_all(entries)?)
+    }
+
+    pub fn clear_state(&self, keys: &[&str]) -> Result<(), MetaError> {
+        Ok(self.store.clear_state(keys)?)
+    }
+
+    pub fn state_ms(&self, key: &str) -> Result<i64, MetaError> {
+        Ok(self.store.state_ms(key)?)
+    }
+
+    pub fn set_state_ms(&self, key: &str, ms: i64) -> Result<(), MetaError> {
+        Ok(self.store.set_state_ms(key, ms)?)
     }
 }
 
-/// One item as the merge sees it locally.
-#[derive(Debug, Clone)]
-pub struct LocalVersion {
-    pub summary: ItemSummary,
-    /// Never empty — `SyncMessage::validate` rejects an empty id, and an item
-    /// with no recorded origin is one this device captured.
-    pub origin_device_id: String,
-    pub is_sensitive: bool,
-    /// Local-only state, and the reason [`crate::merge`] can refuse an
-    /// incoming delete. Never travels on either transport.
-    pub pinned: bool,
-}
+#[cfg(test)]
+mod tests {
+    use crate::testutil::{add, test_state};
 
-/// One item on its way out to a peer, still encrypted.
-#[derive(Debug, Clone)]
-pub struct StoredVersion {
-    pub item_id: String,
-    /// `None` on a tombstone: the soft delete wiped the payload.
-    pub content_ciphertext: Option<Vec<u8>>,
-    pub nonce: Option<Vec<u8>>,
-    pub content_type: String,
-    pub content_hash: String,
-    pub created_at: i64,
-    pub deleted: bool,
-    pub origin_device_id: String,
-}
+    #[test]
+    fn an_item_captured_here_is_attributed_to_this_device_by_name() {
+        let (state, _dir) = test_state("alpha");
+        let id = add(&state, "mine");
+        let row = state.store.version(&id).unwrap().unwrap();
 
-/// One item on its way in from a peer, already sealed under the local key.
-pub struct IncomingVersion<'a> {
-    pub item_id: &'a str,
-    pub content_ciphertext: Option<&'a [u8]>,
-    pub nonce: Option<&'a [u8]>,
-    pub content_type: &'a str,
-    pub content_hash: &'a str,
-    pub created_at: i64,
-    pub deleted: bool,
-    pub is_sensitive: bool,
-    pub origin_device_id: &'a str,
-    /// Plaintext for the search index. Ignored when the item is sensitive or a
-    /// tombstone — the write-time layer of "sensitive items are never indexed".
-    pub search_text: Option<&'a str>,
+        let origin = state.meta.origin_of(&row).unwrap();
+        assert_eq!(origin.device_id, state.meta.device_id());
+        assert_eq!(
+            origin.device_name.as_deref(),
+            Some(state.meta.device_name())
+        );
+    }
+
+    /// The case the type exists for: a row that came from somewhere else must
+    /// not read as local, and its name arrives later than its id does.
+    #[test]
+    fn a_peer_item_reports_the_peer_and_its_name_once_that_name_is_known() {
+        let (state, _dir) = test_state("alpha");
+        let source = crate::sync::store_source(&state);
+        assert!(copypaste_p2p::sync::SyncSource::apply(
+            &source,
+            copypaste_p2p::protocol::SyncItem {
+                item_id: "theirs".into(),
+                content: "from the phone".into(),
+                content_type: "text".into(),
+                created_at: 1_000,
+                deleted: false,
+                content_hash: "hash-theirs".into(),
+                origin_device_id: "device-b".into(),
+            }
+        )
+        .unwrap());
+        let row = state.store.version("theirs").unwrap().unwrap();
+
+        let origin = state.meta.origin_of(&row).unwrap();
+        assert_eq!(origin.device_id, "device-b");
+        assert_eq!(origin.device_name, None);
+        assert_ne!(origin.device_id, state.meta.device_id());
+
+        state
+            .meta
+            .record_device_name("device-b", "  Phone  ")
+            .unwrap();
+        assert_eq!(
+            state.meta.origin_of(&row).unwrap().device_name.as_deref(),
+            Some("Phone")
+        );
+    }
+
+    /// A page is resolved in one query, and every row asked for comes back.
+    #[test]
+    fn every_row_in_a_page_gets_an_answer() {
+        let (state, _dir) = test_state("alpha");
+        add(&state, "a");
+        add(&state, "b");
+        let rows = state.store.list(10, 0).unwrap();
+
+        let origins = state.meta.origins_for(&rows).unwrap();
+        assert_eq!(origins.len(), rows.len());
+        for row in &rows {
+            assert_eq!(origins[&row.id].device_id, state.meta.device_id());
+        }
+        assert!(state.meta.origins_for(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_device_identity_survives_a_restart_and_two_devices_differ() {
+        let (a, dir) = test_state("alpha");
+        let (b, _db) = test_state("beta");
+        assert_ne!(a.meta.device_id(), b.meta.device_id());
+        assert_eq!(a.meta.device_name(), "alpha");
+
+        let id = a.meta.device_id().to_string();
+        drop(a);
+        let (restarted, _dir) =
+            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
+        assert_eq!(restarted.meta.device_id(), id);
+    }
 }

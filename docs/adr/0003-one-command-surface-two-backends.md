@@ -157,46 +157,47 @@ build — revoked on every update, for a setting the user made once.
 
 ## What the Android backend cannot do yet, and why it refuses rather than guesses
 
-Four operations — `add`, `pair_create`, `pair_accept`, `sync` — return a typed
-`Unsupported` error instead of an implementation. **This is a refusal, not an
-oversight.**
+Six operations — `set_config`, `export`, `import`, `backup`, `restore` and
+`reorder_pinned` — return a typed `Unsupported` error instead of an
+implementation. **This is a refusal, not an oversight.** `copypaste-daemon` is a
+binary crate with no `[lib]` target, so the logic behind each still lives
+somewhere Android cannot import: `server::transfer` owns the export/import skip
+accounting and the detector-re-runs-on-import rule, and `server::dbadmin` owns
+the validate-then-swap that keeps a bad backup from replacing a working history.
+Approximating either is the second implementation CLAUDE.md rule 1 exists to
+stop, and a file copy that looks like a restore and is not would be data loss.
+`set_config` refuses because there is nowhere to put the answer: a setting that
+does not outlive the process is not a setting.
 
-`copypaste-daemon` is a binary crate with no `[lib]` target, so nothing in it is
-importable. The two things the Android backend needs are both inside it:
+`reorder_pinned` refuses on both platforms — `Store::reorder_pinned` exists, but
+this build has no `Backend` route to it yet (parity finding 19).
 
-**1. The ingest pipeline** — `daemon::capture::ingest`. Trim, hash,
-dedup-probe, detect, choose the id *before* the seal because the AEAD binds it,
-encrypt, insert, record origin, evict. Every step is a decision with a bug
-behind it: manifest 01 I-33 (a dedup-probe failure must fall through to the
-insert), the `cutoff_ms` argument that is an absolute epoch stamp and not a
-window width, the write-time half of "sensitive items never reach the search
-index".
+### What has since been unblocked — the record of what it took
 
-Re-typing those forty lines into the UI crate would create a second ingest path.
-`capture.rs`'s own module docs record what happened last time there were two:
-*"v1 had two ingest paths that drifted: the IPC one forgot the dedup probe, so
-`copypaste add` could insert a row the poll loop would have collapsed."*
-CLAUDE.md rule 1 names "it's only a few lines" as the failure mode by name, so
-the code says no instead.
+This section listed `add`, `pair_create`, `pair_accept` and `sync` as blocked.
+All four now work, by the two moves this ADR called for, and the shape of the
+fix is worth keeping because the next refusal above will be resolved the same
+way.
 
-**2. The p2p node** — a TCP listener holding the pre-shared keys, mDNS
-discovery, and the sync-metadata connection `daemon::p2p::meta` opens onto the
-same SQLCipher file for the columns `StoredItem` does not carry.
-`copypaste-p2p` provides the transport, the merge and the protocol; it does not
-provide the node that owns them.
+* **`add`** — `capture::ingest` moved down into `copypaste_core::ingest`. One
+  implementation, four callers.
+* **`pair_create`, `pair_accept`, `sync`, and both discovery operations** — the
+  peer node moved up into `copypaste_p2p::node`, generic over `SyncSource`, and
+  then `SyncSource` itself moved down into `copypaste_core::sync::StoreSource`.
+  The second half was the one that mattered: a node generic over a trait with
+  exactly one implementation, and that implementation built on two
+  daemon-private modules, is still a daemon-only node.
 
-### The fix, in crates this change does not own
-
-* **Lift `capture::ingest` down into `copypaste-core`.** Its only dependencies
-  are core's own three modules — crypto, storage, sensitive — so it arguably
-  belongs there already and its presence in the daemon is a layering accident.
-  The daemon keeps the poll loop; the core gains `ingest`.
-* **Lift the p2p node up into `copypaste-p2p`**, as a type owning the listener,
-  discovery and the metadata connection, with the daemon holding one.
-
-Both are behaviour-preserving moves. Until they happen the Android build can
-read, copy, pin, delete and clear history, and list and forget peers — but it
-cannot add an item or sync, which means it is not shippable.
+Making `StoreSource` a core type meant closing the gap it was written around —
+`StoredItem` now carries `content_hash`, `deleted` and `origin_device_id`, and
+`Store` answers `summaries`, `versions`, `versions_since` and `upsert`. The
+daemon's second SQLCipher connection is gone with it. **`copypaste-core`
+therefore depends on `copypaste-p2p`**, for the wire types and for
+`merge_decision` — the one comparator both transports apply (manifest 05
+INV-C2). The edge runs that way because `copypaste-p2p` deliberately knows
+nothing about a database; forking the comparator to keep the two crates apart is
+the defect INV-C2 records. It adds no third-party weight to a shipped binary,
+because every consumer of the core already links `copypaste-p2p`.
 
 ### Also outstanding on Android
 

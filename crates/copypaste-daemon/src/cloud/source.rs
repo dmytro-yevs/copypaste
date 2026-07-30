@@ -1,8 +1,8 @@
 //! The daemon's history, as a cloud round sees it.
 //!
-//! Reads and writes go through [`crate::meta`] — the same view the peer
-//! transport uses, so the `is_sensitive = 0` filter and the comparator in
-//! [`crate::merge`] are shared rather than reimplemented (INV-C2).
+//! Reads and writes go through the same [`copypaste_core::StoreSource`] the
+//! peer transport uses, so the `is_sensitive = 0` filter and the comparator
+//! behind it are shared rather than reimplemented (INV-C2).
 //!
 //! # The two cursors
 //!
@@ -21,11 +21,11 @@
 use std::sync::{Arc, Mutex};
 
 use copypaste_cloud::sync::{CloudSource, LocalItem, SyncError};
+use copypaste_core::sync::blocking;
+use copypaste_core::RemoteVersion;
 use tracing::warn;
 
 use crate::cloud::{KEY_UPLOAD_FLOOR, KEY_WATERMARK, KEY_WATERMARK_ITEM};
-use crate::merge::{apply_remote_version, open_version, RemoteVersion, MSG_STORE};
-use crate::meta::blocking;
 use crate::AppState;
 
 /// Local versions offered to one push.
@@ -37,6 +37,10 @@ const UPLOAD_SCAN_LIMIT: i64 = 500;
 
 pub struct StoreSource {
     state: Arc<AppState>,
+    /// The shared sync view. Held rather than rebuilt per call so one round
+    /// opens and merges through one source, and so this file cannot grow a
+    /// second answer to "what does this device hold".
+    shared: copypaste_core::StoreSource,
     last_offer: Mutex<Offer>,
 }
 
@@ -53,6 +57,7 @@ struct Offer {
 impl StoreSource {
     pub fn new(state: Arc<AppState>) -> Self {
         Self {
+            shared: crate::sync::store_source(&state),
             state,
             last_offer: Mutex::new(Offer::default()),
         }
@@ -85,7 +90,7 @@ impl CloudSource for StoreSource {
         blocking(|| {
             let rows = self
                 .state
-                .meta
+                .store
                 .versions_since(since_ms, UPLOAD_SCAN_LIMIT)
                 .map_err(source_error)?;
 
@@ -101,18 +106,22 @@ impl CloudSource for StoreSource {
                 let content = if row.deleted {
                     String::new()
                 } else {
-                    match open_version(&self.state, &row) {
+                    match self.shared.open(&row) {
                         Some(content) => content,
                         None => continue,
                     }
                 };
                 items.push(LocalItem {
-                    item_id: row.item_id,
+                    origin_device_id: copypaste_core::origin_or(
+                        &row.origin_device_id,
+                        self.state.meta.device_id(),
+                    )
+                    .to_string(),
+                    item_id: row.id,
                     content: content.into_bytes(),
                     content_type: row.content_type,
                     created_at: row.created_at,
                     deleted: row.deleted,
-                    origin_device_id: row.origin_device_id,
                 });
             }
             Ok(items)
@@ -124,9 +133,8 @@ impl CloudSource for StoreSource {
             // Lossy for the same reason the peer path is: clipboard content is
             // text, and one row that is not valid UTF-8 must not fail a round.
             let content = String::from_utf8_lossy(&item.content);
-            apply_remote_version(
-                &self.state,
-                &RemoteVersion {
+            self.shared
+                .apply_version(&RemoteVersion {
                     item_id: &item.item_id,
                     content: &content,
                     content_type: &item.content_type,
@@ -135,9 +143,8 @@ impl CloudSource for StoreSource {
                     // The cloud row carries no hash — see `RemoteVersion`.
                     content_hash: None,
                     origin_device_id: &item.origin_device_id,
-                },
-            )
-            .map_err(|e| SyncError::Source(e.message()))
+                })
+                .map_err(|e| SyncError::Source(e.message()))
         })
     }
 
@@ -218,9 +225,9 @@ impl CloudSource for StoreSource {
     }
 }
 
-fn source_error(e: crate::meta::MetaError) -> SyncError {
+fn source_error(e: impl std::fmt::Debug) -> SyncError {
     warn!(error = ?e, "the history database could not be read for a cloud round");
-    SyncError::Source(MSG_STORE)
+    SyncError::Source(copypaste_core::sync::MSG_STORE)
 }
 
 #[cfg(test)]

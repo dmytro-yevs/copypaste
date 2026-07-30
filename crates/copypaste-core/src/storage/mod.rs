@@ -24,6 +24,12 @@
 //!   is total; that is what [`Store::list_from`]'s keyset seek requires
 //!   ([`page`]) and what keeps offset pages from duplicating or skipping rows
 //!   that tie on `created_at`.
+//! * **One view of the history, for both sync transports.** The four merge keys
+//!   are columns of `clipboard_items` and are projected into [`StoredItem`], so
+//!   [`versions`] serves the peer and cloud paths from the rows the store
+//!   already owns. v2 briefly shadowed `origin_device_id` in a side table on a
+//!   second connection; two answers to "what is in this device's history" drift
+//!   the first time an eviction lands on one and not the other.
 //! * **One live row per distinct content.** [`Store::insert_or_bump`] promotes
 //!   the existing row rather than writing a second one, across all of history
 //!   and not only a recent window (manifest 01 I-23).
@@ -40,6 +46,7 @@
 
 mod connection;
 mod dbfile;
+mod identity;
 mod items;
 mod legacy;
 mod model;
@@ -48,15 +55,19 @@ mod pinning;
 mod retention;
 mod schema;
 mod search;
+mod state;
 mod store;
+mod versions;
 
 pub use dbfile::{attach_key_literal, open_validated, verify_integrity};
+pub use identity::DeviceIdentity;
 pub use legacy::{is_v1_database, v1_database_in, V1_DATABASE_FILENAME};
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};
 pub use search::IndexedText;
 pub use store::Store;
+pub use versions::{origin_or, IncomingItem, Version};
 
 /// Fixtures shared by every test module under `storage`. The direct-SQL helpers
 /// let a test assert what is *in* the FTS table rather than only what `search`

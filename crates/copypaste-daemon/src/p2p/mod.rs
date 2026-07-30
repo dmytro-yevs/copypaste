@@ -7,19 +7,17 @@
 //!
 //! What this module supplies is what the node asks of *this* device:
 //!
-//! * [`source::StoreSource`] — the history, as a session sees it,
 //! * [`P2p`] — the node plus the daemon's cadence and wake signal, hanging off
 //!   `AppState` exactly like the store and the keyring do,
 //! * [`handlers`] — the five IPC operations a client drives all of this with.
 //!
-//! The sync view of the history is *not* here: it is [`crate::meta`], because
-//! the cloud transport reads and writes the same rows through the same
-//! comparator, and one of the two transports owning it is how the second one
-//! ends up with a copy.
+//! The sync view of the history is *not* here: it is
+//! [`copypaste_core::StoreSource`], because the cloud transport reads and
+//! writes the same rows through the same comparator, and one of the two
+//! transports owning it is how the second one ends up with a copy.
 
 pub mod handlers;
 pub mod poll;
-pub mod source;
 
 use std::sync::Arc;
 
@@ -32,7 +30,7 @@ use tokio::sync::{watch, Notify};
 use tracing::warn;
 
 use crate::cadence::Idle;
-use crate::p2p::source::StoreSource;
+use crate::sync::peer_source;
 use crate::AppState;
 
 pub use copypaste_p2p::node::bind;
@@ -118,7 +116,7 @@ impl P2p {
 /// history.
 pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch::Receiver<bool>) {
     let node = Arc::clone(state.p2p.node());
-    let source = Arc::new(StoreSource::new(Arc::clone(&state)));
+    let source = Arc::new(peer_source(&state));
     let on_session = move |_pairing_id: &str, outcome: &SyncOutcome| {
         remember_device(&state, outcome);
         if outcome.stats.received > 0 {

@@ -1,14 +1,12 @@
 //! Opening the SQLCipher history file on a private connection.
 //!
-//! One implementation, used by [`crate::meta`] and by `server::dbadmin`. It is
-//! here rather than in either of them because the second caller is how a third
-//! `PRAGMA key` gets written by hand: `copypaste-core` keeps its own inside the
-//! pool and does not expose a raw connection, so the daemon needs exactly one
-//! of its own and no more (CLAUDE.md rule 1).
+//! One caller left: `server::dbadmin`, which has to `ATTACH` a staging database
+//! under the same key and cannot do that through the store's pool.
 //!
-//! **The clean fix is still a `copypaste-core` change** — a `Store::backup_to`
-//! and a `Store::validate` would delete this file. See `meta`'s module header
-//! for the same debt described in full.
+//! **The clean fix is a `copypaste-core` change** — a `Store::backup_to` and a
+//! `Store::validate` would delete this file, and with it the last hand-written
+//! `PRAGMA key` in the daemon (CLAUDE.md rule 1). The sync half of that debt has
+//! been repaid: `crate::meta` no longer opens a second connection at all.
 
 use std::path::Path;
 
