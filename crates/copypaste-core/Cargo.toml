@@ -28,7 +28,14 @@ uuid.workspace = true
 hex.workspace = true
 regex.workspace = true
 unicode-normalization.workspace = true
-directories.workspace = true
+
+# Declared here as well as in the Android target table below, and optional only
+# here: that is what lets `--features android-keystore-typecheck` compile the
+# Android backend on a Linux host. On Android the table makes them
+# unconditional, so no build of the real thing depends on a flag being passed —
+# which is the mistake the macOS keychain shipped for a year.
+keyring-core = { version = "1", optional = true }
+android-native-keyring-store = { version = "1", optional = true }
 
 # macOS Keychain backend for the device secret. Target-gated, not feature-gated:
 # it is already absent from a Linux build, and the feature that used to guard it
@@ -36,6 +43,31 @@ directories.workspace = true
 # the secret to a 0600 file instead.
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework.workspace = true
+
+# Android Keystore backend for the device secret, target-gated for the same
+# reason. `android-native-keyring-store` wraps the secret with an AES-GCM key
+# held in the Android Keystore and keeps the blob in app-private
+# SharedPreferences — the design this needs — and it classifies a missing entry
+# as `NoEntry` distinctly from every other failure, which is what port manifest
+# 02 I-20 turns on. It adds no second crypto stack (CLAUDE.md rule 1, exemption
+# 3): the AES-GCM is Android's own, reached over JNI.
+#
+# The tradeoff to state: it needs `ndk-context` initialised by the host app,
+# which Tauri does not do — `copypaste-ui` supplies that. ADR-0003 records what
+# was evaluated and what a first device run would falsify.
+#
+# Versions are literal rather than `[workspace.dependencies]` entries only
+# because the root manifest was held by another agent; they belong there.
+[target.'cfg(target_os = "android")'.dependencies]
+keyring-core = "1"
+android-native-keyring-store = "1"
+
+[features]
+# Compile `crypto/keystore/android.rs` on a host that is not Android. It
+# selects nothing — the file backend is still what a Linux build uses — and
+# exists so that code is type-checked somewhere rather than being dead text on
+# every machine this project is built on.
+android-keystore-typecheck = ["dep:keyring-core", "dep:android-native-keyring-store"]
 
 [dev-dependencies]
 tempfile.workspace = true

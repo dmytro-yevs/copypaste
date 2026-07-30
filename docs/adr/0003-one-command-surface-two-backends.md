@@ -132,7 +132,8 @@ because there it is just a store read.
 
 ## Dependencies taken (CLAUDE.md rule 1)
 
-Checked before writing, not after. No native code is written in this crate.
+Checked before writing, not after. One JNI entry point is written here, and
+nothing else native — see the device secret below for why that one exists.
 
 | need | crate | tradeoff stated |
 |---|---|---|
@@ -140,6 +141,7 @@ Checked before writing, not after. No native code is written in this crate.
 | popover show/hide/focus | `tauri`'s window API | already a dependency |
 | global hotkey | `tauri-plugin-global-shortcut` → `global-hotkey` | pulls `keyboard-types`, `xkeysym`; desktop-only, and the crate is itself `cfg`'d off on Android |
 | launch at login | `tauri-plugin-autostart` → `auto-launch` | writes a `LaunchAgent` plist; the alternative is hand-writing that plist, its removal path, and a second mechanism per platform |
+| the app context, for the keystore below | `jni`, `ndk-context` | Android-only, and both already in the tree under tao; costs this crate its `forbid(unsafe_code)` |
 
 No exemption from rule 1 is claimed. Nothing here is hand-rolled.
 
@@ -198,9 +200,6 @@ cannot add an item or sync, which means it is not shippable.
 
 ### Also outstanding on Android
 
-* **No Android Keystore backend.** `copypaste_core::Keyring::load_or_create`
-  falls through to the `0600`-file store, whose own docs call it a development
-  posture and say "Android must use the Android Keystore before shipping".
 * **No clipboard capture.** Android has no equivalent of the daemon's poll loop
   and reading the clipboard in the background is restricted from Android 10 on.
   What items enter history and how is an undecided product question, not just
@@ -213,6 +212,81 @@ cannot add an item or sync, which means it is not shippable.
   rect and the monitor list come from the platform, and this host has neither.
   Confirming the popover actually lands under the icon needs a Mac.
 
+## The device secret on Android
+
+`copypaste_core::Keyring::load_or_create` used to fall through to the
+`0600`-file store on Android — a development posture, shipped. It no longer
+can: `crypto::keystore` now selects a third backend on `target_os = "android"`,
+and the file backend is not compiled on that target at all, so no
+misconfiguration lands on it.
+
+**The secret is wrapped, not stored.** The Android Keystore holds keys, and a
+hardware-backed key is non-exportable, so "put 32 bytes in the Keystore" is not
+available. An AES-GCM key lives in the Keystore under a frozen alias and never
+leaves it; the device secret is sealed with that key and kept in app-private
+`SharedPreferences`. Compromise of the file yields ciphertext.
+
+**`setUserAuthenticationRequired(false)`.** A clipboard that receives items in
+the background must decrypt while the screen is locked; with it true,
+`Cipher.init` throws `UserNotAuthenticatedException` exactly when an item
+arrives. The consequence accepted: a device unlocked by an attacker can
+decrypt. Because the key is not auth-bound, biometric re-enrolment does not
+invalidate it — that applies only to `setInvalidatedByBiometricEnrollment`.
+
+**No StrongBox.** `setIsStrongBoxBacked(true)` throws
+`StrongBoxUnavailableException` on devices without the chip, so it needs a
+per-device fallback, and the fallback is the TEE-backed key already in hand. A
+secure element also has a small key budget and is markedly slower.
+
+**An invalidated key is not authorisation to mint.** A wrapping key that no
+longer opens its own blob surfaces as `CryptoError::KeystoreEntryUnusable` and
+stops there (port manifest 02, I-20). The history was encrypted under a secret
+that can no longer be read; a fresh one would turn that into what looks like
+corruption. The honest report is that the history is gone and clearing app data
+starts over. Clearing app data and uninstalling remove the Keystore alias and
+the database together, so the ordinary destructive paths stay consistent.
+
+### The secret follows the data directory
+
+`Keyring::load_or_create` now takes the directory holding the history, because
+security review F-11 is that `--data-dir` moved the database and left the
+secret behind. The keystore backends are user- or app-scoped and ignore the
+argument; the file backend puts its file there instead of in
+`directories::ProjectDirs`.
+
+They all receive it anyway, because of the guard it enables: **a data directory
+that holds a database but no secret is refused, not minted into.** "No entry"
+otherwise means both "first run" and "we looked in the wrong place", and only
+the first authorises a mint (I-20). The daemon and `EmbeddedBackend::open` each
+pass the one directory they already derived, so there is no second derivation
+to drift.
+
+### The dependency, and what was evaluated (CLAUDE.md rule 1)
+
+`android-native-keyring-store` 1.0, with `keyring-core` 1.0. It is the design
+above, already written: an `AndroidKeyStore` AES-GCM key wrapping values in
+`SharedPreferences`, over JNI to Android's own crypto — no second crypto stack
+(rule 1, exemption 3). Decisively, it reports a missing entry as
+`Error::NoEntry`, distinct from `BadDataFormat`, `BadStoreFormat` and
+`PlatformFailure`, which is precisely the classification I-20 turns on. It is
+maintained by the `keyring-rs` authors; 1.0 is four months old.
+
+Also evaluated: `keyring` 4 (the same store, plus a process-global default and
+three desktop backends we do not want); `animo-secure-env` (last released
+2024-07, and its iOS half duplicates `security-framework`);
+`tauri-plugin-keystore` 2.1.0-alpha.1 (alpha, quiet since 2025-02);
+`hardware-keystore` 0.0.1 (89 downloads). Hand-written JNI was the alternative
+and is roughly 150 lines of `javax.crypto` calls that no machine in this
+project compiles.
+
+The tradeoff to state: it finds the JavaVM and app context through
+`ndk-context`, which **Tauri does not populate** — tao keeps its own activity
+registry and wry dropped the dependency. So the app supplies it:
+`src-tauri/src/android_context.rs` is one JNI entry point, called from
+`MainActivity.onCreate` before `super.onCreate` because Tauri's setup opens the
+database during it. That is the only `unsafe` in `copypaste-ui`, and why its
+crate attribute is now `deny` rather than `forbid`.
+
 ## Verification status
 
 Stated plainly because it matters. This work happened on a Linux host with no
@@ -223,7 +297,27 @@ macOS SDK and no Android SDK.
 | desktop backend, commands, model | yes | yes, 33 tests | **no** |
 | shell (tray, window, hotkey, autostart) | yes | the hotkey guard, yes | **no** |
 | embedded backend | yes, under `--features embedded-backend` on Linux | yes | **no** |
-| Android build config | JSON validated against the `tauri-utils` schema | n/a | **no — `cargo tauri android` has never been run here** |
+| Android keystore backend | yes, under `--features android-keystore-typecheck` on Linux | none exist — they would need a device | **no** |
+| the JNI context handover | yes, under `--features embedded-backend` on Linux | n/a | **no** |
+| `KeystoreContext.kt`, its ProGuard rule, the `MainActivity` call | **no** | n/a | **no** |
+| Android build config | JSON validated against the `tauri-utils` schema | n/a | **no** — `cargo tauri android` has never been run here |
+
+Both new cargo features exist for the same reason: to compile Android code on a
+machine that cannot build for Android. Neither selects anything — the backend
+is chosen by `target_os` alone, because a feature is a way to ship without it
+and that is what happened to the macOS Keychain.
+
+What a first device run would falsify, in the order it would fail:
+
+1. `System.loadLibrary("copypaste_ui_lib")` finds the library and
+   `KeystoreContext.initialize` resolves to the Rust symbol — `UnsatisfiedLinkError`
+   if either the name or the ProGuard rule is wrong.
+2. `getSharedPreferences` and `KeyGenParameterSpec$Builder` succeed from a
+   context captured before `super.onCreate`.
+3. A second launch reads back the same secret rather than reporting
+   `NoEntry` — which is the only observation that proves the round trip, and
+   the one that would have caught a wrong store name.
+4. The database opens under the derived key on that second launch.
 
 The `embedded-backend` cargo feature exists precisely so the Android path is
 type-checked *somewhere*. Without it the whole in-process backend would be dead

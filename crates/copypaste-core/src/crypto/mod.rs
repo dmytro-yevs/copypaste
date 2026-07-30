@@ -64,8 +64,22 @@ pub enum CryptoError {
     /// exists" answer authorises creation, and that path returns `Ok` rather
     /// than this error (port manifest 02, I-20). Callers degrade — report
     /// locked, leave the encrypted database untouched.
+    ///
+    /// Retrying is reasonable: an unlocked keychain, a mounted directory or a
+    /// correct `--data-dir` all turn this into success.
     #[error("key store unavailable: {0}")]
     KeystoreUnavailable(&'static str),
+
+    /// The device secret is *there* and cannot be used — the wrong length, or
+    /// sealed under a wrapping key that no longer opens it.
+    ///
+    /// Separate from [`CryptoError::KeystoreUnavailable`] because the recovery
+    /// is different and worth saying out loud: retrying will not help, and the
+    /// history encrypted under that secret is unrecoverable. It is still not a
+    /// licence to mint (I-20) — minting would replace an unreadable history
+    /// with an unreadable history plus the appearance of corruption.
+    #[error("stored device secret unusable: {0}")]
+    KeystoreEntryUnusable(&'static str),
 
     /// A primitive failed for a reason that is not attacker controlled — an
     /// HKDF output length the implementation rejects, or an AEAD input past
@@ -99,6 +113,7 @@ mod tests {
             CryptoError::AuthFailed,
             CryptoError::InvalidNonce,
             CryptoError::KeystoreUnavailable("the keychain is locked or access was denied"),
+            CryptoError::KeystoreEntryUnusable("the stored device secret is the wrong length"),
             CryptoError::Internal("AEAD rejected the plaintext (too large)"),
         ];
         for e in errors {
