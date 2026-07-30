@@ -200,3 +200,49 @@ nothing compiles it — `copypaste-cloud/src/sync/mod.rs` carried an
 eighty-line header whose central claim, the merge ordering, had gone stale in
 two places while the code stayed correct. A comment that is wrong is worse
 than one that is missing.
+
+## 9. What may reach `main`
+
+**Every commit on `main` compiles, passes its tests, and contains what its
+message says.** No exceptions for work in progress.
+
+This rule exists because of a measured failure in this repository, not a
+hypothetical. During one day of parallel agent work `main` received: commits
+labelled "in flight"; a tree that did not compile; `e2e/node_modules`, staged
+by a `git add -A` that ran while an agent was installing; and three commits
+that swept in other agents' half-finished changes under a message describing
+only one agent's work. One of those had to be corrected by a later commit.
+
+Every one of those came from the same habit — staging everything while
+somebody else was writing.
+
+### The rules
+
+1. **Stage explicit paths.** Not `git add -A`, ever, while another agent holds
+   any part of the tree. The index is shared; a wide stage is a wide commit.
+2. **Verify before committing, not after.** Build, tests, and whatever
+   end-to-end checks exist. A red tree goes to a scratch branch, never here.
+3. **The message must match the diff.** If a commit turns out to contain more
+   than it claims, say so in a follow-up rather than leaving the record wrong.
+   Rewriting shared history to fix prose is worse than the inaccuracy.
+4. **Unverified work is labelled in the message, not in the branch name.**
+   "Never executed on its target platform" is a fact worth recording; "in
+   flight" means it should not be here at all.
+
+### Snapshotting without disturbing anyone
+
+Losing an agent's work to a reclaimed container is a real risk, and the fix is
+not to commit it early. Build the snapshot as an object and move a scratch
+branch to it — this touches neither the working tree nor the index:
+
+```sh
+git add -A
+TREE=$(git write-tree)
+COMMIT=$(git commit-tree "$TREE" -p HEAD -m "WIP snapshot")
+git branch -f wip/snapshot "$COMMIT"
+git reset -q            # unstage; working tree untouched
+```
+
+`git commit` followed by `git reset --soft` looks equivalent and is not: it
+leaves the index full, so the *next* `git add <one file>` commits everything.
+That is how two of the four failures above happened.
