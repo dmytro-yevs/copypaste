@@ -125,6 +125,20 @@ pub struct CloudSyncData {
     /// accident: this is the count the user can check the rule against.
     pub skipped_sensitive: u32,
     pub skipped_undecryptable: u32,
+    /// Remote rows whose metadata signature did not verify, refused before the
+    /// merge saw them.
+    ///
+    /// **Not a routine number.** A non-zero value means something wrote a row
+    /// into the account that does not hold the sync passphrase, which is the
+    /// one count here that distinguishes an attack from a quiet day. It is the
+    /// only reason a client can give for a round that downloaded rows and
+    /// applied none of them.
+    ///
+    /// `#[serde(default)]` because `ResponseData` is untagged: against a daemon
+    /// built before this field, a required one would make the whole payload
+    /// fail to match `CloudSync` and fall through to `Empty`.
+    #[serde(default)]
+    pub skipped_forged: u32,
     pub skipped_future: u32,
     /// Local items withheld because they are over the per-item upload cap
     /// (8 MiB for text, 10 MiB otherwise).

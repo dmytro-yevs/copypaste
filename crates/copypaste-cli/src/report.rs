@@ -80,6 +80,9 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
             out(&render::peers_table(&peers, now_ms(), "no paired devices"));
         }
         Command::Unpair { pairing_id } => out(&format!("unpaired {pairing_id}")),
+        Command::Revoke { pairing_id, .. } => out(&format!(
+            "revoked {pairing_id}; that code can never be used again"
+        )),
         Command::Cloud { action } => match action {
             CloudAction::Sync => {
                 let stats = client::expect_cloud_sync(data)?;

@@ -88,7 +88,10 @@ fn sweep_sensitive_items(state: &AppState) {
     );
     match removed {
         Ok(0) => {}
-        Ok(_) => state.note_local_change(),
+        // `note_sensitive_swept` rather than `note_local_change`: this is the
+        // one history change nobody asked for, and a client cannot say so on an
+        // event that only reports that the count moved.
+        Ok(removed) => state.note_sensitive_swept(u32::try_from(removed).unwrap_or(u32::MAX)),
         Err(e) => warn!(error = ?e, "the sensitive-item sweep failed"),
     }
 }
@@ -173,4 +176,61 @@ pub fn ingest_at(
         created_at,
         &settings,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::test_state;
+
+    /// The auto-wipe is the only thing in the daemon that deletes an item the
+    /// user never asked it to, and until the count rode the event there was no
+    /// way to tell them it had happened — which is the whole reason
+    /// `sensitive_ttl_secs` ships at `0`.
+    #[test]
+    fn a_sweep_reports_how_many_secrets_it_deleted() {
+        let (state, _dir) = test_state("alpha");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &copypaste_ipc::ConfigPatch {
+                    sensitive_ttl_secs: Some(30),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // Captured long enough ago to be past a 30-second deadline.
+        let old = copypaste_core::now_ms() - 10 * 60 * 1000;
+        ingest_at(&state, "AKIAIOSFODNN7EXAMPLE", "text", old).unwrap();
+
+        let mut events = state.subscribe();
+        sweep_sensitive_items(&state);
+
+        let event = events.try_recv().expect("the sweep publishes an event");
+        assert_eq!(event.swept, 1);
+        assert_eq!(event.item_count, 0);
+        assert!(!event.captured);
+    }
+
+    /// A sweep that removed nothing must stay silent, or a client would post a
+    /// "deleted" notice on every poll tick.
+    #[test]
+    fn a_sweep_with_nothing_to_delete_publishes_nothing() {
+        let (state, _dir) = test_state("alpha");
+        ingest(&state, "an ordinary clipping", "text").unwrap();
+        let mut events = state.subscribe();
+        sweep_sensitive_items(&state);
+        assert!(events.try_recv().is_err());
+    }
+
+    /// Every other history change reports `swept: 0`, so a client can branch on
+    /// it without asking what kind of change it was.
+    #[test]
+    fn an_ordinary_change_carries_no_swept_count() {
+        let (state, _dir) = test_state("alpha");
+        let mut events = state.subscribe();
+        state.note_local_change();
+        assert_eq!(events.try_recv().expect("an event").swept, 0);
+    }
 }

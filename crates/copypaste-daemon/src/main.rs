@@ -272,7 +272,18 @@ impl AppState {
     /// applied a peer's row would otherwise reset the cadence, provoke an
     /// immediate empty round on the other device, and ring back.
     pub fn note_local_change(&self) {
-        self.publish(EventKind::Items, false);
+        self.publish(EventKind::Items, false, 0);
+        self.p2p.wake();
+        self.cloud.wake();
+    }
+
+    /// The auto-wipe sweep deleted `count` detected secrets.
+    ///
+    /// A local change like any other to the sync loops, but the only one the
+    /// user did not ask for, so the count travels with it — see
+    /// [`copypaste_ipc::EventData::swept`].
+    pub fn note_sensitive_swept(&self, count: u32) {
+        self.publish(EventKind::Items, false, count);
         self.p2p.wake();
         self.cloud.wake();
     }
@@ -289,27 +300,28 @@ impl AppState {
     /// owns the notification is the one that reads it — see
     /// [`copypaste_ipc::EventData::captured`].
     pub fn note_capture(&self) {
-        self.publish(EventKind::Items, true);
+        self.publish(EventKind::Items, true, 0);
         self.p2p.wake();
         self.cloud.wake();
     }
 
     /// History changed because a peer or the cloud delivered something.
     pub fn note_remote_change(&self) {
-        self.publish(EventKind::Items, false);
+        self.publish(EventKind::Items, false, 0);
     }
 
     pub fn note_peers_changed(&self) {
-        self.publish(EventKind::Peers, false);
+        self.publish(EventKind::Peers, false, 0);
     }
 
-    fn publish(&self, event: EventKind, captured: bool) {
+    fn publish(&self, event: EventKind, captured: bool, swept: u32) {
         // `send` fails only when nobody is listening, which is the ordinary
         // case: the CLI does not subscribe and the app may not be running.
         let _ = self.events.send(EventData {
             event,
             item_count: self.store.count().unwrap_or(0),
             captured,
+            swept,
         });
     }
 
