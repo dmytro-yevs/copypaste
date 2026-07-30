@@ -15,6 +15,8 @@
     "color-primary": { "$value": "{color.accent}", "$description": "shadcn `primary`. Follows [data-accent], so a stock <Button> re-tints with the user's accent for free." },
     "color-primary-foreground": { "$value": "{color.on-accent}", "$description": "shadcn `primary-foreground`. Not always white — teal, green and amber take dark ink in the dark theme." },
 
+    "color-primary-hover": { "$value": "{color.accent-hover}", "$description": "NON-shadcn, ours. The hover fill for `bg-primary`; shadcn puts an alpha on the fill instead, which is a colour in no token file — see --accent-hover for what that costs the label. The mechanical bridge also emits `bg-accent-hover` for this same colour: prefer this name, because shadcn has spent the word `accent` on its neutral hover surface." },
+
     "color-secondary": { "$value": "{color.raised}", "$description": "shadcn `secondary`. The borderless secondary button surface." },
     "color-secondary-foreground": { "$value": "{color.text}", "$description": "shadcn `secondary-foreground`." },
 
@@ -26,6 +28,7 @@
 
     "color-destructive": { "$value": "{color.err}", "$description": "shadcn `destructive`." },
     "color-destructive-foreground": { "$value": "{color.on-err}", "$description": "shadcn `destructive-foreground`." },
+    "color-destructive-hover": { "$value": "{color.err-hover}", "$description": "NON-shadcn, ours. As `primary-hover`, for the destructive fill." },
 
     "color-border": { "$value": "{color.border}", "$description": "shadcn `border`." },
     "color-input": { "$value": "{color.border-strong}", "$description": "shadcn `input` is the field's border colour, not its fill — and a field's border is what identifies the control, so it takes the 3:1 variant rather than the decorative one (WCAG 1.4.11)." },

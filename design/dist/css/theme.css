@@ -18,6 +18,7 @@
   --color-popover-foreground: var(--text);
   --color-primary: var(--accent);
   --color-primary-foreground: var(--on-accent);
+  --color-primary-hover: var(--accent-hover);
   --color-secondary: var(--raised);
   --color-secondary-foreground: var(--text);
   --color-muted: var(--elevated);
@@ -26,6 +27,7 @@
   --color-accent-foreground: var(--text);
   --color-destructive: var(--err);
   --color-destructive-foreground: var(--on-err);
+  --color-destructive-hover: var(--err-hover);
   --color-border: var(--border);
   --color-input: var(--border-strong);
   --color-border-strong: var(--border-strong);
@@ -71,11 +73,13 @@
   --color-faint: var(--faint);
   --color-mute: var(--mute);
   --color-hover: var(--hover);
+  --color-accent-hover: var(--accent-hover);
   --color-scrim: var(--scrim);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-err: var(--err);
   --color-on-err: var(--on-err);
+  --color-err-hover: var(--err-hover);
   --color-info: var(--info);
   --color-ok-strong: var(--ok-strong);
   --color-warn-strong: var(--warn-strong);
@@ -95,6 +99,7 @@
   --color-c-unknown: var(--c-unknown);
   --color-accent-2: var(--accent-2);
   --color-on-accent: var(--on-accent);
+  --color-accent-away: var(--accent-away);
   --shadow-1: var(--sh1);
   --shadow-2: var(--sh2);
   --shadow-3: var(--sh3);

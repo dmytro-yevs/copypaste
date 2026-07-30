@@ -64,6 +64,16 @@ function pairsFor(theme, accent) {
   // apart is the whole reason --accent-2 exists (see accents.*.json).
   text('var(--on-accent)', R('var(--accent)'), '--on-accent on an --accent fill');
   text('var(--on-err)', R('var(--err)'), '--on-err on an --err fill');
+
+  // The hover fill. The two pairs above measured the *undiluted* fill only,
+  // which is how a button could hover at 4.02 with every pair here green.
+  // Mixing away from the ink means these can only sit above them — that is
+  // the property, not the number. The surfaces are in the loop because both
+  // fills are opaque only until somebody mixes one with `transparent`.
+  for (const [n, s] of [['--bg', bg], ['--card', card], ['--elevated', elevated]]) {
+    text('var(--on-accent)', over(R('var(--accent-hover)'), s), `--on-accent on --accent-hover over ${n}`);
+    text('var(--on-err)', over(R('var(--err-hover)'), s), `--on-err on --err-hover over ${n}`);
+  }
   for (const [n, s] of [['--bg', bg], ['--elevated', elevated]]) {
     text('var(--accent-2)', s, `--accent-2 as text on ${n}`);
   }

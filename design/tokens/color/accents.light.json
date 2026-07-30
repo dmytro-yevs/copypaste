@@ -1,6 +1,6 @@
 {
   "accents": {
-    "$description": "The accent axis, light resolution. Two roles, not one ramp step: --accent is a FILL and must carry --on-accent at >=4.5; --accent-2 is TEXT and must clear 4.5 on --bg and --elevated. That is why the steps are not uniform — indigo, blue and rose reach the fill floor at -600 while teal, green and amber only reach it at -700 (teal-600 measures 3.72 against white, green-600 3.27, amber-600 3.21). Every accent is written out in full rather than as a partial override of the dark block: the file is the cascade already resolved, so nothing re-derives it.",
+    "$description": "The accent axis, light resolution. Two roles, not one ramp step: --accent is a FILL and must carry --on-accent at >=4.5; --accent-2 is TEXT and must clear 4.5 on --bg and --elevated. That is why the steps are not uniform — indigo, blue and rose reach the fill floor at -600 while teal, green and amber only reach it at -700 (teal-600 measures 3.72 against white, green-600 3.27, amber-600 3.21). Every accent is written out in full rather than as a partial override of the dark block: the file is the cascade already resolved, so nothing re-derives it. --accent-away is black for all six because every light fill takes white ink; it is the pole --accent-hover (theme.light.json) mixes toward.",
     "$type": "color",
     "indigo": {
       "$description": "Default accent. Fill indigo-600 (6.44 with white ink), text indigo-700 (8.07 on --bg).",
@@ -12,6 +12,9 @@
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     },
     "blue": {
@@ -24,6 +27,9 @@
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     },
     "teal": {
@@ -36,6 +42,9 @@
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     },
     "green": {
@@ -48,6 +57,9 @@
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     },
     "amber": {
@@ -60,6 +72,9 @@
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     },
     "rose": {
@@ -72,6 +87,9 @@
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     }
   },
@@ -88,6 +106,10 @@
     "on-accent": {
       "$value": "{accents.indigo.on-accent}",
       "$description": "Foreground on the active accent."
+    },
+    "accent-away": {
+      "$value": "{accents.indigo.accent-away}",
+      "$description": "See the dark file: --accent-hover substitutes this, so it must be defined before any [data-accent] block matches."
     }
   }
 }
