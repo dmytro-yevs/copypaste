@@ -1,0 +1,195 @@
+/**
+ * The background service's settings, and moving history in and out of a file.
+ *
+ * Two properties this file exists to keep:
+ *
+ * **A write carries only the field it changed.** `setConfig` takes a patch, so
+ * two open screens — or a screen and the CLI — cannot overwrite each other's
+ * unsaved work. Nothing here ever sends the whole record back.
+ *
+ * **A rejected write leaves the cache on what the service kept.** The service
+ * validates into a new record and stays on the old one when a value is out of
+ * range, so on failure the query is invalidated rather than patched: the screen
+ * re-reads the truth instead of showing the value that was refused.
+ */
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
+import { t } from "@/i18n";
+import { toFriendly } from "@/lib/errors";
+import {
+  type ConfigApplied,
+  type ConfigPatch,
+  type ExportReport,
+  type ImportReport,
+  type ServiceState,
+  backupDatabase,
+  exportHistory,
+  getConfig,
+  importHistory,
+  restartService,
+  restoreDatabase,
+  setConfig,
+} from "@/lib/ipc";
+import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
+
+export const CONFIG_KEY = ["config"] as const;
+
+/** No poll. These change when this app or the CLI changes them, and a settings
+ *  screen re-reading every few seconds would fight the control the user is
+ *  holding. */
+export function useServiceConfig() {
+  return useQuery<ConfigApplied>({
+    queryKey: CONFIG_KEY,
+    queryFn: getConfig,
+    retry: false,
+  });
+}
+
+/**
+ * Apply one patch.
+ *
+ * `restart_required` is passed to the caller rather than toasted: the fields it
+ * names have to be marked at the control they belong to, and a toast is gone
+ * before the user looks back at the row.
+ */
+export function useSetServiceConfig() {
+  const qc = useQueryClient();
+  return useMutation<ConfigApplied, unknown, ConfigPatch>({
+    mutationFn: setConfig,
+    onSuccess: (applied) => qc.setQueryData(CONFIG_KEY, applied),
+    onError: (raw) => {
+      toast.error(toFriendly(raw));
+      void qc.invalidateQueries({ queryKey: CONFIG_KEY });
+    },
+  });
+}
+
+/**
+ * Restart the service so a `NeedsRestart` field takes effect.
+ *
+ * It refuses for a service this app did not start (ADR-0004), which is a real
+ * answer rather than a failure to work around: the user started it another way
+ * and is the one who can restart it.
+ */
+export function useRestartService() {
+  const qc = useQueryClient();
+  return useMutation<ServiceState, unknown, void>({
+    mutationFn: () => restartService(),
+    onSuccess: () => {
+      toast.success(t("settings.service.liveness.restarted"));
+      void qc.invalidateQueries({ queryKey: CONFIG_KEY });
+      void qc.invalidateQueries({ queryKey: STATUS_KEY });
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+/* -------------------------------------------------------------- transfer --- */
+
+/** Join the parts of a summary. A count of zero is dropped rather than
+ *  rendered, but the zero case is still reported — "Exported 12 items" with no
+ *  trailing clause *is* the statement that nothing was left out. */
+function summarise(parts: readonly (string | null)[]): string {
+  return parts.filter((part): part is string => part !== null).join(" · ");
+}
+
+function exportSummary(report: ExportReport): string {
+  return summarise([
+    t("settings.transfer.export.done", { count: report.exported }),
+    report.skipped_sensitive > 0
+      ? t("settings.transfer.export.withheld", { count: report.skipped_sensitive })
+      : null,
+    report.skipped_non_text > 0
+      ? t("settings.transfer.export.nonText", { count: report.skipped_non_text })
+      : null,
+    report.skipped_undecryptable > 0
+      ? t("settings.transfer.export.unreadable", {
+          count: report.skipped_undecryptable,
+        })
+      : null,
+  ]);
+}
+
+/**
+ * `null` means the user closed the save panel, which is not a failure and gets
+ * no toast at all.
+ *
+ * A withheld count raises the toast to a warning rather than adding a line to a
+ * success: the whole point is that it must not read as "done".
+ */
+export function useExportHistory() {
+  return useMutation<ExportReport | null, unknown, boolean>({
+    mutationFn: (includeSensitive) => exportHistory(includeSensitive),
+    onSuccess: (report) => {
+      if (report === null) return;
+      const message = exportSummary(report);
+      if (report.skipped_sensitive > 0 || report.skipped_undecryptable > 0) {
+        toast.warning(message);
+      } else {
+        toast.success(message);
+      }
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+export function useImportHistory() {
+  const qc = useQueryClient();
+  return useMutation<ImportReport | null, unknown, void>({
+    mutationFn: () => importHistory(),
+    onSuccess: (report) => {
+      if (report === null) return;
+      toast.success(
+        summarise([
+          t("settings.transfer.import.done", { count: report.inserted }),
+          report.skipped > 0
+            ? t("settings.transfer.import.alreadyHere", { count: report.skipped })
+            : null,
+        ]),
+      );
+      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void qc.invalidateQueries({ queryKey: STATUS_KEY });
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+/** Reported in megabytes, never in bytes: the number is reassurance that
+ *  something real was written, and eight digits do not read as one. */
+function megabytes(bytes: number): string {
+  return Math.max(0.1, bytes / 1_048_576).toFixed(1);
+}
+
+export function useBackupDatabase() {
+  return useMutation<number | null, unknown, void>({
+    mutationFn: () => backupDatabase(),
+    onSuccess: (size) => {
+      if (size === null) return;
+      toast.success(
+        t("settings.transfer.backup.done", { megabytes: megabytes(size) }),
+      );
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+/**
+ * Replaces the whole database.
+ *
+ * Every cached query is dropped rather than invalidated: after a restore the
+ * ids in the cache belong to a history that no longer exists, and an
+ * invalidation would re-render the old rows until each refetch lands.
+ */
+export function useRestoreDatabase() {
+  const qc = useQueryClient();
+  return useMutation<boolean, unknown, void>({
+    mutationFn: () => restoreDatabase(),
+    onSuccess: (restored) => {
+      if (!restored) return;
+      toast.success(t("settings.transfer.restore.done"));
+      qc.clear();
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
