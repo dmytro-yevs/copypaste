@@ -197,7 +197,10 @@ mod tests {
     }
 
     fn secondary_on_the_left() -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
-        (PhysicalPosition::new(-2560, 0), PhysicalSize::new(2560, 1440))
+        (
+            PhysicalPosition::new(-2560, 0),
+            PhysicalSize::new(2560, 1440),
+        )
     }
 
     const WINDOW: PhysicalSize<u32> = PhysicalSize {

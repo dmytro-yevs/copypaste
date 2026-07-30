@@ -70,15 +70,19 @@ pub(super) fn export(state: &AppState, id: u64, limit: u32, include_sensitive: b
                 data.skipped_non_text += 1;
                 continue;
             }
-            let plaintext =
-                match copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id) {
-                    Ok(plaintext) => plaintext,
-                    Err(e) => {
-                        warn!(id = %row.id, error = ?e, "export skipped an item that failed to decrypt");
-                        data.skipped_undecryptable += 1;
-                        continue;
-                    }
-                };
+            let plaintext = match copypaste_core::decrypt(
+                &row.content_ciphertext,
+                &row.nonce,
+                &key,
+                &row.id,
+            ) {
+                Ok(plaintext) => plaintext,
+                Err(e) => {
+                    warn!(id = %row.id, error = ?e, "export skipped an item that failed to decrypt");
+                    data.skipped_undecryptable += 1;
+                    continue;
+                }
+            };
             data.items.push(ExportItem {
                 content: String::from_utf8_lossy(&plaintext).into_owned(),
                 content_type: row.content_type,
@@ -242,7 +246,11 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         crate::testutil::add(&state, "ordinary");
         let json = serde_json::to_value(export_of(&state, false)).unwrap();
-        for field in ["skipped_non_text", "skipped_sensitive", "skipped_undecryptable"] {
+        for field in [
+            "skipped_non_text",
+            "skipped_sensitive",
+            "skipped_undecryptable",
+        ] {
             assert_eq!(json[field], 0, "{field} missing or wrong");
         }
     }
@@ -265,7 +273,11 @@ mod tests {
         let row = state.store.list(10, 0).unwrap().remove(0);
         assert!(row.is_sensitive, "the detector did not re-run on import");
         assert!(
-            state.store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty(),
+            state
+                .store
+                .search("AKIAIOSFODNN7EXAMPLE", 10)
+                .unwrap()
+                .is_empty(),
             "an imported credential reached the search index"
         );
     }

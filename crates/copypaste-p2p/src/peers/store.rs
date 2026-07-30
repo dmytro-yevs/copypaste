@@ -587,7 +587,10 @@ mod tests {
 
         age_out(&path, &id);
         let store = PeerStore::open(&path).expect("reopen");
-        assert!(store.psks().is_empty(), "an expired code still authenticates");
+        assert!(
+            store.psks().is_empty(),
+            "an expired code still authenticates"
+        );
         assert!(store.get(&id).is_none());
         assert!(store.list().is_empty());
         assert!(store.is_empty());
@@ -735,7 +738,9 @@ mod tests {
         };
         reopened.upsert(ordinary).expect("upsert");
         reopened.remove(&ordinary_id).expect("remove");
-        reopened.upsert(again).expect("re-pairing after unpair is fine");
+        reopened
+            .upsert(again)
+            .expect("re-pairing after unpair is fine");
     }
 
     #[test]
@@ -778,7 +783,10 @@ mod tests {
         let future = peer("not here yet");
         let id = future.pairing_id.clone();
 
-        assert!(!store.revoke(&id, 1).expect("revoke"), "nothing was removed");
+        assert!(
+            !store.revoke(&id, 1).expect("revoke"),
+            "nothing was removed"
+        );
         assert!(matches!(store.upsert(future), Err(PeerStoreError::Revoked)));
     }
 
