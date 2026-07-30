@@ -27,8 +27,7 @@ pub(super) const MSG_DECRYPT: &str = "the stored item could not be decrypted";
 pub(super) const MSG_ENCRYPT: &str = "the item could not be encrypted";
 pub(super) const MSG_CLIPBOARD: &str = "the system clipboard could not be written";
 pub(super) const MSG_INTERNAL: &str = "the daemon failed to process the request";
-pub(super) const MSG_WATCHERS_FULL: &str =
-    "too many clients are already watching for changes";
+pub(super) const MSG_WATCHERS_FULL: &str = "too many clients are already watching for changes";
 pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured size limit";
 pub(super) const MSG_IMPORT_EMPTY: &str = "there is nothing to import";
 pub(super) const MSG_IMPORT_TOO_MANY: &str =

@@ -108,7 +108,10 @@ impl P2p {
     /// Everything currently visible on the LAN. Empty when discovery is off or
     /// degraded, which is never an error: an explicit address always works.
     pub fn seen(&self) -> Vec<DiscoveredPeer> {
-        self.discovery.as_ref().map(Discovery::peers).unwrap_or_default()
+        self.discovery
+            .as_ref()
+            .map(Discovery::peers)
+            .unwrap_or_default()
     }
 
     /// Whether a given pairing is visible right now.
