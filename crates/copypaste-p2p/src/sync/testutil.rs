@@ -25,7 +25,7 @@ pub(super) fn summary(id: &str, created_at: i64, hash: &str, deleted: bool) -> I
     }
 }
 
-pub(super) fn item(id: &str, created_at: i64, content: &str, origin: &str) -> SyncItem {
+pub(crate) fn item(id: &str, created_at: i64, content: &str, origin: &str) -> SyncItem {
     SyncItem {
         item_id: id.into(),
         content: content.into(),
@@ -54,7 +54,7 @@ pub(super) fn tombstone(id: &str, created_at: i64, hash: &str, origin: &str) -> 
 /// An in-memory store that behaves the way the daemon's `Store` must:
 /// `apply` re-runs the comparator against what it holds, using the true
 /// origins, and reports whether anything changed.
-pub(super) struct TestSource {
+pub(crate) struct TestSource {
     device_id: String,
     device_name: String,
     items: Mutex<HashMap<String, SyncItem>>,
@@ -65,7 +65,7 @@ pub(super) struct TestSource {
 }
 
 impl TestSource {
-    pub(super) fn new(device_id: &str, items: Vec<SyncItem>) -> Self {
+    pub(crate) fn new(device_id: &str, items: Vec<SyncItem>) -> Self {
         Self {
             device_id: device_id.into(),
             device_name: format!("{device_id} name"),
@@ -75,22 +75,22 @@ impl TestSource {
         }
     }
 
-    pub(super) fn mark_sensitive(&self, id: &str) {
+    pub(crate) fn mark_sensitive(&self, id: &str) {
         self.sensitive.lock().unwrap().insert(id.into());
     }
 
     /// Arrange for `fetch` to return this item whatever it was asked for.
-    pub(super) fn smuggle(&self, item: SyncItem) {
+    pub(crate) fn smuggle(&self, item: SyncItem) {
         self.smuggle.lock().unwrap().push(item);
     }
 
-    pub(super) fn snapshot(&self) -> Vec<SyncItem> {
+    pub(crate) fn snapshot(&self) -> Vec<SyncItem> {
         let mut v: Vec<_> = self.items.lock().unwrap().values().cloned().collect();
         v.sort_by(|a, b| a.item_id.cmp(&b.item_id));
         v
     }
 
-    pub(super) fn get(&self, id: &str) -> Option<SyncItem> {
+    pub(crate) fn get(&self, id: &str) -> Option<SyncItem> {
         self.items.lock().unwrap().get(id).cloned()
     }
 }

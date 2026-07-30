@@ -13,7 +13,10 @@ tokio.workspace = true
 tokio-util.workspace = true
 futures-util = { workspace = true, features = ["sink"] }
 serde.workspace = true
-serde_json.workspace = true
+# `raw_value` so a received sync message can be handed to `SyncMessage::decode`
+# verbatim: the bounds and the timestamp clamp live in that function, and
+# decoding straight into `SyncMessage` would skip both.
+serde_json = { workspace = true, features = ["raw_value"] }
 thiserror.workspace = true
 tracing.workspace = true
 rand.workspace = true
@@ -25,6 +28,10 @@ sha2.workspace = true
 uuid.workspace = true
 # Atomic peer-file writes, not just tests: the file holds PSKs.
 tempfile.workspace = true
+# Local interface addresses: where a pairing tells a peer to dial, and which
+# advertisements on the wire are this device's own. `getifaddrs(3)` behind a
+# maintained crate; covers macOS and Android (CLAUDE.md rules 1 and 7).
+if-addrs = "0.15"
 
 [dev-dependencies]
 tempfile.workspace = true

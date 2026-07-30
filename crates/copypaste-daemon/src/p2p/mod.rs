@@ -1,74 +1,45 @@
 //! Peer-to-peer sync, wired into the daemon.
 //!
-//! `copypaste-p2p` provides the parts — a Noise channel, a last-write-wins
-//! session, an mDNS browser — and deliberately knows nothing about a database.
-//! This module supplies the four things it asks the daemon for:
+//! The node itself is [`copypaste_p2p::Node`] — the peer list, the
+//! advertisement, the inbound listener and the four pairing/sync operations. It
+//! lives there rather than here because Android has no daemon to put it in, and
+//! a second node is how the two would come apart.
+//!
+//! What this module supplies is what the node asks of *this* device:
 //!
 //! * [`source::StoreSource`] — the history, as a session sees it,
-//! * [`channel::NoiseChannel`] — the session over the encrypted transport,
-//!   with the read deadline the sync engine leaves to its caller,
-//! * [`listen`] — the inbound half: accept, authenticate against every stored
-//!   pairing, respond,
+//! * [`P2p`] — the node plus the daemon's cadence and wake signal, hanging off
+//!   `AppState` exactly like the store and the keyring do,
 //! * [`handlers`] — the five IPC operations a client drives all of this with.
 //!
-//! Everything shared sits in [`P2p`], which hangs off `AppState` exactly like
-//! the store and the keyring do: constructed once in `main`, never rebuilt, no
-//! optional fields. The sync view of the history is *not* here: it is
-//! [`crate::meta`], because the cloud transport reads and writes the same rows
-//! through the same comparator, and one of the two transports owning it is how
-//! the second one ends up with a copy.
-//!
-//! # Discovery is a convenience, never a dependency
-//!
-//! `Discovery::start` returns `Ok` on a host with no multicast — that is this
-//! container, and it is also a corporate network with mDNS filtered. The peer
-//! list stays empty, `online` reads false for everyone, and an explicit address
-//! still pairs and still syncs. Nothing below treats a discovery failure as an
-//! error.
+//! The sync view of the history is *not* here: it is [`crate::meta`], because
+//! the cloud transport reads and writes the same rows through the same
+//! comparator, and one of the two transports owning it is how the second one
+//! ends up with a copy.
 
-pub mod channel;
 pub mod handlers;
 pub mod poll;
 pub mod source;
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use copypaste_p2p::discovery::{DiscoveredPeer, Discovery};
-use copypaste_p2p::peers::{Peer, PeerStore};
-use copypaste_p2p::sync::run_responder;
-use copypaste_p2p::transport::Session;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{watch, Notify, Semaphore};
-use tracing::{debug, info, warn};
+use copypaste_p2p::peers::PeerStore;
+use copypaste_p2p::sync::SyncOutcome;
+use copypaste_p2p::Node;
+use tokio::net::TcpListener;
+use tokio::sync::{watch, Notify};
+use tracing::warn;
 
 use crate::cadence::Idle;
-use crate::p2p::channel::{NoiseChannel, SESSION_TIMEOUT};
 use crate::p2p::source::StoreSource;
 use crate::AppState;
 
-/// How many peers may be mid-session at once, inbound.
-///
-/// A session holds a database connection's worth of work and a decrypted batch
-/// in memory, and a device has a handful of peers, not hundreds. Connections
-/// past the limit are dropped without a handshake: refusing early tells an
-/// unauthenticated dialler nothing it did not already know from the open port.
-const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
+pub use copypaste_p2p::node::bind;
 
-/// Everything the peer half of the daemon shares.
-///
-/// Held inside `AppState`; every field is always present, for the same reason
-/// the rest of `AppState` is (see the crate docs).
+/// The node, plus what only a long-lived daemon has: a cadence and a wake.
 pub struct P2p {
-    peers: PeerStore,
-    /// `None` when the user turned LAN visibility off, and
-    /// degraded-but-present when multicast is merely unavailable — see the
-    /// module docs. The two are different states and only the first is a
-    /// decision, so they are not collapsed into one.
-    discovery: Option<Discovery>,
-    /// The port [`listen`] binds, which is what a pairing tells a peer to dial.
-    port: u16,
-    sessions: Arc<Semaphore>,
+    node: Arc<Node>,
     /// Woken by a local capture and by `copypaste sync`, so neither waits out
     /// the idle interval. Mirrors `Cloud::wake`.
     wake: Notify,
@@ -78,45 +49,52 @@ pub struct P2p {
 
 impl std::fmt::Debug for P2p {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("P2p")
-            .field("port", &self.port)
-            .field("peers", &self.peers.len())
-            .finish_non_exhaustive()
+        self.node.fmt(f)
     }
 }
 
 impl P2p {
     pub fn new(peers: PeerStore, discovery: Option<Discovery>, port: u16) -> Self {
         Self {
-            peers,
-            discovery,
-            port,
-            sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
+            node: Arc::new(Node::new(peers, discovery, port)),
             wake: Notify::new(),
             idle: Idle::default(),
         }
     }
 
+    pub fn node(&self) -> &Arc<Node> {
+        &self.node
+    }
+
     pub fn peers(&self) -> &PeerStore {
-        &self.peers
+        self.node.peers()
     }
 
     pub fn discovery(&self) -> Option<&Discovery> {
-        self.discovery.as_ref()
+        self.node.discovery()
     }
 
     /// Everything currently visible on the LAN. Empty when discovery is off or
     /// degraded, which is never an error: an explicit address always works.
     pub fn seen(&self) -> Vec<DiscoveredPeer> {
-        self.discovery
-            .as_ref()
-            .map(Discovery::peers)
-            .unwrap_or_default()
+        self.node.seen()
     }
 
     /// Whether a given pairing is visible right now.
     pub fn find(&self, pairing_id: &str) -> Option<DiscoveredPeer> {
-        self.discovery.as_ref()?.find(pairing_id)
+        self.node.find(pairing_id)
+    }
+
+    pub fn port(&self) -> u16 {
+        self.node.port()
+    }
+
+    pub fn republish(&self) {
+        self.node.republish();
+    }
+
+    pub fn listen_addr(&self) -> Option<String> {
+        self.node.listen_addr()
     }
 
     pub fn idle(&self) -> &Idle {
@@ -134,160 +112,41 @@ impl P2p {
     pub async fn wake_signal(&self) {
         self.wake.notified().await;
     }
-
-    pub fn port(&self) -> u16 {
-        self.port
-    }
-
-    /// Re-advertise after the set of pairings changed.
-    ///
-    /// Best-effort by construction: a new pairing must not fail because mDNS is
-    /// unavailable, and the address the user was given still works.
-    pub fn republish(&self) {
-        let ids: Vec<String> = self
-            .peers
-            .list()
-            .into_iter()
-            .map(|peer| peer.pairing_id.clone())
-            .collect();
-        let Some(discovery) = self.discovery.as_ref() else {
-            return;
-        };
-        if let Err(e) = discovery.republish(&ids) {
-            debug!(error = %e, "could not republish the discovery record");
-        }
-    }
-
-    /// Where a peer should dial this device, when that can be determined.
-    ///
-    /// Loopback is skipped: a peer on another device cannot use it. When the
-    /// host has no routable address the answer is `None` rather than a guess —
-    /// the user is told to supply the address themselves.
-    pub fn listen_addr(&self) -> Option<String> {
-        let addrs = if_addrs::get_if_addrs().ok()?;
-        let best = addrs
-            .iter()
-            .filter(|iface| !iface.is_loopback())
-            .map(|iface| iface.ip())
-            // IPv4 first: it is what a user can read out over the phone.
-            .min_by_key(|ip| u8::from(ip.is_ipv6()))?;
-        Some(SocketAddr::new(best, self.port).to_string())
-    }
-
-    /// Record that a session with this peer succeeded.
-    ///
-    /// The name comes off the wire and is cosmetic — never an identity — so it
-    /// is only taken when the peer offered one.
-    fn touch_peer(&self, peer: &Peer, addr: Option<SocketAddr>, name: Option<&str>) {
-        let updated = Peer {
-            pairing_id: peer.pairing_id.clone(),
-            name: match name {
-                Some(name) if !name.trim().is_empty() => name.to_string(),
-                _ => peer.name.clone(),
-            },
-            // `[u8; 32]` is `Copy`, so this reads the field rather than moving
-            // out of a type that has a `Drop` (see `peers::Peer`).
-            psk: peer.psk,
-            last_addr: addr.or(peer.last_addr),
-            last_seen_ms: copypaste_core::now_ms(),
-        };
-        if let Err(e) = self.peers.upsert(updated) {
-            warn!(error = %e, "could not record a successful peer session");
-        }
-    }
 }
 
-/// Bind the peer port.
-///
-/// `0.0.0.0`: the channel refuses anyone without a stored pre-shared key, so an
-/// open port discloses only that CopyPaste is running.
-pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
-    let listener = std::net::TcpListener::bind(("0.0.0.0", port))?;
-    listener.set_nonblocking(true)?;
-    Ok(listener)
-}
-
-/// Accept peer connections until shutdown.
-pub async fn listen(
-    listener: TcpListener,
-    state: Arc<AppState>,
-    mut shutdown: watch::Receiver<bool>,
-) {
-    info!(port = state.p2p.port(), "peer listener started");
-    let mut sessions = tokio::task::JoinSet::new();
-
-    loop {
-        tokio::select! {
-            _ = shutdown.changed() => break,
-            accepted = listener.accept() => match accepted {
-                Ok((stream, addr)) => {
-                    let Ok(permit) = Arc::clone(&state.p2p.sessions).try_acquire_owned() else {
-                        debug!(%addr, "too many peer sessions in flight; dropping the connection");
-                        continue;
-                    };
-                    let state = Arc::clone(&state);
-                    sessions.spawn(async move {
-                        let _permit = permit;
-                        serve_peer(state, stream, addr).await;
-                    });
-                }
-                Err(e) => warn!(error = %e, "could not accept a peer connection"),
-            },
-        }
-    }
-
-    sessions.shutdown().await;
-    info!("peer listener stopped");
-}
-
-/// One inbound peer: authenticate against every stored pairing, then respond.
-///
-/// An unknown pre-shared key fails the handshake and the connection is dropped
-/// without a reply. That is deliberate and it is the whole authentication
-/// story: `accept_any` reports nothing about which pairings this device holds,
-/// and neither does this function's logging.
-async fn serve_peer(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
-    let candidates = state.p2p.peers().psks();
-    if candidates.is_empty() {
-        debug!(%addr, "a peer connected but this device has no pairings");
-        return;
-    }
-
-    let (session, pairing_id) = match Session::accept_any(stream, &candidates).await {
-        Ok(accepted) => accepted,
-        Err(e) => {
-            debug!(%addr, error = %e, "inbound peer handshake failed");
-            return;
+/// Accept peer connections until shutdown, serving them from this daemon's
+/// history.
+pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch::Receiver<bool>) {
+    let node = Arc::clone(state.p2p.node());
+    let source = Arc::new(StoreSource::new(Arc::clone(&state)));
+    let on_session = move |_pairing_id: &str, outcome: &SyncOutcome| {
+        remember_device(&state, outcome);
+        if outcome.stats.received > 0 {
+            state.note_remote_change();
         }
     };
+    copypaste_p2p::node::listen(node, listener, source, on_session, shutdown).await;
+}
 
-    let mut channel = NoiseChannel::new(session);
-    let source = StoreSource::new(Arc::clone(&state));
-    let outcome = tokio::time::timeout(SESSION_TIMEOUT, run_responder(&mut channel, &source)).await;
-    channel.close().await;
-
-    match outcome {
-        Ok(Ok(outcome)) => {
-            info!(
-                %pairing_id,
-                sent = outcome.stats.sent,
-                received = outcome.stats.received,
-                skipped = outcome.stats.skipped,
-                "served a peer sync session"
-            );
-            if outcome.stats.received > 0 {
-                state.note_remote_change();
-            }
-            if let Some(peer) = state.p2p.peers().get(&pairing_id) {
-                // The dialler's source port is not where it listens, so only
-                // the name is learned here.
-                state
-                    .p2p
-                    .touch_peer(&peer, None, Some(&outcome.peer_device_name));
-            }
-        }
-        Ok(Err(e)) => warn!(%pairing_id, error = %e, "peer sync session failed"),
-        Err(_) => warn!(%pairing_id, "peer sync session timed out"),
+/// Remember what the device on the other end of a session calls itself.
+///
+/// The origin table has always held the device *id*, because the merge
+/// tie-break orders on it. An id is a UUID, so a row that arrived from the
+/// phone could be attributed but not named, and `Item::origin_device_name`
+/// would be `None` forever. This is the other half.
+///
+/// Recorded from both sides of a session, because either may be the first to
+/// speak to a given device — the responder here, the initiator in
+/// [`handlers`].
+///
+/// Best-effort: a failure costs a label, not an item, and it must not fail a
+/// session that has already exchanged its rows.
+pub(crate) fn remember_device(state: &AppState, outcome: &SyncOutcome) {
+    if let Err(e) = state
+        .meta
+        .record_device_name(&outcome.peer_device_id, &outcome.peer_device_name)
+    {
+        warn!(error = ?e, "could not record a peer device name");
     }
 }
 
@@ -296,6 +155,7 @@ mod tests {
     use super::*;
     use crate::testutil::{add, contents, test_state};
     use copypaste_p2p::peers::Peer;
+    use std::net::SocketAddr;
 
     /// Pair two states over loopback and hand back the address A listens on.
     ///

@@ -1,20 +1,20 @@
 //! The five peer-to-peer IPC operations.
 //!
+//! Each is [`copypaste_p2p::Node`] plus the two things only the daemon knows:
+//! which `ErrorCode` a failure carries, and what else has to be told about it —
+//! the event stream, the device-name registry, the cloud cursor. The node holds
+//! the sentences, because what a user reads must not depend on which client
+//! asked.
+//!
 //! These are the only handlers in the daemon that do network I/O, which is why
 //! they are `async` while every store handler in `server` is a blocking call on
 //! a worker thread.
 //!
 //! **The pairing code is a secret.** `pair_create` returns it once, in the
 //! response, and nothing here logs it — not at trace, not in an error, not in a
-//! `Debug`. `PairingToken`'s own `Debug` is redacted, so the only way to render
-//! one is `to_code`, and that is called exactly once below. The pairing *id* is
-//! derived, non-secret and safe to log, and is what every message uses instead.
-//!
-//! Every client-visible string is a fixed sentence with no interpolation, for
-//! the reason `server` gives: an error must never carry a filesystem path
-//! (`CLAUDE.md` rule 4).
+//! `Debug`. `NewPairing`'s own `Debug` is redacted, and the pairing *id* is
+//! derived, non-secret and safe to log; it is what every message uses instead.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use copypaste_ipc::{
@@ -22,154 +22,68 @@ use copypaste_ipc::{
     SyncResult,
 };
 use copypaste_p2p::peers::Peer;
-use copypaste_p2p::sync::{run_initiator, SyncOutcome};
-use copypaste_p2p::transport::{PairingToken, Session};
-use tracing::{debug, info, warn};
+use copypaste_p2p::NodeError;
+use tracing::info;
 
-use crate::p2p::channel::{NoiseChannel, SESSION_TIMEOUT};
 use crate::p2p::source::StoreSource;
 use crate::AppState;
 
-const MSG_BAD_CODE: &str = "that pairing code is not valid";
-const MSG_BAD_ADDR: &str = "that address could not be resolved; expected host:port";
-const MSG_HANDSHAKE: &str = "the other device did not accept this pairing code";
-const MSG_NO_PEER: &str = "no such paired device";
-const MSG_NO_ADDRESS: &str =
-    "this peer has never been reached and is not visible on the network; sync from the other device, or re-pair with an address";
-const MSG_SESSION: &str = "the sync session with the other device failed";
-const MSG_TIMEOUT: &str = "the other device stopped responding";
-const MSG_PEER_STORE: &str = "the paired-device list could not be updated";
-
-/// Every client-visible string this module can produce. Asserted pathless.
-#[cfg(test)]
-const ALL_MESSAGES: &[&str] = &[
-    MSG_BAD_CODE,
-    MSG_BAD_ADDR,
-    MSG_HANDSHAKE,
-    MSG_NO_PEER,
-    MSG_NO_ADDRESS,
-    MSG_SESSION,
-    MSG_TIMEOUT,
-    MSG_PEER_STORE,
-];
-
 /// Mint a pairing and hand back the code to read out to the other device.
-///
-/// The peer is stored *now*, before the other device has ever been heard from,
-/// because the pre-shared key has to be in the listener's candidate list before
-/// the other half dials in. `name` is a placeholder until the first session,
-/// which is where the peer's own device name arrives.
 pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response {
-    let token = PairingToken::generate();
-    let pairing_id = token.pairing_id();
-
-    let peer = Peer {
-        pairing_id: pairing_id.clone(),
-        name: placeholder_name(name),
-        psk: token.psk(),
-        last_addr: None,
-        last_seen_ms: 0,
+    let pairing = match state.p2p.node().pair_create(name) {
+        Ok(pairing) => pairing,
+        Err(e) => return failed(id, e),
     };
-    if let Err(e) = state.p2p.peers().upsert(peer) {
-        warn!(error = %e, "could not store a new pairing");
-        return Response::err(id, ErrorCode::Internal, MSG_PEER_STORE);
-    }
-    state.p2p.republish();
 
     state.note_peers_changed();
-    info!(%pairing_id, "minted a pairing");
+    info!(pairing_id = %pairing.pairing_id, "minted a pairing");
     Response::ok(
         id,
         ResponseData::Pairing(PairingData {
             // The one and only rendering of the secret, straight into the
             // response. Not logged, not stored, not retrievable again.
-            code: token.to_code(),
-            pairing_id,
-            listen_addr: state.p2p.listen_addr(),
+            code: pairing.code,
+            pairing_id: pairing.pairing_id,
+            listen_addr: pairing.listen_addr,
         }),
     )
 }
 
 /// Consume a code from the other device and prove the pairing works.
 ///
-/// The peer is persisted only after a complete session. A code that does not
-/// parse, an address that does not answer, a handshake the other end refuses,
-/// or a session that fails part-way all leave the paired-device list untouched:
-/// a stored pairing means a pairing that has worked at least once.
+/// The peer is persisted only after a complete session — the node's rule, and
+/// the reason a failed pairing leaves the paired-device list untouched.
 pub async fn pair_accept(state: &Arc<AppState>, id: u64, code: &str, addr: &str) -> Response {
-    let Ok(token) = PairingToken::parse(code) else {
-        // No detail, and nothing logged: the input is a secret and saying *how*
-        // it was wrong is a hint about what a valid one looks like.
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CODE);
-    };
-    let pairing_id = token.pairing_id();
-
-    let Some(addr) = resolve(addr).await else {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_ADDR);
+    let source = StoreSource::new(Arc::clone(state));
+    let accepted = match state.p2p.node().pair_accept(code, addr, &source).await {
+        Ok(accepted) => accepted,
+        Err(e) => return failed(id, e),
     };
 
-    let session = match Session::connect(addr, &token.psk()).await {
-        Ok(session) => session,
-        Err(e) => {
-            debug!(%pairing_id, error = %e, "pairing handshake failed");
-            return Response::err(id, ErrorCode::InvalidRequest, MSG_HANDSHAKE);
-        }
-    };
-
-    let outcome = match run_session(state, session).await {
-        Ok(outcome) => outcome,
-        Err(message) => {
-            warn!(%pairing_id, "pairing session failed; not storing the peer");
-            return Response::err(id, ErrorCode::Internal, message);
-        }
-    };
-
-    let peer = Peer {
-        pairing_id: pairing_id.clone(),
-        name: placeholder_name(&outcome.peer_device_name),
-        psk: token.psk(),
-        last_addr: Some(addr),
-        last_seen_ms: copypaste_core::now_ms(),
-    };
-    let info = peer_info(&peer, state.p2p.find(&pairing_id).is_some());
-    if let Err(e) = state.p2p.peers().upsert(peer) {
-        warn!(error = %e, "could not store a completed pairing");
-        return Response::err(id, ErrorCode::Internal, MSG_PEER_STORE);
-    }
-    state.p2p.republish();
+    crate::p2p::remember_device(state, &accepted.outcome);
+    let online = state.p2p.find(&accepted.peer.pairing_id).is_some();
+    let info = peer_info(&accepted.peer, online);
 
     state.note_peers_changed();
-    if outcome.stats.received > 0 {
+    if accepted.outcome.stats.received > 0 {
         state.note_remote_change();
     }
-    info!(
-        %pairing_id,
-        sent = outcome.stats.sent,
-        received = outcome.stats.received,
-        "paired with a device"
-    );
     Response::ok(id, ResponseData::Peers(vec![info]))
 }
 
 /// Forget a peer.
 ///
 /// Local and unilateral: the other device keeps its half until it also unpairs,
-/// which is why this cannot fail on an unreachable peer. What it does do is
-/// remove the pre-shared key from the listener's candidate list, so that
-/// pairing can no longer authenticate here.
+/// which is why this cannot fail on an unreachable peer.
 pub async fn unpair(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Response {
-    match state.p2p.peers().remove(pairing_id) {
+    match state.p2p.node().unpair(pairing_id) {
         Ok(true) => {
-            state.p2p.republish();
             state.note_peers_changed();
             info!(%pairing_id, "unpaired a device");
             Response::ok(id, ResponseData::Empty {})
         }
-        Ok(false) => Response::err(id, ErrorCode::NotFound, MSG_NO_PEER),
-        Err(e) => {
-            warn!(error = %e, "could not remove a pairing");
-            Response::err(id, ErrorCode::Internal, MSG_PEER_STORE)
-        }
+        Ok(false) => failed(id, NodeError::NoPeer),
+        Err(e) => failed(id, e),
     }
 }
 
@@ -201,7 +115,7 @@ pub async fn sync_now(state: &Arc<AppState>, id: u64, pairing_id: Option<&str>) 
     let targets = match pairing_id {
         Some(pairing_id) => match state.p2p.peers().get(pairing_id) {
             Some(peer) => vec![peer],
-            None => return Response::err(id, ErrorCode::NotFound, MSG_NO_PEER),
+            None => return failed(id, NodeError::NoPeer),
         },
         None => state.p2p.peers().list(),
     };
@@ -257,43 +171,10 @@ fn devices(state: &Arc<AppState>) -> DiscoveredData {
 
 /// One peer, start to finish. Never returns `Err`: a failure is a field.
 pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
-    let failed = |message: &str| SyncResult {
-        pairing_id: peer.pairing_id.clone(),
-        name: peer.name.clone(),
-        sent: 0,
-        received: 0,
-        error: Some(message.to_string()),
-    };
-
-    // The last address that worked, else whatever discovery has seen. Both are
-    // hints: the handshake is what actually proves who is on the other end.
-    let addr = peer
-        .last_addr
-        .or_else(|| state.p2p.find(&peer.pairing_id).map(|found| found.addr));
-    let Some(addr) = addr else {
-        return failed(MSG_NO_ADDRESS);
-    };
-
-    let session = match Session::connect(addr, &peer.psk).await {
-        Ok(session) => session,
-        Err(e) => {
-            debug!(pairing_id = %peer.pairing_id, error = %e, "could not reach a peer");
-            return failed(MSG_HANDSHAKE);
-        }
-    };
-
-    match run_session(state, session).await {
+    let source = StoreSource::new(Arc::clone(state));
+    match state.p2p.node().sync_one(peer, &source).await {
         Ok(outcome) => {
-            state
-                .p2p
-                .touch_peer(peer, Some(addr), Some(&outcome.peer_device_name));
-            info!(
-                pairing_id = %peer.pairing_id,
-                sent = outcome.stats.sent,
-                received = outcome.stats.received,
-                skipped = outcome.stats.skipped,
-                "synced with a peer"
-            );
+            crate::p2p::remember_device(state, &outcome);
             SyncResult {
                 pairing_id: peer.pairing_id.clone(),
                 name: outcome.peer_device_name,
@@ -302,37 +183,24 @@ pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
                 error: None,
             }
         }
-        Err(message) => failed(message),
+        Err(e) => SyncResult {
+            pairing_id: peer.pairing_id.clone(),
+            name: peer.name.clone(),
+            sent: 0,
+            received: 0,
+            error: Some(e.to_string()),
+        },
     }
 }
 
-/// Drive the initiating half of one session over an established channel.
-///
-/// The whole session is bounded, on top of the channel's per-read deadline: a
-/// peer that answers every message on time but never runs out of things to say
-/// still has to finish inside `SESSION_TIMEOUT`.
-async fn run_session(state: &Arc<AppState>, session: Session) -> Result<SyncOutcome, &'static str> {
-    let mut channel = NoiseChannel::new(session);
-    let source = StoreSource::new(Arc::clone(state));
-    // The wait for the peer's close is inside the same budget on purpose: see
-    // `NoiseChannel::wait_for_close` for why a session is not over when
-    // `run_initiator` returns.
-    let outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
-        let outcome = run_initiator(&mut channel, &source).await?;
-        channel.wait_for_close().await;
-        Ok::<_, copypaste_p2p::sync::SyncError>(outcome)
-    })
-    .await;
-    channel.close().await;
-
-    match outcome {
-        Ok(Ok(outcome)) => Ok(outcome),
-        Ok(Err(e)) => {
-            warn!(error = %e, "sync session failed");
-            Err(MSG_SESSION)
-        }
-        Err(_) => Err(MSG_TIMEOUT),
-    }
+/// The one mapping from the node's failures onto the IPC taxonomy.
+fn failed(id: u64, error: NodeError) -> Response {
+    let code = match error {
+        NodeError::NoPeer => ErrorCode::NotFound,
+        _ if error.is_client_error() => ErrorCode::InvalidRequest,
+        _ => ErrorCode::Internal,
+    };
+    Response::err(id, code, error.to_string())
 }
 
 fn peer_info(peer: &Peer, online: bool) -> PeerInfo {
@@ -345,36 +213,11 @@ fn peer_info(peer: &Peer, online: bool) -> PeerInfo {
     }
 }
 
-/// A peer always has *some* name: the list is unreadable otherwise, and the
-/// real one arrives with the first hello.
-fn placeholder_name(name: &str) -> String {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        "unnamed device".to_string()
-    } else {
-        trimmed.chars().take(64).collect()
-    }
-}
-
-/// Resolve `host:port`, preferring IPv4.
-///
-/// A hostname is allowed — `copypaste.local:47654` is exactly what discovery
-/// would have given the user — so this is a real lookup rather than a
-/// `SocketAddr` parse.
-async fn resolve(addr: &str) -> Option<SocketAddr> {
-    let resolved: Vec<SocketAddr> = tokio::net::lookup_host(addr).await.ok()?.collect();
-    resolved
-        .iter()
-        .find(|addr| addr.is_ipv4())
-        .or(resolved.first())
-        .copied()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::test_state;
-    use copypaste_p2p::transport::TOKEN_LEN;
+    use copypaste_p2p::transport::{PairingToken, TOKEN_LEN};
 
     #[tokio::test]
     async fn creating_a_pairing_returns_a_code_and_stores_the_peer() {
@@ -424,7 +267,10 @@ mod tests {
         let response = pair_accept(&state, 1, "not-a-code", "127.0.0.1:1").await;
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
-        assert_eq!(response.error.as_deref(), Some(MSG_BAD_CODE));
+        assert_eq!(
+            response.error.as_deref(),
+            Some(NodeError::BadCode.to_string().as_str())
+        );
         assert_eq!(state.p2p.peers().len(), 0);
     }
 
@@ -445,7 +291,11 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         let code = PairingToken::generate().to_code();
         let response = pair_accept(&state, 1, &code, "no-port-here").await;
-        assert_eq!(response.error.as_deref(), Some(MSG_BAD_ADDR));
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(
+            response.error.as_deref(),
+            Some(NodeError::BadAddress.to_string().as_str())
+        );
     }
 
     #[tokio::test]
@@ -532,26 +382,25 @@ mod tests {
         assert!(results.iter().all(|r| r.error.is_some()));
     }
 
+    /// The node owns the sentences; this pins the taxonomy they arrive under,
+    /// and that none of them picks up a path on the way through.
     #[test]
-    fn client_visible_messages_disclose_no_path() {
-        for message in ALL_MESSAGES {
+    fn node_failures_map_onto_the_ipc_taxonomy_without_a_path() {
+        for (error, expected) in [
+            (NodeError::BadCode, ErrorCode::InvalidRequest),
+            (NodeError::BadAddress, ErrorCode::InvalidRequest),
+            (NodeError::Handshake, ErrorCode::InvalidRequest),
+            (NodeError::NoPeer, ErrorCode::NotFound),
+            (NodeError::NoAddress, ErrorCode::Internal),
+            (NodeError::Session, ErrorCode::Internal),
+            (NodeError::Timeout, ErrorCode::Internal),
+            (NodeError::PeerStore, ErrorCode::Internal),
+        ] {
+            let response = failed(1, error);
+            assert_eq!(response.error_code, Some(expected), "{error:?}");
+            let message = response.error.expect("a message");
             assert!(!message.contains('/'), "{message}");
             assert!(!message.contains('\\'), "{message}");
         }
-    }
-
-    #[test]
-    fn a_missing_name_still_reads_as_something() {
-        assert_eq!(placeholder_name("   "), "unnamed device");
-        assert_eq!(placeholder_name(" laptop "), "laptop");
-    }
-
-    #[tokio::test]
-    async fn an_address_without_a_port_does_not_resolve() {
-        assert!(resolve("127.0.0.1").await.is_none());
-        assert_eq!(
-            resolve("127.0.0.1:47654").await,
-            Some("127.0.0.1:47654".parse().unwrap())
-        );
     }
 }

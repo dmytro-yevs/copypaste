@@ -68,12 +68,15 @@ async fn round(state: &Arc<AppState>) {
         return;
     }
 
-    // Only peers this device has actually reached before. A peer with no
-    // recorded address is one the *other* side dials, and the discovery
-    // fallback `sync_one` would use is an unauthenticated mDNS record — on a
-    // host running two daemons that is how a timer ends up dialling this
-    // device's own listener every round. An explicit `copypaste sync` keeps the
-    // fallback, because a human asked for it.
+    // Only peers this device has actually reached before. The discovery
+    // fallback `sync_one` would otherwise use is an unauthenticated mDNS
+    // record, and acting on hearsay on a timer is a different decision from
+    // acting on it because a human ran `copypaste sync`.
+    //
+    // It is no longer what stops this device dialling its own listener: an
+    // advertisement resolving to our own endpoint is now dropped in
+    // `copypaste_p2p::discovery` — the layer that knows which endpoint is ours
+    // — rather than worked around here.
     let reachable: Vec<_> = peers
         .iter()
         .filter(|peer| peer.last_addr.is_some())
