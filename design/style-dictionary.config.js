@@ -627,8 +627,7 @@ await writeFile(
     'Do not edit it. Run `npm run build` in design/ instead.\n',
 );
 
-const counted = compose.dark.allTokens.length + compose.light.allTokens.length;
 console.log(
-  `built ${dark.tokens ? '' : ''}${compose.dark.allTokens.length} dark + ` +
-    `${compose.light.allTokens.length} light token definitions (${counted} total) -> ${DIST}`,
+  `built ${compose.dark.allTokens.length} dark and ` +
+    `${compose.light.allTokens.length} light resolved tokens -> ${DIST}`,
 );
