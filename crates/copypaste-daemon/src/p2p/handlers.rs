@@ -17,7 +17,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use copypaste_ipc::{ErrorCode, PairingData, PeerInfo, Response, ResponseData, SyncResult};
+use copypaste_ipc::{
+    DiscoveredData, DiscoveredDevice, ErrorCode, PairingData, PeerInfo, Response, ResponseData,
+    SyncResult,
+};
 use copypaste_p2p::peers::Peer;
 use copypaste_p2p::sync::{run_initiator, SyncOutcome};
 use copypaste_p2p::transport::{PairingToken, Session};
@@ -73,6 +76,7 @@ pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response
     }
     state.p2p.republish();
 
+    state.note_peers_changed();
     info!(%pairing_id, "minted a pairing");
     Response::ok(
         id,
@@ -127,13 +131,17 @@ pub async fn pair_accept(state: &Arc<AppState>, id: u64, code: &str, addr: &str)
         last_addr: Some(addr),
         last_seen_ms: copypaste_core::now_ms(),
     };
-    let info = peer_info(&peer, state.p2p.discovery().find(&pairing_id).is_some());
+    let info = peer_info(&peer, state.p2p.find(&pairing_id).is_some());
     if let Err(e) = state.p2p.peers().upsert(peer) {
         warn!(error = %e, "could not store a completed pairing");
         return Response::err(id, ErrorCode::Internal, MSG_PEER_STORE);
     }
     state.p2p.republish();
 
+    state.note_peers_changed();
+    if outcome.stats.received > 0 {
+        state.note_remote_change();
+    }
     info!(
         %pairing_id,
         sent = outcome.stats.sent,
@@ -153,6 +161,7 @@ pub async fn unpair(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Respons
     match state.p2p.peers().remove(pairing_id) {
         Ok(true) => {
             state.p2p.republish();
+            state.note_peers_changed();
             info!(%pairing_id, "unpaired a device");
             Response::ok(id, ResponseData::Empty {})
         }
@@ -176,7 +185,7 @@ pub async fn peers(state: &Arc<AppState>, id: u64) -> Response {
         .list()
         .iter()
         .map(|peer| {
-            let online = state.p2p.discovery().find(&peer.pairing_id).is_some();
+            let online = state.p2p.find(&peer.pairing_id).is_some();
             peer_info(peer, online)
         })
         .collect();
@@ -201,11 +210,53 @@ pub async fn sync_now(state: &Arc<AppState>, id: u64, pairing_id: Option<&str>) 
     for peer in &targets {
         results.push(sync_one(state, peer).await);
     }
+    if results.iter().any(|result| result.received > 0) {
+        state.note_remote_change();
+    }
     Response::ok(id, ResponseData::Sync(results))
 }
 
+/// LAN devices, paired or not.
+///
+/// Never an error, and an empty list is a normal answer: discovery may be
+/// switched off, or the network may filter multicast. A client must offer
+/// "enter an address" as an equal path rather than as a fallback (manifest 04
+/// §4.12).
+pub async fn discovered(state: &Arc<AppState>, id: u64) -> Response {
+    Response::ok(id, ResponseData::Discovered(devices(state)))
+}
+
+/// Re-advertise and answer as [`discovered`] does.
+///
+/// Best-effort, exactly like every other discovery call: a republish that fails
+/// is logged and the current table is still returned, because what the user
+/// asked for was "show me what is out there".
+pub async fn rescan(state: &Arc<AppState>, id: u64) -> Response {
+    state.p2p.republish();
+    Response::ok(id, ResponseData::Discovered(devices(state)))
+}
+
+fn devices(state: &Arc<AppState>) -> DiscoveredData {
+    let devices = state
+        .p2p
+        .seen()
+        .into_iter()
+        .map(|found| DiscoveredDevice {
+            // Resolved locally rather than taken from the advertisement:
+            // anyone on the LAN can claim any pairing id, and `paired` decides
+            // whether the UI offers "pair" or "sync" (`CopyPaste-vgpy`).
+            paired: state.p2p.peers().get(&found.pairing_id).is_some(),
+            addr: found.addr.to_string(),
+            pairing_id: found.pairing_id,
+            name: found.name,
+            last_seen_ms: found.last_seen_ms,
+        })
+        .collect();
+    DiscoveredData { devices }
+}
+
 /// One peer, start to finish. Never returns `Err`: a failure is a field.
-async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
+pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
     let failed = |message: &str| SyncResult {
         pairing_id: peer.pairing_id.clone(),
         name: peer.name.clone(),
@@ -216,13 +267,9 @@ async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
 
     // The last address that worked, else whatever discovery has seen. Both are
     // hints: the handshake is what actually proves who is on the other end.
-    let addr = peer.last_addr.or_else(|| {
-        state
-            .p2p
-            .discovery()
-            .find(&peer.pairing_id)
-            .map(|found| found.addr)
-    });
+    let addr = peer
+        .last_addr
+        .or_else(|| state.p2p.find(&peer.pairing_id).map(|found| found.addr));
     let Some(addr) = addr else {
         return failed(MSG_NO_ADDRESS);
     };
@@ -453,9 +500,6 @@ mod tests {
         assert!(response.ok);
         match response.data {
             Some(ResponseData::Sync(results)) => assert!(results.is_empty()),
-            // An empty list is ambiguous in the untagged response encoding; the
-            // CLI treats either as "nothing happened".
-            Some(ResponseData::Items(items)) => assert!(items.is_empty()),
             other => panic!("{other:?}"),
         }
     }

@@ -1,6 +1,6 @@
 /**
- * The History screen: search, the virtualised list, and the states it can be
- * in instead of a list.
+ * The History screen: search, filters, bulk actions, the virtualised list, and
+ * the states it can be in instead of a list.
  *
  * State resolution follows manifest 06 §3.1.11, with one adjustment: an error
  * only replaces the list when there is nothing else to show. A background poll
@@ -24,11 +24,17 @@ import {
 } from "@/components/ui/alert-dialog";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
+import { BulkBar } from "@/components/history/BulkBar";
 import { HistoryList } from "@/components/history/HistoryList";
+import { QuickHint } from "@/components/history/QuickHint";
 import { SearchBar } from "@/components/history/SearchBar";
+import { SkippedNotice } from "@/components/history/SkippedNotice";
 import { ServiceOffline } from "@/components/shell/ServiceOffline";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
 import {
+  historyOf,
+  useBulkDelete,
+  useBulkPin,
   useClearHistory,
   useCopy,
   useHistory,
@@ -36,16 +42,22 @@ import {
   useStatus,
 } from "@/hooks/useHistory";
 import { useReveal } from "@/hooks/useReveal";
+import { useSelection } from "@/hooks/useSelection";
 import { cn } from "@/lib/cn";
 import { type ErrorKind, classifyError, friendlyError } from "@/lib/errors";
+import { hideWindow } from "@/lib/ipc";
 import type { Item } from "@/lib/ipc";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/layout";
+import { DEFAULT_VIEW, type ViewOptions, applyView, isDefaultView } from "@/lib/view";
 import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 
-const NO_ITEMS: readonly Item[] = [];
+interface HistoryViewProps {
+  /** From `usePush` at the app root: slows the poll without stopping it. */
+  pushLive?: boolean;
+}
 
-export function HistoryView() {
+export function HistoryView({ pushLive = false }: HistoryViewProps) {
   const rawQuery = useUi((s) => s.query);
   const setRawQuery = useUi((s) => s.setQuery);
   const activeId = useUi((s) => s.activeId);
@@ -61,29 +73,37 @@ export function HistoryView() {
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const history = useHistory(query);
+  const [view, setView] = useState<ViewOptions>(DEFAULT_VIEW);
+  const history = useHistory(query, pushLive);
   const status = useStatus();
   const copy = useCopy();
   const pin = usePin();
   const clearAll = useClearHistory();
+  const bulkPin = useBulkPin();
+  const bulkDelete = useBulkDelete();
   const { pending, remove } = useDeferredDelete();
   const reveal = useReveal();
 
   const [confirmReveal, setConfirmReveal] = useState<Item | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   /**
-   * INV-2: when nothing is pending this returns the query's own array, so an
-   * idle poll that fetched byte-identical data produces the identical reference
-   * React Query's structural sharing handed us — no re-render, and the scroll
-   * anchor is never disturbed.
+   * INV-2: when nothing is pending and the view is the default this returns
+   * the query's own array, so an idle poll that fetched byte-identical data
+   * produces the identical reference React Query's structural sharing handed
+   * us — no re-render, and the scroll anchor is never disturbed.
    */
+  const page = historyOf(history.data);
   const items = useMemo(() => {
-    const data = history.data ?? NO_ITEMS;
-    return pending.size === 0
-      ? data
-      : data.filter((item) => !pending.has(item.id));
-  }, [history.data, pending]);
+    const shown =
+      pending.size === 0
+        ? page.items
+        : page.items.filter((item) => !pending.has(item.id));
+    return applyView(shown, view);
+  }, [page.items, pending, view]);
+
+  const selection = useSelection(items);
 
   const errorKind: ErrorKind | null = history.error
     ? classifyError(history.error)
@@ -118,8 +138,34 @@ export function HistoryView() {
     [reveal, warnBeforeReveal],
   );
 
-  const filtered = query.length > 0;
+  /**
+   * ⌘1–⌘9: copy, then dismiss.
+   *
+   * Copy first and hide afterwards (INV-26). Hiding first swallows the failure
+   * — the toast would render into a window nobody can see — and leaves the
+   * user pressing ⌘V for something that never reached the clipboard.
+   */
+  const quickCopy = useCallback(
+    (item: Item) => {
+      copy.mutate(item, {
+        onSuccess: () => {
+          // INV-25: through the backend, never `window.hide()` from here. The
+          // app is an Accessory on macOS, so this hands activation back to
+          // whatever the user was in — which is where they press ⌘V.
+          void hideWindow().catch(() => {
+            // A build with no window to hide (the browser, a test) is not a
+            // failed copy. The copy already happened.
+          });
+        },
+      });
+    },
+    [copy],
+  );
+
+  const searching = query.length > 0;
+  const filtered = searching || !isDefaultView(view);
   const total = status.data?.item_count;
+  const busy = bulkPin.isPending || bulkDelete.isPending;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -131,10 +177,34 @@ export function HistoryView() {
         filtered={filtered}
         visible={items.length}
         total={total}
+        view={view}
+        onViewChange={setView}
+        selecting={selection.selecting}
+        onToggleSelecting={() =>
+          selection.selecting ? selection.end() : selection.begin()
+        }
         onClearAll={
           items.length > 0 && !filtered ? () => setConfirmClear(true) : undefined
         }
       />
+
+      {selection.selecting && (
+        <BulkBar
+          count={selection.items.length}
+          allPinned={selection.allPinned}
+          busy={busy}
+          onTogglePin={() =>
+            bulkPin.mutate(
+              { items: selection.items, pinned: !selection.allPinned },
+              { onSettled: () => selection.end() },
+            )
+          }
+          onDelete={() => setConfirmBulkDelete(true)}
+          onCancel={selection.end}
+        />
+      )}
+
+      <SkippedNotice count={page.skipped} />
 
       {history.isPending ? (
         <EmptyState busy title="Loading…" body="Fetching your clipboard history." />
@@ -147,9 +217,14 @@ export function HistoryView() {
           revealedContent={reveal.revealedContent}
           revealPendingId={reveal.pendingId}
           previewLines={previewLines}
+          searching={searching}
+          selection={selection}
+          hasMore={history.hasNextPage}
+          loadingMore={history.isFetchingNextPage}
           onReveal={onReveal}
           onHide={reveal.hide}
           onCopy={copy.mutate}
+          onQuickCopy={quickCopy}
           onTogglePin={pin.mutate}
           onDelete={remove}
           onLoadMore={loadMore}
@@ -173,8 +248,13 @@ export function HistoryView() {
       ) : filtered ? (
         <EmptyState
           icon={Search}
-          title={`No results for "${query}"`}
+          title={searching ? `No results for "${query}"` : "Nothing matches this filter"}
           body="Try a different search term. Sensitive items are never indexed, so they never appear in results."
+          action={
+            history.hasNextPage
+              ? { label: "Load more history", onClick: loadMore }
+              : undefined
+          }
         />
       ) : (
         <EmptyState
@@ -183,6 +263,8 @@ export function HistoryView() {
           body="Copy something and it will appear here."
         />
       )}
+
+      <QuickHint searching={searching} />
 
       {/* A refused reveal is a state, not a failure — see useReveal. It is
           rendered where the row is, dismissible, and never carries a raw
@@ -204,9 +286,8 @@ export function HistoryView() {
         </div>
       )}
 
-      {/* One confirm dialog at a time (INV-18): both are driven by their own
-          piece of state and neither can be open while the other is, because
-          opening either closes the row's own handlers. */}
+      {/* One confirm dialog at a time (INV-18): each is driven by its own piece
+          of state and opening any of them closes the row's own handlers. */}
       <AlertDialog
         open={confirmReveal !== null}
         onOpenChange={(open) => !open && setConfirmReveal(null)}
@@ -228,6 +309,37 @@ export function HistoryView() {
               }}
             >
               Reveal
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk delete has no undo window, unlike the single-row delete
+          (§3.1.9), so this dialog is the only gate in front of it. */}
+      <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete {selection.items.length} item
+              {selection.items.length === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the selected clipboard items. Unlike
+              deleting one item, this cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: "destructive" }))}
+              onClick={() => {
+                bulkDelete.mutate(selection.items, {
+                  onSettled: () => selection.end(),
+                });
+                setConfirmBulkDelete(false);
+              }}
+            >
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -84,7 +84,9 @@ export async function waitForRows(browser: Browser, atLeast = 1): Promise<void> 
   await browser.waitUntil(
     async () => (await rowCount(browser)) >= atLeast,
     {
-      timeout: 30_000,
+      // Generous on purpose: the first paint waits on a poll of the daemon,
+      // and CI runners share a machine with whatever else is building.
+      timeout: 60_000,
       interval: 250,
       timeoutMsg: `fewer than ${atLeast} rows ever rendered`,
     },

@@ -167,7 +167,16 @@ export const usePrefs = create<PrefsStore>()(
   ),
 );
 
-/** Subscribing to one field keeps a slider from re-rendering the list. */
+/**
+ * Subscribing to one field keeps a slider from re-rendering the list.
+ *
+ * **Wrap this in `useShallow`.** It returns a fresh object per call, and
+ * zustand v5 reads the store through `useSyncExternalStore`, which compares
+ * snapshots by reference — an unwrapped call is an infinite render loop that
+ * unmounts the whole app, not a performance smell. Every other selector in
+ * this file and in `store/ui.ts` returns a primitive or a value held in state,
+ * which is why this is the only one that needs it.
+ */
 export const selectAppearance = (s: PrefsStore) => ({
   theme: s.theme,
   accent: s.accent,

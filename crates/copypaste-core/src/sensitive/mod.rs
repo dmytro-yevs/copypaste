@@ -15,11 +15,12 @@
 //!   search index (manifest I4 / ADR-015: `is_sensitive = 1` ⇒ never written to
 //!   FTS, never returned by search). Deliberately inclusive.
 //! * [`Severity`] on the [`Finding`] — only `HighConfidence` (confidence ≥ the
-//!   0.70 auto-wipe floor) may drive automatic deletion. Everything else is
-//!   `Flag`: detected, labelled, maskable, **inert** for deletion. A false
-//!   positive silently destroys unrecoverable user data (`CLAUDE.md` rule 4,
-//!   manifest I1), so a shape that cannot *prove* a secret stays below the
-//!   floor.
+//!   0.70 auto-wipe floor) may drive automatic deletion, through
+//!   [`Detector::may_auto_wipe`] and its one caller [`sweep_sensitive`].
+//!   Everything else is `Flag`: detected, labelled, maskable, **inert** for
+//!   deletion. A false positive silently destroys unrecoverable user data
+//!   (`CLAUDE.md` rule 4, manifest I1), so a shape that cannot *prove* a secret
+//!   stays below the floor.
 //!
 //! [`Detector::scan`] returns the **highest-confidence** match, not the lowest
 //! declaration index: v1 did the latter and labelled text containing both an
@@ -39,6 +40,8 @@ mod normalise;
 mod rules;
 mod spec;
 mod validators;
+mod wipe;
 
 pub use engine::{Detector, DetectorError};
 pub use finding::{Finding, Severity};
+pub use wipe::{sweep_sensitive, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED};

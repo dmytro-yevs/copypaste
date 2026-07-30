@@ -16,6 +16,18 @@
  *    (CopyPaste-crh3.21).
  *  - **Never logged, never toasted.** It exists in this component's state and
  *    goes when the dialog does.
+ *
+ * # The QR is the primary path
+ *
+ * Reading 52 base32 characters and a `host:port` out loud, into a phone's
+ * on-screen keyboard, is a feature nobody uses. The QR carries both at once, so
+ * one scan is the whole pairing. The text stays underneath it for the case
+ * where the other device has no camera.
+ *
+ * **INV-13: the QR's payload is never rendered as text.** `QrCode` draws to a
+ * canvas for exactly that reason. The *code* below is a different string with
+ * its own rule (hidden until revealed); the payload — code plus address — has
+ * no revealed state at all, because there is no reason to ever show it.
  */
 import { useEffect, useState } from "react";
 import { Check, Copy, Eye, LoaderCircle, RefreshCw } from "lucide-react";
@@ -32,7 +44,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { QrCode } from "@/components/devices/QrCode";
 import { usePairCreate } from "@/hooks/useDevices";
+import { encodePairing } from "@/lib/pairing";
 import { isUnavailable, toFriendly } from "@/lib/errors";
 import { cn } from "@/lib/cn";
 
@@ -87,8 +101,8 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
         <DialogHeader>
           <DialogTitle>Pair a new device</DialogTitle>
           <DialogDescription>
-            Generate a code here, then enter it on the other device under
-            Devices → Enter a code.
+            Generate a code here, then scan it with the other device — or enter
+            it by hand under Devices → Add a device.
           </DialogDescription>
         </DialogHeader>
 
@@ -120,8 +134,31 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
           </div>
         ) : (
           <div className="flex flex-col gap-s-3">
+            {pairing.listen_addr !== null && (
+              <div className="flex flex-col items-center gap-s-2">
+                <QrCode
+                  value={encodePairing({
+                    code: pairing.code,
+                    addr: pairing.listen_addr,
+                  })}
+                  label="Pairing code as a QR code. Scan it with the other device."
+                />
+                <p className="text-center text-xs text-muted-foreground">
+                  On the other device, choose Devices → Add a device and scan
+                  this. It carries the code and the address together.
+                </p>
+              </div>
+            )}
+
             <div className="flex flex-col gap-s-1">
-              <span className="text-sm font-medium">Pairing code</span>
+              <span className="text-sm font-medium">
+                Pairing code
+                {pairing.listen_addr !== null && (
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    (if the other device has no camera)
+                  </span>
+                )}
+              </span>
               <div className="relative">
                 <output
                   aria-label={

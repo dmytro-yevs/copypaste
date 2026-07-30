@@ -19,8 +19,12 @@
 //! * **Pinned items are never auto-deleted** — every eviction path filters
 //!   `pinned = 0`.
 //! * **Total ordering.** Every list query ends in an `id` tiebreak so the sort
-//!   is total; that is what keyset pagination requires and what keeps offset
-//!   pages from duplicating or skipping rows that tie on `created_at`.
+//!   is total; that is what [`Store::list_from`]'s keyset seek requires
+//!   ([`page`]) and what keeps offset pages from duplicating or skipping rows
+//!   that tie on `created_at`.
+//! * **One live row per distinct content.** [`Store::insert_or_bump`] promotes
+//!   the existing row rather than writing a second one, across all of history
+//!   and not only a recent window (manifest 01 I-23).
 //! * **Errors never contain a filesystem path** (CLAUDE.md rule 4 — the path
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
@@ -32,12 +36,14 @@
 mod connection;
 mod items;
 mod model;
+mod page;
 mod retention;
 mod schema;
 mod search;
 mod store;
 
-pub use model::{NewItem, StoreError, StoredItem};
+pub use model::{Ingest, NewItem, StoreError, StoredItem};
+pub use page::{ItemCursor, Page};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};
 pub use store::Store;
 
@@ -45,14 +51,26 @@ pub use store::Store;
 /// let a test assert what is *in* the FTS table rather than only what `search`
 /// returns — that is how a missing ADR-015 layer would be caught.
 #[cfg(test)]
-pub(super) mod test_support {
+pub(crate) mod test_support {
     use super::{NewItem, Store};
 
     pub(super) const KEY: [u8; 32] = [7u8; 32];
     pub(super) const OTHER_KEY: [u8; 32] = [9u8; 32];
-    pub(super) const T0: i64 = 1_700_000_000_000;
+    pub(crate) const T0: i64 = 1_700_000_000_000;
 
-    pub(super) fn store() -> Store {
+    /// Rows with this id, tombstones included — the difference between a soft
+    /// delete and a hard one.
+    pub(crate) fn raw_row_count(store: &Store, id: &str) -> i64 {
+        let conn = store.conn().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    pub(crate) fn store() -> Store {
         Store::open_in_memory(&KEY).expect("in-memory store")
     }
 
@@ -61,7 +79,7 @@ pub(super) mod test_support {
         hex::encode(text.as_bytes())
     }
 
-    pub(super) fn item(text: &str, created_at: i64) -> NewItem {
+    pub(crate) fn item(text: &str, created_at: i64) -> NewItem {
         NewItem {
             id: uuid::Uuid::new_v4().to_string(),
             content_ciphertext: format!("ct:{text}").into_bytes(),
@@ -82,7 +100,7 @@ pub(super) mod test_support {
         }
     }
 
-    pub(super) fn fts_row_count(store: &Store, id: &str) -> i64 {
+    pub(crate) fn fts_row_count(store: &Store, id: &str) -> i64 {
         let conn = store.conn().unwrap();
         conn.query_row(
             "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",

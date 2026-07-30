@@ -12,7 +12,8 @@
 
 use crate::error::CliError;
 use copypaste_ipc::{
-    socket_path, CloudStatusData, CloudSyncData, ErrorCode, Item, Method, PairingData, PeerInfo,
+    socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredData,
+    ErrorCode, EventData, ExportData, ImportData, Item, ItemPage, Method, PairingData, PeerInfo,
     Request, Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -114,6 +115,38 @@ async fn request_at(path: &Path, method: Method) -> Result<Response, CliError> {
     }
 }
 
+/// Subscribe to the daemon's change stream and hand each event to `on_event`.
+///
+/// Returns when the daemon stops or the callback asks to stop. The connection
+/// is deliberately not the one [`request`] uses: a subscription lives for as
+/// long as the client wants it to, and mixing it with request/response would
+/// make replies and events ambiguous on one stream.
+pub async fn watch(mut on_event: impl FnMut(EventData) -> bool) -> Result<(), CliError> {
+    let mut connection = Connection::open(&socket_path()).await?;
+    // The ack proves the daemon subscribed before answering, so nothing that
+    // happens after this line is missed.
+    let ack = connection.call(Method::Watch).await?;
+    into_data(ack)?;
+
+    loop {
+        let line = match connection.framed.next().await {
+            Some(Ok(line)) => line,
+            Some(Err(_)) | None => return Err(CliError::DaemonUnreachable),
+        };
+        let response: Response = serde_json::from_str(&line).map_err(|e| {
+            CliError::local(format!("could not understand the daemon's reply: {e}"))
+        })?;
+        match into_data(response)? {
+            Some(ResponseData::Event(event)) => {
+                if !on_event(event) {
+                    return Ok(());
+                }
+            }
+            _ => return Err(shape_error("a change event")),
+        }
+    }
+}
+
 /// Split a response into success payload or typed failure.
 ///
 /// Branches on `ok` and `error_code`, never on the `error` string
@@ -137,11 +170,51 @@ fn shape_error(expected: &str) -> CliError {
     ))
 }
 
-/// A response that must carry a list of items.
-pub fn expect_items(data: Option<ResponseData>) -> Result<Vec<Item>, CliError> {
+/// A response that must carry a page of items.
+pub fn expect_page(data: Option<ResponseData>) -> Result<ItemPage, CliError> {
     match data {
-        Some(ResponseData::Items(items)) => Ok(items),
-        _ => Err(shape_error("a list of items")),
+        Some(ResponseData::Page(page)) => Ok(page),
+        _ => Err(shape_error("a page of items")),
+    }
+}
+
+/// A response that must carry an export.
+pub fn expect_export(data: Option<ResponseData>) -> Result<ExportData, CliError> {
+    match data {
+        Some(ResponseData::Export(export)) => Ok(export),
+        _ => Err(shape_error("an export")),
+    }
+}
+
+/// A response that must carry import counts.
+pub fn expect_import(data: Option<ResponseData>) -> Result<ImportData, CliError> {
+    match data {
+        Some(ResponseData::Import(result)) => Ok(result),
+        _ => Err(shape_error("import results")),
+    }
+}
+
+/// A response that must carry a completed backup.
+pub fn expect_backup(data: Option<ResponseData>) -> Result<BackupData, CliError> {
+    match data {
+        Some(ResponseData::Backup(backup)) => Ok(backup),
+        _ => Err(shape_error("a backup result")),
+    }
+}
+
+/// A response that must carry discovered devices.
+pub fn expect_discovered(data: Option<ResponseData>) -> Result<DiscoveredData, CliError> {
+    match data {
+        Some(ResponseData::Discovered(found)) => Ok(found),
+        _ => Err(shape_error("discovered devices")),
+    }
+}
+
+/// A response that must carry the daemon's settings.
+pub fn expect_config(data: Option<ResponseData>) -> Result<ConfigApplied, CliError> {
+    match data {
+        Some(ResponseData::Config(applied)) => Ok(applied),
+        _ => Err(shape_error("daemon settings")),
     }
 }
 
@@ -181,15 +254,9 @@ pub fn expect_pairing(data: Option<ResponseData>) -> Result<PairingData, CliErro
 }
 
 /// A response that must carry a list of peers.
-///
-/// `ResponseData` is an untagged union, so an *empty* JSON array matches the
-/// first array-shaped variant — `Items` — before it ever reaches `Peers`. That
-/// is a property of the wire encoding, not a daemon bug, so both spellings of
-/// "no peers" are accepted here rather than reported as a shape error.
 pub fn expect_peers(data: Option<ResponseData>) -> Result<Vec<PeerInfo>, CliError> {
     match data {
         Some(ResponseData::Peers(peers)) => Ok(peers),
-        Some(ResponseData::Items(items)) if items.is_empty() => Ok(Vec::new()),
         _ => Err(shape_error("a list of peers")),
     }
 }
@@ -214,7 +281,11 @@ pub fn expect_cloud_sync(data: Option<ResponseData>) -> Result<CloudSyncData, Cl
 pub fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>, CliError> {
     match data {
         Some(ResponseData::Sync(results)) => Ok(results),
-        Some(ResponseData::Items(items)) if items.is_empty() => Ok(Vec::new()),
+        // `Peers` is the first array-shaped variant, so an *empty* JSON array
+        // decodes as one before it ever reaches `Sync`. That is a property of
+        // the untagged wire encoding, not a daemon bug, so "no peers to sync
+        // with" is accepted here rather than reported as a shape error.
+        Some(ResponseData::Peers(peers)) if peers.is_empty() => Ok(Vec::new()),
         _ => Err(shape_error("sync results")),
     }
 }
@@ -274,7 +345,7 @@ mod tests {
         let stub = StubDaemon::start(
             "roundtrip",
             vec![Some(
-                r#"{"id":{id},"ok":true,"data":[{"id":"a","content":"hi","content_type":"text/plain","created_at":5,"pinned":false,"is_sensitive":false}]}"#
+                r#"{"id":{id},"ok":true,"data":{"items":[{"id":"a","content":"hi","content_type":"text/plain","created_at":5,"pinned":false,"is_sensitive":false}],"skipped_undecryptable":0}}"#
                     .to_string(),
             )],
         );
@@ -288,8 +359,8 @@ mod tests {
         )
         .await
         .expect("round trip");
-        let items = expect_items(into_data(response).unwrap()).unwrap();
-        assert_eq!(items[0].content, "hi");
+        let page = expect_page(into_data(response).unwrap()).unwrap();
+        assert_eq!(page.items[0].content, "hi");
     }
 
     #[tokio::test]
@@ -396,22 +467,61 @@ mod tests {
     }
 
     #[test]
-    fn item_lists_deserialise_into_typed_items() {
-        let line = r#"{"id":1,"ok":true,"data":[{"id":"a","content":"hi",
-            "content_type":"text/plain","created_at":5,"pinned":true,"is_sensitive":false}]}"#;
+    fn item_pages_deserialise_into_typed_items_and_a_skip_count() {
+        let line = r#"{"id":1,"ok":true,"data":{"items":[{"id":"a","content":"hi",
+            "content_type":"text/plain","created_at":5,"pinned":true,"is_sensitive":false}],
+            "skipped_undecryptable":3}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
-        let items = expect_items(into_data(response).unwrap()).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].content, "hi");
-        assert!(items[0].pinned);
+        let page = expect_page(into_data(response).unwrap()).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].content, "hi");
+        assert!(page.items[0].pinned);
+        assert_eq!(page.skipped_undecryptable, 3, "the skip count was dropped");
     }
 
     #[test]
-    fn an_empty_item_list_is_not_a_shape_error() {
-        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":[]}"#).unwrap();
-        assert!(expect_items(into_data(response).unwrap())
-            .unwrap()
-            .is_empty());
+    fn an_empty_page_is_not_a_shape_error() {
+        let response: Response =
+            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":0}}"#)
+                .unwrap();
+        assert!(expect_page(into_data(response).unwrap()).unwrap().items.is_empty());
+    }
+
+    /// The untagged decoder tries variants in order, and an export's payload is
+    /// a superset of a page's. `Export` is declared first for exactly this
+    /// reason, and this is the test that fails if the order is changed.
+    #[test]
+    fn an_export_does_not_decode_as_a_page() {
+        let line = r#"{"id":1,"ok":true,"data":{"items":[],"skipped_non_text":1,
+            "skipped_sensitive":2,"skipped_undecryptable":3}}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        let export = expect_export(into_data(response).unwrap()).unwrap();
+        assert_eq!(
+            (export.skipped_non_text, export.skipped_sensitive, export.skipped_undecryptable),
+            (1, 2, 3)
+        );
+    }
+
+    #[test]
+    fn discovered_devices_read_back_as_devices() {
+        let line = r#"{"id":1,"ok":true,"data":{"devices":[{"pairing_id":"abc","name":"phone",
+            "addr":"192.168.1.9:47654","last_seen_ms":5,"paired":false}]}}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        let found = expect_discovered(into_data(response).unwrap()).unwrap();
+        assert_eq!(found.devices.len(), 1);
+        assert!(!found.devices[0].paired);
+    }
+
+    #[test]
+    fn settings_read_back_with_their_restart_list() {
+        let line = r#"{"id":1,"ok":true,"data":{"config":{"poll_interval_ms":250,
+            "history_limit":10000,"retention_days":0,"dedup_window_secs":60,
+            "max_item_bytes":4194304,"sensitive_ttl_secs":0,"excluded_app_bundle_ids":[],
+            "lan_visibility":true,"sync_enabled":true},"restart_required":["lan_visibility"]}}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        let applied = expect_config(into_data(response).unwrap()).unwrap();
+        assert_eq!(applied.config.poll_interval_ms, 250);
+        assert_eq!(applied.restart_required, ["lan_visibility"]);
     }
 
     #[test]
@@ -459,7 +569,7 @@ mod tests {
     fn a_wrong_shape_is_reported_rather_than_silently_defaulted() {
         // v1 would have produced an empty list here via unwrap_or_default.
         let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":{}}"#).unwrap();
-        assert!(expect_items(into_data(response).unwrap()).is_err());
+        assert!(expect_page(into_data(response).unwrap()).is_err());
     }
 
     #[test]

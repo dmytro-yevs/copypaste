@@ -7,10 +7,31 @@ use std::time::Duration;
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 use zeroize::Zeroizing;
 
 use super::model::{is_not_a_database, StoreError};
+
+/// Open a transaction that is going to write. **Every write path must use this**
+/// rather than `Connection::transaction`.
+///
+/// `transaction()` is DEFERRED: it takes no lock until its first statement, so a
+/// transaction that reads before it writes upgrades a read lock to a write lock
+/// mid-way. In WAL that upgrade returns `SQLITE_BUSY_SNAPSHOT` the instant
+/// another connection is writing, and — unlike ordinary lock contention —
+/// `busy_timeout` does not retry it, because the reader's snapshot is already
+/// stale and no amount of waiting fixes that. The daemon has two connections to
+/// one file (the store's pool and `meta`'s), so "another connection is writing"
+/// is the ordinary case during a sync round, not a rare one.
+///
+/// IMMEDIATE takes the write lock up front, which `busy_timeout` *does* wait on.
+///
+/// Found by `demo-p2p.sh`: a capture during a peer sync round failed with
+/// "the item could not be stored" as soon as [`super::Store::insert_or_bump`]
+/// began probing for a dedup match inside its own transaction.
+pub(super) fn write_tx(conn: &mut Connection) -> rusqlite::Result<Transaction<'_>> {
+    conn.transaction_with_behavior(TransactionBehavior::Immediate)
+}
 
 /// WAL gives many concurrent readers and one writer; four connections is what
 /// the daemon needed in v1 (`CopyPaste-j8p`).

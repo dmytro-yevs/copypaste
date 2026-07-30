@@ -16,18 +16,21 @@
 use tauri::State;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
-use crate::model::{ui_items, UiItem};
+use crate::model::{UiItem, UiPage};
 
 type Result<T> = std::result::Result<T, BackendError>;
 
 /// Most recent items, newest first; pinned ahead of unpinned.
+///
+/// Returns a page rather than a bare array so the count of rows that would not
+/// decrypt travels with them (parity finding 17).
 #[tauri::command]
 pub async fn list(
     backend: State<'_, SelectedBackend>,
     limit: u32,
     offset: u32,
-) -> Result<Vec<UiItem>> {
-    Ok(ui_items(backend.list(limit, offset).await?))
+) -> Result<UiPage> {
+    Ok(backend.list(limit, offset).await?.into())
 }
 
 /// Full-text search. Sensitive items are never indexed and never returned, so
@@ -38,8 +41,8 @@ pub async fn search(
     backend: State<'_, SelectedBackend>,
     query: String,
     limit: u32,
-) -> Result<Vec<UiItem>> {
-    Ok(ui_items(backend.search(&query, limit).await?))
+) -> Result<UiPage> {
+    Ok(backend.search(&query, limit).await?.into())
 }
 
 /// Add an item to history without going through the clipboard.
@@ -110,6 +113,25 @@ pub async fn set_pinned(
     pinned: bool,
 ) -> Result<UiItem> {
     Ok(backend.set_pinned(&id, pinned).await?.into())
+}
+
+/// Rewrite the order of the pinned section.
+///
+/// Takes the complete pinned list in the wanted order. Partial moves are not
+/// offered: see `Backend::reorder_pinned` for why a full ordering is the only
+/// shape that survives a concurrent pin.
+#[tauri::command]
+pub async fn reorder_pinned(
+    backend: State<'_, SelectedBackend>,
+    ids: Vec<String>,
+) -> Result<()> {
+    if ids.is_empty() {
+        // Not an error worth a round trip, and not something to send: an empty
+        // ordering would be indistinguishable from "unpin everything" to a
+        // careless implementation on the other side.
+        return Ok(());
+    }
+    backend.reorder_pinned(&ids).await
 }
 
 #[cfg(test)]

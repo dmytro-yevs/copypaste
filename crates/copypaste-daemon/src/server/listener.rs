@@ -1,4 +1,5 @@
-//! The socket itself: binding it, guarding it, and framing what arrives on it.
+//! The socket itself: binding it, guarding it, bounding it, and framing what
+//! arrives on it.
 //!
 //! Framing is `tokio_util::codec::LinesCodec`. v1 hand-rolled a two-pass,
 //! byte-scanning partial-JSON reader — it had to, because it wanted a
@@ -9,25 +10,62 @@
 //! Only the read half goes through the codec. `SinkExt` lives behind
 //! futures-util's `sink` feature, which this crate's dependency line does not
 //! enable, so a reply is written as `to_string` plus a newline straight to the
-//! socket. That is not the thing v1 got wrong: the parsing was.
+//! socket.
+//!
+//! # Three bounds, and what each is for
+//!
+//! * **`flock` around bind** (`CopyPaste-ah1m`) — probe, remove, bind is a
+//!   TOCTOU window: a second starter can unlink a socket the first has just
+//!   bound and put its own there, and two daemons on one SQLCipher database is
+//!   a data-loss shape.
+//! * **A connection cap** (`CopyPaste-6ot5`) — 64 permits, acquired
+//!   non-blockingly. Queueing behind a full cap only moves the stall to the
+//!   accept loop.
+//! * **Read and write deadlines** (`CopyPaste-cce1`, `CopyPaste-c4q2.24`) — a
+//!   same-UID client that connects and never drains otherwise pins a permit and
+//!   the database mutex for as long as it likes.
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
-use copypaste_ipc::{ErrorCode, Response, MAX_FRAME_BYTES};
+use copypaste_ipc::{ErrorCode, Method, Response, MAX_FRAME_BYTES};
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
-use tokio::net::unix::OwnedWriteHalf;
+use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::watch;
+use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
 use super::dispatch::dispatch_line;
-use super::messages::MSG_TOO_LARGE;
+use super::messages::{MSG_TOO_LARGE, MSG_WATCHERS_FULL};
 use crate::AppState;
+
+/// Connections served at once (manifest 04 §3.5). Over-cap connections are
+/// dropped at the OS level with no error frame: an unauthenticated dialler
+/// learns nothing from a refusal that it did not already know from the socket
+/// being there, and writing an error needs a task, which is the resource being
+/// rationed.
+const MAX_CONCURRENT_CONNECTIONS: usize = 64;
+
+/// How many of those may be `watch` subscribers.
+///
+/// A watcher is exempt from the read deadline, so it holds its permit for as
+/// long as it likes; without a cap of its own, idle subscribers could take the
+/// whole connection budget. Eight is several app windows and a CLI `watch`.
+const MAX_WATCHERS: usize = 8;
+
+/// Per-read deadline. A connection that says nothing for this long is dropped
+/// **without a response** — the client sees EOF, which its retry logic already
+/// handles (manifest 04 §3.4).
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Per-write deadline. Shorter than the read deadline because a stalled write
+/// means the client is not draining, and the daemon is holding a reply.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Create the socket directory, clear a stale socket, bind, and lock the socket
 /// down to `0600`.
@@ -43,6 +81,11 @@ pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
         }
     }
 
+    // Held for the whole probe → remove → bind sequence and released when it
+    // goes out of scope. Two starters therefore serialise here, and the loser
+    // finds a live socket rather than a stale one (`CopyPaste-ah1m`).
+    let _guard = BindLock::acquire(path)?;
+
     clear_stale_socket(path)?;
     let listener = UnixListener::bind(path).context("bind the daemon socket")?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
@@ -52,12 +95,43 @@ pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
     Ok(listener)
 }
 
+/// An exclusive `flock(2)` on `<socket>.lock`, held for the bind sequence.
+///
+/// The lock file is created and never removed: unlinking it would let a second
+/// starter create and lock a *different* inode while the first still holds the
+/// old one, which is the race this exists to close.
+struct BindLock {
+    _file: std::fs::File,
+}
+
+impl BindLock {
+    fn acquire(socket_path: &Path) -> anyhow::Result<Self> {
+        let mut name = socket_path.as_os_str().to_os_string();
+        name.push(".lock");
+        let path = PathBuf::from(name);
+
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .context("open the bind lock")?;
+        // Blocking, not `NonBlocking`: the sequence it guards is three syscalls
+        // and the loser is about to be told the socket is taken anyway. Failing
+        // fast here would just reintroduce the race under a different name.
+        rustix::fs::flock(&file, rustix::fs::FlockOperation::LockExclusive)
+            .context("lock the bind lock")?;
+        Ok(Self { _file: file })
+    }
+}
+
 /// A socket file left behind by a crashed daemon is removed; one with a live
 /// listener behind it is not.
 ///
 /// Refusing to steal a live socket is dual-daemon prevention: two daemons on
 /// one database is a data-loss shape, and the second one exiting is the safe
-/// outcome.
+/// outcome. Correct only while [`BindLock`] is held — without it, the connect
+/// probe and the `remove_file` straddle the moment another starter binds.
 fn clear_stale_socket(path: &Path) -> anyhow::Result<()> {
     if std::fs::symlink_metadata(path).is_err() {
         return Ok(());
@@ -71,20 +145,30 @@ fn clear_stale_socket(path: &Path) -> anyhow::Result<()> {
 }
 
 /// Accept connections until shutdown.
-pub async fn run(
-    listener: UnixListener,
-    state: Arc<AppState>,
-    mut shutdown: watch::Receiver<bool>,
-) {
+pub async fn run(listener: UnixListener, state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
     let mut connections = tokio::task::JoinSet::new();
+    let permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
+    let watchers = Arc::new(Semaphore::new(MAX_WATCHERS));
 
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
+                    // Non-blocking: waiting for a permit here would stop the
+                    // accept loop, which turns a busy daemon into an
+                    // unreachable one (`CopyPaste-6ot5`).
+                    let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else {
+                        debug!("ipc connection cap reached; dropping a connection");
+                        continue;
+                    };
                     let state = Arc::clone(&state);
-                    connections.spawn(async move { handle_connection(stream, state).await });
+                    let watchers = Arc::clone(&watchers);
+                    let shutdown = shutdown.clone();
+                    connections.spawn(async move {
+                        let _permit = permit;
+                        handle_connection(stream, state, watchers, shutdown).await;
+                    });
                 }
                 Err(e) => warn!(error = %e, "could not accept an ipc connection"),
             },
@@ -94,13 +178,32 @@ pub async fn run(
     connections.shutdown().await;
 }
 
-/// One connection: read lines, answer each with exactly one line, until EOF.
-async fn handle_connection(stream: UnixStream, state: Arc<AppState>) {
+/// One connection: read lines, answer each with exactly one line, until EOF —
+/// or until it subscribes, after which it only writes.
+async fn handle_connection(
+    stream: UnixStream,
+    state: Arc<AppState>,
+    watchers: Arc<Semaphore>,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let (reader, mut writer) = stream.into_split();
     let mut lines = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
 
     loop {
-        let line = match lines.next().await {
+        // A client that connects and then says nothing holds a permit and, if
+        // it is mid-request, the database mutex. The deadline is per read, so a
+        // client that keeps talking is never cut off (`CopyPaste-cce1`).
+        let next = match tokio::time::timeout(READ_TIMEOUT, lines.next()).await {
+            Ok(next) => next,
+            Err(_) => {
+                // Deliberately no response: the client sees EOF, which its
+                // retry logic already handles (manifest 04 §3.4).
+                debug!("ipc connection idle past the read deadline; closing");
+                break;
+            }
+        };
+
+        let line = match next {
             None => break,
             Some(Ok(line)) => line,
             Some(Err(LinesCodecError::MaxLineLengthExceeded)) => {
@@ -124,6 +227,30 @@ async fn handle_connection(stream: UnixStream, state: Arc<AppState>) {
             continue;
         }
 
+        // `watch` turns the connection into a stream, so it is taken here
+        // rather than in the dispatcher: from this point the loop above no
+        // longer owns the read half's deadline.
+        if let Some(id) = subscribe_id(&line) {
+            let Ok(_permit) = Arc::clone(&watchers).try_acquire_owned() else {
+                let full = Response::err(id, ErrorCode::Internal, MSG_WATCHERS_FULL);
+                let _ = send(&mut writer, &full).await;
+                break;
+            };
+            // Subscribed *before* the acknowledgement, so the ack is a promise:
+            // any change after a client sees it reaches this connection. Taking
+            // the receiver afterwards would drop everything that happened in
+            // between, which is a race a client cannot see or retry around.
+            let events = state.subscribe();
+            if send(&mut writer, &Response::ok(id, copypaste_ipc::ResponseData::Empty {}))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            super::watch::pump(events, id, &mut lines, &mut writer, &mut shutdown).await;
+            break;
+        }
+
         let response = dispatch_line(&state, &line).await;
 
         if send(&mut writer, &response).await.is_err() {
@@ -132,8 +259,19 @@ async fn handle_connection(stream: UnixStream, state: Arc<AppState>) {
     }
 }
 
+/// The request id when this line is a `watch` subscription, else `None`.
+///
+/// Parsed here rather than dispatched because the answer changes what the
+/// connection *is*. A malformed line is left alone: the ordinary dispatcher
+/// already knows how to reject one, and duplicating that judgement is how two
+/// parsers disagree.
+fn subscribe_id(line: &str) -> Option<u64> {
+    let request: copypaste_ipc::Request = serde_json::from_str(line).ok()?;
+    matches!(request.method, Method::Watch).then_some(request.id)
+}
+
 /// One request, one line, one response line.
-async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Result<(), ()> {
+pub(super) async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Result<(), ()> {
     let mut encoded = match serde_json::to_string(response) {
         Ok(encoded) => encoded,
         Err(e) => {
@@ -142,16 +280,32 @@ async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Result<(), ()
         }
     };
     encoded.push('\n');
-    writer.write_all(encoded.as_bytes()).await.map_err(|e| {
-        debug!(error = %e, "ipc connection write failed");
-    })
+    // A client that has stopped reading fills the socket buffer and this write
+    // never returns. The task holds a connection permit while it waits
+    // (`CopyPaste-c4q2.24`).
+    match tokio::time::timeout(WRITE_TIMEOUT, writer.write_all(encoded.as_bytes())).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => {
+            debug!(error = %e, "ipc connection write failed");
+            Err(())
+        }
+        Err(_) => {
+            debug!("ipc connection write deadline passed; closing");
+            Err(())
+        }
+    }
 }
+
+/// The read half, once a connection has subscribed.
+pub(super) type Reader = FramedRead<OwnedReadHalf, LinesCodec>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::test_state;
     use copypaste_ipc::{Method, Request, ResponseData, PROTOCOL_VERSION};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Barrier;
 
     fn request(id: u64, method: Method) -> Request {
         Request {
@@ -169,6 +323,72 @@ mod tests {
 
         let listener = bind(&path).expect("bind must clear the stale file");
         drop(listener);
+    }
+
+    /// `CopyPaste-ah1m`, and the reason the single-starter test above was not
+    /// enough. Several starters race on one stale socket; exactly one may win,
+    /// and the socket that is left on disk must be the winner's — not a file
+    /// some loser unlinked and rebound after the winner was already listening.
+    ///
+    /// Ten rounds because the unguarded window is a few syscalls wide: one round
+    /// can pass by luck, ten do not.
+    #[test]
+    fn two_starters_racing_on_one_socket_produce_exactly_one_daemon() {
+        const STARTERS: usize = 12;
+        const ROUNDS: usize = 10;
+
+        let dir = tempfile::tempdir().unwrap();
+        for round in 0..ROUNDS {
+            let path = dir.path().join(format!("daemon-{round}.sock"));
+            // The state every starter finds after a crash.
+            std::fs::write(&path, b"left behind by a crashed daemon").unwrap();
+
+            let barrier = Arc::new(Barrier::new(STARTERS));
+            let winners = Arc::new(AtomicUsize::new(0));
+            let mut threads = Vec::with_capacity(STARTERS);
+
+            for _ in 0..STARTERS {
+                let path = path.clone();
+                let barrier = Arc::clone(&barrier);
+                let winners = Arc::clone(&winners);
+                threads.push(std::thread::spawn(move || {
+                    // `bind` hands back a tokio listener, which needs a
+                    // reactor on the thread that creates it.
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("runtime");
+                    let _enter = runtime.enter();
+                    barrier.wait();
+                    match bind(&path) {
+                        Ok(listener) => {
+                            winners.fetch_add(1, Ordering::SeqCst);
+                            // Hold it: releasing here would let a loser bind
+                            // and the count would be right for the wrong
+                            // reason.
+                            Some(listener)
+                        }
+                        Err(_) => None,
+                    }
+                }));
+            }
+
+            let held: Vec<_> = threads
+                .into_iter()
+                .map(|t| t.join().expect("no panic"))
+                .collect();
+
+            assert_eq!(
+                winners.load(Ordering::SeqCst),
+                1,
+                "round {round}: more than one starter bound the same socket"
+            );
+            // The winner is still reachable, so nobody unlinked its socket and
+            // put an unbound file in its place.
+            std::os::unix::net::UnixStream::connect(&path)
+                .unwrap_or_else(|e| panic!("round {round}: the surviving socket is dead: {e}"));
+            drop(held);
+        }
     }
 
     #[tokio::test]
@@ -224,7 +444,7 @@ mod tests {
         assert_eq!(added.content, "round trip");
         assert!(!added.is_sensitive);
 
-        // list sees it.
+        // list sees it, and reports that nothing was unreadable.
         let response = client
             .call(request(
                 3,
@@ -234,11 +454,12 @@ mod tests {
                 },
             ))
             .await;
-        let items = match response.data {
-            Some(ResponseData::Items(items)) => items,
-            other => panic!("expected items, got {other:?}"),
+        let page = match response.data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("expected a page, got {other:?}"),
         };
-        assert!(items.iter().any(|item| item.id == added.id));
+        assert!(page.items.iter().any(|item| item.id == added.id));
+        assert_eq!(page.skipped_undecryptable, 0);
 
         // copy writes to the clipboard source.
         let response = client
@@ -301,10 +522,95 @@ mod tests {
         let _ = server.await;
     }
 
+    /// A subscriber gets an ack, then a frame per change, on the same
+    /// connection and in the same envelope.
+    #[tokio::test]
+    async fn a_watcher_is_pushed_a_frame_when_history_changes() {
+        let (state, dir) = test_state("server");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let mut watcher = Client::new(stream);
+        let ack = watcher.call(request(1, Method::Watch)).await;
+        assert!(ack.ok, "{:?}", ack.error);
+
+        // A capture on the daemon side, through the ordinary ingest path.
+        crate::server::dispatch::dispatch_store(
+            &state,
+            99,
+            Method::Add {
+                content: "pushed".into(),
+            },
+        );
+
+        let frame = tokio::time::timeout(Duration::from_secs(5), watcher.next_frame())
+            .await
+            .expect("an event must arrive without polling");
+        assert_eq!(frame.id, 1);
+        match frame.data {
+            Some(ResponseData::Event(event)) => {
+                assert_eq!(event.event, copypaste_ipc::EventKind::Items);
+                assert_eq!(event.item_count, 1);
+            }
+            other => panic!("expected an event, got {other:?}"),
+        }
+
+        shutdown_tx.send(true).unwrap();
+        let _ = server.await;
+    }
+
+    /// The cap is non-blocking, so an over-cap connection is dropped rather
+    /// than queued behind a permit that may never come free.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn connections_past_the_cap_are_dropped_rather_than_queued() {
+        let (state, dir) = test_state("server");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        // Fill every permit. Each one is made to answer a request first: a
+        // connect alone only reaches the listen backlog, so without a round
+        // trip the test would race the accept loop rather than the cap.
+        let mut idle = Vec::new();
+        for n in 0..MAX_CONCURRENT_CONNECTIONS {
+            let mut client = Client::new(UnixStream::connect(&path).await.expect("connect"));
+            assert!(client.call(request(n as u64 + 100, Method::Status)).await.ok);
+            idle.push(client);
+        }
+
+        // The next one is accepted by the OS and then dropped, so it is never
+        // served. Which of the three symptoms shows up — a broken pipe on the
+        // write, a reset on the read, or a clean EOF — depends on timing; the
+        // property is that no `Response` comes back.
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let mut client = Client::new(stream);
+        let line = serde_json::to_string(&request(1, Method::Status)).unwrap();
+        let served = tokio::time::timeout(Duration::from_secs(5), async {
+            client.writer.write_all(line.as_bytes()).await?;
+            client.writer.write_all(b"\n").await?;
+            Ok::<_, std::io::Error>(client.lines.next().await)
+        })
+        .await
+        .expect("the daemon must not leave an over-cap client hanging");
+
+        assert!(
+            matches!(served, Err(_) | Ok(None) | Ok(Some(Err(_)))),
+            "an over-cap connection was served: {served:?}"
+        );
+
+        drop(idle);
+        shutdown_tx.send(true).unwrap();
+        let _ = server.await;
+    }
+
     /// A minimal newline-JSON client, mirroring what the CLI does.
     struct Client {
         writer: OwnedWriteHalf,
-        lines: FramedRead<tokio::net::unix::OwnedReadHalf, LinesCodec>,
+        lines: FramedRead<OwnedReadHalf, LinesCodec>,
     }
 
     impl Client {
@@ -324,6 +630,10 @@ mod tests {
         async fn call_raw(&mut self, line: &str) -> Response {
             self.writer.write_all(line.as_bytes()).await.unwrap();
             self.writer.write_all(b"\n").await.unwrap();
+            self.next_frame().await
+        }
+
+        async fn next_frame(&mut self) -> Response {
             let reply = self
                 .lines
                 .next()

@@ -13,186 +13,20 @@
 
 #![forbid(unsafe_code)]
 
+mod cli;
 mod client;
 mod cloud;
 mod error;
 mod render;
 
-use clap::{Parser, Subcommand};
-use copypaste_ipc::Method;
+use clap::Parser;
+use cli::{config_patch, Cli, CloudAction, Command, ConfigAction, PairAction};
+use copypaste_ipc::{ExportData, Method};
 use error::CliError;
 use std::io::{IsTerminal, Read, Write};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Parser, Debug)]
-#[command(
-    name = "copypaste",
-    version,
-    about = "Clipboard history, from the terminal.",
-    long_about = "Clipboard history, from the terminal.\n\n\
-                  Talks to the CopyPaste daemon over a local socket; start it with \
-                  `copypaste-daemon` if commands report that it is unreachable."
-)]
-struct Cli {
-    /// Print the daemon's raw response as JSON, for scripting.
-    #[arg(long, global = true)]
-    json: bool,
-
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Show recent clipboard items, newest first. Pinned items sort ahead.
-    List {
-        /// How many items to show.
-        #[arg(long, short = 'n', default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
-        limit: u32,
-        /// How many items to skip.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
-    },
-
-    /// Full-text search over clipboard history.
-    ///
-    /// Sensitive items are never indexed, so they never appear in results.
-    Search {
-        /// What to search for.
-        query: String,
-        /// How many matches to show.
-        #[arg(long, short = 'n', default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..))]
-        limit: u32,
-    },
-
-    /// Add an item to history without going through the clipboard.
-    Add {
-        /// The text to add. Read from stdin when omitted.
-        text: Option<String>,
-    },
-
-    /// Put an item back on the system clipboard.
-    Copy {
-        /// The item id, as shown by `copypaste list`.
-        id: String,
-    },
-
-    /// Delete one item.
-    Delete {
-        /// The item id, as shown by `copypaste list`.
-        id: String,
-    },
-
-    /// Delete every item. This cannot be undone.
-    Clear {
-        /// Skip the confirmation prompt.
-        #[arg(long)]
-        yes: bool,
-    },
-
-    /// Pin an item so it stays at the top and survives `clear`.
-    Pin {
-        /// The item id, as shown by `copypaste list`.
-        id: String,
-    },
-
-    /// Remove a pin.
-    Unpin {
-        /// The item id, as shown by `copypaste list`.
-        id: String,
-    },
-
-    /// Report whether the daemon is running and what it is doing.
-    Status,
-
-    /// Pair this device with another one.
-    Pair {
-        #[command(subcommand)]
-        action: PairAction,
-    },
-
-    /// List paired devices.
-    Peers,
-
-    /// Forget a paired device.
-    ///
-    /// Local and one-sided: the other device keeps its half until it also
-    /// unpairs.
-    Unpair {
-        /// The pairing id, as shown by `copypaste peers`.
-        pairing_id: String,
-    },
-
-    /// Sync clipboard history with paired devices.
-    Sync {
-        /// Sync with one device instead of all of them.
-        #[arg(long, value_name = "PAIRING_ID")]
-        peer: Option<String>,
-    },
-
-    /// Sync clipboard history through a cloud account.
-    Cloud {
-        #[command(subcommand)]
-        action: CloudAction,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum CloudAction {
-    /// Sign in to the sync account and unlock the sync key.
-    ///
-    /// The password and the sync passphrase are read from
-    /// `COPYPASTE_CLOUD_PASSWORD` and `COPYPASTE_SYNC_PASSPHRASE`, or from
-    /// stdin as two lines. There is no flag for either: process arguments are
-    /// readable by every process running as this user.
-    ///
-    /// The passphrase is what the rows are encrypted with, and the backend
-    /// never sees it. Use the same one on every device, or each device will
-    /// hold rows the others cannot read.
-    SignIn {
-        /// The account email address.
-        #[arg(long, short = 'e', value_name = "EMAIL")]
-        email: String,
-    },
-
-    /// Forget the account, its tokens and the sync key on this device.
-    ///
-    /// Local history is untouched, and the daemon keeps the deployment it is
-    /// configured with.
-    SignOut,
-
-    /// Whether cloud sync is configured, signed in, and when it last ran.
-    Status,
-
-    /// Run one cloud sync round now instead of waiting for the poll.
-    Sync,
-}
-
-#[derive(Subcommand, Debug)]
-enum PairAction {
-    /// Mint a pairing code on this device, to be entered on the other one.
-    ///
-    /// The code is a secret — anyone who has it can pair with this device — and
-    /// it is shown exactly once. It is never written to a log or stored in
-    /// readable form.
-    Create {
-        /// What to call the other device until it says its own name.
-        #[arg(long, short = 'n', default_value = "unnamed device")]
-        name: String,
-    },
-
-    /// Consume a code from another device and complete the pairing.
-    ///
-    /// The pairing is only kept if a sync session with that device succeeds, so
-    /// a wrong code or an unreachable address leaves nothing behind.
-    Accept {
-        /// The code shown by `copypaste pair create` on the other device.
-        code: String,
-        /// Where that device is listening, as `host:port`.
-        #[arg(long, value_name = "HOST:PORT")]
-        addr: String,
-    },
-}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -210,6 +44,12 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> Result<(), CliError> {
+    // Two commands are not one request and one reply, so they are handled
+    // before the mapping below rather than bent into it.
+    if let Command::Watch = &cli.command {
+        return watch(cli.json).await;
+    }
+
     let method = match &cli.command {
         Command::List { limit, offset } => Method::List {
             limit: *limit,
@@ -256,6 +96,47 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Sync { peer } => Method::SyncNow {
             pairing_id: peer.clone(),
         },
+        Command::Discover { rescan } => {
+            if *rescan {
+                Method::Rescan
+            } else {
+                Method::Discovered
+            }
+        }
+        Command::Export {
+            limit,
+            include_sensitive,
+            ..
+        } => Method::Export {
+            limit: *limit,
+            include_sensitive: *include_sensitive,
+        },
+        Command::Import { file } => Method::Import {
+            items: read_export(file.as_deref())?.items,
+        },
+        Command::Backup { dest } => Method::Backup {
+            dest_path: dest.to_string_lossy().into_owned(),
+        },
+        Command::Restore { src, yes } => {
+            // Restoring replaces every item on this device. A piped stdin is
+            // not a decision (CLAUDE.md rule 4: data loss is the worst
+            // outcome).
+            if !yes && !confirm_restore()? {
+                out("cancelled; nothing was changed");
+                return Ok(());
+            }
+            Method::Restore {
+                src_path: src.to_string_lossy().into_owned(),
+                confirm: true,
+            }
+        }
+        Command::Config { action } => match action {
+            ConfigAction::Show => Method::GetConfig,
+            ConfigAction::Set { .. } => Method::SetConfig {
+                patch: config_patch(action),
+            },
+        },
+        Command::Watch => unreachable!("handled above"),
         Command::Cloud { action } => match action {
             CloudAction::SignIn { email } => {
                 let (password, passphrase) = cloud::read_credentials()?;
@@ -288,12 +169,14 @@ async fn run(cli: Cli) -> Result<(), CliError> {
 
     match &cli.command {
         Command::List { .. } => {
-            let items = client::expect_items(data)?;
-            out(&(render::items_table(&items, now_ms(), "no items yet")));
+            let page = client::expect_page(data)?;
+            out(&(render::items_table(&page.items, now_ms(), "no items yet")));
+            warn_unreadable(page.skipped_undecryptable);
         }
         Command::Search { .. } => {
-            let items = client::expect_items(data)?;
-            out(&(render::items_table(&items, now_ms(), "no matches")));
+            let page = client::expect_page(data)?;
+            out(&(render::items_table(&page.items, now_ms(), "no matches")));
+            warn_unreadable(page.skipped_undecryptable);
         }
         Command::Status => {
             let status = client::expect_status(data)?;
@@ -347,6 +230,48 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 out(&(render::cloud_status_text(&status, now_ms())));
             }
         },
+        Command::Discover { .. } => {
+            let found = client::expect_discovered(data)?;
+            out(&render::discovered_table(
+                &found.devices,
+                now_ms(),
+                "no devices are visible on this network",
+            ));
+        }
+        Command::Export { output, .. } => {
+            let export = client::expect_export(data)?;
+            let encoded = serde_json::to_string_pretty(&export)
+                .map_err(|e| CliError::local(format!("could not render the export: {e}")))?;
+            match output {
+                Some(path) => {
+                    write_export(path, &encoded)?;
+                    out(&format!("exported {} items", export.items.len()));
+                }
+                None => out(&encoded),
+            }
+            // On stderr, so `copypaste export > file` is still exactly the
+            // export — and so the warning survives being redirected away.
+            eprint!("{}", render::export_summary(&export));
+        }
+        Command::Import { .. } => {
+            let result = client::expect_import(data)?;
+            out(&format!(
+                "imported {} {}, skipped {} already present",
+                result.inserted,
+                plural(u64::from(result.inserted), "item", "items"),
+                result.skipped
+            ));
+        }
+        Command::Backup { .. } => {
+            let backup = client::expect_backup(data)?;
+            out(&format!("wrote a backup of {} bytes", backup.size_bytes));
+        }
+        Command::Restore { .. } => out("restored this device's history from the backup"),
+        Command::Config { .. } => {
+            let applied = client::expect_config(data)?;
+            out(&render::config_text(&applied));
+        }
+        Command::Watch => unreachable!("handled above"),
         Command::Sync { .. } => {
             let results = client::expect_sync(data)?;
             out(&(render::sync_table(&results, "no paired devices")));
@@ -359,6 +284,89 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+/// Subscribe and print a line per change until interrupted.
+async fn watch(json: bool) -> Result<(), CliError> {
+    client::watch(|event| {
+        let line = if json {
+            serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string())
+        } else {
+            render::event_text(&event)
+        };
+        out(&line);
+        true
+    })
+    .await
+}
+
+/// Say when a page was shortened, and by how much.
+///
+/// v1 shortened the page and said nothing; the user saw fewer items with no
+/// explanation (`CopyPaste-00zz`). On stderr so a `--json` consumer and a pipe
+/// are unaffected.
+fn warn_unreadable(skipped: u32) {
+    if skipped > 0 {
+        eprintln!(
+            "warning: {skipped} {} could not be read and {} left out",
+            plural(u64::from(skipped), "item", "items"),
+            plural(u64::from(skipped), "was", "were")
+        );
+    }
+}
+
+/// Read an export file, or stdin.
+fn read_export(path: Option<&Path>) -> Result<ExportData, CliError> {
+    let raw = match path {
+        Some(path) => std::fs::read_to_string(path).map_err(|e| {
+            // The user supplied the path, so naming *what went wrong* is
+            // useful; the path itself is scrubbed on the way out by
+            // `CliError::user_message` (CLAUDE.md rule 4).
+            CliError::local(format!("could not read the import file: {e}"))
+        })?,
+        None => {
+            let stdin = std::io::stdin();
+            if stdin.is_terminal() {
+                return Err(CliError::local(
+                    "nothing to import: pass a file, or pipe one on stdin",
+                ));
+            }
+            let mut buffer = String::new();
+            stdin
+                .lock()
+                .read_to_string(&mut buffer)
+                .map_err(|e| CliError::local(format!("could not read stdin: {e}")))?;
+            buffer
+        }
+    };
+
+    serde_json::from_str(&raw).map_err(|e| {
+        CliError::local(format!(
+            "that file is not a CopyPaste export: {e}. Expected the JSON written by `copypaste export`."
+        ))
+    })
+}
+
+fn write_export(path: &Path, encoded: &str) -> Result<(), CliError> {
+    std::fs::write(path, format!("{encoded}\n"))
+        .map_err(|e| CliError::local(format!("could not write the export: {e}")))
+}
+
+fn confirm_restore() -> Result<bool, CliError> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return Err(CliError::local(
+            "refusing to replace this device's history without confirmation: pass --yes",
+        ));
+    }
+    eprint!("Replace this device's clipboard history with the backup? [y/N] ");
+    let _ = std::io::stderr().flush();
+
+    let mut answer = String::new();
+    stdin
+        .read_line(&mut answer)
+        .map_err(|e| CliError::local(format!("could not read the answer: {e}")))?;
+    Ok(is_affirmative(&answer))
 }
 
 /// Write one block to stdout, treating a closed pipe as a normal end.

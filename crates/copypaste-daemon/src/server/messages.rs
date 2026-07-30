@@ -27,6 +27,23 @@ pub(super) const MSG_DECRYPT: &str = "the stored item could not be decrypted";
 pub(super) const MSG_ENCRYPT: &str = "the item could not be encrypted";
 pub(super) const MSG_CLIPBOARD: &str = "the system clipboard could not be written";
 pub(super) const MSG_INTERNAL: &str = "the daemon failed to process the request";
+pub(super) const MSG_WATCHERS_FULL: &str =
+    "too many clients are already watching for changes";
+pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured size limit";
+pub(super) const MSG_IMPORT_EMPTY: &str = "there is nothing to import";
+pub(super) const MSG_IMPORT_TOO_MANY: &str =
+    "too many items in one import; split the file into smaller batches";
+pub(super) const MSG_BAD_PATH: &str = "a destination is required";
+pub(super) const MSG_BACKUP_EXISTS: &str =
+    "a file is already there; choose a name that does not exist yet";
+pub(super) const MSG_BACKUP_NO_DIR: &str = "the folder to write the backup into does not exist";
+pub(super) const MSG_BACKUP_FAILED: &str = "the backup could not be written";
+pub(super) const MSG_NEEDS_CONFIRM: &str = "restoring replaces this device's history; confirm it";
+pub(super) const MSG_RESTORE_NOT_FOUND: &str = "there is no backup file there";
+pub(super) const MSG_RESTORE_NOT_A_BACKUP: &str =
+    "that file is not a CopyPaste backup for this device, or it is damaged; nothing was changed";
+pub(super) const MSG_RESTORE_FAILED: &str =
+    "the restore could not be completed; this device's history is unchanged";
 
 /// Map a storage failure onto the wire.
 ///
@@ -60,6 +77,18 @@ mod tests {
         MSG_ENCRYPT,
         MSG_CLIPBOARD,
         MSG_INTERNAL,
+        MSG_WATCHERS_FULL,
+        MSG_TOO_BIG,
+        MSG_IMPORT_EMPTY,
+        MSG_IMPORT_TOO_MANY,
+        MSG_BAD_PATH,
+        MSG_BACKUP_EXISTS,
+        MSG_BACKUP_NO_DIR,
+        MSG_BACKUP_FAILED,
+        MSG_NEEDS_CONFIRM,
+        MSG_RESTORE_NOT_FOUND,
+        MSG_RESTORE_NOT_A_BACKUP,
+        MSG_RESTORE_FAILED,
     ];
 
     #[test]

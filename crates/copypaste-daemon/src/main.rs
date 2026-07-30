@@ -23,13 +23,16 @@
 //! `clipboard` talks to NSPasteboard through `objc2` and needs `unsafe`. The
 //! other two modules do not use it.
 
+mod cadence;
 mod capture;
 mod clipboard;
 mod cloud;
+mod dbfile;
 mod merge;
 mod meta;
 mod p2p;
 mod server;
+mod settings;
 
 #[cfg(test)]
 mod testutil;
@@ -43,7 +46,8 @@ use clap::Parser;
 use copypaste_core::{Detector, Keyring, Store};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
-use tokio::sync::watch;
+use copypaste_ipc::{EventData, EventKind};
+use tokio::sync::{broadcast, watch};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -51,6 +55,7 @@ use crate::clipboard::ClipboardSource;
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
+use crate::settings::Settings;
 
 /// Reported by `status`. Single source: the crate version.
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -158,12 +163,30 @@ pub struct AppState {
     /// Cloud sync. Always present too, and unconfigured is an ordinary state:
     /// the deployment may not be set, or nobody may be signed in.
     pub cloud: Cloud,
+    /// The live settings. Every consumer reads it at the moment it acts, which
+    /// is what makes a change take effect without a restart.
+    pub settings: Settings,
+    /// Where the history database is, for `backup` and `restore`. Never put in
+    /// a client-visible string: it discloses the local username.
+    db_path: PathBuf,
+    /// Push channel for [`copypaste_ipc::Method::Watch`] subscribers.
+    ///
+    /// `broadcast` rather than a list of senders: a subscriber that stops
+    /// draining lags and is told so, instead of applying backpressure to the
+    /// capture loop. A dropped event is safe — an event says only *that*
+    /// something changed, and the client re-reads.
+    events: broadcast::Sender<EventData>,
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
 }
 
+/// How many change events are buffered per subscriber before it is told it
+/// lagged. Small on purpose: the recovery for a lag is one extra re-read.
+const EVENT_BUFFER: usize = 32;
+
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Store,
         keyring: Keyring,
@@ -172,6 +195,8 @@ impl AppState {
         meta: Meta,
         p2p: P2p,
         cloud: Cloud,
+        settings: Settings,
+        db_path: PathBuf,
     ) -> Self {
         let backend_name = clipboard.backend_name();
         Self {
@@ -182,10 +207,54 @@ impl AppState {
             meta,
             p2p,
             cloud,
+            settings,
+            db_path,
+            events: broadcast::channel(EVENT_BUFFER).0,
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
         }
+    }
+
+    pub fn db_path(&self) -> &std::path::Path {
+        &self.db_path
+    }
+
+    /// A stream of change events, for a `watch` subscriber.
+    pub fn subscribe(&self) -> broadcast::Receiver<EventData> {
+        self.events.subscribe()
+    }
+
+    /// History changed *on this device* — a capture, an `add`, a delete, a pin,
+    /// an import, a restore.
+    ///
+    /// Three consumers, and the split from [`AppState::note_remote_change`] is
+    /// what keeps them from feeding each other: both wake the watchers, but only
+    /// a local change pulls the two sync loops to their floor. A round that
+    /// applied a peer's row would otherwise reset the cadence, provoke an
+    /// immediate empty round on the other device, and ring back.
+    pub fn note_local_change(&self) {
+        self.publish(EventKind::Items);
+        self.p2p.wake();
+        self.cloud.wake();
+    }
+
+    /// History changed because a peer or the cloud delivered something.
+    pub fn note_remote_change(&self) {
+        self.publish(EventKind::Items);
+    }
+
+    pub fn note_peers_changed(&self) {
+        self.publish(EventKind::Peers);
+    }
+
+    fn publish(&self, event: EventKind) {
+        // `send` fails only when nobody is listening, which is the ordinary
+        // case: the CLI does not subscribe and the app may not be running.
+        let _ = self.events.send(EventData {
+            event,
+            item_count: self.store.count().unwrap_or(0),
+        });
     }
 
     /// Lock recovery rather than propagation: a poisoned clipboard mutex means
@@ -265,24 +334,34 @@ async fn main() -> anyhow::Result<()> {
     if let Some(name) = args.device_name.as_deref() {
         meta.set_device_name(name).context("set the device name")?;
     }
+    let settings = Settings::load(&meta);
     let peers = PeerStore::open(&peers_path).context("open the paired-device list")?;
-    // Never fatal: a host without multicast still pairs and still syncs to an
-    // explicit address, and that is the common case on a locked-down network.
-    let discovery = match Discovery::start(
-        meta.device_name(),
-        &peers
+    // `lan_visibility` is read once, here: the mDNS registration is made at
+    // start, so this is the moment it either happens or does not. It is the one
+    // setting `ConfigData::field_liveness` marks `NeedsRestart`, and this line
+    // is why.
+    let discovery = if settings.get().lan_visibility {
+        // Never fatal: a host without multicast still pairs and still syncs to
+        // an explicit address, and that is the common case on a locked-down
+        // network.
+        let pairing_ids: Vec<String> = peers
             .list()
             .iter()
             .map(|peer| peer.pairing_id.clone())
-            .collect::<Vec<_>>(),
-        args.port,
-    ) {
-        Ok(discovery) => discovery,
-        Err(e) => {
-            warn!(error = %e, "could not start discovery; peers must be given an address");
-            Discovery::start("CopyPaste device", &[], args.port)
-                .context("start discovery with a fallback name")?
+            .collect();
+        match Discovery::start(meta.device_name(), &pairing_ids, args.port) {
+            Ok(discovery) => Some(discovery),
+            Err(e) => {
+                warn!(error = %e, "could not start discovery; peers must be given an address");
+                Some(
+                    Discovery::start("CopyPaste device", &[], args.port)
+                        .context("start discovery with a fallback name")?,
+                )
+            }
         }
+    } else {
+        info!("LAN visibility is off; not advertising and not browsing");
+        None
     };
     let device_id = meta.device_id().to_string();
     let device_name = meta.device_name().to_string();
@@ -296,7 +375,15 @@ async fn main() -> anyhow::Result<()> {
     let cloud = Cloud::new(config);
 
     let state = Arc::new(AppState::new(
-        store, keyring, detector, source, meta, p2p, cloud,
+        store,
+        keyring,
+        detector,
+        source,
+        meta,
+        p2p,
+        cloud,
+        settings,
+        db_path.clone(),
     ));
     state.set_ready(true);
     let cloud_signed_in = state.cloud.restore(&state);
@@ -332,6 +419,17 @@ async fn main() -> anyhow::Result<()> {
         ))
     });
     let cloud_task = tokio::spawn(cloud::run(Arc::clone(&state), shutdown_rx.clone()));
+    // The push half of cloud sync. Without it the five-minute idle ceiling in
+    // `copypaste_cloud::sync::cadence` has nothing behind it: that ceiling is
+    // justified in its own doc comment by realtime existing, and the poll is
+    // only allowed to be slow because something else is fast.
+    let realtime_task = tokio::spawn(cloud::realtime::run(
+        Arc::clone(&state),
+        shutdown_rx.clone(),
+    ));
+    // Peer sync on a cadence. Without it a paired device only ever syncs when
+    // the *other* side dials in or a human runs `copypaste sync`.
+    let peer_sync = tokio::spawn(p2p::poll::run(Arc::clone(&state), shutdown_rx.clone()));
     let server = tokio::spawn(server::run(listener, Arc::clone(&state), shutdown_rx));
 
     wait_for_shutdown().await?;
@@ -352,6 +450,12 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Err(e) = cloud_task.await {
         warn!(error = ?e, "cloud sync loop did not shut down cleanly");
+    }
+    if let Err(e) = realtime_task.await {
+        warn!(error = ?e, "cloud realtime loop did not shut down cleanly");
+    }
+    if let Err(e) = peer_sync.await {
+        warn!(error = ?e, "peer sync loop did not shut down cleanly");
     }
     if let Err(e) = server.await {
         warn!(error = ?e, "ipc server did not shut down cleanly");

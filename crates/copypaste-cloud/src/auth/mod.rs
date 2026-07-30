@@ -52,7 +52,7 @@
 //!
 //! # Retry
 //!
-//! One policy, from the `backoff` crate, shared with [`crate::rest`] via
+//! One policy, from the `backon` crate, shared with [`crate::rest`] via
 //! [`transient_backoff`]. Network faults and 5xx retry; everything else is
 //! permanent and surfaces to the caller immediately. A `429` is **not** retried
 //! here — it is returned as [`AuthError::RateLimited`] with the server's

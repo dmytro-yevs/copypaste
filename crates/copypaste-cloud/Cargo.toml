@@ -17,7 +17,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-backoff.workspace = true
+backon.workspace = true
 argon2.workspace = true
 base64.workspace = true
 chacha20poly1305.workspace = true
@@ -29,5 +29,5 @@ hex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-# `start_paused` for deterministic backoff tests without real sleeping.
+# `start_paused` for deterministic retry tests without real sleeping.
 tokio = { workspace = true, features = ["test-util"] }

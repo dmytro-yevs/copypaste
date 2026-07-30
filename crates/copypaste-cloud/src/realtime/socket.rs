@@ -7,11 +7,10 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use backoff::backoff::Backoff;
-use backoff::ExponentialBackoff;
+use backon::{BackoffBuilder, ExponentialBuilder};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, watch, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::channel::{open_channel, WsStream};
@@ -42,7 +41,7 @@ enum Exit {
     Disconnected,
 }
 
-/// Run sessions back to back, reconnecting on the `backoff` schedule.
+/// Run sessions back to back, reconnecting on the `backon` schedule.
 ///
 /// The reset rule is manifest 05 §4.7's: a session that ran at least as long as
 /// the ceiling counts as *stable*, so the schedule goes back to its floor.
@@ -50,23 +49,29 @@ enum Exit {
 /// ever-growing delay and eventually stops reconnecting promptly at all. A
 /// short-lived session does **not** reset, which is what stops a connect-crash
 /// loop from hammering the endpoint.
+///
+/// `token` is a watch channel rather than a `String` because this task outlives
+/// any one JWT: a daemon that stays signed in for days refreshes its session
+/// hourly, and a reconnect that re-joined with the token captured at
+/// subscription time would be refused from the first refresh onward — silently,
+/// since a refused join only slows the poll loop down.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
     first: WsStream,
     url: String,
     anon_key: String,
-    token: String,
+    mut token: watch::Receiver<String>,
     user_id: String,
     tx: mpsc::Sender<Result<RealtimeEvent, RealtimeError>>,
     shutdown: Arc<Notify>,
 ) {
-    let mut policy = reconnect_policy();
+    let mut schedule = reconnect_policy().build();
     let mut stream = Some(first);
 
     loop {
         let started = Instant::now();
         let exit = match stream.take() {
-            Some(ws) => pump(ws, &tx, &shutdown).await,
+            Some(ws) => pump(ws, &tx, &shutdown, &mut token).await,
             None => Exit::Disconnected,
         };
         if matches!(exit, Exit::Shutdown) || tx.is_closed() {
@@ -74,12 +79,12 @@ pub(super) async fn run(
         }
 
         if started.elapsed() >= RECONNECT_MAX {
-            policy.reset();
+            schedule = reconnect_policy().build();
         }
 
-        let Some(delay) = policy.next_backoff() else {
-            // `max_elapsed_time` is `None`, so this is unreachable; treat it as
-            // "give up" rather than as a reason to spin.
+        let Some(delay) = schedule.next() else {
+            // The schedule has no attempt cap, so this is unreachable; treat it
+            // as "give up" rather than as a reason to spin.
             let _ = tx
                 .send(Err(RealtimeError::Connect("reconnects exhausted")))
                 .await;
@@ -92,15 +97,32 @@ pub(super) async fn run(
             () = tokio::time::sleep(delay) => {}
         }
 
-        match open_channel(&url, &anon_key, &token, &user_id).await {
-            Ok(ws) => stream = Some(ws),
+        // Read the token at each attempt, not once at startup.
+        let current = token.borrow_and_update().clone();
+        match open_channel(&url, &anon_key, &current, &user_id).await {
+            Ok(ws) => {
+                stream = Some(ws);
+                // The gap is not replayed. Say so, so the subscriber polls
+                // rather than trusting the channel to have carried everything
+                // (manifest 05 §5.1 row 9a).
+                if tx.send(Ok(RealtimeEvent::Resubscribed)).await.is_err() {
+                    return;
+                }
+            }
             Err(RealtimeError::MissingUserId) => {
                 // Cannot be recovered by retrying; the token is the problem.
                 let _ = tx.send(Err(RealtimeError::MissingUserId)).await;
                 return;
             }
             Err(e) => {
+                // Reported as well as logged: a join that is being refused
+                // because the JWT died is indistinguishable, from the outside,
+                // from a quiet account. The subscriber is the only thing that
+                // can refresh the session and hand the new token back.
                 tracing::debug!(error = %e, "realtime reconnect attempt failed");
+                if tx.send(Err(e)).await.is_err() {
+                    return;
+                }
             }
         }
     }
@@ -112,6 +134,7 @@ async fn pump(
     ws: WsStream,
     tx: &mpsc::Sender<Result<RealtimeEvent, RealtimeError>>,
     shutdown: &Notify,
+    token: &mut watch::Receiver<String>,
 ) -> Exit {
     // Split so the heartbeat write and the inbound read are disjoint borrows.
     let (mut write, mut read) = ws.split();
@@ -130,6 +153,31 @@ async fn pump(
             () = shutdown.notified() => {
                 let _ = leave(&mut write, next_ref).await;
                 return Exit::Shutdown;
+            }
+
+            // A refreshed session, pushed down without dropping the socket.
+            // Supabase closes a channel whose JWT has expired, so a connection
+            // that has been open for hours needs the new token *before* the old
+            // one dies; re-joining afterwards would lose every event in between.
+            changed = token.changed() => {
+                if changed.is_err() {
+                    // The subscription handle is gone.
+                    return Exit::Shutdown;
+                }
+                let frame = access_token_frame(next_ref, &token.borrow_and_update());
+                next_ref += 1;
+                match tokio::time::timeout(
+                    HEARTBEAT_INTERVAL,
+                    write.send(Message::Text(frame.to_string())),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) | Err(_) => {
+                        tracing::debug!("could not push a refreshed token; reconnecting");
+                        return Exit::Disconnected;
+                    }
+                }
             }
 
             _ = heartbeat.tick() => {
@@ -184,6 +232,21 @@ async fn pump(
     }
 }
 
+/// The frame that re-authenticates a channel that is already joined.
+///
+/// Phoenix's `access_token` event, which is how Supabase is told the JWT has
+/// been rotated. Without it the server closes the channel when the old token
+/// expires, and a subscription that has been up for an hour goes quiet.
+fn access_token_frame(msg_ref: u64, access_token: &str) -> Value {
+    json!([
+        Value::Null,
+        msg_ref.to_string(),
+        TOPIC,
+        "access_token",
+        { "access_token": access_token }
+    ])
+}
+
 /// Send `phx_leave` and close. Best effort — we are shutting down either way.
 async fn leave(write: &mut WsSink, msg_ref: u64) -> Result<(), ()> {
     let frame = json!(["1", msg_ref.to_string(), TOPIC, "phx_leave", {}]);
@@ -201,18 +264,16 @@ async fn leave(write: &mut WsSink, msg_ref: u64) -> Result<(), ()> {
 
 /// Build the reconnect schedule.
 ///
-/// `max_elapsed_time` is `None` so the subscription retries for as long as it
-/// is alive; a clipboard that stops syncing after fifteen minutes offline would
-/// be worse than useless. The randomisation factor is the crate's default,
-/// which is what stops every device of a large account reconnecting in lockstep
-/// after a server restart.
-fn reconnect_policy() -> ExponentialBackoff {
-    ExponentialBackoff {
-        initial_interval: RECONNECT_INITIAL,
-        max_interval: RECONNECT_MAX,
-        max_elapsed_time: None,
-        ..ExponentialBackoff::default()
-    }
+/// There is no attempt cap: the subscription retries for as long as it is
+/// alive, because a clipboard that stops syncing after fifteen minutes offline
+/// would be worse than useless. Jitter is on, which is what stops every device
+/// of a large account reconnecting in lockstep after a server restart.
+fn reconnect_policy() -> ExponentialBuilder {
+    ExponentialBuilder::new()
+        .with_min_delay(RECONNECT_INITIAL)
+        .with_max_delay(RECONNECT_MAX)
+        .without_max_times()
+        .with_jitter()
 }
 
 // ---------------------------------------------------------------------------
@@ -226,17 +287,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_reauth_frame_is_a_phoenix_event_on_our_topic() {
+        let frame = access_token_frame(7, "the.new.jwt");
+        let parts = frame.as_array().expect("five-element envelope");
+        assert_eq!(parts.len(), 5);
+        assert_eq!(parts[1], "7");
+        assert_eq!(parts[2], TOPIC);
+        assert_eq!(parts[3], "access_token");
+        assert_eq!(parts[4]["access_token"], "the.new.jwt");
+    }
+
+    #[test]
     fn the_reconnect_schedule_grows_and_is_bounded() {
-        let mut policy = reconnect_policy();
+        let mut schedule = reconnect_policy().build();
         let mut last = Duration::ZERO;
         let mut grew = false;
 
         for _ in 0..40 {
-            let delay = policy.next_backoff().expect("the schedule never gives up");
-            // The crate applies a randomisation factor, so assert the envelope
-            // rather than an exact doubling.
+            let delay = schedule.next().expect("the schedule never gives up");
+            // Jitter adds up to the delay again, so assert the envelope rather
+            // than an exact doubling.
             assert!(
-                delay <= RECONNECT_MAX.mul_f64(1.5),
+                delay <= RECONNECT_MAX * 2,
                 "delay {delay:?} exceeded the ceiling"
             );
             if delay > last {
@@ -246,19 +318,22 @@ mod tests {
         }
         assert!(grew, "the schedule never grew");
 
-        // A stable session resets it to the floor.
-        policy.reset();
-        let first = policy.next_backoff().unwrap();
+        // A stable session rebuilds it, which returns it to the floor.
+        let first = reconnect_policy().build().next().unwrap();
         assert!(
-            first <= RECONNECT_INITIAL.mul_f64(1.5),
-            "reset did not return to the floor: {first:?}"
+            first <= RECONNECT_INITIAL * 2,
+            "a rebuilt schedule did not start at the floor: {first:?}"
         );
     }
 
     #[test]
     fn the_reconnect_schedule_never_expires() {
-        // `max_elapsed_time = None`. A device that has been offline overnight
-        // must still reconnect in the morning.
-        assert!(reconnect_policy().max_elapsed_time.is_none());
+        // No attempt cap. A device that has been offline overnight must still
+        // reconnect in the morning.
+        let mut schedule = reconnect_policy().build();
+        assert!(
+            schedule.nth(10_000).is_some(),
+            "the reconnect schedule gave up"
+        );
     }
 }

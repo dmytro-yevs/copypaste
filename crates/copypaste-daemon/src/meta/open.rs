@@ -12,10 +12,9 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::{params, Connection, OptionalExtension};
-use zeroize::Zeroizing;
 
-use super::error::is_not_a_database;
 use super::MetaError;
+use crate::dbfile;
 
 /// Key of the persisted device id in `sync_device_state`.
 const KEY_DEVICE_ID: &str = "device_id";
@@ -46,16 +45,7 @@ impl Meta {
     /// name is cosmetic and peer-visible, so it stays put across a hostname
     /// change rather than churning on every restart.
     pub fn open(path: &Path, db_key: &[u8; 32], name_hint: &str) -> Result<Self, MetaError> {
-        let conn = Connection::open(path).map_err(MetaError::Sqlite)?;
-        apply_key(&conn, db_key)?;
-        validate_key(&conn)?;
-        for pragma in [
-            "PRAGMA busy_timeout = 5000",
-            "PRAGMA foreign_keys = ON",
-            "PRAGMA temp_store = MEMORY",
-        ] {
-            run_pragma(&conn, pragma)?;
-        }
+        let conn = dbfile::open(path, db_key)?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS sync_device_state (
@@ -108,33 +98,6 @@ impl Meta {
     /// that decision.
     pub(super) fn lock(&self) -> Result<MutexGuard<'_, Connection>, MetaError> {
         self.conn.lock().map_err(|_| MetaError::Poisoned)
-    }
-}
-
-fn apply_key(conn: &Connection, db_key: &[u8; 32]) -> Result<(), MetaError> {
-    // Same shape as the store's: SQLCipher wants the raw key as
-    // `x'<64 hex>'`, applied before any other statement, and both the hex and
-    // the array are wrapped so neither lingers in freed heap.
-    let key_hex = Zeroizing::new(hex::encode(db_key));
-    let stmt = Zeroizing::new(format!("PRAGMA key = \"x'{}'\"", key_hex.as_str()));
-    run_pragma(conn, &stmt)
-}
-
-fn run_pragma(conn: &Connection, sql: &str) -> Result<(), MetaError> {
-    let mut stmt = conn.prepare(sql)?;
-    let mut rows = stmt.query([])?;
-    while rows.next()?.is_some() {}
-    Ok(())
-}
-
-/// Proves the key opens the file before anything else touches it.
-fn validate_key(conn: &Connection) -> Result<(), MetaError> {
-    match conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
-        r.get::<_, i64>(0)
-    }) {
-        Ok(_) => Ok(()),
-        Err(e) if is_not_a_database(&e) => Err(MetaError::InvalidKey),
-        Err(e) => Err(MetaError::Sqlite(e)),
     }
 }
 
