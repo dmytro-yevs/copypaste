@@ -222,6 +222,10 @@ somebody else was writing.
    any part of the tree. The index is shared; a wide stage is a wide commit.
 2. **Verify before committing, not after.** Build, tests, and whatever
    end-to-end checks exist. A red tree goes to a scratch branch, never here.
+   `.githooks/pre-commit` enforces the one part of this that is mechanical:
+   staged Rust files must be rustfmt-clean. It reports only staged paths,
+   because formatting one file also formats its submodules and those may
+   belong to somebody else.
 3. **The message must match the diff.** If a commit turns out to contain more
    than it claims, say so in a follow-up rather than leaving the record wrong.
    Rewriting shared history to fix prose is worse than the inaccuracy.

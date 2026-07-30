@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+# Reject a commit whose staged Rust files are not rustfmt-clean.
+#
+# Runs the same `cargo fmt --check` CI runs, then fails only on the intersection
+# with the staged set. Both halves matter: running rustfmt on one file formats
+# its whole module tree, so a per-file check reports other people's files — and
+# this tree is edited by several agents at once, so failing on those would block
+# commits that are fine.
+set -eu
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+[ -n "$staged" ] || exit 0
+
+command -v cargo >/dev/null 2>&1 || exit 0
+
+root=$(git rev-parse --show-toplevel)
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+cd "$root"
+cargo fmt --all -- --check 2>/dev/null \
+    | sed -n 's|^Diff in \(.*\):[0-9][0-9]*:$|\1|p' \
+    | sed "s|^$root/||" | sort -u > "$tmp"
+
+bad=$(printf '%s\n' "$staged" | sort -u | grep -Fx -f "$tmp" || true)
+
+[ -z "$bad" ] || {
+    printf 'rustfmt would change these staged files:\n'             >&2
+    printf '%s\n' "$bad" | sed 's/^/  /'                            >&2
+    printf 'Run: rustfmt --edition 2021 <file> && git add <file>\n' >&2
+    exit 1
+}
