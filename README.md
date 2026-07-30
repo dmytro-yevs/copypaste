@@ -83,7 +83,8 @@ frontmost-app attribution, private mode, the app-exclusion list · cloud sync
 wired to the daemon, with its quota/TTL job and signed LWW metadata ·
 age-based retention (`evict_older_than` exists, no loop calls it) · rate
 limiting (`governor` is declared in the workspace manifest and unused) ·
-release packaging — `cargo-dist`, DMG signing/notarisation, Homebrew cask ·
+release packaging — the Homebrew tap and its cask, per
+[ADR-0001](docs/adr/0001-macos-distribution-without-a-developer-id.md) ·
 telemetry.
 
 ## What is here
@@ -102,6 +103,7 @@ telemetry.
 | `docs/rewrite/port-manifest/` | ~9,100 lines of specification harvested from v1 and its tests: ~500 acceptance tests, 200+ recovered bug IDs. **The behaviour in them is the requirements.** |
 | `docs/rewrite/target-architecture.md` | The library-first stack, per subsystem, the things that stay custom on purpose, and the three decisions taken since it was written. |
 | `docs/rewrite/design-reference.html` | Visual reference for the **v1** UI. Historical: v1's design is not being carried over. |
+| `docs/adr/` | Decisions with consequences that outlive the commit that took them. |
 | `CLAUDE.md` | The working rules. |
 
 `compat/` no longer exists. It held the evidence that v2 could still open v1

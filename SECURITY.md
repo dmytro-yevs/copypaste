@@ -133,9 +133,23 @@ Written, never observed working. Treat these claims as unproven:
 Age-based retention, private mode, an application exclusion list, rate limiting
 on any surface, and telemetry.
 
+## macOS permissions
+
+**The app requests no TCC permission** — not Accessibility, not Input
+Monitoring. Reading `NSPasteboard` needs none, the global hotkey goes through
+Carbon `RegisterEventHotKey` rather than an event tap, and selecting an item
+puts it on the clipboard instead of synthesising Cmd+V.
+
+This is a security property and also a distribution constraint: the app is
+ad-hoc signed, so macOS would tie any grant to a code hash that changes on
+every build and revoke it on every update. See
+[ADR-0001](docs/adr/0001-macos-distribution-without-a-developer-id.md).
+
+An earlier version of this document claimed clipboard monitoring requires
+accessibility permission on macOS. That was wrong.
+
 ## Known limitations
 
-- Clipboard monitoring needs accessibility permission on macOS.
 - Android restricts clipboard reads to foreground apps.
 - Windows and Linux desktop are out of scope.
 
