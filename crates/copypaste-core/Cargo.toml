@@ -59,6 +59,11 @@ security-framework.workspace = true
 # Versions are literal rather than `[workspace.dependencies]` entries only
 # because the root manifest was held by another agent; they belong there.
 [target.'cfg(target_os = "android")'.dependencies]
+# The NDK sysroot has no OpenSSL, and `bundled-sqlcipher` links against
+# the system one. Vendored here and nowhere else: resolver v2 does not
+# unify features from a target that is not being built, so macOS keeps
+# CommonCrypto and pays nothing. See ADR-0007.
+rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
 keyring-core = "1"
 android-native-keyring-store = "1"
 
