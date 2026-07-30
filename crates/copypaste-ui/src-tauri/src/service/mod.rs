@@ -38,11 +38,9 @@ pub mod push;
 /// packaging slip.
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const MSG_NOT_INSTALLED: &str =
-    "This build of CopyPaste doesn't include the background service.";
+const MSG_NOT_INSTALLED: &str = "This build of CopyPaste doesn't include the background service.";
 const MSG_START_FAILED: &str = "The background service could not be started.";
-const MSG_NEVER_READY: &str =
-    "The background service started but didn't finish coming up.";
+const MSG_NEVER_READY: &str = "The background service started but didn't finish coming up.";
 const MSG_NOT_OURS: &str =
     "Another copy of the background service is already running. Quit it, then try again.";
 
@@ -300,7 +298,14 @@ mod tests {
         let sup = Supervisor::default();
         let state = sup.state(&FakeBackend::running(APP_VERSION)).await;
         assert!(
-            matches!(state, ServiceState::Running { matches_app: true, ours: false, .. }),
+            matches!(
+                state,
+                ServiceState::Running {
+                    matches_app: true,
+                    ours: false,
+                    ..
+                }
+            ),
             "{state:?}"
         );
     }
@@ -325,7 +330,10 @@ mod tests {
             .restart(&FakeBackend::running("0.9.9"))
             .await
             .unwrap_err();
-        assert!(matches!(err, BackendError::Unsupported(MSG_NOT_OURS)), "{err:?}");
+        assert!(
+            matches!(err, BackendError::Unsupported(MSG_NOT_OURS)),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -345,7 +353,12 @@ mod tests {
     /// Every sentence this module can show a user, checked in one place.
     #[test]
     fn no_message_names_a_path() {
-        for message in [MSG_NOT_INSTALLED, MSG_START_FAILED, MSG_NEVER_READY, MSG_NOT_OURS] {
+        for message in [
+            MSG_NOT_INSTALLED,
+            MSG_START_FAILED,
+            MSG_NEVER_READY,
+            MSG_NOT_OURS,
+        ] {
             assert!(!message.contains('/'), "{message}");
             assert!(message.ends_with('.'), "{message}");
             // "daemon" is a developer word; the user-facing name is
