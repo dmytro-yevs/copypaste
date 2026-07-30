@@ -69,11 +69,11 @@ unpairing. Both pass.
 
 | Thing | Why not |
 |---|---|
-| macOS NSPasteboard backend | We develop on Linux. `clipboard::macos` has never been compiled or run. The shared change-detection state machine it uses *is* tested; the binding-level assumptions are not. The daemon reports which backend is live (`status`), so a demo cannot be mistaken for the real thing. |
-| macOS Keychain device-secret store | Same reason. It is behind the `macos-keychain` cargo feature; on Linux the daemon falls back to a `0600` file store, which is a development posture and not a shipping one. |
+| macOS NSPasteboard backend | Compiled and lint-clean on `macos-14` in CI, never executed. The shared change-detection state machine it uses *is* tested; the binding-level assumptions are not. The daemon reports which backend is live (`status`), so a demo cannot be mistaken for the real thing. |
+| macOS Keychain device-secret store | Same: compiled in CI, never executed. Behind the `macos-keychain` feature; on Linux the daemon falls back to a `0600` file store, which is a development posture and not a shipping one. |
 | The UI as a *view* | WebKitGTK executes no JavaScript under headless Xvfb without a GPU. Confirmed rather than assumed: a stub daemon on the socket saw zero requests from the launched app, while the same probe against the CLI proved the harness worked. The shell is verified; what it renders is covered only by jsdom unit tests. |
 | mDNS discovery | The container has no multicast. Discovery is a convenience only — an explicit `--addr` always works, and that is the path the demo and the tests take. |
-| `copypaste-cloud` against a live Supabase project | Every test runs against in-process fakes and mocked HTTP. Nothing has ever spoken to a real deployment. It is also **not wired into the daemon or the CLI** — the crate compiles and is tested, and nothing calls it yet. |
+| `copypaste-cloud` against a live Supabase project | Wired into the daemon and the CLI, and exercised end to end by `scripts/demo-cloud.sh` — **against a local stub, not Supabase.** Nothing has ever spoken to a real deployment. |
 
 ### Not built
 
@@ -97,7 +97,7 @@ telemetry.
 | `crates/copypaste-cli` | `copypaste`. Speaks IPC and nothing else — it cannot open the database or decide what is sensitive. |
 | `crates/copypaste-ipc` | The one model of the wire contract, plus the path redactor every client shares. |
 | `crates/copypaste-p2p` | Noise `NNpsk0` transport, pairing, the LWW merge, mDNS discovery. |
-| `crates/copypaste-cloud` | Supabase auth, PostgREST, Realtime, client-side encryption, the sync driver. Not yet wired in. |
+| `crates/copypaste-cloud` | Supabase auth, PostgREST, Realtime, client-side encryption, the sync driver. |
 | `crates/copypaste-ui` | The app: Tauri v2 + React 19, and the bridge to the daemon socket. macOS and Android both. |
 | `design/` | The Style Dictionary pipeline. One token source compiled per target; its current values are v1's and are placeholders. |
 | `scripts/` | `demo.sh` and `demo-p2p.sh`. |

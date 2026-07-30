@@ -1,15 +1,8 @@
 /**
- * Loading / empty / error placeholder.
- *
- * Every string it can be given is fixed copy; none of them is ever derived from
- * an error object (INV-12). The spinner and the icon are deliberately real,
- * visible elements: v1 shipped classless empty `<span>`s that rendered as
- * nothing and were indistinguishable from a layout bug (CopyPaste-8ebg.29,
- * bdac.2).
- *
- * Loading copy is static text with no pulse animation, per MOT-21, and the
- * spinner is the only moving part — which the token layer stops under
- * `prefers-reduced-motion` (A11Y-11).
+ * The spinner and the icon are real, visible elements: v1 shipped classless
+ * empty `<span>`s that rendered as nothing and were indistinguishable from a
+ * layout bug (CopyPaste-8ebg.29, bdac.2). Loading copy is static text — a
+ * pulsing one ignored reduced motion (MOT-21).
  */
 import type { LucideIcon } from "lucide-react";
 import { LoaderCircle } from "lucide-react";

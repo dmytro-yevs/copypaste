@@ -1,10 +1,5 @@
-/**
- * The single banner slot (INV-17).
- *
- * A11Y-5: `role="alert"` for warnings and errors, `role="status"` for
- * informational ones — severity chooses the role, so nothing informational
- * interrupts a screen reader mid-sentence and nothing urgent waits its turn.
- */
+/** A11Y-5: severity chooses the role, so nothing informational interrupts a
+ *  screen reader and nothing urgent waits its turn. */
 import { CircleAlert, TriangleAlert, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
