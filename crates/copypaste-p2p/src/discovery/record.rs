@@ -8,12 +8,26 @@
 //! | `n` | device display name, UTF-8 |
 //! | `p0`…`pN` | one advertised `pairing_id` per key |
 //!
-//! **The pairing token / PSK is never advertised, in any form — not hashed, not
-//! truncated, not as a "fingerprint".** The `pairing_id` is a public handle for
-//! a pairing; the token is the key to it, and anything derived from it on the
-//! wire is a gift to a passive listener, so the encoder only ever sees the id.
-//! `advertisement_has_no_secret_material` pins the allowed key set, so a new
-//! key cannot be added without the test failing.
+//! # What the advertisement discloses about the token
+//!
+//! The token itself never appears — not whole, not truncated, not in the code
+//! alphabet. The `pairing_id` that *is* advertised is nevertheless derived from
+//! it: [`crate::PairingToken::pairing_id`] is a domain-separated BLAKE2s of the
+//! token truncated to 128 bits. That is one-way, so the id is not a credential
+//! and possession of it authenticates nothing — but it is not independent of the
+//! token either, and two consequences follow and are accepted (security review
+//! F-7, and `SECURITY.md` says the same):
+//!
+//! * Someone holding a candidate pairing code can compute its id and confirm
+//!   offline which device on the LAN it belongs to, without touching the
+//!   network.
+//! * The ids are stable public identifiers, broadcast on every network the
+//!   device joins, so they link a device across networks.
+//!
+//! Nothing else derived from the token goes in the record, and the key set is
+//! closed: `advertisement_carries_the_pairing_id_and_nothing_else_of_the_token`
+//! builds its record from a real [`crate::PairingToken`], so it can fail on both
+//! halves of that claim rather than on strings a test invented.
 //!
 //! Both directions are pure: no sockets either way.
 
@@ -84,8 +98,8 @@ pub(super) fn build_service_info(
         advertised.truncate(MAX_ADVERTISED_PAIRING_IDS);
     }
 
-    // Only these three kinds of key ever exist. No token, no PSK, no digest of
-    // either — see the module docs.
+    // Only these three kinds of key ever exist, and the pairing id is the only
+    // one of the three derived from the token — see the module docs.
     let mut txt: HashMap<String, String> = HashMap::new();
     txt.insert(TXT_KEY_VERSION.to_string(), TXT_VERSION.to_string());
     txt.insert(TXT_KEY_NAME.to_string(), display);
@@ -202,9 +216,8 @@ fn best_addr(addrs: &[IpAddr]) -> Option<IpAddr> {
 mod tests {
     use super::*;
     use crate::discovery::names::{instance_of, MAX_PAIRING_ID_LEN};
+    use crate::transport::{PairingToken, TOKEN_LEN};
     use std::net::Ipv4Addr;
-
-    const SECRET: &str = "d3adb33fd3adb33fd3adb33fd3adb33fd3adb33fd3adb33fd3adb33fd3adb33f";
 
     /// Everything a TXT record puts on the wire, flattened, for the audit test.
     fn txt_bytes(info: &ServiceInfo) -> Vec<u8> {
@@ -308,33 +321,76 @@ mod tests {
 
     // -- the security property ------------------------------------------------
 
-    /// The advertisement is public to anyone within radio range. Nothing
-    /// derived from the pairing token may appear in it, and the key set is
-    /// pinned so a new field cannot be added without a decision.
+    /// The advertisement is public to anyone within radio range.
+    ///
+    /// Security review F-7: the claim this pins used to be "nothing derived
+    /// from the token is advertised", which was false — the `pairing_id` is a
+    /// truncated digest of it — and the test could not notice, because it built
+    /// its record from strings like `"pair-one"` instead of from a pairing. The
+    /// ids here come from real [`PairingToken`]s, the way `Node::republish`
+    /// feeds `build_service_info` from the peer store, so both halves of the
+    /// corrected claim are actually exercised: the id *is* advertised, and
+    /// nothing that yields the token is.
     #[test]
-    fn advertisement_has_no_secret_material() {
-        let ids = vec!["pair-one".to_string(), "pair-two".to_string()];
+    fn advertisement_carries_the_pairing_id_and_nothing_else_of_the_token() {
+        let tokens = [PairingToken::generate(), PairingToken::generate()];
+        let ids: Vec<String> = tokens.iter().map(PairingToken::pairing_id).collect();
         let info = build_service_info("Laptop", "Laptop", &ids, 47_654).unwrap();
 
-        let wire = txt_bytes(&info);
-        let rendered = String::from_utf8(wire.clone()).unwrap();
+        let rendered = String::from_utf8(txt_bytes(&info)).unwrap();
+        let lowered = rendered.to_lowercase();
 
-        for needle in [SECRET, &SECRET[..16], &SECRET.to_uppercase()] {
-            assert!(
-                !rendered.contains(needle),
-                "secret leaked into the TXT record"
-            );
-            assert!(!info.get_fullname().contains(needle));
-            assert!(!info.get_hostname().contains(needle));
+        // The derived id is advertised, and that is deliberate: it is what a
+        // peer looks this device up by.
+        for id in &ids {
+            assert!(rendered.contains(id), "the pairing id must be advertised");
         }
+
+        for token in &tokens {
+            let psk = token.psk();
+            let code = token.to_code();
+            let bare = code.replace('-', "");
+
+            // Not the token, in any rendering it has.
+            for needle in [
+                hex::encode(psk),
+                hex::encode_upper(psk),
+                code.clone(),
+                code.to_lowercase(),
+                bare.clone(),
+                bare.to_lowercase(),
+            ] {
+                assert!(!rendered.contains(&needle), "the token reached the wire");
+                assert!(!lowered.contains(&needle.to_lowercase()));
+                assert!(!info.get_fullname().contains(&needle));
+                assert!(!info.get_hostname().contains(&needle));
+            }
+
+            // Nor a prefix of it. "Truncated" is the specific thing the id must
+            // not be: were `pairing_id` ever reduced to `hex::encode(&psk[..16])`,
+            // this is what would catch it. Eight hex characters is the shortest
+            // needle that cannot match the record by chance.
+            for keep in [4usize, 8, 16, TOKEN_LEN] {
+                let prefix = hex::encode(&psk[..keep]);
+                assert!(
+                    !lowered.contains(&prefix),
+                    "a {keep}-byte prefix of the token reached the wire"
+                );
+            }
+            for keep in [8usize, 16, 32] {
+                assert!(
+                    !lowered.contains(&bare[..keep].to_lowercase()),
+                    "a prefix of the pairing code reached the wire"
+                );
+            }
+        }
+
         for banned in ["psk", "token", "secret", "key"] {
-            assert!(
-                !rendered.to_lowercase().contains(banned),
-                "advertisement mentions {banned}"
-            );
+            assert!(!lowered.contains(banned), "advertisement mentions {banned}");
         }
 
-        // Pin the key set: only v, n and p<n> are ever published.
+        // Pin the key set: only v, n and p<n> are ever published, so a fourth
+        // kind of field cannot arrive without a decision.
         let mut keys: Vec<String> = info
             .get_properties()
             .iter()

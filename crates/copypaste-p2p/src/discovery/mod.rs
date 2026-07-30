@@ -16,7 +16,8 @@
 //! Trust comes only from the Noise `NNpsk0` handshake in [`crate::transport`],
 //! which requires the pairing token; discovery supplies a candidate address to
 //! try, so a hostile advertiser can waste one handshake attempt and no more.
-//! Nothing derived from the token is ever advertised — see [`record`].
+//! What the advertisement does and does not disclose about the token is in
+//! [`record`], which is more than "nothing".
 
 mod error;
 mod names;
