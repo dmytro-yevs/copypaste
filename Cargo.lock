@@ -665,6 +665,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hkdf",
+ "hmac",
  "rand 0.8.7",
  "reqwest 0.12.28",
  "serde",
@@ -683,6 +684,7 @@ name = "copypaste-core"
 version = "2.0.0-alpha.1"
 dependencies = [
  "chacha20poly1305",
+ "copypaste-ipc",
  "directories",
  "hex",
  "hkdf",
@@ -695,7 +697,6 @@ dependencies = [
  "security-framework",
  "serde",
  "serde_json",
- "serde_rusqlite",
  "sha2",
  "subtle",
  "tempfile",
@@ -756,6 +757,7 @@ dependencies = [
  "data-encoding",
  "futures-util",
  "hex",
+ "if-addrs",
  "mdns-sd",
  "rand 0.8.7",
  "serde",
@@ -3981,16 +3983,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
-]
-
-[[package]]
-name = "serde_rusqlite"
-version = "0.36.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b741cc5ef185cd96157e762c3bba743c4e94c8dc6af0edb053c48d2b3c27e691"
-dependencies = [
- "rusqlite",
- "serde",
 ]
 
 [[package]]

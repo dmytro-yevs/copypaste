@@ -1232,6 +1232,20 @@ delegating `ToSql`/`FromSql`, so they already round-trip; the boolean columns
 are stored as `INTEGER 0/1` and are read as `i64 != 0`, which needs an explicit
 converter rather than serde's default `bool`.
 
+**Amended in v2: the defect is fixed, the recommended crate is not used.** The
+requirement here is that fields bind by column *name*, and
+`copypaste-core/src/storage/model.rs` does that directly —
+`row_to_item` is a list of `row.get("…")` calls against one projection macro,
+with no positional index anywhere in the crate. What made v1's version painful
+was the *scale*: 19 columns, three parallel constants, and a `key_version`
+index hardcoded twice. v2 projects seven columns, has one projection (plus its
+`ci.`-aliased twin, generated from the same macro), and no `key_version` at all
+— rule 3 removed it. `serde_rusqlite` was declared as a dependency in
+anticipation of this and never used; carrying a crate to generate seven
+`row.get`s that would still need a manual converter for the `INTEGER 0/1`
+booleans is cost without a defect to prevent, so the declaration has been
+dropped. If the projection grows back towards v1's, revisit this.
+
 ### 6.4 Additional accidental complexity found while harvesting
 
 | Item | Evidence | Recommendation |

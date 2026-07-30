@@ -34,14 +34,17 @@
 //! schema starts clean at version 1 and `rusqlite_migration` owns the ladder.
 
 mod connection;
+mod dbfile;
 mod items;
 mod model;
 mod page;
+mod pinning;
 mod retention;
 mod schema;
 mod search;
 mod store;
 
+pub use dbfile::{attach_key_literal, open_validated, verify_integrity};
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};

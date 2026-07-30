@@ -28,12 +28,6 @@
 //! * **Keystore naming is frozen** at `com.copypaste.daemon` /
 //!   `device-secret-key` (I-10).
 
-// The macOS Keychain backend is behind the `macos-keychain` cargo feature,
-// which this crate's Cargo.toml does not declare yet (it needs
-// `security-framework` as an optional dependency). Until it does, that cfg is
-// an unknown feature name.
-#![allow(unexpected_cfgs)]
-
 mod aead;
 mod keys;
 mod keystore;

@@ -115,6 +115,12 @@ pub enum StoreError {
     #[error("database could not be opened with the supplied key")]
     InvalidKey,
 
+    /// `PRAGMA integrity_check` returned something other than `ok`. The key was
+    /// right and the pages are not: a candidate file in this state must not
+    /// replace a working one.
+    #[error("the database failed its integrity check")]
+    IntegrityCheckFailed,
+
     #[error("item not found")]
     NotFound,
 
