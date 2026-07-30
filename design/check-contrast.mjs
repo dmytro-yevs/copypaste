@@ -10,100 +10,18 @@
  * `--selected` is a color-mix on the live accent, `--hover` is an alpha layer,
  * and both only have a ratio once composited against a real surface.
  *
+ * Token pairs are not the whole contract. A component can hold every token
+ * value fixed and still land below the floor — by putting an alpha on the
+ * focus ring, or using a fill token in a text role — so check-usage.mjs reads
+ * the component tree and this file does not.
+ *
  * Colour maths comes from culori. Run `npm run check` after `npm run build`.
  */
 
-import { readFileSync } from 'node:fs';
-import { parse, converter, wcagContrast } from 'culori';
-
-const DIST = new URL('./dist/css/', import.meta.url);
-const rgb = converter('rgb');
-
-const AA_TEXT = 4.5; // WCAG 1.4.3, small text
-const NON_TEXT = 3.0; // WCAG 1.4.11, control boundaries and focus indicators
-
-const ACCENTS = ['indigo', 'blue', 'teal', 'green', 'amber', 'rose'];
-
-/* ------------------------------------------------------------- CSS reading */
-
-const read = (file) => readFileSync(new URL(file, DIST), 'utf8');
-
-function declarations(src) {
-  const out = {};
-  for (const m of src.matchAll(/^\s*--([\w-]+):\s*([^;]+);/gm)) out[m[1]] = m[2].trim();
-  return out;
-}
-
-/** The `[data-accent="x"]` block, which the flat scan above would collapse. */
-function accentBlock(file, accent) {
-  const m = new RegExp(`data-accent="${accent}"\\][^{]*\\{([^}]*)\\}`).exec(read(file));
-  if (!m) throw new Error(`no [data-accent="${accent}"] block in ${file}`);
-  return declarations(m[1]);
-}
-
-/* ------------------------------------------------------------ colour maths */
-
-/** Composite `src` (possibly translucent) over opaque `dst`. */
-function over(src, dst) {
-  const a = src.alpha ?? 1;
-  return {
-    mode: 'rgb',
-    r: src.r * a + dst.r * (1 - a),
-    g: src.g * a + dst.g * (1 - a),
-    b: src.b * a + dst.b * (1 - a),
-  };
-}
-
-/**
- * Resolve a declaration to a colour. Handles the two indirections the token
- * set actually uses — `var()` and a two-argument `color-mix()` — rather than
- * being a general CSS evaluator.
- */
-function resolve(expr, vars, depth = 0) {
-  if (depth > 8) throw new Error(`reference cycle at: ${expr}`);
-  expr = expr.trim();
-
-  const v = /^var\(--([\w-]+)\)$/.exec(expr);
-  if (v) {
-    if (!(v[1] in vars)) throw new Error(`--${v[1]} is referenced but never defined`);
-    return resolve(vars[v[1]], vars, depth + 1);
-  }
-
-  const mix = /^color-mix\(in [\w-]+,\s*(.+?)\s+([\d.]+)%,\s*(.+?)\s*\)$/.exec(expr);
-  if (mix) {
-    const c = resolve(mix[1], vars, depth + 1);
-    const pct = parseFloat(mix[2]) / 100;
-    if (mix[3].trim() === 'transparent') return { ...c, alpha: (c.alpha ?? 1) * pct };
-    const d = resolve(mix[3], vars, depth + 1);
-    return {
-      mode: 'rgb',
-      r: c.r * pct + d.r * (1 - pct),
-      g: c.g * pct + d.g * (1 - pct),
-      b: c.b * pct + d.b * (1 - pct),
-    };
-  }
-
-  const parsed = parse(expr);
-  if (!parsed) throw new Error(`cannot parse colour: ${expr}`);
-  const c = rgb(parsed);
-  if (parsed.alpha !== undefined) c.alpha = parsed.alpha;
-  return c;
-}
-
-/* ------------------------------------------------------------- the checks */
+import { AA_TEXT, NON_TEXT, THEMES, ACCENTS, context, over, ratio } from './lib/tokens.mjs';
 
 function pairsFor(theme, accent) {
-  const base = declarations(read('tokens.base.css'));
-  const vars = {
-    ...base,
-    ...declarations(read(`tokens.${theme}.css`)),
-    ...accentBlock(`accents.${theme}.css`, accent),
-  };
-  const R = (e) => resolve(e, vars);
-  const surface = (e) => {
-    const c = R(e);
-    return c.alpha === undefined || c.alpha === 1 ? c : over(c, R('var(--bg)'));
-  };
+  const { vars, R, surface, alias } = context(theme, accent);
 
   const bg = surface('var(--bg)');
   const panel = surface('var(--panel)');
@@ -112,6 +30,8 @@ function pairsFor(theme, accent) {
   const selected = over(R('var(--selected)'), bg);
   const hover = over(R('var(--hover)'), bg);
   const withheld = surface('var(--withheld)');
+
+  const named = { '--bg': bg, '--card': card, '--elevated': elevated };
 
   const pairs = [];
   const text = (fg, on, name) => pairs.push({ fg, on, name, floor: AA_TEXT });
@@ -126,7 +46,7 @@ function pairsFor(theme, accent) {
   }
 
   // Status text on the container tint it is designed to sit on.
-  const tintAlpha = parseFloat(base['alpha-tint']);
+  const tintAlpha = parseFloat(vars['alpha-tint']);
   for (const s of ['ok', 'warn', 'err', 'info']) {
     const tint = over({ ...R(`var(--${s})`), alpha: tintAlpha }, bg);
     text(`var(--${s}-strong)`, tint, `--${s}-strong on a ${tintAlpha * 100}% --${s} tint`);
@@ -158,17 +78,43 @@ function pairsFor(theme, accent) {
   nonText('var(--selected-edge)', selected, '--selected-edge on --selected');
   nonText('var(--selected-edge)', bg, '--selected-edge on --bg');
 
-  // Focus indicator and control boundaries.
+  // Focus indicator and control boundaries. --elevated is the tightest of the
+  // three and was missing: shadcn's TabsList and ToggleGroup are `bg-muted`
+  // with 3px of padding and their triggers draw a 3px `ring-ring` into it, and
+  // the Slider thumb rings against a `bg-muted` track. index.css's global
+  // :focus-visible outline is var(--accent) too, so this is the token's floor
+  // and not the alias's.
   nonText('var(--accent)', bg, 'focus ring on --bg');
   nonText('var(--accent)', card, 'focus ring on --card');
+  nonText('var(--accent)', elevated, 'focus ring on --elevated');
   for (const [n, s] of [['--bg', bg], ['--card', card], ['--elevated', elevated]]) {
     nonText('var(--border-strong)', s, `--border-strong on ${n}`);
   }
 
-  return pairs.map((p) => {
-    const fg = over(R(p.fg), p.on);
-    return { ...p, ratio: wcagContrast(fg, p.on) };
-  });
+  const measured = pairs.map((p) => ({ ...p, ratio: ratio(R(p.fg), p.on) }));
+
+  // The shadcn aliases, measured through the alias rather than through the
+  // token underneath. `border-input` is the case that needs this: --color-input
+  // routes to --border-strong here and to --border upstream, and every pair
+  // above stays green if it is pointed back at the 1.25:1 one, because no pair
+  // above names it. Surfaces match what each role is already blessed on.
+  const aliasPairs = [
+    ['color-input', ['--bg', '--card', '--elevated']],
+    ['color-ring', ['--bg', '--card', '--elevated']],
+    ['color-sidebar-ring', ['--bg', '--card', '--elevated']],
+  ];
+  for (const [a, surfaces] of aliasPairs) {
+    for (const n of surfaces) {
+      measured.push({
+        name: `--${a} (alias) on ${n}`,
+        floor: NON_TEXT,
+        on: named[n],
+        ratio: ratio(alias(`var(--${a})`), named[n]),
+      });
+    }
+  }
+
+  return measured;
 }
 
 /* --------------------------------------------------------------- reporting */
@@ -177,7 +123,7 @@ const verbose = process.argv.includes('--verbose');
 const failures = [];
 let checked = 0;
 
-for (const theme of ['dark', 'light']) {
+for (const theme of THEMES) {
   for (const accent of ACCENTS) {
     for (const p of pairsFor(theme, accent)) {
       checked += 1;

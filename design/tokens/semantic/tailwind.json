@@ -30,7 +30,7 @@
     "color-border": { "$value": "{color.border}", "$description": "shadcn `border`." },
     "color-input": { "$value": "{color.border-strong}", "$description": "shadcn `input` is the field's border colour, not its fill — and a field's border is what identifies the control, so it takes the 3:1 variant rather than the decorative one (WCAG 1.4.11)." },
     "color-border-strong": { "$value": "{color.border-strong}", "$description": "NON-shadcn, ours. The 3:1 boundary for any control shadcn does not route through `input`: switch track, segmented button, checkbox." },
-    "color-ring": { "$value": "{color.accent}", "$description": "shadcn `ring` — the focus ring, which is never removed, only restyled. Use it at FULL alpha (`ring-ring`), never shadcn's stock `ring-ring/50`: the accent at 50% over --bg measures 1.78-2.98 across the six accents and fails WCAG 1.4.11." },
+    "color-ring": { "$value": "{color.accent}", "$description": "shadcn `ring` — the focus ring, which is never removed, only restyled. Use it at FULL alpha (`ring-ring`), never shadcn's stock `ring-ring/50`: the accent at 50% measures 1.51-2.98 over --bg, --card and --elevated across the six accents and fails WCAG 1.4.11. --elevated is the tightest: shadcn's TabsList and ToggleGroup are `bg-muted` with 3px of padding that a 3px ring fills exactly." },
 
     "color-sidebar": { "$value": "{color.panel}", "$description": "shadcn `sidebar`. Chrome surface." },
     "color-sidebar-foreground": { "$value": "{color.dim}", "$description": "shadcn `sidebar-foreground`. Nav items rest dim and go --text on hover." },
