@@ -35,8 +35,15 @@
 //! ADR-0003 lists what is outstanding, including the two refactors in crates
 //! this change does not own that the Android backend needs before it is whole.
 
-#![forbid(unsafe_code)]
+// `deny` rather than `forbid`, for exactly one exception: [`android_context`]
+// has to call `ndk_context::initialize_android_context`, which takes raw
+// pointers because JNI does. Everything else in this crate stays safe, and the
+// lint still fails the build for any second exception that does not say so at
+// its own module.
+#![deny(unsafe_code)]
 
+#[cfg(any(target_os = "android", feature = "embedded-backend"))]
+pub mod android_context;
 pub mod backend;
 pub mod capture;
 pub mod commands;

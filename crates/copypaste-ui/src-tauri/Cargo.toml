@@ -38,6 +38,13 @@ tracing.workspace = true
 # flag. See `backend::mod` for why the cfg predicate names both.
 copypaste-core = { path = "../../copypaste-core", optional = true }
 copypaste-p2p = { path = "../../copypaste-p2p", optional = true }
+# `src/android_context.rs` only: the one JNI entry point in this crate, which
+# hands the app context to `ndk-context` so the core's Android Keystore backend
+# can find it. Both crates are already in the tree under tao; neither is a new
+# stack, and both build on any host — which is what lets the feature below
+# type-check that file here. See ADR-0003 for why Tauri does not do this itself.
+jni = { version = "0.21", optional = true }
+ndk-context = { version = "0.1", optional = true }
 
 # ---------------------------------------------------------------------------
 # Desktop only
@@ -62,12 +69,14 @@ tauri-plugin-autostart = "2"
 [target.'cfg(target_os = "android")'.dependencies]
 copypaste-core = { path = "../../copypaste-core" }
 copypaste-p2p = { path = "../../copypaste-p2p" }
+jni = "0.21"
+ndk-context = "0.1"
 
 [features]
 # Compile the in-process backend on a host that is not Android. Exists so this
 # code is type-checked somewhere: without it the whole Android path would be
 # dead text on every machine the project is actually built on.
-embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p"]
+embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:jni", "dep:ndk-context"]
 
 [dev-dependencies]
 tempfile.workspace = true
