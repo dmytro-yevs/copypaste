@@ -32,6 +32,12 @@ pub enum PeerStoreError {
     #[error("that device was revoked and cannot be paired again")]
     Revoked,
 
+    /// The list is at [`super::MAX_PAIRINGS`]. Refusing the new pairing is the
+    /// decision: evicting to make room would cut off a device the user still
+    /// owns, and only the user knows which one they are finished with.
+    #[error("this device is already paired with as many devices as it can hold; unpair one first")]
+    TooManyPairings,
+
     /// A thread panicked while holding the store's lock. Surfaced rather than
     /// swallowed: the map may have been observed mid-update, and its contents
     /// decide who is allowed to connect.
@@ -51,6 +57,7 @@ mod tests {
             PeerStoreError::Legacy,
             PeerStoreError::Invalid("pairing id is empty"),
             PeerStoreError::Revoked,
+            PeerStoreError::TooManyPairings,
             PeerStoreError::Poisoned,
         ];
         for err in &errors {

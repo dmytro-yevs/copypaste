@@ -33,7 +33,7 @@ use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use crate::discovery::{DiscoveredPeer, Discovery};
-use crate::peers::{Peer, PeerStore};
+use crate::peers::{Peer, PeerStore, PeerStoreError};
 
 pub use channel::{NoiseChannel, READ_TIMEOUT, SESSION_TIMEOUT};
 pub use error::NodeError;
@@ -177,10 +177,7 @@ impl Node {
                 last_addr: None,
                 last_seen_ms: 0,
             })
-            .map_err(|e| {
-                warn!(error = %e, "could not store a new pairing");
-                NodeError::PeerStore
-            })?;
+            .map_err(store_error)?;
         self.republish();
 
         Ok(NewPairing {
@@ -228,6 +225,19 @@ impl Node {
         };
         if let Err(e) = self.peers.upsert(updated) {
             warn!(error = %e, "could not record a successful peer session");
+        }
+    }
+}
+
+/// A failure to save a pairing, as the caller should hear it. A full list is
+/// the one case with a remedy the user can carry out, so it keeps its own
+/// sentence instead of arriving as "could not be updated".
+pub(super) fn store_error(e: PeerStoreError) -> NodeError {
+    match e {
+        PeerStoreError::TooManyPairings => NodeError::TooManyPairings,
+        e => {
+            warn!(error = %e, "could not store a pairing");
+            NodeError::PeerStore
         }
     }
 }
@@ -300,6 +310,34 @@ mod tests {
         let second = node.pair_create("b").unwrap();
         assert_ne!(first.pairing_id, second.pairing_id);
         assert_eq!(node.peers().len(), 2);
+    }
+
+    /// Security review F-13. At the cap the user gets a refusal naming the
+    /// remedy, not an internal error and not a silently evicted device.
+    #[test]
+    fn minting_past_the_pairing_cap_is_refused_with_a_reason() {
+        let (node, _dir) = node();
+        for i in 0..crate::peers::MAX_PAIRINGS {
+            node.pair_create(&format!("device-{i}"))
+                .expect("up to the cap");
+        }
+
+        let err = node
+            .pair_create("one too many")
+            .expect_err("past the cap must be refused");
+        assert_eq!(err, NodeError::TooManyPairings);
+        assert!(
+            err.is_client_error(),
+            "a refusal with a remedy must not read as an internal fault"
+        );
+        assert!(err.to_string().contains("unpair"), "{err}");
+
+        // Nothing was taken to make room, and unpairing is what unblocks it.
+        assert_eq!(node.peers().len(), crate::peers::MAX_PAIRINGS);
+        let existing = node.peers().list()[0].pairing_id.clone();
+        assert!(node.unpair(&existing).unwrap());
+        node.pair_create("the replacement")
+            .expect("a freed slot must be usable");
     }
 
     #[test]

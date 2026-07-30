@@ -45,6 +45,27 @@ pub use store::PeerStore;
 /// the shortest window that does not do that.
 pub const PAIRING_CODE_TTL: Duration = Duration::from_secs(300);
 
+/// The most pairings one device will hold.
+///
+/// **A refusal, never an eviction.** Making room by dropping the oldest pairing
+/// would cut off a device the user still owns, and nothing on this end can put
+/// it back — the other half's key is gone and the two devices have to be paired
+/// again by hand. That is the data-loss-shaped outcome `CLAUDE.md` rule 4 rules
+/// out, so a new pairing at the cap fails with
+/// [`PeerStoreError::TooManyPairings`] and the user unpairs something. An
+/// *existing* pairing is never refused: a rename, a new address and the
+/// end-of-session timestamp all still write, or every session would fail once
+/// the list filled up.
+///
+/// Sixteen because that is what one mDNS record advertises
+/// (`discovery::record::MAX_ADVERTISED_PAIRING_IDS`, pinned equal by a test):
+/// past it a pairing is reachable only from an explicit address, so a larger
+/// cap would hand out devices discovery cannot find. It also bounds the work an
+/// unauthenticated dialler can cause, because
+/// [`crate::Session::accept_any`] tries one pre-shared key per stored pairing
+/// per inbound connection (security review F-13).
+pub const MAX_PAIRINGS: usize = 16;
+
 /// A pairing that was cut off, and when.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RevokedDevice {
@@ -66,6 +87,11 @@ pub const FORMAT_TAG: &str = "copypaste-peers-v2";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cap's stated reason is that every pairing this device holds fits in
+    /// one advertisement. A build failure if that stops being true, rather than
+    /// a comment that quietly goes stale.
+    const _: () = assert!(MAX_PAIRINGS <= crate::discovery::MAX_ADVERTISED_PAIRING_IDS);
 
     #[test]
     fn default_file_name_is_not_v1s() {
