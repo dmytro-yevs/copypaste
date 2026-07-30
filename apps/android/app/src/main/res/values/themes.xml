@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The launch theme only. Everything the user sees after the first frame is
+      drawn by Compose (see ui/theme/Theme.kt), and this file deliberately
+      declares no colours of its own: `Theme.Material3.DayNight.NoActionBar`
+      already tracks the system light/dark setting, so the splash matches
+      whichever scheme Compose is about to use.
+    -->
+    <style name="Theme.CopyPaste" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
+</resources>
