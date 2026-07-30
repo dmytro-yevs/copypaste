@@ -1,0 +1,42 @@
+[package]
+name = "copypaste-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "UniFFI bindings that let a native app embed the CopyPaste core"
+
+[lib]
+# `cdylib` is what Android loads (`libcopypaste_ffi.so`, one per ABI).
+# `lib` is kept alongside it so `cargo test -p copypaste-ffi` can link the
+# crate as an ordinary Rust library and exercise everything below directly —
+# without it the whole surface would only be testable through Kotlin, on a
+# device this repository's CI does not have.
+crate-type = ["cdylib", "lib"]
+name = "copypaste_ffi"
+
+[dependencies]
+copypaste-core = { path = "../copypaste-core" }
+copypaste-p2p = { path = "../copypaste-p2p" }
+uniffi = { workspace = true, features = ["tokio"] }
+# The peer operations are network I/O and `copypaste-p2p`'s transport is built
+# on tokio. `uniffi`'s `tokio` feature is what turns an exported `async fn`
+# into a Kotlin `suspend fun` driven on a tokio reactor.
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bin]]
+name = "uniffi-bindgen"
+required-features = ["bindgen"]
+
+[features]
+# Pulls in `uniffi`'s CLI so `src/bin/uniffi-bindgen.rs` can generate the
+# Kotlin. Off by default: an Android release build has no reason to compile a
+# code generator into the `.so`.
+bindgen = ["uniffi/cli"]
