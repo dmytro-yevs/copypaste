@@ -3,10 +3,12 @@
 #![forbid(unsafe_code)]
 
 pub mod crypto;
+pub mod ingest;
 pub mod sensitive;
 pub mod storage;
 
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
+pub use ingest::{ingest, ingest_into, IngestError, Ingested};
 pub use sensitive::{
     sweep_sensitive, Detector, Finding, Severity, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
 };

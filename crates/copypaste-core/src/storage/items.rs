@@ -203,44 +203,6 @@ impl Store {
         Ok(changed as u64)
     }
 
-    /// Pins or unpins an item. Returns `false` if there is no such live item.
-    ///
-    /// Pinning is idempotent; a newly pinned item lands at the end of the pinned
-    /// section.
-    pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<bool, StoreError> {
-        let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn)?;
-        let exists: Option<i64> = tx
-            .query_row(
-                "SELECT 1 FROM clipboard_items WHERE id = ?1 AND deleted = 0",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        if exists.is_none() {
-            return Ok(false);
-        }
-        if pinned {
-            tx.execute(
-                "UPDATE clipboard_items \
-                    SET pinned = 1, \
-                        pin_order = (SELECT COALESCE(MAX(pin_order), 0) + 1 \
-                                       FROM clipboard_items \
-                                      WHERE pinned = 1 AND deleted = 0) \
-                  WHERE id = ?1 AND deleted = 0 AND pinned = 0",
-                [id],
-            )?;
-        } else {
-            tx.execute(
-                "UPDATE clipboard_items SET pinned = 0, pin_order = NULL \
-                  WHERE id = ?1 AND deleted = 0",
-                [id],
-            )?;
-        }
-        tx.commit()?;
-        Ok(true)
-    }
-
     /// Number of live items. Tombstones do not count.
     pub fn count(&self) -> Result<u64, StoreError> {
         let conn = self.conn()?;

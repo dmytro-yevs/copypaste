@@ -1,14 +1,13 @@
-//! The capture loop, and the single ingest path every new item goes through.
+//! The capture loop, and the daemon's wrapper around the shared ingest path.
 //!
-//! [`ingest`] is shared by the clipboard poll loop and by the `add` IPC method
-//! on purpose. v1 had two ingest paths that drifted: the IPC one forgot the
-//! dedup probe, so `copypaste add` could insert a row the poll loop would have
-//! collapsed. One function, two callers.
+//! The pipeline itself is [`copypaste_core::ingest_into`], re-exported here so
+//! this crate's callers name it where they always did. It lives in the core
+//! because Android links the core in-process and cannot depend on this crate,
+//! which is a binary with no `lib` target — and a second ingest is the defect
+//! v1 shipped, where the IPC path forgot the dedup probe.
 //!
 //! Manifest 01's data-loss rules that this file is responsible for:
 //!
-//! * **I-33** — a dedup lookup failure falls through to the insert. Storing a
-//!   duplicate is recoverable; dropping a capture is not.
 //! * **I-36** — no failure inside the pipeline may kill the poll loop. Every
 //!   tick result is logged and the loop continues.
 //! * Nothing acknowledges a capture without having stored it: the tick awaits
@@ -18,9 +17,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use copypaste_core::{CryptoError, NewItem, StoreError, StoredItem};
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
+
+pub use copypaste_core::{ingest_into, IngestError, Ingested};
 
 use crate::AppState;
 
@@ -29,42 +29,6 @@ use crate::AppState;
 // constant. Below ~100 ms the poll loop's own cost becomes visible; above ~5 s
 // bursts become the norm rather than the exception, which is what the bounds in
 // `copypaste_ipc::config` encode.
-
-/// What a successful ingest did.
-#[derive(Debug)]
-pub enum Ingested {
-    /// A new row.
-    Stored(StoredItem),
-    /// The same content was already stored inside the dedup window; this is the
-    /// existing row.
-    Duplicate(StoredItem),
-}
-
-impl Ingested {
-    pub fn into_item(self) -> StoredItem {
-        match self {
-            Ingested::Stored(item) | Ingested::Duplicate(item) => item,
-        }
-    }
-}
-
-/// Ingest failures.
-///
-/// The `Display` text is deliberately free of detail: these strings can end up
-/// in an IPC error, and the underlying `StoreError` may carry a database path,
-/// which discloses the local username (CLAUDE.md rule 4). The full error is
-/// kept as the `source` and goes to the local log, never to a client.
-#[derive(Debug, thiserror::Error)]
-pub enum IngestError {
-    #[error("clipboard content was empty")]
-    Empty,
-    #[error("the item is larger than the configured size limit")]
-    TooLarge,
-    #[error("the item could not be encrypted")]
-    Crypto(#[from] CryptoError),
-    #[error("the item could not be stored")]
-    Storage(#[from] StoreError),
-}
 
 /// Poll the clipboard until shutdown.
 ///
@@ -111,7 +75,8 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 /// Best-effort, and deliberately never fatal to a tick: the sweep deletes user
 /// data, so a failure must leave the data alone and retry, not stop capture
 /// (CLAUDE.md rule 4). `0` disables it, and that is the default until a user
-/// asks for it.
+/// asks for it — `copypaste_ipc::ConfigData::sensitive_ttl_secs` records why,
+/// and what would justify turning it back on out of the box.
 fn sweep_sensitive_items(state: &AppState) {
     let ttl = Duration::from_secs(state.settings.get().sensitive_ttl_secs);
     let removed = copypaste_core::sensitive::sweep_sensitive(
@@ -150,8 +115,12 @@ fn tick(state: &AppState) -> Result<(), IngestError> {
             debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
             // Wakes the watchers and pulls both sync loops to their floor, so a
             // copy here shows up over there in seconds rather than at whatever
-            // interval the loops had drifted to.
-            state.note_local_change();
+            // interval the loops had drifted to. `note_capture` rather than
+            // `note_local_change` because this is the one caller that knows the
+            // change was a *copy*, which is what a client needs to decide
+            // whether to notify (parity finding 18).
+            state.note_capture();
+            crate::notify::on_capture(state);
             Ok(())
         }
         Ok(Ingested::Duplicate(item)) => {
@@ -170,11 +139,8 @@ fn tick(state: &AppState) -> Result<(), IngestError> {
     }
 }
 
-/// Detect, encrypt, deduplicate, store — the one path into the database.
-///
-/// A thin shim over [`ingest_into`]: everything except recording the item's
-/// origin is expressed in `copypaste-core` types, so that function can move into
-/// `copypaste-core` unchanged. See the module header for why that move matters.
+/// [`copypaste_core::ingest_into`], plus the one thing the core cannot do:
+/// record which device captured the item.
 pub fn ingest(
     state: &AppState,
     content: &str,
@@ -218,123 +184,4 @@ pub fn ingest_at(
         }
     }
     Ok(outcome)
-}
-
-/// The ingest path itself, in `copypaste-core` terms only.
-///
-/// **Written to be moved into `copypaste-core`.** Android links the core
-/// in-process and cannot reach this crate, which is a binary with no `lib`
-/// target — and re-typing it there is how v1 got two ingest paths that drifted
-/// (see the module header). Nothing below mentions the daemon, so the move is a
-/// cut-and-paste plus a re-export, taking [`Ingested`], [`IngestError`],
-/// [`MAX_HISTORY_ITEMS`] and their tests with it.
-#[allow(clippy::too_many_arguments)]
-pub fn ingest_into(
-    store: &copypaste_core::Store,
-    detector: &copypaste_core::Detector,
-    keyring: &copypaste_core::Keyring,
-    content: &str,
-    content_type: &str,
-    created_at: i64,
-    settings: &copypaste_ipc::ConfigData,
-) -> Result<Ingested, IngestError> {
-    if content.trim().is_empty() {
-        return Err(IngestError::Empty);
-    }
-    // Refusing a capture is data loss, so the cap has to be a *user's* number
-    // rather than a compiled-in one — and the refusal is reported, not silent.
-    if content.len() as u64 > settings.max_item_bytes {
-        return Err(IngestError::TooLarge);
-    }
-
-    let hash = content_hash(content.as_bytes());
-
-    // Manifest 01 I-33: a probe failure must not abort the ingest. Falling
-    // through costs at most a duplicate row; returning here costs the capture.
-    // `find_recent_by_hash` takes an absolute epoch-ms cutoff, not a duration.
-    // Passing the window width itself would compare every row's timestamp
-    // against 60000 ms after 1970 and match the entire history, silently
-    // collapsing all repeats of a value into the first one ever stored.
-    let cutoff_ms = created_at - dedup_window_ms(settings);
-    let recent = match store.find_recent_by_hash(&hash, cutoff_ms) {
-        Ok(found) => found,
-        Err(e) => {
-            warn!(error = ?e, "dedup probe failed; storing the item anyway");
-            None
-        }
-    };
-    if let Some(row) = recent {
-        return Ok(Ingested::Duplicate(row));
-    }
-
-    let is_sensitive = detector.is_sensitive(content);
-
-    // The AEAD binds the item id as associated data (manifest 02: "AAD must
-    // bind item identity"), and `decrypt` is handed `StoredItem::id` on the way
-    // back out. The id therefore has to be chosen *before* the seal — it cannot
-    // be assigned by the insert, or the AAD written and the AAD read differ and
-    // every row fails authentication on every later read. That is why `NewItem`
-    // carries `id` rather than the store minting one.
-    let item_id = uuid::Uuid::new_v4().to_string();
-    let key = keyring.item_key();
-    let (nonce, ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, &item_id)?;
-
-    let stored = store.insert(NewItem {
-        id: item_id,
-        content_ciphertext: ciphertext,
-        nonce,
-        content_type: content_type.to_string(),
-        content_hash: hash,
-        is_sensitive,
-        // CLAUDE.md rule 4 / manifest 03 ADR-015: a sensitive item never
-        // reaches the search index. This is the write-time layer of that rule;
-        // `server::search` enforces it again at read time.
-        search_text: if is_sensitive {
-            None
-        } else {
-            Some(content.to_string())
-        },
-        created_at,
-    })?;
-
-    // Best-effort, and deliberately after the insert: the item is already
-    // durable, and a failed sweep must never turn a stored capture into a lost
-    // one.
-    if let Err(e) = store.evict_over_cap(u64::from(settings.history_limit)) {
-        warn!(error = ?e, "history cap eviction failed");
-    }
-    // Age-based retention, disabled by the `0` sentinel. Best-effort and after
-    // the insert, for the same reason the cap sweep is.
-    if settings.retention_days > 0 {
-        let cutoff = created_at - i64::from(settings.retention_days) * 86_400_000;
-        if let Err(e) = store.evict_older_than(cutoff) {
-            warn!(error = ?e, "age-based retention failed");
-        }
-    }
-
-    Ok(Ingested::Stored(stored))
-}
-
-/// Hex SHA-256 of the raw pre-encryption bytes.
-///
-/// Manifest 03 §3.7 (`CopyPaste-y4v1`): the **full** 64-character lowercase
-/// digest. An earlier daemon helper truncated it to 16 bytes, which weakened
-/// second-preimage resistance for nothing.
-///
-/// The digest comes from `copypaste-core` rather than a second `sha2` call
-/// site here: the storage layer already hashes for its dedup index, and two
-/// hash helpers is exactly how v1 ended up with two definitions of the same
-/// content identity.
-fn content_hash(bytes: &[u8]) -> String {
-    copypaste_core::storage::compute_content_hash(bytes)
-}
-
-/// The dedup window, in milliseconds.
-///
-/// `copypaste_core::storage::DEDUP_WINDOW_MS` is the default this setting
-/// starts at; the setting is what is in force. Two definitions of "the same
-/// thing twice" is exactly the duplication rule 1 is about, so the constant is
-/// referenced only in `ConfigData::default`.
-fn dedup_window_ms(settings: &copypaste_ipc::ConfigData) -> i64 {
-    i64::from(settings.dedup_window_secs) * 1_000
 }
