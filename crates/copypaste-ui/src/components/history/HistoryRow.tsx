@@ -1,24 +1,15 @@
 /**
- * One history row.
- *
  * INV-10: a sensitive item's plaintext is *absent*, not blurred — the bridge
- * sends `content: null`. Nothing here can reconstruct it, and the row's
- * accessible name is a fixed string (AT-13).
+ * sends `content: null`, and the accessible name is a fixed string (AT-13).
  *
- * INV-8: `role="listitem"`, never `role="option"` — option is
- * `childrenPresentational` and would flatten these buttons into an axe
- * `nested-interactive` violation. For the same reason the body button and the
- * action buttons are siblings; nesting them would recreate the violation
- * under a different tag.
+ * **Click selects, double-click copies.** A single click that overwrites the
+ * system clipboard is a destructive default. The explicit Copy button is the
+ * path a screen reader or a touch user takes, which is also why the actions are
+ * always visible: Android has no hover, so a hover-revealed control does not
+ * exist there.
  *
- * **Click selects, double-click copies.** Selecting and copying are different
- * intents, and a single click that overwrites the system clipboard is a
- * destructive default. Keyboard: Enter on the focused list copies (§3.1.4);
- * every row also carries an explicit Copy button, which is the path a screen
- * reader or a touch user takes.
- *
- * Actions are always visible. Hover is not available on Android, so a
- * hover-revealed control is a control that does not exist there.
+ * The body button and the action buttons are siblings, never nested: a control
+ * inside a control is the `nested-interactive` violation INV-8 is about.
  */
 import { memo } from "react";
 import {
@@ -44,17 +35,15 @@ import {
 } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 
-/** A11Y-3, exact strings from the manifest. */
+/** A11Y-3, verbatim from the manifest. */
 export const SENSITIVE_A11Y_LABEL = "Sensitive item, hidden — activate to reveal";
 export const SENSITIVE_REVEAL_LABEL =
   "Sensitive content hidden — activate to reveal";
 const SENSITIVE_PLACEHOLDER = "Sensitive content hidden";
 const EMPTY_LABEL = "Empty item";
 
-/**
- * Carries no relative age: the age changes on its own, and the live region
- * mirrors this string on every selection change (INV-9).
- */
+/** No relative age: the live region mirrors this on every selection change,
+ *  and an age that ticks would re-announce a selection that did not change. */
 export function rowLabel(item: Item): string {
   const body = item.is_sensitive
     ? SENSITIVE_A11Y_LABEL
@@ -68,7 +57,6 @@ interface HistoryRowProps {
   item: Item;
   active: boolean;
   flashing: boolean;
-  /** Present only while this row is the revealed one. */
   revealedContent: string | null;
   revealPending: boolean;
   previewLines: number;
@@ -80,8 +68,8 @@ interface HistoryRowProps {
   onHide: () => void;
 }
 
-/** 36px under a mouse, 48px under a finger — `--sz-iconbtn` carries the
- *  coarse-pointer floor so one token moves every target. */
+/** 36px under a mouse, 48px under a finger: `--sz-iconbtn` carries the
+ *  coarse-pointer floor, so one token moves every target. */
 const ACTION = "size-[var(--sz-iconbtn)]";
 
 function HistoryRowImpl({
@@ -102,8 +90,7 @@ function HistoryRowImpl({
   const revealed = revealedContent !== null;
   const masked = item.is_sensitive && !revealed;
   const body = revealed ? revealedContent : item.content;
-  // Roving tabindex: 200 rows must not be 1000 tab stops. Arrow keys on the
-  // list move the selection, which moves what is tabbable.
+  // Roving: 200 rows must not be 1000 tab stops.
   const tab = active ? 0 : -1;
 
   return (
@@ -139,11 +126,11 @@ function HistoryRowImpl({
         className="flex min-w-0 flex-1 flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
         {masked ? (
-          <span className="flex items-center gap-2 text-sm text-c-secret">
-            <span
-              className="h-[var(--fs-sm)] w-20 rounded-xs bg-current opacity-25"
-              aria-hidden="true"
-            />
+          // The withheld slot stands in for content that was never delivered.
+          // Not a blur: a blur says the content is present behind a filter,
+          // which for a screenshot or a shoulder is both a lie and a leak.
+          <span className="flex items-center gap-2 rounded-sm border border-withheld-border bg-withheld px-2 py-0.5 text-sm text-withheld-fg">
+            <ShieldAlert size={12} aria-hidden="true" />
             {SENSITIVE_PLACEHOLDER}
           </span>
         ) : (
@@ -243,9 +230,6 @@ function HistoryRowImpl({
   );
 }
 
-/**
- * Plain `memo`, not v1's twenty-field comparator: every prop is a primitive or
- * a stable callback, so the shallow compare stays correct when `Item` grows a
- * field. The comparator silently stopped re-rendering when it did not (§9.1).
- */
+/** Plain `memo`, not v1's twenty-field comparator: that one silently stopped
+ *  re-rendering when `Item` grew a field (§9.1). */
 export const HistoryRow = memo(HistoryRowImpl);

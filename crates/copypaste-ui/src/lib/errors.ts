@@ -1,19 +1,15 @@
 /**
- * Error classification and the code -> copy mapping.
+ * INV-12 and CLAUDE.md rule 4: **no raw error string is ever rendered.** The
+ * socket path contains the local username, so a transport error carrying it
+ * would leak that into the DOM, screenshots and the accessibility tree. The raw
+ * value is logged and dropped; only an `ErrorKind` crosses into the view layer.
  *
- * INV-12 (manifest 06 §2) and CLAUDE.md rule 4: **no raw error string may ever
- * be rendered.** The daemon's Unix socket path contains the local username, and
- * a transport error carrying it would leak that into the DOM, into screenshots
- * and into the accessibility tree. Raw errors are `console.error`'d and thrown
- * away; only an `ErrorKind` crosses into the view layer, and only
- * `friendlyError()` turns one into text.
- *
- * Vocabulary is the canonical one (manifest §3.2.5): "clipboard service" /
- * "background service", never "daemon", and American spelling.
+ * Vocabulary is "clipboard service" / "background service", never "daemon"
+ * (bdac.34/36), American spelling.
  */
 
-/** The bridge surfaces these; they mirror `copypaste_ipc::ErrorCode` plus the
- *  transport conditions the daemon itself cannot report. */
+/** `copypaste_ipc::ErrorCode`, plus the conditions the daemon cannot report
+ *  about itself. */
 export type ErrorKind =
   | "offline"
   | "not_ready"

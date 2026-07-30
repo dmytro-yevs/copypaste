@@ -1,17 +1,8 @@
 /**
- * Revealing one sensitive item, and un-revealing it again.
- *
- * A sensitive item arrives with `content: null` — the bridge drops the
- * plaintext before serialising (INV-10), so revealing is a *fetch*, not a CSS
- * state. That makes the two expiry rules literal rather than cosmetic:
- *
- *   INV-11 — a revealed item re-hides on **window blur** (SCRH-7) **and** after
- *   **10s** (CopyPaste-5917.56), independently. Here that drops the string, so
- *   an unattended screen is not merely covering a secret it still holds.
- *
- * Only one item is revealed at a time; revealing another drops the first. The
- * plaintext lives in component state and is never written to the query cache,
- * which would outlive the row and survive a re-render.
+ * Revealing is a *fetch*, not a CSS state: the item arrives with
+ * `content: null` (INV-10). That makes INV-11's two expiries literal — the
+ * string is dropped on window blur (SCRH-7) and after 10s (CopyPaste-5917.56),
+ * independently — rather than covering a secret the window still holds.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -20,15 +11,11 @@ import { REVEAL_TIMEOUT_MS } from "@/lib/layout";
 import { revealItem } from "@/lib/ipc";
 
 /**
- * `reveal_item` refuses on the desktop build today, and the refusal is
- * deliberate: the bridge's first attempt routed it through the `Copy` method,
- * which would have published the secret to the system pasteboard as a side
- * effect of *looking* at it. It stays refused until a read-only `Get` lands in
- * the wire contract.
- *
- * So a refusal is a normal state with its own sentence, not an error to be
- * reported. What the user needs to know is that the item is still usable — copy
- * puts it on the clipboard without its ever entering this window.
+ * `reveal_item` refuses on desktop today, deliberately: the bridge's first
+ * attempt routed it through `Copy`, which would have published the secret to
+ * the system pasteboard as a side effect of *looking* at it. It stays refused
+ * until a read-only `Get` lands in the wire contract, so the refusal is a
+ * normal state with its own sentence.
  */
 const UNAVAILABLE_COPY =
   "Showing this item isn't available yet. You can still copy it — its contents never enter this window.";

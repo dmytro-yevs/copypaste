@@ -1,25 +1,11 @@
 /**
- * Client-owned preferences: appearance and list display.
+ * The state the daemon does **not** own. React Query holds what the service is
+ * the source of truth for; this holds what only this window knows.
  *
- * This is the half of the state the **daemon does not own**, which is exactly
- * the split CLAUDE.md's architecture note draws — React Query holds everything
- * the service is the source of truth for (history, status, peers), and zustand
- * holds what only this window knows. Neither is a copy of the other.
- *
- * INV-21 — *prefs corruption defaults per field, never wholesale.* An invalid
- * `theme` must not discard a valid `accent`. That is `parsePrefs` below: every
- * field is parsed independently with its own fallback, unknown keys are dropped
- * and never re-persisted, a present-but-invalid field logs a warning, and an
- * absent one defaults silently. Malformed JSON, a non-object payload, or a
- * throwing `localStorage` all fall back to full defaults without throwing.
- *
- * INV-22 — *first paint already carries the persisted appearance.* `readPrefs`
- * is synchronous, and `main.tsx` calls it before `createRoot().render`, so the
- * `<html>` attributes are set before React puts anything in the body. v1 needed
- * a separate dependency-free pre-paint script because its store was inside the
- * app bundle; reading a few bytes of `localStorage` at module scope is the same
- * guarantee without the second copy of the schema (AT-54's whole risk was that
- * copy drifting).
+ * INV-21: an invalid `theme` must not discard a valid `accent`, so every field
+ * is parsed independently. INV-22: `readPrefs` is synchronous so `main.tsx` can
+ * set the `<html>` attributes before first paint — v1 needed a second copy of
+ * the schema in a pre-paint script, and AT-54 exists because that copy drifted.
  */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
@@ -65,12 +51,9 @@ export const DEFAULT_PREFS: Prefs = {
 };
 
 /**
- * One schema per field, parsed independently. Manifest §9.1 names a zod schema
- * with a per-field fallback as the replacement for v1's hand-written
- * `validateTheme` / `validateAccent` / whitelist merge; `safeParse` per field
- * rather than `.catch()` on a single object schema, because INV-21 also
- * requires *warning* on a present-but-invalid field, and a fallback that
- * silently substitutes cannot tell the two apart.
+ * `safeParse` per field rather than `.catch()` on one object schema: INV-21
+ * requires a *warning* on a present-but-invalid field, and a silent fallback
+ * cannot tell that apart from an absent one.
  */
 const FIELD = {
   theme: z.enum(THEMES),
@@ -80,15 +63,8 @@ const FIELD = {
   warnBeforeReveal: z.boolean(),
 } as const;
 
-/**
- * Parse a stored blob into prefs. Never throws.
- *
- * Present-but-invalid warns (the user's setting was discarded and they should
- * be able to find out why); absent defaults silently (a new field on an old
- * install is not a problem). Unknown keys are dropped by construction — the
- * result is built from the known key list, so nothing else can survive to be
- * re-persisted.
- */
+/** Never throws. Unknown keys are dropped by construction: the result is built
+ *  from the known key list, so nothing else survives to be re-persisted. */
 export function parsePrefs(raw: unknown): Prefs {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     if (raw !== undefined && raw !== null) {
@@ -104,8 +80,6 @@ export function parsePrefs(raw: unknown): Prefs {
     if (!(key in source)) continue; // absent -> silent default
     const result = FIELD[key].safeParse(source[key]);
     if (result.success) {
-      // The per-key schemas are 1:1 with the field types; the cast is the
-      // price of iterating a heterogeneous record.
       (out[key] as unknown) = result.data;
     } else {
       console.warn(
@@ -135,8 +109,8 @@ export function readPrefs(): Prefs {
   }
 }
 
-/** A storage that cannot throw. Private mode, a full quota and a disabled
- *  store all end up here, and none of them may take the window down. */
+/** Private mode, a full quota and a disabled store all land here, and none of
+ *  them may take the window down. */
 const safeStorage = {
   getItem(name: string): string | null {
     try {
@@ -176,7 +150,6 @@ export const usePrefs = create<PrefsStore>()(
     {
       name: STORAGE_KEY,
       storage: createJSONStorage(() => safeStorage),
-      // Only the data is persisted; the actions are not state.
       partialize: (state) =>
         // Built from the known key list so an action can never be persisted,
         // and so a key removed from `Prefs` stops being written on the next
@@ -187,15 +160,14 @@ export const usePrefs = create<PrefsStore>()(
             state[key as keyof Prefs],
           ]),
         ) as unknown as Prefs,
-      // INV-21: the stored blob is validated per field on the way in, so a
-      // corrupt entry can never reach a component.
+      // INV-21: validated on the way in, so a corrupt entry cannot reach a
+      // component.
       merge: (persisted, current) => ({ ...current, ...parsePrefs(persisted) }),
     },
   ),
 );
 
-/** Selector helpers — subscribing to one field keeps a slider from re-rendering
- *  the history list. */
+/** Subscribing to one field keeps a slider from re-rendering the list. */
 export const selectAppearance = (s: PrefsStore) => ({
   theme: s.theme,
   accent: s.accent,

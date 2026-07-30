@@ -1,15 +1,10 @@
 /**
- * The history toolbar: search field, result count, clear-all.
+ * `historyCount` is the only place that decides which number the badge shows.
+ * v1 had more than one, and the badge read "14 items" beside a search matching
+ * none of them (CopyPaste-g27b.37).
  *
- * The count lives here and **nowhere else**. Manifest §3.1.7
- * (CopyPaste-g27b.37) is about a badge that kept reading the daemon's total
- * while a search showed zero matches; the way not to reintroduce that is to
- * have exactly one place that decides which number is being shown — see
- * `historyCount` below, which is the whole rule.
- *
- * Shortcuts are discoverable through the field's `title` rather than a
- * permanently visible hint that crowded the header and read as disabled text
- * (CopyPaste-7w060.6).
+ * The shortcut hint lives in `title`: a permanently visible one crowded the
+ * header and read as disabled text (CopyPaste-7w060.6).
  */
 import type { RefObject } from "react";
 import { Search, Trash2, X } from "lucide-react";
@@ -17,10 +12,8 @@ import { Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-/**
- * Which number the badge shows: the filtered count whenever a filter is
- * active, the daemon's total otherwise (AT-68).
- */
+/** The filtered count whenever a filter is active, the service's total
+ *  otherwise (AT-68). */
 export function historyCount(
   filtered: boolean,
   visible: number,
@@ -33,13 +26,11 @@ export function historyCount(
 interface SearchBarProps {
   value: string;
   onChange: (value: string) => void;
-  /** ArrowDown from the field hands control to the list. */
   onEnterList: () => void;
   inputRef: RefObject<HTMLInputElement | null>;
   filtered: boolean;
   visible: number;
   total: number | undefined;
-  /** Absent while there is nothing to clear. */
   onClearAll?: () => void;
 }
 

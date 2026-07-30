@@ -3,12 +3,13 @@
   "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "The single source of truth for CopyPaste colour, type, spacing and motion. Compiled by Style Dictionary to CSS custom properties (macOS/Tauri desktop), a Tailwind v4 @theme layer (shadcn/ui), and Kotlin/Compose Material 3 (Android).",
+  "description": "The single source of truth for CopyPaste colour, type, spacing and motion. Compiled by Style Dictionary to CSS custom properties and a Tailwind v4 @theme layer.",
   "license": "MIT OR Apache-2.0",
   "files": [
     "tokens",
     "dist",
-    "style-dictionary.config.js"
+    "style-dictionary.config.js",
+    "check-contrast.mjs"
   ],
   "exports": {
     "./css": "./dist/css/index.css",
@@ -18,10 +19,12 @@
   },
   "scripts": {
     "build": "node style-dictionary.config.js",
+    "check": "node check-contrast.mjs",
     "clean": "node -e \"import('node:fs').then(fs=>fs.rmSync('dist',{recursive:true,force:true}))\"",
-    "rebuild": "npm run clean && npm run build"
+    "rebuild": "npm run clean && npm run build && npm run check"
   },
   "devDependencies": {
+    "culori": "^4.0.2",
     "style-dictionary": "^5.5.0"
   }
 }

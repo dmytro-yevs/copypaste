@@ -1,14 +1,8 @@
 /**
- * Delete with an undo window — manifest §3.1.8, and CLAUDE.md rule 4 ("data
- * loss is the worst outcome").
- *
- * The row disappears immediately; the IPC fires 5000ms later. A second delete
- * commits the first at once, and anything still pending is committed when the
- * window goes away, so nothing is ever silently left undeleted (F11).
- *
- * `pending` is filtered out of the query result by the caller. When it is empty
- * the caller returns the query's array untouched, which is what preserves
- * INV-2's reference stability on the idle path.
+ * Delete with an undo window (§3.1.8; CLAUDE.md rule 4 — data loss is the worst
+ * outcome). The row goes at once, the IPC fires 5000ms later, a second delete
+ * commits the first immediately, and anything pending is committed on unmount
+ * so nothing is silently left undeleted (F11).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -54,7 +48,7 @@ export function useDeferredDelete() {
       } catch (raw) {
         toast.error(toFriendly(raw));
       } finally {
-        // INV-30: the busy flag is released whatever happened above.
+        // INV-30: released whatever happened above.
         setPending((prev) => without(prev, id));
       }
     },
@@ -97,8 +91,8 @@ export function useDeferredDelete() {
     [commit, flush, undo],
   );
 
-  // A pending delete must survive neither a reload nor an unmount as a silent
-  // no-op: commit it directly, without touching React state.
+  // Commit directly, without touching React state: an unmount must not turn a
+  // pending delete into a silent no-op.
   useEffect(() => {
     const commitAllNow = () => {
       for (const [id, timer] of timers.current) {

@@ -1,15 +1,5 @@
-/**
- * INV-20 — **the shell chrome is never inside an error boundary.**
- *
- * Navigation and the main pane get their own *sibling* boundaries, so a crash
- * in a screen cannot take navigation down with it, and the fallback renders
- * inside the shell layout rather than against a bare document body
- * (CopyPaste-8ebg.12).
- *
- * The boundary itself is `react-error-boundary` rather than a hand-written
- * class component (CLAUDE.md rule 1): it is the maintained package for exactly
- * this, and it brings the reset semantics we would otherwise write badly.
- */
+/** INV-20: sibling boundaries around navigation and the main pane, so a crash
+ *  in a screen cannot take navigation down with it (CopyPaste-8ebg.12). */
 import type { ReactNode } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import { RotateCcw } from "lucide-react";
@@ -17,7 +7,7 @@ import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface BoundaryProps {
-  /** Named so a crash report can say *which* region failed. */
+  /** Named so a crash report says which region failed. */
   label: string;
   children: ReactNode;
 }
@@ -25,8 +15,7 @@ interface BoundaryProps {
 export function Boundary({ label, children }: BoundaryProps) {
   return (
     <ErrorBoundary
-      // The raw error is logged, never rendered: a stack can contain a bundle
-      // path, and a path discloses the local username (INV-12).
+      // Logged, never rendered: a stack contains a bundle path (INV-12).
       onError={(error) => console.error(`[copypaste] ${label} crashed`, error)}
       fallbackRender={({ resetErrorBoundary }) => (
         <div

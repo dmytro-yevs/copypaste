@@ -14,7 +14,7 @@
 
 :root[data-accent="blue"],
 .theme-scope[data-accent="blue"] {
-  --accent: oklch(0.623 0.214 259.815);
+  --accent: oklch(0.546 0.245 262.881);
   --accent-2: oklch(0.707 0.165 254.624);
   --on-accent: oklch(1 0 0);
 }
@@ -42,7 +42,7 @@
 
 :root[data-accent="rose"],
 .theme-scope[data-accent="rose"] {
-  --accent: oklch(0.645 0.246 16.439);
+  --accent: oklch(0.586 0.253 17.585);
   --accent-2: oklch(0.712 0.194 13.428);
   --on-accent: oklch(1 0 0);
 }

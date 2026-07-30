@@ -1,6 +1,6 @@
 {
   "accents": {
-    "$description": "The accent axis, dark resolution. Six user-selectable accents drawn straight from the Tailwind v4 palette: --accent is the -500 step (a FILL, paired with --on-accent) and --accent-2 the -400 (TEXT, >=4.5 on --bg). Indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks and feed shadcn's `primary` / `ring` / `sidebar-primary` slots, so choosing an accent re-tints every stock component with no per-component override.",
+    "$description": "The accent axis, dark resolution. Six user-selectable accents drawn straight from the Tailwind v4 palette: --accent is a FILL and must carry --on-accent at >=4.5; --accent-2 is TEXT and must clear 4.5 on --bg. That is why the fills are not one ramp step: indigo, teal, green and amber sit at -500, blue and rose at -600. Teal, green and amber take dark ink because those hues are intrinsically light at -500 and darkening them to carry white ink would read as muddy on a near-black ground; blue and rose darken instead, which is what every system does with blue. Indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks and feed shadcn's `primary` / `ring` / `sidebar-primary` slots, so choosing an accent re-tints every stock component with no per-component override.",
     "$type": "color",
     "indigo": {
       "$description": "Default accent. indigo-500 / indigo-400.",
@@ -17,9 +17,9 @@
       }
     },
     "blue": {
-      "$description": "blue-500 / blue-400.",
+      "$description": "Fill blue-600, text blue-400. Blue is one of two accents whose -500 step does not carry white ink in dark (3.71); -600 measures 5.26 and still clears 3:1 as a focus ring at 3.78.",
       "accent": {
-        "$value": "oklch(0.623 0.214 259.815)"
+        "$value": "oklch(0.546 0.245 262.881)"
       },
       "accent-2": {
         "$value": "oklch(0.707 0.165 254.624)"
@@ -68,9 +68,9 @@
       }
     },
     "rose": {
-      "$description": "rose-500 / rose-400.",
+      "$description": "Fill rose-600, text rose-400. rose-500 measures 3.73 with white ink; rose-600 measures 4.78, ring 4.16.",
       "accent": {
-        "$value": "oklch(0.645 0.246 16.439)"
+        "$value": "oklch(0.586 0.253 17.585)"
       },
       "accent-2": {
         "$value": "oklch(0.712 0.194 13.428)"

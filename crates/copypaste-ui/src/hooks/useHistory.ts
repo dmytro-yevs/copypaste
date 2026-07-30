@@ -1,28 +1,10 @@
 /**
- * The history data layer: one paged query, one status query, three mutations.
- *
- * v1 carried roughly a thousand lines of hand-written polling — per-screen
- * `setInterval`s, `visibilitychange` wiring, in-flight guards, `useRef` state
- * mirrors, request sequence tags and a per-item signature hash — to satisfy
- * INV-2/3/4/27/33. Manifest §9.1 says replace the mechanism and keep the
- * contract. React Query provides:
- *
- *   INV-2  (no new reference)     structuralSharing, on by default, plus a
- *                                 module-level `select` so the flattened list
- *                                 keeps its identity across an idle poll
- *   INV-3  (mutations invalidate) invalidateQueries after every write
- *   INV-4  (load-more merges)     useInfiniteQuery refetches every loaded page,
- *                                 so a poll can never replace the merged list
- *                                 with page 1
- *   INV-27 (visibility gating)    refetchIntervalInBackground: false, plus
- *                                 refetchOnWindowFocus for the immediate
- *                                 refresh (v5's focusManager listens on
- *                                 visibilitychange)
- *   INV-33 (late responses)       built-in last-write-wins per query key
- *   INV-34 (retry policy)         retry/retryDelay, configured in main.tsx
- *
- * The numbers are the earned ones from manifest §5.1 and are the part that does
- * not come for free.
+ * React Query stands in for v1's hand-written polling, which is what manifest
+ * §9.1 asks for; the contracts it has to keep are INV-2 (an idle poll must not
+ * produce a new array identity), INV-3 (every mutation invalidates), INV-4 (a
+ * poll must not replace the merged list with page 1), INV-27 (a hidden window
+ * polls zero times) and INV-33 (last write wins). §5.5 says verify rather than
+ * assume — `useHistory.test.tsx` does.
  */
 import {
   keepPreviousData,
@@ -58,13 +40,10 @@ export const STATUS_KEY = ["status"] as const;
 export const historyKey = (query: string) => [...HISTORY_KEY, query] as const;
 
 /**
- * Flatten the loaded pages into the list the UI renders, de-duplicated by id.
- *
- * De-duplication is INV-4's other half: page offsets are positions in a list
- * that a capture can prepend to between two fetches, so the same item can come
- * back on two pages. Defined at module scope so its identity is stable —
- * React Query memoises `select` on (data, selectFn), and INV-2 depends on this
- * returning the *same array* when the data has not changed.
+ * De-duplicated by id: a page offset is a position in a list a capture can
+ * prepend to between two fetches, so one item can arrive on two pages (INV-4).
+ * Module scope, because React Query memoises `select` on (data, selectFn) and
+ * INV-2 needs the same array back when the data has not changed.
  */
 function flatten(data: { pages: Item[][] }): readonly Item[] {
   if (data.pages.length === 1) return data.pages[0] ?? [];
@@ -81,17 +60,10 @@ function flatten(data: { pages: Item[][] }): readonly Item[] {
 }
 
 /**
- * One query drives the list in both modes. An empty query pages through
- * `list`; a non-empty one runs the daemon's FTS.
- *
  * Search is deliberately **not** paged: `search` runs against the whole
- * database and returns up to `SEARCH_LIMIT`, so a match at index 800 is found
- * without the client loading 800 rows first. That is the same requirement as
- * AT-73 (CopyPaste-crh3.106), reached by asking the daemon instead of by
- * driving load-more in a loop.
- *
- * Sensitive items are never indexed, so a search legitimately cannot return
- * them (manifest 03, CLAUDE.md rule 4).
+ * database, so a match at index 800 is found without loading 800 rows first
+ * (AT-73 / CopyPaste-crh3.106). Sensitive items are never indexed, so a search
+ * legitimately cannot return one.
  */
 export function useHistory(query: string) {
   const searching = query.length > 0;
@@ -106,7 +78,6 @@ export function useHistory(query: string) {
       if (lastPage.length < PAGE_SIZE) return undefined;
       return allPages.reduce((total, page) => total + page.length, 0);
     },
-    // §5.1: 3000ms healthy, 5000ms while erroring.
     refetchInterval: (q) =>
       q.state.status === "error" ? POLL_BACKOFF_MS : POLL_ACTIVE_MS,
     // Typing must not blank the list between keystrokes.
@@ -127,11 +98,9 @@ export function useStatus() {
 /* ----------------------------------------------------------- mutations --- */
 
 /**
- * Copy is not optimistic. The daemon re-sorts — it bumps the item's time, and
- * INV-31 requires a *pinned* item keep its slot rather than jump to the top —
- * so the server's order is the only correct one, and we invalidate and take it.
- * Nothing here reorders the list locally, which is what makes INV-31 true by
- * construction rather than by a special case.
+ * Not optimistic, and nothing here reorders locally: INV-31 (a pinned item
+ * keeps its slot on copy while an unpinned one moves to the top) is then true
+ * by construction rather than by a special case.
  */
 export function useCopy() {
   const qc = useQueryClient();
@@ -145,8 +114,7 @@ export function useCopy() {
   });
 }
 
-/** Pin toggles refetch immediately so the server's re-sort is reflected
- *  (manifest §3.1.6). */
+/** Refetches immediately, so the server's re-sort is what is shown. */
 export function usePin() {
   const qc = useQueryClient();
   return useMutation({
@@ -158,11 +126,8 @@ export function usePin() {
   });
 }
 
-/**
- * Clear history. Destructive and un-undoable, so the caller must gate it behind
- * a confirm dialog (manifest §3.1.11; bugs 5j9x / kayk / fjvz / vcnv / w6xc all
- * come from destructive actions that were one misclick away).
- */
+/** Destructive and un-undoable: the caller must gate it behind a confirm
+ *  dialog (5j9x, kayk, fjvz, vcnv, w6xc are all one misclick away). */
 export function useClearHistory() {
   const qc = useQueryClient();
   return useMutation({
