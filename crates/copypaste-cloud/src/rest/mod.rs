@@ -128,17 +128,9 @@
 //! * No error variant can hold a filesystem path or a token — the only free
 //!   text any of them carries is a `&'static str` written in this module.
 //!
-//! # How the module is laid out
-//!
-//! The constants below stay here, next to the SQL they describe: each one is a
-//! name for something in that schema, and moving them away from it is how a
-//! column list and a `select=` drift apart.
-//!
-//! | file | owns |
-//! |---|---|
-//! | [`item`] | [`CloudItem`] — the row shape, its constructors, and what makes one valid to send |
-//! | [`error`] | [`RestError`] and the status-to-error mapping |
-//! | [`client`] | [`SupabaseRest`] — the three requests, their query shape, and the retry envelope |
+//! The constants below stay in this file, next to the SQL they describe: each
+//! one is a name for something in that schema, and moving them away from it is
+//! how a column list and a `select=` drift apart.
 
 use std::time::Duration;
 

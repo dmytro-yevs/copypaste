@@ -228,7 +228,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             // Destroying history needs an explicit decision, and a piped stdin
             // is not one (CLAUDE.md rule 4: data loss is the worst outcome).
             if !yes && !confirm_clear()? {
-                println!("cancelled; nothing was deleted");
+                out("cancelled; nothing was deleted");
                 return Ok(());
             }
             Method::DeleteAll
@@ -278,7 +278,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         // machine-readable answer; the exit code below still reflects it.
         let text = serde_json::to_string_pretty(&response)
             .map_err(|e| CliError::local(format!("could not render the reply as JSON: {e}")))?;
-        println!("{text}");
+        out(&text);
     }
 
     let data = client::into_data(response)?;
@@ -289,27 +289,30 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     match &cli.command {
         Command::List { .. } => {
             let items = client::expect_items(data)?;
-            println!("{}", render::items_table(&items, now_ms(), "no items yet"));
+            out(&(render::items_table(&items, now_ms(), "no items yet")));
         }
         Command::Search { .. } => {
             let items = client::expect_items(data)?;
-            println!("{}", render::items_table(&items, now_ms(), "no matches"));
+            out(&(render::items_table(&items, now_ms(), "no matches")));
         }
         Command::Status => {
             let status = client::expect_status(data)?;
-            println!("{}", render::status_text(&status));
+            out(&(render::status_text(&status)));
         }
         Command::Add { .. } => match client::optional_item(&data) {
-            Some(item) => println!("added {}", item.id),
-            None => println!("added"),
+            Some(item) => out(&format!("added {}", item.id)),
+            None => out("added"),
         },
-        Command::Copy { id } => println!("copied {id} to the clipboard"),
-        Command::Delete { id } => println!("deleted {id}"),
-        Command::Pin { id } => println!("pinned {id}"),
-        Command::Unpin { id } => println!("unpinned {id}"),
+        Command::Copy { id } => out(&format!("copied {id} to the clipboard")),
+        Command::Delete { id } => out(&format!("deleted {id}")),
+        Command::Pin { id } => out(&format!("pinned {id}")),
+        Command::Unpin { id } => out(&format!("unpinned {id}")),
         Command::Clear { .. } => match client::optional_count(&data) {
-            Some(count) => println!("deleted {count} {}", plural(count, "item", "items")),
-            None => println!("cleared"),
+            Some(count) => out(&format!(
+                "deleted {count} {}",
+                plural(count, "item", "items")
+            )),
+            None => out("cleared"),
         },
         Command::Pair { action } => match action {
             PairAction::Create { .. } => {
@@ -317,39 +320,36 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 // The only place a code is ever rendered. Straight to stdout,
                 // never through the logger, and the daemon does not keep a copy
                 // that could be asked for again.
-                println!("{}", render::pairing_text(&pairing));
+                out(&render::pairing_text(&pairing));
             }
             PairAction::Accept { .. } => {
                 let peers = client::expect_peers(data)?;
                 match peers.first() {
-                    Some(peer) => println!("paired with {} ({})", peer.name, peer.pairing_id),
-                    None => println!("paired"),
+                    Some(peer) => out(&format!("paired with {} ({})", peer.name, peer.pairing_id)),
+                    None => out("paired"),
                 }
             }
         },
         Command::Peers => {
             let peers = client::expect_peers(data)?;
-            println!(
-                "{}",
-                render::peers_table(&peers, now_ms(), "no paired devices")
-            );
+            out(&render::peers_table(&peers, now_ms(), "no paired devices"));
         }
-        Command::Unpair { pairing_id } => println!("unpaired {pairing_id}"),
+        Command::Unpair { pairing_id } => out(&format!("unpaired {pairing_id}")),
         Command::Cloud { action } => match action {
             CloudAction::Sync => {
                 let stats = client::expect_cloud_sync(data)?;
-                println!("{}", render::cloud_sync_text(&stats));
+                out(&render::cloud_sync_text(&stats));
             }
             // Sign-in, sign-out and status all answer with the new status, so
             // the user sees the state they just moved the daemon into.
             _ => {
                 let status = client::expect_cloud_status(data)?;
-                println!("{}", render::cloud_status_text(&status, now_ms()));
+                out(&(render::cloud_status_text(&status, now_ms())));
             }
         },
         Command::Sync { .. } => {
             let results = client::expect_sync(data)?;
-            println!("{}", render::sync_table(&results, "no paired devices"));
+            out(&(render::sync_table(&results, "no paired devices")));
             // A run where every peer failed is not a success, even though the
             // request itself was answered: a script must be able to tell.
             if !results.is_empty() && results.iter().all(|r| r.error.is_some()) {
@@ -359,6 +359,29 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+/// Write one block to stdout, treating a closed pipe as a normal end.
+///
+/// `println!` panics when its write fails, so `copypaste list | head -1` used to
+/// end in a Rust backtrace instead of behaving like every other Unix tool. A
+/// downstream reader that stopped reading is not this program's failure: exit
+/// quietly, the way SIGPIPE would have.
+fn out(text: &str) {
+    use std::io::ErrorKind;
+    let mut stdout = std::io::stdout().lock();
+    let wrote = stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.write_all(b"\n"));
+    if let Err(e) = wrote {
+        if e.kind() == ErrorKind::BrokenPipe {
+            std::process::exit(error::EXIT_OK);
+        }
+        // Anything else — a full disk, a closed descriptor — is worth saying,
+        // once, on the stream that is still open.
+        eprintln!("error: could not write output: {e}");
+        std::process::exit(error::EXIT_OTHER);
+    }
 }
 
 fn now_ms() -> i64 {

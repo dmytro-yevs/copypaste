@@ -27,7 +27,8 @@
   --color-destructive: var(--err);
   --color-destructive-foreground: var(--on-err);
   --color-border: var(--border);
-  --color-input: var(--border);
+  --color-input: var(--border-strong);
+  --color-border-strong: var(--border-strong);
   --color-ring: var(--accent);
   --color-sidebar: var(--panel);
   --color-sidebar-foreground: var(--dim);
@@ -47,6 +48,9 @@
   --color-brand-2: var(--accent-2);
   --color-selected: var(--selected);
   --color-pressed: var(--pressed);
+  --color-withheld: var(--withheld);
+  --color-withheld-fg: var(--withheld-fg);
+  --color-withheld-border: var(--withheld-border);
   --font-sans: var(--f-ui);
   --font-mono: var(--f-mono);
   --radius: var(--r-row);
@@ -70,6 +74,7 @@
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-err: var(--err);
+  --color-on-err: var(--on-err);
   --color-info: var(--info);
   --color-ok-strong: var(--ok-strong);
   --color-warn-strong: var(--warn-strong);
@@ -89,8 +94,6 @@
   --color-c-unknown: var(--c-unknown);
   --color-accent-2: var(--accent-2);
   --color-on-accent: var(--on-accent);
-  --color-on-err: var(--on-err);
-  --color-on-accent-2: var(--on-accent-2);
   --shadow-1: var(--sh1);
   --shadow-2: var(--sh2);
   --shadow-3: var(--sh3);

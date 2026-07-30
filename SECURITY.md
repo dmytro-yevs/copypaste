@@ -109,47 +109,41 @@ everywhere.
 ## Cloud sync
 
 **Wired into the daemon, and never once spoken to a real Supabase project.**
-Those are two separate facts and both matter.
+Two separate facts; both matter.
 
-What is wired: the daemon holds a `CloudSync` driver, an adaptive poll loop
-(5 s after a change, doubling to 5 min while idle), and four IPC operations —
-`cloud sign-in`, `cloud sign-out`, `cloud status`, `cloud sync`. Rows are sealed
-client-side under an Argon2id key derived from a passphrase that never leaves
-the device, so the server holds ciphertext and metadata only. Row-level security
-is the second layer — a misconfigured policy would expose rows that remain
-unreadable.
+Rows are sealed client-side under an Argon2id key derived from a passphrase
+that never leaves the device, so the server holds ciphertext and metadata only.
+Row-level security is the second layer — a misconfigured policy would expose
+rows that remain unreadable.
 
-What the daemon stores, and where: the access token, the rotated refresh token
-and the derived sync key, in the SQLCipher database beside the ciphertext they
-protect, under the device key from the OS keystore. **Never** the account
-password and **never** the passphrase — so a stolen database yields a session
-that expires and a key for one account, not the means to re-derive it. Signing
-out clears all three; it keeps the deployment URL and anon key, which are
-configuration rather than credentials.
+The daemon stores the access token, the rotated refresh token and the derived
+sync key in the SQLCipher database, under the device key from the OS keystore.
+Never the account password and never the passphrase, so a stolen database
+yields a session that expires and a key for one account — not the means to
+re-derive it. Sign-out clears all three and keeps the deployment URL and anon
+key, which are configuration rather than credentials.
 
-Three secrets cross the IPC socket on sign-in (email, password, passphrase).
-The socket is `0600` and is the only authentication boundary. The CLI reads the
-two secrets from the environment or from stdin and has no flag for either,
-because process arguments are readable by every process running as the same
-user. The passphrase is zeroized once the key is derived; the request frame it
-arrived in is an ordinary `String` owned by the JSON codec and is not, which is
-a residual worth knowing about.
+Sign-in carries three secrets over the `0600` IPC socket, which is the only
+authentication boundary. The CLI takes the password and passphrase from the
+environment or stdin and has no flag for either: process arguments are readable
+by every process running as the same user. The passphrase is zeroized once the
+key is derived; the request frame it arrived in is not, so it is "not
+persisted" rather than "not in memory".
 
-What leaves the device is gated twice: the outbound query never lists a
-sensitive row, and the driver re-checks every item against the same detector
-before it is sealed (manifest 05 AT-56 — v1 had one enforcement point and it had
-a hole).
+What leaves the device is gated twice — the outbound query never lists a
+sensitive row, and the driver re-checks each item against the same detector
+before sealing it (manifest 05 AT-56: v1 had one enforcement point and it had a
+hole).
 
-Metadata the backend does see, and v1's relay did not: the account email,
-`origin_device_id`, content types, payload sizes and timestamps. Content stays
-end-to-end encrypted; the metadata surface is a genuine regression from v1's
-account-less relay, and sync now requires an account.
+Metadata the backend sees that v1's account-less relay did not: account email,
+`origin_device_id`, content types, payload sizes, timestamps. Content stays
+end-to-end encrypted; the metadata surface is a real regression, and sync now
+requires an account.
 
-The end-to-end exercise is `scripts/demo-cloud.sh`, which drives two real
-daemons against **a local stub** (`scripts/cloud-stub.py`) — not Supabase. It
-asserts that two devices converge, that a sensitive item never leaves its
-device, and that nothing but ciphertext reaches the backend. It cannot tell you
-that a real deployment accepts any of it.
+`scripts/demo-cloud.sh` drives two real daemons against a local **stub**
+(`scripts/cloud-stub.py`), not Supabase. It asserts convergence, that a
+sensitive item never leaves its device, and that only ciphertext reaches the
+backend. It cannot tell you a real deployment accepts any of it.
 
 ## Unverified
 

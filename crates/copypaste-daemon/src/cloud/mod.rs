@@ -1,32 +1,19 @@
 //! Cloud sync, wired into the daemon.
 //!
-//! `copypaste-cloud` provides the driver — Argon2id key derivation, the sealed
-//! row, GoTrue sessions, PostgREST paging, the 401/429 rules and the adaptive
-//! idle cadence — and deliberately knows nothing about a database. This module
-//! supplies the three things it asks the daemon for:
-//!
-//! * [`source::StoreSource`] — the history, as a round sees it, over the same
-//!   [`crate::meta`] view the peer transport uses,
-//! * [`poll::run`] — the loop that decides when a round happens,
-//! * [`handlers`] — the four IPC operations a client drives it with.
-//!
 //! # Where the credentials live
 //!
-//! In `sync_device_state`, inside the SQLCipher database, under the device key
-//! from the OS keystore. Three secrets are held: the access token, the rotated
-//! refresh token, and the derived sync key — never the account password and
-//! never the passphrase, so a stolen database yields a session that expires and
-//! a key for exactly this account, not the ability to re-derive it elsewhere.
+//! Three secrets are stored: the access token, the rotated refresh token, and
+//! the derived sync key — never the account password, never the passphrase. So
+//! a stolen database yields a session that expires and a key for one account,
+//! not the means to re-derive one elsewhere.
 //!
-//! Putting them beside the ciphertext they protect is deliberate: a token in a
-//! plain file next to an encrypted database would be the weakest link in a
-//! design whose whole claim is that the backend never sees plaintext.
+//! They live in `sync_device_state` inside the SQLCipher database, under the
+//! device key from the OS keystore. A token in a plain file beside an encrypted
+//! database would be the weakest link in a design whose claim is that the
+//! backend never sees plaintext.
 //!
-//! # Signed out is an ordinary state, and so is unconfigured
-//!
-//! No deployment configured, configured but signed out, and signed in are all
-//! states the daemon runs in. Nothing else in the daemon depends on cloud sync:
-//! local history and peer sync work identically in all three.
+//! Unconfigured and signed-out are both states the daemon runs in normally;
+//! local history and peer sync do not depend on any of this.
 
 pub mod handlers;
 pub mod poll;
@@ -297,20 +284,11 @@ impl Cloud {
 
 /// Tell the cloud transport that a version was written *below* its cursor.
 ///
-/// The upload floor assumes a version's `created_at` is the moment it appeared
-/// here. Two ordinary things break that assumption:
-///
-/// * **A peer session** applies rows carrying the *sender's* stamp, routinely
-///   older than this device's floor. Without this the item would sit in the
-///   history and never reach the account, so a pair where only one device is
-///   signed in would silently sync in one direction only.
-/// * **A delete** tombstones a row without restamping it (`Store::delete`), so
-///   deleting anything older than the floor produces a version no `created_at`
-///   query would find, and the delete would never propagate.
-///
-/// Lowering the floor costs at most one re-offer of everything above it, and
-/// every re-offer is an idempotent upsert. Best-effort: a failure means one
-/// version is late to the account, not that the operation failed.
+/// The floor assumes a version's `created_at` is when it appeared here. A peer
+/// session breaks that (rows carry the sender's stamp) and so does a delete
+/// (`Store::delete` does not restamp). Neither would ever reach the account
+/// otherwise. Lowering the floor costs one re-offer of everything above it, and
+/// a re-offer is an idempotent upsert.
 pub fn note_version_written(state: &AppState, created_at_ms: i64) {
     let meta = &state.meta;
     match meta.state_ms(KEY_UPLOAD_FLOOR) {

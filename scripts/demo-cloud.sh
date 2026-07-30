@@ -4,24 +4,19 @@
 # ⚠ THE BACKEND IS A STUB, NOT SUPABASE. ⚠
 #
 # `scripts/cloud-stub.py` answers the GoTrue and PostgREST calls the client
-# makes and stores the rows in memory. It has no Postgres, no row-level
-# security and no JWT verification, and this container cannot reach a real
-# Supabase project. So what this demo proves is:
+# makes and keeps the rows in memory. No Postgres, no row-level security, no JWT
+# verification, and this container cannot reach a real Supabase project.
 #
-#   * the daemon is actually wired to `copypaste-cloud` — sign in, poll, push,
-#     pull, sign out, all driven through the CLI over the daemon socket,
-#   * two devices converge through an account, holding only the passphrase in
-#     common,
-#   * a sensitive item never leaves the device it was captured on,
-#   * the backend only ever receives ciphertext — asserted against the stub's
-#     own dump of every row it was given,
-#   * the client's request shapes are the ones a PostgREST deployment needs:
-#     the stub rejects an exclusive cursor bound or a newest-first page order,
-#     which are the two shapes manifest 05 §4.4 records as shipped v1 bugs.
+# What a pass means: the daemon is wired to `copypaste-cloud` and driven only
+# through the CLI; two devices converge sharing nothing but a passphrase; a
+# sensitive item never leaves the device that captured it; the backend receives
+# ciphertext only (asserted against the stub's dump of every row it was given);
+# and the client's request shapes are the ones PostgREST needs — the stub
+# rejects an exclusive cursor bound or a newest-first page, the two shapes
+# manifest 05 §4.4 records as shipped v1 bugs.
 #
-# What it does NOT prove: that a real Supabase project accepts any of this.
-# Nothing here has ever spoken to one. Treat a pass as "the client is wired end
-# to end", never as "cloud sync works against Supabase".
+# What a pass does not mean: that Supabase accepts any of it. Nothing here has
+# ever spoken to a deployment.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

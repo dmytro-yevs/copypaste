@@ -33,7 +33,9 @@ pub fn read_credentials() -> Result<(String, String), CliError> {
         // Reading an unechoed line from a terminal needs a dependency this CLI
         // does not carry, and blocking on a terminal read looks like a hang.
         // Saying how to supply them is more useful than either.
-        return Err(CliError::local(format!("no credentials given: {HOW_TO_SUPPLY}")));
+        return Err(CliError::local(format!(
+            "no credentials given: {HOW_TO_SUPPLY}"
+        )));
     }
 
     let mut buffer = String::new();
@@ -52,7 +54,9 @@ pub fn read_credentials() -> Result<(String, String), CliError> {
 /// by the daemon's minimum-length check, and read as "the daemon is broken".
 fn check(password: String, passphrase: String) -> Result<(String, String), CliError> {
     if password.is_empty() {
-        return Err(CliError::local(format!("no password given: {HOW_TO_SUPPLY}")));
+        return Err(CliError::local(format!(
+            "no password given: {HOW_TO_SUPPLY}"
+        )));
     }
     if passphrase.is_empty() {
         return Err(CliError::local(format!(

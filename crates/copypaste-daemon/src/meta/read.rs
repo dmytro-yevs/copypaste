@@ -92,7 +92,11 @@ impl Meta {
     /// cursor produces a version this query cannot see. See
     /// `crate::cloud::source` for what that costs and why it is not repaired
     /// here.
-    pub fn versions_since(&self, since_ms: i64, limit: i64) -> Result<Vec<StoredVersion>, MetaError> {
+    pub fn versions_since(
+        &self,
+        since_ms: i64,
+        limit: i64,
+    ) -> Result<Vec<StoredVersion>, MetaError> {
         let conn = self.lock()?;
         let mut stmt = conn.prepare_cached(
             "SELECT ci.id, ci.content_ciphertext, ci.nonce, ci.content_type, ci.content_hash, \

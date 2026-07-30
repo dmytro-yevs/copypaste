@@ -8,7 +8,7 @@ pub mod storage;
 
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
 pub use sensitive::{Detector, Finding, Severity};
-pub use storage::{NewItem, StoredItem, Store, StoreError};
+pub use storage::{NewItem, Store, StoreError, StoredItem};
 
 /// Milliseconds since the Unix epoch.
 ///

@@ -213,9 +213,29 @@ export function syncNow(pairingId?: string): Promise<SyncResult[]> {
 
 /* --------------------------------------------------------------- service --- */
 
-/** Ask the bridge to start the background service. Fails with `unavailable`
- *  until the bridge routes it, which the offline screen handles by falling
- *  back to the manual instruction. */
+/** Not routed yet: starting the service needs a daemon-lifecycle decision. The
+ *  offline screen falls back to the manual instruction on `unavailable`. */
 export function startService(): Promise<void> {
   return call<void>("start_service");
+}
+
+/* -------------------------------------------------------------- shortcut --- */
+
+/** Not routed yet. The default must come from the backend rather than a TS
+ *  constant, or the two drift (CopyPaste-sqw0); `DEFAULT_SHORTCUT` in
+ *  `lib/accelerator.ts` is the fallback until this exists. */
+export function getDefaultShortcut(): Promise<string> {
+  return call<string>("get_default_shortcut");
+}
+
+/** Not routed yet. */
+export function getShortcut(): Promise<string> {
+  return call<string>("get_shortcut");
+}
+
+/** Not routed yet. The bridge refuses the five media keys with a test each;
+ *  `captureAccelerator` refuses them here too so the user learns why before
+ *  spending a round trip. */
+export function setShortcut(accelerator: string): Promise<void> {
+  return call<void>("set_shortcut", { accelerator });
 }

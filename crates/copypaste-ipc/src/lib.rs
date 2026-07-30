@@ -49,11 +49,19 @@ pub enum Method {
     /// Liveness plus daemon state.
     Status,
     /// Most recent items, newest first. Pinned items sort ahead of unpinned.
-    List { limit: u32, offset: u32 },
+    List {
+        limit: u32,
+        offset: u32,
+    },
     /// Full-text search. Sensitive items are never indexed and never returned.
-    Search { query: String, limit: u32 },
+    Search {
+        query: String,
+        limit: u32,
+    },
     /// Put an item's content back on the system clipboard.
-    Copy { id: String },
+    Copy {
+        id: String,
+    },
     /// One item by id, with its content, and **no side effects**.
     ///
     /// The read-only twin of [`Method::Copy`]. It exists because a UI that
@@ -69,29 +77,47 @@ pub enum Method {
     /// returns the same plaintext, and the alternative is a client that cannot
     /// implement reveal at all. Deciding whether to render it is the client's,
     /// and a client should require an explicit gesture.
-    Get { id: String },
+    Get {
+        id: String,
+    },
     /// Add an item directly, bypassing clipboard capture. Used by tests, by
     /// `copypaste add`, and by the fake clipboard source.
-    Add { content: String },
-    Delete { id: String },
+    Add {
+        content: String,
+    },
+    Delete {
+        id: String,
+    },
     DeleteAll,
-    Pin { id: String, pinned: bool },
+    Pin {
+        id: String,
+        pinned: bool,
+    },
 
     // ---- peer-to-peer sync -------------------------------------------------
     /// Mint a pairing token on this device and return the code to read out.
     /// The token is the Noise pre-shared key; the code is its transferable form.
-    PairCreate { name: String },
+    PairCreate {
+        name: String,
+    },
     /// Consume a code produced by `PairCreate` on another device, connect to
     /// `addr`, and complete the pairing.
-    PairAccept { code: String, addr: String },
+    PairAccept {
+        code: String,
+        addr: String,
+    },
     /// Forget a peer. Its half of the pairing keeps working until it also
     /// unpairs — this is a local decision, not a negotiated one.
-    Unpair { pairing_id: String },
+    Unpair {
+        pairing_id: String,
+    },
     /// Known peers and when each was last reachable.
     Peers,
     /// Sync now with one peer, or with every known peer when `pairing_id` is
     /// absent. Returns per-peer counts.
-    SyncNow { pairing_id: Option<String> },
+    SyncNow {
+        pairing_id: Option<String>,
+    },
 
     // ---- cloud sync --------------------------------------------------------
     /// Sign into the sync account and unlock the sync key.
@@ -132,7 +158,13 @@ pub struct Response {
 
 impl Response {
     pub fn ok(id: u64, data: ResponseData) -> Self {
-        Self { id, ok: true, data: Some(data), error: None, error_code: None }
+        Self {
+            id,
+            ok: true,
+            data: Some(data),
+            error: None,
+            error_code: None,
+        }
     }
 
     /// Build a failure reply.

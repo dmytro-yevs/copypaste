@@ -10,6 +10,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import type { Item, PeerInfo, StatusData } from "@/lib/ipc";
 
@@ -65,6 +66,11 @@ export function testClient(): QueryClient {
       mutations: { retry: false },
     },
   });
+}
+
+/** `withClient` plus a `userEvent` session, for the tests that click. */
+export function withUser(ui: ReactElement, client = testClient()) {
+  return { user: userEvent.setup(), ...withClient(ui, client) };
 }
 
 export function withClient(ui: ReactElement, client = testClient()) {

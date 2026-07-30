@@ -674,9 +674,7 @@ mod tests {
             SyncMessage::Summary {
                 items: vec![grave.summary()],
             },
-            SyncMessage::Items {
-                items: vec![grave],
-            },
+            SyncMessage::Items { items: vec![grave] },
             SyncMessage::Done,
             SyncMessage::Request { item_ids: vec![] },
         ]);

@@ -1,6 +1,6 @@
 {
   "size": {
-    "$description": "Fixed control, icon and stroke sizes, aligned to shadcn's control heights (h-8 / h-9 / h-10) and its size-4 icon default. The switch, checkbox and selection-bar sizes v1 defined here are gone: those components come from the library now, and a token nobody reads is a value that drifts.",
+    "$description": "Control, icon and stroke sizes, aligned to shadcn's control heights (h-8 / h-9 / h-10) and its size-4 icon default. Three tokens carry a `coarsePointer` extension and are re-emitted under @media (pointer: coarse); the rest are the same on both platforms. The switch, checkbox and selection-bar sizes v1 defined here are gone: those components come from the library now, and a token nobody reads is a value that drifts.",
     "$type": "dimension",
     "icon-sm": {
       "$value": "14px",
@@ -26,9 +26,32 @@
       "$value": "40px",
       "$description": "shadcn Button `lg` (h-10)."
     },
+    "tap-min": {
+      "$value": "32px",
+      "$description": "The floor for the hit area of ANY interactive element, as `min-block-size`/`min-inline-size`. 32px with a mouse; 44px under a finger. The two platform guidelines disagree — Apple HIG says 44pt, Material 3 says 48dp — and WCAG 2.2 SC 2.5.8 asks only 24x24 at AA, which every control here already clears. 44 is taken as the coarse floor because it satisfies HIG and is one 4px step from Material's 48, which --sz-iconbtn does reach. This and --hit-slop and --sz-iconbtn are the ONLY pointer-varying tokens: one lever is auditable, six are not.",
+      "$extensions": {
+        "com.copypaste": {
+          "coarsePointer": "44px"
+        }
+      }
+    },
+    "hit-slop": {
+      "$value": "0px",
+      "$description": "Invisible target expansion for a glyph too small to grow — draw it with an ::after inset by the negative of this, so the target grows without the layout moving. Zero with a mouse.",
+      "$extensions": {
+        "com.copypaste": {
+          "coarsePointer": "6px"
+        }
+      }
+    },
     "sz-iconbtn": {
       "$value": "36px",
-      "$description": "Square icon button (shadcn `size-9`). 36px is above the 24px WCAG 2.2 target minimum and comfortable under a finger on Android."
+      "$description": "Square icon button (shadcn `size-9`). 48px on a coarse pointer — Material 3's touch target, and the icon button is the control that actually fails on a phone: the row actions are 32px `size-8` buttons spaced 2px apart.",
+      "$extensions": {
+        "com.copypaste": {
+          "coarsePointer": "48px"
+        }
+      }
     },
     "sz-tile": {
       "$value": "36px",
@@ -57,7 +80,7 @@
     },
     "focus-ring-width": {
       "$value": "3px",
-      "$description": "shadcn's focus ring is a 3px accent halo at 50% alpha plus a 1px border shift. The ring is never removed, only restyled (A11Y contract)."
+      "$description": "shadcn's 3px halo width, kept. The alpha is not — see --sh-focus. The ring is never removed, only restyled (A11Y contract)."
     },
     "focus-ring-offset": {
       "$value": "2px"

@@ -337,10 +337,7 @@ mod tests {
         let det = detector();
         let token = format!("glpat-{}", rep('A', 20));
         assert!(fired(&det, &token, "gitlab_pat"));
-        assert_eq!(
-            det.scan(&token).unwrap().severity,
-            Severity::HighConfidence
-        );
+        assert_eq!(det.scan(&token).unwrap().severity, Severity::HighConfidence);
         // \b anchor: glued into a longer identifier it is not a token.
         assert!(!fired(&det, &format!("x{token}"), "gitlab_pat"));
     }

@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 """A STUB of the Supabase surface CopyPaste uses. NOT a Supabase deployment.
 
-It answers the four GoTrue calls and the three PostgREST calls that
-`copypaste-cloud` makes, and it stores what it is given in memory, dumping every
-row to --dump on each write so the demo can inspect exactly what left the
-device.
+Answers the four GoTrue calls and the three PostgREST calls `copypaste-cloud`
+makes, keeps rows in memory, and dumps them to --dump on each write so the demo
+can inspect exactly what left the device.
 
-What it proves: the client's HTTP shapes are the ones a PostgREST/GoTrue
-deployment expects (inclusive `gte` cursor, ascending compound order, upsert on
-conflict, tombstone as a PATCH), and that nothing but ciphertext is sent.
-
-What it does NOT prove: that a real Supabase project accepts them. It has no
-row-level security, no JWT verification, no Postgres, and it is permissive where
-the real service is strict. Treat a passing run as "the client is wired end to
-end", never as "this works against Supabase".
+It has no row-level security, no JWT verification and no Postgres, and it is
+permissive where the real service is strict. A passing run means the client is
+wired end to end, never that this works against Supabase.
 """
 
 import argparse

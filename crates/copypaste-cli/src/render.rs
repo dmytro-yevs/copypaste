@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn table_shows_the_full_id_so_it_can_be_copied_into_another_command() {
         let it = item("hello");
-        let table = items_table(&[it.clone()], 1_000_000, "none");
+        let table = items_table(std::slice::from_ref(&it), 1_000_000, "none");
         assert!(table.contains(&it.id), "{table}");
     }
 

@@ -52,14 +52,10 @@
 //! AEAD, `rand` for nonces, `zeroize` for erasure, `base64` for the wire
 //! encoding. The code in this module is glue and policy.
 //!
-//! # How the module is laid out
-//!
-//! | file | owns |
-//! |---|---|
-//! | [`key`] | [`SyncKey`], the Argon2id parameters and the per-account salt |
-//! | [`row`] | the AAD layout, [`encrypt_row`] and [`decrypt_row`] |
-//! | [`handle`] | [`CloudCrypto`], a key with the two row operations bound to it |
-//! | [`error`] | [`CloudCryptoError`] and the fail-closed policy it encodes |
+//! [`key`] and [`row`] are separable because nothing in the AEAD path may depend
+//! on *how* the key was obtained — the daemon's keystore path hands over 32
+//! bytes with no passphrase in sight, and that must be indistinguishable from a
+//! fresh derivation.
 
 pub mod error;
 pub mod handle;

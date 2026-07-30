@@ -1,75 +1,74 @@
 {
   "accents": {
-    "$description": "The accent axis, light resolution. The whole axis shifts one step darker than dark's — --accent is the Tailwind -600 step, --accent-2 the -500 — so a filled button clears AA against white text on every accent. Every accent is written out in full rather than as a partial override of the dark block: the file is the cascade already resolved, so nothing re-derives it.",
+    "$description": "The accent axis, light resolution. Two roles, not one ramp step: --accent is a FILL and must carry --on-accent at >=4.5; --accent-2 is TEXT and must clear 4.5 on --bg and --elevated. That is why the steps are not uniform — indigo, blue and rose reach the fill floor at -600 while teal, green and amber only reach it at -700 (teal-600 measures 3.72 against white, green-600 3.27, amber-600 3.21). Every accent is written out in full rather than as a partial override of the dark block: the file is the cascade already resolved, so nothing re-derives it.",
     "$type": "color",
     "indigo": {
-      "$description": "Default accent. indigo-600 / indigo-500.",
+      "$description": "Default accent. Fill indigo-600 (6.44 with white ink), text indigo-700 (8.07 on --bg).",
       "accent": {
         "$value": "oklch(0.511 0.262 276.966)"
       },
       "accent-2": {
-        "$value": "oklch(0.585 0.233 277.117)"
+        "$value": "oklch(0.457 0.24 277.023)"
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
       }
     },
     "blue": {
-      "$description": "blue-600 / blue-500.",
+      "$description": "Fill blue-600 (5.26), text blue-700 (6.82).",
       "accent": {
         "$value": "oklch(0.546 0.245 262.881)"
       },
       "accent-2": {
-        "$value": "oklch(0.623 0.214 259.815)"
+        "$value": "oklch(0.488 0.243 264.376)"
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
       }
     },
     "teal": {
-      "$description": "teal-600 / teal-500.",
+      "$description": "Fill teal-700 (5.44), text teal-800 (7.55). Teal needs -700 for the fill; -600 measures 3.72 with white ink.",
       "accent": {
-        "$value": "oklch(0.6 0.118 184.704)"
+        "$value": "oklch(0.511 0.096 186.391)"
       },
       "accent-2": {
-        "$value": "oklch(0.704 0.14 182.503)"
+        "$value": "oklch(0.437 0.078 188.216)"
       },
       "on-accent": {
-        "$value": "oklch(1 0 0)",
-        "$description": "The darkened teal carries white text; dark's lighter fill does not."
+        "$value": "oklch(1 0 0)"
       }
     },
     "green": {
-      "$description": "green-600 / green-500.",
+      "$description": "Fill green-700 (4.99), text green-800 (7.09). green-600 measures 3.27 with white ink.",
       "accent": {
-        "$value": "oklch(0.627 0.194 149.214)"
+        "$value": "oklch(0.527 0.154 150.069)"
       },
       "accent-2": {
-        "$value": "oklch(0.723 0.219 149.579)"
+        "$value": "oklch(0.448 0.119 151.328)"
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
       }
     },
     "amber": {
-      "$description": "amber-600 / amber-500.",
+      "$description": "Fill amber-700 (5.07), text amber-800 (7.14). amber-600 measures 3.21 with white ink — the worst of the six.",
       "accent": {
-        "$value": "oklch(0.666 0.179 58.318)"
+        "$value": "oklch(0.555 0.163 48.998)"
       },
       "accent-2": {
-        "$value": "oklch(0.769 0.188 70.08)"
+        "$value": "oklch(0.473 0.137 46.201)"
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
       }
     },
     "rose": {
-      "$description": "rose-600 / rose-500.",
+      "$description": "Fill rose-600 (4.78), text rose-700 (6.38).",
       "accent": {
         "$value": "oklch(0.586 0.253 17.585)"
       },
       "accent-2": {
-        "$value": "oklch(0.645 0.246 16.439)"
+        "$value": "oklch(0.514 0.222 16.935)"
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
@@ -84,7 +83,7 @@
     },
     "accent-2": {
       "$value": "{accents.indigo.accent-2}",
-      "$description": "The active accent's lighter ramp step."
+      "$description": "The text-safe accent step: lighter than --accent in dark, darker in light. --accent is a fill and is not guaranteed to clear 4.5 as text."
     },
     "on-accent": {
       "$value": "{accents.indigo.on-accent}",

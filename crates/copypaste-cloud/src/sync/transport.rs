@@ -35,14 +35,8 @@ pub enum TransportFault {
     Permanent(&'static str),
 }
 
-/// The REST surface this driver uses.
-///
-/// `SupabaseRest` is the production implementation — the adapter is in
-/// [`super::adapters`]. The trait exists so that the recovery rules above can
-/// be exercised against a fake with no HTTP anywhere; every 401, 429 and
-/// tombstone assertion in this module's tests would otherwise need a live
-/// backend or a stub server, and a rule that is only asserted end to end tends
-/// not to be asserted at all.
+/// The REST surface this driver uses. `SupabaseRest` is the production
+/// implementation, via the adapter in [`super::adapters`].
 pub trait RestApi: Send + Sync {
     /// Rows with `created_at >= since_ms`, **oldest first**, at most `limit` of
     /// them.

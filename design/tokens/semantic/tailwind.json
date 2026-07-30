@@ -28,8 +28,9 @@
     "color-destructive-foreground": { "$value": "{color.on-err}", "$description": "shadcn `destructive-foreground`." },
 
     "color-border": { "$value": "{color.border}", "$description": "shadcn `border`." },
-    "color-input": { "$value": "{color.border}", "$description": "shadcn `input` is the field's border colour, not its fill." },
-    "color-ring": { "$value": "{color.accent}", "$description": "shadcn `ring` — the focus ring, which is never removed, only restyled." },
+    "color-input": { "$value": "{color.border-strong}", "$description": "shadcn `input` is the field's border colour, not its fill — and a field's border is what identifies the control, so it takes the 3:1 variant rather than the decorative one (WCAG 1.4.11)." },
+    "color-border-strong": { "$value": "{color.border-strong}", "$description": "NON-shadcn, ours. The 3:1 boundary for any control shadcn does not route through `input`: switch track, segmented button, checkbox." },
+    "color-ring": { "$value": "{color.accent}", "$description": "shadcn `ring` — the focus ring, which is never removed, only restyled. Use it at FULL alpha (`ring-ring`), never shadcn's stock `ring-ring/50`: the accent at 50% over --bg measures 1.78-2.98 across the six accents and fails WCAG 1.4.11." },
 
     "color-sidebar": { "$value": "{color.panel}", "$description": "shadcn `sidebar`. Chrome surface." },
     "color-sidebar-foreground": { "$value": "{color.dim}", "$description": "shadcn `sidebar-foreground`. Nav items rest dim and go --text on hover." },
@@ -48,10 +49,14 @@
 
     "color-brand": { "$value": "{color.accent}", "$description": "NON-shadcn, ours. An unambiguous name for the brand accent, because shadcn has already spent the word `accent` on its hover surface. `bg-brand` and `bg-primary` are the same colour; prefer `brand` outside shadcn components." },
     "color-on-brand": { "$value": "{color.on-accent}", "$description": "NON-shadcn, ours. Foreground on --color-brand." },
-    "color-brand-2": { "$value": "{color.accent-2}", "$description": "NON-shadcn, ours. The accent ramp's light step, for emphasis text on a dark surface." },
+    "color-brand-2": { "$value": "{color.accent-2}", "$description": "NON-shadcn, ours. The text-safe accent step. Accent-coloured TEXT uses this; `text-primary`/`text-brand` is a fill and measures 3.21-4.37 as text depending on the accent." },
 
     "color-selected": { "$value": "{color.selected}", "$description": "NON-shadcn, ours. The accent-tinted list-row selection fill, exposed as a utility rather than an inline style." },
     "color-pressed": { "$value": "{color.pressed}", "$description": "NON-shadcn, ours. The neutral pressed state layer." },
+
+    "color-withheld": { "$value": "{color.withheld}", "$description": "NON-shadcn, ours. The slot standing in for a sensitive item's absent content (INV-10). A fill, not a filter — there is no blur token and there must not be one." },
+    "color-withheld-fg": { "$value": "{color.withheld-fg}", "$description": "NON-shadcn, ours. The label on --color-withheld." },
+    "color-withheld-border": { "$value": "{color.withheld-border}", "$description": "NON-shadcn, ours. The reveal affordance is a real button (A11Y-3), so its boundary carries the 1.4.11 weight." },
 
     "font-sans": { "$type": "fontFamily", "$value": "{type.f-ui}", "$description": "Tailwind `font-sans`, which shadcn components inherit." },
     "font-mono": { "$type": "fontFamily", "$value": "{type.f-mono}", "$description": "Tailwind `font-mono`." },

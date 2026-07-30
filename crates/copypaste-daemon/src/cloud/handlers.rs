@@ -1,26 +1,14 @@
 //! The four cloud IPC operations.
 //!
-//! Like the peer handlers these are `async` — they do network I/O, so they run
-//! on the reactor rather than on the blocking pool — and like them, every
-//! client-visible string is a fixed sentence with no interpolation, because an
-//! error must never carry a filesystem path (`CLAUDE.md` rule 4).
+//! **Three secrets arrive here and none leaves.** Neither the password nor the
+//! passphrase is stored, logged at any level, or reachable from an error
+//! payload — every client-visible string here is a `const`, so nothing can be
+//! interpolated into one, and that is also `CLAUDE.md` rule 4 (no path in a
+//! user-facing error). None reaches the store, so none reaches the search index.
 //!
-//! **Three secrets arrive here and none leaves.** The password and the
-//! passphrase are used and dropped: the password goes to GoTrue and is never
-//! stored, and the passphrase derives the sync key and is never stored either,
-//! so what the daemon keeps is a key for this account rather than the means to
-//! re-derive one anywhere else. Nothing in this file logs any of the three at
-//! any level, no error payload can carry one (every one is a `const` below, and
-//! `SyncError`'s payloads are `&'static str` by construction), and the reply
-//! carries only the status a client could have asked for anyway. None of the
-//! three ever reaches the store, so none can reach the search index.
-//!
-//! One residual, stated rather than hidden: the passphrase copy this module
-//! derives from is `Zeroizing`, but the request frame it arrived in is an
-//! ordinary `String` owned by the JSON codec, and that copy is dropped without
-//! being wiped. Closing it means a zeroizing decoder for one field of one
-//! method, which is not obviously worth what it costs — but it is the reason
-//! this is "the passphrase is not persisted" rather than "the passphrase is not
+//! One residual: the passphrase copy used for derivation is `Zeroizing`, but
+//! the request frame it arrived in is an ordinary `String` owned by the JSON
+//! codec and is dropped unwiped. So the property is "not persisted", not "not
 //! in memory".
 
 use std::sync::Arc;
@@ -160,9 +148,7 @@ fn sign_in_failure(id: u64, error: AuthError) -> Response {
         AuthError::Network(_) | AuthError::Server { .. } => (ErrorCode::Internal, MSG_UNAVAILABLE),
         // A malformed or rejected response is not something a user can fix by
         // retyping a password, so it must not read as a credential failure.
-        AuthError::Malformed | AuthError::Rejected { .. } => {
-            (ErrorCode::Internal, MSG_UNAVAILABLE)
-        }
+        AuthError::Malformed | AuthError::Rejected { .. } => (ErrorCode::Internal, MSG_UNAVAILABLE),
     };
     warn!(error = ?error, "cloud sign-in failed");
     Response::err(id, code, message)

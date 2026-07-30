@@ -1,31 +1,14 @@
-//! The two steps both transports share: opening a stored version to send
-//! ([`open_version`]), and merging one that arrived ([`apply_remote_version`]).
+//! Opening a stored version to send ([`open_version`]) and merging one that
+//! arrived ([`apply_remote_version`]) — the two steps both transports share.
 //!
-//! Both transports land here: a peer session ([`crate::p2p::source`]) and a
-//! cloud round ([`crate::cloud::source`]) hand their decoded version to
-//! [`apply_remote_version`], and it decides. That is manifest 05 INV-C2 made
-//! structural rather than disciplinary — v1's worst convergence bug was two
-//! transports comparing with two different comparators, and the way to stop
-//! that recurring is for there to be exactly one call to
-//! [`merge_decision`](copypaste_p2p::sync::merge_decision) in the daemon.
+//! Manifest 05 INV-C2 made structural: this is the daemon's only call to
+//! [`merge_decision`](copypaste_p2p::sync::merge_decision), because v1's worst
+//! convergence bug was two transports comparing with two different comparators.
 //!
-//! Four things happen here, in this order, and each is a rule neither transport
-//! can enforce for itself:
-//!
-//! * **The merge is re-run against the row as it stands now.** A peer session
-//!   planned from summaries taken before it started writing, and a cloud page
-//!   was fetched before the local user touched anything. This is the only place
-//!   both `origin_device_id`s and the current local row exist at once.
-//! * **Sensitivity is decided here, by this device's detector**, not by
-//!   whatever the sender thought. A tombstone has no content to judge and
-//!   inherits the flag from the row it deletes — otherwise deleting a flagged
-//!   item would publish its hash.
-//! * **The content is re-sealed under the local item key.** The sender's
-//!   ciphertext is useless: the AEAD binds the item id to a key derived from
-//!   *that* device's secret.
-//! * **A tombstone for an unknown item is still stored** as a tombstone
-//!   (manifest 05 T-3, `CopyPaste-bfiu`). Dropping it lets a later-arriving
-//!   create resurrect the item.
+//! The merge is re-run here rather than trusted from the caller: a peer session
+//! planned from summaries taken before it started writing, and a cloud page was
+//! fetched before the local user touched anything. This is the only place both
+//! `origin_device_id`s and the current local row exist at once.
 
 use copypaste_p2p::protocol::ItemSummary;
 use copypaste_p2p::sync::{merge_decision, MergeDecision};
@@ -148,7 +131,9 @@ pub fn apply_remote_version(
     let computed;
     let content_hash: &str = match incoming.content_hash {
         Some(hash) => hash,
-        None if incoming.deleted => local.as_ref().map_or("", |l| l.summary.content_hash.as_str()),
+        None if incoming.deleted => local
+            .as_ref()
+            .map_or("", |l| l.summary.content_hash.as_str()),
         None => {
             computed = copypaste_core::storage::compute_content_hash(incoming.content.as_bytes());
             &computed
@@ -310,7 +295,15 @@ mod tests {
 
         assert!(applied, "the delete lost to the version it deletes");
         assert!(state.store.get("a").unwrap().is_none());
-        assert!(state.meta.local_version("a").unwrap().unwrap().summary.deleted);
+        assert!(
+            state
+                .meta
+                .local_version("a")
+                .unwrap()
+                .unwrap()
+                .summary
+                .deleted
+        );
     }
 
     #[test]

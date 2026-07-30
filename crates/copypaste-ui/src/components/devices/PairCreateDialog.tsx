@@ -143,7 +143,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
                     type="button"
                     aria-label="Reveal the pairing code"
                     onClick={() => setRevealed(true)}
-                    className="absolute inset-0 flex items-center justify-center gap-2 rounded-md bg-card/60 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    className="absolute inset-0 flex items-center justify-center gap-2 rounded-md bg-card/60 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
                   >
                     <Eye size={16} aria-hidden="true" />
                     Click to reveal

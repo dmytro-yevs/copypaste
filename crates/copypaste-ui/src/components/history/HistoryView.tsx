@@ -197,7 +197,7 @@ export function HistoryView() {
           <button
             type="button"
             onClick={reveal.hide}
-            className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
           >
             Dismiss
           </button>

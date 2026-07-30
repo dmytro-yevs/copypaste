@@ -60,20 +60,9 @@
 //! how long it may sleep. v1 had six separate hand-rolled backoffs; this crate
 //! has none of its own.
 //!
-//! # How the module is laid out
-//!
-//! | file | owns |
-//! |---|---|
-//! | [`session`] | [`Session`]: the tokens, their expiry arithmetic, and their redaction |
-//! | [`token`] | the GoTrue response body and how it becomes a `Session` |
-//! | [`error`] | [`AuthError`], `GrantKind`, and the `invalid_grant` disambiguation |
-//! | [`client`] | [`SupabaseAuth`]: the four endpoints and the request helper |
-//! | [`http`] | the pieces `crate::rest` shares: the one retry policy, `Retry-After`, redaction |
-//!
 //! [`http`] is a module rather than a handful of loose functions because every
 //! item in it has exactly one job: to be the *only* implementation of something
-//! v1 had several of. Keeping them together is what makes a second one
-//! obvious.
+//! v1 had several of. Keeping them together is what makes a second one obvious.
 
 pub mod client;
 pub mod error;

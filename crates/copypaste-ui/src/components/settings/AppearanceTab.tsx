@@ -98,7 +98,7 @@ export function AppearanceTab() {
                 data-accent={option}
                 onClick={() => set("accent", option)}
                 className={cn(
-                  "flex size-7 items-center justify-center rounded-full bg-brand text-on-brand outline-none transition-transform focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                  "flex size-7 items-center justify-center rounded-full bg-brand text-on-brand outline-none transition-transform focus-visible:ring-[3px] focus-visible:ring-ring",
                   selected ? "scale-110" : "hover:scale-105",
                 )}
               >

@@ -4,13 +4,13 @@
     "$type": "shadow",
     "sh-focus": {
       "$value": {
-        "color": "color-mix(in oklab, var(--accent) 50%, transparent)",
+        "color": "var(--accent)",
         "offsetX": "0",
         "offsetY": "0",
         "blur": "0",
         "spread": "3px"
       },
-      "$description": "shadcn's focus halo: a 3px ring of the accent at 50%, drawn as a shadow so it does not affect layout. Identical in both themes because it is derived from the live accent."
+      "$description": "The focus halo: a 3px ring of the accent, drawn as a shadow so it does not affect layout. FULL alpha, not shadcn's 50%: the accent at 50% over --bg measures 1.78-2.98 across the six accents in both themes and fails WCAG 1.4.11 (3:1) on every one. At full alpha the worst is 3.27 (light green). Any component using `ring-ring/50` has the same defect and must use `ring-ring`."
     }
   }
 }
