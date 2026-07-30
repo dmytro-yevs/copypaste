@@ -139,8 +139,53 @@ fn tick(state: &AppState) -> Result<(), IngestError> {
 }
 
 /// Detect, encrypt, deduplicate, store — the one path into the database.
+///
+/// A thin shim over [`ingest_into`]: everything except recording the item's
+/// origin is expressed in `copypaste-core` types, so that function can move into
+/// `copypaste-core` unchanged. See the module header for why that move matters.
 pub fn ingest(
     state: &AppState,
+    content: &str,
+    content_type: &str,
+) -> Result<Ingested, IngestError> {
+    let outcome = ingest_into(
+        &state.store,
+        &state.detector,
+        &state.keyring,
+        content,
+        content_type,
+    )?;
+
+    // This device captured it, so this device is its origin — the one thing a
+    // sync session needs about an item that the store has no column for. Read
+    // as advisory on the way out (`meta::local_version` treats an absent row as
+    // "captured here"), so a failure here costs nothing but is still worth
+    // reporting. It stays in the daemon because the origin table is the
+    // daemon's, not the store's.
+    if let Ingested::Stored(item) = &outcome {
+        if let Err(e) = state.meta.record_origin(&item.id, state.meta.device_id()) {
+            warn!(error = ?e, "could not record the origin of a captured item");
+        }
+    }
+    Ok(outcome)
+}
+
+/// The ingest path itself, in `copypaste-core` terms only.
+///
+/// **Written to be moved.** Android cannot host a daemon, so the app links the
+/// core in-process — and `copypaste-daemon` is a binary with no `lib` target, so
+/// nothing can depend on it. This function is what the Android app needs and
+/// cannot reach. Re-typing it there is not an option: this module's header
+/// records that v1 had two ingest paths that drifted and the second one forgot
+/// the dedup probe.
+///
+/// Nothing below mentions the daemon, so moving it into `copypaste-core` is a
+/// cut-and-paste plus a re-export. What has to move with it: [`Ingested`],
+/// [`IngestError`], [`MAX_HISTORY_ITEMS`] and the tests that exercise them.
+pub fn ingest_into(
+    store: &copypaste_core::Store,
+    detector: &copypaste_core::Detector,
+    keyring: &copypaste_core::Keyring,
     content: &str,
     content_type: &str,
 ) -> Result<Ingested, IngestError> {
@@ -157,7 +202,7 @@ pub fn ingest(
     // against 60000 ms after 1970 and match the entire history, silently
     // collapsing all repeats of a value into the first one ever stored.
     let cutoff_ms = copypaste_core::now_ms() - DEDUP_WINDOW_MS;
-    let recent = match state.store.find_recent_by_hash(&hash, cutoff_ms) {
+    let recent = match store.find_recent_by_hash(&hash, cutoff_ms) {
         Ok(found) => found,
         Err(e) => {
             warn!(error = ?e, "dedup probe failed; storing the item anyway");
@@ -168,7 +213,7 @@ pub fn ingest(
         return Ok(Ingested::Duplicate(row));
     }
 
-    let is_sensitive = state.detector.is_sensitive(content);
+    let is_sensitive = detector.is_sensitive(content);
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
     // bind item identity"), and `decrypt` is handed `StoredItem::id` on the way
@@ -177,10 +222,10 @@ pub fn ingest(
     // every row fails authentication on every later read. That is why `NewItem`
     // carries `id` rather than the store minting one.
     let item_id = uuid::Uuid::new_v4().to_string();
-    let key = state.keyring.item_key();
+    let key = keyring.item_key();
     let (nonce, ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, &item_id)?;
 
-    let stored = state.store.insert(NewItem {
+    let stored = store.insert(NewItem {
         id: item_id,
         content_ciphertext: ciphertext,
         nonce,
@@ -198,22 +243,10 @@ pub fn ingest(
         created_at: copypaste_core::now_ms(),
     })?;
 
-    // This device captured it, so this device is its origin — the one thing a
-    // sync session needs about an item that the store has no column for. Read
-    // as advisory on the way out (`meta::local_version` treats an absent
-    // row as "captured here"), so a failure here costs nothing but is still
-    // worth reporting.
-    if let Err(e) = state
-        .meta
-        .record_origin(&stored.id, state.meta.device_id())
-    {
-        warn!(error = ?e, "could not record the origin of a captured item");
-    }
-
     // Best-effort, and deliberately after the insert: the item is already
     // durable, and a failed sweep must never turn a stored capture into a lost
     // one.
-    if let Err(e) = state.store.evict_over_cap(MAX_HISTORY_ITEMS) {
+    if let Err(e) = store.evict_over_cap(MAX_HISTORY_ITEMS) {
         warn!(error = ?e, "history cap eviction failed");
     }
 
