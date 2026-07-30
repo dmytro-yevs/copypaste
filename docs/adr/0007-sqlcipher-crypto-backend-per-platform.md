@@ -100,9 +100,28 @@ defaults, so the difference is not observable in the file format either.
 
 `openssl-src` maps all four Android ABIs onto generic OpenSSL configurations
 (`linux-aarch64`, `linux-armv4`, `linux-elf`, `linux-x86_64`) and takes its
-compiler, archiver and ranlib from `cc`, which reads the `CC_<target>` and
-`AR_<target>` variables the Tauri Android build already exports with absolute
-NDK paths. It does not read `ANDROID_NDK_ROOT`.
+compiler, archiver and ranlib from `cc`, which it hands to `./Configure` to be
+baked into the Makefile. It does not read `ANDROID_NDK_ROOT`.
+
+**The ranlib has to be wired in; the rest arrives.** The Tauri Android build
+(`cargo-mobile2`) exports `TARGET_CC`, `TARGET_CXX` and `TARGET_AR` with
+absolute NDK paths, and no `RANLIB` at all. Given none, `cc` probes `PATH` for
+`llvm-ranlib` and otherwise falls back to `<triple>-ranlib` — a GCC-era wrapper
+the NDK deleted in r23 — so the fourth release dry run compiled OpenSSL for
+`aarch64-linux-android` and then died in `install_dev` on
+`aarch64-linux-android-ranlib: not found`.
+
+`scripts/release/android-ndk-env.sh` exports `AR_<triple>` and
+`RANLIB_<triple>` (underscored — the highest-priority spelling `cc` reads that
+a shell can export) for all four ABIs, pointing at the NDK's `llvm-ar` and
+`llvm-ranlib`. `AR` is set alongside `RANLIB` rather than left to
+`cargo-mobile2`, whose contract has already proved partial. The alternative —
+a `PATH` directory of `<triple>-ar` symlinks — is the widely copied recipe and
+works whatever reads what, but it rots invisibly: nothing would ever report a
+shim that had stopped being used. The script instead asserts the two tools are
+executable before the build starts, and `check.sh` runs it against a fake NDK
+and asserts the exact variable names, because a misspelled one is not an error,
+only a variable nobody reads.
 
 ## Alternatives rejected
 
@@ -122,11 +141,15 @@ encrypted at rest on both platforms or the product is not what it claims.
 
 ## Unverified
 
-The Android OpenSSL build has never run. It cannot be reproduced in the
+The Android OpenSSL build has compiled but never installed. The fourth release
+dry run got through the `aarch64-linux-android` compile and failed on ranlib;
+the three other ABIs have not been reached at all, and no run has yet linked
+`sqlite3.c` against the result. None of this can be reproduced in the
 development container: there is no NDK, `dl.google.com` is unreachable, and the
 one available cross-compilation trick — a shim that emits an empty object file —
-would fake exactly the C compilation being tested. What is verified here is
-feature resolution, not compilation.
+would fake exactly the C compilation being tested. The ranlib wiring is
+verified only to the extent that the emitted variable names are asserted and
+`cc`'s precedence order was read from the vendored source.
 
 The macOS linkage check has likewise never run on macOS; `otool` does not exist
 in the container. Whether it *passes* is the open question, and it is the

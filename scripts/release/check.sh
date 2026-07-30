@@ -440,6 +440,18 @@ else
     ok "root Cargo.toml keeps vendored OpenSSL off the default path"
 fi
 
+# It must appear somewhere, and that is a separate check from where. The
+# feature is one line in one crate manifest, nothing in the workspace refers to
+# it, and losing it is invisible off Android: the host build is unaffected and
+# the Android job fails minutes later while compiling sqlite3.c against headers
+# the NDK sysroot does not have. Commit 2304fbb5 dropped it exactly that way.
+if grep -rql 'bundled-sqlcipher-vendored-openssl' --include=Cargo.toml crates >/dev/null; then
+    ok "some crate manifest enables vendored OpenSSL (ADR-0007 part 1)"
+else
+    bad "some crate manifest enables vendored OpenSSL (ADR-0007 part 1)" \
+        "no crates/**/Cargo.toml enables it; the Android build has no crypto backend to link SQLCipher against"
+fi
+
 # Where the feature does appear it must sit under an android cfg. In a plain
 # [dependencies] it vendors on every target — the same mistake, wider blast
 # radius, and resolver v2 is the only reason the scoped form works at all.
@@ -465,6 +477,43 @@ else
     bad "deny.toml admits openssl-sys only beneath libsqlite3-sys" \
         "unscoped, either the Android graph fails cargo-deny or native-tls stops being caught"
 fi
+
+# The Android half of the same ADR. cc-rs reads RANLIB_<triple>; a misspelled
+# name does not fail, it is simply never read, and the build goes back to the
+# `<triple>-ranlib` fallback and dies inside OpenSSL's install_dev. So the names
+# are asserted against a fake NDK rather than read.
+NDKDIR="$(mktemp -d)"
+NDKBIN="$NDKDIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
+mkdir -p "$NDKBIN"
+: > "$NDKBIN/llvm-ar"
+: > "$NDKBIN/llvm-ranlib"
+chmod +x "$NDKBIN/llvm-ar" "$NDKBIN/llvm-ranlib"
+if NDK_ENV="$(./scripts/release/android-ndk-env.sh "$NDKDIR" 2>&1)"; then
+    absent=""
+    for triple in aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android; do
+        t="${triple//-/_}"
+        grep -qxF "AR_${t}=${NDKBIN}/llvm-ar"         <<<"$NDK_ENV" || absent="${absent} AR_${t}"
+        grep -qxF "RANLIB_${t}=${NDKBIN}/llvm-ranlib" <<<"$NDK_ENV" || absent="${absent} RANLIB_${t}"
+    done
+    if [[ -z "$absent" ]]; then
+        ok "android-ndk-env.sh names AR_<triple> and RANLIB_<triple> for all four ABIs"
+    else
+        bad "android-ndk-env.sh names AR_<triple> and RANLIB_<triple> for all four ABIs" \
+            "not emitted, or not pointing at the NDK's llvm tools:${absent}"
+    fi
+    if [[ "$(grep -c . <<<"$NDK_ENV")" == "8" ]]; then
+        ok "android-ndk-env.sh emits those eight lines and nothing else"
+    else
+        bad "android-ndk-env.sh emits those eight lines and nothing else" \
+            "anything else in the output would be appended to GITHUB_ENV verbatim: $NDK_ENV"
+    fi
+else
+    bad "android-ndk-env.sh runs against an NDK layout" "$NDK_ENV"
+fi
+rm -f "$NDKBIN/llvm-ranlib"
+reject "android-ndk-env.sh fails when llvm-ranlib is absent" ./scripts/release/android-ndk-env.sh "$NDKDIR"
+reject "android-ndk-env.sh fails when the NDK is absent"     ./scripts/release/android-ndk-env.sh "$NDKDIR/nope"
+rm -rf "$NDKDIR"
 
 if grep -q 'check-macos-linkage.sh' .github/workflows/release.yml; then
     ok "release.yml runs the macOS linkage check"

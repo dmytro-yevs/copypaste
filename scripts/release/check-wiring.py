@@ -199,6 +199,30 @@ for wf, doc in docs.items():
         rec("RUSTUP_TOOLCHAIN" in env, "{}: {} pins RUSTUP_TOOLCHAIN for its bare cargo".format(wf, jn),
             "resolves through rust-toolchain.toml instead: {}".format(hits[:3]))
 
+# --- the Android NDK binutils wiring ---------------------------------------
+# openssl-src asks cc-rs for AR and RANLIB, and cc-rs falls back to
+# `<triple>-ranlib` — a wrapper no NDK has shipped since r23 — unless something
+# exports RANLIB_<triple>. android-ndk-env.sh exports it, per triple, so its
+# list and the list of targets the job installs have to stay the same set: a
+# target it misses fails only after several minutes of OpenSSL build.
+android = (docs["release.yml"].get("jobs") or {}).get("android") or {}
+wiring = [s for s in steps(android) if "android-ndk-env.sh" in (s.get("run") or "")]
+rec(len(wiring) == 1, "release.yml: android runs android-ndk-env.sh exactly once",
+    "found {} steps invoking it".format(len(wiring)))
+rec(any("GITHUB_ENV" in (s.get("run") or "") for s in wiring),
+    "release.yml: android-ndk-env.sh output reaches GITHUB_ENV",
+    "the script only prints; nothing reads it unless it is appended to GITHUB_ENV")
+installed = set()
+for s in steps(android):
+    if (s.get("uses") or "").startswith("dtolnay/rust-toolchain"):
+        installed |= {t.strip() for t in str((s.get("with") or {}).get("targets", "")).split(",") if t.strip()}
+script = pathlib.Path("scripts/release/android-ndk-env.sh")
+m = re.search(r"TRIPLES=\(([^)]*)\)", script.read_text()) if script.is_file() else None
+listed = set((m.group(1) if m else "").split())
+rec(bool(installed) and listed == installed,
+    "android-ndk-env.sh covers every Android target the job installs",
+    "script has {}, the toolchain step installs {}".format(sorted(listed), sorted(installed)))
+
 # --- release.yml shell discipline ------------------------------------------
 for jn, j in (docs["release.yml"].get("jobs") or {}).items():
     for i, s in enumerate(steps(j)):

@@ -339,6 +339,15 @@ jobs:
           perl --version | sed -n '2p'
           make --version | sed -n '1p'
 
+      - name: Point the Android builds at the NDK's llvm-ar and llvm-ranlib
+        # cc-rs derives an Android target's ranlib from the triple when nothing
+        # exports one, and the NDK stopped shipping `<triple>-ranlib` in r23.
+        # The script says the rest; it is separate so check.sh can execute it,
+        # because the variable names are the whole of the fix.
+        run: |
+          set -euo pipefail
+          ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
+
       - name: Build the APK
         run: |
           set -euo pipefail
