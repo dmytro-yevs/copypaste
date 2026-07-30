@@ -42,7 +42,9 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) {
         return;
     };
     // Positioned before it is shown, so it never appears in one place and
-    // jumps to another.
+    // jumps to another. Android has no tray to position under, and no
+    // `tray_by_id` on `AppHandle` either — the window there is the activity.
+    #[cfg(not(target_os = "android"))]
     position_under_tray(app, &window);
     let _ = window.show();
     // Focus is what makes the search field live. Requested after `show`
@@ -83,6 +85,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
 /// Every failure here is silent and leaves the window where it was. A popover
 /// in the wrong place is a cosmetic problem; a popover that refuses to appear
 /// because a monitor query returned `None` is not.
+#[cfg(not(target_os = "android"))]
 fn position_under_tray<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     let Some(tray) = app.tray_by_id("main") else {
         return;
