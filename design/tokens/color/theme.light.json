@@ -62,6 +62,11 @@
       "$value": "oklch(0 0 0 / 9%)",
       "$description": "Neutral pressed state layer."
     },
+    "accent-hover": {
+      "$value": "color-mix(in oklab, var(--accent) 88%, var(--accent-away))",
+      "$description": "See the dark theme's note for why the mix goes away from the ink rather than toward the surface. Every light fill takes white ink, so every accent darkens on hover; worst label 6.34 (rose), from 4.78 at rest.",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
+    },
     "selected": {
       "$value": "color-mix(in oklab, var(--accent) 12%, transparent)",
       "$description": "Accent-tinted selection fill. Light takes 12% where dark takes 18% — the same tint over white reads much stronger.",
@@ -102,6 +107,11 @@
     "on-err": {
       "$value": "oklch(0.985 0 0)",
       "$description": "Foreground on a solid --err fill: 4.71. White works here because light's --err is red-600; dark's red-400 needs dark ink."
+    },
+    "err-hover": {
+      "$value": "color-mix(in oklab, var(--err) 88%, oklch(0 0 0))",
+      "$description": "As dark's --err-hover, mirrored: the ink is white here, so the hover mixes toward black. 4.71 at rest, 6.23 on hover.",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
     },
     "info": {
       "$value": "oklch(0.546 0.245 262.881)",

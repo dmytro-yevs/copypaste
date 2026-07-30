@@ -1,6 +1,6 @@
 {
   "accents": {
-    "$description": "The accent axis, dark resolution. Six user-selectable accents drawn straight from the Tailwind v4 palette: --accent is a FILL and must carry --on-accent at >=4.5, and it is also the focus ring, so it must clear 3:1 on --bg, --card AND --elevated. --accent-2 is TEXT and must clear 4.5 on --bg. Those three constraints are why the fills are not one ramp step: five accents sit at -500 and rose at -600. Teal, green, amber and blue take dark ink because at -500 they are too light to carry white; rose darkens to -600 instead, which the ring floor still permits at 3.12. Indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks and feed shadcn's `primary` / `ring` / `sidebar-primary` slots, so choosing an accent re-tints every stock component with no per-component override.",
+    "$description": "The accent axis, dark resolution. Six user-selectable accents drawn straight from the Tailwind v4 palette: --accent is a FILL and must carry --on-accent at >=4.5, and it is also the focus ring, so it must clear 3:1 on --bg, --card AND --elevated. --accent-2 is TEXT and must clear 4.5 on --bg. Those three constraints are why the fills are not one ramp step: five accents sit at -500 and rose at -600. Teal, green, amber and blue take dark ink because at -500 they are too light to carry white; rose darkens to -600 instead, which the ring floor still permits at 3.12. Indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks and feed shadcn's `primary` / `ring` / `sidebar-primary` slots, so choosing an accent re-tints every stock component with no per-component override. --accent-away is the pole opposite --on-accent — black where the ink is white, white where it is dark — and it exists only to give --accent-hover (theme.dark.json) its direction; it is the one part of the hover fill that has to vary per accent.",
     "$type": "color",
     "indigo": {
       "$description": "Default accent. indigo-500 / indigo-400.",
@@ -14,6 +14,9 @@
       "on-accent": {
         "$value": "oklch(1 0 0)",
         "$description": "Foreground on a solid --accent fill."
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     },
     "blue": {
@@ -27,6 +30,9 @@
       "on-accent": {
         "$value": "oklch(0.21 0.04 259.815)",
         "$description": "Dark ink: blue-500 measures 3.71 with white."
+      },
+      "accent-away": {
+        "$value": "oklch(1 0 0)"
       }
     },
     "teal": {
@@ -40,6 +46,9 @@
       "on-accent": {
         "$value": "oklch(0.21 0.04 182.503)",
         "$description": "Dark ink: the teal fill is too light to carry white text at AA."
+      },
+      "accent-away": {
+        "$value": "oklch(1 0 0)"
       }
     },
     "green": {
@@ -53,6 +62,9 @@
       "on-accent": {
         "$value": "oklch(0.21 0.05 149.579)",
         "$description": "Dark ink: the green fill is too light to carry white text at AA."
+      },
+      "accent-away": {
+        "$value": "oklch(1 0 0)"
       }
     },
     "amber": {
@@ -66,6 +78,9 @@
       "on-accent": {
         "$value": "oklch(0.21 0.04 70.08)",
         "$description": "Dark ink: the amber fill is too light to carry white text at AA."
+      },
+      "accent-away": {
+        "$value": "oklch(1 0 0)"
       }
     },
     "rose": {
@@ -78,6 +93,9 @@
       },
       "on-accent": {
         "$value": "oklch(1 0 0)"
+      },
+      "accent-away": {
+        "$value": "oklch(0 0 0)"
       }
     }
   },
@@ -94,6 +112,10 @@
     "on-accent": {
       "$value": "{accents.indigo.on-accent}",
       "$description": "Foreground on the active accent."
+    },
+    "accent-away": {
+      "$value": "{accents.indigo.accent-away}",
+      "$description": "The default the [data-accent] blocks override. It has to exist: --accent-hover substitutes this, and an undefined custom property inside color-mix() makes the whole declaration invalid at computed-value time, which is a hover with no fill at all rather than a hover with the wrong one."
     }
   }
 }

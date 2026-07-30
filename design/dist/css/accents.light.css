@@ -10,6 +10,7 @@
   --accent: oklch(0.511 0.262 276.966);
   --accent-2: oklch(0.457 0.24 277.023);
   --on-accent: oklch(1 0 0);
+  --accent-away: oklch(0 0 0);
 }
 
 :root[data-theme="light"][data-accent="blue"],
@@ -17,6 +18,7 @@
   --accent: oklch(0.546 0.245 262.881);
   --accent-2: oklch(0.488 0.243 264.376);
   --on-accent: oklch(1 0 0);
+  --accent-away: oklch(0 0 0);
 }
 
 :root[data-theme="light"][data-accent="teal"],
@@ -24,6 +26,7 @@
   --accent: oklch(0.511 0.096 186.391);
   --accent-2: oklch(0.437 0.078 188.216);
   --on-accent: oklch(1 0 0);
+  --accent-away: oklch(0 0 0);
 }
 
 :root[data-theme="light"][data-accent="green"],
@@ -31,6 +34,7 @@
   --accent: oklch(0.527 0.154 150.069);
   --accent-2: oklch(0.448 0.119 151.328);
   --on-accent: oklch(1 0 0);
+  --accent-away: oklch(0 0 0);
 }
 
 :root[data-theme="light"][data-accent="amber"],
@@ -38,6 +42,7 @@
   --accent: oklch(0.555 0.163 48.998);
   --accent-2: oklch(0.473 0.137 46.201);
   --on-accent: oklch(1 0 0);
+  --accent-away: oklch(0 0 0);
 }
 
 :root[data-theme="light"][data-accent="rose"],
@@ -45,4 +50,5 @@
   --accent: oklch(0.586 0.253 17.585);
   --accent-2: oklch(0.514 0.222 16.935);
   --on-accent: oklch(1 0 0);
+  --accent-away: oklch(0 0 0);
 }

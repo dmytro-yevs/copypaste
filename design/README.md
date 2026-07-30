@@ -7,7 +7,7 @@ committed.
 cd design && npm install
 npm run rebuild        # clean + build + check
 npm run check          # both gates
-npm run check:contrast # token values; --verbose lists all 756 pairs
+npm run check:contrast # token values; --verbose lists all 828 pairs
 npm run check:usage    # the component tree; --verbose lists rules and exemptions
 ```
 
@@ -48,7 +48,7 @@ moment they are copied.
 
 ### Where the adopted system is overridden
 
-Three of shadcn's own defaults are not used, each because it measures below the
+Four of shadcn's own defaults are not used, each because it measures below the
 accessibility contract. These are the only deliberate divergences; anything
 else that differs from upstream is a bug.
 
@@ -57,11 +57,24 @@ else that differs from upstream is a bug.
 | white on dark `destructive` (red-400) | **2.75:1** | dark theme takes dark ink on `--err`; light keeps white on red-600 (4.71) |
 | `ring-ring/50` focus halo | **1.51–2.98:1** | the ring is the accent at full alpha (3.12 worst) |
 | `--input` = `--border` as a field's boundary | **1.25:1** | `--color-input` routes to `--border-strong` (3.64 worst) |
+| an alpha on a filled button's hover (`/90`) | **4.02:1** primary, **4.45:1** destructive | `--accent-hover` / `--err-hover`, mixed away from the ink (5.77 worst) |
 
-Two of the three are one `npx shadcn@latest add` away from coming back, and a
-token gate cannot see either: `ring-ring/50` puts the alpha at the call site
-and leaves every token value untouched. `npm run check:usage` is what notices —
-see *The component tree*.
+Three of the four are one `npx shadcn@latest add` away from coming back, and a
+token gate cannot see any of them: `ring-ring/50` puts the alpha at the call
+site and leaves every token value untouched. `npm run check:usage` is what
+notices — see *The component tree*.
+
+**The hover fill is mixed away from `--on-accent`, never toward the surface.**
+An alpha dilutes a fill toward whatever is behind it, and on one theme or the
+other that is toward the label: shadcn's `/90` puts `--on-accent` at 4.02
+(dark/blue on `--bg`) and `--on-err` at 4.45 (light/indigo). Raising the alpha
+until it passes is arithmetic, not a fix — `/97` and `/94` clear 4.5 by 0.04.
+`--accent-hover` mixes `--accent` 12% toward `--accent-away`, the pole opposite
+the ink, so the label's ratio can only rise on hover; 12% is about one Tailwind
+palette step. The cost is stated rather than hidden: in dark, the two accents
+with white ink darken on hover, so the fill falls from 3.12 to 2.35 against
+`--elevated`. A filled button is identified by its rest state, and the hover
+state is not its boundary.
 
 ---
 
@@ -71,9 +84,9 @@ see *The component tree*.
 can actually land on — including the alpha state layers and the `color-mix()`
 selection fill, which have no ratio until they are composited — across both
 themes and all six accents, and fails the build below **4.5:1 for text** and
-**3:1 for control boundaries and focus indicators**. 756 pairs.
+**3:1 for control boundaries and focus indicators**. 828 pairs.
 
-The last 84 measure the shadcn aliases (`--color-input`, `--color-ring`,
+The last 108 measure the shadcn aliases (`--color-input`, `--color-ring`,
 `--color-sidebar-ring`) rather than the tokens beneath them. A component says
 `border-input` and never names `--border-strong`, so pointing the alias back at
 the 1.25:1 `--border` would leave every other pair green.
@@ -92,6 +105,8 @@ Worst case in each category, over both themes and all six accents:
 | `--accent-2` as text | 4.81 | 4.5 |
 | `--on-accent` on an `--accent` fill | 4.55 | 4.5 |
 | `--on-err` on an `--err` fill | 4.71 | 4.5 |
+| `--on-accent` on `--accent-hover` | 5.77 | 4.5 |
+| `--on-err` on `--err-hover` | 6.23 | 4.5 |
 | `*-strong` on its own 15% tint | 4.90 | 4.5 |
 | `--withheld-fg` on `--withheld` | 5.32 | 4.5 |
 | content-kind glyph on `--bg` | 4.83 | 3.0 |
@@ -363,24 +378,8 @@ What a machine cannot settle:
   WebView. Only the solid fallback is guaranteed.
 - Coarse-pointer sizing on a real phone. `pointer: coarse` is inferred from the
   media query, not observed.
-- Whether a hover state that does not change the fill is legible as a hover
-  state. See below — the current one is not AA, and every fix for it either
-  changes the fill less or replaces it with something that is not a fill.
-
-### Open, measured, and not fixable here
-
-`check:usage` fails on two lines of `crates/copypaste-ui/src/components/ui/`
-`button.tsx`, which this package does not own:
-
-| Line | Measured | Floor |
-|---|---|---|
-| `hover:bg-primary/90` with `text-primary-foreground` | **4.02:1** worst (dark/blue on `--bg`) | 4.5 |
-| `hover:bg-destructive/90` with `text-destructive-foreground` | **4.45:1** worst (light/indigo on `--bg`) | 4.5 |
-
-Diluting a fill toward the page moves it toward the label on one theme or the
-other, and `--on-accent` / `--on-err` were only ever measured against the
-undiluted fill. `/97` and `/94` respectively are the first alphas that clear
-4.5, with 0.04 of headroom — which is a number, not a fix. The fix is a hover
-token per accent that mixes the fill *away* from its ink, so the label's ratio
-can only rise; it is not here yet because no component can use it until
-`button.tsx` changes.
+- Whether a filled button that *darkens* on hover reads as a hover or as the
+  button receding. In dark, indigo and rose take white ink, so away from the
+  ink is toward black; the shift is 12%, about one palette step, and the
+  direction is not negotiable — the alternative is a hover that lowers the
+  label's contrast.
