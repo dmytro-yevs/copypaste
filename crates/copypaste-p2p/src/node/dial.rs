@@ -9,8 +9,8 @@ use tokio::net::lookup_host;
 use tracing::{debug, info, warn};
 
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
-use super::{placeholder_name, Node, NodeError};
-use crate::peers::Peer;
+use super::{placeholder_name, store_error, Node, NodeError};
+use crate::peers::{Peer, MAX_PAIRINGS};
 use crate::sync::{run_initiator, SyncError, SyncOutcome, SyncSource};
 use crate::transport::{PairingToken, Session};
 
@@ -39,6 +39,15 @@ impl Node {
         // it was wrong is a hint about what a valid one looks like.
         let token = PairingToken::parse(code).map_err(|_| NodeError::BadCode)?;
         let pairing_id = token.pairing_id();
+
+        // Checked before dialling as well as at the write. The write is the
+        // authority, but finding out after a full sync round that the pairing
+        // cannot be stored would mean this device had already sent its history
+        // to a peer it then refuses to know.
+        if self.peers().get(&pairing_id).is_none() && self.peers().len() >= MAX_PAIRINGS {
+            return Err(NodeError::TooManyPairings);
+        }
+
         let addr = resolve(addr).await.ok_or(NodeError::BadAddress)?;
 
         let session = match Session::connect(addr, &token.psk()).await {
@@ -60,10 +69,7 @@ impl Node {
             last_addr: Some(addr),
             last_seen_ms: crate::now_ms(),
         };
-        self.peers().upsert(peer.clone()).map_err(|e| {
-            warn!(error = %e, "could not store a completed pairing");
-            NodeError::PeerStore
-        })?;
+        self.peers().upsert(peer.clone()).map_err(store_error)?;
         self.republish();
 
         info!(
@@ -232,6 +238,30 @@ mod tests {
         let err = node.sync_one(&peer, &source).await.expect_err("no address");
         assert_eq!(err, NodeError::NoAddress);
         assert!(!err.is_client_error(), "this is not the caller's mistake");
+    }
+
+    /// The cap is checked before the dial, so a pairing this device is going to
+    /// refuse never gets a sync round first.
+    #[tokio::test]
+    async fn accepting_past_the_pairing_cap_is_refused_before_anything_is_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let source = TestSource::new("me", Vec::new());
+        for i in 0..MAX_PAIRINGS {
+            node.pair_create(&format!("device-{i}"))
+                .expect("up to the cap");
+        }
+
+        // Nothing is listening on port 1, so a dial would fail with
+        // `Handshake`. Getting `TooManyPairings` is what proves the cap was
+        // checked before the socket was opened.
+        let code = PairingToken::generate().to_code();
+        let err = node
+            .pair_accept(&code, "127.0.0.1:1", &source)
+            .await
+            .expect_err("past the cap must be refused");
+        assert_eq!(err, NodeError::TooManyPairings);
+        assert_eq!(node.peers().len(), MAX_PAIRINGS);
     }
 
     #[tokio::test]
