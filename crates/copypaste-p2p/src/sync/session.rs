@@ -1,9 +1,9 @@
 //! The session: ten messages, no state machine.
 //!
 //! One round trip of summaries, one request in each direction, items streamed
-//! back in bounded batches. v1 shipped a HELLO/HAVE/WANT anti-entropy engine of
-//! about 5,000 lines that the daemon never once instantiated; everything here is
-//! on the path the daemon calls.
+//! back in bounded batches. v1 shipped a 5,000-line HELLO/HAVE/WANT
+//! anti-entropy engine the daemon never instantiated; everything here is on the
+//! path the daemon calls.
 //!
 //! ```text
 //! initiator                      responder
@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use super::plan::plan;
 use super::{SyncChannel, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::protocol::{
-    ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
+    content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
     MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
 };
 
@@ -98,8 +98,6 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
     })
 }
 
-// ---------------------------------------------------------------- session parts
-
 fn local_hello<S: SyncSource>(source: &S) -> SyncMessage {
     SyncMessage::Hello {
         protocol_version: PROTOCOL_VERSION,
@@ -108,11 +106,9 @@ fn local_hello<S: SyncSource>(source: &S) -> SyncMessage {
     }
 }
 
-/// Reads the peer's hello and fails closed on anything unexpected.
-///
-/// The version check itself lives in [`SyncMessage::validate`], so it applies to
-/// every ingress path rather than only to this one; calling it again here costs
-/// nothing and covers a channel implementation that skipped decode-time
+/// Reads the peer's hello and fails closed on anything unexpected. The version
+/// check lives in [`SyncMessage::validate`] so it covers every ingress path;
+/// repeating it here also covers a channel that skipped decode-time
 /// validation.
 async fn recv_hello<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
@@ -138,11 +134,10 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
     }
 }
 
-/// Sends our summary and returns exactly what was advertised, keyed by id.
-///
-/// The returned map is the session's authority on two questions: what we may
-/// serve (nothing outside it, so a sensitive item can never be requested out of
-/// us) and what the peer's summary is compared against.
+/// Sends our summary and returns exactly what was advertised, keyed by id. The
+/// map is the session's authority on what we may serve — nothing outside it, so
+/// a sensitive item can never be requested out of us — and on what the peer's
+/// summary is compared against.
 async fn advertise<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
@@ -150,10 +145,9 @@ async fn advertise<C: SyncChannel, S: SyncSource>(
     let mut items = source.summaries()?;
 
     if items.len() > MAX_SUMMARIES_PER_MESSAGE {
-        // Newest first, then truncate: a clipboard's newest entries are the ones
-        // a user is waiting for, and the remainder is picked up by the next
-        // session. Sessions repeat, so this delays convergence rather than
-        // preventing it.
+        // Newest first, then truncate: the newest entries are what a user is
+        // waiting for, and the remainder goes in the next session. Sessions
+        // repeat, so this delays convergence rather than preventing it.
         tracing::warn!(
             count = items.len(),
             max = MAX_SUMMARIES_PER_MESSAGE,
@@ -195,12 +189,10 @@ async fn recv_request<C: SyncChannel>(chan: &mut C) -> Result<Vec<String>, SyncE
     }
 }
 
-/// Reads `Items` messages until `Done`, applying what was asked for.
-///
-/// Everything unasked-for is dropped. That is the guard against a peer pushing
-/// an item we never evaluated — the merge decision was made against the summary,
-/// so an item that does not match the summary it was promised as is not the item
-/// we agreed to take.
+/// Reads `Items` messages until `Done`, applying what was asked for. Everything
+/// unasked-for is dropped: the merge decision was made against the summary, so
+/// an item that does not match what it was promised as is not the item we
+/// agreed to take.
 async fn receive_items<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
@@ -236,6 +228,20 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
                         stats.skipped += 1;
                         continue;
                     }
+                    if !item.deleted && content_hash(&item.content) != item.content_hash {
+                        // The peer's `content_hash` is comparator key 2. Taking
+                        // its word for it lets a hostile peer pick that key
+                        // freely — and collide with a targeted item's hash so
+                        // the version it names is refused. Recomputed here
+                        // rather than in `apply`, so every `SyncSource` gets it.
+                        // A tombstone is exempt: it carries the hash of the item
+                        // it deletes and no content to hash (rule T-4).
+                        tracing::warn!(
+                            "peer sent an item whose content does not match its hash; dropping it"
+                        );
+                        stats.skipped += 1;
+                        continue;
+                    }
                     if !applied.insert(item.item_id.clone()) {
                         // Within-session replay. Harmless — apply is idempotent —
                         // but there is no reason to pay for it twice.
@@ -266,12 +272,10 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
     }
 }
 
-/// Answers a request, then closes the stream with `Done`.
-///
-/// Only ids present in our own advertised summary are served. That is what makes
-/// "a sensitive item never leaves the device" a property of the protocol and not
-/// only of the store: a sensitive item is absent from `summaries()`, so it is
-/// absent from `advertised`, so no request can name it.
+/// Answers a request, then closes the stream with `Done`. Only ids in our own
+/// advertised summary are served, which makes "a sensitive item never leaves the
+/// device" a property of the protocol and not only of the store: absent from
+/// `summaries()`, absent from `advertised`, unnameable by any request.
 async fn serve_items<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
@@ -343,12 +347,9 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
     chan.send(SyncMessage::Done).await
 }
 
-/// Milliseconds since the Unix epoch.
-///
-/// `copypaste-core` has the same helper, but this crate does not depend on it
-/// and adding a dependency to reach three lines of `SystemTime` is not a trade
-/// worth making. A clock before the epoch reads as 0, which loses every
-/// comparison — the safe direction.
+/// Milliseconds since the Unix epoch. Local because this crate does not depend
+/// on `copypaste-core`, where the shared helper lives. A clock before the epoch
+/// reads as 0, which loses every comparison — the safe direction.
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
@@ -406,7 +407,6 @@ mod tests {
         session(&a1, &b1).await;
 
         let (a2, b2) = mk();
-        // Same pair, roles swapped.
         let (rb, ra) = try_session(&b2, &a2).await;
         ra.unwrap();
         rb.unwrap();
@@ -458,7 +458,6 @@ mod tests {
         assert_eq!(b.snapshot(), c.snapshot());
         assert_eq!(a.snapshot().len(), 3);
 
-        // No oscillation: another full round moves nothing.
         let (oa, ob) = session(&a, &b).await;
         assert_eq!((oa.stats.sent, oa.stats.received), (0, 0));
         assert_eq!((ob.stats.sent, ob.stats.received), (0, 0));
@@ -623,6 +622,68 @@ mod tests {
         let outcome = run_initiator(&mut chan, &a).await.unwrap();
         assert!(a.get("x").is_none());
         assert_eq!(outcome.stats.skipped, 1);
+    }
+
+    /// The peer's `content_hash` is comparator key 2, so a peer that is believed
+    /// picks that key freely — it can hand over content while claiming the hash
+    /// of a *different* item and collide with it in the dedup index, making the
+    /// targeted version be refused. The receiver recomputes instead.
+    #[tokio::test]
+    async fn an_item_whose_content_does_not_hash_to_its_claimed_hash_is_dropped() {
+        let a = TestSource::new("dev-a", vec![]);
+        let mut forged = item("x", 100, "attacker payload", "dev-b");
+        forged.content_hash = content_hash("some other item's content");
+        let promised = forged.summary();
+
+        let mut chan = ScriptChannel::new(vec![
+            SyncMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                device_id: "dev-b".into(),
+                device_name: "B".into(),
+            },
+            SyncMessage::Summary {
+                items: vec![promised],
+            },
+            SyncMessage::Items {
+                items: vec![forged],
+            },
+            SyncMessage::Done,
+            SyncMessage::Request { item_ids: vec![] },
+        ]);
+
+        let outcome = run_initiator(&mut chan, &a).await.unwrap();
+        assert!(a.get("x").is_none(), "a forged content_hash was applied");
+        assert_eq!(outcome.stats.received, 0);
+        assert_eq!(outcome.stats.skipped, 1);
+    }
+
+    /// The exemption that must survive the check: a tombstone carries the hash of
+    /// the item it deletes and no content to hash (rule T-4), so recomputing
+    /// would drop every delete.
+    #[tokio::test]
+    async fn a_tombstone_is_exempt_from_the_hash_check() {
+        let a = TestSource::new("dev-a", vec![item("x", 100, "live version", "dev-a")]);
+        let grave = tombstone("x", 200, &content_hash("live version"), "dev-b");
+
+        let mut chan = ScriptChannel::new(vec![
+            SyncMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                device_id: "dev-b".into(),
+                device_name: "B".into(),
+            },
+            SyncMessage::Summary {
+                items: vec![grave.summary()],
+            },
+            SyncMessage::Items {
+                items: vec![grave],
+            },
+            SyncMessage::Done,
+            SyncMessage::Request { item_ids: vec![] },
+        ]);
+
+        let outcome = run_initiator(&mut chan, &a).await.unwrap();
+        assert_eq!(outcome.stats.received, 1, "the delete was dropped");
+        assert!(a.get("x").is_some_and(|i| i.deleted));
     }
 
     #[tokio::test]

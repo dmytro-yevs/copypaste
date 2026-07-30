@@ -326,7 +326,7 @@ async fn resolve(addr: &str) -> Option<SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::p2p::tests::test_state;
+    use crate::testutil::test_state;
     use copypaste_p2p::transport::TOKEN_LEN;
 
     #[tokio::test]

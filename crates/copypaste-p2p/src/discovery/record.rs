@@ -1,8 +1,6 @@
 //! The TXT record: what we advertise, and what we are willing to believe.
 //!
-//! # What goes in the TXT record
-//!
-//! Only non-secret material:
+//! Only non-secret material goes in it:
 //!
 //! | key | value |
 //! |---|---|
@@ -12,15 +10,12 @@
 //!
 //! **The pairing token / PSK is never advertised, in any form — not hashed, not
 //! truncated, not as a "fingerprint".** The `pairing_id` is a public handle for
-//! a pairing; the token is the key to it. Anything derived from the token that
-//! appears on the wire is a gift to a passive listener, so the encoder here
-//! only ever sees the id. `advertisement_has_no_secret_material` in the tests
-//! pins the allowed key set so a future key cannot be added without the test
-//! failing.
+//! a pairing; the token is the key to it, and anything derived from it on the
+//! wire is a gift to a passive listener, so the encoder only ever sees the id.
+//! `advertisement_has_no_secret_material` pins the allowed key set, so a new
+//! key cannot be added without the test failing.
 //!
-//! Both directions are pure: encoding touches no socket, so it is testable on a
-//! host with no network at all, and decoding is fed a `TxtProperties` that a
-//! test can build by hand.
+//! Both directions are pure: no sockets either way.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -54,15 +49,9 @@ pub const MAX_PAIRING_IDS_PER_PEER: usize = 16;
 /// advertise must never be able to break pairing.
 pub const MAX_ADVERTISED_PAIRING_IDS: usize = 16;
 
-// ---------------------------------------------------------------------------
-// Encode
-// ---------------------------------------------------------------------------
-
-/// Build the advertisement. Pure — touches no socket, so the encoding is
-/// testable on a host with no network at all.
-///
-/// `instance` is the mDNS instance label (which the daemon may rename on
-/// conflict); `device_name` is what we put in TXT for humans to read.
+/// Build the advertisement. `instance` is the mDNS instance label (which the
+/// daemon may rename on conflict); `device_name` is what goes in TXT for humans
+/// to read.
 pub(super) fn build_service_info(
     instance: &str,
     device_name: &str,
@@ -110,10 +99,6 @@ pub(super) fn build_service_info(
     let info = ServiceInfo::new(SERVICE_TYPE, &instance, &hostname, (), port, txt)?;
     Ok(info.enable_addr_auto())
 }
-
-// ---------------------------------------------------------------------------
-// Decode
-// ---------------------------------------------------------------------------
 
 /// What we were able to read out of somebody's TXT record.
 #[derive(Debug, Clone, PartialEq, Eq)]

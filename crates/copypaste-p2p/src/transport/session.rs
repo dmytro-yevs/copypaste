@@ -1,20 +1,16 @@
 //! The established channel: framing, chunking, poisoning.
 //!
-//! # Framing
+//! Two framing layers, neither hand-rolled:
 //!
-//! Two layers, neither hand-rolled:
-//!
-//! 1. [`tokio_util::codec::LengthDelimitedCodec`] puts a 4-byte big-endian
-//!    length in front of every Noise message and enforces
-//!    [`MAX_NOISE_MESSAGE`] on the way in, so an oversized declaration is
-//!    rejected before anything is allocated for it.
-//! 2. Noise messages are capped at 65535 bytes by the specification, which is
-//!    smaller than a clipboard image. A logical message is therefore split
-//!    across Noise messages, each carrying a one-byte record marker
-//!    (`RECORD_MORE` / `RECORD_FINAL`) *inside* the AEAD, so the marker is
-//!    authenticated and an attacker cannot truncate a message by dropping the
-//!    final record — the receiver would see the stream end mid-message and
-//!    return [`TransportError::Malformed`].
+//! 1. [`tokio_util::codec::LengthDelimitedCodec`] length-prefixes every Noise
+//!    message and enforces [`MAX_NOISE_MESSAGE`] on the way in, so an oversized
+//!    declaration is rejected before anything is allocated for it.
+//! 2. Noise caps a message at 65535 bytes, smaller than a clipboard image, so a
+//!    logical message is split across Noise messages, each carrying a one-byte
+//!    record marker (`RECORD_MORE` / `RECORD_FINAL`) *inside* the AEAD. The
+//!    marker is therefore authenticated: an attacker cannot truncate a message
+//!    by dropping the final record, because the receiver sees the stream end
+//!    mid-message and returns [`TransportError::Malformed`].
 //!
 //! That one byte is the only framing invented here. Reassembly is bounded by
 //! [`MAX_MESSAGE_BYTES`]; past it the peer gets [`TransportError::TooLarge`]
@@ -56,30 +52,26 @@ const RECORD_FINAL: u8 = 0x02;
 /// Largest logical message this channel will send or reassemble.
 ///
 /// A resource guard, not a front-line defence: the peer is authenticated by the
-/// time this matters, since an unpaired attacker never gets past the handshake.
-/// It bounds what a single `recv` can allocate for a buggy or hostile *paired*
-/// device.
+/// time this matters, so it bounds what one `recv` can allocate for a buggy or
+/// hostile *paired* device.
 ///
-/// Deliberately equal to [`crate::protocol::MAX_MESSAGE_BYTES`], and it must
-/// never be smaller. The protocol layer owns message-size policy — it caps one
-/// item at 4 MiB and allows 8× that for JSON escape inflation. If the transport
-/// were the tighter limit, a legitimate message full of control characters
-/// would be refused down here, with a transport error, instead of by the layer
-/// that decided the budget. The two constants are kept separate rather than
-/// aliased because the crate docs make these modules independently
-/// substitutable; a test pins them together so the pair cannot drift silently.
+/// Equal to [`crate::protocol::MAX_MESSAGE_BYTES`] and never smaller. The
+/// protocol layer owns message-size policy; if the transport were the tighter
+/// limit, a message that layer considers legal would be refused down here with
+/// a transport error. The two are kept separate rather than aliased because the
+/// modules are independently substitutable, and a test pins them together so
+/// they cannot drift silently.
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
 /// An established, encrypted, message-oriented channel with one peer.
 ///
-/// Obtained from [`Session::connect`] or [`Session::accept`]; both return only
-/// after the handshake has completed, so a `Session` that exists is a session
-/// that authenticated.
+/// Only [`Session::connect`] and [`Session::accept`] produce one, and both
+/// return after the handshake completes, so a `Session` that exists is a
+/// session that authenticated.
 ///
-/// Not `Clone` and not shareable: [`Session::send`] and [`Session::recv`] take
-/// `&mut self` because the Noise transport state carries a per-direction nonce
-/// counter that must advance in lockstep with the wire. Give each connection
-/// its own task.
+/// Not `Clone` and not shareable: `send` and `recv` take `&mut self` because
+/// the Noise transport state carries a per-direction nonce counter that must
+/// advance in lockstep with the wire. Give each connection its own task.
 pub struct Session {
     framed: Framed<TcpStream, LengthDelimitedCodec>,
     noise: TransportState,
@@ -103,10 +95,9 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// [`TransportError::TooLarge`] if the encoded message exceeds
-    /// [`MAX_MESSAGE_BYTES`] — nothing is written in that case, so the channel
-    /// stays usable; [`TransportError::Codec`] if `msg` does not serialise;
-    /// [`TransportError::Io`] if the socket fails.
+    /// [`TransportError::TooLarge`] past [`MAX_MESSAGE_BYTES`] — nothing is
+    /// written, so the channel stays usable; [`TransportError::Codec`] if `msg`
+    /// does not serialise; [`TransportError::Io`] if the socket fails.
     pub async fn send<T: serde::Serialize>(&mut self, msg: &T) -> Result<(), TransportError> {
         if self.poisoned {
             return Err(TransportError::Malformed);
@@ -117,9 +108,7 @@ impl Session {
         }
 
         // `chunks` yields nothing for an empty slice, and an empty logical
-        // message still has to produce one record or the peer's `recv` would
-        // block. `serde_json` never emits zero bytes for a valid value, so this
-        // is belt and braces rather than a live path.
+        // message still needs one record or the peer's `recv` blocks.
         let mut records = payload.chunks(MAX_RECORD_PAYLOAD).peekable();
         if records.peek().is_none() {
             return self.write_record(RECORD_FINAL, &[]).await;
@@ -145,10 +134,9 @@ impl Session {
     /// # Errors
     ///
     /// [`TransportError::Malformed`] on an authentication failure, an unknown
-    /// record marker or a truncated message — the session is poisoned and must
-    /// be dropped. [`TransportError::TooLarge`] if reassembly would exceed
-    /// [`MAX_MESSAGE_BYTES`]. [`TransportError::Codec`] if the authenticated
-    /// bytes did not parse as `T`, which leaves the session usable.
+    /// record marker or truncation — the session is poisoned. `TooLarge` if
+    /// reassembly would exceed [`MAX_MESSAGE_BYTES`]. `Codec` if the
+    /// authenticated bytes did not parse as `T`, which leaves it usable.
     pub async fn recv<T: serde::de::DeserializeOwned>(
         &mut self,
     ) -> Result<Option<T>, TransportError> {
@@ -162,9 +150,8 @@ impl Session {
             let frame = match self.framed.next().await {
                 None => {
                     if started {
-                        // FIN arrived between records. Someone truncated the
-                        // message — either the peer crashed or an attacker cut
-                        // the connection. Either way it is not an empty message.
+                        // FIN between records: the peer crashed or an attacker
+                        // cut the connection. Not an empty message.
                         self.poisoned = true;
                         return Err(TransportError::Malformed);
                     }
@@ -251,8 +238,7 @@ impl Session {
 
     // -- internals ----------------------------------------------------------
 
-    /// Wrap a completed handshake. Called only by [`super::handshake`], which
-    /// is the sole way a `Session` comes into existence.
+    /// Wrap a completed handshake. Called only by [`super::handshake`].
     pub(super) fn new(
         framed: Framed<TcpStream, LengthDelimitedCodec>,
         noise: TransportState,
@@ -325,18 +311,11 @@ mod tests {
     use snow::Builder;
     use std::time::Duration;
 
-    /// The protocol layer owns message-size policy. If this transport were the
-    /// narrower of the two, a message the protocol considers legal would be
-    /// refused down here, and the caller would get a transport error for a
-    /// decision made a layer up.
-    ///
-    /// A compile-time guard rather than a runtime assertion — the same shape as
-    /// port manifest 02 I-27's constant guards — so drift between the two
-    /// numbers is a build failure with the reason attached. It lives inside the
-    /// test module so the shipped `transport` stays free of any reference to
-    /// `protocol`; the crate docs describe the two as independently
-    /// substitutable, and that should remain true of the artifact even though
-    /// the numbers have to agree.
+    /// The protocol layer owns message-size policy, so this transport must not
+    /// be the narrower of the two. A compile-time guard rather than a runtime
+    /// assertion (port manifest 02 I-27's constant-guard shape), so drift is a
+    /// build failure; inside the test module so the shipped `transport` keeps
+    /// no reference to `protocol`.
     const _: () = assert!(
         MAX_MESSAGE_BYTES >= crate::protocol::MAX_MESSAGE_BYTES,
         "the transport must never impose a tighter message limit than the protocol"
@@ -372,8 +351,6 @@ mod tests {
                 })
                 .await
                 .expect("send back");
-            // Closing cleanly is what makes the client's second recv return
-            // Ok(None) rather than an error.
             session.close().await.expect("clean close");
         });
 
@@ -419,7 +396,6 @@ mod tests {
             let got: String = session.recv().await.expect("recv").expect("message");
             assert_eq!(got.len(), expected.len());
             assert_eq!(got, expected);
-            // Echo it back so both directions are exercised at size.
             session.send(&got).await.expect("echo");
             session.close().await.expect("close");
         });
@@ -448,8 +424,7 @@ mod tests {
         });
 
         let mut client = Session::connect(addr, &psk).await.expect("initiator");
-        // JSON of a String is the string plus two quotes, so this is just over
-        // the cap.
+        // Just over the cap, once JSON quoting is counted.
         let huge = "q".repeat(MAX_MESSAGE_BYTES);
         assert!(
             matches!(client.send(&huge).await, Err(TransportError::TooLarge)),
@@ -497,8 +472,8 @@ mod tests {
 
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("accept");
-            // Speak the handshake honestly, then send a frame that is the right
-            // shape but not a valid Noise message.
+            // Handshake honestly, then send a frame of the right shape that is
+            // not a valid Noise message.
             let mut framed = Framed::new(stream, codec());
             let first = framed.next().await.expect("frame").expect("ok");
             let mut buf = vec![0u8; MAX_NOISE_MESSAGE];
@@ -515,7 +490,6 @@ mod tests {
                 .expect("send response");
             let mut noise = hs.into_transport_mode().expect("transport");
             let len = noise.write_message(b"\x02garbage", &mut buf).expect("seal");
-            // Flip a bit in the ciphertext.
             buf[len / 2] ^= 0x01;
             framed
                 .send(Bytes::copy_from_slice(&buf[..len]))

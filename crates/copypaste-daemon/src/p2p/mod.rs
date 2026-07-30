@@ -13,7 +13,10 @@
 //!
 //! Everything shared sits in [`P2p`], which hangs off `AppState` exactly like
 //! the store and the keyring do: constructed once in `main`, never rebuilt, no
-//! optional fields.
+//! optional fields. The sync view of the history is *not* here: it is
+//! [`crate::meta`], because the cloud transport reads and writes the same rows
+//! through the same comparator, and one of the two transports owning it is how
+//! the second one ends up with a copy.
 //!
 //! # Discovery is a convenience, never a dependency
 //!
@@ -25,7 +28,6 @@
 
 pub mod channel;
 pub mod handlers;
-pub mod meta;
 pub mod source;
 
 use std::net::SocketAddr;
@@ -40,7 +42,6 @@ use tokio::sync::{watch, Semaphore};
 use tracing::{debug, info, warn};
 
 use crate::p2p::channel::{NoiseChannel, SESSION_TIMEOUT};
-use crate::p2p::meta::Meta;
 use crate::p2p::source::StoreSource;
 use crate::AppState;
 
@@ -57,8 +58,6 @@ const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
 /// Held inside `AppState`; every field is always present, for the same reason
 /// the rest of `AppState` is (see the crate docs).
 pub struct P2p {
-    /// The sync view of the item table, and this device's identity.
-    pub meta: Meta,
     peers: PeerStore,
     /// Degraded-but-present when multicast is unavailable — see the module docs.
     discovery: Discovery,
@@ -70,7 +69,6 @@ pub struct P2p {
 impl std::fmt::Debug for P2p {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("P2p")
-            .field("device_id", &self.meta.device_id())
             .field("port", &self.port)
             .field("peers", &self.peers.len())
             .finish_non_exhaustive()
@@ -78,9 +76,8 @@ impl std::fmt::Debug for P2p {
 }
 
 impl P2p {
-    pub fn new(meta: Meta, peers: PeerStore, discovery: Discovery, port: u16) -> Self {
+    pub fn new(peers: PeerStore, discovery: Discovery, port: u16) -> Self {
         Self {
-            meta,
             peers,
             discovery,
             port,
@@ -247,59 +244,10 @@ async fn serve_peer(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use super::*;
-    use crate::clipboard::{Capture, ClipboardSource};
-    use copypaste_core::{Detector, Keyring, Store};
-
-    /// Writes nowhere and reads nothing: these tests are about sync, not the
-    /// pasteboard.
-    #[derive(Default)]
-    pub struct FakeClipboard;
-
-    impl ClipboardSource for FakeClipboard {
-        fn poll(&mut self) -> Option<Capture> {
-            None
-        }
-        fn set_contents(&mut self, _text: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-        fn backend_name(&self) -> &'static str {
-            "fake"
-        }
-    }
-
-    /// A fully wired daemon state on a temporary data directory.
-    ///
-    /// The keyring is deterministic rather than loaded: a test must not touch
-    /// the developer's real keystore, and two states built with different names
-    /// get different secrets, which is what makes "re-encrypted under the local
-    /// key" a meaningful assertion.
-    pub fn test_state(name: &str) -> (Arc<AppState>, tempfile::TempDir) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("copypaste-v2.db");
-
-        let mut secret = [0u8; 32];
-        for (slot, byte) in secret.iter_mut().zip(name.bytes().cycle()) {
-            *slot = byte;
-        }
-        let keyring = Keyring::from_secret(&secret);
-        let store = Store::open(&db_path, &keyring.db_key()).expect("store");
-        let meta = Meta::open(&db_path, &keyring.db_key(), name).expect("meta");
-        let peers = PeerStore::open(&dir.path().join("peers-v2.json")).expect("peer store");
-        // Port 0 is never bound in these tests; discovery degrades either way.
-        let discovery = Discovery::start(name, &[], 0).expect("discovery");
-
-        let state = AppState::new(
-            store,
-            keyring,
-            Detector::new().expect("detector"),
-            Box::new(FakeClipboard),
-            P2p::new(meta, peers, discovery, 0),
-        );
-        state.set_ready(true);
-        (Arc::new(state), dir)
-    }
+    use crate::testutil::{add, contents, test_state};
+    use copypaste_p2p::peers::Peer;
 
     /// Pair two states over loopback and hand back the address A listens on.
     ///
@@ -338,29 +286,6 @@ pub mod tests {
             })
             .expect("store the pairing on B");
         (pairing_id, addr)
-    }
-
-    fn add(state: &Arc<AppState>, content: &str) -> String {
-        crate::capture::ingest(state, content, "text")
-            .expect("ingest")
-            .into_item()
-            .id
-    }
-
-    fn contents(state: &Arc<AppState>) -> Vec<String> {
-        let key = state.keyring.item_key();
-        state
-            .store
-            .list(100, 0)
-            .expect("list")
-            .into_iter()
-            .map(|row| {
-                let plain =
-                    copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
-                        .expect("decrypt");
-                String::from_utf8(plain).expect("utf-8")
-            })
-            .collect()
     }
 
     /// The whole thing, in process: a listener, a dialler, two databases with
@@ -501,8 +426,8 @@ pub mod tests {
     fn two_states_have_distinct_device_identities() {
         let (a, _da) = test_state("alpha");
         let (b, _db) = test_state("beta");
-        assert_ne!(a.p2p.meta.device_id(), b.p2p.meta.device_id());
-        assert_eq!(a.p2p.meta.device_name(), "alpha");
+        assert_ne!(a.meta.device_id(), b.meta.device_id());
+        assert_eq!(a.meta.device_name(), "alpha");
     }
 
     #[test]

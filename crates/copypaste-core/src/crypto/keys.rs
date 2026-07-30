@@ -17,10 +17,8 @@ use super::CryptoError;
 /// Length of the device secret and of every key derived from it.
 pub const KEY_LEN: usize = 32;
 
-/// HKDF extract salt. One salt for the whole v2 tree — domain separation
-/// between the derived keys comes from the `info` strings below, which is what
-/// HKDF's `info` parameter is for. Using distinct salts *as well* would be
-/// belt-and-braces with no additional property.
+/// HKDF extract salt. One salt for the whole v2 tree; domain separation comes
+/// from the `info` strings below, which is what `info` is for.
 const HKDF_SALT: &[u8] = b"copypaste/v2/device-secret/hkdf-salt";
 
 /// HKDF `info` for the SQLCipher database key.
@@ -36,11 +34,8 @@ const INFO_ITEM_KEY: &[u8] = b"copypaste/v2/item-content-key";
 /// (port manifest 02, I-23).
 const ENV_EPHEMERAL: &str = "COPYPASTE_EPHEMERAL_KEY";
 
-/// The device secret plus the keys derived from it.
-///
-/// Construct with [`Keyring::load_or_create`] in production or
-/// [`Keyring::from_secret`] in tests. The secret is zeroized when the `Keyring`
-/// is dropped.
+/// The device secret plus the keys derived from it. The secret is zeroized on
+/// drop.
 pub struct Keyring {
     secret: Zeroizing<[u8; KEY_LEN]>,
 }
@@ -50,28 +45,26 @@ impl Keyring {
     ///
     /// * **macOS** — a Keychain generic-password item under service
     ///   `com.copypaste.daemon`, account `device-secret-key`. Requires the
-    ///   `macos-keychain` cargo feature (see the note above the `allow` in
-    ///   [`crate::crypto`]).
+    ///   `macos-keychain` cargo feature.
     /// * **Every other platform** — a `0600` file named `device_secret.key`
     ///   under the platform data directory.
     ///
     /// **The file backend is for development only.** It is not a keystore: the
-    /// secret sits in the user's home directory in plaintext, protected by
-    /// nothing but Unix file permissions, and is readable by any process
-    /// running as that user and by anything that backs the directory up. It
-    /// exists so the daemon can be built and tested on a Linux workstation.
-    /// Android must use the Android Keystore before shipping — a
-    /// platform-`cfg`'d backend added here, alongside the macOS one.
+    /// secret sits in plaintext under the user's home directory, protected by
+    /// file permissions alone and readable by any process running as that user
+    /// or by anything that backs the directory up. It exists so the daemon can
+    /// be built and tested on a Linux workstation. Android must use the Android
+    /// Keystore before shipping — a platform-`cfg`'d backend added here,
+    /// alongside the macOS one.
     ///
-    /// Setting `COPYPASTE_EPHEMERAL_KEY` short-circuits both backends before
-    /// any keystore call and mints a throwaway secret. Data written under it is
-    /// unrecoverable after the process exits, which is the point.
+    /// `COPYPASTE_EPHEMERAL_KEY` short-circuits both backends and mints a
+    /// throwaway secret; data written under it is unrecoverable after exit.
     ///
     /// # Errors
     ///
     /// [`CryptoError::KeystoreUnavailable`] when the keystore's state could not
-    /// be determined. That is *not* the same as "no secret exists yet": a first
-    /// run creates a secret and returns `Ok`. See the variant's docs.
+    /// be determined — *not* the same as "no secret exists yet", which creates
+    /// one and returns `Ok`.
     pub fn load_or_create() -> Result<Self, CryptoError> {
         if ephemeral_requested() {
             tracing::warn!(
@@ -84,24 +77,18 @@ impl Keyring {
         Ok(Self { secret })
     }
 
-    /// Deterministic construction from a known secret.
-    ///
-    /// For tests and for callers that obtained the secret some other way. Does
-    /// not touch any keystore.
+    /// Deterministic construction from a known secret; touches no keystore.
     pub fn from_secret(secret: &[u8; KEY_LEN]) -> Self {
         Self {
             secret: Zeroizing::new(*secret),
         }
     }
 
-    /// Key for SQLCipher, as raw bytes.
-    ///
-    /// The caller formats the PRAGMA — this module does not build SQL. Note
-    /// that SQLCipher wants `PRAGMA key = "x'<64 lowercase hex chars>'"`
-    /// applied *before any other statement*, and that both the hex string and
-    /// this array should be wrapped in `zeroize::Zeroizing` at the call site;
-    /// the signature is fixed by the shared API contract, so it cannot do that
-    /// for you.
+    /// Key for SQLCipher, as raw bytes. The caller formats the PRAGMA:
+    /// SQLCipher wants `PRAGMA key = "x'<64 lowercase hex chars>'"` applied
+    /// *before any other statement*, and both the hex string and this array
+    /// should be wrapped in `zeroize::Zeroizing` at the call site — the fixed
+    /// signature cannot do it for you.
     pub fn db_key(&self) -> [u8; KEY_LEN] {
         derive(&self.secret, INFO_DB_KEY)
     }
@@ -119,18 +106,14 @@ impl std::fmt::Debug for Keyring {
     }
 }
 
-/// The per-item content key. Zeroized on drop; never printed.
-///
-/// The field is `pub(super)` rather than private only so [`super::aead`] can
-/// reach the raw bytes; it is not reachable from outside this module.
+/// The per-item content key. Zeroized on drop; never printed. The field is
+/// `pub(super)` only so [`super::aead`] can reach the raw bytes.
 pub struct ItemKey(pub(super) Zeroizing<[u8; KEY_LEN]>);
 
 impl ItemKey {
-    /// Constant-time equality.
-    ///
-    /// `==` on key bytes short-circuits on the first differing byte and leaks
-    /// a prefix-match length by timing (port manifest 02, I-13). This is the
-    /// only equality this type has.
+    /// Constant-time equality, and the only equality this type has: `==` on
+    /// key bytes short-circuits on the first differing byte and leaks a
+    /// prefix-match length by timing (port manifest 02, I-13).
     pub fn ct_eq(&self, other: &Self) -> bool {
         self.0.as_ref().ct_eq(other.0.as_ref()).into()
     }
@@ -176,10 +159,6 @@ fn ephemeral_requested() -> bool {
     static EPHEMERAL: OnceLock<bool> = OnceLock::new();
     *EPHEMERAL.get_or_init(|| std::env::var_os(ENV_EPHEMERAL).is_some())
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

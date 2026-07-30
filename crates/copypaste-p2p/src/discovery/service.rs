@@ -1,19 +1,15 @@
 //! The live half: the mDNS daemon, the advertisement's lifecycle, and the two
 //! background threads that keep the peer table current.
 //!
-//! # Nothing here is allowed to fail loudly
-//!
-//! Every path in the daemon works with an explicit `host:port`; this module
-//! only saves the user typing one. So [`Discovery::start`] returns a working
-//! handle even when the host forbids multicast (containers, guest Wi-Fi, a
-//! locked-down corporate network), in which case [`Discovery::peers`] simply
-//! stays empty and the reason is logged at debug. That degraded mode is the
-//! normal case in our own test environment, so it is exercised by the tests
-//! below.
+//! Nothing here may fail loudly (see the module docs): [`Discovery::start`]
+//! returns a working handle even when the host forbids multicast — containers,
+//! guest Wi-Fi, a locked-down corporate network — and [`Discovery::peers`] then
+//! stays empty with the reason logged at debug. That degraded mode is the
+//! normal case in our own test environment, so the tests below exercise it.
 //!
 //! The two loops take an `IntoIterator` rather than the concrete mdns-sd
-//! receiver, which is what lets them be driven from a plain `Vec` of events
-//! with no network and no daemon at all.
+//! receiver, so they can be driven from a plain `Vec` of events with no network
+//! and no daemon.
 
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -49,11 +45,10 @@ pub struct Discovery {
 struct Shared {
     table: Mutex<PeerTable>,
     /// Instance name and fullname we currently advertise, if registration went
-    /// through. Tracked so we can re-register on `republish`, unregister on
-    /// teardown, and filter our own advertisement out of the browse results.
-    ///
-    /// mDNS resolves name conflicts by renaming, so this is not necessarily
-    /// what we asked for; the monitor thread keeps it current.
+    /// through: needed to re-register on `republish`, unregister on teardown,
+    /// and filter our own advertisement out of browse results. mDNS resolves
+    /// name conflicts by renaming, so it is not necessarily what we asked for;
+    /// the monitor thread keeps it current.
     registration: Mutex<Option<Registration>>,
 }
 
@@ -215,10 +210,6 @@ impl std::fmt::Debug for Discovery {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Background threads
-// ---------------------------------------------------------------------------
-
 fn spawn(name: &str, body: impl FnOnce() + Send + 'static) {
     if let Err(e) = std::thread::Builder::new()
         .name(name.to_string())
@@ -230,9 +221,6 @@ fn spawn(name: &str, body: impl FnOnce() + Send + 'static) {
 }
 
 /// Drains browse events until the daemon closes the channel.
-///
-/// `IntoIterator` rather than the concrete receiver so the loop is unit
-/// testable from a plain `Vec` of events, with no network and no daemon.
 fn browse_loop(shared: &Shared, events: impl IntoIterator<Item = ServiceEvent>) {
     for event in events {
         match event {

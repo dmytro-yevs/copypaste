@@ -1,29 +1,33 @@
 {
   "z": {
-    "$description": "Stacking order (port-manifest §8.5). A closed, ordered set — new layers get a name here rather than an inline z-index.",
+    "$description": "Stacking order. A closed, ordered set — a new layer gets a name here rather than an inline z-index. The order is load-bearing at one point: a toast must never occlude an open dialog, and the undo toast must sit below it.",
     "$type": "number",
-    "glide": {
-      "$value": 0,
-      "$description": "The glide/ghost layer beneath rows."
-    },
     "row": {
       "$value": 1
     },
-    "grouphead": {
+    "sticky": {
       "$value": 2,
-      "$description": "Sticky date group header."
+      "$description": "Sticky section header inside a scroller."
     },
     "dropzone": {
-      "$value": 10
-    },
-    "scrim": {
-      "$value": 40
+      "$value": 10,
+      "$description": "Drag-and-drop overlay."
     },
     "toast": {
-      "$value": 60
+      "$value": 40,
+      "$description": "Below the scrim on purpose: a toast must never occlude an open dialog, and the undo toast in particular must sit under one (SCRH-12). v1 ordered these the other way round and had to special-case the undo toast."
+    },
+    "scrim": {
+      "$value": 60,
+      "$description": "Dialog scrim. Above the toast stack, so opening a dialog dims everything including any toast on screen."
+    },
+    "dialog": {
+      "$value": 70,
+      "$description": "The dialog panel itself, above its own scrim."
     },
     "popover": {
-      "$value": 80
+      "$value": 80,
+      "$description": "Popovers and tooltips, which may be opened from inside a dialog."
     }
   }
 }

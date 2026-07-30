@@ -1,40 +1,38 @@
 {
   "radius": {
-    "$description": "Corner radii (port-manifest §8.5). Every value is per-component rather than a single ramp, because CopyPaste nests controls inside rows inside cards and a uniform radius reads wrong at 7px and at 13px simultaneously.",
+    "$description": "Corner radii: shadcn/ui's ramp, derived from its base --radius of 0.625rem (10px) as sm = base-4, md = base-2, lg = base, xl = base+4. v1 had a per-component radius for every component (7px chip, 9px input, 13px card); one ramp with four steps is what a component library expects, and it is what keeps a control nested in a row nested in a card looking like one system.",
     "$type": "dimension",
     "r-xs": {
-      "$value": "2px"
-    },
-    "r-chk": {
-      "$value": "5px",
-      "$description": "Selection checkbox."
+      "$value": "4px",
+      "$description": "Smallest rounding — inline marks, tiny swatches."
     },
     "r-sm": {
-      "$value": "6px"
+      "$value": "6px",
+      "$description": "shadcn `--radius-sm`. Chips, badges, small swatches."
     },
     "r-chip": {
-      "$value": "7px",
-      "$description": "Chip / small tile."
+      "$value": "{radius.r-sm}",
+      "$description": "Alias kept because chips are referred to by name across the UI; there is no separate chip radius any more."
     },
     "r-ctl": {
       "$value": "8px",
-      "$description": "Buttons and segmented controls."
+      "$description": "shadcn `--radius-md`, the default on Button and Input."
     },
     "r-input": {
-      "$value": "9px",
-      "$description": "Text fields."
+      "$value": "{radius.r-ctl}",
+      "$description": "Alias: fields share the control radius. v1 gave them their own 9px."
     },
     "r-row": {
       "$value": "10px",
-      "$description": "History row."
-    },
-    "r-window": {
-      "$value": "12px",
-      "$description": "Popup window corner."
+      "$description": "shadcn `--radius-lg`, and the base radius. History rows and list items."
     },
     "r-card": {
-      "$value": "13px",
-      "$description": "Card."
+      "$value": "14px",
+      "$description": "shadcn `--radius-xl`, the default on Card and Dialog."
+    },
+    "r-window": {
+      "$value": "{radius.r-card}",
+      "$description": "The frameless window's own corner, matched to the card radius so the outermost surface is not a fifth value."
     },
     "r-empty-ic": {
       "$value": "16px",
@@ -42,11 +40,7 @@
     },
     "r-pill": {
       "$value": "999px",
-      "$description": "Fully rounded — pills, badges, dots."
-    },
-    "sel-bar-r": {
-      "$value": "3px",
-      "$description": "Radius of the accent bar on a selected row."
+      "$description": "Fully rounded — pills, dots, the switch track."
     }
   }
 }

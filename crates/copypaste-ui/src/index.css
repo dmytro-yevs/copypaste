@@ -4,11 +4,14 @@
  * colour, radius, size, duration and font comes from design/dist/css, which
  * Style Dictionary generates from design/tokens (see design/README.md).
  *
- * Import order is load-bearing: `tailwindcss` first, then the token bundle,
- * whose last import is the `@theme inline` block that binds our tokens to
- * Tailwind's utility namespace (bg-panel, text-dim, rounded-row, p-s-4, …).
+ * Import order is load-bearing: `tailwindcss` first, then `tw-animate-css`
+ * (which supplies the enter/exit animation utilities shadcn components use),
+ * then the token bundle, whose last import is the `@theme inline` block that
+ * binds our tokens to Tailwind's utility namespace — and to shadcn's semantic
+ * slots, so `bg-primary` is the user's accent and `bg-muted` is our --elevated.
  */
 @import "tailwindcss";
+@import "tw-animate-css";
 @import "../../../design/dist/css/index.css";
 
 /* Class detection: this app's sources only. */
@@ -25,9 +28,10 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--f-ui);
-    font-size: var(--fs-md);
-    letter-spacing: var(--ls-body);
+    font-size: var(--fs-sm);
+    letter-spacing: var(--ls-none);
     -webkit-font-smoothing: antialiased;
+    /* The window scrolls nowhere; every scroll region is a pane inside it. */
     overflow: hidden;
   }
 
@@ -35,20 +39,46 @@
     background: var(--selected);
   }
 
-  /* A11Y — visible focus everywhere. Never `outline: none` without a
-   * replacement; the token pair exists precisely so this is one rule. */
+  /* A11Y — a visible focus ring, everywhere. Never `outline: none` without a
+   * replacement; shadcn components carry their own `focus-visible:ring-*`, and
+   * this is the floor under everything else. */
   :focus-visible {
-    outline: var(--focus-ring-width) solid var(--accent);
+    outline: var(--stroke-2) solid var(--accent);
     outline-offset: var(--focus-ring-offset);
+  }
+
+  /* A11Y-11: the token layer zeroes the duration tokens under reduced motion.
+   * This covers the animations that are not driven by a duration token — the
+   * spinner, and the enter/exit keyframes from tw-animate-css. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
-/* sonner reads its surface from these three custom properties, so the toast
- * stack is themed from our tokens rather than from sonner's own palette. */
+/* The chrome surfaces that frost under [data-translucency="on"] (§8.6). Content
+ * surfaces stay solid: a clipboard preview must never be read through anything
+ * behind it. */
+@layer components {
+  .chrome {
+    background: var(--chrome-bg);
+    backdrop-filter: var(--frost-filter);
+    -webkit-backdrop-filter: var(--frost-filter);
+  }
+}
+
+/* sonner reads its surface from these custom properties, so the toast stack is
+ * themed from our tokens rather than from sonner's own palette. */
 [data-sonner-toaster] {
-  --normal-bg: var(--elevated);
+  --normal-bg: var(--card);
   --normal-text: var(--text);
   --normal-border: var(--border);
   --border-radius: var(--r-card);
+  /* Below an open dialog, never above it (SCRH-12). */
   z-index: var(--z-toast);
 }

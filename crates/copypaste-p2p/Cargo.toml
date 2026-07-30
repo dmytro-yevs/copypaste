@@ -20,6 +20,8 @@ rand.workspace = true
 zeroize.workspace = true
 subtle.workspace = true
 hex.workspace = true
+# The wire definition of content identity (protocol::content_hash).
+sha2.workspace = true
 uuid.workspace = true
 # Atomic peer-file writes, not just tests: the file holds PSKs.
 tempfile.workspace = true

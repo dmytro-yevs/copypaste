@@ -1,0 +1,123 @@
+//! The small key/value table both transports keep their cursors in.
+//!
+//! `sync_device_state` already held this device's identity; the cloud path adds
+//! its account, its tokens and its two cursors. They live here rather than in a
+//! file beside the database for one reason: this file is SQLCipher-encrypted
+//! under the device key from the OS keystore, and a refresh token or a sync key
+//! in a plain JSON file next to it would be the weakest link in a design whose
+//! whole claim is that the backend never sees plaintext.
+//!
+//! Values are opaque strings. Nothing here interprets them, and no `Debug`
+//! renders one.
+
+use rusqlite::{params, OptionalExtension};
+
+use super::{Meta, MetaError};
+
+impl Meta {
+    /// Read one value, or `None` when it has never been set.
+    pub fn state(&self, key: &str) -> Result<Option<String>, MetaError> {
+        let conn = self.lock()?;
+        let value = conn
+            .query_row(
+                "SELECT value FROM sync_device_state WHERE key = ?1",
+                [key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(value.filter(|v| !v.is_empty()))
+    }
+
+    pub fn set_state(&self, key: &str, value: &str) -> Result<(), MetaError> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO sync_device_state (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Forget a set of keys in one transaction.
+    ///
+    /// A set rather than one key because signing out has to clear the account,
+    /// both tokens and the key together: a partial clear leaves a refresh token
+    /// on disk for an account the daemon no longer thinks it holds.
+    pub fn clear_state(&self, keys: &[&str]) -> Result<(), MetaError> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction()?;
+        for key in keys {
+            tx.execute("DELETE FROM sync_device_state WHERE key = ?1", [key])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Read a cursor stored as a decimal string, defaulting to zero.
+    ///
+    /// A value that will not parse is treated as absent rather than as an
+    /// error: the cost of re-reading from the start is bandwidth, and the cost
+    /// of refusing to sync is that nothing syncs at all.
+    pub fn state_ms(&self, key: &str) -> Result<i64, MetaError> {
+        Ok(self
+            .state(key)?
+            .and_then(|raw| raw.parse::<i64>().ok())
+            .unwrap_or(0)
+            .max(0))
+    }
+
+    pub fn set_state_ms(&self, key: &str, ms: i64) -> Result<(), MetaError> {
+        self.set_state(key, &ms.max(0).to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::meta::testutil::fixture;
+
+    #[test]
+    fn a_value_round_trips_and_overwrites() {
+        let f = fixture();
+        assert_eq!(f.meta.state("cloud_email").unwrap(), None);
+
+        f.meta.set_state("cloud_email", "a@example.com").unwrap();
+        assert_eq!(
+            f.meta.state("cloud_email").unwrap().as_deref(),
+            Some("a@example.com")
+        );
+
+        f.meta.set_state("cloud_email", "b@example.com").unwrap();
+        assert_eq!(
+            f.meta.state("cloud_email").unwrap().as_deref(),
+            Some("b@example.com")
+        );
+    }
+
+    #[test]
+    fn clearing_removes_every_named_key() {
+        let f = fixture();
+        f.meta.set_state("a", "1").unwrap();
+        f.meta.set_state("b", "2").unwrap();
+        f.meta.clear_state(&["a", "b", "never-set"]).unwrap();
+        assert_eq!(f.meta.state("a").unwrap(), None);
+        assert_eq!(f.meta.state("b").unwrap(), None);
+        // The device identity lives in the same table and must survive.
+        assert!(!f.meta.device_id().is_empty());
+    }
+
+    #[test]
+    fn a_cursor_defaults_to_zero_and_never_reads_negative() {
+        let f = fixture();
+        assert_eq!(f.meta.state_ms("cursor").unwrap(), 0);
+
+        f.meta.set_state_ms("cursor", 1_700_000_000_000).unwrap();
+        assert_eq!(f.meta.state_ms("cursor").unwrap(), 1_700_000_000_000);
+
+        // CopyPaste-psx7 in miniature: a negative cursor must not survive a
+        // round trip, in either direction.
+        f.meta.set_state_ms("cursor", -5).unwrap();
+        assert_eq!(f.meta.state_ms("cursor").unwrap(), 0);
+        f.meta.set_state("cursor", "not a number").unwrap();
+        assert_eq!(f.meta.state_ms("cursor").unwrap(), 0);
+    }
+}

@@ -1,24 +1,19 @@
-//! Deciding what to ask a peer for, from the two summaries alone.
-//!
-//! Pure and clock-injected, which is what lets the delete-before-create case
-//! and the clock-skew ceiling be tested without a session at all.
+//! Deciding what to ask a peer for, from the two summaries alone. Pure and
+//! clock-injected, so the delete-before-create case and the clock-skew ceiling
+//! are testable without a session.
 
 use std::collections::{HashMap, HashSet};
 
 use super::{merge_decision_by_summary, MergeDecision, SyncStats};
 use crate::protocol::{ItemSummary, MAX_REQUEST_IDS_PER_MESSAGE};
 
-/// How far into the future a peer's `created_at` may be before we refuse to
-/// take that version.
-///
-/// The lower bound on timestamps is clamped at the decode boundary; the upper
-/// bound needs the local clock and so lives here. Without it a peer — hostile,
-/// or merely holding a wrong clock — can stamp `i64::MAX` on one `item_id` and
-/// win every future comparison for it, effectively censoring that item on every
-/// device. A day of slack is far more than the skew any real pair of devices
-/// shows, and the response is to skip that one version, never to fail the
-/// session or to delete anything (manifest 05 §3.4, R-CLK-2: no correction is
-/// attempted, only refusal).
+/// How far into the future a peer's `created_at` may be before we refuse that
+/// version. The lower bound is clamped at the decode boundary; this upper bound
+/// needs the local clock. Without it a peer — hostile or merely wrong-clocked —
+/// stamps `i64::MAX` on one `item_id` and wins every future comparison for it,
+/// censoring that item on every device. A day is far more than any real skew,
+/// and the response is to skip that one version, never to fail the session or
+/// delete anything (manifest 05 §3.4, R-CLK-2: refusal, not correction).
 pub const MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// Decides what to ask the peer for, from the two summaries alone.
@@ -148,7 +143,6 @@ mod tests {
         let wanted = plan(&local, &remote, i64::MAX / 2, &mut stats);
         assert_eq!(wanted.len(), MAX_REQUEST_IDS_PER_MESSAGE);
         assert_eq!(stats.skipped, 10);
-        // Newest kept, so the user sees the most recent entries first.
         assert!(wanted.contains_key(&format!("i{}", MAX_REQUEST_IDS_PER_MESSAGE + 9)));
         assert!(!wanted.contains_key("i0"));
     }
