@@ -73,6 +73,11 @@
         }
       }
     },
+    "selected-edge": {
+      "$value": "var(--accent)",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } },
+      "$description": "The selection marker: a bar or border at full accent strength. Selection CANNOT be carried by --selected alone — the tinted fill differs from --bg by 1.09-1.32:1 across the six accents and from --hover by almost nothing, so a selected row and a hovered row look alike and neither is distinguishable at WCAG 1.4.11's 3:1. Raising the tint far enough to reach 3:1 makes every selected row a coloured block. The edge measures 3.33 worst against --selected and clears 3:1 against --bg by construction (it is the focus-ring colour). Do not use --border here; it is 1.25:1."
+    },
     "alpha-selected": {
       "$type": "number",
       "$value": 0.18,

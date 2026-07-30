@@ -153,6 +153,11 @@ function pairsFor(theme, accent) {
   text('var(--withheld-fg)', selected, '--withheld-fg on --selected');
   nonText('var(--withheld-border)', withheld, '--withheld-border on --withheld');
 
+  // Selection is carried by the edge, never by the fill: --selected differs
+  // from --bg by 1.09-1.32:1 and from --hover by less than that.
+  nonText('var(--selected-edge)', selected, '--selected-edge on --selected');
+  nonText('var(--selected-edge)', bg, '--selected-edge on --bg');
+
   // Focus indicator and control boundaries.
   nonText('var(--accent)', bg, 'focus ring on --bg');
   nonText('var(--accent)', card, 'focus ring on --card');

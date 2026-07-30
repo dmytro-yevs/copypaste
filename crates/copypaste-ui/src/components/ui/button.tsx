@@ -12,8 +12,10 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90",
         destructive:
           "bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive",
+        // --border-strong, not shadcn's --border: an outline button's boundary
+        // is what identifies the control, and --border is 1.25:1 (WCAG 1.4.11).
         outline:
-          "border border-border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground",
+          "border border-border-strong bg-background shadow-xs hover:bg-accent hover:text-accent-foreground",
         secondary:
           "bg-secondary text-secondary-foreground shadow-xs hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",

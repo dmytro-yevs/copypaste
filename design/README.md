@@ -6,7 +6,7 @@ committed.
 ```sh
 cd design && npm install
 npm run rebuild        # clean + build + check
-npm run check          # contrast gate alone; --verbose lists all 612 pairs
+npm run check          # contrast gate alone; --verbose lists all 636 pairs
 ```
 
 `npm run build` without `npm run check` is not enough — see *Contrast* below.
@@ -60,7 +60,7 @@ else that differs from upstream is a bug.
 actually land on — including the alpha state layers and the `color-mix()`
 selection fill, which have no ratio until they are composited — across both
 themes and all six accents, and fails the build below **4.5:1 for text** and
-**3:1 for control boundaries and focus indicators**. 612 pairs.
+**3:1 for control boundaries and focus indicators**. 636 pairs.
 
 It exists because the previous revision of this file asserted AA compliance
 while eight combinations were below it. Do not replace a measurement here with
@@ -82,12 +82,27 @@ Worst case in each category, over both themes and all six accents:
 | status dot on `--bg` | 3.21 | 3.0 |
 | focus ring on `--bg` / `--card` | 3.37 | 3.0 |
 | `--border-strong` on any surface | 3.64 | 3.0 |
+| `--selected-edge` on `--selected` | 3.33 | 3.0 |
 
 Two tokens are deliberately below AA and are checked by nothing: `--mute`
 (4.12 dark, 2.63 light) and `--border` (1.25 dark, 1.27 light). Both are
 decorative — `--mute` must never be the sole carrier of text (A11Y-10) and
 `--border` must never be a control's only boundary. Using either for meaning
 is the defect the `--border-strong` and `--faint` tokens exist to prevent.
+
+**Selection is carried by an edge, not by the fill.** `--selected` differs from
+`--bg` by only 1.09–1.32:1, and from `--hover` by less than that — a selected
+row and a merely hovered row look alike, and neither is distinguishable at
+1.4.11's 3:1. Raising the tint that far turns every selected row into a
+coloured block. So the state indicator is `--selected-edge` (the accent at full
+strength, `--sel-bar-w` wide), and `border-border` is not a substitute at
+1.25:1.
+
+**Offline, degraded and error share `--err`, deliberately.** Manifest 06 gives
+all three `role="alert"` at error severity, so a fourth hue would encode a
+distinction the product does not make. What separates them is copy and the
+recovery action, not colour — and none of the three may carry a filesystem path
+(INV-12).
 
 **`--accent` is a fill, `--accent-2` is text.** This is the one distinction the
 whole accent axis hangs on. `--accent` is only guaranteed against
@@ -129,6 +144,25 @@ scales start.
 **Safe areas are tokens**, not raw `env()` at each call site: `env()` with no
 fallback resolves to nothing rather than to `0px` and silently invalidates the
 `calc()` around it.
+
+### The interaction rules that follow
+
+Three rules, because each one has a way of being got wrong that ships a control
+Android users cannot reach.
+
+**No affordance may exist only on hover.** Android has no hover, so a
+hover-revealed control does not exist there. Row actions are always visible.
+
+**Navigation moves rather than shrinks.** Below `sm` the rail becomes a bottom
+bar (`--tabbar-h` + `--inset-bottom`) — the reachable band on a phone is the
+bottom of the display, and a 200 px rail on a 380 px viewport leaves no content.
+It is the same `<nav>`, reordered.
+
+**One click never destroys.** In the history list a click selects and a
+double-click copies; copying overwrites the system clipboard, and a list where
+pointing at something overwrites it is a destructive default. The keyboard path
+is Enter on the focused list, and every row carries an explicit Copy button —
+which is what a screen reader and a finger both use.
 
 ---
 
