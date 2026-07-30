@@ -15,6 +15,7 @@
 
 pub mod config;
 pub mod content_type;
+pub mod error;
 pub mod paths;
 pub mod payload;
 pub mod redact;
@@ -22,6 +23,7 @@ pub mod redact;
 pub use paths::{data_dir, database_path, socket_path, v1_data_dir};
 
 pub use config::{ConfigData, ConfigError, ConfigPatch, Liveness};
+pub use error::ErrorCode;
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DiscoveredData, DiscoveredDevice, ExportData,
     ExportItem, ImportData, Item, ItemPage, PairingData, PeerInfo, StatusData, SyncResult,
@@ -140,6 +142,26 @@ pub enum Method {
     /// Forget a peer. Its half of the pairing keeps working until it also
     /// unpairs — this is a local decision, not a negotiated one.
     Unpair {
+        pairing_id: String,
+    },
+    /// Cut a device off for good: drop its key **and** bar the pairing id.
+    ///
+    /// Distinct from [`Method::Unpair`] in exactly one respect, and it is the
+    /// one that matters after a device is lost. The code that made a pairing is
+    /// the long-term Noise pre-shared key, so it keeps working: after `Unpair`,
+    /// re-entering a code someone kept restores the pairing. `Revoke` records
+    /// the pairing id as refused — permanently, across restarts and across a
+    /// stale copy of the peer file — so nothing can enrol it again
+    /// (`CopyPaste-gbo`, `PeerStore::revoke`).
+    ///
+    /// Irreversible from this side and not negotiated: the other device is told
+    /// nothing and keeps its own half. Pairing the two devices again means a
+    /// new code, by hand, on both.
+    ///
+    /// Answers `Empty` whether or not a peer was there to remove. Revoking an
+    /// id this device has not seen is meaningful — it refuses one that has not
+    /// dialled in yet — so a `not_found` would deny work that was done.
+    Revoke {
         pairing_id: String,
     },
     /// Known peers and when each was last reachable.
@@ -303,6 +325,23 @@ pub struct EventData {
     /// `daemon/src/notify.rs`).
     #[serde(default)]
     pub captured: bool,
+
+    /// Detected secrets the auto-wipe sweep deleted, in the change this event
+    /// reports. Zero on every other change.
+    ///
+    /// A deletion the user did not ask for is the one history change they have
+    /// to be told about, and until this field there was no way to tell them:
+    /// `ConfigData::sensitive_ttl_secs` defaults to `0` — the feature off —
+    /// *because* the count could not leave the daemon, and the Settings screen
+    /// says so in as many words.
+    ///
+    /// A count and not a list of ids, for the reason [`Method::Watch`] gives:
+    /// the rows are gone, and an event carries no content.
+    ///
+    /// Same `#[serde(default)]` reasoning as [`EventData::captured`] — a
+    /// watcher built against an older daemon must keep decoding.
+    #[serde(default)]
+    pub swept: u32,
 }
 
 /// One reply. `ok` distinguishes success from failure without inspecting the
@@ -379,99 +418,9 @@ pub enum ResponseData {
     Empty {},
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorCode {
-    NotFound,
-    InvalidRequest,
-    ProtocolMismatch,
-    NotReady,
-    /// Credentials were rejected, or the operation needs credentials the daemon
-    /// does not hold. Its own code because the recovery is a human action —
-    /// sign in, retype the passphrase — and never a retry (manifest 04's
-    /// `auth_failed`).
-    AuthFailed,
-    /// The file is a CopyPaste 0.4 history. v2 shares no formats with v0.4.x
-    /// (CLAUDE.md rule 3) and has neither opened nor altered it.
-    ///
-    /// Its own code because every other reading of the same failure sends the
-    /// user somewhere useless: `Internal` reads as a bug, and the restore
-    /// path's "not a backup, or damaged" reads as data loss when the data is
-    /// intact. The decision is a human one — keep the old history and run an
-    /// older build, or start fresh — so a client must not offer a retry.
-    LegacyDatabase,
-    /// The key store could not be read, so what it holds is *unknown* — locked
-    /// keychain, unreadable directory, wrong data directory
-    /// (`CryptoError::KeystoreUnavailable`).
-    ///
-    /// Transient by nature: unlocking the keychain turns this into success,
-    /// which is the entire reason it is not [`ErrorCode::KeyUnusable`].
-    KeyLocked,
-    /// The device key is present and cannot be used
-    /// (`CryptoError::KeystoreEntryUnusable`), so the history encrypted under
-    /// it cannot be decrypted by anything.
-    ///
-    /// The counterpart to [`ErrorCode::KeyLocked`] and the reason both exist:
-    /// collapsing the two tells a user to retry against a condition where no
-    /// number of retries produces a different answer.
-    KeyUnusable,
-    Internal,
-}
-
-impl ErrorCode {
-    /// Whether repeating the same request could plausibly succeed.
-    ///
-    /// One answer, next to the taxonomy, because the alternative is each
-    /// surface deciding again — and the defect this guards is a client
-    /// offering **Try again** against a condition that can never change.
-    /// Anything a human must act on is `false`, whether the action is a
-    /// sign-in, a downgrade, or an admission that the data is gone.
-    #[must_use]
-    pub fn retryable(self) -> bool {
-        match self {
-            Self::NotReady | Self::KeyLocked | Self::Internal => true,
-            Self::NotFound
-            | Self::InvalidRequest
-            | Self::ProtocolMismatch
-            | Self::AuthFailed
-            | Self::LegacyDatabase
-            | Self::KeyUnusable => false,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The codes are the contract; a client branches on them and never on the
-    /// text (manifest 04, I9). Renaming one silently is a client that stops
-    /// recognising a state and falls back to its generic one.
-    #[test]
-    fn error_codes_keep_their_wire_spelling() {
-        for (code, wire) in [
-            (ErrorCode::NotFound, "\"not_found\""),
-            (ErrorCode::InvalidRequest, "\"invalid_request\""),
-            (ErrorCode::ProtocolMismatch, "\"protocol_mismatch\""),
-            (ErrorCode::NotReady, "\"not_ready\""),
-            (ErrorCode::AuthFailed, "\"auth_failed\""),
-            (ErrorCode::LegacyDatabase, "\"legacy_database\""),
-            (ErrorCode::KeyLocked, "\"key_locked\""),
-            (ErrorCode::KeyUnusable, "\"key_unusable\""),
-            (ErrorCode::Internal, "\"internal\""),
-        ] {
-            assert_eq!(serde_json::to_string(&code).unwrap(), wire);
-        }
-    }
-
-    /// The pair the distinction exists for: the same subsystem, one worth
-    /// waiting on and one that no amount of waiting changes.
-    #[test]
-    fn a_locked_key_store_is_retryable_and_an_unusable_key_is_not() {
-        assert!(ErrorCode::KeyLocked.retryable());
-        assert!(!ErrorCode::KeyUnusable.retryable());
-        assert!(!ErrorCode::LegacyDatabase.retryable());
-    }
 
     /// v0.4's directory is a *different question* from v2's, which is the whole
     /// reason this function exists rather than a reuse of [`data_dir`].

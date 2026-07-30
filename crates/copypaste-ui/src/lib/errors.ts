@@ -43,6 +43,10 @@ export type ErrorKind =
   | "peer_unreachable"
   | "pairing_limit"
   | "peer_failed"
+  /** A device this list no longer holds. Its own kind because `not_found` is
+   *  worded for a clipboard item, and answering an unpairing with it told the
+   *  user a clipping had gone (`copypaste_ipc::ErrorCode::PeerNotFound`). */
+  | "peer_not_found"
   | "internal"
   | "unknown";
 
@@ -78,10 +82,17 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, ErrorKind]> = [
   //
   // **This is the second-best mechanism and it is worth saying so.** Matching
   // text this app does not author is how these eight drifted out of the list in
-  // the first place, when the node's vocabulary moved into `copypaste-p2p`. The
-  // fix that would not drift is an `ErrorCode` per condition — which needs the
-  // daemon's `p2p::handlers::failed` and `BackendError::from_code`, neither of
-  // them this change's to touch.
+  // the first place, when the node's vocabulary moved into `copypaste-p2p`.
+  // `copypaste_ipc::ErrorCode` now carries one code per condition and
+  // `BackendError::from_code` passes the sentence through unchanged, so these
+  // patterns are pinned by a Rust test on each side; what would end the drift
+  // for good is the *code* crossing the Tauri boundary, which needs a payload
+  // `commands/` does not send yet.
+  //
+  // Before the pairing patterns, and matched on "device" rather than on
+  // "found": this is the one that used to classify as `not_found` and render a
+  // sentence about the clipboard.
+  [/no such paired device|peer[_ ]not[_ ]found/i, "peer_not_found"],
   [/pairing code is not valid|did not accept this pairing code/i, "pairing_code"],
   [/address could not be resolved|expected host:port/i, "pairing_address"],
   [
@@ -152,6 +163,7 @@ const FRIENDLY = {
   peer_unreachable: "errors.peer_unreachable",
   pairing_limit: "errors.pairing_limit",
   peer_failed: "errors.peer_failed",
+  peer_not_found: "errors.peer_not_found",
   internal: "errors.internal",
   unknown: "errors.unknown",
 } as const satisfies Record<ErrorKind, string>;
@@ -191,6 +203,9 @@ const RETRYABLE = {
   pairing_code: false,
   pairing_address: false,
   pairing_limit: false,
+  // The list was stale, not the device. Refreshing it is the next step, and
+  // repeating the same request against the same id is not.
+  peer_not_found: false,
 } as const satisfies Record<ErrorKind, boolean>;
 
 export function isRetryable(kind: ErrorKind): boolean {

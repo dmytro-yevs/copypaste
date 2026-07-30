@@ -51,7 +51,9 @@ pub enum BackendError {
     #[error("The app and the daemon are different versions. Upgrade both and restart the daemon.")]
     ProtocolMismatch,
 
-    /// No such item, or no such peer.
+    /// No such item. A missing *peer* is not this: it arrives as
+    /// `ErrorCode::PeerNotFound` and keeps the daemon's own sentence, because
+    /// the fixed one here is about the clipboard.
     #[error("{0}")]
     NotFound(&'static str),
 
@@ -96,14 +98,42 @@ impl BackendError {
     ///
     /// Branching on the code and never on the string is manifest 04 I9: the
     /// text is for humans and may be reworded, the code is the contract.
+    ///
+    /// **Substituting a sentence for the daemon's is the exception, not the
+    /// rule, and each one is a decision.** Three codes name a condition this
+    /// crate can word better than the daemon can; every other code passes the
+    /// daemon's own sentence through, because that is where the remedy is
+    /// written — "unpair one first", "get a fresh code", "sign in again". The
+    /// arm is total so that a new code cannot inherit a substitution nobody
+    /// chose: `NotFound` used to swallow "no such paired device" and answer
+    /// "That item is no longer there.", which told a user unpairing a vanished
+    /// device that their clipboard item had gone (post-merge review, finding 4).
     pub fn from_code(code: Option<ErrorCode>, message: Option<&str>) -> Self {
-        match code {
-            Some(ErrorCode::NotReady) => Self::NotReady,
-            Some(ErrorCode::ProtocolMismatch) => Self::ProtocolMismatch,
-            Some(ErrorCode::NotFound) => Self::NotFound("That item is no longer there."),
-            _ => Self::from_daemon(
+        let passthrough = || {
+            Self::from_daemon(
                 message.unwrap_or("The daemon reported a failure but gave no reason."),
-            ),
+            )
+        };
+        let Some(code) = code else {
+            return passthrough();
+        };
+        match code {
+            ErrorCode::NotReady => Self::NotReady,
+            ErrorCode::ProtocolMismatch => Self::ProtocolMismatch,
+            // Now only ever an item: a missing device is `PeerNotFound`.
+            ErrorCode::NotFound => Self::NotFound("That item is no longer there."),
+            ErrorCode::PairingCode
+            | ErrorCode::PairingAddress
+            | ErrorCode::PeerUnreachable
+            | ErrorCode::PairingLimit
+            | ErrorCode::PeerFailed
+            | ErrorCode::PeerNotFound
+            | ErrorCode::InvalidRequest
+            | ErrorCode::AuthFailed
+            | ErrorCode::LegacyDatabase
+            | ErrorCode::KeyLocked
+            | ErrorCode::KeyUnusable
+            | ErrorCode::Internal => passthrough(),
         }
     }
 
@@ -206,6 +236,51 @@ mod tests {
             BackendError::from_code(None, Some("unknown method")),
             BackendError::Daemon(_)
         ));
+    }
+
+    /// Every code that carries a remedy has to arrive with it intact. This is
+    /// exactly what `NotFound` failed: it answered "no such paired device" with
+    /// "That item is no longer there.", so unpairing a device that had gone
+    /// reported a missing clipboard item (post-merge review, finding 4).
+    #[test]
+    fn a_pairing_failure_keeps_the_sentence_the_daemon_wrote() {
+        for (code, sentence) in [
+            (ErrorCode::PairingCode, "that pairing code is not valid"),
+            (
+                ErrorCode::PairingAddress,
+                "that address could not be resolved; expected host:port",
+            ),
+            (
+                ErrorCode::PeerUnreachable,
+                "the other device stopped responding",
+            ),
+            (
+                ErrorCode::PairingLimit,
+                "this device is already paired with as many devices as it can hold; \
+                 unpair one first",
+            ),
+            (
+                ErrorCode::PeerFailed,
+                "the sync session with the other device failed",
+            ),
+            (ErrorCode::PeerNotFound, "no such paired device"),
+        ] {
+            let shown = BackendError::from_code(Some(code), Some(sentence)).to_string();
+            assert_eq!(shown, sentence, "{code:?}");
+            assert!(!shown.contains("clipboard"), "{code:?}: {shown}");
+        }
+    }
+
+    /// The other half of the same rule: `NotFound` now only ever means an item,
+    /// so its fixed sentence is finally the true one.
+    #[test]
+    fn a_missing_item_and_a_missing_device_do_not_render_alike() {
+        let item = BackendError::from_code(Some(ErrorCode::NotFound), Some("item not found"));
+        let device =
+            BackendError::from_code(Some(ErrorCode::PeerNotFound), Some("no such paired device"));
+        assert_ne!(item.to_string(), device.to_string());
+        assert!(item.to_string().contains("item"), "{item}");
+        assert!(device.to_string().contains("device"), "{device}");
     }
 
     #[test]

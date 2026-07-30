@@ -17,13 +17,14 @@
 
 use std::sync::Arc;
 
+use copypaste_core::now_ms;
 use copypaste_ipc::{
     DiscoveredData, DiscoveredDevice, ErrorCode, PairingData, PeerInfo, Response, ResponseData,
     SyncResult,
 };
 use copypaste_p2p::peers::Peer;
 use copypaste_p2p::NodeError;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::sync::peer_source;
 use crate::AppState;
@@ -84,6 +85,32 @@ pub async fn unpair(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Respons
         }
         Ok(false) => failed(id, NodeError::NoPeer),
         Err(e) => failed(id, e),
+    }
+}
+
+/// Cut a device off for good.
+///
+/// [`unpair`] drops the key; this drops the key *and* bars the pairing id, so a
+/// code that was written down, a stale copy of the peer file, or a device that
+/// keeps re-announcing cannot bring the pairing back. That is the difference
+/// between "stop syncing with my laptop" and "I no longer have that phone".
+///
+/// It succeeds even when no peer was removed, and the revocation is still
+/// recorded: barring an id this device has not yet seen is what "revoke the
+/// device I lost before it reaches this one" needs. Reporting `not_found` there
+/// would say nothing happened when the bar had in fact been written.
+pub async fn revoke(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Response {
+    match state.p2p.peers().revoke(pairing_id, now_ms()) {
+        Ok(removed) => {
+            state.p2p.republish();
+            state.note_peers_changed();
+            info!(%pairing_id, removed, "revoked a pairing");
+            Response::ok(id, ResponseData::Empty {})
+        }
+        Err(e) => {
+            warn!(error = %e, "could not revoke a pairing");
+            failed(id, NodeError::PeerStore)
+        }
     }
 }
 
@@ -194,11 +221,21 @@ pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
 }
 
 /// The one mapping from the node's failures onto the IPC taxonomy.
+///
+/// Total, and deliberately not routed through
+/// [`NodeError::is_client_error`]: that answers "whose fault is it", and what a
+/// client needs is "what does the user do next". Collapsing nine sentences onto
+/// three codes is what left a typo, a switched-off device and a full pairing
+/// list indistinguishable, and sent `NoPeer` out under the code every client
+/// renders as a missing clipboard item (post-merge review, finding 4).
 fn failed(id: u64, error: NodeError) -> Response {
     let code = match error {
-        NodeError::NoPeer => ErrorCode::NotFound,
-        _ if error.is_client_error() => ErrorCode::InvalidRequest,
-        _ => ErrorCode::Internal,
+        NodeError::BadCode | NodeError::Handshake => ErrorCode::PairingCode,
+        NodeError::BadAddress => ErrorCode::PairingAddress,
+        NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
+        NodeError::TooManyPairings => ErrorCode::PairingLimit,
+        NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
+        NodeError::NoPeer => ErrorCode::PeerNotFound,
     };
     Response::err(id, code, error.to_string())
 }
@@ -266,7 +303,7 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         let response = pair_accept(&state, 1, "not-a-code", "127.0.0.1:1").await;
         assert!(!response.ok);
-        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(response.error_code, Some(ErrorCode::PairingCode));
         assert_eq!(
             response.error.as_deref(),
             Some(NodeError::BadCode.to_string().as_str())
@@ -291,18 +328,26 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         let code = PairingToken::generate().to_code();
         let response = pair_accept(&state, 1, &code, "no-port-here").await;
-        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(response.error_code, Some(ErrorCode::PairingAddress));
         assert_eq!(
             response.error.as_deref(),
             Some(NodeError::BadAddress.to_string().as_str())
         );
     }
 
+    /// The code has to be the *device* one. `ErrorCode::NotFound` is rendered
+    /// by every client as a sentence about the clipboard, so answering a
+    /// vanished device with it told the user an item had gone.
     #[tokio::test]
-    async fn unpairing_an_unknown_device_is_not_found() {
+    async fn unpairing_an_unknown_device_names_a_device_and_not_an_item() {
         let (state, _dir) = test_state("alpha");
         let response = unpair(&state, 1, "0123456789abcdef0123456789abcdef").await;
-        assert_eq!(response.error_code, Some(ErrorCode::NotFound));
+        assert_eq!(response.error_code, Some(ErrorCode::PeerNotFound));
+        assert_ne!(response.error_code, Some(ErrorCode::NotFound));
+        assert_eq!(
+            response.error.as_deref(),
+            Some(NodeError::NoPeer.to_string().as_str())
+        );
     }
 
     #[tokio::test]
@@ -317,6 +362,74 @@ mod tests {
         let response = unpair(&state, 2, &pairing.pairing_id).await;
         assert!(response.ok);
         assert!(state.p2p.peers().psks().is_empty());
+    }
+
+    /// The whole of the difference between the two verbs, at the wire: after
+    /// `unpair` the same code still enrols the pairing, and after `revoke` it
+    /// never does again (`CopyPaste-gbo`).
+    #[tokio::test]
+    async fn revoking_bars_the_pairing_that_unpairing_leaves_reusable() {
+        let (state, _dir) = test_state("alpha");
+        let peers = state.p2p.peers();
+
+        let unpaired = PairingToken::generate();
+        let revoked = PairingToken::generate();
+        for token in [&unpaired, &revoked] {
+            peers
+                .upsert(Peer {
+                    pairing_id: token.pairing_id(),
+                    name: "phone".into(),
+                    psk: token.psk(),
+                    last_addr: None,
+                    last_seen_ms: 1_753_900_000_000,
+                })
+                .expect("upsert");
+        }
+
+        assert!(unpair(&state, 1, &unpaired.pairing_id()).await.ok);
+        assert!(revoke(&state, 2, &revoked.pairing_id()).await.ok);
+        assert!(
+            peers.psks().is_empty(),
+            "both keys must leave the candidates"
+        );
+
+        let re_add = |token: &PairingToken| {
+            peers.upsert(Peer {
+                pairing_id: token.pairing_id(),
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+            })
+        };
+        re_add(&unpaired).expect("unpairing must leave the pairing id usable");
+        assert!(
+            re_add(&revoked).is_err(),
+            "a revoked pairing came back, so the code someone kept still works"
+        );
+    }
+
+    /// Barring a device that has not reached this one yet is the case the
+    /// store's unconditional record exists for, so it must not answer as if
+    /// nothing happened.
+    #[tokio::test]
+    async fn revoking_a_device_this_one_has_not_seen_succeeds_and_still_bars_it() {
+        let (state, _dir) = test_state("alpha");
+        let token = PairingToken::generate();
+
+        let response = revoke(&state, 1, &token.pairing_id()).await;
+        assert!(response.ok, "{:?}", response.error);
+        assert!(state
+            .p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: token.pairing_id(),
+                name: "the lost phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+            })
+            .is_err());
     }
 
     #[tokio::test]
@@ -340,7 +453,7 @@ mod tests {
     async fn syncing_a_named_peer_that_does_not_exist_is_not_found() {
         let (state, _dir) = test_state("alpha");
         let response = sync_now(&state, 1, Some("0123456789abcdef")).await;
-        assert_eq!(response.error_code, Some(ErrorCode::NotFound));
+        assert_eq!(response.error_code, Some(ErrorCode::PeerNotFound));
     }
 
     #[tokio::test]
@@ -382,25 +495,65 @@ mod tests {
         assert!(results.iter().all(|r| r.error.is_some()));
     }
 
+    /// Every variant the node can produce, with the code it arrives under.
+    ///
+    /// Exhaustive on purpose: this is the list a new `NodeError` has to be
+    /// added to, and the compiler already forces the `match` in [`failed`].
+    const EVERY_FAILURE: &[(NodeError, ErrorCode)] = &[
+        (NodeError::BadCode, ErrorCode::PairingCode),
+        (NodeError::Handshake, ErrorCode::PairingCode),
+        (NodeError::BadAddress, ErrorCode::PairingAddress),
+        (NodeError::NoAddress, ErrorCode::PeerUnreachable),
+        (NodeError::Timeout, ErrorCode::PeerUnreachable),
+        (NodeError::TooManyPairings, ErrorCode::PairingLimit),
+        (NodeError::Session, ErrorCode::PeerFailed),
+        (NodeError::PeerStore, ErrorCode::PeerFailed),
+        (NodeError::NoPeer, ErrorCode::PeerNotFound),
+    ];
+
     /// The node owns the sentences; this pins the taxonomy they arrive under,
     /// and that none of them picks up a path on the way through.
     #[test]
     fn node_failures_map_onto_the_ipc_taxonomy_without_a_path() {
-        for (error, expected) in [
-            (NodeError::BadCode, ErrorCode::InvalidRequest),
-            (NodeError::BadAddress, ErrorCode::InvalidRequest),
-            (NodeError::Handshake, ErrorCode::InvalidRequest),
-            (NodeError::NoPeer, ErrorCode::NotFound),
-            (NodeError::NoAddress, ErrorCode::Internal),
-            (NodeError::Session, ErrorCode::Internal),
-            (NodeError::Timeout, ErrorCode::Internal),
-            (NodeError::PeerStore, ErrorCode::Internal),
-        ] {
-            let response = failed(1, error);
-            assert_eq!(response.error_code, Some(expected), "{error:?}");
+        for (error, expected) in EVERY_FAILURE {
+            let response = failed(1, *error);
+            assert_eq!(response.error_code, Some(*expected), "{error:?}");
             let message = response.error.expect("a message");
             assert!(!message.contains('/'), "{message}");
             assert!(!message.contains('\\'), "{message}");
+        }
+    }
+
+    /// The property `NotFound` failed: the sentence the node wrote is what
+    /// reaches the client, so a code that carries a remedy still carries it.
+    #[test]
+    fn every_node_sentence_survives_the_mapping() {
+        for (error, _) in EVERY_FAILURE {
+            let response = failed(1, *error);
+            assert_eq!(
+                response.error.as_deref(),
+                Some(error.to_string().as_str()),
+                "{error:?}"
+            );
+        }
+        let capped = failed(1, NodeError::TooManyPairings)
+            .error
+            .expect("a message");
+        assert!(capped.contains("unpair one first"), "{capped}");
+    }
+
+    /// Nine sentences over six codes, and no two conditions that need
+    /// different screens share one.
+    #[test]
+    fn no_pairing_condition_reaches_a_client_as_a_generic_failure() {
+        for (error, code) in EVERY_FAILURE {
+            assert!(
+                !matches!(
+                    code,
+                    ErrorCode::Internal | ErrorCode::InvalidRequest | ErrorCode::NotFound
+                ),
+                "{error:?} has no code of its own"
+            );
         }
     }
 }
