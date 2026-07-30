@@ -7,23 +7,26 @@
 //!
 //! # What this file will not do, and why that matters
 //!
-//! Six operations — `set_config`, `export`, `import`, `backup`, `restore` and
-//! `reorder_pinned` — return [`BackendError::Unsupported`] rather than an
-//! implementation. Each is a deliberate refusal with its reason on the method,
-//! and each names the same fix: the logic still lives inside the
+//! Four operations — `set_config`, `backup`, `restore` and `reorder_pinned` —
+//! return [`BackendError::Unsupported`] rather than an implementation. Each is a
+//! deliberate refusal with its reason on the method. `backup` and `restore`
+//! still name the same fix: the validate-then-swap lives inside the
 //! `copypaste-daemon` binary, which has no `[lib]` target, so approximating it
-//! here would be the second implementation CLAUDE.md rule 1 exists to stop.
+//! here would be the second implementation CLAUDE.md rule 1 exists to stop —
+//! and a file copy that looks like a restore and is not is data loss.
 //!
-//! Pairing, syncing and discovery used to be on that list. They are not any
-//! more: `copypaste_p2p::Node` owns the listener and the four operations, and
-//! `copypaste_core::StoreSource` is the history behind them — the same node and
-//! the same source the daemon runs (ADR-0003, [`peers`]).
+//! Pairing, syncing, discovery, export and import used to be on that list. They
+//! are not any more: `copypaste_p2p::Node` owns the listener and the four peer
+//! operations, `copypaste_core::StoreSource` is the history behind them, and
+//! `copypaste_core::transfer` owns the skip accounting and the
+//! detector-re-runs-on-import rule — the same node, the same source and the same
+//! two transfer functions the daemon runs (ADR-0003, [`peers`]).
 //!
 //! # What it does do
 //!
 //! Everything reachable through the library API as it stands: the read paths,
-//! ingest, the clipboard write, delete/clear/pin, status, and the whole of peer
-//! pairing, sync and LAN discovery.
+//! ingest, the clipboard write, delete/clear/pin, status, export and import, and
+//! the whole of peer pairing, sync and LAN discovery.
 //!
 //! # Unverified
 //!
@@ -36,6 +39,7 @@
 
 mod peers;
 mod rows;
+mod transfer;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -64,7 +68,6 @@ const MSG_NO_WATCH: &str = "Live updates aren't available in this build.";
 const MSG_NO_SETTINGS: &str =
     "This build can't change the service's settings — it has no background service to \
      change them on, and runs on the defaults shown here.";
-const MSG_NO_TRANSFER: &str = "Exporting and importing aren't available in this build yet.";
 const MSG_NO_BACKUP: &str = "Backup and restore aren't available in this build yet.";
 const MSG_NO_REORDER: &str =
     "Reordering pinned items isn't available yet. Pinned items keep the order they \
@@ -157,7 +160,10 @@ impl EmbeddedBackend {
                 detector: Arc::new(detector),
                 device_id: identity.device_id,
                 device_name: identity.device_name,
-                peers_path: data_dir.join("peers.json"),
+                // The name from the shared crate, as the daemon uses. Spelling
+                // it here is how this backend came to open `peers.json`, which
+                // is v1's file (CLAUDE.md rule 3).
+                peers_path: data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
                 node: OnceCell::new(),
                 settings: copypaste_ipc::ConfigData::default(),
                 clipboard,
@@ -385,6 +391,10 @@ impl Backend for EmbeddedBackend {
         }
     }
 
+    async fn revoke(&self, pairing_id: &str) -> Result<()> {
+        self.node().await?.revoke(pairing_id)
+    }
+
     async fn sync(&self, pairing_id: Option<&str>) -> Result<Vec<SyncResult>> {
         self.node().await?.sync(&self.inner, pairing_id).await
     }
@@ -431,22 +441,14 @@ impl Backend for EmbeddedBackend {
         Err(BackendError::Unsupported(MSG_NO_SETTINGS))
     }
 
-    /// Needs the export and import paths out of `copypaste-daemon`.
-    ///
-    /// Both are reachable here in principle — the store lists, `decrypt` opens,
-    /// and `copypaste_core::ingest_into` exists precisely so an import keeps its
-    /// own capture time. What is not reachable is the daemon's
-    /// `server::transfer`, which owns the skip accounting and the
-    /// detector-re-runs-on-import rule. Re-deriving those here is the
-    /// duplication CLAUDE.md rule 1 exists to stop, and the fix is the one that
-    /// worked for ingest: move it down into `copypaste-core` and call it from
-    /// both (ADR-0003).
-    async fn export(&self, _limit: u32, _include_sensitive: bool) -> Result<ExportData> {
-        Err(BackendError::Unsupported(MSG_NO_TRANSFER))
+    async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {
+        self.blocking(move |inner| transfer::export(inner, limit, include_sensitive))
+            .await
     }
 
-    async fn import(&self, _items: Vec<ExportItem>) -> Result<ImportData> {
-        Err(BackendError::Unsupported(MSG_NO_TRANSFER))
+    async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData> {
+        self.blocking(move |inner| transfer::import(inner, items))
+            .await
     }
 
     /// Needs the daemon's validate-then-swap, and must not be approximated.
@@ -486,7 +488,7 @@ mod tests {
     /// Records what was written, so `copy` can be asserted without a system
     /// clipboard.
     #[derive(Default)]
-    struct FakeClipboard(Mutex<Vec<String>>);
+    pub(super) struct FakeClipboard(Mutex<Vec<String>>);
 
     impl Clipboard for Arc<FakeClipboard> {
         fn set_text(&self, text: &str) -> std::result::Result<(), &'static str> {
@@ -495,7 +497,9 @@ mod tests {
         }
     }
 
-    fn backend() -> (EmbeddedBackend, Arc<FakeClipboard>, tempfile::TempDir) {
+    /// `pub(super)` so a submodule's tests build the same backend rather than a
+    /// second fixture that could drift from this one.
+    pub(super) fn backend() -> (EmbeddedBackend, Arc<FakeClipboard>, tempfile::TempDir) {
         let dir = tempfile::TempDir::new().unwrap();
         // Keeps the test off the real keystore and off the developer's own
         // history file.
@@ -583,6 +587,33 @@ mod tests {
         assert!(backend.peers().await.unwrap().is_empty());
     }
 
+    /// Revoking is the same gesture as unpairing until you try to use the code
+    /// again, which is the only place the two differ.
+    #[tokio::test]
+    async fn a_revoked_pairing_cannot_be_minted_back_onto_this_device() {
+        let (backend, _clip, _dir) = backend();
+        let pairing = backend.pair_create("stolen phone").await.unwrap();
+
+        backend.revoke(&pairing.pairing_id).await.unwrap();
+        assert!(backend.peers().await.unwrap().is_empty());
+
+        let store = copypaste_p2p::peers::PeerStore::open(&backend.inner.peers_path).unwrap();
+        let token =
+            copypaste_p2p::transport::PairingToken::parse(&pairing.code).expect("a valid code");
+        assert!(
+            store
+                .upsert(copypaste_p2p::peers::Peer {
+                    pairing_id: token.pairing_id(),
+                    name: "stolen phone".into(),
+                    psk: token.psk(),
+                    last_addr: None,
+                    last_seen_ms: 0,
+                })
+                .is_err(),
+            "the code someone kept still enrols the pairing"
+        );
+    }
+
     /// A well-formed code for a device that is not listening must not leave a
     /// half-made pairing behind.
     #[tokio::test]
@@ -639,8 +670,6 @@ mod tests {
                 .set_config(ConfigPatch::default())
                 .await
                 .unwrap_err(),
-            backend.export(0, false).await.unwrap_err(),
-            backend.import(Vec::new()).await.unwrap_err(),
             backend.backup(Path::new("anywhere")).await.unwrap_err(),
             backend.restore(Path::new("anywhere")).await.unwrap_err(),
         ] {

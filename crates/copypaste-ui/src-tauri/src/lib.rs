@@ -181,9 +181,12 @@ pub fn run() {
             commands::peers::pair_accept,
             commands::peers::peers,
             commands::peers::unpair,
+            commands::peers::revoke,
             commands::peers::sync_now,
             commands::peers::discovered,
             commands::peers::rescan,
+            // the clipboard, for text the WebView already holds
+            commands::clipboard::copy_text,
         ])
         .build(tauri::generate_context!())
         .expect("could not start CopyPaste")

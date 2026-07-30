@@ -30,7 +30,6 @@ export interface Item {
   readonly is_sensitive: boolean;
 }
 
-
 /**
  * `skipped_undecryptable` is not an error: it is the difference between a short
  * page and a small history, and without it the user sees fewer items and no
@@ -40,7 +39,6 @@ export interface ItemPage {
   readonly items: readonly Item[];
   readonly skipped_undecryptable: number;
 }
-
 
 export interface StatusData {
   readonly version: string;
@@ -62,7 +60,6 @@ export interface PairingData {
   readonly listen_addr: string | null;
 }
 
-
 export interface PeerInfo {
   readonly pairing_id: string;
   readonly name: string;
@@ -72,7 +69,6 @@ export interface PeerInfo {
    *  "unreachable". */
   readonly online: boolean;
 }
-
 
 export interface SyncResult {
   readonly pairing_id: string;
@@ -171,6 +167,20 @@ export function pairAccept(code: string, addr: string): Promise<PeerInfo[]> {
 
 export function unpair(pairingId: string): Promise<void> {
   return call<void>("unpair", { pairingId });
+}
+
+/** Not `unpair` with a flag: an unpaired pairing can be enrolled again with the
+ *  same code, and a revoked pairing id is refused for ever. */
+export function revokeDevice(pairingId: string): Promise<void> {
+  return call<void>("revoke", { pairingId });
+}
+
+/** Text the screen already shows, onto the system clipboard. Not the clipboard
+ *  plugin: `capabilities/default.json` withholds `allow-write-text`, so its
+ *  `writeText` rejects here. `copyItem` stays the route for an item — it takes
+ *  an id, so a clipping's plaintext never enters the WebView. */
+export function copyText(text: string): Promise<void> {
+  return call<void>("copy_text", { text });
 }
 
 export function syncNow(pairingId?: string): Promise<SyncResult[]> {

@@ -160,7 +160,19 @@ pub trait Backend: Send + Sync + 'static {
     async fn peers(&self) -> Result<Vec<PeerInfo>>;
 
     /// Forget a peer. Local and one-sided.
+    ///
+    /// Reversible in the one sense a user cares about: the pairing code is the
+    /// long-term key, so re-entering a code someone kept restores the pairing.
     async fn unpair(&self, pairing_id: &str) -> Result<()>;
+
+    /// Cut a device off for good: drop its key and bar the pairing id.
+    ///
+    /// The distinction from [`Backend::unpair`] is the code. After an unpair
+    /// the same code still enrols the pairing; after this it never does again,
+    /// which is the only thing that helps once a device — or the code — is in
+    /// someone else's hands. Irreversible, one-sided, and it deletes no
+    /// clipboard history on either device.
+    async fn revoke(&self, pairing_id: &str) -> Result<()>;
 
     /// Sync with one peer, or with every known peer when `pairing_id` is
     /// `None`.

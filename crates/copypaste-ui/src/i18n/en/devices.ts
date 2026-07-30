@@ -29,6 +29,7 @@ export const devices = {
   /** INV-15: `{{name}}` is what the other device called itself, never a
    *  verified identity — `nameHint` is what says so. */
   peer: {
+    thisDevice: "this device",
     nameHint: "Name reported by the device itself — not verified",
     lastSeen: "Last seen {{age}}",
     online: "On the network",
@@ -37,18 +38,41 @@ export const devices = {
     syncOneHint: "Sync with this device now",
     unpairOne: "Unpair {{name}}",
     unpairHint: "Unpair this device",
+    revokeOne: "Revoke {{name}}",
+    revokeHint: "Cut this device off for good — for a device you no longer have",
   },
 
+  /** The lighter of the two. It says what unpairing does *not* cost, because
+   *  that is what tells the two apart at the moment of choosing. */
   unpair: {
-    thisDevice: "this device",
     title: "Unpair {{name}}?",
-    body: "This device will stop syncing with it. Unpairing is one-sided — the other device keeps its half of the pairing until it unpairs too. Nothing already synced is deleted.",
+    body: "This device will stop syncing with it. Unpairing is one-sided — the other device keeps its half of the pairing until it unpairs too. Nothing already synced is deleted, and you can pair these devices again later.",
+    lost: "No longer have this device? Revoke it instead, so its pairing code can never be used again.",
     action: "Unpair",
+  },
+
+  /**
+   * The heavier one, and every line of it is something the user does not get
+   * back (CLAUDE.md rule 4). The three consequences are separate entries
+   * because a screen may show them as a list and a confirmation has to name
+   * what is lost rather than say "are you sure".
+   */
+  revoke: {
+    title: "Revoke {{name}}?",
+    body: "This can't be undone from this device.",
+    lostCode:
+      "The pairing code stops working for good. Pairing these devices again means generating a new code and entering it by hand.",
+    lostOneSided:
+      "{{name}} isn't told, and keeps its own half of the pairing. If you have other devices, revoke it there too.",
+    keptHistory: "Nothing already synced is deleted, here or on that device.",
+    confirmLabel: "I understand this can't be undone",
+    action: "Revoke",
   },
 
   toast: {
     paired: "Device paired",
     unpaired: "Unpaired {{name}}",
+    revoked: "Revoked {{name}} — its pairing code can never be used again",
     nothingToSync: "Nothing to sync — no paired devices",
     synced_one: "Synced {{count}} device — sent {{sent}}, received {{received}}",
     synced_other:
@@ -78,6 +102,7 @@ export const devices = {
     addressHint: "Enter this alongside the code on the other device.",
     copyCode: "Copy code",
     copied: "Copied",
+    copyFailed: "The code couldn't be copied. Read it off the screen instead.",
     generate: "Generate code",
     regenerate: "Generate a new code",
     generating: "Generating…",

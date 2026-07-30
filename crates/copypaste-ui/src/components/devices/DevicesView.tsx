@@ -7,6 +7,10 @@
  *    (5917.11 / SCRD-3: the two-state version lied).
  *  - **Peer-reported names are unverified** (INV-15) and are labelled as such.
  *  - Unpairing is one-sided and needs a confirm that says so (§3.2.6).
+ *  - **Unpair and revoke are two actions, not one with a flag.** Unpairing is
+ *    recoverable — the pairing code still enrols the pairing — and revoking is
+ *    not, so they carry different weight and `RevokeDialog` owns the heavier
+ *    half.
  *  - Every load state is *visible*: a spinner, not a classless empty element
  *    (CopyPaste-8ebg.29, bdac.2).
  */
@@ -17,6 +21,7 @@ import {
   Link2,
   LoaderCircle,
   RefreshCw,
+  ShieldOff,
   Unlink,
 } from "lucide-react";
 
@@ -35,8 +40,9 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
 import { PairAcceptDialog } from "@/components/devices/PairAcceptDialog";
 import { PairCreateDialog } from "@/components/devices/PairCreateDialog";
+import { RevokeDialog } from "@/components/devices/RevokeDialog";
 import { ServiceOffline } from "@/components/shell/ServiceOffline";
-import { usePeers, useSyncNow, useUnpair } from "@/hooks/useDevices";
+import { usePeers, useRevoke, useSyncNow, useUnpair } from "@/hooks/useDevices";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
@@ -47,11 +53,13 @@ export function DevicesView() {
   const { t } = useTranslation();
   const peers = usePeers();
   const unpair = useUnpair();
+  const revoke = useRevoke();
   const sync = useSyncNow();
 
   const [creating, setCreating] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
 
   const errorKind = peers.error ? classifyError(peers.error) : null;
   const list = peers.data ?? [];
@@ -184,6 +192,22 @@ export function DevicesView() {
                     <Unlink aria-hidden="true" />
                   )}
                 </Button>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={t("devices.peer.revokeOne", { name: peer.name })}
+                  title={t("devices.peer.revokeHint")}
+                  className="hover:text-err-strong"
+                  disabled={revoke.isPending}
+                  onClick={() => setConfirmRevoke(peer)}
+                >
+                  {revoke.isPending &&
+                  revoke.variables?.pairing_id === peer.pairing_id ? (
+                    <LoaderCircle aria-hidden="true" className="animate-spin" />
+                  ) : (
+                    <ShieldOff aria-hidden="true" />
+                  )}
+                </Button>
               </li>
             ))}
           </ul>
@@ -201,13 +225,19 @@ export function DevicesView() {
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("devices.unpair.title", {
-                name: confirmUnpair?.name ?? t("devices.unpair.thisDevice"),
+                name: confirmUnpair?.name ?? t("devices.peer.thisDevice"),
               })}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t("devices.unpair.body")}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {/* Where a user who has lost a device finds the action that helps.
+              They reach for "unpair" first, because that is the word they
+              know. */}
+          <p className="text-sm text-muted-foreground">
+            {t("devices.unpair.lost")}
+          </p>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
@@ -222,6 +252,15 @@ export function DevicesView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RevokeDialog
+        peer={confirmRevoke}
+        onOpenChange={(open) => !open && setConfirmRevoke(null)}
+        onConfirm={(peer) => {
+          revoke.mutate(peer);
+          setConfirmRevoke(null);
+        }}
+      />
     </div>
   );
 }
