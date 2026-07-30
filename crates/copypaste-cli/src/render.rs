@@ -247,10 +247,7 @@ pub fn config_text(applied: &ConfigApplied) -> String {
                 days => format!("{days} days"),
             },
         ),
-        setting(
-            "dedup window",
-            format!("{} s", config.dedup_window_secs),
-        ),
+        setting("dedup window", format!("{} s", config.dedup_window_secs)),
         setting("max item size", format!("{} bytes", config.max_item_bytes)),
         setting(
             "sensitive ttl",

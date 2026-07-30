@@ -145,7 +145,11 @@ fn clear_stale_socket(path: &Path) -> anyhow::Result<()> {
 }
 
 /// Accept connections until shutdown.
-pub async fn run(listener: UnixListener, state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
+pub async fn run(
+    listener: UnixListener,
+    state: Arc<AppState>,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let mut connections = tokio::task::JoinSet::new();
     let permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let watchers = Arc::new(Semaphore::new(MAX_WATCHERS));
@@ -241,9 +245,12 @@ async fn handle_connection(
             // the receiver afterwards would drop everything that happened in
             // between, which is a race a client cannot see or retry around.
             let events = state.subscribe();
-            if send(&mut writer, &Response::ok(id, copypaste_ipc::ResponseData::Empty {}))
-                .await
-                .is_err()
+            if send(
+                &mut writer,
+                &Response::ok(id, copypaste_ipc::ResponseData::Empty {}),
+            )
+            .await
+            .is_err()
             {
                 break;
             }
@@ -578,7 +585,12 @@ mod tests {
         let mut idle = Vec::new();
         for n in 0..MAX_CONCURRENT_CONNECTIONS {
             let mut client = Client::new(UnixStream::connect(&path).await.expect("connect"));
-            assert!(client.call(request(n as u64 + 100, Method::Status)).await.ok);
+            assert!(
+                client
+                    .call(request(n as u64 + 100, Method::Status))
+                    .await
+                    .ok
+            );
             idle.push(client);
         }
 
