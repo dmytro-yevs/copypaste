@@ -151,9 +151,29 @@ describe("pairing and sync failures", () => {
     ],
     ["the sync session with the other device failed", "peer_failed"],
     ["the paired-device list could not be updated", "peer_failed"],
+    ["no such paired device", "peer_not_found"],
   ] as const)("%s -> %s", (raw, kind) => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(classifyError(raw)).toBe(kind);
+  });
+
+  /**
+   * The regression this whole group exists for. `NoPeer` arrived under
+   * `ErrorCode::NotFound`, the bridge replaced its sentence with "That item is
+   * no longer there.", and unpairing a device that had gone told the user their
+   * clipboard item was missing.
+   */
+  it("reports a missing device as a device, never as a missing clipping", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const kind = classifyError("no such paired device");
+    expect(kind).not.toBe("not_found");
+
+    const sentence = friendlyError(kind);
+    expect(sentence).not.toBe(friendlyError("not_found"));
+    expect(sentence).not.toMatch(/clipboard|clipping|item/i);
+    expect(sentence).toMatch(/device/i);
+    // Nothing about the same request would go differently a second time.
+    expect(isRetryable(kind)).toBe(false);
   });
 
   it("gives each one a sentence of its own, and none of them the generic one", () => {
@@ -163,6 +183,7 @@ describe("pairing and sync failures", () => {
       "peer_unreachable",
       "pairing_limit",
       "peer_failed",
+      "peer_not_found",
     ] as const;
     const sentences = kinds.map(friendlyError);
     expect(new Set(sentences).size).toBe(kinds.length);

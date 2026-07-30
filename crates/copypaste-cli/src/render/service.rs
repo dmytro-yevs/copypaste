@@ -95,6 +95,12 @@ fn yes_no(value: bool) -> String {
 /// One line per change event, for `copypaste watch`.
 pub fn event_text(event: &EventData) -> String {
     match event.event {
+        // First: a deletion nobody asked for outranks the fact that the count
+        // moved, and it is the only event here that reports lost data.
+        EventKind::Items if event.swept > 0 => format!(
+            "deleted {} sensitive item(s) past their time to live ({} in history)",
+            event.swept, event.item_count
+        ),
         // The capture case is called out because it is the one a person
         // watching the stream is usually waiting for, and because it is what
         // the notification and the sound are gated on (parity finding 18).
@@ -226,6 +232,16 @@ pub fn cloud_sync_text(stats: &CloudSyncData) -> String {
             "skipped", stats.skipped_undecryptable
         ));
     }
+    if stats.skipped_forged > 0 {
+        // Not a skip like the others, and it must not read like one: every
+        // other line here describes this device's own decision, and this one
+        // describes somebody writing into the account.
+        lines.push(format!(
+            "{:<12} {} (metadata signature did not verify — something wrote to \
+             this account without the sync passphrase)",
+            "refused", stats.skipped_forged
+        ));
+    }
     if stats.skipped_future > 0 {
         lines.push(format!(
             "{:<12} {} (stamped implausibly far in the future)",
@@ -341,9 +357,24 @@ mod tests {
             applied: 0,
             skipped_sensitive: 0,
             skipped_undecryptable: 0,
+            skipped_forged: 0,
             skipped_future: 0,
             skipped_too_large: 0,
         }
+    }
+
+    /// The one count here that is not about this device's own choices.
+    #[test]
+    fn a_round_says_when_a_row_was_written_without_the_passphrase() {
+        let quiet = cloud_sync_text(&stats());
+        assert!(!quiet.contains("signature"), "{quiet}");
+
+        let loud = cloud_sync_text(&CloudSyncData {
+            skipped_forged: 1,
+            ..stats()
+        });
+        assert!(loud.contains("sync passphrase"), "{loud}");
+        assert!(!loud.contains('/'), "no path may appear: {loud}");
     }
 
     /// An item over the cap will never reach the account. A round that says
@@ -370,6 +401,7 @@ mod tests {
             event: EventKind::Items,
             item_count: 3,
             captured: true,
+            swept: 0,
         });
         assert!(captured.contains("captured"), "{captured}");
 
@@ -377,7 +409,22 @@ mod tests {
             event: EventKind::Items,
             item_count: 3,
             captured: false,
+            swept: 0,
         });
         assert!(!other.contains("captured"), "{other}");
+    }
+
+    /// The auto-wipe is the only thing here that deletes without being asked,
+    /// so "items changed" is not an adequate report of it.
+    #[test]
+    fn a_sweep_says_that_something_was_deleted() {
+        let swept = event_text(&EventData {
+            event: EventKind::Items,
+            item_count: 3,
+            captured: false,
+            swept: 2,
+        });
+        assert!(swept.contains("deleted 2"), "{swept}");
+        assert!(swept.contains("sensitive"), "{swept}");
     }
 }

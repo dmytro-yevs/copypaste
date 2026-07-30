@@ -54,8 +54,11 @@ impl CliError {
     pub fn exit_code(&self) -> i32 {
         match self {
             CliError::DaemonUnreachable => EXIT_UNREACHABLE,
+            // A missing device is the same answer to a script as a missing
+            // item — "the thing you named is not here" — so splitting the code
+            // on the wire must not split the exit status.
             CliError::Daemon {
-                code: Some(ErrorCode::NotFound),
+                code: Some(ErrorCode::NotFound | ErrorCode::PeerNotFound),
                 ..
             } => EXIT_NOT_FOUND,
             CliError::Daemon { .. } => EXIT_OTHER,
@@ -126,12 +129,32 @@ mod tests {
     }
 
     #[test]
-    fn not_found_exits_two() {
+    fn a_missing_item_and_a_missing_device_both_exit_two() {
+        for (code, message) in [
+            (ErrorCode::NotFound, "no such item"),
+            (ErrorCode::PeerNotFound, "no such paired device"),
+        ] {
+            let err = CliError::Daemon {
+                code: Some(code),
+                message: message.into(),
+            };
+            assert_eq!(err.exit_code(), EXIT_NOT_FOUND, "{code:?}");
+            assert_eq!(err.user_message(), message);
+        }
+    }
+
+    /// Every pairing failure reaches the user with the node's own sentence,
+    /// remedy included — the CLI substitutes nothing.
+    #[test]
+    fn pairing_failures_keep_their_remedy() {
         let err = CliError::Daemon {
-            code: Some(ErrorCode::NotFound),
-            message: "no such item".into(),
+            code: Some(ErrorCode::PairingLimit),
+            message: "this device is already paired with as many devices as it can hold; \
+                      unpair one first"
+                .into(),
         };
-        assert_eq!(err.exit_code(), EXIT_NOT_FOUND);
+        assert!(err.user_message().contains("unpair one first"));
+        assert_eq!(err.exit_code(), EXIT_OTHER);
     }
 
     #[test]

@@ -40,8 +40,8 @@ use rusqlite::Connection;
 use tracing::{info, warn};
 
 use super::messages::{
-    MSG_BACKUP_EXISTS, MSG_BACKUP_FAILED, MSG_BACKUP_NO_DIR, MSG_BAD_PATH, MSG_NEEDS_CONFIRM,
-    MSG_RESTORE_FAILED, MSG_RESTORE_NOT_A_BACKUP, MSG_RESTORE_NOT_FOUND,
+    MSG_BACKUP_EXISTS, MSG_BACKUP_FAILED, MSG_BACKUP_NO_DIR, MSG_BAD_PATH, MSG_LEGACY_DATABASE,
+    MSG_NEEDS_CONFIRM, MSG_RESTORE_FAILED, MSG_RESTORE_NOT_A_BACKUP, MSG_RESTORE_NOT_FOUND,
 };
 use crate::dbfile;
 use crate::AppState;
@@ -116,6 +116,15 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
     };
     if !src.is_file() {
         return Response::err(id, ErrorCode::NotFound, MSG_RESTORE_NOT_FOUND);
+    }
+    // Before the file is staged, not after: the validate path would meet a v0.4
+    // history as `InvalidKey` and call it damaged, which is the one thing
+    // CLAUDE.md rule 3 says a v2 build must not do to a user's own data. The
+    // probe never applies a key and never writes, so the old file is as intact
+    // after this as before — which is what makes the sentence true.
+    if copypaste_core::is_v1_database(&src) {
+        info!("a restore was asked for a CopyPaste 0.4 history; it was not opened or changed");
+        return Response::err(id, ErrorCode::LegacyDatabase, MSG_LEGACY_DATABASE);
     }
 
     let key = state.keyring.db_key();
@@ -409,6 +418,47 @@ mod tests {
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(contents(&state), ["still here"]);
+    }
+
+    /// The user's own history from an earlier version is neither a foreign
+    /// backup nor a damaged one, and telling them it is damaged is telling them
+    /// their data is gone when it is intact on disk (CLAUDE.md rule 3).
+    #[test]
+    fn restoring_a_v0_4_history_says_so_rather_than_reporting_damage() {
+        let (state, dir) = test_state("alpha");
+        add(&state, "the new history");
+
+        // v0.4.x's plaintext schema, which is what a user who never upgraded
+        // past the pre-encryption builds still has (manifest 03 §3.4).
+        let old = dir.path().join("clipboard.db");
+        let conn = Connection::open(&old).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_items (
+                 id          TEXT PRIMARY KEY NOT NULL,
+                 item_id     TEXT,
+                 content     BLOB,
+                 lamport_ts  INTEGER NOT NULL DEFAULT 0,
+                 wall_time   INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 15).unwrap();
+        drop(conn);
+        let before = std::fs::metadata(&old).unwrap().len();
+
+        let response = restore_from(&state, &old, true);
+        assert!(!response.ok);
+        assert_eq!(response.error_code, Some(ErrorCode::LegacyDatabase));
+        assert_eq!(response.error.as_deref(), Some(MSG_LEGACY_DATABASE));
+        assert!(!response.error_code.unwrap().retryable());
+
+        // The two halves of the sentence, both of which have to stay true.
+        assert_eq!(contents(&state), ["the new history"]);
+        assert_eq!(std::fs::metadata(&old).unwrap().len(), before);
+        for suffix in ["-wal", "-shm"] {
+            let beside = dir.path().join(format!("clipboard.db{suffix}"));
+            assert!(!beside.exists(), "the probe journalled the old history");
+        }
     }
 
     /// A backup taken on another device is encrypted under another key. It must

@@ -134,6 +134,7 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
         applied: count(stats.applied),
         skipped_sensitive: count(stats.skipped_sensitive),
         skipped_undecryptable: count(stats.skipped_undecryptable),
+        skipped_forged: count(stats.skipped_forged),
         skipped_future: count(stats.skipped_future),
         skipped_too_large: count(stats.skipped_too_large),
     }
@@ -161,6 +162,20 @@ mod tests {
             .await
             .expect("the loop must observe shutdown")
             .expect("no panic");
+    }
+
+    /// The count that says something wrote into the account without the
+    /// passphrase. It reached the log and stopped there, so the one signal that
+    /// separates an attack from a quiet day was unreachable from any client.
+    #[test]
+    fn a_refused_forgery_reaches_the_wire() {
+        let wire = to_wire(copypaste_cloud::SyncStats {
+            downloaded: 4,
+            skipped_forged: 3,
+            ..Default::default()
+        });
+        assert_eq!(wire.skipped_forged, 3);
+        assert_eq!(wire.applied, 0);
     }
 
     #[test]

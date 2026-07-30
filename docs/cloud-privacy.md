@@ -105,10 +105,9 @@ the row reaches the merge and refuses what does not verify: it is not applied,
 not counted as a delete, and never allowed to displace a local version.
 
 Each round counts its refusals, and a non-zero count means something wrote a row
-into your account that does not hold your passphrase. **That count does not
-reach the app yet** — the sync engine reports it, the daemon's status message
-does not carry it, so today it is only in the log. Sync itself is not affected;
-what is missing is the ability to be told.
+into your account that does not hold your passphrase. The count is on the wire —
+`CloudSyncData::skipped_forged`, printed by `copypaste cloud sync` — so a device
+that refuses a row can say so rather than only logging it.
 
 Because the ciphertext is under the signature too, a real version cannot be
 spliced onto another version's stamp — an attacker cannot roll an item back to
