@@ -14,7 +14,7 @@ use rand::RngCore;
 use snow::params::HashChoice;
 use snow::resolvers::{CryptoResolver, DefaultResolver};
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use super::TransportError;
 
@@ -129,6 +129,38 @@ impl PairingToken {
     pub fn pairing_id(&self) -> String {
         let digest = blake2s(&[PAIRING_ID_DOMAIN, &self.0[..]]);
         hex::encode(&digest[..PAIRING_ID_LEN])
+    }
+}
+
+/// One stored pairing offered to [`Session::accept_any`](super::Session::accept_any)
+/// as a candidate for an inbound handshake.
+///
+/// # Why this is not a plain tuple
+///
+/// The responder has to copy every pairing key it holds before it knows who is
+/// dialling, so an attacker who never completes a handshake can drive that copy
+/// as fast as they can open TCP sockets. The copies are therefore wiped when
+/// they go out of scope, and [`crate::PeerStore::psks`] hands the set out inside
+/// `Zeroizing` so a caller cannot lose the wipe by binding it to a plain local —
+/// which is exactly what the listener used to do (security review F-8).
+///
+/// Not `Clone`, for the same reason [`PairingToken`] is not: every copy of key
+/// material should be a deliberate act.
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct PskCandidate {
+    /// The non-secret pairing id this key belongs to.
+    pub pairing_id: String,
+    /// The Noise pre-shared key. **This is the secret.**
+    pub psk: [u8; TOKEN_LEN],
+}
+
+/// Prints the pairing id and nothing else, so the type can sit inside a
+/// `#[derive(Debug)]` struct without the key following it into a log.
+impl fmt::Debug for PskCandidate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PskCandidate")
+            .field("pairing_id", &self.pairing_id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -348,6 +380,36 @@ mod tests {
         let token = PairingToken::generate();
         let rendered = format!("{token:?}");
         assert_no_secret(&rendered, &token);
+        assert!(rendered.contains(&token.pairing_id()));
+    }
+
+    /// Security review F-8. The contract is a type-level one (port manifest 02,
+    /// I-12: "the tests that pin these are type-level"), so the guard against a
+    /// regression is that this stops compiling — a `PskCandidate` that lost its
+    /// `ZeroizeOnDrop` fails `assert_zeroize_on_drop`.
+    #[test]
+    fn a_psk_candidate_wipes_its_key() {
+        fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<PskCandidate>();
+
+        let mut candidate = PskCandidate {
+            pairing_id: "a-pairing".to_string(),
+            psk: [7u8; TOKEN_LEN],
+        };
+        candidate.zeroize();
+        assert_eq!(candidate.psk, [0u8; TOKEN_LEN]);
+    }
+
+    #[test]
+    fn psk_candidate_debug_never_prints_key_material() {
+        let token = PairingToken::generate();
+        let candidate = PskCandidate {
+            pairing_id: token.pairing_id(),
+            psk: token.psk(),
+        };
+        let rendered = format!("{candidate:?}");
+        assert_no_secret(&rendered, &token);
+        assert!(!rendered.contains("psk"), "the key field must not appear");
         assert!(rendered.contains(&token.pairing_id()));
     }
 

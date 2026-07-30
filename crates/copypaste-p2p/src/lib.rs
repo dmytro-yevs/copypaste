@@ -31,7 +31,7 @@ pub use node::{Node, NodeError};
 pub use peers::{Peer, PeerStore, PeerStoreError, RevokedDevice, PAIRING_CODE_TTL};
 pub use protocol::{ItemSummary, SyncItem, SyncMessage, PROTOCOL_VERSION};
 pub use sync::{merge_decision, MergeDecision, SyncOutcome, SyncStats};
-pub use transport::{PairingToken, Session, TransportError};
+pub use transport::{PairingToken, PskCandidate, Session, TransportError};
 
 /// TCP port the daemon listens on for peers.
 ///
