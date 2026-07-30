@@ -25,16 +25,28 @@ pub enum NodeError {
     Timeout,
     #[error("the paired-device list could not be updated")]
     PeerStore,
+    /// [`crate::peers::MAX_PAIRINGS`] reached. The user has to decide which
+    /// device to let go; nothing here will decide for them.
+    #[error("this device is already paired with as many devices as it can hold; unpair one first")]
+    TooManyPairings,
 }
 
 impl NodeError {
-    /// Whether the caller supplied something invalid, as opposed to something
-    /// having gone wrong here. Callers map this onto their own error taxonomy.
+    /// Whether the caller can act on it — bad input, or a precondition they
+    /// control — as opposed to something having gone wrong here. Callers map
+    /// this onto their own error taxonomy.
+    ///
+    /// `TooManyPairings` is here rather than with the internal failures on
+    /// purpose: it is a refusal with a remedy the user can carry out, and
+    /// reporting it as an internal error would hide the remedy.
     #[must_use]
     pub fn is_client_error(self) -> bool {
         matches!(
             self,
-            NodeError::BadCode | NodeError::BadAddress | NodeError::Handshake
+            NodeError::BadCode
+                | NodeError::BadAddress
+                | NodeError::Handshake
+                | NodeError::TooManyPairings
         )
     }
 }
@@ -53,6 +65,7 @@ mod tests {
         NodeError::Session,
         NodeError::Timeout,
         NodeError::PeerStore,
+        NodeError::TooManyPairings,
     ];
 
     #[test]
