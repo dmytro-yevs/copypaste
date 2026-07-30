@@ -26,7 +26,6 @@ import {
   MONO_KINDS,
   absoluteTime,
   kindOf,
-  longAge,
   previewOf,
   shortAge,
 } from "../lib/format";
@@ -231,5 +230,3 @@ function HistoryRowImpl({
  * added to `Item`.
  */
 export const HistoryRow = memo(HistoryRowImpl);
-
-export { longAge };
