@@ -307,6 +307,14 @@ impl Backend for DaemonBackend {
         Ok(())
     }
 
+    async fn revoke(&self, pairing_id: &str) -> Result<()> {
+        self.call(Method::Revoke {
+            pairing_id: pairing_id.to_string(),
+        })
+        .await?;
+        Ok(())
+    }
+
     async fn sync(&self, pairing_id: Option<&str>) -> Result<Vec<SyncResult>> {
         expect_sync(
             self.call(Method::SyncNow {

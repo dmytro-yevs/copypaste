@@ -55,6 +55,11 @@ export const errors = {
   pairing_limit:
     "This device is already paired with as many devices as it can hold. Unpair one, then try again.",
   peer_failed: "Syncing with the other device didn't finish. Try again in a moment.",
+  /** Says "device", where `not_found` says "item". The daemon used to answer a
+   *  vanished device with `not_found`, so unpairing one reported a missing
+   *  clipping (post-merge review, finding 4). */
+  peer_not_found:
+    "That device is no longer paired with this one. Refresh the device list to see what's still paired.",
   internal: "The background service returned an error.",
   unknown: "The background service returned an error.",
 } as const;

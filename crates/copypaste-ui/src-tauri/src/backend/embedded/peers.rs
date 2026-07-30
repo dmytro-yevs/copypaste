@@ -144,6 +144,29 @@ impl PeerNode {
         self.node.unpair(pairing_id).map_err(failed)
     }
 
+    /// Bar the pairing id as well as dropping the key.
+    ///
+    /// Straight to the store rather than through the node: `Node` has an
+    /// `unpair` and no revoke, and adding one would be a change to a crate this
+    /// one only reads. Republishing afterwards is what `Node::unpair` does for
+    /// the same reason — the advertisement lists the pairings this device still
+    /// answers for.
+    ///
+    /// Recording the revocation is unconditional in the store, so this succeeds
+    /// whether or not a peer was there: barring an id before the lost device
+    /// ever reaches this one is the case that needs it.
+    pub(super) fn revoke(&self, pairing_id: &str) -> Result<()> {
+        self.node
+            .peers()
+            .revoke(pairing_id, copypaste_core::now_ms())
+            .map_err(|e| {
+                tracing::warn!(error = %e, "could not revoke a pairing");
+                BackendError::internal("that device could not be revoked")
+            })?;
+        self.node.republish();
+        Ok(())
+    }
+
     /// Sync with one peer, or with every known peer.
     ///
     /// One peer failing must not abort the rest: each gets its own
