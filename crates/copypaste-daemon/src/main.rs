@@ -9,8 +9,9 @@
 //!   discovery, and the five pairing/sync IPC operations,
 //! * [`cloud`] — cloud sync: the account, the adaptive poll loop, and the four
 //!   cloud IPC operations,
-//! * [`meta`] — the sync view of the history that both transports share, and
-//!   [`merge`], the one comparator they both apply.
+//! * [`meta`] — this device's identity and item attribution; the sync view both
+//!   transports read and write through is [`copypaste_core::StoreSource`],
+//!   built here by [`sync`].
 //!
 //! Everything they share lives in one [`AppState`] behind one `Arc`. v1 grew a
 //! 38-field context with 13 `Arc<Mutex<Option<T>>>` slots and 20 builder
@@ -28,12 +29,12 @@ mod capture;
 mod clipboard;
 mod cloud;
 mod dbfile;
-mod merge;
 mod meta;
 mod notify;
 mod p2p;
 mod server;
 mod settings;
+mod sync;
 
 #[cfg(test)]
 mod testutil;
@@ -144,7 +145,10 @@ fn cloud_config(args: &Args) -> Option<copypaste_cloud::CloudConfig> {
 /// that `status` reports.
 pub struct AppState {
     pub store: Store,
-    pub keyring: Keyring,
+    /// Behind an `Arc` because `copypaste_core::StoreSource` holds one for as
+    /// long as the peer listener runs, and the device secret is not `Clone` on
+    /// purpose.
+    pub keyring: Arc<Keyring>,
     /// Behind an `Arc` because the cloud upload gate holds one too: the
     /// `SensitiveGuard` the driver requires is a closure that outlives this
     /// call, and a second `Detector` would be a second ruleset (`CLAUDE.md`
@@ -189,6 +193,13 @@ pub struct AppState {
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
+    /// A CopyPaste 0.4 history was found on this device at startup.
+    ///
+    /// A flag rather than a constructor argument for the same reason the two
+    /// above are: it is decided outside construction and read by `status`,
+    /// and threading it through `AppState::new` would touch every caller for
+    /// a value none of them has an opinion about.
+    legacy_history: AtomicBool,
 }
 
 /// How many change events are buffered per subscriber before it is told it
@@ -199,7 +210,7 @@ impl AppState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Store,
-        keyring: Keyring,
+        keyring: Arc<Keyring>,
         detector: Arc<Detector>,
         clipboard: Box<dyn ClipboardSource>,
         meta: Meta,
@@ -224,6 +235,7 @@ impl AppState {
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
+            legacy_history: AtomicBool::new(false),
         }
     }
 
@@ -329,6 +341,31 @@ impl AppState {
     pub fn set_capture_running(&self, running: bool) {
         self.capture_running.store(running, Ordering::Release);
     }
+
+    pub fn legacy_history_present(&self) -> bool {
+        self.legacy_history.load(Ordering::Acquire)
+    }
+
+    pub fn set_legacy_history_present(&self, present: bool) {
+        self.legacy_history.store(present, Ordering::Release);
+    }
+}
+
+/// Whether a CopyPaste 0.4 history is on this device.
+///
+/// **Read-only, and never fatal.** `v1_database_in` opens nothing with a key
+/// and writes nothing, and a user who has one still wants v2 to run — they want
+/// to be told, not blocked (CLAUDE.md rule 3: the old file stays exactly as it
+/// was, so a downgrade finds it intact).
+///
+/// Two directories, because there are two ways to meet one. Where v0.4.x put it
+/// is the upgrade case and the only one that matters on macOS, where the two
+/// resolvers disagree. `data_dir` is the `--data-dir` case, and on Linux it is
+/// the same directory — which is exactly why v2's *filename* is different.
+fn legacy_history_present(data_dir: &std::path::Path) -> bool {
+    std::iter::once(data_dir.to_path_buf())
+        .chain(copypaste_ipc::v1_data_dir())
+        .any(|dir| copypaste_core::v1_database_in(&dir))
 }
 
 #[tokio::main]
@@ -363,12 +400,32 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // Before the store is opened, so the answer describes the disk as the user
+    // left it rather than as this run has already changed it: `Store::open`
+    // creates `copypaste-v2.db` on a first run, and on Linux that is the same
+    // directory the probe reads.
+    let legacy_history = legacy_history_present(&data_dir);
+    if legacy_history {
+        info!("a CopyPaste 0.4 history is present; it has not been opened or changed");
+    }
+
     // Order matters: the keyring unlocks the database key, the database is
     // opened with it, and neither the socket nor the capture loop exists until
     // both succeeded. A daemon that cannot store what it captures should not
     // start capturing.
-    let keyring = Keyring::load_or_create(&data_dir).context("unlock the keyring")?;
-    let store = Store::open(&db_path, &keyring.db_key()).context("open the history database")?;
+    //
+    // The two failures with a fixed sentence — a v0.4 history, a device key
+    // that cannot be used — do not exit here. Exiting leaves the app with no
+    // socket to ask, so it reports the service as merely down and offers to
+    // start it again; see `server::halted`.
+    let keyring = match Keyring::load_or_create(&data_dir) {
+        Ok(keyring) => Arc::new(keyring),
+        Err(e) => return halt_or_fail(&socket_path, e, "unlock the keyring").await,
+    };
+    let store = match Store::open(&db_path, &keyring.db_key()) {
+        Ok(store) => store,
+        Err(e) => return halt_or_fail(&socket_path, e, "open the history database").await,
+    };
     let detector = Arc::new(Detector::new().context("build the sensitive-content detector")?);
 
     // The third enforcement layer for "sensitive items must never reach the
@@ -390,12 +447,11 @@ async fn main() -> anyhow::Result<()> {
 
     let source = clipboard::new_source();
 
-    // Peer sync. The metadata connection opens the database the store just
+    // Peer sync. The identity is minted in the database the store just
     // migrated, so it must come second; the peer file and discovery do not
     // depend on either.
     let hostname = gethostname::gethostname().to_string_lossy().into_owned();
-    let mut meta =
-        Meta::open(&db_path, &keyring.db_key(), &hostname).context("open the sync metadata")?;
+    let mut meta = Meta::open(&store, &hostname).context("resolve this device's identity")?;
     if let Some(name) = args.device_name.as_deref() {
         meta.set_device_name(name).context("set the device name")?;
     }
@@ -450,6 +506,7 @@ async fn main() -> anyhow::Result<()> {
         settings,
         db_path.clone(),
     ));
+    state.set_legacy_history_present(legacy_history);
     state.set_ready(true);
     let cloud_signed_in = state.cloud.restore(&state);
     info!(
@@ -500,7 +557,7 @@ async fn main() -> anyhow::Result<()> {
     // Either a signal or a client asking. One path out, so the IPC verb
     // unwinds exactly as SIGTERM does rather than through a second teardown
     // nobody exercises.
-    wait_for_shutdown(&state).await?;
+    wait_for_shutdown(state.shutdown_rx()).await?;
     info!("shutting down");
     state.set_ready(false);
     state.request_shutdown();
@@ -529,11 +586,7 @@ async fn main() -> anyhow::Result<()> {
         warn!(error = ?e, "ipc server did not shut down cleanly");
     }
 
-    match std::fs::remove_file(&socket_path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => warn!(error = %e, "could not remove the socket on shutdown"),
-    }
+    remove_socket(&socket_path);
     Ok(())
 }
 
@@ -545,22 +598,133 @@ fn init_tracing() {
         .init();
 }
 
+/// A startup failure that has a fixed sentence holds the socket instead of
+/// exiting, so the app hears the condition rather than inferring a crash.
+///
+/// Every other failure exits exactly as before: there is nothing a client could
+/// be told that is more use than the exit status and the log line.
+async fn halt_or_fail<E>(socket_path: &std::path::Path, error: E, doing: &str) -> anyhow::Result<()>
+where
+    E: crate::server::messages::Refusal + std::error::Error + Send + Sync + 'static,
+{
+    let Some(refusal) = error.refusal() else {
+        return Err(anyhow::Error::new(error).context(doing.to_string()));
+    };
+    warn!(error = %error, doing, "cannot serve a history; holding the socket to say why");
+
+    let stop = watch::channel(false).0;
+    let served = tokio::spawn(server::serve_halted(
+        server::bind(socket_path)?,
+        refusal,
+        stop.clone(),
+    ));
+    wait_for_shutdown(stop.subscribe()).await?;
+    let _ = stop.send(true);
+    if let Err(e) = served.await {
+        warn!(error = ?e, "the halted ipc server did not shut down cleanly");
+    }
+    remove_socket(socket_path);
+    Ok(())
+}
+
+fn remove_socket(socket_path: &std::path::Path) {
+    match std::fs::remove_file(socket_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => warn!(error = %e, "could not remove the socket on shutdown"),
+    }
+}
+
 /// Resolves on SIGINT, SIGTERM, or a client's `shutdown` request.
 ///
 /// launchd sends SIGTERM; a terminal sends SIGINT; the app sends the IPC verb,
 /// because it cannot signal a process it did not start. All three must unwind
 /// the same way — an aborted process leaves the socket file behind and the next
 /// start has to treat it as stale.
-async fn wait_for_shutdown(state: &AppState) -> anyhow::Result<()> {
+async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::Result<()> {
     use tokio::signal::unix::{signal, SignalKind};
 
     let mut sigterm = signal(SignalKind::terminate()).context("install the SIGTERM handler")?;
     let mut sigint = signal(SignalKind::interrupt()).context("install the SIGINT handler")?;
-    let mut requested = state.shutdown_rx();
     tokio::select! {
         _ = sigterm.recv() => info!("received SIGTERM"),
         _ = sigint.recv() => info!("received SIGINT"),
         _ = requested.wait_for(|stopping| *stopping) => info!("shutdown was requested over ipc"),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// A plaintext v0.4.x history, which is what a user who never upgraded past
+    /// the pre-encryption builds still has. An *encrypted* one cannot be staged
+    /// — v2 cannot derive v1's key — and `copypaste_core::storage::legacy`
+    /// already covers that half.
+    fn stage_v1(dir: &Path) {
+        let conn = rusqlite::Connection::open(dir.join("clipboard.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_items (
+                 id          TEXT PRIMARY KEY NOT NULL,
+                 item_id     TEXT,
+                 lamport_ts  INTEGER NOT NULL DEFAULT 0,
+                 wall_time   INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 12).unwrap();
+    }
+
+    /// CLAUDE.md rule 3's second obligation. The identification in
+    /// `copypaste-core` was correct and never *asked*: `Store::open` only ever
+    /// sees `copypaste-v2.db`, so the question that matters — is an old history
+    /// sitting here — had no caller at all (post-merge review, finding 2).
+    #[test]
+    fn a_v0_4_history_beside_the_new_one_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!legacy_history_present(dir.path()));
+        stage_v1(dir.path());
+        assert!(legacy_history_present(dir.path()));
+    }
+
+    /// The probe must leave the disk as it found it: a user who downgrades has
+    /// to find their history intact, and a created journal or a replayed WAL is
+    /// a change to a file this build promised not to touch.
+    #[test]
+    fn finding_one_changes_nothing_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        stage_v1(dir.path());
+
+        let before = snapshot(dir.path());
+        assert!(legacy_history_present(dir.path()));
+        assert_eq!(snapshot(dir.path()), before);
+    }
+
+    /// A v2 database is not an old one, whatever else is in the directory — the
+    /// distinction the whole probe exists to keep.
+    #[test]
+    fn a_v2_database_alone_is_not_a_v0_4_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = copypaste_core::Keyring::from_secret(&[3u8; 32]).db_key();
+        let _store = Store::open(&dir.path().join("copypaste-v2.db"), &key).unwrap();
+        assert!(!legacy_history_present(dir.path()));
+    }
+
+    /// Name plus length for everything in the directory, sorted.
+    fn snapshot(dir: &Path) -> Vec<(String, u64)> {
+        let mut entries: Vec<(String, u64)> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    entry.metadata().unwrap().len(),
+                )
+            })
+            .collect();
+        entries.sort();
+        entries
+    }
 }

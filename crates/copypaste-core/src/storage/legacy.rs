@@ -206,6 +206,22 @@ mod tests {
         ));
     }
 
+    /// The verdict above holds because of the *columns*, not because of the
+    /// filename or luck: v2's `user_version` is 1, which is inside v0.4.x's
+    /// ladder, so [`V1_ONLY_COLUMNS`] is the only thing separating the two
+    /// schemas. A v2 schema change that reintroduced one of these names would
+    /// make every plaintext v2 database announce itself as an old history.
+    #[test]
+    fn v2_carries_none_of_the_columns_that_identify_v1() {
+        let store = Store::open_in_memory(&KEY).unwrap();
+        let conn = store.conn().unwrap();
+        for column in V1_ONLY_COLUMNS {
+            assert!(!has_column(&conn, column).unwrap(), "v2 grew {column}");
+        }
+        // ...and the probe is not vacuously false: it finds a column v2 has.
+        assert!(has_column(&conn, "origin_device_id").unwrap());
+    }
+
     /// A corrupt file must stay corrupt. The name is only evidence for a file
     /// that has a database's shape.
     #[test]

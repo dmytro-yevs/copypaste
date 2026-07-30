@@ -111,9 +111,14 @@ impl Store {
             content_ciphertext: item.content_ciphertext,
             nonce: item.nonce,
             content_type: item.content_type,
+            content_hash: item.content_hash,
             created_at: item.created_at,
             pinned: false,
             is_sensitive: item.is_sensitive,
+            deleted: false,
+            // A capture on this device. The empty sentinel rather than a device
+            // id the store has no business knowing — see `versions::origin_or`.
+            origin_device_id: String::new(),
         }))
     }
 

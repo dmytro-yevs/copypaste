@@ -25,7 +25,7 @@ use copypaste_p2p::peers::Peer;
 use copypaste_p2p::NodeError;
 use tracing::info;
 
-use crate::p2p::source::StoreSource;
+use crate::sync::peer_source;
 use crate::AppState;
 
 /// Mint a pairing and hand back the code to read out to the other device.
@@ -54,7 +54,7 @@ pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response
 /// The peer is persisted only after a complete session — the node's rule, and
 /// the reason a failed pairing leaves the paired-device list untouched.
 pub async fn pair_accept(state: &Arc<AppState>, id: u64, code: &str, addr: &str) -> Response {
-    let source = StoreSource::new(Arc::clone(state));
+    let source = peer_source(state);
     let accepted = match state.p2p.node().pair_accept(code, addr, &source).await {
         Ok(accepted) => accepted,
         Err(e) => return failed(id, e),
@@ -171,7 +171,7 @@ fn devices(state: &Arc<AppState>) -> DiscoveredData {
 
 /// One peer, start to finish. Never returns `Err`: a failure is a field.
 pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
-    let source = StoreSource::new(Arc::clone(state));
+    let source = peer_source(state);
     match state.p2p.node().sync_one(peer, &source).await {
         Ok(outcome) => {
             crate::p2p::remember_device(state, &outcome);

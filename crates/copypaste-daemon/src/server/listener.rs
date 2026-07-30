@@ -49,7 +49,7 @@ use crate::AppState;
 /// learns nothing from a refusal that it did not already know from the socket
 /// being there, and writing an error needs a task, which is the resource being
 /// rationed.
-const MAX_CONCURRENT_CONNECTIONS: usize = 64;
+pub(super) const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
 /// How many of those may be `watch` subscribers.
 ///
@@ -61,7 +61,7 @@ const MAX_WATCHERS: usize = 8;
 /// Per-read deadline. A connection that says nothing for this long is dropped
 /// **without a response** — the client sees EOF, which its retry logic already
 /// handles (manifest 04 §3.4).
-const READ_TIMEOUT: Duration = Duration::from_secs(30);
+pub(super) const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Per-write deadline. Shorter than the read deadline because a stalled write
 /// means the client is not draining, and the daemon is holding a reply.
