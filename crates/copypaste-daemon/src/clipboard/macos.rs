@@ -165,9 +165,7 @@ impl ClipboardSource for MacOsClipboard {
             // below this branch, and image *presence* must be probed
             // without materialising the bytes (I-12).
             let data = UTIS.with(|utis| unsafe {
-                if pb.availableTypeFromArray(&utis.text_probe).is_none() {
-                    return None;
-                }
+                pb.availableTypeFromArray(&utis.text_probe)?;
                 pb.dataForType(&utis.text)
             })?;
 
