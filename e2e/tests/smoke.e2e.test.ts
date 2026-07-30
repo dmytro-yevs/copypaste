@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
+import { rowCount } from "../src/harness/ui.js";
 
 let app: App;
 
@@ -18,8 +19,7 @@ test("the real WebView runs the real app against the real daemon", async () => {
   const list = await browser.$('[role="list"][aria-label="Clipboard history"]');
   await list.waitForExist({ timeout: 60_000 });
 
-  const rows = await browser.$$('[role="listitem"]');
-  expect(rows.length).toBeGreaterThan(0);
+  expect(await rowCount(browser)).toBeGreaterThan(0);
 
   const text = await browser.execute(() => document.body.innerText);
   expect(text).toContain("smoke two");

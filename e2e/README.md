@@ -22,6 +22,57 @@ A green run means the frontend, the bridge and the daemon agree on a Linux
 host. It is not evidence about either shipping platform, and CLAUDE.md rule 7
 means both still need their own verification.
 
+## What is driven
+
+Every file starts its own app: WebKitWebDriver answers a second concurrent
+session with "Maximum number of active sessions", so the files run one at a
+time and each gets a fresh daemon and a fresh database.
+
+| File | What only a running program can show |
+|---|---|
+| `smoke` | the app mounts, paints and reaches the daemon at all |
+| `history-render` · `scroll-anchor` · `history-controls` | virtualisation, the row-height rule (INV-5), scroll anchoring (INV-1/6), keyboard navigation, toolbar layout |
+| `sensitive` · `error-strings` | a flagged item's plaintext is absent from `outerHTML`, and no user-facing string carries a filesystem path (INV-10/12) |
+| `bulk-actions` | per-row actions are **absent** in selection mode rather than hidden, and a bulk delete reaches the database |
+| `devices` | real pairing against a **second real daemon**: mint, reveal, a wrong code, the right one, unpair — plus the QR (INV-13) and the no-camera fallback |
+| `push` | a `copypaste://changed` event really crosses the bridge, the list updates inside the poll interval, and a dead daemon degrades to polling |
+| `service-lifecycle` | the offline screen offers to *start* the service, and pressing the button really does |
+| `settings` | every tab lays out, a preference reaches layout and survives a reload, and Settings still works with the service down |
+| `export-import` | an export withholds and counts flagged items; an edited backup cannot import a credential marked clean |
+| `daemon-config` | `GetConfig`/`SetConfig` over the socket — **no WebView**, because no Tauri command routes them (see below) |
+
+Two constraints are asserted from `src/harness/leaks.ts` rather than restated
+per file: a secret must be absent from `outerHTML` (a blur, a `display: none`
+or an `aria-label` all leave it there), and no accessible string — text,
+`title`, `aria-label`, `placeholder`, `value` — may contain a filesystem path,
+because the daemon socket path discloses the local username.
+
+Assertions are against **rendered text**, never a catalogue key, so they survive
+strings moving into `src/i18n` and fail if a key ever reaches the screen.
+
+## Known red
+
+`daemon-config` › "patches over different fields all survive" fails, and the
+defect is in the daemon rather than in the test. `Settings::apply`
+(`crates/copypaste-daemon/src/settings.rs`) reads the live configuration under a
+read lock, drops it, validates the patch into a new value, persists that, and
+only then takes the write lock — so two connections that overlap read the same
+"before" and the second write erases the field the first one set. The test
+writes four fields from four clients per round, six rounds, and reports every
+field that did not survive.
+
+## Surfaces this cannot reach yet
+
+- **Configuration.** The daemon has `GetConfig`/`SetConfig` with per-field
+  liveness and the CLI drives both, but no `#[tauri::command]` routes either, so
+  Settings cannot read or change a single daemon setting. `daemon-config`
+  exercises the contract through the CLI; when a command lands, those
+  assertions belong in `settings`.
+- **Export and import.** Same shape: `Method::Export` / `Method::Import` exist
+  and the CLI uses them; the app has no backup or restore anywhere.
+- Tray, popover, global hotkey, launch-at-login — desktop-shell APIs no
+  WebDriver session touches.
+
 ## Requirements the host must satisfy
 
 - `/usr/bin/WebKitWebDriver`, from the `webkit2gtk-driver` package. Separate

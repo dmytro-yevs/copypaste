@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
-import { ROW, rowBoxes, waitForRows } from "../src/harness/ui.js";
+import { ROW, count, rowBoxes, waitForRows } from "../src/harness/ui.js";
 
 let app: App;
 
@@ -105,7 +105,7 @@ describe("selection mode", () => {
     await app.browser.$('[aria-label="Select multiple items"]').click();
 
     await app.browser.waitUntil(
-      async () => (await app.browser.$$('[role="checkbox"]')).length > 0,
+      async () => (await count(app.browser, '[role="checkbox"]')) > 0,
       { timeout: 5_000, timeoutMsg: "no checkboxes appeared" },
     );
 
@@ -141,7 +141,7 @@ describe("selection mode", () => {
   test("leaves the mode again without stranding the checkboxes", async () => {
     await app.browser.$('[aria-label="Leave selection mode"]').click();
     await app.browser.waitUntil(
-      async () => (await app.browser.$$('[role="checkbox"]')).length === 0,
+      async () => (await count(app.browser, '[role="checkbox"]')) === 0,
       { timeout: 5_000, timeoutMsg: "the checkboxes stayed after leaving" },
     );
   });

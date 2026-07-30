@@ -1,0 +1,177 @@
+/**
+ * `GetConfig` / `SetConfig`, against a real daemon over a real socket.
+ *
+ * **This file drives the CLI, not the window, and that is the finding.** The
+ * daemon has a complete configuration surface and `copypaste-ipc::config`
+ * records per-field liveness so a client can say "this one needs a restart" —
+ * but no Tauri command routes either method, so Settings shows none of it and
+ * the app cannot change a single one of these values. Until that lands, this is
+ * where the contract is exercised; when it lands, these assertions move up into
+ * the Settings file rather than being written again.
+ *
+ * The three properties are the ones a UI would be built on:
+ * a value that round-trips, a rejected value that changes *nothing*, and a
+ * patch that carries only the field it names — which is what stops two screens
+ * (or two tabs) from overwriting each other's unsaved work.
+ */
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+
+import { startDaemon, type Daemon } from "../src/harness/daemon.js";
+import { expectNoFilesystemPath } from "../src/harness/leaks.js";
+
+interface ConfigData {
+  poll_interval_ms: number;
+  history_limit: number;
+  dedup_window_secs: number;
+  lan_visibility: boolean;
+  sync_enabled: boolean;
+}
+
+interface ConfigApplied {
+  config: ConfigData;
+  restart_required: string[];
+}
+
+let daemon: Daemon;
+
+beforeAll(async () => {
+  daemon = await startDaemon();
+}, 120_000);
+
+afterAll(async () => {
+  await daemon?.stop();
+});
+
+const show = () => daemon.json<ConfigApplied>(["config", "show"]);
+
+describe("the round trip", () => {
+  test("a setting that is written comes back", async () => {
+    const before = await show();
+    expect(before.config.poll_interval_ms).toBeGreaterThan(0);
+    expect(before.restart_required).toEqual([]);
+
+    const applied = await daemon.json<ConfigApplied>([
+      "config",
+      "set",
+      "--poll-interval-ms",
+      "1500",
+    ]);
+    expect(applied.config.poll_interval_ms).toBe(1500);
+
+    // Read back through a second process, so this is the daemon's answer and
+    // not the writer's echo.
+    expect((await show()).config.poll_interval_ms).toBe(1500);
+  });
+
+  test("a field that needs a restart says so; a live one does not", async () => {
+    const restart = await daemon.json<ConfigApplied>([
+      "config",
+      "set",
+      "--lan-visibility",
+      "false",
+    ]);
+    expect(restart.restart_required).toContain("lan_visibility");
+
+    const live = await daemon.json<ConfigApplied>([
+      "config",
+      "set",
+      "--dedup-window-secs",
+      "45",
+    ]);
+    expect(live.restart_required).toEqual([]);
+    expect(live.config.dedup_window_secs).toBe(45);
+  });
+});
+
+describe("a rejected value", () => {
+  test("changes nothing, and its message names the bound rather than a file", async () => {
+    const before = await show();
+
+    const result = await daemon.cli(["--json", "config", "set", "--poll-interval-ms", "1"]);
+    expect(result.exitCode).not.toBe(0);
+
+    const message = `${result.stdout}\n${result.stderr}`;
+    expect(message).toContain("poll_interval_ms");
+    expect(message).toMatch(/between \d+ and \d+/);
+    expectNoFilesystemPath(message, daemon.dataHome);
+
+    expect((await show()).config).toEqual(before.config);
+  });
+
+  test("a rejected value in a batch does not let the others through", async () => {
+    const before = await show();
+
+    const result = await daemon.cli([
+      "--json",
+      "config",
+      "set",
+      "--history-limit",
+      "4242",
+      "--poll-interval-ms",
+      "0",
+    ]);
+    expect(result.exitCode).not.toBe(0);
+    expect((await show()).config.history_limit).toBe(before.config.history_limit);
+  });
+});
+
+describe("concurrent writers", () => {
+  /**
+   * The reason `SetConfig` takes a patch rather than a whole `ConfigData`: two
+   * clients — two windows, a window and the CLI, two tabs of one screen — each
+   * send the field they changed, and neither carries a stale copy of the
+   * other's.
+   *
+   * **This currently fails, and the failure is real.**
+   * `daemon/src/settings.rs::apply` reads the live value under a read lock,
+   * drops it, validates the patch into a new `ConfigData`, persists that, and
+   * only then takes the write lock. Two connections are two tokio tasks, so
+   * both can read the same "before" and the second write erases the first
+   * one's field — a lost update, and the exact thing patches exist to prevent.
+   * It is not deterministic, which is why this runs several rounds rather than
+   * one.
+   */
+  test("patches over different fields all survive", async () => {
+    const lost: string[] = [];
+
+    for (let round = 1; round <= 6; round += 1) {
+      // Four writers rather than two: whether the race is *observed* depends on
+      // how far apart the process spawns land, so the width is what makes this
+      // more than a coin toss. Each field is written by exactly one writer, so
+      // any disagreement afterwards is a lost update and nothing else.
+      const want = {
+        history_limit: 700 + round,
+        retention_days: 10 + round,
+        dedup_window_secs: 20 + round,
+        max_item_bytes: 1_000_000 + round,
+      };
+      await Promise.all([
+        daemon.json(["config", "set", "--history-limit", String(want.history_limit)]),
+        daemon.json(["config", "set", "--retention-days", String(want.retention_days)]),
+        daemon.json(["config", "set", "--dedup-window-secs", String(want.dedup_window_secs)]),
+        daemon.json(["config", "set", "--max-item-bytes", String(want.max_item_bytes)]),
+      ]);
+
+      const after = (await show()).config as unknown as Record<string, number>;
+      for (const [field, expected] of Object.entries(want)) {
+        if (after[field] !== expected) {
+          lost.push(
+            `round ${round}: wrote ${field}=${expected}, read back ${after[field]}`,
+          );
+        }
+      }
+    }
+
+    expect(
+      lost,
+      "a concurrent SetConfig lost a field that the other patch did not name — " +
+        "see daemon/src/settings.rs::apply, which is a read-modify-write that " +
+        "does not hold one lock across the whole operation:\n" +
+        lost.join("\n"),
+    ).toEqual([]);
+  });
+
+  test("the field nobody wrote is untouched", async () => {
+    expect((await show()).config.poll_interval_ms).toBe(1500);
+  });
+});
