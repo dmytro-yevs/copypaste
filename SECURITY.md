@@ -18,8 +18,8 @@ trusting anything else here.
 
 An adversarial source review of this branch is at
 [`docs/rewrite/security-review.md`](docs/rewrite/security-review.md): fourteen
-findings, none critical, several still open. It tests the claims on this page
-against the code, so where the two disagree, believe it.
+findings, two High, several still open. It is dated 2026-07-30; each finding
+carries its own status.
 
 This document describes v2 only. v0.4.1 survives on
 `archive/v0.4.1-pre-rewrite` and differs in ways that matter — most sharply, it
@@ -91,8 +91,8 @@ pass shared by every client, with tests asserting it.
   secrecy from the pairing key alone.
 - The pairing token is 256 bits from the OS CSPRNG, shown as a Crockford base32
   code. Possession is the authentication — there is no password, so there is no
-  dictionary to attack. Treat a code like a password; it is shown once, and
-  nothing expires or burns it.
+  dictionary to attack. Treat a code like a password. It is shown once, stays
+  redeemable for five minutes, and the first session that completes burns it.
 - A wrong key fails the handshake on the first message. There is no
   unauthenticated mode to fall back to.
 - A session poisons itself after any authentication failure rather than
@@ -168,14 +168,12 @@ Written, never observed working on a platform we ship to:
 
 ## Not implemented
 
-Age-based retention, sensitive-item auto-wipe, private mode, an application
-exclusion list, device revocation and sync-key rotation, expiring or single-use
-pairing codes, rate limiting on any surface, and telemetry.
+Sensitive-item auto-wipe, private mode, an application exclusion list, device
+revocation and sync-key rotation reachable from any client, rate limiting on any
+surface, and telemetry.
 
-The full accounting of what v0.4.1 did that this does not is
-[`docs/rewrite/parity-audit.md`](docs/rewrite/parity-audit.md); two of its
-findings are security-relevant on their own — the socket bind is TOCTOU-racy,
-and the IPC accept loop has no connection cap and no read or write timeouts.
+What is outstanding, re-checked against the tree, is
+[`docs/backlog.md`](docs/backlog.md).
 
 ## macOS permissions
 
