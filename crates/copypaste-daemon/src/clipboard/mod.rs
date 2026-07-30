@@ -54,6 +54,7 @@ mod fake;
 #[cfg(target_os = "macos")]
 mod macos;
 
+#[cfg(not(target_os = "macos"))]
 pub use fake::FakeClipboard;
 
 /// Read gate for text, in bytes (§4, "Max text (default)" = 10 MiB).
