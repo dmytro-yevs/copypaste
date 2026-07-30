@@ -8,7 +8,7 @@
 //! Binding-level assumptions to confirm on a mac (the *logic* is manifest, the
 //! *spelling* is not): `NSPasteboard::generalPasteboard`, `changeCount`,
 //! `clearContents`, `availableTypeFromArray`, `dataForType`, `setString_forType`,
-//! `NSArray::from_slice`, `NSData::length`/`bytes`.
+//! `NSArray::from_vec`, `NSData::length`/`bytes`.
 //!
 //! # macOS 16 will make this read a user-visible event
 //!
@@ -78,10 +78,12 @@ impl Utis {
         let text = NSString::from_str(UTI_TEXT);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
-        let marker_refs: Vec<&NSString> = markers.iter().map(|s| &**s).collect();
+        // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
+        // `NSString` is `ImmutableWithMutableSubclass<NSMutableString>`, which
+        // is not. Taking owned `Retained`s is the supported path for it.
         Self {
-            text_probe: NSArray::from_slice(&[&*text]),
-            markers: NSArray::from_slice(&marker_refs),
+            text_probe: NSArray::from_vec(vec![text.clone()]),
+            markers: NSArray::from_vec(markers),
             text,
         }
     }
