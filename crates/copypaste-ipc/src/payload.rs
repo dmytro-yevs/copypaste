@@ -183,6 +183,27 @@ pub struct StatusData {
     /// on non-macOS hosts and in tests. Surfaced so a demo cannot be mistaken
     /// for the real thing.
     pub clipboard_backend: String,
+
+    /// A CopyPaste 0.4 history is on this device, unread and unaltered.
+    ///
+    /// The whole of CLAUDE.md rule 3's second obligation depends on this
+    /// crossing the wire. The daemon *works* — v2 starts a new history and the
+    /// old one is untouched — so this is not a failure and has no error code;
+    /// what it is, is the difference between "your clipboard history vanished"
+    /// and "your clipboard history is still there and this version cannot read
+    /// it". Without it a client has no way to tell an empty history from an
+    /// unreadable one, and the upgrade looks like data loss.
+    ///
+    /// Decided once, at startup, by a read-only probe: re-probing on every
+    /// status poll would open a SQLite connection every few seconds against a
+    /// file this build has promised not to touch. It therefore goes stale if
+    /// the old history is removed while the daemon runs, which costs a restart
+    /// and no data.
+    ///
+    /// `#[serde(default)]` so a client built before this field decodes a reply
+    /// that has it — an unknown field is ignored, a missing one is not.
+    #[serde(default)]
+    pub legacy_history_present: bool,
 }
 
 /// An item as seen by clients. Content is plaintext here: it is decrypted by
