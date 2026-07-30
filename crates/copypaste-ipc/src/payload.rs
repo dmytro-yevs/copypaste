@@ -126,6 +126,17 @@ pub struct CloudSyncData {
     pub skipped_sensitive: u32,
     pub skipped_undecryptable: u32,
     pub skipped_future: u32,
+    /// Local items withheld because they are over the per-item upload cap
+    /// (8 MiB for text, 10 MiB otherwise).
+    ///
+    /// Withheld, never deleted: the item stays on this device in full, it
+    /// simply does not reach the account. It is counted for the same reason
+    /// `skipped_sensitive` is — a round that uploaded fewer items than the user
+    /// expected has to be able to say why — and because without it an item that
+    /// will *never* reach the other device is indistinguishable from one that
+    /// is merely still in the queue. [`Item::too_large_to_sync`] is the
+    /// per-item half of the same answer.
+    pub skipped_too_large: u32,
 }
 
 /// A freshly minted pairing, returned once and never retrievable again.
@@ -187,4 +198,45 @@ pub struct Item {
     /// True when the detector matched. Sensitive items are excluded from the
     /// search index at write time, at read time, and by a purge pass.
     pub is_sensitive: bool,
+
+    /// Which device first captured this item.
+    ///
+    /// Never empty: an item with no recorded origin was captured here, and the
+    /// daemon substitutes its own device id rather than sending a blank —
+    /// "unknown" and "this one" are different answers and a client should not
+    /// have to guess which it got.
+    ///
+    /// An opaque UUID, not a name. It is stable across renames and it is what
+    /// the merge tie-break orders on, so it is the right thing to *group* and
+    /// *filter* by; [`Item::origin_device_name`] is the right thing to show.
+    #[serde(default)]
+    pub origin_device_id: String,
+
+    /// What that device calls itself, when this device has ever been told.
+    ///
+    /// `None` for a device that has never completed a sync session here — the
+    /// cloud path carries an origin id but no name, so an item that arrived
+    /// through an account from a third device has an id and no name until that
+    /// device is paired directly. A client should fall back to a short form of
+    /// the id rather than claiming the item is local.
+    ///
+    /// Peer-supplied and cosmetic. It is not trusted for anything, and two
+    /// devices may well report the same name.
+    #[serde(default)]
+    pub origin_device_name: Option<String>,
+
+    /// This item is larger than cloud sync will carry, so it will never reach
+    /// another device through an account.
+    ///
+    /// A property of the item and the cap, not of any particular round: it is
+    /// true before the first sync attempt and stays true, which is the point —
+    /// v1 drew a warning on the row (`CopyPaste-f72f`) precisely so that an
+    /// item that will silently never arrive does not look like one that is
+    /// still on its way.
+    ///
+    /// Local history is unaffected. The item is stored in full, it is
+    /// searchable, it copies, and the peer transport is not governed by this
+    /// cap. [`CloudSyncData::skipped_too_large`] is the per-round half.
+    #[serde(default)]
+    pub too_large_to_sync: bool,
 }

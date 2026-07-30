@@ -29,8 +29,7 @@
 //!
 //! ## What is implemented here
 //!
-//! Text capture only — the MVP's single representation. The manifest's
-//! representation-priority rules (I-11..I-16), image/file ingest, frontmost-app
+//! Text capture only — the MVP's single representation. Frontmost-app
 //! attribution (§3.9), private mode and the app-exclusion gate are *not* in this
 //! module; they are separate work. The pieces that are here are implemented
 //! against the manifest, not approximated:
@@ -47,6 +46,43 @@
 //! - **I-39 / §6.5** rejections are counted and readable, not just logged.
 //! - **§3.12** the invariant UTI strings are built once, not once per tick.
 //! - **I-9** no clipboard content, and no paths, in logs or in errors.
+//!
+//! ## Image, file and rich-text capture: what is done and what is not
+//!
+//! **Done — the type plumbing.** `copypaste_ipc::content_type` is the one place
+//! the vocabulary is spelled, `Capture::content_type` and the storage column
+//! carry it end to end, `Item::content_type` reaches every client, and a
+//! non-text row already renders as its label rather than as mojibake
+//! (`cli::render::item_preview`). A row of any of these types can already
+//! *arrive* — from a peer, from a cloud account, from an import — and is
+//! stored, listed and excluded from an export with a count (`skipped_non_text`).
+//!
+//! **Not done — the capture path, and it is the larger half.** Nothing below
+//! this line is written, and none of it can be tested on a Linux host:
+//!
+//! * **I-11** representation priority `text > image > file`, chosen once per
+//!   change, with the lower-priority ones dropped rather than queued.
+//! * **I-12/I-13** probing image *presence* with `availableTypeFromArray`
+//!   before any `dataForType`, `public.png` then `public.tiff`. A multi-MB
+//!   image accompanying text must never enter the heap.
+//! * **I-14/§3.6** `public.file-url` — strip the scheme, percent-decode with a
+//!   maintained crate, require absolute; invalid `%` passes through.
+//! * **§3.5 (`CopyPaste-q5ab`)** `NSFilenamesPboardType` is a **binary plist**,
+//!   not a string: read it with a data accessor and parse an array of bare
+//!   POSIX paths. v1 called `stringForType` and stripped `file://`, and every
+//!   file copied from Finder was silently discarded with no error and no log.
+//! * **I-15/I-16/I-19** absolute-path check, the read moved off the reactor,
+//!   and `stat`+`read` in one blocking operation (`CopyPaste-b5iz`, TOCTOU).
+//! * **§3.7/§3.8** promised files stay unsupported; the unsupported-type probe
+//!   is a fixed allowlist logged once per kind.
+//!
+//! And three things outside this module that the capture path would need:
+//! [`Capture::content`] is a `String`, so image bytes have nowhere to go;
+//! `copypaste_core::ingest_into` takes `&str`; and `Item::content` is a
+//! `String` on the wire. Carrying bytes is a change to all three, and it is the
+//! decision that should be taken first — base64 on the JSON wire, a side
+//! channel, or a content-addressed blob beside the database — because the
+//! pasteboard code above is shaped by the answer.
 
 mod change;
 mod fake;
@@ -68,9 +104,13 @@ const MAX_TEXT_BYTES: usize = 10 * 1024 * 1024;
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capture {
+    /// A `String`, which is why image and file capture is not merely a matter
+    /// of writing the pasteboard code — see the module header.
     pub content: String,
-    /// `"text"` for the MVP. Image and file representations (I-11..I-16) are
-    /// not captured yet.
+    /// One of `copypaste_ipc::content_type`. Always
+    /// [`copypaste_ipc::content_type::TEXT`] today; the field is typed as the
+    /// shared vocabulary rather than a bare literal so a new representation
+    /// names itself the same way everywhere it travels.
     pub content_type: String,
 }
 
@@ -78,7 +118,7 @@ impl Capture {
     fn text(content: String) -> Self {
         Self {
             content,
-            content_type: "text".to_string(),
+            content_type: copypaste_ipc::content_type::TEXT.to_string(),
         }
     }
 }

@@ -116,6 +116,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Delete { .. }
         | Method::DeleteAll
         | Method::Pin { .. }
+        | Method::ReorderPinned { .. }
         // Peer operations read and write the same history, and pairing needs
         // the device identity that comes out of the same database.
         | Method::PairCreate { .. }
@@ -139,10 +140,14 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Backup { .. }
         | Method::Restore { .. } => true,
         Method::CloudStatus => false,
-        // Intercepted in `server::listener` before dispatch — it changes what
-        // the connection is — and never reaches here. Listed rather than left
-        // to a `_` so a new method is still a compile error.
-        Method::Watch => false,
+        // Both are intercepted in `server::listener` before dispatch — one
+        // changes what the connection is, the other ends the process — and
+        // neither reaches here. Listed rather than left to a `_` so a new
+        // method is still a compile error.
+        //
+        // `Shutdown` would be exempt anyway: a daemon whose database will not
+        // open is exactly the one a user needs to be able to stop.
+        Method::Watch | Method::Shutdown => false,
     }
 }
 
@@ -205,6 +210,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             id: item_id,
             pinned,
         } => items::pin(state, id, &item_id, pinned),
+        Method::ReorderPinned { ids } => items::reorder_pinned(state, id, &ids),
         Method::Export {
             limit,
             include_sensitive,
@@ -228,7 +234,8 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         | Method::CloudSignOut
         | Method::CloudStatus
         | Method::CloudSyncNow
-        | Method::Watch => {
+        | Method::Watch
+        | Method::Shutdown => {
             error!("a network operation reached the blocking dispatcher");
             Response::err(id, ErrorCode::Internal, MSG_INTERNAL)
         }
@@ -302,6 +309,9 @@ mod tests {
             id: "x".into(),
             pinned: true
         }));
+        assert!(requires_ready(&Method::ReorderPinned { ids: Vec::new() }));
+        // The one a user reaches for when nothing else answers.
+        assert!(!requires_ready(&Method::Shutdown));
         assert!(requires_ready(&Method::Export {
             limit: 0,
             include_sensitive: false
