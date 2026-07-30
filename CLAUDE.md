@@ -137,7 +137,28 @@ Splitting is behaviour-preserving refactoring. Move a responsibility, keep the
 public surface identical by re-exporting from a thin `mod.rs`, move each test
 with the code it exercises, and compile and test after every extraction.
 
-## 6. Scope
+## 6. A feature is not done until it has a UI
+
+**Ship the interface with the capability, in the same stretch of work — not as a
+later phase.**
+
+Peer sync is the example this rule was written from. The transport, the merge,
+discovery, the daemon wiring and the CLI commands all landed and passed their
+tests, and the feature was called done while the only way to pair two devices
+was to type a command into a terminal. For a clipboard manager on macOS and
+Android, that is not a shipped feature; it is a feature with no users.
+
+Deferring the interface is expensive in a specific way: the shape of the UI is
+what exposes the awkward parts of an API, and finding them a month later means
+changing a contract that other code now depends on. Pairing is again the
+example — a screen has to show a code, a QR, a progress state, a failure, and a
+list of known devices, and none of those needs was visible while the work was
+only a CLI verb.
+
+The CLI does not satisfy this rule. It is a tool for scripting and for tests,
+not the product surface.
+
+## 7. Scope
 
 macOS and Android. Not Windows, not Linux desktop.
 
