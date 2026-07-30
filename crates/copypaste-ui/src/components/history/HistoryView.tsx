@@ -1,7 +1,4 @@
 /**
- * The History screen: search, filters, bulk actions, the virtualised list, and
- * the states it can be in instead of a list.
- *
  * State resolution follows manifest 06 §3.1.11, with one adjustment: an error
  * only replaces the list when there is nothing else to show. A background poll
  * that fails while 200 rows are on screen must not throw those rows away — the
@@ -43,6 +40,7 @@ import {
 } from "@/hooks/useHistory";
 import { useReveal } from "@/hooks/useReveal";
 import { useSelection } from "@/hooks/useSelection";
+import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { type ErrorKind, classifyError, friendlyError } from "@/lib/errors";
 import { hideWindow } from "@/lib/ipc";
@@ -58,6 +56,7 @@ interface HistoryViewProps {
 }
 
 export function HistoryView({ pushLive = false }: HistoryViewProps) {
+  const { t } = useTranslation();
   const rawQuery = useUi((s) => s.query);
   const setRawQuery = useUi((s) => s.setQuery);
   const activeId = useUi((s) => s.activeId);
@@ -207,7 +206,11 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       <SkippedNotice count={page.skipped} />
 
       {history.isPending ? (
-        <EmptyState busy title="Loading…" body="Fetching your clipboard history." />
+        <EmptyState
+          busy
+          title={t("history.empty.loading.title")}
+          body={t("history.empty.loading.body")}
+        />
       ) : items.length > 0 ? (
         <HistoryList
           items={items}
@@ -235,32 +238,39 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       ) : errorKind === "not_ready" ? (
         <EmptyState
           busy
-          title="Starting up…"
+          title={t("history.empty.starting.title")}
           body={friendlyError("not_ready")}
         />
       ) : errorKind !== null ? (
         <EmptyState
           icon={CircleAlert}
-          title="Failed to load history"
+          title={t("history.empty.failed.title")}
           body={friendlyError(errorKind)}
-          action={{ label: "Try again", onClick: () => void history.refetch() }}
+          action={{
+            label: t("common.tryAgain"),
+            onClick: () => void history.refetch(),
+          }}
         />
       ) : filtered ? (
         <EmptyState
           icon={Search}
-          title={searching ? `No results for "${query}"` : "Nothing matches this filter"}
-          body="Try a different search term. Sensitive items are never indexed, so they never appear in results."
+          title={
+            searching
+              ? t("history.empty.noResults", { query })
+              : t("history.empty.noMatch")
+          }
+          body={t("history.empty.filteredBody")}
           action={
             history.hasNextPage
-              ? { label: "Load more history", onClick: loadMore }
+              ? { label: t("history.empty.loadMore"), onClick: loadMore }
               : undefined
           }
         />
       ) : (
         <EmptyState
           icon={Inbox}
-          title="Nothing copied yet"
-          body="Copy something and it will appear here."
+          title={t("history.empty.none.title")}
+          body={t("history.empty.none.body")}
         />
       )}
 
@@ -281,7 +291,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
             onClick={reveal.hide}
             className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
           >
-            Dismiss
+            {t("common.dismiss")}
           </button>
         </div>
       )}
@@ -294,21 +304,22 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reveal sensitive content?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("history.reveal.confirm.title")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This item looks like a password, key or token. It will be shown for
-              10 seconds, and hidden again as soon as this window loses focus.
+              {t("history.reveal.confirm.body")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (confirmReveal) void reveal.reveal(confirmReveal.id);
                 setConfirmReveal(null);
               }}
             >
-              Reveal
+              {t("history.reveal.confirm.action")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -320,16 +331,14 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Delete {selection.items.length} item
-              {selection.items.length === 1 ? "" : "s"}?
+              {t("history.bulkDelete.title", { count: selection.items.length })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently removes the selected clipboard items. Unlike
-              deleting one item, this cannot be undone.
+              {t("history.bulkDelete.body")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
@@ -339,7 +348,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
                 setConfirmBulkDelete(false);
               }}
             >
-              Delete
+              {t("history.bulkDelete.action")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -348,14 +357,13 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear all clipboard history?</AlertDialogTitle>
+            <AlertDialogTitle>{t("history.clear.title")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This permanently deletes every unpinned item on this device.
-              Pinned items are kept. This cannot be undone.
+              {t("history.clear.body")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
@@ -363,7 +371,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
                 setConfirmClear(false);
               }}
             >
-              Clear all
+              {t("history.clear.action")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

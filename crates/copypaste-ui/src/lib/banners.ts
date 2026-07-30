@@ -11,6 +11,7 @@
  *
  * No banner text is ever derived from an error object (INV-12).
  */
+import { t } from "@/i18n";
 
 export type BannerSeverity = "error" | "warning" | "info";
 
@@ -42,7 +43,7 @@ export function pickBanner(conditions: BannerConditions): Banner | null {
     candidates.push({
       id: "service-offline",
       severity: "error",
-      message: "Background service not running — nothing is being recorded.",
+      message: t("shell.banner.serviceOffline"),
       dismissible: false,
     });
   }
@@ -51,7 +52,9 @@ export function pickBanner(conditions: BannerConditions): Banner | null {
     candidates.push({
       id: "protocol-mismatch",
       severity: "warning",
-      message: `CopyPaste and the background service are on incompatible versions (service protocol v${conditions.protocolMismatch}). Restart both to resolve.`,
+      message: t("shell.banner.protocolMismatch", {
+        protocol: conditions.protocolMismatch,
+      }),
       dismissible: true,
     });
   }
@@ -60,8 +63,7 @@ export function pickBanner(conditions: BannerConditions): Banner | null {
     candidates.push({
       id: "capture-paused",
       severity: "warning",
-      message:
-        "The clipboard service is running but is not recording — copied items will not appear here.",
+      message: t("shell.banner.capturePaused"),
       dismissible: true,
       action: "retry",
     });

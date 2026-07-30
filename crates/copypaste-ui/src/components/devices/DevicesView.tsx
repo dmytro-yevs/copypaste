@@ -1,14 +1,11 @@
 /**
- * The Devices screen: paired devices, pairing, unpairing, sync.
- *
  * Rules carried from manifest §3.2:
  *
  *  - **`online: false` means "not seen", never "unreachable"** — a device on a
  *    network without multicast is reachable by address and still reads as
  *    offline, so the dot is a hint and the row never renders as an error
  *    (5917.11 / SCRD-3: the two-state version lied).
- *  - **Peer-reported names are unverified** (INV-15) and are labelled as such,
- *    because `name` is whatever the other device called itself.
+ *  - **Peer-reported names are unverified** (INV-15) and are labelled as such.
  *  - Unpairing is one-sided and needs a confirm that says so (§3.2.6).
  *  - Every load state is *visible*: a spinner, not a classless empty element
  *    (CopyPaste-8ebg.29, bdac.2).
@@ -40,12 +37,14 @@ import { PairAcceptDialog } from "@/components/devices/PairAcceptDialog";
 import { PairCreateDialog } from "@/components/devices/PairCreateDialog";
 import { ServiceOffline } from "@/components/shell/ServiceOffline";
 import { usePeers, useSyncNow, useUnpair } from "@/hooks/useDevices";
+import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
 
 export function DevicesView() {
+  const { t } = useTranslation();
   const peers = usePeers();
   const unpair = useUnpair();
   const sync = useSyncNow();
@@ -63,8 +62,8 @@ export function DevicesView() {
     return (
       <EmptyState
         icon={Link2}
-        title="Device sync isn't available in this build"
-        body="Pairing runs in the background service, which this build doesn't reach yet. Everything else on this device works normally."
+        title={t("devices.unavailable.title")}
+        body={t("devices.unavailable.body")}
       />
     );
   }
@@ -72,47 +71,56 @@ export function DevicesView() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-panel px-s-3 py-s-2">
-        <h1 className="mr-auto text-sm font-semibold">Devices</h1>
+        <h1 className="mr-auto text-sm font-semibold">{t("devices.title")}</h1>
 
         <Button size="sm" onClick={() => setCreating(true)}>
           <KeyRound aria-hidden="true" />
-          Pair a new device
+          {t("devices.actions.pairNew")}
         </Button>
         <Button size="sm" variant="outline" onClick={() => setAccepting(true)}>
           <Link2 aria-hidden="true" />
-          Add a device
+          {t("devices.actions.add")}
         </Button>
         <Button
           size="sm"
           variant="ghost"
           disabled={sync.isPending || list.length === 0}
           onClick={() => sync.mutate(undefined)}
-          title="Sync with every paired device now"
+          title={t("devices.actions.syncAllHint")}
         >
           <RefreshCw
             aria-hidden="true"
             className={cn(sync.isPending && "animate-spin")}
           />
-          {sync.isPending ? "Syncing…" : "Sync now"}
+          {t(
+            sync.isPending ? "devices.actions.syncing" : "devices.actions.syncAll",
+          )}
         </Button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-s-3">
         {peers.isPending ? (
-          <EmptyState busy title="Loading…" body="Looking for paired devices." />
+          <EmptyState
+            busy
+            title={t("devices.loading.title")}
+            body={t("devices.loading.body")}
+          />
         ) : errorKind !== null ? (
           <EmptyState
-            title="Couldn't load your devices"
+            title={t("devices.failed.title")}
             body={friendlyError(errorKind)}
-            action={{ label: "Try again", onClick: () => void peers.refetch() }}
+            action={{
+              label: t("common.tryAgain"),
+              onClick: () => void peers.refetch(),
+            }}
           />
         ) : list.length === 0 ? (
           <EmptyState
             icon={Laptop}
-            title="No other devices paired"
-            body="Pair your phone or another Mac to sync your clipboard — end-to-end encrypted, directly between your devices."
+            title={t("devices.none.title")}
+            body={t("devices.none.body")}
             action={{
-              label: "Pair a new device",
+              label: t("devices.actions.pairNew"),
               onClick: () => setCreating(true),
               icon: KeyRound,
             }}
@@ -134,25 +142,27 @@ export function DevicesView() {
                 <div className="flex min-w-0 flex-1 flex-col">
                   <span
                     className="truncate text-sm font-medium"
-                    title="Name reported by the device itself — not verified"
+                    title={t("devices.peer.nameHint")}
                   >
                     {peer.name}
                   </span>
                   <span className="truncate text-xs text-muted-foreground">
-                    Last seen {longAge(peer.last_seen_ms)}
+                    {t("devices.peer.lastSeen", {
+                      age: longAge(peer.last_seen_ms),
+                    })}
                     {peer.last_addr ? ` · ${peer.last_addr}` : ""}
                   </span>
                 </div>
 
                 <Badge variant={peer.online ? "ok" : "secondary"}>
-                  {peer.online ? "On the network" : "Not seen"}
+                  {t(peer.online ? "devices.peer.online" : "devices.peer.offline")}
                 </Badge>
 
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label={`Sync with ${peer.name} now`}
-                  title="Sync with this device now"
+                  aria-label={t("devices.peer.syncOne", { name: peer.name })}
+                  title={t("devices.peer.syncOneHint")}
                   disabled={sync.isPending}
                   onClick={() => sync.mutate(peer.pairing_id)}
                 >
@@ -161,8 +171,8 @@ export function DevicesView() {
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label={`Unpair ${peer.name}`}
-                  title="Unpair this device"
+                  aria-label={t("devices.peer.unpairOne", { name: peer.name })}
+                  title={t("devices.peer.unpairHint")}
                   className="hover:text-err-strong"
                   disabled={unpair.isPending}
                   onClick={() => setConfirmUnpair(peer)}
@@ -190,16 +200,16 @@ export function DevicesView() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Unpair {confirmUnpair?.name ?? "this device"}?
+              {t("devices.unpair.title", {
+                name: confirmUnpair?.name ?? t("devices.unpair.thisDevice"),
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              This device will stop syncing with it. Unpairing is one-sided — the
-              other device keeps its half of the pairing until it unpairs too.
-              Nothing already synced is deleted.
+              {t("devices.unpair.body")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
@@ -207,7 +217,7 @@ export function DevicesView() {
                 setConfirmUnpair(null);
               }}
             >
-              Unpair
+              {t("devices.unpair.action")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

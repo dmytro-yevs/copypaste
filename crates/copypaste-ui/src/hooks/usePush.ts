@@ -1,18 +1,9 @@
 /**
- * The change stream, and the poll that backs it up.
- *
- * v1's clients subscribed; v2's app polled every three seconds, which costs up
- * to three seconds of lag on every copy and a constant trickle of IPC on an
- * idle machine (parity finding 15). The daemon now has `Method::Watch` and
- * `service::push` in the bridge turns it into two window events.
- *
  * **Push accelerates the poll; it does not replace it.** A subscription can die
  * in ways neither end notices promptly, and a UI that stopped polling because
  * it believed it was subscribed shows stale history for as long as the window
- * is open. So `live` slows the poll rather than stopping it — the same
- * conclusion `copypaste_cloud::sync::cadence` reached about Realtime, and the
- * obligation manifest 05 §5.4 calls "the only item that can silently
- * reintroduce data loss".
+ * is open. `live` slows the poll rather than stopping it — manifest 05 §5.4
+ * calls this "the only item that can silently reintroduce data loss".
  */
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -38,12 +29,8 @@ export interface PushStatePayload {
   readonly live: boolean;
 }
 
-/**
- * Subscribe to the change stream. Returns whether it is currently delivering.
- *
- * Mounted once, at the app root — not per screen. A second subscriber would
- * invalidate the same queries twice for one change.
- */
+/** Mounted once, at the app root — not per screen. A second subscriber would
+ *  invalidate the same queries twice for one change. */
 export function usePush(): boolean {
   const qc = useQueryClient();
   const [live, setLive] = useState(false);

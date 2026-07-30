@@ -3,10 +3,9 @@
  * sends `content: null`, and the accessible name is a fixed string (AT-13).
  *
  * **Click selects, double-click copies.** A single click that overwrites the
- * system clipboard is a destructive default. The explicit Copy button is the
- * path a screen reader or a touch user takes, which is also why the actions are
- * always visible: Android has no hover, so a hover-revealed control does not
- * exist there.
+ * system clipboard is a destructive default. The actions are always visible
+ * because Android has no hover, so a hover-revealed control does not exist
+ * there.
  *
  * The body button and the action buttons are siblings, never nested: a control
  * inside a control is the `nested-interactive` violation INV-8 is about.
@@ -25,6 +24,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { t, useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import {
   KIND_TEXT_CLASS,
@@ -36,23 +36,20 @@ import {
 } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 
-/** A11Y-3, verbatim from the manifest. */
-export const SENSITIVE_A11Y_LABEL =
-  "Sensitive item, hidden — activate to reveal";
-export const SENSITIVE_REVEAL_LABEL =
-  "Sensitive content hidden — activate to reveal";
-const SENSITIVE_PLACEHOLDER = "Sensitive content hidden";
-const EMPTY_LABEL = "Empty item";
-
-/** No relative age: the live region mirrors this on every selection change,
- *  and an age that ticks would re-announce a selection that did not change. */
+/**
+ * No relative age: the live region mirrors this on every selection change, and
+ * an age that ticks would re-announce a selection that did not change.
+ *
+ * The clip is concatenated onto a catalogue prefix rather than interpolated
+ * into a message — no template ever takes an item's content as a variable.
+ */
 export function rowLabel(item: Item): string {
   const body = item.is_sensitive
-    ? SENSITIVE_A11Y_LABEL
+    ? t("history.row.sensitiveName")
     : item.content === null
-      ? EMPTY_LABEL
+      ? t("history.row.empty")
       : previewOf(item.content);
-  return item.pinned ? `Pinned. ${body}` : body;
+  return item.pinned ? `${t("history.row.pinnedPrefix")} ${body}` : body;
 }
 
 interface HistoryRowProps {
@@ -96,6 +93,7 @@ function HistoryRowImpl({
   onReveal,
   onHide,
 }: HistoryRowProps) {
+  const { t: tr } = useTranslation();
   const kind = kindOf(item);
   const revealed = revealedContent !== null;
   const masked = item.is_sensitive && !revealed;
@@ -129,7 +127,7 @@ function HistoryRowImpl({
           <Checkbox
             checked={checked}
             tabIndex={tab}
-            aria-label={`Select ${rowLabel(item)}`}
+            aria-label={`${tr("history.row.selectPrefix")} ${rowLabel(item)}`}
             onCheckedChange={() => onToggleChecked(item)}
           />
         </span>
@@ -152,11 +150,9 @@ function HistoryRowImpl({
       <button
         type="button"
         aria-label={rowLabel(item)}
-        title={
-          selecting
-            ? "Click to add to the selection"
-            : "Click to select · double-click to copy"
-        }
+        title={tr(
+          selecting ? "history.row.selectingHint" : "history.row.hint",
+        )}
         tabIndex={tab}
         onClick={() => (selecting ? onToggleChecked(item) : onSelect(item))}
         // No double-click-to-copy while selecting: a second click there means
@@ -171,7 +167,7 @@ function HistoryRowImpl({
           // which for a screenshot or a shoulder is both a lie and a leak.
           <span className="flex items-center gap-2 rounded-sm border border-withheld-border bg-withheld px-2 py-0.5 text-sm text-withheld-fg">
             <ShieldAlert size={12} aria-hidden="true" />
-            {SENSITIVE_PLACEHOLDER}
+            {tr("history.row.sensitivePlaceholder")}
           </span>
         ) : (
           <span
@@ -199,11 +195,13 @@ function HistoryRowImpl({
           {item.pinned && (
             <span className="flex items-center gap-0.5 text-brand-2">
               <Pin size={10} aria-hidden="true" />
-              Pinned
+              {tr("history.row.pinnedBadge")}
             </span>
           )}
           {item.is_sensitive && (
-            <span className="text-c-secret">· Sensitive</span>
+            <span className="text-c-secret">
+              {tr("history.row.sensitiveBadge")}
+            </span>
           )}
         </span>
       </button>
@@ -219,8 +217,8 @@ function HistoryRowImpl({
             (revealed ? (
               <Button
                 variant="ghost"
-                aria-label="Hide sensitive content"
-                title="Hide sensitive content"
+                aria-label={tr("history.row.hide")}
+                title={tr("history.row.hide")}
                 tabIndex={tab}
                 className={ACTION}
                 onClick={onHide}
@@ -230,8 +228,8 @@ function HistoryRowImpl({
             ) : (
               <Button
                 variant="ghost"
-                aria-label={SENSITIVE_REVEAL_LABEL}
-                title="Reveal sensitive content"
+                aria-label={tr("history.row.sensitiveReveal")}
+                title={tr("history.row.reveal")}
                 tabIndex={tab}
                 className={ACTION}
                 onClick={() => onReveal(item)}
@@ -245,8 +243,8 @@ function HistoryRowImpl({
             ))}
           <Button
             variant="ghost"
-            aria-label="Copy to clipboard"
-            title="Copy to clipboard"
+            aria-label={tr("history.row.copy")}
+            title={tr("history.row.copy")}
             tabIndex={tab}
             className={ACTION}
             onClick={() => onCopy(item)}
@@ -255,8 +253,8 @@ function HistoryRowImpl({
           </Button>
           <Button
             variant="ghost"
-            aria-label={item.pinned ? "Unpin item" : "Pin item"}
-            title={item.pinned ? "Unpin item" : "Pin item"}
+            aria-label={tr(item.pinned ? "history.row.unpin" : "history.row.pin")}
+            title={tr(item.pinned ? "history.row.unpin" : "history.row.pin")}
             tabIndex={tab}
             className={ACTION}
             onClick={() => onTogglePin(item)}
@@ -269,8 +267,8 @@ function HistoryRowImpl({
           </Button>
           <Button
             variant="ghost"
-            aria-label="Delete item"
-            title="Delete item"
+            aria-label={tr("history.row.delete")}
+            title={tr("history.row.delete")}
             tabIndex={tab}
             className={cn(ACTION, "hover:text-err-strong")}
             onClick={() => onDelete(item)}

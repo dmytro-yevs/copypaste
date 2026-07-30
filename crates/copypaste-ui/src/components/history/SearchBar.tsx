@@ -6,27 +6,25 @@
  * The shortcut hint lives in `title`: a permanently visible one crowded the
  * header and read as disabled text (CopyPaste-7w060.6).
  *
- * # Why the filter and sort controls are native `<select>`s
- *
- * They are the one control the platform already renders as a picker on a phone
- * and as a menu on a desktop, with keyboard behaviour, type-ahead and screen
- * reader support that no popup we assemble would match. A Radix dropdown would
- * be a bigger dependency and a worse Android experience. The class list only
- * restyles the closed state — the open list stays native on purpose.
+ * The filter and sort controls are native `<select>`s because the platform
+ * already renders one as a picker on a phone and a menu on a desktop, with
+ * keyboard behaviour, type-ahead and screen reader support a popup we assembled
+ * would not match. The class list restyles only the closed state.
  */
 import type { RefObject } from "react";
 import { ListChecks, Search, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { t as translate, useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import {
   FILTERABLE_KINDS,
-  KIND_LABEL,
-  SORT_LABEL,
   type KindFilter,
   type SortOrder,
   type ViewOptions,
+  kindLabel,
+  sortLabel,
 } from "@/lib/view";
 
 /** The filtered count whenever a filter is active, the service's total
@@ -37,7 +35,7 @@ export function historyCount(
   total: number | undefined,
 ): string {
   const n = filtered || total === undefined ? visible : total;
-  return `${n} item${n === 1 ? "" : "s"}`;
+  return translate("history.search.count", { count: n });
 }
 
 const SELECT_CLASS =
@@ -72,6 +70,8 @@ export function SearchBar({
   onToggleSelecting,
   onClearAll,
 }: SearchBarProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-panel px-s-3 py-s-2">
       <div className="relative flex min-w-[180px] flex-1 items-center">
@@ -86,9 +86,9 @@ export function SearchBar({
           value={value}
           spellCheck={false}
           autoComplete="off"
-          placeholder="Search clipboard history"
-          aria-label="Search clipboard history"
-          title="Search (⌘F) · ↓ to move into the list · ⌘A select all"
+          placeholder={t("history.search.placeholder")}
+          aria-label={t("history.search.label")}
+          title={t("history.search.hint")}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "ArrowDown") {
@@ -105,8 +105,8 @@ export function SearchBar({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Clear search"
-            title="Clear search"
+            aria-label={t("history.search.clear")}
+            title={t("history.search.clear")}
             className="absolute right-0.5"
             onClick={() => onChange("")}
           >
@@ -116,31 +116,31 @@ export function SearchBar({
       </div>
 
       <select
-        aria-label="Filter by kind"
+        aria-label={t("history.search.filterKind")}
         className={SELECT_CLASS}
         value={view.kind}
         onChange={(event) =>
           onViewChange({ ...view, kind: event.target.value as KindFilter })
         }
       >
-        <option value="all">{KIND_LABEL.all}</option>
+        <option value="all">{kindLabel("all")}</option>
         {FILTERABLE_KINDS.map((kind) => (
           <option key={kind} value={kind}>
-            {KIND_LABEL[kind]}
+            {kindLabel(kind)}
           </option>
         ))}
       </select>
 
       <select
-        aria-label="Sort order"
+        aria-label={t("history.search.sortOrder")}
         className={SELECT_CLASS}
         value={view.sort}
         onChange={(event) =>
           onViewChange({ ...view, sort: event.target.value as SortOrder })
         }
       >
-        <option value="newest">{SORT_LABEL.newest}</option>
-        <option value="oldest">{SORT_LABEL.oldest}</option>
+        <option value="newest">{sortLabel("newest")}</option>
+        <option value="oldest">{sortLabel("oldest")}</option>
       </select>
 
       <span
@@ -153,9 +153,17 @@ export function SearchBar({
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label={selecting ? "Leave selection mode" : "Select multiple items"}
+        aria-label={t(
+          selecting
+            ? "history.search.leaveSelection"
+            : "history.search.selectMultiple",
+        )}
         aria-pressed={selecting}
-        title={selecting ? "Leave selection mode" : "Select multiple items"}
+        title={t(
+          selecting
+            ? "history.search.leaveSelection"
+            : "history.search.selectMultiple",
+        )}
         className={cn(selecting && "bg-selected text-foreground")}
         onClick={onToggleSelecting}
       >
@@ -166,8 +174,8 @@ export function SearchBar({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label="Clear clipboard history"
-          title="Clear clipboard history"
+          aria-label={t("history.search.clearAll")}
+          title={t("history.search.clearAll")}
           onClick={onClearAll}
         >
           <Trash2 aria-hidden="true" />
