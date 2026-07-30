@@ -10,7 +10,10 @@ to an empty history on 2026-07-29; v0.4.1 remains intact at
 `archive/v0.4.1-pre-rewrite` (2,153 commits). v2 reads nothing that version
 wrote and uses a distinct database filename, `copypaste-v2.db`, so an old file
 is never opened — [CLAUDE.md](CLAUDE.md) rule 3 has the reasoning and the one
-obligation it creates.
+obligation it creates. **That obligation is not yet discharged:** the code that
+identifies a v0.4 history exists and nothing on the startup path asks it, so an
+upgrading user still sees an empty history and no explanation
+([`docs/backlog.md`](docs/backlog.md) B-4).
 
 The rewrite exists because v0.4.1 had grown to ~150k lines of Rust with six
 retry implementations, three rate limiters and three models of one wire
@@ -28,39 +31,44 @@ and reviewed, and never observed doing its job on a platform we ship to.
 |---|---|
 | Crypto | XChaCha20-Poly1305 + HKDF-SHA256, item id bound as AAD, fail-closed, zeroized |
 | Storage | One SQLCipher schema, r2d2 pool, FTS5 search, tombstones, pins, cap eviction |
-| Secret detection | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence bands; a flagged item never reaches the index and never leaves the device |
+| Secret detection | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence bands; a flagged item never reaches the index and never leaves the device. A purge pass at daemon start re-decides the index question for rows captured before a rule existed |
 | Capture | Clipboard behind a trait, so `changeCount` detection, burst handling, self-write suppression and the `org.nspasteboard.*` opt-outs are all tested against the fake source on any host |
 | IPC | `0600` Unix socket, newline-JSON, `LinesCodec` framing; `copypaste-ipc` is the only model of the contract, shared by daemon, CLI and the Tauri bridge |
-| CLI | `list search add copy delete clear pin unpin status pair peers unpair sync cloud discover export import backup restore config watch`, `--json` for scripting |
+| CLI | `crates/copypaste-cli/src/cli.rs` is the verb list — `copypaste --help` prints it. `--json` on any of them, for scripting |
 | Peer sync | Noise `NNpsk0` over TCP, pairing codes, LWW merge, delete-wins |
-| Cloud sync | Supabase auth, PostgREST, Realtime, rows sealed client-side under an Argon2id key; wired to the daemon and the CLI — but see below |
-| App | History, search, devices/pairing, settings; menu-bar item, popover, global hotkey and launch-at-login via Tauri plugins |
+| Cloud sync | Supabase auth, PostgREST, Realtime; rows sealed client-side under an Argon2id key and signed under a second key from the same passphrase, so the ordering metadata the backend pages on cannot be forged. Wired to the daemon and the CLI — but see below |
+| App | History, search, devices/pairing, settings, the Android capture ladder; menu-bar item, popover, global hotkey and launch-at-login via Tauri plugins. Every user-facing string is in one catalogue (`crates/copypaste-ui/src/i18n/`) |
 | Design tokens | One DTCG source compiled by Style Dictionary; shadcn/ui on Tailwind v4, zinc base in OKLCH, with contrast measured and gated (`design/README.md`) |
 
 ### Unverified
 
 | Thing | What is and is not established |
 |---|---|
-| macOS `NSPasteboard` capture, macOS Keychain device-secret store | CI's `macos-check` job compiles and lints them on `macos-14` with `--all-features`, and runs the portable half of the suite there. Nothing drives a real pasteboard or a real keychain entry. On Linux the daemon falls back to a `0600` file store — a development posture, not a shipping one. |
+| macOS `NSPasteboard` capture, macOS Keychain device-secret store | CI's `macos-check` job compiles and lints them on `macos-14` and runs the portable half of the suite there. Nothing drives a real pasteboard or a real keychain entry. On Linux the daemon falls back to a `0600` file store — a development posture, not a shipping one. |
+| Android — the capture ladder, the Keystore device-secret store, the app itself | Never compiled. There is no NDK on any host here and `dl.google.com` is unreachable, so `cargo check --target aarch64-linux-android` stops at SQLCipher. Every claim about what Android permits is read out of AOSP source; [`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md) lists what a first device run would falsify, in the order to expect it. |
 | Cloud sync against Supabase | `scripts/demo-cloud.sh` drives two daemons through sign-in, convergence and sensitive-item refusal against a **local stub** (`scripts/cloud-stub.py`). Nothing has ever spoken to a real project, and no deployment has had `supabase/`'s schema and RLS policies applied. |
-| The app as a rendered view | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. The suite is in flight, and WebKitGTK is neither WKWebView nor Android's WebView, so a green run is evidence about Linux only. |
+| The app as a rendered view | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. WebKitGTK is neither WKWebView nor Android's WebView, so a green run is evidence about Linux only. |
 | Packaging and release | `.github/workflows/release.yml`, `scripts/release/`, `Casks/` and `packaging/` are written from documentation and v1's scripts. No step of it — `codesign`, `hdiutil`, the Tauri macOS bundler — has run on a Mac. |
 | mDNS discovery | This container has no multicast. Discovery is a convenience; an explicit `--addr` always works and is what the demo and the tests use. |
 
-### Missing
+### Outstanding
 
-[`docs/backlog.md`](docs/backlog.md) is the live list. The [parity
-audit](docs/rewrite/parity-audit.md) and the [security
-review](docs/rewrite/security-review.md) are dated, and about half of what they
-record has since closed. Outstanding, in rough order of what a user loses: no
-sensitive-item auto-wipe, no device revocation or key rotation reachable from a
-client, no notifications, and keyset pagination that exists in `copypaste-core`
-with no caller (`page::list_from` — the wire and the app still page by offset).
+**[`docs/backlog.md`](docs/backlog.md) is the list.** Ranked by what a user
+loses, re-checked against the tree. A second inventory of absence here would
+disagree with it within a day; four rewrites of this section were spent
+learning that.
 
-Also absent: image, file and rich-text capture (text only), frontmost-app
-attribution — which manifest 07 makes an independent *sensitivity* signal, not
-just metadata — private mode, the app-exclusion list, rate limiting, and
-telemetry.
+One limit is not on it, because it is the shape of the product rather than work
+not yet done: **text only** — no image, file or rich-text capture, and so no
+frontmost-app attribution, which manifest 07 makes an independent *sensitivity*
+signal rather than metadata.
+
+The [parity audit](docs/rewrite/parity-audit.md), the [UI parity
+audit](docs/rewrite/ui-parity-audit.md), the [security
+review](docs/rewrite/security-review.md) and the [claims
+audit](docs/rewrite/claims-audit.md) are dated documents: each marks its
+findings closed in place and none is rewritten. Read them for the reasoning and
+the backlog for the state.
 
 ## Build and run
 
@@ -100,9 +108,9 @@ names the live backend, so a demo cannot be mistaken for the real thing.
 
 ## The specification
 
-`docs/rewrite/port-manifest/` is ~9,000 lines harvested from v0.4.1 and its
-tests: ~500 acceptance tests and 200+ recovered bug ids. A subsystem is not done
-until its manifest's tests pass.
+`docs/rewrite/port-manifest/` is harvested from v0.4.1 and its tests: ~500
+acceptance tests and 200+ recovered bug ids. A subsystem is not done until its
+manifest's tests pass.
 
 Read [`port-manifest/README.md`](docs/rewrite/port-manifest/README.md) first. It
 records, per manifest, which sections still bind and which became reference

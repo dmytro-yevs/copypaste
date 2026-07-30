@@ -94,11 +94,14 @@ Three things must be handled deliberately rather than omitted:
    the sync key; Supabase proves possession of the account password. An attacker
    holding the account but not the passphrase can read metadata and *write* rows
    — forging a far-future ordering key to outrank and effectively censor a
-   legitimate item. End-to-end confidentiality holds; metadata integrity does
-   not. The fix is to sign the LWW metadata under the sync key, and it is **not
-   built**. What exists is a bound: versions stamped implausibly far ahead are
-   refused (`MAX_FUTURE_SKEW_MS`), so a hostile clock can win ties it should
-   have lost but cannot win forever.
+   legitimate item. End-to-end confidentiality would hold; metadata integrity
+   would not. So the LWW metadata is signed under a key derived from the sync
+   passphrase (`cloud/src/crypto/sign.rs`), verified before a row reaches the
+   merge, and a row that does not verify is refused rather than ranked. Two
+   bounds sit under it: versions stamped implausibly far ahead are refused
+   (`MAX_FUTURE_SKEW_MS`), and the ciphertext is inside the signature, so real
+   content cannot be spliced onto another version's stamp.
+   [`../cloud-privacy.md`](../cloud-privacy.md) is the disclosure page.
 
 The ordering key is `created_at`, not manifest 05's `lamport_ts`: **v2 has no
 Lamport clock**, deliberately, and both transports share one comparator so there
@@ -189,8 +192,10 @@ the better outcome.
 
 - **v2 must never open, modify, or misreport a v1 file.** The database is
   `copypaste-v2.db`, a distinct filename, so an old file survives a downgrade
-  intact. A build that stumbles onto v1 data must say so plainly rather than
-  failing with a decryption error that reads like corruption.
+  intact. The *saying so* half is written and unreached: `storage/legacy.rs`
+  identifies a v0.4 schema and `StoreError::LegacyDatabase` carries the
+  sentence, but nothing on the startup path asks the question against a v0.4
+  filename. `docs/backlog.md` B-4.
 - **No migration path may be retrofitted casually.** Adding one is a feature to
   decide, and it is materially harder now the v1 formats have left the tree.
 - **Keychain service and account names are fixed strings.** Not for

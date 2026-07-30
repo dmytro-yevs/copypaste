@@ -1,93 +1,99 @@
 # Backlog — everything outstanding, in one place
 
-**Built:** 2026-07-30, by sweeping `parity-audit.md` (19), `ui-parity-audit.md`
-(12), `security-review.md` (14), `android-clipboard-access.md`, all four ADRs,
-the manifest amendments, and the tree itself. **Every item was re-checked
-against the working tree**, not copied from its source document — the audits
-anchor at older commits and roughly half of what they list has since closed.
+**Last swept against the tree:** 2026-07-30, over `parity-audit.md` (19),
+`ui-parity-audit.md` (12), `security-review.md` (14), `claims-audit.md` (24),
+`android-clipboard-access.md`, all six ADRs, the manifest amendments, and the
+tree itself. **Every item is re-checked against the working tree**, never copied
+from its source document — the audits anchor at older commits and roughly half
+of what they list has since closed.
+
+**This is the only list of outstanding work that is maintained.** `README.md`
+and `SECURITY.md` point here rather than keeping their own, because a prose
+inventory of absence is falsified by every commit that lands a feature and
+nothing fails when it is.
 
 CLAUDE.md rule 9 requires unfinished work to live in an issue rather than a
 commit message, and there is no issue tracker. This file is that register.
 
 **How to read it.** §1 is what already closed — read it before starting
 anything, because the largest single cost here has been items being closed
-twice. §2 is being written *right now* by other agents; do not start these.
-§3 is the backlog, ranked by what a user loses: data loss, then security, then
-a capability nobody can reach, then polish. Cost is a tiebreak, never the sort
-key. §4 groups by what unblocks what — the ordering in §3 falls out of it.
+twice. §3 is the backlog, ranked by what a user loses: data loss, then security,
+then a capability nobody can reach, then polish. Cost is a tiebreak, never the
+sort key. §4 groups by what unblocks what — the ordering in §3 falls out of it.
 §5 is decisions that look like debts; changing one is a reversal, not a fix.
 §6 is work waiting on hardware or an account, which is not debt.
+
+**Numbers are never reused.** A closed item's `B-n` moves to §1 and the gap
+stays, so a reference from a commit, an audit or a source comment cannot come to
+mean something else.
 
 ---
 
 ## 1. Closed — do not re-open
 
-Verified in the tree today. The source document still lists each as missing.
+Verified in the tree. Each source document now marks its own row closed in
+place; this table is where to look first, because it is one list rather than
+four.
 
 | Source | Item | Closed by |
 |---|---|---|
 | parity 1 | Pairing / peers / sync UI | `crates/copypaste-ui/src/components/devices/` (5 files, incl. `QrCode.tsx`, `QrScanner.tsx`) |
 | parity 2 | Daemon lifecycle ownership | ADR-0004; `src-tauri/src/service/`; `components/shell/ServiceOffline.tsx` |
-| parity 3 | Sensitive-item auto-wipe (TTL) | `copypaste-core/src/sensitive/wipe.rs`; swept from the poll loop, `daemon/src/capture.rs:106` |
-| parity 4 | Re-copy bumps to the top | `Store::insert_or_bump`, `core/src/storage/items.rs:122`; dedup is unbounded again (`retention.rs:16`) |
+| parity 3 | Sensitive-item auto-wipe (TTL) | `core/src/sensitive/wipe.rs`, swept from the poll loop in `daemon/src/capture.rs`. Default `0` — off until a user asks, and `ServiceTab.tsx` is where they ask |
+| parity 4 | Re-copy bumps to the top | `Store::insert_or_bump`, `core/src/storage/items.rs`; dedup is unbounded again (`retention.rs`) |
 | parity 5 | Export / import | `Method::Export` / `Import`; `ipc/src/payload.rs` `ExportData` / `ExportItem` |
 | parity 6 | Database backup / restore | `Method::Backup` / `Restore`; `daemon/src/server/dbadmin.rs`. **Partial** — `reset_database` and `vacuum` are still absent (B-11) |
-| parity 9 | Daemon config | `ipc/src/config.rs`, `daemon/src/settings.rs`, `Method::GetConfig` / `SetConfig`. **Wire only** — no UI reads it (B-14) |
+| parity 9 | Daemon config, wire and CLI | `ipc/src/config.rs`, `daemon/src/settings.rs`, `Method::GetConfig` / `SetConfig`, CLI `config show` / `config set`. Its UI half is two rows below |
 | parity 11 | Quick-Paste popup, global hotkey | `src-tauri/src/shell/{hotkey,window}.rs` |
-| parity 12 · D1 | Stale-socket bind TOCTOU | `BindLock`, an exclusive `flock(2)` over probe→remove→bind, `daemon/src/server/listener.rs:98-122` |
-| parity 13 · S8 | IPC connection cap, read/write timeouts | `listener.rs:62-68` (`READ_TIMEOUT` 30 s, `WRITE_TIMEOUT` 10 s) + `Semaphore` |
+| parity 12 · D1 | Stale-socket bind TOCTOU | `BindLock`, an exclusive `flock(2)` over probe→remove→bind, `daemon/src/server/listener.rs`. Distinct from F-9 (bind→chmod), which is still open as B-10 |
+| parity 13 · S8 | IPC connection cap, read/write timeouts | `listener.rs` — `READ_TIMEOUT` 30 s, `WRITE_TIMEOUT` 10 s, `MAX_CONCURRENT_CONNECTIONS` 64, `MAX_WATCHERS` 8 |
 | parity 14 · F-6 · S7 | Pairing codes never expire | `PAIRING_CODE_TTL` = 300 s, `p2p/src/peers/mod.rs`; refused on every read path, not one gate |
 | parity 15 | Push / streaming updates | `Method::Watch`; `ui/src/hooks/usePush.ts` |
 | parity 16 | Discovery not reachable | `Method::Discovered` / `Rescan` |
 | parity 17 · F-10 | Undecryptable rows not counted | `ItemPage::skipped_undecryptable`; `components/history/SkippedNotice.tsx` |
-| parity 19 | Bulk actions, filter, sort | `components/history/BulkBar.tsx`, `lib/view.ts`. Drag-to-reorder is in flight (§2) |
-| ADR-0003 | `reveal_item` unsupported on desktop | `Method::Get { id }` exists; only `reorder_pinned` still refuses in `backend/daemon.rs:242` |
-| ui-parity 4 (half) | No per-peer sync health on the wire | `PeerInfo::last_sync_ms`, `ipc/src/payload.rs:110`. UI half still open (B-16) |
+| parity 19 | Bulk actions, filter, sort | `components/history/BulkBar.tsx`, `lib/view.ts`. Drag-to-reorder is B-23 |
+| ADR-0003 | `reveal_item` unsupported on desktop | `Method::Get { id }`. `reorder_pinned` is the last thing `backend/daemon.rs` refuses, and its reason is stale — B-23 |
+| ui-parity 4 (half) | No per-peer sync health on the wire | `PeerInfo::last_sync_ms`. UI half still open (B-16) |
 | sec F-1 | Quoted credential values invisible to the detector | `sensitive/validators.rs` — `unquote()` strips one balanced pair before the code-shape gate |
-| sec F-2 | `aws_secret_access_key = …` matched no rule | `sensitive/rules.rs:355`, its own rule at 0.99 |
+| sec F-2 | `aws_secret_access_key = …` matched no rule | `sensitive/rules.rs`, its own rule at 0.99 |
 | sec F-4 | Remote tombstone cleared `pinned` | **Decided, not fixed** — see §5 |
-| sec F-7 | `SECURITY.md`'s mDNS claim was false | `SECURITY.md:105` now says "a domain-separated BLAKE2s of the token" |
+| sec F-7 | The mDNS claim was false on both sides | `SECURITY.md` and `p2p/src/discovery/record.rs`'s module doc both now say the id is a one-way domain-separated digest; `advertisement_carries_the_pairing_id_and_nothing_else_of_the_token` builds its record from a real `PairingToken` |
+| sec F-8 · B-10(b) | PSKs copied unzeroized on every unauthenticated connection | `PeerStore::psks` returns `Zeroizing<Vec<PskCandidate>>`, so the next caller cannot re-create the hazard |
+| sec F-11 · B-10(e) | `--data-dir` did not relocate the device secret | `Keyring::load_or_create(&data_dir)`; and a directory holding a database but no secret is now **refused** rather than minted into (`a_database_without_its_secret_is_refused_rather_than_re_keyed`) |
+| sec F-12 · B-3 | No purge pass; `is_sensitive` never revisited | `core/src/sensitive/purge.rs`, run from `daemon/src/main.rs` before the socket binds. Index only — it never deletes a row and never rewrites the flag, deliberately; see §5 |
+| sec F-13 · B-10(c) | Pairings uncapped, so `accept_any` scaled with the list | `MAX_PAIRINGS`, enforced by refusing a *new* pairing rather than evicting an old one |
+| sec F-14 · B-10(d) | Reassembly `Vec` left peer plaintext in freed heap | `Reassembly` moves into a fresh `Zeroizing<Vec>` and drops the old one; the ceiling is checked before anything is reserved, so the size is ours and not the peer's |
+| parity §2.2 | macOS Keychain reachable only behind a cargo feature no build passed | The feature is deleted. `security-framework` is target-gated and the backend is chosen by `target_os` alone (`core/src/crypto/keystore/`) |
+| ADR-0003 §"Also outstanding" | No Android Keystore backend | `core/src/crypto/keystore/android.rs` — an AES-GCM key that never leaves the Keystore wraps the secret; the blob sits in app-private storage. Never compiled (§6) |
+| parity §2.6 · B-7 | Forged cloud metadata could outrank a real item | `cloud/src/crypto/sign.rs`. Every row carries an HMAC over the ordering fields plus ciphertext and nonce; `pull` verifies before the merge and refuses what does not |
+| parity §2.6 (§5.4 obligation 3) | The cloud threat-model change was unrecorded | `docs/cloud-privacy.md` |
+| parity §2.9 · ui-parity §2.6 | Localisation | `ui/src/i18n/`, one catalogue behind i18next with `catalogue.test.ts` over it |
+| parity 18 (half) | No sound on copy | `daemon/src/notify.rs`, called from the capture tick; macOS only, gated on `sound_on_copy`, suppressed on any fake clipboard backend. The notification half is B-18 |
+| ui-parity 3 (half) · B-15 | Origin device nowhere on the wire | `Item::{origin_device_id, origin_device_name}` and `UiItem`'s pair. The frontend has not consumed them — B-15 |
+| ui-parity 9 (half) · B-26 | No "too large to sync" signal | `Item::too_large_to_sync` and `UiItem`'s copy, plus `CloudSyncData::skipped_too_large`. Not consumed by any component — B-26 |
+| ADR-0004 §"still missing" | No `Method::Shutdown` | `ipc/src/lib.rs`, `daemon/src/server/dispatch.rs`, CLI `shutdown` |
+| parity 19 (below the UI) · B-23 | No `reorder_pinned` anywhere | `Store::reorder_pinned`, `Method::ReorderPinned`, CLI `reorder`, `useReorderPinned`. The drag affordance and the two Tauri backends are B-23 |
+| parity 9 (UI half) · ui-parity §2.4 · B-14 | Daemon settings had no UI | `components/settings/ServiceTab.tsx` over `hooks/useServiceConfig.ts`: poll interval, history limit, retention days, max item bytes, sensitive TTL, notify, sound, sync, LAN visibility. `e2e/tests/daemon-config.e2e.test.ts` drives it |
+| B-22 | `README.md` **Missing**, `SECURITY.md` **Not implemented**, both stale | Both prose inventories are deleted rather than corrected; each now names this file. `claims-audit.md`, `security-review.md`, `parity-audit.md` and `ui-parity-audit.md` mark their stale rows closed in place |
 
-Two documents are now stale enough to mislead: `parity-audit.md` §2.7 (UI) and
-`README.md`'s **Missing** section, which still lists export/import,
-backup/restore, config, streaming, discovery and bulk actions as absent. B-22.
+## 2. In flight
 
-## 2. In flight — uncommitted in the working tree right now
-
-Nine agents hold the tree. Do not start any of these; re-check `git status`
-before starting anything that touches the same files.
-
-| Work | Evidence | Unblocks |
-|---|---|---|
-| `capture::ingest` lifted into `copypaste-core` | `core/src/ingest.rs` (untracked), `core/src/lib.rs` gains `pub mod ingest` | B-13a |
-| The p2p **node** lifted into `copypaste-p2p` | `p2p/src/node/{mod,dial,listen,error,channel}.rs` (untracked); `daemon/src/p2p/channel.rs` moved | B-13b |
-| Origin device on the wire | `ipc/src/payload.rs:202-226` (`origin_device_id`, `origin_device_name`), `daemon/src/meta/devices.rs` | B-15, B-16 |
-| Signed LWW cloud metadata | `cloud/src/crypto/sign.rs` (untracked) | B-7 |
-| Drag-to-reorder pins | `core/src/storage/pinning.rs`, `Method::ReorderPinned` | B-23 |
-| `Method::Shutdown` (ADR-0004's request) | `ipc/src/lib.rs:252`, `daemon/src/server/dispatch.rs:238` | ADR-0004 §"still missing" |
-| Localisation | `ui/src/i18n/` (untracked, 8 files) | parity §2.9 |
-| Android capture ladder, rungs 0 and 2 | `src-tauri/src/capture/{mod,model,intake,desktop}.rs` (untracked) | §6 |
-| One content-type vocabulary | `ipc/src/content_type.rs` (untracked) | — |
-| Keyed-connection consolidation, own-address enumeration | `core/src/storage/dbfile.rs`, `p2p/src/netif.rs` | — |
-| `BulkBar.tsx`, `QuickHint.tsx`, `SearchBar.tsx` edits | modified | B-24, B-27 |
-
-`src-tauri/src/capture/mod.rs` cites `ADR-0005` and
-`docs/rewrite/android-spike.md`; neither file exists yet. Expect them from the
-same agent.
+Everything the 2026-07-30 build of this section listed has landed and moved to
+§1. Check `git status` before starting anything — this section is only ever true
+for the minutes after it is written, which is why it holds no work of its own.
 
 ## 3. The backlog, ranked by user consequence
 
-Status: **open** · **open (in flight nearby)** — an adjacent file is being
-edited, re-check first.
+Everything below is open. Line numbers rot faster than paths — where one
+disagrees with the tree, trust the identifier.
 
 ### Tier 1 — data loss
 
 | # | Item | What the user loses | Evidence | Depends on |
 |---|---|---|---|---|
 | **B-1** | **Keyset pagination is in `copypaste-core` and on no wire.** `Method::List` is still `{ limit, offset }`. | Page 2 repeats or skips rows whenever a row lands above the window — `CopyPaste-8ebg.57`, parity D6. **This became live today**: it was masked while the app fetched one page, and load-more has since shipped. | `Store::list_from` at `core/src/storage/page.rs:83`, callers: tests only. `Store::list` at `core/src/storage/items.rs:134-144` (`LIMIT ?1 OFFSET ?2`). `ipc/src/lib.rs:61-64`. Manifest 03 §3.12 + Q11 (which specifies the test). | Nothing. Core half is done and tested. |
-| **B-2** | **Peer-supplied `content_hash` is stored and ordered on, unverified.** | A paired-but-hostile or simply buggy peer picks a hash colliding with a local row, `idx_items_dedup` refuses the insert, and a chosen item silently never lands. It also controls merge key 2, and the receiver re-advertises the forged hash onward. | `daemon/src/merge.rs:132-138` — `Some(hash) => hash` passes through; the `None` arm (cloud) recomputes. Security review F-3. | Nothing. Fix is in the `!deleted` arm of `apply_remote_version`. |
-| **B-3** | **`is_sensitive` is decided once, at capture, and never revisited; the "purge pass" three texts promise does not exist.** | F-1 and F-2 were fixed *today*. Every item captured before that fix stays unflagged: its plaintext stays in `clipboard_fts` — the one table not under the item AEAD — and keeps syncing. There is no mechanism to correct it. | `ipc/src/payload.rs:199` and `daemon/src/server/items.rs:349` both promise a purge pass; `grep` finds no rescan, reindex or purge anywhere. CLAUDE.md rule 4 makes the same claim. Security review F-12. | Nothing. Either build the rescan or delete the sentence from all three places and record the limitation. |
-| **B-4** | **Nothing detects a v1 database, and no screen could say so.** | CLAUDE.md rule 3's *one* obligation is half-met: `copypaste-v2.db` means a v1 file is never touched (tested), but "a v2 build that stumbles onto it must say so plainly rather than failing with a decryption error that reads like corruption" has no code and nowhere to appear. Today the user gets `Failed to load history` and a **Try again** button that retries forever against a condition retrying cannot fix. | `ipc/src/lib.rs:408`; `components/history/HistoryView.tsx` state chain; no `degraded` / `reset_database` anywhere. ui-parity 2; manifest 06 §3.1.11 (binding, with exact copy). | B-11 (`reset_database` on the wire) for the escape hatch; the *detection and the sentence* need neither. |
+| **B-2** | **Peer-supplied `content_hash` is stored and ordered on, unverified.** | A paired-but-hostile or simply buggy peer picks a hash colliding with a local row, `idx_items_dedup` refuses the insert, and a chosen item silently never lands. It also controls merge key 2, and the receiver re-advertises the forged hash onward. | `core/src/sync/merge.rs:136` — `Some(hash) => hash` still passes through; the `None` arm (cloud) recomputes. The merge moved out of `daemon/src/merge.rs` into `copypaste-core` and the gap moved with it. Security review F-3. | Nothing. Fix is in the `!deleted` arm of `apply_remote_version`. |
+| **B-4** | **The v0.4 detector is written and never asked.** | `core/src/storage/legacy.rs` identifies a v0.4 schema correctly and `StoreError::LegacyDatabase` carries the sentence — and **the check cannot fire in a shipping build.** `is_v1_database` is reached only from `Store::open` and `open_validated`; `Store::open` is handed `copypaste-v2.db` and nothing else, `open_validated` has no non-test caller, and `v1_database_in(dir)` — the function shaped for the real question, "is an old history sitting beside the new one?" — has zero callers anywhere. So the daemon cannot *produce* the error, and a screen wired to it would be a state nothing can enter. On upgrade the user gets a fresh empty history and silence. CLAUDE.md rule 3's one obligation is not discharged. | `core/src/storage/legacy.rs`, `storage/store.rs:43`, `storage/dbfile.rs:35`; `daemon/src/main.rs` (`db_path` is always `copypaste-v2.db`). `post-merge-review.md` §2 reaches this by call-site audit; ui-parity 2; manifest 06 §3.1.11 (binding, with exact copy). | Nothing. A `v1_database_in(&data_dir)` probe at startup, *then* the wire code and the screen. Doing the surface half alone closes nothing. |
 | **B-5** | **Mutations made during a backend outage rely on the next full push round.** | A pin or delete made while Supabase is unreachable is not queued; nothing replays it. LWW bounds the blast radius, so this is not a guaranteed loss — but v1's `CopyPaste-1t38` test has no analogue. | No outbound queue in `cloud/src/sync/` or `daemon/src/cloud/`. Parity D8, AT-33. | Nothing. |
 
 ### Tier 2 — security
@@ -95,10 +101,9 @@ edited, re-check first.
 | # | Item | What the user loses | Evidence | Depends on |
 |---|---|---|---|---|
 | **B-6** | **Screen-capture protection is off (INV-35).** | Any screen recorder, and any app with screen-recording permission, captures the history window — including revealed secrets. The manifest says on by default. | `src-tauri/tauri.conf.json` → `app.windows[0]` has no `contentProtected`; no `set_content_protected` call in `src-tauri/src/`. Parity S11, ui-parity §2.4. | Nothing. One config key plus the macOS call. |
-| **B-7** | **Forged cloud metadata can outrank and censor a real item.** | Someone with the account password but not the sync passphrase cannot read anything, but can stamp a competing version of a known `item_id` that wins the merge on every device. | Manifest 05 §5.3; parity S12; `SECURITY.md` does not record it. **In flight** — `cloud/src/crypto/sign.rs`. | §2. Also owes the threat-model paragraph (manifest 05 §5.4 obligation 3). |
-| **B-8** | **Device revocation is built and unreachable.** | `PeerStore::revoke` / `revoke_all` / `revoked` exist, are tested, and enforce on every read path — and there is no IPC verb, no CLI verb and no UI. `unpair` is local-only, so a lost or stolen device keeps syncing. Sync-key rotation does not exist at all. | `p2p/src/peers/store.rs:227,260,289`; `Method` has `Unpair` and nothing else. Parity 7; ui-parity §2.3. CLAUDE.md rule 6's exact shape. | Nothing for revoke (store half done). Rotation is a separate, larger piece. |
-| **B-9** | **The clock-skew ceiling is enforced per transport, not at the shared merge.** | Both transports do check, so this is a latent hole rather than a live one: `apply_remote_version` now has two callers and guards neither. The next caller inherits nothing. Separately, a peer stamping `now + 24 h − ε` wins every comparison for a day — the accepted trade in R-CLK-2, which `SECURITY.md` overstates. | `p2p/src/sync/plan.rs:17` and `cloud/src/sync/pull.rs:56` both hold `MAX_FUTURE_SKEW_MS`; `daemon/src/merge.rs` holds none. Security review F-5(b). | Nothing. Move the ceiling to where the paths converge; keep the two early-outs. |
-| **B-10** | **Five bounded hazards in the transport and the socket.** | Each is small on its own; grouped because they are one afternoon. **(a)** TOCTOU between `bind()` and `chmod 0600` — under `umask 002` the socket is 0775 for the window, and the parent-dir `0700` is warn-only (F-9). **(b)** PSKs copied unzeroized into freed heap on every *unauthenticated* inbound connection (F-8). **(c)** No cap on stored pairings, so `accept_any` does one X25519 per pairing per anonymous connect (F-13). **(d)** Reassembly `Vec` grows inside `Zeroizing`, leaving peer plaintext in freed heap (F-14). **(e)** `--data-dir` does not relocate the device secret, so a "fully isolated" demo daemon reads and creates the real user's key (F-11). | (a) `daemon/src/server/listener.rs:89-92`. (b) `daemon/src/p2p/mod.rs:247` — and the in-flight lift carries it forward at `p2p/src/node/listen.rs:88`, so fix `psks()` itself. (c) no `max_pairings` in `peers/store.rs`. (d) `p2p/src/transport/session.rs:150,196`. (e) `core/src/crypto/keystore.rs:103-107`, and its `ProjectDirs` qualifier differs in case from `ipc::data_dir`. | (b) is cheaper *after* §2's node lift lands. |
+| **B-8** | **Device revocation is built and unreachable.** | `PeerStore::revoke` / `revoke_all` / `revoked` exist, are tested, and enforce on every read path — and there is no IPC verb, no CLI verb and no UI. `unpair` routes to `PeerStore::remove` and is local-only, so a lost or stolen device keeps syncing. Sync-key rotation does not exist at all. | `p2p/src/peers/store.rs:236,269,298`; `Method` has `Unpair` and nothing else. Parity 7; ui-parity §2.3. CLAUDE.md rule 6's exact shape. | Nothing for revoke (store half done). Rotation is a separate, larger piece. |
+| **B-9** | **The clock-skew ceiling is enforced per transport, not at the shared merge.** | Both transports do check, so this is a latent hole rather than a live one: `apply_remote_version` has two callers and guards neither. The next caller inherits nothing. Separately, a peer stamping `now + 24 h − ε` wins every comparison for a day — the accepted trade in R-CLK-2, which `SECURITY.md` overstates. | `p2p/src/sync/plan.rs:17` and `cloud/src/sync/pull.rs:56` both hold `MAX_FUTURE_SKEW_MS`; `core/src/sync/merge.rs` holds none. Security review F-5(b). | Nothing. Move the ceiling to where the paths converge; keep the two early-outs. |
+| **B-10** | **One bounded hazard left of the five.** | **(a)** TOCTOU between `bind()` and `chmod 0600` — under `umask 002` the socket is 0775 for the window, and the parent-dir `0700` is applied warn-only (F-9). (b) through (e) closed; see §1. | `daemon/src/server/listener.rs:90-91`. | Nothing. `umask(0o177)` around the bind, or bind to a temporary name inside the already-`0700` directory and rename it into place. |
 
 ### Tier 3 — a capability nobody can reach
 
@@ -108,12 +113,12 @@ CLAUDE.md rule 6: shipped code with no interface is not a shipped feature.
 |---|---|---|---|---|
 | **B-11** | **`reset_database` and `vacuum` have no verb.** | The escape hatch B-4 needs, and the only way to recover from an unopenable store without deleting a file by hand — which no error may name (rule 4). | `Method` has `Backup` / `Restore`, not these. `daemon/src/server/dbadmin.rs`. Parity 6 (residue). | Nothing. |
 | **B-12** | **No log-read verb, so no Logs tab.** | A user reporting a bug has nothing to attach, and no path is safe to tell them to open by hand. | ui-parity 6; manifest 06 §3.4.10. v1 redacted the directory to `~` (`CopyPaste-2b3i`). | A verb, then the tab. The largest of the twelve UI gaps. |
-| **B-13** | **The Android backend refuses eight operations.** Two structural causes, both being removed in §2. **(a)** `add` needs the ingest pipeline. **(b)** `pair_create`, `pair_accept`, `sync`, `discovered`, `rescan` need a running node. **(c)** `watch` needs an in-process event source. **(d)** `reorder_pinned` needs the storage + wire half. | The Android build "can read, copy, pin, delete and clear history, and list and forget peers — but it cannot add an item or sync, which means it is not shippable" (ADR-0003). | `src-tauri/src/backend/embedded.rs:289` (a), `:386,390,424,433,437` (b), `:448` (c), `:361` (d). ADR-0003 §"the fix, in crates this change does not own". | (a) `core/src/ingest.rs`; (b) `p2p/src/node/`; both §2. **This file is not currently being edited** — the lifts land in other crates and someone has to come back and consume them. |
-| **B-14** | **Daemon settings have no UI.** | `GetConfig` / `SetConfig` are on the wire and `daemon/src/settings.rs` persists a validated record — and every Settings tab reads local `prefs` only. Poll interval, size caps, storage quota, sensitive TTL and the sync toggles are unreachable from the product. | `ipc/src/lib.rs:209,212`; `daemon/src/settings.rs`; `grep setConfig ui/src` → nothing. Rule 6 again. | Nothing. |
-| **B-15** | **Origin device is invisible in the app.** | With sync on, every row looks local: no badge, no device filter, no by-device sort. | `ui/src/lib/ipc.ts` `Item` has six fields. The wire half is in flight (§2). ui-parity 3. | §2 (the wire field). |
+| **B-13** | **The Android backend refuses seven operations, and they are no longer the same seven.** `add`, `pair_create`, `pair_accept`, `sync`, `discovered` and `rescan` all closed once `copypaste-core`'s ingest and `copypaste-p2p`'s node landed and `backend/embedded/` consumed them. What refuses now: `set_config` (so the Service tab is desktop-only), `export` / `import`, `backup` / `restore`, `watch`, and `reorder_pinned` (B-23). | The Android build can read, copy, add, pin, delete and clear history, pair, sync and discover. It cannot change a setting, get data out, or receive a push. | `src-tauri/src/backend/embedded/mod.rs` — `MSG_NO_SETTINGS`, `MSG_NO_TRANSFER`, `MSG_NO_BACKUP`, `MSG_NO_WATCH`, `MSG_NO_REORDER`. ADR-0003. | Nothing. `get_config` is already implemented there; only the write half refuses. |
+| **B-15** | **Origin device reaches the WebView boundary and stops.** | With sync on, every row still looks local: no badge, no device filter, no by-device sort. | `UiItem` carries `origin_device_id` and `origin_device_name` (`src-tauri/src/model.rs`), fed by `Item` on the wire. `ui/src/lib/ipc.ts`'s `Item` still declares six fields and no component reads either. ui-parity 3. | Nothing. Both halves below the TS type are done. |
 | **B-16** | **No per-device sync health, and no sync dimension anywhere.** | The peer row shows *Last seen* (a discovery signal), never *last synced*; `StatusChip` is entirely about the local service. Manifest 06 §3.8 names the exact failure: "the badge can read `synced` while one peer silently receives nothing". | `PeerInfo::last_sync_ms` exists (`payload.rs:110`) and no component reads it. `components/devices/DevicesView.tsx`, `components/shell/StatusChip.tsx`. ui-parity 4. | Nothing — the field landed. A stall pill needs a failure counter too. |
+| **B-16a** | **A cloud round counts forged rows and cannot report them.** | `SyncStats::skipped_forged` is the number that says something wrote a row into the account that does not hold the passphrase. It reaches no client: `CloudSyncData` carries six skip counters and not this one, and `CloudStatusData` carries none. Today it exists only in the daemon's log, so the one signal that distinguishes an attack from a quiet day is unreachable. | `cloud/src/sync/outcome.rs:32`; `ipc/src/payload.rs` `CloudSyncData` / `CloudStatusData`. `docs/cloud-privacy.md` states the gap. | Nothing. One field on `CloudSyncData`, then a readout. |
 | **B-17** | **No way to see an item's full content.** | Rows clamp to 1–6 preview lines with no expand, no tooltip carrying the text and no detail view. Choosing between three similar long clips is guesswork. **The content is already at the frontend** — this is a missing view, not missing data. | `components/history/HistoryRow.tsx` (`WebkitLineClamp`); `src-tauri/src/model.rs`. ui-parity 1. Harder than it looks: the window is now one 420-wide popover (ui-parity §2.1). | Nothing. |
-| **B-18** | **No notifications and no sound on copy.** | A background capture is invisible. v1 gated both on config, which now exists (B-14). | No notification or sound code in the tree. Parity 18; manifest 06 §3.6, manifest 01 §3.23. | B-14 for the toggles. |
+| **B-18** | **No notification on copy.** | The sound landed and its switch is reachable (`daemon/src/notify.rs`; `ServiceTab.tsx`). The notification did not, and it cannot come from the daemon: `UNUserNotificationCenter` needs an application bundle, so the app has to post it off `EventData::captured` and `notify_on_copy`. Both are wired *to* the toggle and read by nothing — a user can switch on a notification that will never arrive. | `daemon/src/notify.rs`; `EventData::captured` is never set `true`; no notification plugin in `src-tauri`. Parity 18; manifest 06 §3.6, manifest 01 §3.23. | Nothing. |
 | **B-19** | **No `Recent` submenu in the menu-bar item.** | While the window is hidden the tray is the whole app, and v2's is three navigation verbs with nothing you can *do*. | `src-tauri/src/shell/tray.rs` (ids: `toggle`, `autostart`, `quit`). ui-parity 5; manifest 06 §3.6. | Nothing. |
 
 ### Tier 4 — polish, hygiene, and the record
@@ -122,14 +127,14 @@ CLAUDE.md rule 6: shipped code with no interface is not a shipped feature.
 |---|---|---|
 | **B-20** | Escape does not dismiss the popover. It clears selection in the list and the query in the search field; nothing at the top level hides the window. For a hotkey-summoned popover, Escape *is* the dismissal. | `HistoryList.tsx:229`, `SearchBar.tsx:97`, `shell/window.rs` (handles `CloseRequested` and `Focused(false)`, not a key). ui-parity 7 |
 | **B-21** | About reports the *service* version and no external links — no app version, changelog, or privacy policy. | `components/settings/AboutTab.tsx`; no `@tauri-apps/api/app` import. ui-parity 8 |
-| **B-22** | `README.md` **Missing** and `parity-audit.md` §2.7 are stale (§1 above). `SECURITY.md`'s "Not implemented" has the same shape. | Both list six-plus capabilities that shipped |
-| **B-23** | Drag-to-reorder pins: storage + wire in flight (§2); the UI half is not. | `components/history/HistoryList.tsx`; parity 19 residue |
+| **B-22a** | **A document can be added and the index will not notice.** `docs/README.md` claims to list every ADR, audit and study, and `README.md` tells the reader to start there. It has now fallen behind twice: first ADR-0004 and `ui-parity-audit.md`, then ADR-0005, ADR-0006, `claims-audit.md` and `android-spike.md`. Nothing fails when it happens. | `docs/README.md`; `README.md` §Decisions. Claims audit finding 13. A `ls docs/adr docs/rewrite` diffed against the index, run in CI, would end it |
+| **B-23** | Drag-to-reorder pins. Every layer below the screen landed — `Store::reorder_pinned` (`core/src/storage/pinning.rs`), `Method::ReorderPinned`, the daemon's dispatch, CLI `reorder`, `useReorderPinned`. There is no drag affordance, and **both Tauri backends still refuse on stated reasons that are false**: `backend/daemon.rs` says "`copypaste_ipc::Method` has no reorder, so there is nothing to send"; `backend/embedded/mod.rs` says the transaction "belongs beside the other `pin_order` writes in `copypaste-core`" as though it were not already there. Two comments, one wrong fact each, and a capability the user cannot reach through any surface but the CLI. | `components/history/HistoryList.tsx`; `src-tauri/src/backend/`; parity 19 residue. Claims audit finding 10 |
 | **B-24** | Bulk **Copy** and a visible Select-all. ⌘A works but has no on-screen control, in the exact mode where you want it. | `components/history/BulkBar.tsx` (being edited). ui-parity 11 |
 | **B-25** | Launch at login is a tray check item only, read once at build and never re-read, so it shows the wrong tick after a change in System Settings. Not in Settings at all. | `shell/tray.rs:36-47`, and its own comment. ui-parity 10 |
-| **B-26** | No "too large to sync" affordance. An item that will silently never reach the other device looks like one that will. | `ui/src/lib/ipc.ts` `Item`; `HistoryRow.tsx`. ui-parity 9 |
+| **B-26** | No "too large to sync" affordance, though the data is at the boundary: `UiItem::too_large_to_sync` and `CloudSyncData::skipped_too_large` both landed and neither is declared in `ui/src/lib/ipc.ts` or drawn by `HistoryRow.tsx`. An item that will silently never reach the other device still looks like one that will. | `src-tauri/src/model.rs`; `ui/src/lib/ipc.ts`; `HistoryRow.tsx`. ui-parity 9 |
 | **B-27** | ⌘1–⌘9 row numerals — advertised once in the footer, not carried per row, so the user counts. Partly substituted by `QuickHint`. | ui-parity 12 |
 | **B-28** | No fuzz targets and no benchmarks. Three parse boundaries (AEAD, IPC line, sync frames) are unfuzzed; manifest 06 §5.4 carries budget numbers nothing measures. Good hand-written hostile-input tests cover much of the first. | No `fuzz/`, no `benches/`. Parity §2.9 |
-| **B-29** | Untested behaviour that exists: `useScrollAnchor` (INV-1/INV-6, C10), the React Query delegation (INV-2/3/33, C11), reveal auto-hide (INV-11), `role="listitem"` (INV-8), the a11y announcer (INV-9), window-hide-on-close (INV-36). Every one is in the UI or the macOS binding — a coverage boundary, not scattered neglect. | Parity §3.5 |
+| **B-29** | Untested behaviour that exists. Narrowed by `e2e/` (74 tests in a real WebKitGTK WebView): `scroll-anchor`, `push`, `service-lifecycle`, `sensitive`, `error-strings` and `history-render` now cover INV-1/INV-6, the push path and the a11y-adjacent render rules on Linux. Still unexercised anywhere: reveal auto-hide (INV-11), window-hide-on-close (INV-36), and everything in the macOS binding — a coverage boundary, not scattered neglect. | Parity §3.5; `e2e/tests/` |
 | **B-30** | A11Y-10 contrast, A11Y-11 reduced motion, A11Y-12 reduced transparency, A11Y-15 720×460 minimum are behaviour, so the "visual is reference only" carve-out does not cover them. Contrast is now gated in `design/`; the other three are not asserted. | Parity §2.7 |
 | **B-31** | ADR-0001's untested self-signed re-sign path. Signing in `postflight` with a per-machine self-signed certificate would give a stable designated requirement, which would make TCC grants survive updates and buy back auto-paste for nothing. Unresolved: whether TCC needs a trusted chain or only a valid signature matching the stored `csreq`. **Ten minutes on a Mac settles it** (§6). | ADR-0001 §"An untested third path" |
 | **B-32** | ADR-0001 also asks to **watch** Homebrew's `postflight_steps` mini-DSL: arbitrary Ruby in a cask is now the discouraged form of something with a declarative replacement, which is usually how a feature ends. Not a task; a standing watch item. | ADR-0001 §"Why this path may still close" |
@@ -141,14 +146,13 @@ cheap; do the tail first and you pay twice.
 
 | Unblocker | Unblocks | Note |
 |---|---|---|
-| **The two lifts** — `ingest` into `copypaste-core`, the node into `copypaste-p2p` | **6 of the 8** `Unsupported` returns in `backend/embedded.rs` (B-13a, B-13b) | Both are in flight in *other* crates. Nobody is currently editing `embedded.rs` — the consumption step is unowned and is the whole of Android shippability |
-| **`Item.origin_device_id` / `origin_device_name` on the wire** | B-15 and B-16's device axis together: the row badge, the device filter, the by-device sort, the per-peer readout | One field pair, four surfaces. In flight |
+| **`backend/embedded/`'s write half** | B-13 — `set_config`, transfer, backup, `watch` | The read half already routes through the same core; six of its refusals closed this way |
+| **`ui/src/lib/ipc.ts`'s `Item` catching up with `UiItem`** | B-15, B-16's device axis, and B-26 together: the row badge, the device filter, the by-device sort, the too-large warning | Three fields already crossing the bridge and declared by nothing on the far side |
 | **`Store::list_from` reaching `Method::List`** | B-1, and it stops D6 becoming a live bug now that load-more ships | The hard half — a total order with an `id` tiebreak — is already done and documented |
-| **A daemon config UI** (B-14) | B-18 (notify/sound toggles), the sensitive-TTL control, size caps, sync toggles | The wire and the persistence both exist |
+| **A `BackendError` a screen can name** | B-4's sentence, and every future condition a retry cannot fix | The condition is already detected (`StoreError::LegacyDatabase`); nothing carries it across the bridge |
 
-Two smaller pairs: B-4 wants B-11 for its escape hatch (but not for its
-detection or its sentence); B-10(b) is cheaper after the node lift lands than
-before it.
+One smaller pair: B-4 wants B-11 for its escape hatch, but its *sentence* needs
+only a route through the bridge — the detection is done.
 
 ## 5. Decisions, not debts — do not "fix" these
 
@@ -158,7 +162,8 @@ deliberately, in a commit that amends the manifest in the same change
 
 | Decision | Recorded | If you reverse it |
 |---|---|---|
-| **Pin state does not travel over the cloud transport**, and the daemon **refuses a remote delete of a pinned row**. The two stand or fall together: without the refusal, a device that cannot see the pin would delete a row the user pinned. | Manifest 05 §3.6, amended 2026-07-30, contradicting its own binding table; `daemon/src/merge.rs:89-111,164`; `meta/write.rs:35-45`. This also closes security review F-4. | Three fields, a column pair, a migration, a `CloudSource` that reads and writes them, and revisiting the refusal — all in one change. Neither half may move alone |
+| **Pin state does not travel over the cloud transport**, and the merge **refuses a remote delete of a pinned row**. The two stand or fall together: without the refusal, a device that cannot see the pin would delete a row the user pinned. | Manifest 05 §3.6, amended 2026-07-30, contradicting its own binding table; `core/src/sync/merge.rs` (`refuses_delete`); `daemon/src/meta/write.rs`. This also closes security review F-4. | Three fields, a column pair, a migration, a `CloudSource` that reads and writes them, and revisiting the refusal — all in one change. Neither half may move alone |
+| **The purge pass removes from the search index and never rewrites `is_sensitive`.** | `core/src/sensitive/purge.rs`; security review F-12 | `sweep_sensitive` selects on that flag, so writing it would hand a changed ruleset a hard delete over data the user never reviewed. The cost to accept, stated: a row the current ruleset would flag stays listable and stays syncable — only its plaintext leaves the index |
 | **No `expires_at` column**; the auto-wipe deadline is *derived* (`created_at + ttl`). | Manifest 07 §6.2 amended; `core/src/sensitive/wipe.rs:18-31`. v1 paid three bugs for the stored form (`3e7y`, `44rq.62`, `8ebg.2`) | Stated cost, not hidden: changing the TTL re-dates every existing sensitive item, not only new ones |
 | **The wipe decision is re-derived from the plaintext** rather than read from a stamped flag. | Manifest 07 §6.2 amendment; `wipe.rs` "two gates, and both must agree" | A persisted "may be deleted" bit written by a ruleset that has since changed is a deletion nobody can review before it fires |
 | **The cloud poll cadence is a backoff ladder, not two fixed intervals** — 5 s, doubling while quiet, snapping back on any change, ceiling 300 s rather than 60 s for phone battery. | Manifest 05 §4.8, amended 2026-07-30, in the first row only | Defensible only because `RealtimeEvent::Resubscribed` forces a round on reconnect, which v1 had no equivalent of |
@@ -185,18 +190,26 @@ each needs one thing this container does not have.
 | **Multicast** | mDNS discovery at runtime. `Discovery::start` degrades to an empty peer list and an explicit address always pairs, so this is a convenience, not a dependency | `p2p/src/node/mod.rs`; `README.md` |
 | **A shipping WebView** | The `e2e/` suite runs WebKitGTK 2.52 under Xvfb. That is real JavaScript and real layout — but it is neither WKWebView nor Android's WebView, so a green run is evidence about Linux | `e2e/README.md` |
 
-Two things that follow. **An Android Keystore backend does not exist** — the
-`0600` file store, whose own docs call it a development posture, is what would
-ship on Android today (ADR-0003 §"Also outstanding"); that one *is* a debt,
-and it is B-13's neighbour rather than a hardware item. And the embedded
-backend's data directory resolves through `directories`, not the Android
-context.
+**Two debts that used to sit here have moved out of it**, and neither was ever a
+hardware question. The Android Keystore backend exists
+(`core/src/crypto/keystore/android.rs`), so the `0600` file store is no longer
+what would ship on Android. And the embedded backend now takes its data
+directory from Tauri's `app.path().app_data_dir()` rather than `directories`,
+which has no notion of an Android context. Both are unrun, which is what §6 is
+for; neither is outstanding work.
+
+The same distinction applies to the macOS Keychain. What needed a Mac was
+running it. What needed nobody was noticing that a cargo feature guarded it and
+no release script passed it — this section filed that under hardware for a day,
+and it was a reading of `build-macos-app.sh` away.
 
 ## 7. What this register does not establish
 
-Nothing was executed. Every verdict above is a source reading plus a `grep`
-against a working tree that nine agents are editing — several items moved
-while it was being written. Re-check `git status` before starting anything in
-§2 or anything marked *in flight nearby*. The audits it draws on state their
-own limits: `parity-audit.md` §7, `ui-parity-audit.md` §6, `security-review.md`
-§"Suspected, not confirmed".
+Almost nothing was executed. Every verdict above is a source reading plus a
+`grep` against a working tree several agents are editing, and items have moved
+mid-sweep more than once. The two exceptions, both run on 2026-07-30: `design`'s
+`npm run check` (828 contrast pairs clear, usage gate clear) and a count of
+`e2e/tests` (74). Re-check `git status` before starting anything. The audits
+this draws on state their own limits: `parity-audit.md` §7,
+`ui-parity-audit.md` §6, `security-review.md` §"Suspected, not confirmed",
+`claims-audit.md` §0.

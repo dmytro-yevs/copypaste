@@ -45,14 +45,14 @@ extraction behind F-1 and F-2.
 | F-4 | Medium | A remote tombstone clears `pinned`; a local `delete_all` deliberately does not — **decided the other way** |
 | F-5 | Medium | The clock-skew ceiling is enforced at one point per transport, not at the shared merge |
 | F-6 | Medium | A pairing token is minted, persisted and valid forever, with no expiry and no cap — **closed** |
-| F-7 | Low | `SECURITY.md`'s mDNS claim is false: the advertised pairing id *is* a digest of the token — **half closed** |
-| F-8 | Low | Every inbound TCP connection copies all PSKs into a heap buffer that is never zeroized |
+| F-7 | Low | `SECURITY.md`'s mDNS claim is false: the advertised pairing id *is* a digest of the token — **closed** |
+| F-8 | Low | Every inbound TCP connection copies all PSKs into a heap buffer that is never zeroized — **closed** |
 | F-9 | Low | TOCTOU window between `bind()` and `chmod 0600` on the daemon socket |
 | F-10 | Low | Undecryptable rows vanish from `list`/`search` with no user-visible signal — **closed** |
-| F-11 | Low | `--data-dir` does not relocate the device secret |
-| F-12 | Low | The "purge pass" three comments promise does not exist, and nothing ever re-evaluates `is_sensitive` |
-| F-13 | Low | `accept_any` does one X25519 per stored pairing per unauthenticated connection; pairings are uncapped |
-| F-14 | Low | Reassembly buffer reallocates inside `Zeroizing`, leaving peer plaintext in freed heap |
+| F-11 | Low | `--data-dir` does not relocate the device secret — **closed** |
+| F-12 | Low | The "purge pass" three comments promise does not exist, and nothing ever re-evaluates `is_sensitive` — **closed for the index; the flag is deliberately still never rewritten** |
+| F-13 | Low | `accept_any` does one X25519 per stored pairing per unauthenticated connection; pairings are uncapped — **closed** |
+| F-14 | Low | Reassembly buffer reallocates inside `Zeroizing`, leaving peer plaintext in freed heap — **closed** |
 
 Claims verified **sound**: fail-closed crypto and AAD binding (V-1), sensitive
 items and the search index (V-2), sensitive items and both sync transports
@@ -266,7 +266,7 @@ expire it (minutes, not days); drop the entry once a session succeeds, or mark i
 established. Cap the pairing list. Surface unused pairings in `peers` so the UI
 can show "waiting to pair — expires in N minutes", which is also rule 6.
 
-### F-7 — Low — The mDNS claim is false as written · **half closed** (`SECURITY.md` corrected; `discovery/record.rs`'s module doc and its test are not)
+### F-7 — Low — The mDNS claim is false as written · **closed** (`SECURITY.md` and `discovery/record.rs`'s module doc both now say the id is a one-way digest of the token; `advertisement_carries_the_pairing_id_and_nothing_else_of_the_token` builds its record from a real `PairingToken`, so it can fail on the claim it pins)
 
 **Files:** `SECURITY.md:103` · `crates/copypaste-p2p/src/discovery/record.rs:14-19` ·
 `crates/copypaste-p2p/src/transport/token.rs:129-133`
@@ -303,7 +303,7 @@ truncated digest, chosen so the id cannot be used as a credential — and make t
 test derive its ids from a real token so the claim it pins is the claim the code
 makes.
 
-### F-8 — Low — PSKs are copied unzeroized on every inbound connection
+### F-8 — Low — PSKs are copied unzeroized on every inbound connection · **closed** (`PeerStore::psks` returns `Zeroizing<Vec<PskCandidate>>`, so the hazard cannot be re-created by the next caller; `psks_are_handed_out_wiped_on_drop`)
 
 **Files:** `crates/copypaste-p2p/src/peers/store.rs:143` ·
 `crates/copypaste-daemon/src/p2p/mod.rs:205`
@@ -366,7 +366,7 @@ quietly shrinking" rather than as an error.
 has room), or at minimum surface a count in `status` so a UI can say "3 items
 could not be read".
 
-### F-11 — Low — `--data-dir` does not relocate the device secret
+### F-11 — Low — `--data-dir` does not relocate the device secret · **closed** (`Keyring::load_or_create` takes the data directory; `crypto/keystore/mod.rs` additionally refuses a directory holding a history database but no secret, rather than minting into it — `a_database_without_its_secret_is_refused_rather_than_re_keyed`)
 
 **Files:** `crates/copypaste-core/src/crypto/keystore.rs` (`secret_path`) ·
 `crates/copypaste-ipc/src/lib.rs:284-288` · `crates/copypaste-daemon/src/main.rs:224-236`
@@ -386,7 +386,15 @@ user's device secret, and its database is keyed identically to the real one.
 **Fix.** Thread the data directory into `Keyring::load_or_create`, and settle on
 one `ProjectDirs` qualifier triple in one place.
 
-### F-12 — Low — The promised "purge pass" does not exist, and `is_sensitive` is never re-evaluated
+### F-12 — Low — The promised "purge pass" does not exist, and `is_sensitive` is never re-evaluated · **closed** (`core/src/sensitive/purge.rs`, run from `daemon/src/main.rs` before the socket binds)
+
+The pass removes from the index and nothing else. It deliberately does **not**
+rewrite `is_sensitive`, which is the half of this finding that stays open by
+decision rather than by omission: `sweep_sensitive` selects on that flag, so a
+re-derived flag would hand a changed ruleset a hard delete over data the user
+never reviewed. The consequence to accept is that a row the current ruleset
+would flag stays listable and stays syncable; only its plaintext leaves the
+index.
 
 **Files:** `crates/copypaste-ipc/src/lib.rs:250` ·
 `crates/copypaste-daemon/src/server/items.rs:225` · `CLAUDE.md` rule 4
@@ -413,7 +421,7 @@ are fixed), every already-captured item stays unflagged and its plaintext stays 
 **Fix.** Either add the rescan-and-purge pass and keep the sentence, or delete the
 sentence from all three places and record the consequence as a known limitation.
 
-### F-13 — Low — Unauthenticated CPU amplification in `accept_any`
+### F-13 — Low — Unauthenticated CPU amplification in `accept_any` · **closed** (`MAX_PAIRINGS`, enforced in `PeerStore::upsert` by refusing a *new* pairing rather than evicting an old one — `the_pairing_list_is_capped_by_refusing_not_by_evicting`. The mDNS-hinted ordering was not built; the cap alone bounds the multiplier.)
 
 **File:** `crates/copypaste-p2p/src/transport/handshake.rs:141-163`
 
@@ -431,7 +439,7 @@ common case is one trial. (Do **not** add a wire hint that identifies which
 pairing is being attempted — that would undo the "reveals nothing about which
 pairings this device holds" property, which is currently correct.)
 
-### F-14 — Low — Reassembly leaves peer plaintext in freed heap
+### F-14 — Low — Reassembly leaves peer plaintext in freed heap · **closed** (`Reassembly` starts at `MAX_NOISE_PLAINTEXT` and grows by moving into a fresh `Zeroizing<Vec>` and dropping the old one, which wipes it; the ceiling is checked before anything is copied or reserved, so the size comes from our limit and not from what the peer declares)
 
 **File:** `crates/copypaste-p2p/src/transport/session.rs:150,202`
 
@@ -644,11 +652,17 @@ Two properties of `scrub_paths` worth writing down rather than fixing:
   in a way a random salt would not.
 * **macOS Keychain and NSPasteboard.** Never compiled, per `SECURITY.md`. Read
   only. The Keychain backend's fail-closed logic (only `errSecItemNotFound`
-  mints) reads correctly; `-25308`/`-25293`/`-34018` are all surfaced.
-* **Android Keystore.** Not implemented; the `0600` file backend is what would
-  ship today on both non-macOS targets. `SECURITY.md` says this; repeating it
-  because it is the largest single gap between the documented posture and the
-  code.
+  mints) reads correctly; `-25308`/`-25293`/`-34018` are all surfaced. **Since
+  amended:** the `macos-keychain` cargo feature that guarded it — and that no
+  release script ever passed — is gone; `security-framework` is a plain
+  target-gated dependency and the backend is selected by `target_os` alone.
+* **Android Keystore.** *Was* "not implemented; the `0600` file backend is what
+  would ship today". **Since built** —
+  `core/src/crypto/keystore/android.rs`, target-gated the same way: an AES-GCM
+  key in the Keystore wraps the device secret and the blob sits in app-private
+  storage, because the Keystore holds keys and not blobs. Still never compiled —
+  no NDK here — so it moves from "not implemented" to the unverified pile rather
+  than out of this section.
 * **DoS accounting.** Per-session memory looks bounded (≤ 8 items × 4 MiB per
   message, 32 MiB reassembly cap, 4 concurrent sessions ⇒ order 128 MiB), and
   the mDNS peer table is capped at 256 with LRU eviction and a TTL. I did not
