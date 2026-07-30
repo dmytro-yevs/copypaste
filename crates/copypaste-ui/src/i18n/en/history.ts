@@ -1,0 +1,151 @@
+export const history = {
+  list: {
+    label: "Clipboard history",
+    loadMore: "Load more",
+    loadingMore: "Loading…",
+  },
+
+  search: {
+    label: "Search clipboard history",
+    placeholder: "Search clipboard history",
+    hint: "Search (⌘F) · ↓ to move into the list · ⌘A select all",
+    clear: "Clear search",
+    filterKind: "Filter by kind",
+    sortOrder: "Sort order",
+    selectMultiple: "Select multiple items",
+    leaveSelection: "Leave selection mode",
+    clearAll: "Clear clipboard history",
+    count_one: "{{count}} item",
+    count_other: "{{count}} items",
+  },
+
+  kind: {
+    all: "All kinds",
+    text: "Text",
+    url: "Links",
+    mail: "Email addresses",
+    path: "File paths",
+    code: "Code",
+    json: "JSON",
+    num: "Numbers",
+    color: "Colors",
+    secret: "Sensitive",
+    unknown: "Other",
+  },
+
+  sort: {
+    newest: "Newest first",
+    oldest: "Oldest first",
+  },
+
+  bulk: {
+    label: "Selection actions",
+    empty: "Select items to act on them",
+    selected_one: "{{count}} item selected",
+    selected_other: "{{count}} items selected",
+    pin: "Pin",
+    unpin: "Unpin",
+    delete: "Delete",
+    done: "Done",
+  },
+
+  /**
+   * A11Y-3 is verbatim from manifest 06. `pinnedPrefix` and `selectPrefix` are
+   * prefixes rather than `"Pinned. {{content}}"` templates: a clip's text is
+   * concatenated onto them at the call site, so no catalogue entry can ever
+   * carry item content.
+   */
+  row: {
+    sensitiveName: "Sensitive item, hidden — activate to reveal",
+    sensitiveReveal: "Sensitive content hidden — activate to reveal",
+    sensitivePlaceholder: "Sensitive content hidden",
+    empty: "Empty item",
+    pinnedPrefix: "Pinned.",
+    selectPrefix: "Select",
+    selectingHint: "Click to add to the selection",
+    hint: "Click to select · double-click to copy",
+    hide: "Hide sensitive content",
+    reveal: "Reveal sensitive content",
+    copy: "Copy to clipboard",
+    pin: "Pin item",
+    unpin: "Unpin item",
+    delete: "Delete item",
+    pinnedBadge: "Pinned",
+    sensitiveBadge: "· Sensitive",
+  },
+
+  empty: {
+    loading: {
+      title: "Loading…",
+      body: "Fetching your clipboard history.",
+    },
+    starting: { title: "Starting up…" },
+    failed: { title: "Failed to load history" },
+    /** `{{query}}` is the user's own search text, already visible in the field
+     *  beside it. It is the one interpolation here that is not authored copy. */
+    noResults: 'No results for "{{query}}"',
+    noMatch: "Nothing matches this filter",
+    filteredBody:
+      "Try a different search term. Sensitive items are never indexed, so they never appear in results.",
+    loadMore: "Load more history",
+    none: {
+      title: "Nothing copied yet",
+      body: "Copy something and it will appear here.",
+    },
+  },
+
+  skipped_one: "{{count}} item could not be read and is not shown.",
+  skipped_other: "{{count}} items could not be read and are not shown.",
+
+  reveal: {
+    unavailable:
+      "Showing this item isn't available yet. You can still copy it — its contents never enter this window.",
+    confirm: {
+      title: "Reveal sensitive content?",
+      body: "This item looks like a password, key or token. It will be shown for 10 seconds, and hidden again as soon as this window loses focus.",
+      action: "Reveal",
+    },
+  },
+
+  clear: {
+    title: "Clear all clipboard history?",
+    body: "This permanently deletes every unpinned item on this device. Pinned items are kept. This cannot be undone.",
+    action: "Clear all",
+  },
+
+  bulkDelete: {
+    title_one: "Delete {{count}} item?",
+    title_other: "Delete {{count}} items?",
+    body: "This permanently removes the selected clipboard items. Unlike deleting one item, this cannot be undone.",
+    action: "Delete",
+  },
+
+  /** Rendered through `<Trans>`; `<kbd>` is supplied by the component. */
+  hint: {
+    move: "<kbd>↑↓</kbd> move",
+    copy: "<kbd>⏎</kbd> copy",
+    quickCopy: "<kbd>⌘1</kbd>–<kbd>⌘9</kbd> copy and close",
+    paste:
+      "Copying puts the item on the clipboard — press <kbd>⌘V</kbd> yourself to paste",
+  },
+
+  toast: {
+    copied: "Copied — press ⌘V to paste",
+    cleared_one: "Cleared {{count}} item — pinned items kept",
+    cleared_other: "Cleared {{count}} items — pinned items kept",
+    deleted: "Deleted",
+    /** The description slot beside it carries the clip itself, passed as a
+     *  value rather than through a template. */
+    deletedSensitive: "Sensitive item",
+    undo: "Undo",
+    pinned_one: "Pinned {{count}} item",
+    pinned_other: "Pinned {{count}} items",
+    unpinned_one: "Unpinned {{count}} item",
+    unpinned_other: "Unpinned {{count}} items",
+    bulkDeleted_one: "Deleted {{count}} item",
+    bulkDeleted_other: "Deleted {{count}} items",
+    pinnedPartial: "Pinned {{done}} of {{total}} — {{failed}} failed",
+    unpinnedPartial: "Unpinned {{done}} of {{total}} — {{failed}} failed",
+    bulkDeletedPartial: "Deleted {{done}} of {{total}} — {{failed}} failed",
+  },
+} as const;

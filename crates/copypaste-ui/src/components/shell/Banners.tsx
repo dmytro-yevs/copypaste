@@ -3,6 +3,7 @@
 import { CircleAlert, TriangleAlert, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { pickBanner } from "@/lib/banners";
 import type { BannerConditions } from "@/lib/banners";
@@ -14,6 +15,7 @@ interface BannerBarProps {
 }
 
 export function BannerBar({ conditions, onRetry }: BannerBarProps) {
+  const { t } = useTranslation();
   const dismissed = useUi((s) => s.dismissed);
   const dismiss = useUi((s) => s.dismiss);
 
@@ -38,7 +40,7 @@ export function BannerBar({ conditions, onRetry }: BannerBarProps) {
 
       {banner.action === "retry" && (
         <Button size="sm" variant="outline" onClick={onRetry}>
-          Try again
+          {t("common.tryAgain")}
         </Button>
       )}
 
@@ -46,8 +48,8 @@ export function BannerBar({ conditions, onRetry }: BannerBarProps) {
         <Button
           size="icon-sm"
           variant="ghost"
-          aria-label="Dismiss"
-          title="Dismiss"
+          aria-label={t("common.dismiss")}
+          title={t("common.dismiss")}
           onClick={() => dismiss(banner.id as BannerId)}
         >
           <X aria-hidden="true" />

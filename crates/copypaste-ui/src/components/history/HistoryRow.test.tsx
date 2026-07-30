@@ -10,11 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import {
-  HistoryRow,
-  SENSITIVE_A11Y_LABEL,
-  rowLabel,
-} from "@/components/history/HistoryRow";
+import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
 import { item } from "@/test/harness";
 
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
@@ -48,7 +44,9 @@ describe("a sensitive item", () => {
 
   it("labels the row without quoting anything about it", () => {
     const secret = item({ is_sensitive: true });
-    expect(rowLabel(secret)).toBe(SENSITIVE_A11Y_LABEL);
+    // A11Y-3, verbatim from manifest 06 — asserted as the rendered sentence,
+    // not as a catalogue key.
+    expect(rowLabel(secret)).toBe("Sensitive item, hidden — activate to reveal");
     expect(rowLabel(secret)).not.toContain(SECRET);
   });
 

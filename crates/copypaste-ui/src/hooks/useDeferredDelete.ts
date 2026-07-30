@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import { truncate } from "@/lib/format";
 import { UNDO_WINDOW_MS } from "@/lib/layout";
@@ -76,16 +77,17 @@ export function useDeferredDelete() {
         item.id,
         setTimeout(() => void commit(item.id), UNDO_WINDOW_MS),
       );
-      toast("Deleted", {
+      toast(t("history.toast.deleted"), {
         // A sensitive item has no content on this side of the bridge at all
         // (INV-10), so there is nothing to leak into a toast; anything else is
-        // truncated to 40 characters (§3.1.8).
+        // truncated to 40 characters (§3.1.8) and passed as a value, never
+        // through a message template.
         description:
           item.content === null
-            ? "Sensitive item"
+            ? t("history.toast.deletedSensitive")
             : truncate(item.content, 40),
         duration: UNDO_WINDOW_MS,
-        action: { label: "Undo", onClick: () => undo(item.id) },
+        action: { label: t("history.toast.undo"), onClick: () => undo(item.id) },
       });
     },
     [commit, flush, undo],

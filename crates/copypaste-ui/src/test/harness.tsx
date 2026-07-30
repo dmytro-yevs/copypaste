@@ -1,11 +1,7 @@
 /**
- * Shared test scaffolding.
- *
- * These tests are the only execution this UI gets: WebKitGTK does not run
- * JavaScript under headless Xvfb without a GPU here, so the app cannot be
- * launched and looked at. Everything below runs in jsdom, which means layout is
- * simulated — where a test needs a box to have a size, it says so explicitly
- * rather than pretending jsdom measured one.
+ * Everything below runs in jsdom, which has no layout: where a test needs a box
+ * to have a size it says so explicitly rather than pretending jsdom measured
+ * one.
  */
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

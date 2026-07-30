@@ -4,10 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Row } from "@/components/settings/Row";
 import { usePeers, useSyncNow } from "@/hooks/useDevices";
+import { useTranslation } from "@/i18n";
 import { isUnavailable } from "@/lib/errors";
 import { useUi } from "@/store/ui";
 
 export function SyncTab() {
+  const { t } = useTranslation();
   const peers = usePeers();
   const sync = useSyncNow();
   const setView = useUi((s) => s.setView);
@@ -18,25 +20,27 @@ export function SyncTab() {
   return (
     <div className="flex flex-col">
       <Row
-        title="Paired devices"
-        description="Sync is peer-to-peer and end-to-end encrypted: devices exchange history directly, and nothing passes through a server."
+        title={t("settings.sync.paired.title")}
+        description={t("settings.sync.paired.description")}
       >
         <div className="flex items-center gap-s-2">
           {!unavailable && (
             <Badge variant={count > 0 ? "secondary" : "warn"}>
-              {count === 0 ? "None" : `${count} paired`}
+              {count === 0
+                ? t("settings.sync.paired.none")
+                : t("settings.sync.paired.count", { n: count })}
             </Badge>
           )}
           <Button variant="outline" size="sm" onClick={() => setView("devices")}>
             <MonitorSmartphone aria-hidden="true" />
-            Manage devices
+            {t("settings.sync.paired.manage")}
           </Button>
         </div>
       </Row>
 
       <Row
-        title="Sync now"
-        description="Runs a sync with every paired device. Devices also sync on their own when they see each other."
+        title={t("settings.sync.now.title")}
+        description={t("settings.sync.now.description")}
       >
         <Button
           variant="outline"
@@ -45,21 +49,20 @@ export function SyncTab() {
           onClick={() => sync.mutate(undefined)}
         >
           <RefreshCw aria-hidden="true" />
-          {sync.isPending ? "Syncing…" : "Sync now"}
+          {t(sync.isPending ? "settings.sync.now.pending" : "settings.sync.now.action")}
         </Button>
       </Row>
 
       <Row
-        title="Cloud sync"
-        description="Not in this build. The service has no cloud-account command for the app to call, so signing in would be a form with nothing behind it."
+        title={t("settings.sync.cloud.title")}
+        description={t("settings.sync.cloud.description")}
       >
-        <Badge variant="secondary">Unavailable</Badge>
+        <Badge variant="secondary">{t("settings.sync.cloud.badge")}</Badge>
       </Row>
 
       {unavailable && (
         <p className="py-s-3 text-sm text-muted-foreground">
-          Device sync isn't available in this build — pairing runs in the
-          background service, which this build doesn't reach.
+          {t("settings.sync.unavailable")}
         </p>
       )}
     </div>

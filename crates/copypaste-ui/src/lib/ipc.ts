@@ -1,13 +1,13 @@
 /**
- * The Tauri bridge, and the only place `invoke` is called. Command names track
- * `copypaste_ipc::Method`, so this file and `src-tauri/src/commands/` name the
- * same things; field names are snake_case because that is what serde emits.
+ * The only place `invoke` is called. Command names track
+ * `copypaste_ipc::Method`; field names are snake_case because that is what
+ * serde emits.
  *
  * A command the bridge does not route, and an operation a build cannot perform
- * (`BackendError::Unsupported` — Android has no pairing), both classify as the
- * `unavailable` kind. Screens render that as its own state: "this build cannot"
- * and "the service is down" are different things to be told, and only one of
- * them is worth retrying.
+ * (`BackendError::Unsupported` — Android has no pairing), both classify as
+ * `unavailable`. Screens render that as its own state: "this build cannot" and
+ * "the service is down" are different things to be told, and only one of them
+ * is worth retrying.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -32,12 +32,9 @@ export interface Item {
 
 
 /**
- * A page of history, and how many rows in it would not decrypt.
- *
- * `skipped_undecryptable` is not an error: the items that *did* open are still
- * the user's data. It is the difference between a short page and a small
- * history, and without it the user sees fewer items and no reason (finding 17).
- * Named exactly as `copypaste_ipc::ItemPage` names it.
+ * `skipped_undecryptable` is not an error: it is the difference between a short
+ * page and a small history, and without it the user sees fewer items and no
+ * reason (finding 17).
  */
 export interface ItemPage {
   readonly items: readonly Item[];
@@ -127,11 +124,9 @@ export function addItem(content: string): Promise<Item> {
   return call<Item>("add_item", { content });
 }
 
-/**
- * One item's plaintext, on demand. The result is held in component state and
- * dropped when the reveal expires (INV-11) — never in the query cache, which
- * outlives the row and would restore it on the next render.
- */
+/** One item's plaintext, on demand. Held in component state and dropped when
+ *  the reveal expires (INV-11) — never in the query cache, which outlives the
+ *  row and would restore it on the next render. */
 export function revealItem(id: string): Promise<string> {
   return call<string>("reveal_item", { id });
 }
@@ -149,13 +144,8 @@ export function setPinned(id: string, pinned: boolean): Promise<Item> {
   return call<Item>("set_pinned", { id, pinned });
 }
 
-/**
- * The complete pinned list, in the order the user wants it.
- *
- * Not routed to anything yet: `copypaste_ipc::Method` has no reorder verb, so
- * the bridge refuses with `unavailable` and the drag handles stay hidden.
- * `useCapabilities` is what asks.
- */
+/** Not routed yet: `copypaste_ipc::Method` has no reorder verb, so the bridge
+ *  refuses with `unavailable` and the drag handles stay hidden. */
 export function reorderPinned(ids: readonly string[]): Promise<void> {
   return call<void>("reorder_pinned", { ids });
 }
@@ -213,13 +203,9 @@ export function rescanDiscovered(): Promise<DiscoveredDevice[]> {
 
 /* --------------------------------------------------------------- service --- */
 
-/**
- * What the background service is doing (ADR-0004).
- *
- * A tagged union rather than a boolean because four situations need four
- * answers: nothing to start, something to start, running, and running on a
- * version this app did not ship with — which is what an upgrade leaves behind.
- */
+/** A tagged union rather than a boolean because four situations need four
+ *  answers (ADR-0004): nothing to start, something to start, running, and
+ *  running on a version this app did not ship with. */
 export type ServiceState =
   | { readonly state: "running"; readonly version: string; readonly matches_app: boolean; readonly ours: boolean }
   | { readonly state: "unhealthy" }
@@ -242,12 +228,10 @@ export function restartService(): Promise<ServiceState> {
 }
 
 /**
- * Hide the window, through the backend (INV-25).
- *
- * The frontend must never reach for the window itself. On macOS the app is an
+ * INV-25: through the backend, never `window.hide()`. On macOS the app is an
  * `Accessory`, so hiding hands activation back to whatever the user was in —
- * which is the point of quick-copy, because the app never synthesises a paste
- * (ADR-0001) and the user presses ⌘V themselves.
+ * which is where they press ⌘V, since the app never synthesises a paste
+ * (ADR-0001).
  */
 export function hideWindow(): Promise<void> {
   return call<void>("hide_window");

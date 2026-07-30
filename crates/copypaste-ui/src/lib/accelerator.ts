@@ -4,6 +4,7 @@
  * INV-23: the key comes from `event.code`, never `.key`, so a Cyrillic or
  * AZERTY layout records the same physical binding.
  */
+import { t } from "@/i18n";
 
 export const DEFAULT_SHORTCUT = "CmdOrCtrl+Shift+V";
 
@@ -21,9 +22,6 @@ export const MEDIA_KEYS: readonly string[] = [
   "MediaFastForward",
   "MediaRewind",
 ];
-
-export const MEDIA_KEY_REFUSAL =
-  "Media keys can't be used: binding one needs macOS Accessibility permission, and CopyPaste loses that permission every time it updates. Pick another key.";
 
 const BARE_MODIFIERS = new Set(["Meta", "Control", "Alt", "Shift"]);
 
@@ -83,7 +81,7 @@ export function captureAccelerator(
   const key = keyFrom(event);
   if (key === null) return { kind: "incomplete" };
   if (MEDIA_KEYS.includes(key)) {
-    return { kind: "refused", reason: MEDIA_KEY_REFUSAL };
+    return { kind: "refused", reason: t("settings.shortcut.refusal.mediaKeys") };
   }
 
   const parts: string[] = [];
@@ -94,7 +92,7 @@ export function captureAccelerator(
   if (parts.length === 0) {
     return {
       kind: "refused",
-      reason: "A shortcut needs at least one modifier — hold ⌘, ⌥ or ⌃ as well.",
+      reason: t("settings.shortcut.refusal.needsModifier"),
     };
   }
 

@@ -1,12 +1,6 @@
 /**
- * Bootstrap: appearance before first paint, then the query client, then React.
- *
- * INV-22 — the persisted appearance is on `<html>` **before** anything is
- * painted, so there is no default-theme flash. The two statements below run at
- * module scope, before `createRoot().render`, with an empty `<body>`; v1 needed
- * a separate dependency-free pre-paint script because its prefs schema lived
- * inside the app bundle, and AT-54's whole risk was that second copy drifting
- * from the first. There is one schema here.
+ * INV-22 — the persisted appearance is applied to `<html>` at module scope,
+ * before `createRoot().render`, so there is no default-theme flash.
  */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -22,11 +16,9 @@ import "@/index.css";
 applyAppearance(readPrefs());
 
 /**
- * INV-34 — retry policy. v1 retried `migration_in_progress` on the ladder below
- * and *nothing else*, because retrying arbitrary errors masks bugs. v2 has no
- * migrations (CLAUDE.md rule 3), so the transient startup condition is
- * `not_ready`: the service is up but the store is not open yet. Every other
- * kind propagates on the first failure, exactly as before — including
+ * INV-34 — `not_ready` is the one condition worth retrying: the service is up
+ * but the store is not open yet. Every other kind propagates on the first
+ * failure, because retrying arbitrary errors masks bugs — including
  * `unavailable`, which is structural and would never succeed on a retry.
  */
 const RETRY_BACKOFF_MS = [250, 500, 1000, 2000, 2000];

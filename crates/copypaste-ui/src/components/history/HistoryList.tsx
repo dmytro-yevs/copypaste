@@ -1,6 +1,4 @@
 /**
- * The virtualised history list.
- *
  * INV-8: `role="list"`/`listitem`, never listbox/option — the rows carry
  * buttons, and option is `childrenPresentational` (axe `nested-interactive`).
  * INV-9/A11Y-14: the announcer is a *sibling* of the list; inside it, it fails
@@ -19,6 +17,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { Button } from "@/components/ui/button";
 import { useScrollAnchor } from "@/hooks/useScrollAnchor";
+import { useTranslation } from "@/i18n";
 import type { Item } from "@/lib/ipc";
 import {
   COPY_FLASH_MS,
@@ -90,6 +89,7 @@ export function HistoryList({
   onLoadMore,
   listRef,
 }: HistoryListProps) {
+  const { t } = useTranslation();
   const [announcement, setAnnouncement] = useState("");
   const [flashId, setFlashId] = useState<string | null>(null);
   const itemsRef = useRef(items);
@@ -252,7 +252,7 @@ export function HistoryList({
       >
         <div
           role="list"
-          aria-label="Clipboard history"
+          aria-label={t("history.list.label")}
           aria-multiselectable={selection.selecting || undefined}
           data-active-descendant={
             activeRendered ? `history-row-${activeId}` : undefined
@@ -313,7 +313,9 @@ export function HistoryList({
               disabled={loadingMore}
               onClick={onLoadMore}
             >
-              {loadingMore ? "Loading…" : "Load more"}
+              {t(
+                loadingMore ? "history.list.loadingMore" : "history.list.loadMore",
+              )}
             </Button>
           </div>
         )}

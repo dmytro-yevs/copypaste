@@ -1,8 +1,4 @@
 /**
- * Primary navigation: a rail beside the content above Tailwind's `sm`, a bottom
- * bar under it below — the reachable band on a phone is the bottom of the
- * display, and a 200px rail on a 380px viewport leaves no content.
- *
  * The bar adds `--inset-bottom` rather than assuming a gesture bar: `env()`
  * with no fallback resolves to nothing and silently voids the `calc()`, which
  * is why the inset is a token.
@@ -10,23 +6,29 @@
 import { Clipboard, MonitorSmartphone, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { type View, useUi } from "@/store/ui";
 import { StatusChip } from "@/components/shell/StatusChip";
 
-const ITEMS: ReadonlyArray<{ view: View; label: string; icon: LucideIcon }> = [
-  { view: "history", label: "History", icon: Clipboard },
-  { view: "devices", label: "Devices", icon: MonitorSmartphone },
-  { view: "settings", label: "Settings", icon: Settings2 },
-];
+const ITEMS = [
+  { view: "history", label: "nav.history", icon: Clipboard },
+  { view: "devices", label: "nav.devices", icon: MonitorSmartphone },
+  { view: "settings", label: "nav.settings", icon: Settings2 },
+] as const satisfies ReadonlyArray<{
+  view: View;
+  label: string;
+  icon: LucideIcon;
+}>;
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
 
   return (
     <nav
-      aria-label="Primary"
+      aria-label={t("nav.primary")}
       className={cn(
         "flex shrink-0 bg-sidebar",
         "border-t border-sidebar-border sm:border-t-0 sm:border-r",
@@ -41,8 +43,9 @@ export function Sidebar() {
       />
 
       <ul className="flex flex-1 sm:flex-col sm:gap-s-1">
-        {ITEMS.map(({ view: id, label, icon: Icon }) => {
+        {ITEMS.map(({ view: id, label: key, icon: Icon }) => {
           const active = view === id;
+          const label = t(key);
           return (
             <li key={id} className="flex-1">
               <button

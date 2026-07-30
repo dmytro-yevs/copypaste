@@ -1,19 +1,11 @@
 /**
  * A screen with an offer, not an empty list: an empty list says "you have
- * copied nothing" when the truth is "nothing is listening" — the same defect as
- * bdac.2, one screen over.
+ * copied nothing" when the truth is "nothing is listening" (bdac.2).
  *
- * ADR-0004 made the offer real. The app owns the background service's lifetime
- * and ships it inside its own bundle, so the button starts it rather than
- * telling the user to open a terminal. The four situations the ADR enumerates
- * each get their own copy, because the recovery differs:
- *
- * | state | what the user can do |
- * |---|---|
- * | `stopped` | press Start |
- * | `not_installed` | nothing here; the build has no service to start |
- * | `running` with a different version | restart it, if this app started it |
- * | `unhealthy` | wait, or restart |
+ * The four states ADR-0004 enumerates each get their own copy because the
+ * recovery differs: `stopped` offers Start, `not_installed` has nothing to
+ * start, `running` on another version offers Restart and only if this app
+ * started it, `unhealthy` is wait-or-restart.
  *
  * No filesystem path appears in any branch (INV-12), and none of these
  * sentences names a command.
@@ -24,6 +16,7 @@ import { PlugZap, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
+import { useTranslation } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import { type ServiceState, restartService, serviceState, startService } from "@/lib/ipc";
 
@@ -41,6 +34,7 @@ export function useServiceState() {
 }
 
 export function ServiceOffline() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const service = useServiceState();
   const [busy, setBusy] = useState(false);
@@ -72,14 +66,18 @@ export function ServiceOffline() {
       <EmptyState
         icon={TriangleAlert}
         busy={busy}
-        title="The background service is out of date"
-        body={
+        title={t("shell.service.outOfDate.title")}
+        body={t(
           state.ours
-            ? "A different version of the background service is running. Restart it to pick up this update."
-            : "A different version of the background service is running, and it was started by something else — CopyPaste can't stop it. Quit it, then restart."
-        }
+            ? "shell.service.outOfDate.ours"
+            : "shell.service.outOfDate.theirs",
+        )}
         action={{
-          label: busy ? "Restarting…" : "Restart the service",
+          label: t(
+            busy
+              ? "shell.service.outOfDate.restarting"
+              : "shell.service.outOfDate.restart",
+          ),
           onClick: () => void run(restartService),
         }}
         secondary={<Failure message={failure} />}
@@ -91,8 +89,8 @@ export function ServiceOffline() {
     return (
       <EmptyState
         icon={TriangleAlert}
-        title="This build has no background service"
-        body="CopyPaste records your clipboard from a small background service, and this build doesn't include one. Install CopyPaste from the official package to get it."
+        title={t("shell.service.notInstalled.title")}
+        body={t("shell.service.notInstalled.body")}
         secondary={<Recheck onClick={() => void qc.invalidateQueries()} />}
       />
     );
@@ -102,10 +100,12 @@ export function ServiceOffline() {
     <EmptyState
       icon={PlugZap}
       busy={busy}
-      title="The clipboard service isn't running"
-      body="CopyPaste records your clipboard from a small background service. It isn't running, so nothing is being saved right now."
+      title={t("shell.service.stopped.title")}
+      body={t("shell.service.stopped.body")}
       action={{
-        label: busy ? "Starting…" : "Start the service",
+        label: t(
+          busy ? "shell.service.stopped.starting" : "shell.service.stopped.start",
+        ),
         onClick: () => void run(startService),
       }}
       secondary={
@@ -128,10 +128,11 @@ function Failure({ message }: { message: string | null }) {
 }
 
 function Recheck({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
   return (
     <Button variant="ghost" size="sm" onClick={onClick}>
       <RefreshCw aria-hidden="true" />
-      Check again
+      {t("shell.service.recheck")}
     </Button>
   );
 }

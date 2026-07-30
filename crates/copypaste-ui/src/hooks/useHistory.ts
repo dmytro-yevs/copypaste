@@ -1,13 +1,9 @@
 /**
- * React Query stands in for v1's hand-written polling, which is what manifest
- * §9.1 asks for; the contracts it has to keep are INV-2 (an idle poll must not
+ * The contracts React Query has to keep here: INV-2 (an idle poll must not
  * produce a new array identity), INV-3 (every mutation invalidates), INV-4 (a
  * poll must not replace the merged list with page 1), INV-27 (a hidden window
- * polls zero times) and INV-33 (last write wins). §5.5 says verify rather than
- * assume — `useHistory.test.tsx` does.
- *
- * The poll interval is now a function of whether the change stream is
- * delivering (`usePush`). It never becomes zero: see `pollInterval`.
+ * polls zero times) and INV-33 (last write wins). `useHistory.test.tsx`
+ * verifies rather than assumes (§5.5).
  */
 import {
   keepPreviousData,
@@ -18,6 +14,7 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import {
   PAGE_SIZE,
@@ -55,14 +52,12 @@ export interface History {
 const EMPTY: History = { items: [], skipped: 0 };
 
 /**
- * How often to re-read while push is live.
- *
- * Not `false`. A subscription can die without either end noticing — the daemon
- * is killed, the socket is half-closed by a sleep/wake — and a window that
- * stopped polling on the strength of one `live` event shows yesterday's
- * clipboard until it is restarted. Thirty seconds is a backstop, not a poll:
- * it is 2 requests a minute against the 20 that poll-only costs, and it bounds
- * how wrong the list can get to half a minute rather than to forever.
+ * Never `false`. A subscription can die without either end noticing — the
+ * daemon is killed, the socket is half-closed by a sleep/wake — and a window
+ * that stopped polling on the strength of one `live` event shows yesterday's
+ * clipboard until it is restarted. The backstop bounds how wrong the list can
+ * get to half a minute rather than to forever, at 2 requests a minute against
+ * poll-only's 20.
  */
 export function pollInterval(pushLive: boolean, failed: boolean): number {
   if (failed) return POLL_BACKOFF_MS;
@@ -75,9 +70,8 @@ export function pollInterval(pushLive: boolean, failed: boolean): number {
  * Module scope, because React Query memoises `select` on (data, selectFn) and
  * INV-2 needs the same object back when the data has not changed.
  *
- * The skipped counts sum across pages: three unreadable rows on page 1 and two
- * on page 2 is five items the user cannot see, and reporting only the last
- * page's count would quietly shrink as they scroll.
+ * Skipped counts sum across pages; reporting only the last page's would shrink
+ * as the user scrolls.
  */
 function flatten(data: { pages: ItemPage[] }): History {
   const seen = new Set<string>();
@@ -95,9 +89,9 @@ function flatten(data: { pages: ItemPage[] }): History {
 }
 
 /**
- * Search is deliberately **not** paged: `search` runs against the whole
- * database, so a match at index 800 is found without loading 800 rows first
- * (AT-73 / CopyPaste-crh3.106). Sensitive items are never indexed, so a search
+ * Search is deliberately **not** paged: it runs against the whole database, so
+ * a match at index 800 is found without loading 800 rows first (AT-73 /
+ * CopyPaste-crh3.106). Sensitive items are never indexed, so a search
  * legitimately cannot return one.
  */
 export function useHistory(query: string, pushLive = false) {
@@ -145,18 +139,15 @@ export function useStatus() {
  * keeps its slot on copy while an unpinned one moves to the top) is then true
  * by construction rather than by a special case.
  *
- * The toast says what the user still has to do. Selecting an item makes it the
- * clipboard and nothing more — the app never synthesises ⌘V, because that
- * needs an Accessibility grant an ad-hoc-signed app loses on every update
- * (ADR-0001). Saying so at the moment of the copy is the difference between a
- * deliberate design and an app that looks broken.
+ * The toast says what the user still has to do, because the app never
+ * synthesises ⌘V (ADR-0001).
  */
 export function useCopy() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (item: Item) => copyItem(item.id),
     onSuccess: () => {
-      toast.success("Copied — press ⌘V to paste", { duration: 2500 });
+      toast.success(t("history.toast.copied"), { duration: 2500 });
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),
@@ -182,9 +173,7 @@ export function useClearHistory() {
   return useMutation({
     mutationFn: () => deleteAll(),
     onSuccess: (removed) => {
-      toast.success(
-        `Cleared ${removed} item${removed === 1 ? "" : "s"} — pinned items kept`,
-      );
+      toast.success(t("history.toast.cleared", { count: removed }));
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
@@ -201,12 +190,9 @@ export interface BulkOutcome {
 }
 
 /**
- * Run one operation over a selection, reporting how much of it worked.
- *
  * Sequential, not `Promise.all`: every one of these is a write to one SQLite
  * connection behind one mutex, so concurrency buys nothing and a hundred
  * simultaneous requests is how a client trips the daemon's connection cap.
- * `allSettled` semantics without the parallelism.
  */
 async function runBulk<T>(
   targets: readonly T[],
@@ -227,29 +213,31 @@ async function runBulk<T>(
   return { done, failed };
 }
 
-function report(verb: string, { done, failed }: BulkOutcome) {
+const BULK_KEYS = {
+  pinned: ["history.toast.pinned", "history.toast.pinnedPartial"],
+  unpinned: ["history.toast.unpinned", "history.toast.unpinnedPartial"],
+  deleted: ["history.toast.bulkDeleted", "history.toast.bulkDeletedPartial"],
+} as const;
+
+function report(verb: keyof typeof BULK_KEYS, { done, failed }: BulkOutcome) {
+  const [whole, partial] = BULK_KEYS[verb];
   if (failed === 0) {
-    toast.success(`${verb} ${done} item${done === 1 ? "" : "s"}`);
+    toast.success(t(whole, { count: done }));
   } else {
-    toast.warning(`${verb} ${done} of ${done + failed} — ${failed} failed`);
+    toast.warning(t(partial, { done, total: done + failed, failed }));
   }
 }
 
-/**
- * Pin or unpin a whole selection.
- *
- * `pinned` is decided by the caller from whether *every* selected item is
- * already pinned, so the button is one toggle with a label that matches what
- * it will do (CopyPaste-8ebg.55) rather than two buttons that are each wrong
- * half the time.
- */
+/** `pinned` is decided by the caller from whether *every* selected item is
+ *  already pinned, so the button is one toggle whose label matches what it will
+ *  do (CopyPaste-8ebg.55). */
 export function useBulkPin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ items, pinned }: { items: readonly Item[]; pinned: boolean }) =>
       runBulk(items, (item) => setPinned(item.id, pinned)),
     onSuccess: (outcome, { pinned }) => {
-      report(pinned ? "Pinned" : "Unpinned", outcome);
+      report(pinned ? "pinned" : "unpinned", outcome);
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),
@@ -262,7 +250,7 @@ export function useBulkDelete() {
   return useMutation({
     mutationFn: (items: readonly Item[]) => runBulk(items, (item) => deleteItem(item.id)),
     onSuccess: (outcome) => {
-      report("Deleted", outcome);
+      report("deleted", outcome);
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
@@ -271,12 +259,10 @@ export function useBulkDelete() {
 }
 
 /**
- * Rewrite the pinned order.
- *
- * Not optimistic. §3.1.6 specifies an optimistic reorder with a revert, and
- * that is right once the verb exists; while the bridge refuses it, an
- * optimistic move would show the user a new order, then take it away — which
- * reads as the app losing their change rather than as a missing feature.
+ * Not optimistic, though §3.1.6 specifies an optimistic reorder with a revert:
+ * while the bridge refuses the verb, an optimistic move would show the user a
+ * new order and take it away, which reads as the app losing their change
+ * rather than as a missing feature.
  */
 export function useReorderPinned() {
   const qc = useQueryClient();

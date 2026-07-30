@@ -1,6 +1,4 @@
 /**
- * Settings › Appearance — theme, accent, translucency.
- *
  * Two details are bug fixes rather than decoration:
  *
  *  - "System" says what it currently resolves to, live (CopyPaste-8ebg.63): a
@@ -16,25 +14,26 @@ import { Check } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Label } from "@/components/ui/label";
+import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { resolveTheme } from "@/lib/theme";
 import { ACCENTS, type Accent, type ThemePref, usePrefs } from "@/store/prefs";
 import { Row } from "@/components/settings/Row";
 
-const THEME_OPTIONS: ReadonlyArray<{ value: ThemePref; label: string }> = [
-  { value: "system", label: "System" },
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-];
+const THEME_OPTIONS = [
+  { value: "system", label: "settings.appearance.theme.system" },
+  { value: "dark", label: "settings.appearance.theme.dark" },
+  { value: "light", label: "settings.appearance.theme.light" },
+] as const satisfies ReadonlyArray<{ value: ThemePref; label: string }>;
 
-const ACCENT_LABEL: Record<Accent, string> = {
-  indigo: "Indigo",
-  blue: "Blue",
-  teal: "Teal",
-  green: "Green",
-  amber: "Amber",
-  rose: "Rose",
-};
+const ACCENT_LABEL = {
+  indigo: "settings.appearance.accent.indigo",
+  blue: "settings.appearance.accent.blue",
+  teal: "settings.appearance.accent.teal",
+  green: "settings.appearance.accent.green",
+  amber: "settings.appearance.accent.amber",
+  rose: "settings.appearance.accent.rose",
+} as const satisfies Record<Accent, string>;
 
 /** Subscribe to the OS appearance so the "resolves to" hint is live. */
 function useSystemTheme(): "dark" | "light" {
@@ -51,6 +50,7 @@ function useSystemTheme(): "dark" | "light" {
 }
 
 export function AppearanceTab() {
+  const { t } = useTranslation();
   const theme = usePrefs((s) => s.theme);
   const accent = usePrefs((s) => s.accent);
   const translucency = usePrefs((s) => s.translucency);
@@ -60,32 +60,42 @@ export function AppearanceTab() {
   return (
     <div className="flex flex-col">
       <Row
-        title="Theme"
+        title={t("settings.appearance.theme.title")}
         description={
           theme === "system"
-            ? `Currently resolves to ${system === "dark" ? "Dark" : "Light"}.`
-            : "Overrides the system appearance for CopyPaste only."
+            ? t("settings.appearance.theme.resolves", {
+                theme: t(
+                  system === "dark"
+                    ? "settings.appearance.theme.dark"
+                    : "settings.appearance.theme.light",
+                ),
+              })
+            : t("settings.appearance.theme.override")
         }
       >
         <ToggleGroup
           type="single"
           value={theme}
-          aria-label="Theme"
+          aria-label={t("settings.appearance.theme.title")}
           onValueChange={(value) => value && set("theme", value as ThemePref)}
         >
           {THEME_OPTIONS.map((option) => (
             <ToggleGroupItem key={option.value} value={option.value}>
-              {option.label}
+              {t(option.label)}
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
       </Row>
 
       <Row
-        title="Accent"
-        description="Tints selection, focus rings and primary buttons."
+        title={t("settings.appearance.accent.title")}
+        description={t("settings.appearance.accent.description")}
       >
-        <div role="group" aria-label="Accent" className="flex flex-wrap gap-s-2">
+        <div
+          role="group"
+          aria-label={t("settings.appearance.accent.title")}
+          className="flex flex-wrap gap-s-2"
+        >
           {ACCENTS.map((option) => {
             const selected = option === accent;
             return (
@@ -93,8 +103,8 @@ export function AppearanceTab() {
                 key={option}
                 type="button"
                 aria-pressed={selected}
-                aria-label={ACCENT_LABEL[option]}
-                title={ACCENT_LABEL[option]}
+                aria-label={t(ACCENT_LABEL[option])}
+                title={t(ACCENT_LABEL[option])}
                 data-accent={option}
                 onClick={() => set("accent", option)}
                 className={cn(
@@ -110,8 +120,8 @@ export function AppearanceTab() {
       </Row>
 
       <Row
-        title="Translucency"
-        description="Frost the window chrome over what is behind it. Turned off automatically when the system asks for reduced transparency."
+        title={t("settings.appearance.translucency.title")}
+        description={t("settings.appearance.translucency.description")}
       >
         <div className="flex items-center gap-s-2">
           <Switch
@@ -119,7 +129,9 @@ export function AppearanceTab() {
             checked={translucency}
             onCheckedChange={(value) => set("translucency", value)}
           />
-          <Label htmlFor="translucency">{translucency ? "On" : "Off"}</Label>
+          <Label htmlFor="translucency">
+            {t(translucency ? "common.on" : "common.off")}
+          </Label>
         </div>
       </Row>
     </div>

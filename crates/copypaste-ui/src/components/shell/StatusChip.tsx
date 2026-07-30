@@ -4,21 +4,31 @@
  * interpolated into it (INV-12).
  */
 import { useStatus } from "@/hooks/useHistory";
+import { useTranslation } from "@/i18n";
 import { classifyError } from "@/lib/errors";
 import { cn } from "@/lib/cn";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 
 type ChipState = "running" | "paused" | "starting" | "offline" | "error";
 
-const COPY: Record<ChipState, { label: string; dot: string }> = {
-  running: { label: "Service running", dot: "bg-ok" },
-  paused: { label: "Capture paused", dot: "bg-warn" },
-  starting: { label: "Starting up", dot: "bg-warn" },
-  offline: { label: "Service offline", dot: "bg-err" },
-  error: { label: "Service error", dot: "bg-err" },
+const DOT: Record<ChipState, string> = {
+  running: "bg-ok",
+  paused: "bg-warn",
+  starting: "bg-warn",
+  offline: "bg-err",
+  error: "bg-err",
 };
 
+const STATE_KEY = {
+  running: "shell.status.running",
+  paused: "shell.status.paused",
+  starting: "shell.status.starting",
+  offline: "shell.status.offline",
+  error: "shell.status.error",
+} as const satisfies Record<ChipState, string>;
+
 export function StatusChip() {
+  const { t } = useTranslation();
   const status = useStatus();
 
   let state: ChipState;
@@ -29,36 +39,39 @@ export function StatusChip() {
     state = kind === "offline" ? "offline" : kind === "not_ready" ? "starting" : "error";
     detail =
       state === "offline"
-        ? "The background service is not running."
+        ? t("shell.status.detail.offline")
         : state === "starting"
-          ? "The clipboard service is initializing."
-          : "The background service returned an error.";
+          ? t("shell.status.detail.starting")
+          : t("shell.status.detail.error");
   } else if (status.data === undefined) {
     state = "starting";
-    detail = "Connecting to the background service.";
+    detail = t("shell.status.detail.connecting");
   } else if (!status.data.capture_running) {
     state = "paused";
-    detail = "The service is running but is not recording the clipboard.";
+    detail = t("shell.status.detail.paused");
   } else {
     state = "running";
     const mismatch = status.data.protocol_version !== CURRENT_PROTOCOL_VERSION;
     detail = mismatch
-      ? `CopyPaste ${status.data.version}, on a different protocol version.`
-      : `CopyPaste ${status.data.version} · ${status.data.item_count} item${status.data.item_count === 1 ? "" : "s"}`;
+      ? t("shell.status.detail.mismatch", { version: status.data.version })
+      : t("shell.status.detail.running", {
+          version: status.data.version,
+          count: status.data.item_count,
+        });
   }
 
-  const { label, dot } = COPY[state];
+  const label = t(STATE_KEY[state]);
 
   return (
     <div
       role="status"
-      aria-label={`Clipboard service: ${label}. ${detail}`}
+      aria-label={t("shell.status.label", { state: label, detail })}
       title={detail}
       className="flex items-center gap-s-2 rounded-md px-s-2 py-s-1 text-xs text-muted-foreground"
     >
       <span
         aria-hidden="true"
-        className={cn("size-[var(--sz-badge-dot)] shrink-0 rounded-full", dot)}
+        className={cn("size-[var(--sz-badge-dot)] shrink-0 rounded-full", DOT[state])}
       />
       <span className="truncate">{label}</span>
     </div>

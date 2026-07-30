@@ -1,14 +1,11 @@
 /**
  * The bulk action bar (manifest §3.1.9).
  *
- * Two rules it exists to satisfy:
- *
  * * **Pin is one toggle, not two buttons.** Its label reflects whether *every*
  *   selected item is already pinned, so it always says what pressing it will
  *   do (CopyPaste-8ebg.55).
- * * **Bulk delete confirms.** There is no undo for a bulk delete, unlike the
- *   single-row delete's five-second window, so the dialog is the only gate.
- *   The caller owns the dialog; this only asks for it.
+ * * **Bulk delete confirms.** There is no undo for it, unlike the single-row
+ *   delete's five-second window, so the caller's dialog is the only gate.
  *
  * It sits above the list rather than floating over it: a floating bar covers
  * the rows the user is choosing between, and on a phone it lands exactly where
@@ -17,6 +14,7 @@
 import { Pin, PinOff, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "@/i18n";
 
 interface BulkBarProps {
   count: number;
@@ -35,6 +33,7 @@ export function BulkBar({
   onDelete,
   onCancel,
 }: BulkBarProps) {
+  const { t } = useTranslation();
   const nothing = count === 0;
 
   return (
@@ -43,13 +42,13 @@ export function BulkBar({
       // whose controls are ordinary buttons, and `role="toolbar"` would take
       // over arrow-key handling that belongs to the list below it.
       role="region"
-      aria-label="Selection actions"
+      aria-label={t("history.bulk.label")}
       className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-raised-1 px-s-3 py-s-2"
     >
       <span className="text-xs tabular-nums text-foreground" aria-live="polite">
         {nothing
-          ? "Select items to act on them"
-          : `${count} item${count === 1 ? "" : "s"} selected`}
+          ? t("history.bulk.empty")
+          : t("history.bulk.selected", { count })}
       </span>
 
       <div className="ml-auto flex items-center gap-s-2">
@@ -64,7 +63,7 @@ export function BulkBar({
           ) : (
             <Pin aria-hidden="true" />
           )}
-          {allPinned ? "Unpin" : "Pin"}
+          {t(allPinned ? "history.bulk.unpin" : "history.bulk.pin")}
         </Button>
 
         <Button
@@ -75,12 +74,12 @@ export function BulkBar({
           onClick={onDelete}
         >
           <Trash2 aria-hidden="true" />
-          Delete
+          {t("history.bulk.delete")}
         </Button>
 
         <Button variant="ghost" size="sm" onClick={onCancel}>
           <X aria-hidden="true" />
-          Done
+          {t("history.bulk.done")}
         </Button>
       </div>
     </div>

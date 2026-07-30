@@ -8,6 +8,7 @@
  * usable while the service is down.
  */
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useTranslation } from "@/i18n";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { AppearanceTab } from "@/components/settings/AppearanceTab";
 import { ListTab } from "@/components/settings/ListTab";
@@ -16,28 +17,30 @@ import { StorageTab } from "@/components/settings/StorageTab";
 import { SyncTab } from "@/components/settings/SyncTab";
 
 const TABS = [
-  { value: "appearance", label: "Appearance", render: () => <AppearanceTab /> },
-  { value: "list", label: "List", render: () => <ListTab /> },
-  { value: "shortcut", label: "Shortcut", render: () => <ShortcutTab /> },
-  { value: "sync", label: "Sync", render: () => <SyncTab /> },
-  { value: "storage", label: "Storage", render: () => <StorageTab /> },
-  { value: "about", label: "About", render: () => <AboutTab /> },
+  { value: "appearance", label: "settings.tabs.appearance", render: () => <AppearanceTab /> },
+  { value: "list", label: "settings.tabs.list", render: () => <ListTab /> },
+  { value: "shortcut", label: "settings.tabs.shortcut", render: () => <ShortcutTab /> },
+  { value: "sync", label: "settings.tabs.sync", render: () => <SyncTab /> },
+  { value: "storage", label: "settings.tabs.storage", render: () => <StorageTab /> },
+  { value: "about", label: "settings.tabs.about", render: () => <AboutTab /> },
 ] as const;
 
 export function SettingsView() {
+  const { t } = useTranslation();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex shrink-0 items-center border-b border-divider bg-panel px-s-3 py-s-2">
-        <h1 className="text-sm font-semibold">Settings</h1>
+        <h1 className="text-sm font-semibold">{t("settings.title")}</h1>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-s-3">
         <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-3">
           <Tabs defaultValue="appearance">
-            <TabsList aria-label="Settings sections">
+            <TabsList aria-label={t("settings.sections")}>
               {TABS.map((tab) => (
                 <TabsTrigger key={tab.value} value={tab.value}>
-                  {tab.label}
+                  {t(tab.label)}
                 </TabsTrigger>
               ))}
             </TabsList>

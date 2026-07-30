@@ -1,33 +1,20 @@
 /**
- * "Pair a new device" — mint a code on this device and read it out on the
- * other one.
- *
  * The code is the Noise pre-shared key in transferable form: anyone holding it
- * can pair. Three rules follow from that, all carried from manifest §3.3.1
- * even though the handshake underneath is not v1's:
+ * can pair. Three rules follow, carried from manifest §3.3.1 even though the
+ * handshake underneath is not v1's:
  *
- *  - **Hidden until revealed** (CopyPaste-1jms.2). It is generated eagerly so
- *    there is no wait, and covered until the user asks for it — a screen share
- *    or a shoulder is the threat, and the user is the one who knows whether
- *    either is present.
- *  - **Shown exactly once.** The daemon does not keep it, so the dialog says
- *    so before the user closes it. Regenerating means a *new* code, and
- *    re-blurs first: a fresh credential must not appear already visible
- *    (CopyPaste-crh3.21).
- *  - **Never logged, never toasted.** It exists in this component's state and
- *    goes when the dialog does.
- *
- * # The QR is the primary path
- *
- * Reading 52 base32 characters and a `host:port` out loud, into a phone's
- * on-screen keyboard, is a feature nobody uses. The QR carries both at once, so
- * one scan is the whole pairing. The text stays underneath it for the case
- * where the other device has no camera.
+ *  - **Hidden until revealed** (CopyPaste-1jms.2). Generated eagerly so there
+ *    is no wait, covered until the user asks — the user is the one who knows
+ *    whether a screen share or a shoulder is present.
+ *  - **Shown exactly once.** The daemon does not keep it. Regenerating means a
+ *    *new* code and re-blurs first: a fresh credential must not appear already
+ *    visible (CopyPaste-crh3.21).
+ *  - **Never logged, never toasted.**
  *
  * **INV-13: the QR's payload is never rendered as text.** `QrCode` draws to a
  * canvas for exactly that reason. The *code* below is a different string with
  * its own rule (hidden until revealed); the payload — code plus address — has
- * no revealed state at all, because there is no reason to ever show it.
+ * no revealed state at all.
  */
 import { useEffect, useState } from "react";
 import { Check, Copy, Eye, LoaderCircle, RefreshCw } from "lucide-react";
@@ -46,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { QrCode } from "@/components/devices/QrCode";
 import { usePairCreate } from "@/hooks/useDevices";
+import { useTranslation } from "@/i18n";
 import { encodePairing } from "@/lib/pairing";
 import { isUnavailable, toFriendly } from "@/lib/errors";
 import { cn } from "@/lib/cn";
@@ -56,6 +44,7 @@ interface PairCreateDialogProps {
 }
 
 export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) {
+  const { t } = useTranslation();
   const create = usePairCreate();
   const [name, setName] = useState("");
   const [revealed, setRevealed] = useState(false);
@@ -80,7 +69,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
     // Re-blur *before* the new code arrives: it is a new credential.
     setRevealed(false);
     setCopied(false);
-    create.mutate(name.trim() || "unnamed device");
+    create.mutate(name.trim() || t("devices.create.defaultName"));
   }
 
   async function copyCode() {
@@ -99,25 +88,22 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[var(--modal-w-wide)]">
         <DialogHeader>
-          <DialogTitle>Pair a new device</DialogTitle>
-          <DialogDescription>
-            Generate a code here, then scan it with the other device — or enter
-            it by hand under Devices → Add a device.
-          </DialogDescription>
+          <DialogTitle>{t("devices.create.title")}</DialogTitle>
+          <DialogDescription>{t("devices.create.description")}</DialogDescription>
         </DialogHeader>
 
         {pairing === null ? (
           <div className="flex flex-col gap-s-3">
             <div className="flex flex-col gap-s-1">
-              <Label htmlFor="pair-name">Name for the other device</Label>
+              <Label htmlFor="pair-name">{t("devices.create.nameLabel")}</Label>
               <Input
                 id="pair-name"
                 value={name}
-                placeholder="unnamed device"
+                placeholder={t("devices.create.defaultName")}
                 onChange={(event) => setName(event.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Used until that device tells us its own name.
+                {t("devices.create.nameHint")}
               </p>
             </div>
 
@@ -127,7 +113,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
                 className="rounded-md bg-warn/15 px-s-2 py-s-2 text-sm text-warn-strong"
               >
                 {isUnavailable(create.error)
-                  ? "Pairing isn't available in this build yet. It runs in the background service, which this build doesn't reach."
+                  ? t("devices.pairUnavailable")
                   : toFriendly(create.error)}
               </p>
             )}
@@ -141,31 +127,30 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
                     code: pairing.code,
                     addr: pairing.listen_addr,
                   })}
-                  label="Pairing code as a QR code. Scan it with the other device."
+                  label={t("devices.create.qrLabel")}
                 />
                 <p className="text-center text-xs text-muted-foreground">
-                  On the other device, choose Devices → Add a device and scan
-                  this. It carries the code and the address together.
+                  {t("devices.create.qrHint")}
                 </p>
               </div>
             )}
 
             <div className="flex flex-col gap-s-1">
               <span className="text-sm font-medium">
-                Pairing code
+                {t("devices.create.codeLabel")}
                 {pairing.listen_addr !== null && (
                   <span className="ml-1 font-normal text-muted-foreground">
-                    (if the other device has no camera)
+                    {t("devices.create.codeCameraNote")}
                   </span>
                 )}
               </span>
               <div className="relative">
                 <output
-                  aria-label={
+                  aria-label={t(
                     revealed
-                      ? "Pairing code"
-                      : "Pairing code, hidden. Activate reveal to show it."
-                  }
+                      ? "devices.create.codeLabel"
+                      : "devices.create.codeHidden",
+                  )}
                   className={cn(
                     "block rounded-md border border-border bg-muted px-s-3 py-s-3 font-mono text-lg tracking-wider break-all select-text",
                     !revealed && "blur-sm select-none",
@@ -178,29 +163,29 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
                 {!revealed && (
                   <button
                     type="button"
-                    aria-label="Reveal the pairing code"
+                    aria-label={t("devices.create.revealLabel")}
                     onClick={() => setRevealed(true)}
                     className="absolute inset-0 flex items-center justify-center gap-2 rounded-md bg-card/60 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
                   >
                     <Eye size={16} aria-hidden="true" />
-                    Click to reveal
+                    {t("devices.create.reveal")}
                   </button>
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                Anyone with this code can pair with this device. It is shown once
-                and cannot be retrieved again — generate a new one if you lose
-                it.
+                {t("devices.create.codeWarning")}
               </p>
             </div>
 
             <div className="flex flex-col gap-s-1">
-              <span className="text-sm font-medium">This device's address</span>
+              <span className="text-sm font-medium">
+                {t("devices.create.addressLabel")}
+              </span>
               <code className="rounded-md bg-muted px-s-2 py-s-1 font-mono text-sm">
-                {pairing.listen_addr ?? "Not reachable — check that sync is enabled"}
+                {pairing.listen_addr ?? t("devices.create.addressMissing")}
               </code>
               <p className="text-xs text-muted-foreground">
-                Enter this alongside the code on the other device.
+                {t("devices.create.addressHint")}
               </p>
             </div>
           </div>
@@ -210,7 +195,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
           {pairing !== null && (
             <Button variant="ghost" onClick={() => void copyCode()}>
               {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-              {copied ? "Copied" : "Copy code"}
+              {t(copied ? "devices.create.copied" : "devices.create.copyCode")}
             </Button>
           )}
           <Button
@@ -223,11 +208,13 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
             ) : pairing === null ? null : (
               <RefreshCw aria-hidden="true" />
             )}
-            {create.isPending
-              ? "Generating…"
-              : pairing === null
-                ? "Generate code"
-                : "Generate a new code"}
+            {t(
+              create.isPending
+                ? "devices.create.generating"
+                : pairing === null
+                  ? "devices.create.generate"
+                  : "devices.create.regenerate",
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

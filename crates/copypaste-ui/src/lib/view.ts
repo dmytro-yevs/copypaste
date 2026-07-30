@@ -1,26 +1,15 @@
 /**
- * Filtering and sorting the loaded history, and the identity rule both obey.
- *
- * Parity finding 19: v1's History had a kind filter and a sort control; v2 had
- * one flat list.
- *
  * **A no-op view returns the array it was given.** INV-2 says identical data
- * must not produce a new list reference, and a filter that rebuilds the array
- * on every render breaks that for every user who never opens the filter menu —
- * which is most of them. `applyView` short-circuits before it allocates.
+ * must not produce a new list reference, so `applyView` short-circuits before
+ * it allocates.
  *
- * # Why this operates on the loaded set
- *
- * The daemon sorts (pinned first, then newest) and this does not ask it to sort
- * differently. So a filter or a non-default order applies to the rows that have
- * been paged in, not to the whole database. That is v1's behaviour too, and the
- * alternative — a sort argument on `Method::List` — would put a second ordering
- * in the place manifest 05 depends on there being exactly one.
- *
- * What it does mean is that a filter must not be able to strand the user on an
- * empty list while matches sit unpaged. The list keeps an explicit "Load more"
- * control for exactly that, because a filtered list is too short to scroll.
+ * It operates on the *loaded* set: the daemon sorts (pinned first, then
+ * newest), and a sort argument on `Method::List` would put a second ordering
+ * in the place manifest 05 depends on there being exactly one. That means a
+ * filter can leave matches sitting unpaged, which is what the list's explicit
+ * "Load more" control exists for — a filtered list is too short to scroll.
  */
+import { t } from "@/i18n";
 import { type Kind, kindOf } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 
@@ -40,8 +29,6 @@ export function isDefaultView(view: ViewOptions): boolean {
 }
 
 /**
- * The kinds worth offering, in menu order.
- *
  * Not every `Kind`: `unknown` is what an item with no content resolves to, so
  * offering it as a filter would present "sensitive items and empty ones" as a
  * category. `secret` is offered because "show me what was flagged" is a real
@@ -59,28 +46,34 @@ export const FILTERABLE_KINDS: readonly Kind[] = [
   "secret",
 ];
 
-export const KIND_LABEL: Record<KindFilter, string> = {
-  all: "All kinds",
-  text: "Text",
-  url: "Links",
-  mail: "Email addresses",
-  path: "File paths",
-  code: "Code",
-  json: "JSON",
-  num: "Numbers",
-  color: "Colors",
-  secret: "Sensitive",
-  unknown: "Other",
-};
+const KIND_KEY = {
+  all: "history.kind.all",
+  text: "history.kind.text",
+  url: "history.kind.url",
+  mail: "history.kind.mail",
+  path: "history.kind.path",
+  code: "history.kind.code",
+  json: "history.kind.json",
+  num: "history.kind.num",
+  color: "history.kind.color",
+  secret: "history.kind.secret",
+  unknown: "history.kind.unknown",
+} as const satisfies Record<KindFilter, string>;
 
-export const SORT_LABEL: Record<SortOrder, string> = {
-  newest: "Newest first",
-  oldest: "Oldest first",
-};
+const SORT_KEY = {
+  newest: "history.sort.newest",
+  oldest: "history.sort.oldest",
+} as const satisfies Record<SortOrder, string>;
+
+export function kindLabel(kind: KindFilter): string {
+  return t(KIND_KEY[kind]);
+}
+
+export function sortLabel(sort: SortOrder): string {
+  return t(SORT_KEY[sort]);
+}
 
 /**
- * Apply a view to a page of items.
- *
  * Pinned items stay ahead of unpinned ones in **both** orders. Pinning is a
  * section, not a date: "oldest first" meaning "your pins are now at the bottom"
  * would move the rows a user pinned precisely so they would not move.

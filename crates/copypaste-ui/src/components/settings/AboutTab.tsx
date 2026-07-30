@@ -1,6 +1,4 @@
 /**
- * Settings › About — what is running, and one way to start over.
- *
  * `clipboard_backend` is surfaced because a fake backend must not be mistaken
  * for the real pasteboard: a build reading `fake` or `android-inprocess` says
  * so, in the warning colour, rather than looking like a working clipboard.
@@ -11,6 +9,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useStatus } from "@/hooks/useHistory";
+import { useTranslation } from "@/i18n";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import { usePrefs } from "@/store/prefs";
@@ -19,6 +18,7 @@ import { Row } from "@/components/settings/Row";
 const REAL_BACKENDS = /pasteboard|nspasteboard|system/i;
 
 export function AboutTab() {
+  const { t } = useTranslation();
   const status = useStatus();
   const resetPrefs = usePrefs((s) => s.reset);
 
@@ -31,71 +31,85 @@ export function AboutTab() {
 
   return (
     <div className="flex flex-col">
-      <Row title="Background service">
+      <Row title={t("settings.about.service.title")}>
         {status.error ? (
           <span className="text-sm text-err-strong">
             {friendlyError(classifyError(status.error))}
           </span>
         ) : status.data ? (
           <span className="text-sm tabular-nums text-muted-foreground">
-            CopyPaste {status.data.version}
+            {t("settings.about.service.version", { version: status.data.version })}
           </span>
         ) : (
-          <span className="text-sm text-muted-foreground">Connecting…</span>
+          <span className="text-sm text-muted-foreground">
+            {t("settings.about.service.connecting")}
+          </span>
         )}
       </Row>
 
       <Row
-        title="Clipboard capture"
-        description="Whether the service is watching the system clipboard right now."
+        title={t("settings.about.capture.title")}
+        description={t("settings.about.capture.description")}
       >
         {status.data ? (
           <Badge variant={status.data.capture_running ? "ok" : "warn"}>
-            {status.data.capture_running ? "Running" : "Paused"}
+            {t(
+              status.data.capture_running
+                ? "settings.about.capture.running"
+                : "settings.about.capture.paused",
+            )}
           </Badge>
         ) : (
-          <Badge variant="secondary">Unknown</Badge>
+          <Badge variant="secondary">{t("common.unknown")}</Badge>
         )}
       </Row>
 
       <Row
-        title="Clipboard backend"
-        description="Which clipboard the service is reading. A test backend means this build is not touching your real clipboard."
+        title={t("settings.about.backend.title")}
+        description={t("settings.about.backend.description")}
       >
         {status.data ? (
           <Badge variant={backendIsReal ? "secondary" : "warn"}>
             {status.data.clipboard_backend}
           </Badge>
         ) : (
-          <Badge variant="secondary">Unknown</Badge>
+          <Badge variant="secondary">{t("common.unknown")}</Badge>
         )}
       </Row>
 
       <Row
-        title="IPC protocol"
-        description="The app and the service have to agree on this."
+        title={t("settings.about.protocol.title")}
+        description={t("settings.about.protocol.description")}
       >
         <Badge variant={mismatch ? "error" : "secondary"}>
-          v{status.data?.protocol_version ?? CURRENT_PROTOCOL_VERSION}
-          {mismatch ? ` · app speaks v${CURRENT_PROTOCOL_VERSION}` : ""}
+          {t("settings.about.protocol.value", {
+            version: status.data?.protocol_version ?? CURRENT_PROTOCOL_VERSION,
+          })}
+          {mismatch
+            ? ` ${t("settings.about.protocol.mismatch", {
+                version: CURRENT_PROTOCOL_VERSION,
+              })}`
+            : ""}
         </Badge>
       </Row>
 
       <Row
-        title="Items stored"
-        description="Everything the service is holding for this device."
+        title={t("settings.about.items.title")}
+        description={t("settings.about.items.description")}
       >
         <span className="text-sm tabular-nums text-muted-foreground">
-          {status.data ? status.data.item_count.toLocaleString() : "—"}
+          {status.data
+            ? status.data.item_count.toLocaleString()
+            : t("common.noValue")}
         </span>
       </Row>
 
       <Row
-        title="Reset preferences"
-        description="Puts theme, accent and list settings back to their defaults. Your clipboard history is not touched."
+        title={t("settings.about.reset.title")}
+        description={t("settings.about.reset.description")}
       >
         <Button variant="outline" size="sm" onClick={resetPrefs}>
-          Reset preferences
+          {t("settings.about.reset.action")}
         </Button>
       </Row>
     </div>
