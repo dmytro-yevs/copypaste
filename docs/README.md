@@ -23,6 +23,7 @@ answer surprises you.
 | [parity-audit](rewrite/parity-audit.md) | What v0.4.1 did that v2 does not: nineteen capabilities that were neither ported nor recorded as dropped, ranked by what a user loses, each with where the auditor looked. |
 | [security-review](rewrite/security-review.md) | Whether `SECURITY.md`'s claims hold against the code. Fourteen findings, two High, and a list of the properties that did hold. |
 | [e2e/README](../e2e/README.md) | What a green real-WebView run proves and what it does not — the engine is WebKitGTK, so it is evidence about Linux, not about either shipping platform. |
+| [backlog](backlog.md) | Everything still outstanding, in one ranked list: the two parity audits, the security review, the ADRs' open questions and the code's own refusals, deduplicated and re-checked against the tree — plus what has already closed, what is a decision rather than a debt, and what is waiting on hardware. |
 
 ## Binding
 
