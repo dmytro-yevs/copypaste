@@ -10,7 +10,8 @@ export interface Daemon {
   readonly dataHome: string;
   add(content: string): Promise<void>;
   addMany(contents: readonly string[]): Promise<void>;
-  itemCount(): Promise<number>;
+  items(): Promise<CliItem[]>;
+  remove(id: string): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -57,6 +58,8 @@ export async function startDaemon(): Promise<Daemon> {
     await new Promise((r) => setTimeout(r, 250));
   }
 
+  let stopped = false;
+
   async function add(content: string): Promise<void> {
     const result = await cli(["add", content]);
     if (result.exitCode !== 0) {
@@ -71,13 +74,22 @@ export async function startDaemon(): Promise<Daemon> {
     async addMany(contents) {
       for (const content of contents) await add(content);
     },
-    async itemCount() {
+    async items() {
       const result = await cli(["--json", "list"]);
       if (result.exitCode !== 0) throw new Error(`\`copypaste list\` failed`);
-      const parsed = JSON.parse(result.stdout) as { data: CliItem[] };
-      return parsed.data.length;
+      return (JSON.parse(result.stdout) as { data: CliItem[] }).data;
+    },
+    async remove(id) {
+      const result = await cli(["delete", id]);
+      if (result.exitCode !== 0) {
+        throw new Error(`\`copypaste delete\` failed: ${result.stderr || result.stdout}`);
+      }
     },
     async stop() {
+      // Tests stop the daemon themselves to produce the offline state, and the
+      // app teardown stops it again.
+      if (stopped) return;
+      stopped = true;
       proc.kill("SIGTERM");
       await Promise.race([
         proc.catch(() => undefined),
