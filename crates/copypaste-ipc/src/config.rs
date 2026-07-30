@@ -363,7 +363,10 @@ mod tests {
         ] {
             assert!(patch.apply(&base).is_ok(), "{patch:?}");
         }
-        assert_eq!(ConfigData::default().sensitive_ttl_secs, 0);
+        // ...and the default is a real TTL, not the sentinel: v1 wiped a
+        // detected secret after 30 s and the parity audit records losing that
+        // as finding 3.
+        assert_eq!(ConfigData::default().sensitive_ttl_secs, 30);
     }
 
     #[test]
