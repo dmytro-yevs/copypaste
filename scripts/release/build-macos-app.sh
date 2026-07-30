@@ -96,12 +96,11 @@ UI_DIR="crates/copypaste-ui"
 # ---------------------------------------------------------------------------
 # 1. Version agreement
 # ---------------------------------------------------------------------------
-# tauri.conf.json carries no "version" key, so Tauri reads the Cargo package
-# version — which comes from [workspace.package]. That is the right design
-# (one source of truth) and it means this script must never rewrite it. It
-# checks instead: a mismatch is a release-preparation mistake, and failing here
-# is much cheaper than shipping a DMG whose Info.plist disagrees with its
-# filename and with the cask that points at it.
+# tauri.conf.json's "version" is a path to crates/copypaste-ui/package.json,
+# which check.sh holds equal to [workspace.package]. So this script must never
+# rewrite a version; it checks instead. A mismatch is a release-preparation
+# mistake, and failing here is much cheaper than shipping a DMG whose
+# Info.plist disagrees with its filename and with the cask that points at it.
 WS_VERSION="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml)"
 if [[ "$WS_VERSION" != "$VERSION" ]]; then
     echo "ERROR: version mismatch." >&2
@@ -125,11 +124,17 @@ echo "==> Building the frontend and the .app bundle"
     # --bundles app: produce only the .app. The DMG is made by make-dmg.sh,
     # for the reasons in the header.
     #
-    # APPLE_SIGNING_IDENTITY is explicitly cleared rather than merely unset, so
-    # an identity leaking in from the runner environment cannot silently change
-    # what this produces. There is no credential anywhere in this pipeline and
-    # this is one of the places that has to stay true.
-    APPLE_SIGNING_IDENTITY='' npm run tauri -- build --target "$TRIPLE" --bundles app
+    # `env -u`, not `APPLE_SIGNING_IDENTITY=''`. The CLI matches on
+    # `var_os("APPLE_SIGNING_IDENTITY")`, so present-and-empty is Some(""), and
+    # the bundler then signs with the identity "" — `codesign -s ""` asks the
+    # keychain for a certificate named nothing and fails with "The specified
+    # item could not be found in the keychain." Observed, not theorised: it is
+    # how the first real run of this pipeline died. Removing the variable is
+    # also the stronger form of what the old line was reaching for — an identity
+    # leaking in from the runner environment cannot change what this produces,
+    # because the bundler is left with no identity at all and skips signing,
+    # which is the order the header requires.
+    env -u APPLE_SIGNING_IDENTITY npm run tauri -- build --target "$TRIPLE" --bundles app
 )
 
 BUILT_APP="target/${TRIPLE}/release/bundle/macos/${APP_NAME}.app"
