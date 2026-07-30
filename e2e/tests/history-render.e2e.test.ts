@@ -79,7 +79,7 @@ describe("row geometry (INV-5)", () => {
   });
 
   test("a long clip is clipped to its reserved box rather than expanding it", async () => {
-    const overflow = await app.browser.execute(function (selector: string) {
+    const overflow = (await app.browser.execute(function (selector: string) {
       return Array.prototype.map.call(
         document.querySelectorAll(selector),
         function (node) {
