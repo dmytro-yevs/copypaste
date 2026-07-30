@@ -34,11 +34,12 @@ pub(super) type DeviceSecret = Zeroizing<[u8; KEY_LEN]>;
 
 pub(super) use backend::load_or_create_secret;
 
-/// macOS Keychain backend, gated on the `macos-keychain` cargo feature: this
-/// crate's `Cargo.toml` still needs `security-framework` as an optional
-/// dependency and the feature that enables it. Until then macOS falls through
-/// to the file backend, which is a development posture, not a shipping one.
-#[cfg(all(target_os = "macos", feature = "macos-keychain"))]
+/// macOS Keychain backend. Selected by the target alone: `security-framework`
+/// is declared under `[target.'cfg(target_os = "macos")'.dependencies]`, so it
+/// is already absent from a Linux build and a cargo feature could only add a
+/// way to forget it. It was one — every shipped macOS binary took the file
+/// backend below, because nothing passed `--features macos-keychain`.
+#[cfg(target_os = "macos")]
 mod backend {
     use super::super::keys::random_secret;
     use super::{
@@ -89,7 +90,7 @@ mod backend {
 ///
 /// See [`crate::crypto::Keyring::load_or_create`] for why this is not a
 /// keystore.
-#[cfg(not(all(target_os = "macos", feature = "macos-keychain")))]
+#[cfg(not(target_os = "macos"))]
 mod backend {
     use std::fs;
     use std::io::{ErrorKind, Read, Write};

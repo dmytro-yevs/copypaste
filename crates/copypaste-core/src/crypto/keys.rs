@@ -44,8 +44,9 @@ impl Keyring {
     /// Load the device secret from the OS keystore, creating one on first run.
     ///
     /// * **macOS** — a Keychain generic-password item under service
-    ///   `com.copypaste.daemon`, account `device-secret-key`. Requires the
-    ///   `macos-keychain` cargo feature.
+    ///   `com.copypaste.daemon`, account `device-secret-key`. Selected by the
+    ///   target, not by a cargo feature: a feature is a way to ship without it,
+    ///   and that is what happened.
     /// * **Every other platform** — a `0600` file named `device_secret.key`
     ///   under the platform data directory.
     ///
