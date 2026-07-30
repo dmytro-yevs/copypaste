@@ -5,6 +5,11 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
+# A JNI symbol is spelled out of the class's package and name, so R8 renaming
+# this one turns the keystore handover into an UnsatisfiedLinkError in release
+# builds only — and then the app cannot open its own history.
+-keep class com.copypaste.app.KeystoreContext { *; }
+
 # If your project uses WebView with JS, uncomment the following
 # and specify the fully qualified class name to the JavaScript interface
 # class:

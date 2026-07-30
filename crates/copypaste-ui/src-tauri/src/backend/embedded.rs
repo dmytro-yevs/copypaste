@@ -36,12 +36,10 @@
 //!
 //! Nothing in this file has been run. This host has no Android SDK and no NDK,
 //! so it is compiled — under `--features embedded-backend`, on Linux — and
-//! never executed. Two things are known-wrong for a shipping Android build and
-//! are recorded in ADR-0003 rather than papered over here: the device secret
-//! falls through `copypaste_core::Keyring` to the `0600`-file backend because
-//! there is no Android Keystore backend yet, and the data directory comes from
-//! `copypaste_ipc::data_dir()`, which resolves through `directories` rather
-//! than through the Android context.
+//! never executed. Note that the backend `copypaste_core::Keyring` selects here
+//! is *not* the one an Android build selects: on this host it is the `0600`
+//! file, and on Android it is the Keystore-wrapped secret, which no machine in
+//! this project can compile.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -123,10 +121,9 @@ impl EmbeddedBackend {
         std::fs::create_dir_all(data_dir)
             .map_err(|e| BackendError::internal(&format!("could not prepare storage: {e}")))?;
 
-        // `load_or_create` reaches the Android Keystore only once core grows a
-        // backend for it; today this is the `0600` file, which is a development
-        // posture (ADR-0003).
-        let keyring = Keyring::load_or_create()
+        // The same directory the database goes in, so the secret cannot end up
+        // somewhere the history is not (security review F-11).
+        let keyring = Keyring::load_or_create(data_dir)
             .map_err(|e| BackendError::internal(&format!("could not open the keystore: {e}")))?;
 
         // The v2 filename, from the shared crate. Deliberately distinct from
