@@ -45,6 +45,15 @@
 # not observed. If a quarantined ad-hoc build still refuses to launch on a real
 # Mac, the fallback is v1's: re-sign in the cask postflight. Casks/copypaste.rb
 # documents where that goes.
+#
+# ---------------------------------------------------------------------------
+# Why the release artefact is still ad-hoc when the cask re-signs anyway
+# ---------------------------------------------------------------------------
+# The signature that matters for TCC is applied on the user's machine, by
+# packaging/macos/selfsign.sh, with a certificate that only exists there. CI has
+# no certificate and ADR-0001 says it never will. So this build signs ad-hoc —
+# which is the floor macOS requires to execute a Mach-O at all — and stages the
+# re-signing script into the bundle for the cask to run.
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -160,8 +169,74 @@ EXEC="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$PLIST" 2>/dev/n
     echo "ERROR: CFBundleExecutable '$EXEC' is not present at ${BIN_DIR}/${EXEC}" >&2
     exit 1
 }
-SHORT_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo '?')"
-echo "    CFBundleExecutable=$EXEC  CFBundleShortVersionString=$SHORT_VERSION"
+
+# ---------------------------------------------------------------------------
+# CFBundleShortVersionString, and the pre-release suffix
+# ---------------------------------------------------------------------------
+# Apple's documented format for CFBundleShortVersionString is one to three
+# period-separated integers. A tag like v2.0.0-alpha.1 is not that, and nobody
+# on this project has yet watched Tauri's macOS bundler decide what to do with
+# one — it may pass the string through, or strip the suffix.
+#
+# Both outcomes are survivable and they are not equally survivable, so they are
+# distinguished rather than lumped together:
+#
+#   * a different numeric core means the bundle claims to be a different release
+#     from the DMG that contains it and the cask that points at the DMG. That is
+#     a broken release and it stops here.
+#   * a dropped "-alpha.1" is cosmetic. The cask keys on the DMG filename, so
+#     the install still works; the user sees "2.0.0" in About. Loud warning, and
+#     it goes into the CI step summary so the first real run answers the
+#     question instead of burying it.
+SHORT_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || true)"
+BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || true)"
+echo "    CFBundleExecutable=$EXEC"
+echo "    CFBundleShortVersionString=${SHORT_VERSION:-<unset>}  CFBundleVersion=${BUNDLE_VERSION:-<unset>}"
+
+[[ -n "$SHORT_VERSION" ]] || {
+    echo "ERROR: CFBundleShortVersionString is unset in the built bundle." >&2
+    echo "       Tauri normally writes it from the Cargo package version. An empty" >&2
+    echo "       value means the bundler did something unexpected; do not ship it." >&2
+    exit 1
+}
+
+if [[ "$SHORT_VERSION" != "$VERSION" ]]; then
+    if [[ "$SHORT_VERSION" == "${VERSION%%-*}" ]]; then
+        MSG="Tauri wrote CFBundleShortVersionString=$SHORT_VERSION for version $VERSION — the pre-release suffix was dropped"
+        echo "WARNING: $MSG" >&2
+        # Plain `[[ ... ]] && cmd` as a statement would trip `set -e` whenever the
+        # test is false, which is the common case. Keep it an `if`.
+        if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+            echo "> **Note:** $MSG" >> "$GITHUB_STEP_SUMMARY"
+        fi
+        if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+            echo "::warning::$MSG"
+        fi
+    else
+        echo "ERROR: CFBundleShortVersionString is '$SHORT_VERSION' but this build is '$VERSION'." >&2
+        echo "       The bundle would disagree with its own DMG filename and with the cask." >&2
+        exit 1
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Stage the on-machine signing script
+# ---------------------------------------------------------------------------
+# packaging/macos/selfsign.sh runs on the user's machine, from the cask's
+# postflight, and does the de-quarantine and the re-sign with a per-machine
+# certificate. It travels inside the bundle rather than being pasted into the
+# cask so that it is reviewable in a diff, testable on its own, and identical in
+# the tap and in this repository.
+#
+# It is copied in BEFORE signing, so the signature seals it. A script the cask
+# executes must be covered by the seal like any other resource.
+SELFSIGN_SRC="packaging/macos/selfsign.sh"
+[[ -f "$SELFSIGN_SRC" ]] || { echo "ERROR: $SELFSIGN_SRC missing" >&2; exit 1; }
+bash -n "$SELFSIGN_SRC" || { echo "ERROR: $SELFSIGN_SRC does not parse" >&2; exit 1; }
+mkdir -p "${APP}/Contents/Resources"
+cp "$SELFSIGN_SRC" "${APP}/Contents/Resources/selfsign.sh"
+chmod 755 "${APP}/Contents/Resources/selfsign.sh"
+echo "    staged Contents/Resources/selfsign.sh"
 
 # ---------------------------------------------------------------------------
 # 4. Sign, ad-hoc, inside out
@@ -191,6 +266,13 @@ codesign --force --sign - --timestamp=none "$APP"
 
 echo "==> Verifying"
 codesign --verify --strict --verbose=2 "$APP"
+
+# Print the designated requirement. On an ad-hoc signature this is a bare cdhash
+# and nothing else, which is exactly why a TCC grant against this bundle would
+# die on the next build — and why the cask re-signs on the user's machine. Worth
+# having in the release log the first time anyone reads one.
+echo "==> Designated requirement (ad-hoc: expect a bare cdhash)"
+codesign --display --requirements - "$APP" 2>&1 || true
 
 # Reported, not enforced. `spctl` will reject an ad-hoc bundle — that is the
 # expected outcome and the entire subject of ADR-0001. Printing it keeps the

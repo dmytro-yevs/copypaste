@@ -45,64 +45,71 @@ cask "copypaste" do
   app "CopyPaste.app"
 
   # ---------------------------------------------------------------------------
-  # Quarantine
+  # Quarantine, and the signature
   # ---------------------------------------------------------------------------
-  # Homebrew applies com.apple.quarantine to everything it downloads, and the
-  # escape hatch is gone: `--no-quarantine` was deprecated in Homebrew 5.1 with
-  # no replacement. A Homebrew maintainer's guidance on the deprecation thread
-  # (Homebrew discussion #6537) is verbatim:
+  # Two jobs, both delegated to one script that ships inside the bundle:
+  # Contents/Resources/selfsign.sh, checked in at packaging/macos/selfsign.sh.
   #
-  #   "Yes, post-processing is required, as it would be if you download and
-  #    extract the files using other methods."
+  # 1. Homebrew applies com.apple.quarantine to everything it downloads, and the
+  #    escape hatch is gone: `--no-quarantine` was deprecated in Homebrew 5.1
+  #    with no replacement. A Homebrew maintainer's guidance on the deprecation
+  #    thread (Homebrew discussion #6537) is verbatim:
   #
-  # This block is that post-processing.
+  #      "Yes, post-processing is required, as it would be if you download and
+  #       extract the files using other methods."
   #
-  # It names our bundle. It does NOT operate on `#{appdir}` — the widely-copied
-  # `xattr -rd com.apple.quarantine /Applications/*` form de-quarantines every
-  # app the user has ever downloaded. A Homebrew maintainer objected to exactly
-  # that suggestion on the same thread, for the same reason. Doing it here
-  # rather than in a README also matters: telling users to run `xattr -rd`
-  # teaches a habit that is genuinely dangerous applied anywhere else.
+  #    The script names our bundle and only ours. The widely-copied
+  #    `xattr -rd com.apple.quarantine /Applications/*` form de-quarantines
+  #    every app the user has ever downloaded, and a Homebrew maintainer
+  #    objected to exactly that on the same thread. Doing it here rather than in
+  #    a README also matters: telling users to run `xattr -rd` teaches a habit
+  #    that is genuinely dangerous applied anywhere else.
+  #
+  # 2. It re-signs the bundle. v1 did this too, with `--sign -`, to work around
+  #    a quarantined hardened-runtime ad-hoc bundle refusing to launch. v2 signs
+  #    with a self-signed certificate generated once on this machine instead,
+  #    because that is what makes a TCC grant survive an update — see ADR-0001,
+  #    which also carries the test procedure for the one thing about it that
+  #    documentation does not settle. The script falls back to `--sign -` if the
+  #    certificate path fails for any reason, so the outcome is never worse than
+  #    what v1 shipped.
+  #
+  # Why a script in the bundle rather than commands here. The logic has real
+  # failure handling in it — roughly two hundred lines — and inlining that into
+  # a cask would put it beyond review, duplicate it into the tap, and make it
+  # untestable. It is copied in before the release build signs the bundle, so
+  # the seal covers it.
+  #
+  # Why `/bin/bash <script>` rather than executing it directly: the bundle is
+  # still quarantined at this point, and invoking the interpreter explicitly
+  # takes Gatekeeper out of the question entirely.
   #
   # Verified against Homebrew's current source (2026-07-30), not assumed:
-  # `postflight` is still registered from Cask::DSL via
-  # ARTIFACT_BLOCK_CLASSES, and `system_command` is still a public method on
-  # Cask::DSL::Base alongside the `appdir` delegator, so both names below
-  # resolve. Flight blocks run inside `install_artifacts`, after the `app`
-  # stanza has moved the bundle into place — which is the ordering this needs.
+  # `postflight` is still registered from Cask::DSL via ARTIFACT_BLOCK_CLASSES;
+  # `system_command` is still a public method on Cask::DSL::Base alongside the
+  # `appdir` delegator; flight blocks run inside `install_artifacts`, after the
+  # `app` stanza has moved the bundle into place, which is the ordering this
+  # needs. One correction to what was assumed before: `system_command` is
+  # `SystemCommand.run!`, which is must-succeed — a non-zero exit raises and
+  # rolls the install back. That is why the script owns its own fallbacks and
+  # exits non-zero only when the app would genuinely not open, and why the
+  # unguarded `xattr -dr` this block used to run was a latent abort (it exits
+  # non-zero for any file in the tree that has no such attribute).
   postflight do
     app_path = "#{appdir}/CopyPaste.app"
+    selfsign = "#{app_path}/Contents/Resources/selfsign.sh"
 
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", app_path],
-                   print_stderr: false
-
-    # Second step, and a deviation from ADR-0001's snippet — deliberate, and
-    # the reason is recorded rather than inferred.
-    #
-    # v1 shipped this same cask with the hardened runtime enabled on an ad-hoc
-    # signature and found that removing the quarantine attribute was not
-    # sufficient: the app still would not launch, failing with
-    # RBSRequestErrorDomain Code=5 / POSIX 163, which macOS shows the user as
-    # "CopyPaste.app can't be opened." Re-sealing the bundle fixed it.
-    #
-    # v2's build drops the hardened runtime (it is a precondition for
-    # notarisation and buys nothing without it), which SHOULD make this
-    # unnecessary. "Should" is doing real work in that sentence — nobody on
-    # this project has run either build on a Mac. Since the cost of being wrong
-    # is an app that cannot be opened at all, the re-seal stays until a real
-    # install proves it redundant.
-    #
-    # It is safe to keep: the app needs no TCC permission, so nothing depends
-    # on the code hash staying put (ADR-0001, consequence 1). Not `--deep`,
-    # which Apple deprecated and which would re-sign the injected daemon and
-    # CLI with no identifier of their own; the outer seal is what changed.
-    #
-    # /usr/bin/codesign is an Xcode Command Line Tools shim, but Homebrew
-    # itself requires the CLT, so it is present wherever this can run.
-    system_command "/usr/bin/codesign",
-                   args: ["--force", "--sign", "-", "--timestamp=none", app_path],
-                   print_stderr: false
+    if File.exist?(selfsign)
+      system_command "/bin/bash", args: [selfsign, app_path]
+    else
+      # A DMG built before the script existed. Do what v1 did, and keep the
+      # `|| true` on the xattr call for the must-succeed reason above.
+      system_command "/bin/bash",
+                     args: ["-c",
+                            "/usr/bin/xattr -dr com.apple.quarantine \"$1\" 2>/dev/null || true; " \
+                            "exec /usr/bin/codesign --force --sign - --timestamp=none \"$1\"",
+                            "--", app_path]
+    end
   end
 
   # Carried from v1, where it fixed an observed production failure.
@@ -128,6 +135,13 @@ cask "copypaste" do
     end
   end
 
+  # The signing keychain and its password live under
+  # ~/Library/Application Support/CopyPaste/signing, so this already removes
+  # them. That is the right semantics for `zap` — remove every trace — and it is
+  # worth knowing that it is not free: a later reinstall generates a new
+  # certificate, macOS sees a different app, and any permission has to be
+  # granted again. `brew uninstall` alone leaves the certificate in place, which
+  # is what makes uninstall-then-reinstall keep a grant.
   zap trash: [
     "~/Library/Application Support/CopyPaste",
     "~/Library/Caches/CopyPaste",
@@ -135,9 +149,11 @@ cask "copypaste" do
   ]
 
   caveats <<~EOS
-    CopyPaste is ad-hoc signed and not notarised by Apple — the project has no
-    Apple Developer ID. This cask removes the Gatekeeper quarantine attribute
-    from CopyPaste.app on install so the app opens normally.
+    CopyPaste is not notarised by Apple — the project has no Apple Developer ID.
+    On install this cask removes the Gatekeeper quarantine attribute from
+    CopyPaste.app and re-signs it with a certificate generated on this machine,
+    which stays in your keychain and is never sent anywhere. Updates are signed
+    by the same certificate, so macOS keeps treating it as the same app.
 
     The app requires no Accessibility or Input Monitoring permission. Choosing
     an item puts it on the clipboard; you press Cmd+V yourself.
