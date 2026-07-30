@@ -6,6 +6,10 @@ import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    // Before super.onCreate, which is where Tauri's setup runs: that setup
+    // opens the history database, and opening it needs the device secret out
+    // of the Android Keystore, which cannot be found until this has run.
+    KeystoreContext.initialize(applicationContext)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
   }
