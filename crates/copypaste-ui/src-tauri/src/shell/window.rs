@@ -119,6 +119,7 @@ pub struct IconRect {
     pub bottom: f64,
 }
 
+#[cfg(not(target_os = "android"))]
 fn to_physical(rect: tauri::Rect, scale: f64) -> IconRect {
     let position = match rect.position {
         tauri::Position::Physical(p) => PhysicalPosition::new(p.x as f64, p.y as f64),

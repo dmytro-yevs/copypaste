@@ -56,6 +56,12 @@ use service::Supervisor;
 use tauri::Manager as _;
 
 /// Build and run the app.
+///
+/// On Android there is no `main`: the activity loads `libcopypaste_ui_lib.so`
+/// and calls into it, so the entry point has to be generated. Without this the
+/// library builds and the CLI then refuses it — "does not include required
+/// runtime symbols" — which reads like a linker problem and is not one.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The dialog plugin is registered for `commands::transfer`, which drives it
     // from Rust. It is deliberately not granted to the WebView in
