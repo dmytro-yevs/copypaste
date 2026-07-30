@@ -1,5 +1,5 @@
-//! The FTS5 layer, and two of the three ADR-015 layers that keep sensitive
-//! content out of it. Counted in one place:
+//! The FTS5 layer, and the ADR-015 enforcement that keeps sensitive content out
+//! of it. Counted in one place:
 //!
 //! 1. **Write guard** — [`super::Store::insert`] drops any `search_text` on an
 //!    item marked sensitive, whatever the caller passed.
@@ -10,12 +10,27 @@
 //!    can never surface.
 //!
 //! All three are required: v1 shipped databases with plaintext passwords in FTS
-//! because one was missing.
+//! because one was missing. All three are also decided *at capture*, which is
+//! what [`crate::sensitive::purge_indexed_secrets`] exists to correct — it reads
+//! the index through [`Store::indexed_texts`] and drops what the current ruleset
+//! calls a secret, whatever the row was flagged as when it arrived.
 
 use rusqlite::{params, OptionalExtension, Transaction};
 
+use super::connection::write_tx;
 use super::model::{item_columns_ci, row_to_item, StoreError, StoredItem};
 use super::store::Store;
+
+/// One row of the search index, as stored. `text` is plaintext: `clipboard_fts`
+/// is the one table not under the item AEAD, which is exactly why anything
+/// sensitive reaching it matters.
+pub struct IndexedText {
+    /// Resume point for the next page. Stable under the deletes this feeds,
+    /// which only ever remove rows already passed.
+    pub rowid: i64,
+    pub id: String,
+    pub text: String,
+}
 
 impl Store {
     /// Full-text search over non-sensitive items, best match first. Layer 3:
@@ -36,6 +51,73 @@ impl Store {
         ))?;
         let rows = stmt.query_map(params![match_expr, i64::from(limit)], row_to_item)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// A page of the index in `rowid` order, after `after_rowid` exclusive.
+    ///
+    /// Paged rather than collected: the index holds every searchable clipboard
+    /// item's plaintext, and a rescan that materialised all of it at once would
+    /// hold the whole history in memory to look at one row at a time.
+    pub fn indexed_texts(
+        &self,
+        after_rowid: i64,
+        limit: u32,
+    ) -> Result<Vec<IndexedText>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(
+            "SELECT rowid, id, content_text FROM clipboard_fts \
+              WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![after_rowid, i64::from(limit)], |row| {
+            Ok(IndexedText {
+                rowid: row.get(0)?,
+                id: row.get(1)?,
+                text: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Removes every index row belonging to an item already flagged
+    /// `is_sensitive`, returning how many went.
+    ///
+    /// Manifest 03 S4, which v1 discharged as migration v13: an index row for a
+    /// flagged item is one the write guard should never have allowed, and it
+    /// holds plaintext whatever the current ruleset would say about that
+    /// plaintext now. Costs one indexed sub-select and no scanning, so it is the
+    /// cheap half of [`crate::sensitive::purge_indexed_secrets`] and runs first.
+    pub fn purge_index_of_flagged(&self) -> Result<u64, StoreError> {
+        let conn = self.conn()?;
+        let removed = conn.execute(
+            "DELETE FROM clipboard_fts WHERE id IN \
+                 (SELECT id FROM clipboard_items WHERE is_sensitive = 1)",
+            [],
+        )?;
+        Ok(removed as u64)
+    }
+
+    /// Removes index rows by `rowid`, returning how many went.
+    ///
+    /// **Only `clipboard_fts` is touched.** No history row is deleted,
+    /// tombstoned or reflagged, so the worst outcome of a wrong verdict here is
+    /// an item the user cannot find by searching — never one they cannot find at
+    /// all (CLAUDE.md rule 4). Flipping `is_sensitive` instead would arm
+    /// [`crate::sensitive::sweep_sensitive`], which hard-deletes.
+    pub fn purge_from_index(&self, rowids: &[i64]) -> Result<u64, StoreError> {
+        if rowids.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let mut removed = 0u64;
+        {
+            let mut stmt = tx.prepare("DELETE FROM clipboard_fts WHERE rowid = ?1")?;
+            for rowid in rowids {
+                removed += stmt.execute([rowid])? as u64;
+            }
+        }
+        tx.commit()?;
+        Ok(removed)
     }
 }
 

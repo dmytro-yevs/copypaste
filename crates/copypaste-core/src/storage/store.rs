@@ -8,6 +8,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 
 use super::connection::{apply_connection_pragmas, apply_key, build_pool, validate_key};
+use super::legacy::is_v1_database;
 use super::model::StoreError;
 use super::schema::migrate;
 
@@ -36,6 +37,12 @@ impl Store {
     /// existing file yields [`StoreError::InvalidKey`]; there is no fallback
     /// read and no unkeyed plaintext probe.
     pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
+        // Before anything is opened: a file written by v0.4.x is refused with
+        // its own error, never migrated and never mistaken for corruption
+        // (CLAUDE.md rule 3, [`super::legacy`]).
+        if is_v1_database(path) {
+            return Err(StoreError::LegacyDatabase);
+        }
         // Probe on a private connection first so a wrong key surfaces as
         // InvalidKey instead of an opaque pool-construction failure, and so the
         // migration runs once rather than once per pooled connection.
@@ -89,7 +96,7 @@ mod tests {
     #[test]
     fn file_backed_store_round_trips_and_rejects_a_wrong_key() {
         let dir = TempDir::new().unwrap();
-        let path = dir.path().join("clipboard.db");
+        let path = dir.path().join("copypaste-v2.db");
 
         let id = {
             let s = Store::open(&path, &KEY).unwrap();
@@ -117,7 +124,7 @@ mod tests {
         // And the error must not leak the path (it discloses the username).
         let rendered = err.to_string();
         assert!(!rendered.contains(&*path.to_string_lossy()));
-        assert!(!rendered.contains("clipboard.db"));
+        assert!(!rendered.contains("copypaste-v2.db"));
     }
 
     #[test]

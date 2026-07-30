@@ -43,6 +43,10 @@ the IPC verbs (see `04-ipc-protocol.md`).
 user database written by v0.4.1 (schema v15) and by every shipped predecessor
 (v1..v14).** That constraint dominates every design decision below.
 
+> **Reversed in v2 by CLAUDE.md rule 3 — see the amendment under I1.** v2 opens
+> none of those files. Read the rest of this manifest with that inverted: the
+> ladder, the plaintext auto-migration and the rekey procedure are provenance.
+
 ### File layout on disk
 
 | File | Notes |
@@ -63,6 +67,22 @@ so a crashed previous attempt cannot poison the next one.
 **I1 — Openability.** A database file at any `user_version` in `1..=15` MUST
 open and be migrated forward to the current version in a single atomic
 transaction. Never require the user to "start fresh".
+
+> **Amended in v2, 2026-07-30: inverted.** CLAUDE.md rule 3 drops backward
+> compatibility, so v2 does the opposite — a v0.4.x file MUST NOT be opened,
+> migrated or modified. What survives is the *reason* I1 was written: the user
+> must not silently lose a history. v2 discharges that by leaving the file
+> exactly as it is and saying so.
+>
+> `copypaste-core/src/storage/legacy.rs` identifies one **positively**, without
+> consulting the key: an unkeyed read showing `user_version` in `1..=15` plus a
+> `clipboard_items` carrying `item_id`, `lamport_ts` and `wall_time` (the
+> pre-encryption case, §3.4), or — because SQLCipher pages carry no header to
+> read — v0.4.x's filename `clipboard.db` on a page-shaped file, which v2 can
+> treat as evidence precisely because it writes `copypaste-v2.db` instead. The
+> verdict is never "the key failed, therefore v1": that would report a damaged
+> v2 file as an old history. `StoreError::LegacyDatabase` is its own variant,
+> distinct from `InvalidKey`, and names no path (rule 4).
 
 **I2 — No silent downgrade.** If `PRAGMA user_version > SCHEMA_VERSION`, the
 open MUST fail with a typed downgrade error and MUST NOT touch the file.
@@ -470,6 +490,27 @@ transaction. The FTS delete always runs even if `is_sensitive` was already 1,
 to repair a stale row from an earlier partial failure.
 
 Plus: migration **v13** purges pre-existing leaked rows (§4).
+
+> **Amended in v2, 2026-07-30: the purge stays, the migration goes, and the
+> predicate widens.** Rule 3 removes the ladder, so there is no v13 to hang a
+> one-time data fix on — and a one-time fix would have been the wrong shape
+> anyway. v13 assumed the leak was a *missing guard*, fixed once. The leak that
+> recurs is a *changed ruleset*: `is_sensitive` is decided at capture and never
+> revisited, so every rule added afterwards leaves the rows that predate it
+> holding plaintext in `clipboard_fts` forever. F-1 and F-2 landed on
+> 2026-07-30 and did exactly that.
+>
+> `copypaste-core/src/sensitive/purge.rs::purge_indexed_secrets` runs on every
+> open, not once per schema version, and applies both predicates: v13's
+> (`id IN (SELECT id FROM clipboard_items WHERE is_sensitive = 1)`, kept
+> verbatim) and a re-scan of the indexed text under the current ruleset.
+>
+> **It removes index rows and nothing else.** It does not write `is_sensitive`,
+> which would arm the auto-wipe sweep's hard delete with a verdict from a
+> ruleset the user never reviewed (rule 4, and the reasoning manifest 07 §6.2
+> already uses to refuse a stamped wipe flag). A full pass over the 10,000-item
+> default history measures 9.7 ms, and over 11 MiB of indexed text 38 ms, so no
+> resume cursor is needed.
 
 **Search SQL (no type filter):**
 
@@ -978,6 +1019,15 @@ not the implementation.
 | S3 | Search never returns a sensitive item even with a **stale** FTS row | direct `INSERT INTO clipboard_fts` for a sensitive id, then `search_items` → empty | `items/tests.rs::search_items_does_not_return_sensitive_items` |
 | S4 | **v13 purges pre-existing sensitive FTS rows** | build a v12 DB with one sensitive + one normal FTS row → migrate → sensitive row gone, normal row survives, `user_version == 15` | `schema/tests.rs::v13_migration_purges_sensitive_fts_rows` |
 | S5 | v13 is a no-op on a clean DB | | `schema/tests.rs::v13_migration_is_noop_when_no_sensitive_fts_rows_exist` |
+
+> **S4 and S5 amended in v2, 2026-07-30** (see §3.5): binding as behaviour, not
+> as a migration step. `sensitive/purge.rs::a_stale_index_row_for_a_flagged_item_is_purged`
+> is S4 and `::a_second_pass_finds_nothing_and_a_clean_history_is_untouched` is
+> S5. v2 adds what v13 could not test, because v13 ran once:
+> `::a_row_indexed_before_its_rule_existed_is_purged` — a row the *current*
+> ruleset calls a secret and the ruleset at capture did not — and
+> `::a_purged_row_keeps_its_clipboard_item`, which pins that the pass takes an
+> index entry and never an item.
 | S6 | `mark_sensitive` removes the FTS entry atomically, and repairs a stale row for an already-sensitive item | | `items/tests.rs::mark_sensitive_removes_fts_entry`, `::mark_sensitive_clears_stale_fts_for_already_sensitive_item`, `::mark_sensitive_unknown_id_is_noop` |
 | S7 | **Sensitive items never carry a thumbnail** | both insert paths suppress it; `set_thumb` refuses a non-None blob on a sensitive row but always allows clearing | `items/tests.rs::sensitive_image_insert_item_suppresses_thumb`, `::sensitive_image_insert_item_with_fts_suppresses_thumb`, `::set_thumb_suppresses_backfill_for_sensitive_item`, `::non_sensitive_image_insert_retains_thumb` |
 | S8 | `has_sensitive_items` **fails closed** — returns `true` on a query error | | `items/tests.rs::has_sensitive_items_fails_closed_on_db_error` |
