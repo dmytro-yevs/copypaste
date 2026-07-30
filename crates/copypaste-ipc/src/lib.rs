@@ -15,8 +15,11 @@
 
 pub mod config;
 pub mod content_type;
+pub mod paths;
 pub mod payload;
 pub mod redact;
+
+pub use paths::{data_dir, database_path, socket_path, v1_data_dir};
 
 pub use config::{ConfigData, ConfigError, ConfigPatch, Liveness};
 pub use payload::{
@@ -25,7 +28,6 @@ pub use payload::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Bumped on any breaking change to the request or response shape.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -117,7 +119,7 @@ pub enum Method {
     /// their relative order and sort after the ones it does.
     ///
     /// The order is local. Nothing about a pin travels on either transport
-    /// (`meta::apply` preserves the local `pinned` and `pin_order` across an
+    /// (`Store::upsert` preserves the local `pinned` and `pin_order` across an
     /// incoming version), so reordering here does not reorder anywhere else.
     ReorderPinned {
         ids: Vec<String>,
@@ -389,26 +391,121 @@ pub enum ErrorCode {
     /// sign in, retype the passphrase — and never a retry (manifest 04's
     /// `auth_failed`).
     AuthFailed,
+    /// The file is a CopyPaste 0.4 history. v2 shares no formats with v0.4.x
+    /// (CLAUDE.md rule 3) and has neither opened nor altered it.
+    ///
+    /// Its own code because every other reading of the same failure sends the
+    /// user somewhere useless: `Internal` reads as a bug, and the restore
+    /// path's "not a backup, or damaged" reads as data loss when the data is
+    /// intact. The decision is a human one — keep the old history and run an
+    /// older build, or start fresh — so a client must not offer a retry.
+    LegacyDatabase,
+    /// The key store could not be read, so what it holds is *unknown* — locked
+    /// keychain, unreadable directory, wrong data directory
+    /// (`CryptoError::KeystoreUnavailable`).
+    ///
+    /// Transient by nature: unlocking the keychain turns this into success,
+    /// which is the entire reason it is not [`ErrorCode::KeyUnusable`].
+    KeyLocked,
+    /// The device key is present and cannot be used
+    /// (`CryptoError::KeystoreEntryUnusable`), so the history encrypted under
+    /// it cannot be decrypted by anything.
+    ///
+    /// The counterpart to [`ErrorCode::KeyLocked`] and the reason both exist:
+    /// collapsing the two tells a user to retry against a condition where no
+    /// number of retries produces a different answer.
+    KeyUnusable,
     Internal,
 }
 
-/// Where the daemon socket lives.
-///
-/// One definition, used by the daemon and the CLI. v1 duplicated this logic in
-/// three places and the module doc admitted it.
-pub fn socket_path() -> PathBuf {
-    data_dir().join("daemon.sock")
+impl ErrorCode {
+    /// Whether repeating the same request could plausibly succeed.
+    ///
+    /// One answer, next to the taxonomy, because the alternative is each
+    /// surface deciding again — and the defect this guards is a client
+    /// offering **Try again** against a condition that can never change.
+    /// Anything a human must act on is `false`, whether the action is a
+    /// sign-in, a downgrade, or an admission that the data is gone.
+    #[must_use]
+    pub fn retryable(self) -> bool {
+        match self {
+            Self::NotReady | Self::KeyLocked | Self::Internal => true,
+            Self::NotFound
+            | Self::InvalidRequest
+            | Self::ProtocolMismatch
+            | Self::AuthFailed
+            | Self::LegacyDatabase
+            | Self::KeyUnusable => false,
+        }
+    }
 }
 
-/// v2 database filename. Deliberately distinct from v1's, so an existing v0.4.x
-/// database is never opened, modified, or reported as corrupt — see CLAUDE.md
-/// rule 3.
-pub fn database_path() -> PathBuf {
-    data_dir().join("copypaste-v2.db")
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub fn data_dir() -> PathBuf {
-    directories::ProjectDirs::from("com", "copypaste", "CopyPaste")
-        .map(|d| d.data_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".copypaste"))
+    /// The codes are the contract; a client branches on them and never on the
+    /// text (manifest 04, I9). Renaming one silently is a client that stops
+    /// recognising a state and falls back to its generic one.
+    #[test]
+    fn error_codes_keep_their_wire_spelling() {
+        for (code, wire) in [
+            (ErrorCode::NotFound, "\"not_found\""),
+            (ErrorCode::InvalidRequest, "\"invalid_request\""),
+            (ErrorCode::ProtocolMismatch, "\"protocol_mismatch\""),
+            (ErrorCode::NotReady, "\"not_ready\""),
+            (ErrorCode::AuthFailed, "\"auth_failed\""),
+            (ErrorCode::LegacyDatabase, "\"legacy_database\""),
+            (ErrorCode::KeyLocked, "\"key_locked\""),
+            (ErrorCode::KeyUnusable, "\"key_unusable\""),
+            (ErrorCode::Internal, "\"internal\""),
+        ] {
+            assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+        }
+    }
+
+    /// The pair the distinction exists for: the same subsystem, one worth
+    /// waiting on and one that no amount of waiting changes.
+    #[test]
+    fn a_locked_key_store_is_retryable_and_an_unusable_key_is_not() {
+        assert!(ErrorCode::KeyLocked.retryable());
+        assert!(!ErrorCode::KeyUnusable.retryable());
+        assert!(!ErrorCode::LegacyDatabase.retryable());
+    }
+
+    /// v0.4's directory is a *different question* from v2's, which is the whole
+    /// reason this function exists rather than a reuse of [`data_dir`].
+    #[test]
+    fn the_v0_4_directory_is_resolved_where_v0_4_put_it() {
+        let v1 = v1_data_dir().expect("a home directory in the test environment");
+        assert!(v1.is_absolute(), "{}", v1.display());
+
+        #[cfg(target_os = "macos")]
+        {
+            assert!(
+                v1.ends_with("Library/Application Support/CopyPaste"),
+                "{v1:?}"
+            );
+            // If these ever coincided, CLAUDE.md rule 3's "never touch the old
+            // file" would rest on the filename alone.
+            assert_ne!(v1, data_dir());
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // v0.4.x and `ProjectDirs` agree here; the *filename* is what keeps
+            // the two histories apart, and `database_path` is why.
+            assert!(v1.ends_with("copypaste"), "{v1:?}");
+            assert_eq!(v1, data_dir());
+        }
+    }
+
+    /// A daemon built before the field omits it, and a client built after must
+    /// still decode that reply rather than treating a status as malformed.
+    #[test]
+    fn a_status_without_the_legacy_flag_decodes_as_absent() {
+        let older = r#"{"version":"2.0.0-alpha.1","protocol_version":1,"item_count":3,
+                        "capture_running":true,"clipboard_backend":"fake"}"#;
+        let status: StatusData = serde_json::from_str(older).unwrap();
+        assert!(!status.legacy_history_present);
+    }
 }
