@@ -5,6 +5,7 @@ members = [
     "crates/copypaste-core",
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
+    "crates/copypaste-ui/src-tauri",
 ]
 
 [workspace.package]

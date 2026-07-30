@@ -1,0 +1,26 @@
+[package]
+name = "copypaste-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "copypaste_ui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# Speaks IPC to the daemon over the same socket the CLI uses. No copypaste-core
+# dependency: the UI never touches crypto or the database directly.
+[dependencies]
+copypaste-ipc = { path = "../../copypaste-ipc" }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-clipboard-manager = "2"
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
