@@ -57,7 +57,13 @@ use tauri::Manager as _;
 
 /// Build and run the app.
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_clipboard_manager::init());
+    // The dialog plugin is registered for `commands::transfer`, which drives it
+    // from Rust. It is deliberately not granted to the WebView in
+    // `capabilities/`: a picked path is used on this side and never handed
+    // across (CLAUDE.md rule 4).
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init());
 
     // Desktop plugins. The `cfg` is here, at the assembly point, rather than
     // inside `shell` — one gate, at the one place that knows it is building a
@@ -162,6 +168,14 @@ pub fn run() {
             commands::service::start_service,
             commands::service::restart_service,
             commands::service::hide_window,
+            // the service's own settings
+            commands::config::get_config,
+            commands::config::set_config,
+            // history in and out of a file
+            commands::transfer::export_history,
+            commands::transfer::import_history,
+            commands::transfer::backup_database,
+            commands::transfer::restore_database,
             // peers
             commands::peers::pair_create,
             commands::peers::pair_accept,

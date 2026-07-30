@@ -25,11 +25,13 @@
 //! Connecting per call makes "the daemon went away" the same code path as "the
 //! daemon was never there", which is also what the user sees.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use copypaste_ipc::{
-    socket_path, DiscoveredDevice, EventData, Item, Method, PairingData, PeerInfo, Request,
-    Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    socket_path, BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData,
+    ExportItem, ImportData, Item, Method, PairingData, PeerInfo, Request, Response, ResponseData,
+    StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::UnixStream;
@@ -157,6 +159,34 @@ fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>> {
     match data {
         Some(ResponseData::Sync(results)) => Ok(results),
         _ => Err(BackendError::wrong_shape("a sync report")),
+    }
+}
+
+fn expect_config(data: Option<ResponseData>) -> Result<ConfigApplied> {
+    match data {
+        Some(ResponseData::Config(applied)) => Ok(applied),
+        _ => Err(BackendError::wrong_shape("the service's settings")),
+    }
+}
+
+fn expect_export(data: Option<ResponseData>) -> Result<ExportData> {
+    match data {
+        Some(ResponseData::Export(export)) => Ok(export),
+        _ => Err(BackendError::wrong_shape("an export")),
+    }
+}
+
+fn expect_import(data: Option<ResponseData>) -> Result<ImportData> {
+    match data {
+        Some(ResponseData::Import(result)) => Ok(result),
+        _ => Err(BackendError::wrong_shape("an import report")),
+    }
+}
+
+fn expect_backup(data: Option<ResponseData>) -> Result<BackupData> {
+    match data {
+        Some(ResponseData::Backup(backup)) => Ok(backup),
+        _ => Err(BackendError::wrong_shape("a backup report")),
     }
 }
 
@@ -292,6 +322,59 @@ impl Backend for DaemonBackend {
 
     async fn rescan(&self) -> Result<Vec<DiscoveredDevice>> {
         expect_discovered(self.call(Method::Rescan).await?)
+    }
+
+    async fn get_config(&self) -> Result<ConfigApplied> {
+        expect_config(self.call(Method::GetConfig).await?)
+    }
+
+    async fn set_config(&self, patch: ConfigPatch) -> Result<ConfigApplied> {
+        expect_config(self.call(Method::SetConfig { patch }).await?)
+    }
+
+    async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {
+        expect_export(
+            self.call(Method::Export {
+                limit,
+                include_sensitive,
+            })
+            .await?,
+        )
+    }
+
+    async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData> {
+        expect_import(self.call(Method::Import { items }).await?)
+    }
+
+    /// `to_string_lossy` rather than a refusal on non-UTF-8.
+    ///
+    /// The path came from the platform's own save panel, so a byte sequence
+    /// this cannot render is a path the user picked in a file manager that
+    /// could. The daemon does the real check — it refuses an empty or
+    /// non-absolute path, and refuses to overwrite — and a mangled name fails
+    /// there with a sentence rather than here with a silent nothing.
+    async fn backup(&self, dest: &Path) -> Result<BackupData> {
+        expect_backup(
+            self.call(Method::Backup {
+                dest_path: dest.to_string_lossy().into_owned(),
+            })
+            .await?,
+        )
+    }
+
+    /// `confirm: true` unconditionally.
+    ///
+    /// The wire flag exists so a scripted `copypaste restore` cannot replace a
+    /// history by accident. Here the confirmation has already happened — the
+    /// user answered a dialog naming what is about to be lost — so passing
+    /// `false` would only produce a second refusal with nothing left to ask.
+    async fn restore(&self, src: &Path) -> Result<()> {
+        self.call(Method::Restore {
+            src_path: src.to_string_lossy().into_owned(),
+            confirm: true,
+        })
+        .await?;
+        Ok(())
     }
 
     /// The one call that keeps its connection.
@@ -516,6 +599,88 @@ mod tests {
         ))
         .unwrap();
         assert!(matches!(data, Some(ResponseData::Page(_))), "{data:?}");
+    }
+
+    /// `restart_required` is what lets a Settings screen say "this one needs a
+    /// restart" at the moment of the change. It has to survive the decode, and
+    /// an empty list has to stay an empty list rather than becoming a shape
+    /// error.
+    #[test]
+    fn settings_decode_with_the_fields_that_are_waiting_on_a_restart() {
+        let applied = expect_config(
+            into_data(parse(
+                r#"{"id":1,"ok":true,"data":{"config":{"poll_interval_ms":250},
+                   "restart_required":["lan_visibility"]}}"#,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(applied.config.poll_interval_ms, 250);
+        // Absent keys take their defaults, so a daemon on a newer build does
+        // not blank the screen.
+        assert_eq!(
+            applied.config.history_limit,
+            copypaste_ipc::ConfigData::default().history_limit
+        );
+        assert_eq!(applied.restart_required, ["lan_visibility"]);
+
+        assert!(expect_config(
+            into_data(parse(
+                r#"{"id":1,"ok":true,"data":{"config":{},"restart_required":[]}}"#
+            ))
+            .unwrap()
+        )
+        .unwrap()
+        .restart_required
+        .is_empty());
+    }
+
+    /// The untagged decoder takes the first variant that fits, and an export's
+    /// fields are a superset of a page's. `ResponseData` declares `Export`
+    /// first for exactly that reason; this is the client-side guard that it
+    /// still holds, because the failure is silent — an export would arrive as
+    /// a page with its three skip counts gone.
+    #[test]
+    fn an_export_does_not_decode_as_a_page() {
+        let export = expect_export(
+            into_data(parse(
+                r#"{"id":1,"ok":true,"data":{"items":[{"content":"hi","content_type":"text/plain",
+                   "created_at":5,"pinned":false,"is_sensitive":false}],"skipped_non_text":1,
+                   "skipped_sensitive":2,"skipped_undecryptable":3}}"#,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(export.items.len(), 1);
+        assert_eq!(export.skipped_sensitive, 2);
+    }
+
+    #[test]
+    fn an_import_report_and_a_backup_report_decode_as_themselves() {
+        let imported = expect_import(
+            into_data(parse(
+                r#"{"id":1,"ok":true,"data":{"inserted":7,"skipped":2}}"#,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!((imported.inserted, imported.skipped), (7, 2));
+
+        assert_eq!(
+            expect_backup(
+                into_data(parse(r#"{"id":1,"ok":true,"data":{"size_bytes":4096}}"#)).unwrap()
+            )
+            .unwrap()
+            .size_bytes,
+            4096
+        );
+    }
+
+    /// A restore is the one call whose success carries no payload. It must read
+    /// as done rather than as a reply of the wrong shape.
+    #[test]
+    fn a_restore_succeeds_on_an_empty_reply() {
+        assert!(into_data(parse(r#"{"id":1,"ok":true,"data":{}}"#)).is_ok());
     }
 
     #[test]
