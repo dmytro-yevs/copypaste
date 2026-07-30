@@ -11,7 +11,7 @@ import { screen, waitFor } from "@testing-library/react";
 
 import { HistoryView } from "@/components/history/HistoryView";
 import { historyCount } from "@/components/history/SearchBar";
-import { IpcFailure } from "@/lib/errors";
+import { type ErrorKind, IpcFailure } from "@/lib/errors";
 import { items, page, status, withClient, withUser } from "@/test/harness";
 import { useUi } from "@/store/ui";
 
@@ -147,4 +147,87 @@ describe("clear all", () => {
     expect(dialog.textContent).toContain("Pinned items are kept");
     expect(dialog.textContent).toContain("cannot be undone");
   });
+});
+
+/**
+ * The regression this file exists to stop reappearing: an unrecoverable state
+ * rendered with the affordance of a transient one. Both of these used to land
+ * on the generic `Failed to load history` screen and its **Try again**, which
+ * retried forever against a condition retrying cannot fix (backlog B-4,
+ * ui-parity finding 2).
+ */
+describe("states no retry can clear", () => {
+  const failWith = (kind: ErrorKind) => {
+    listItems.mockRejectedValue(new IpcFailure(kind));
+    getStatus.mockRejectedValue(new IpcFailure(kind));
+  };
+
+  it("says a v0.4 history is a v0.4 history, and that it is untouched", async () => {
+    failWith("legacy_database");
+    withClient(<HistoryView />);
+
+    const title = await screen.findByText(/CopyPaste 0\.4 clipboard history/i);
+    expect(title).toBeTruthy();
+    // The reassuring half is the half the user cannot work out alone.
+    expect(document.body.textContent).toMatch(/still on this device/i);
+    expect(screen.queryByText("Failed to load history")).toBeNull();
+  });
+
+  it("admits there is nothing to do about an unusable key", async () => {
+    failWith("key_unusable");
+    withClient(<HistoryView />);
+
+    await screen.findByText(/can't be unlocked/i);
+    expect(document.body.textContent).toMatch(/won't change that/i);
+  });
+
+  it.each(["legacy_database", "key_unusable"] as const)(
+    "offers no retry for %s",
+    async (kind) => {
+      failWith(kind);
+      withClient(<HistoryView />);
+
+      await waitFor(() =>
+        expect(screen.queryByText("Loading…")).toBeNull(),
+      );
+      for (const button of screen.queryAllByRole("button")) {
+        expect(button.textContent ?? "").not.toMatch(/try again|retry|restart/i);
+      }
+    },
+  );
+
+  /** The gate must not swallow the ordinary case: a transient fault is still
+   *  worth another go, and removing the retry from everything would be the
+   *  same defect pointed the other way. */
+  it("still offers a retry for an ordinary failure", async () => {
+    failWith("internal");
+    withClient(<HistoryView />);
+
+    await screen.findByText("Failed to load history");
+    expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
+  });
+
+  /** The counterpart, and the reason the two key-store failures are separate
+   *  codes: this one is worth asking again. */
+  it("does offer a retry when the key store is merely locked", async () => {
+    failWith("key_locked");
+    withClient(<HistoryView />);
+
+    await screen.findByText(/Waiting for the key store/i);
+    expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
+  });
+
+  it.each(["legacy_database", "key_unusable", "key_locked"] as const)(
+    "names no path for %s",
+    async (kind) => {
+      failWith(kind);
+      const { container } = withClient(<HistoryView />);
+      await waitFor(() =>
+        expect(screen.queryByText("Loading…")).toBeNull(),
+      );
+      expect(container.innerHTML).not.toMatch(
+        /\/Users\/|\/home\/|\.sock|\.db\b|~\//,
+      );
+    },
+  );
 });

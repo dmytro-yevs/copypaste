@@ -81,6 +81,27 @@ export const history = {
     },
     starting: { title: "Starting up…" },
     failed: { title: "Failed to load history" },
+    /**
+     * The three states no retry can clear. Each says what happened, what is
+     * still true, and the one thing that would actually change the outcome —
+     * and `keyUnusable` says outright that there is nothing, because a screen
+     * that pretends otherwise costs the user an evening.
+     *
+     * No path is named in any of them, and none may be: the location of the
+     * old history discloses the local username (CLAUDE.md rule 4).
+     */
+    legacy: {
+      title: "This is a CopyPaste 0.4 clipboard history",
+      body: "CopyPaste 0.4 wrote this history, and this version can't read it. Nothing has been changed or deleted — the old history is still on this device exactly as it was, and installing CopyPaste 0.4 again brings it back. This version can only start a new history.",
+    },
+    keyUnusable: {
+      title: "This clipboard history can't be unlocked",
+      body: "This device's encryption key is there but can't be used, so nothing can decrypt the history it protects — not this version, and not a later one. Trying again won't change that. Whatever had already synced to a paired device is still on that device.",
+    },
+    keyLocked: {
+      title: "Waiting for the key store",
+      body: "CopyPaste couldn't reach the key store that holds this device's encryption key, so your history stayed locked. Unlock it and try again.",
+    },
     /** `{{query}}` is the user's own search text, already visible in the field
      *  beside it. It is the one interpolation here that is not authored copy. */
     noResults: 'No results for "{{query}}"',

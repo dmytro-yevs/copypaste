@@ -1,6 +1,6 @@
 /** A11Y-5: severity chooses the role, so nothing informational interrupts a
  *  screen reader and nothing urgent waits its turn. */
-import { CircleAlert, TriangleAlert, X } from "lucide-react";
+import { CircleAlert, Info, TriangleAlert, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/i18n";
@@ -22,7 +22,12 @@ export function BannerBar({ conditions, onRetry }: BannerBarProps) {
   const banner = pickBanner({ ...conditions, dismissed });
   if (!banner) return null;
 
-  const Icon = banner.severity === "error" ? CircleAlert : TriangleAlert;
+  const Icon =
+    banner.severity === "error"
+      ? CircleAlert
+      : banner.severity === "info"
+        ? Info
+        : TriangleAlert;
 
   return (
     <div
@@ -32,7 +37,12 @@ export function BannerBar({ conditions, onRetry }: BannerBarProps) {
         "flex shrink-0 flex-wrap items-center gap-s-2 border-b px-s-4 py-s-2 text-sm",
         banner.severity === "error"
           ? "border-err/20 bg-err/15 text-err-strong"
-          : "border-warn/20 bg-warn/15 text-warn-strong",
+          : banner.severity === "info"
+            // A neutral edge rather than a tinted one: an alpha on `info` is a
+            // colour no token file holds and nothing has measured, and the
+            // tint and the text already carry the severity.
+            ? "border-border-strong bg-info/15 text-info-strong"
+            : "border-warn/20 bg-warn/15 text-warn-strong",
       )}
     >
       <Icon size={16} aria-hidden="true" className="shrink-0" />

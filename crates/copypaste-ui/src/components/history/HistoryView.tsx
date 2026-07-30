@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDebounceValue } from "usehooks-ts";
-import { CircleAlert, Inbox, Search, ShieldAlert } from "lucide-react";
+import { Archive, CircleAlert, Inbox, KeyRound, Lock, Search, ShieldAlert } from "lucide-react";
 
 import {
   AlertDialog,
@@ -43,7 +43,7 @@ import { useReveal } from "@/hooks/useReveal";
 import { useSelection } from "@/hooks/useSelection";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
-import { type ErrorKind, classifyError, friendlyError } from "@/lib/errors";
+import { type ErrorKind, classifyError, friendlyError, isRetryable } from "@/lib/errors";
 import { hideWindow } from "@/lib/ipc";
 import type { Item } from "@/lib/ipc";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/layout";
@@ -238,6 +238,36 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
           onLoadMore={loadMore}
           listRef={listRef}
         />
+      ) : errorKind === "legacy_database" ? (
+        // No action, deliberately. The recovery is a human decision made
+        // outside this app, and the only button that would fit here — erase
+        // and start over — does not exist yet (backlog B-11). Offering a
+        // **Try again** that can never succeed is the defect this replaces.
+        <EmptyState
+          icon={Archive}
+          title={t("history.empty.legacy.title")}
+          body={t("history.empty.legacy.body")}
+        />
+      ) : errorKind === "key_unusable" ? (
+        // Also no action, and for a harder reason: there is genuinely nothing
+        // to offer. Saying so is better than a control that pretends.
+        <EmptyState
+          icon={KeyRound}
+          title={t("history.empty.keyUnusable.title")}
+          body={t("history.empty.keyUnusable.body")}
+        />
+      ) : errorKind === "key_locked" ? (
+        // The one that *is* worth retrying, and the reason the two key-store
+        // failures are separate codes at all.
+        <EmptyState
+          icon={Lock}
+          title={t("history.empty.keyLocked.title")}
+          body={t("history.empty.keyLocked.body")}
+          action={{
+            label: t("common.tryAgain"),
+            onClick: () => void history.refetch(),
+          }}
+        />
       ) : errorKind === "offline" ? (
         <ServiceOffline />
       ) : errorKind === "not_ready" ? (
@@ -251,10 +281,11 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
           icon={CircleAlert}
           title={t("history.empty.failed.title")}
           body={friendlyError(errorKind)}
-          action={{
-            label: t("common.tryAgain"),
-            onClick: () => void history.refetch(),
-          }}
+          action={
+            isRetryable(errorKind)
+              ? { label: t("common.tryAgain"), onClick: () => void history.refetch() }
+              : undefined
+          }
         />
       ) : filtered ? (
         <EmptyState

@@ -20,8 +20,9 @@ export function resolveView(value: unknown): View {
   return VIEWS.includes(value as View) ? (value as View) : "history";
 }
 
-/** `service-offline` is deliberately absent: it is non-dismissible (INV-17). */
-export type BannerId = "protocol-mismatch" | "capture-paused";
+/** `service-offline` and `history-unreadable` are deliberately absent: both are
+ *  non-dismissible (INV-17), because nothing in the app works while they hold. */
+export type BannerId = "protocol-mismatch" | "capture-paused" | "legacy-history";
 
 interface UiStore {
   view: View;

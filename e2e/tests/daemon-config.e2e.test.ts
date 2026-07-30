@@ -1,18 +1,18 @@
 /**
  * `GetConfig` / `SetConfig`, against a real daemon over a real socket.
  *
- * **This file drives the CLI, not the window, and that is the finding.** The
- * daemon has a complete configuration surface and `copypaste-ipc::config`
- * records per-field liveness so a client can say "this one needs a restart" —
- * but no Tauri command routes either method, so Settings shows none of it and
- * the app cannot change a single one of these values. Until that lands, this is
- * where the contract is exercised; when it lands, these assertions move up into
- * the Settings file rather than being written again.
+ * **The finding this file recorded is closed.** `get_config` and `set_config`
+ * are routed Tauri commands, and Settings has a Service tab built on them, so
+ * the two properties a screen is built on are now asserted at the screen:
+ * `crates/copypaste-ui/src/components/settings/ServiceTab.test.tsx` covers the
+ * value that round-trips and the patch that carries only the field it names,
+ * including the restart badge on `lan_visibility`.
  *
- * The three properties are the ones a UI would be built on:
- * a value that round-trips, a rejected value that changes *nothing*, and a
- * patch that carries only the field it names — which is what stops two screens
- * (or two tabs) from overwriting each other's unsaved work.
+ * What stays here is the half a jsdom test cannot reach: a rejection that
+ * changes *nothing* on a real daemon, and the concurrent-writer race below,
+ * which is a defect in `daemon/src/settings.rs` rather than anything a client
+ * can do about. `poll_interval_ms` is set in the first block and read again in
+ * the last, so the round trip earns its place twice over.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 

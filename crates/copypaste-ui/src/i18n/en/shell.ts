@@ -9,10 +9,18 @@ export const shell = {
   banner: {
     serviceOffline:
       "Background service not running — nothing is being recorded.",
+    legacyDatabase:
+      "This device's clipboard history was written by CopyPaste 0.4 — this version can't read it, and hasn't changed it.",
+    keyUnusable:
+      "This device's encryption key can't be used, so its clipboard history can't be unlocked. Nothing here can recover it.",
     protocolMismatch:
       "CopyPaste and the background service are on incompatible versions (service protocol v{{protocol}}). Restart both to resolve.",
     capturePaused:
       "The clipboard service is running but is not recording — copied items will not appear here.",
+    /** Not "can't read it" alone: the news is that nothing was thrown away.
+     *  An empty list after an upgrade reads as data loss otherwise. */
+    legacyHistory:
+      "Your CopyPaste 0.4 history is still on this device, unchanged. This version can't read it, so it has started a new one.",
   },
 
   status: {
@@ -25,7 +33,6 @@ export const shell = {
     detail: {
       offline: "The background service is not running.",
       starting: "The clipboard service is initializing.",
-      error: "The background service returned an error.",
       connecting: "Connecting to the background service.",
       paused: "The service is running but is not recording the clipboard.",
       mismatch: "CopyPaste {{version}}, on a different protocol version.",

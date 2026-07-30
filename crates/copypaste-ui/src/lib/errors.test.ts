@@ -7,7 +7,13 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-import { classifyError, friendlyError, isUnavailable, toFriendly } from "./errors";
+import {
+  classifyError,
+  friendlyError,
+  isRetryable,
+  isUnavailable,
+  toFriendly,
+} from "./errors";
 
 const LEAKY = [
   "connection refused on /Users/dmitriy/Library/Application Support/CopyPaste/daemon.sock",
@@ -69,5 +75,114 @@ describe("classification", () => {
     expect(spy).toHaveBeenCalled();
     expect(kind).toBe("offline");
     expect(friendlyError(kind)).not.toContain("dmitriy");
+  });
+});
+
+/**
+ * The two conditions that are unrecoverable, and the one beside them that is
+ * not. Collapsing any pair of these is what puts a **Try again** in front of a
+ * user whose history is gone.
+ */
+describe("the states no retry can clear", () => {
+  it.each([
+    // The daemon's own sentences, which reach the frontend as text.
+    [
+      "this is a CopyPaste 0.4 history; this version cannot read it and has left it as it was",
+      "legacy_database",
+    ],
+    [
+      "this device's key is present and cannot be used, so the history encrypted with it cannot be read by anything",
+      "key_unusable",
+    ],
+    [
+      "the key store could not be read, so this history could not be unlocked",
+      "key_locked",
+    ],
+    // The in-process backend wraps the core error instead, so both spellings
+    // have to classify the same way.
+    ["could not open history: this is a CopyPaste 0.4 history", "legacy_database"],
+    [
+      "could not open the keystore: stored device secret unusable: the stored device secret is the wrong length",
+      "key_unusable",
+    ],
+    ["could not open the keystore: key store unavailable: the keychain is locked", "key_locked"],
+  ] as const)("%s -> %s", (raw, kind) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(classifyError(raw)).toBe(kind);
+  });
+
+  it("marks the unrecoverable ones as not retryable, and the locked one as retryable", () => {
+    expect(isRetryable("legacy_database")).toBe(false);
+    expect(isRetryable("key_unusable")).toBe(false);
+    expect(isRetryable("key_locked")).toBe(true);
+  });
+
+  it("gives each of them a sentence of its own", () => {
+    const sentences = (["legacy_database", "key_locked", "key_unusable"] as const).map(
+      friendlyError,
+    );
+    expect(new Set(sentences).size).toBe(3);
+    for (const sentence of sentences) {
+      expect(sentence.length).toBeGreaterThan(0);
+      expect(sentence).not.toMatch(/\/Users\/|\/home\/|\.sock|\.db\b/);
+    }
+  });
+});
+
+/**
+ * `copypaste_p2p::NodeError`, whose sentences the daemon passes through. All
+ * eight read as "The background service returned an error" before this, which
+ * made a mistyped code, a switched-off device and a full pairing list one
+ * event (post-merge review, finding 4).
+ */
+describe("pairing and sync failures", () => {
+  it.each([
+    ["that pairing code is not valid", "pairing_code"],
+    ["the other device did not accept this pairing code", "pairing_code"],
+    ["that address could not be resolved; expected host:port", "pairing_address"],
+    [
+      "this peer has never been reached and is not visible on the network; sync from the other device, or re-pair with an address",
+      "peer_unreachable",
+    ],
+    ["the other device stopped responding", "peer_unreachable"],
+    [
+      "this device is already paired with as many devices as it can hold; unpair one first",
+      "pairing_limit",
+    ],
+    ["the sync session with the other device failed", "peer_failed"],
+    ["the paired-device list could not be updated", "peer_failed"],
+  ] as const)("%s -> %s", (raw, kind) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(classifyError(raw)).toBe(kind);
+  });
+
+  it("gives each one a sentence of its own, and none of them the generic one", () => {
+    const kinds = [
+      "pairing_code",
+      "pairing_address",
+      "peer_unreachable",
+      "pairing_limit",
+      "peer_failed",
+    ] as const;
+    const sentences = kinds.map(friendlyError);
+    expect(new Set(sentences).size).toBe(kinds.length);
+    for (const sentence of sentences) {
+      expect(sentence).not.toBe(friendlyError("unknown"));
+      expect(sentence).not.toMatch(/\/Users\/|\/home\//);
+    }
+  });
+
+  /** The refusal whose whole point is naming the remedy — it landed with a
+   *  commit message saying so, and the remedy was being discarded. */
+  it("keeps the remedy in the pairing-cap refusal", () => {
+    expect(friendlyError("pairing_limit")).toMatch(/unpair/i);
+    expect(isRetryable("pairing_limit")).toBe(false);
+  });
+
+  it("retries only what a repeat could answer differently", () => {
+    expect(isRetryable("peer_unreachable")).toBe(true);
+    expect(isRetryable("peer_failed")).toBe(true);
+    expect(isRetryable("pairing_code")).toBe(false);
+    expect(isRetryable("pairing_address")).toBe(false);
   });
 });
