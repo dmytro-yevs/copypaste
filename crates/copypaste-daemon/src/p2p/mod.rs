@@ -365,6 +365,13 @@ pub mod tests {
 
     /// The whole thing, in process: a listener, a dialler, two databases with
     /// two different device secrets, and the three properties that matter.
+    ///
+    /// Every assertion runs the instant `sync_now` returns, with no sleep. That
+    /// is deliberate and it is a real guarantee: the initiator's last act is a
+    /// `Done` the responder has yet to *apply*, so a session that returned as
+    /// soon as the bytes left would make this test — and any script that syncs
+    /// and then reads — a race. `NoiseChannel::wait_for_close` is what closes
+    /// it. This test failed roughly one run in ten before that existed.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn two_daemons_converge_without_leaking_a_secret() {
         let (a, _da) = test_state("alpha");

@@ -48,6 +48,26 @@ impl NoiseChannel {
         }
     }
 
+    /// Wait for the peer to hang up.
+    ///
+    /// The initiating half sends the last message of a session — its `Done` —
+    /// and `run_initiator` returns the moment that is written. The responder
+    /// still has to *apply* what it was just sent, and it closes the connection
+    /// when it has. Waiting for that close is what makes `copypaste sync` mean
+    /// "the other device has these items" rather than "the bytes have left".
+    ///
+    /// Never an error. A peer that says something else, or that never closes,
+    /// has still received everything this side sent; the session succeeded
+    /// either way and the deadline keeps a rude peer from holding the caller.
+    pub async fn wait_for_close(&mut self) {
+        match tokio::time::timeout(self.read_timeout, self.session.recv::<Box<RawValue>>()).await {
+            Ok(Ok(None)) => {}
+            Ok(Ok(Some(_))) => tracing::debug!("peer sent more after the session ended"),
+            Ok(Err(e)) => tracing::debug!(error = %e, "peer session ended untidily"),
+            Err(_) => tracing::debug!("peer did not close the session"),
+        }
+    }
+
     /// Flush and shut the write half down, so the peer's next read sees a clean
     /// close rather than a reset.
     pub async fn close(self) {

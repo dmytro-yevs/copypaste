@@ -267,7 +267,15 @@ async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
 async fn run_session(state: &Arc<AppState>, session: Session) -> Result<SyncOutcome, &'static str> {
     let mut channel = NoiseChannel::new(session);
     let source = StoreSource::new(Arc::clone(state));
-    let outcome = tokio::time::timeout(SESSION_TIMEOUT, run_initiator(&mut channel, &source)).await;
+    // The wait for the peer's close is inside the same budget on purpose: see
+    // `NoiseChannel::wait_for_close` for why a session is not over when
+    // `run_initiator` returns.
+    let outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
+        let outcome = run_initiator(&mut channel, &source).await?;
+        channel.wait_for_close().await;
+        Ok::<_, copypaste_p2p::sync::SyncError>(outcome)
+    })
+    .await;
     channel.close().await;
 
     match outcome {
