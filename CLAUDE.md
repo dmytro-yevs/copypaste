@@ -246,3 +246,58 @@ git reset -q            # unstage; working tree untouched
 `git commit` followed by `git reset --soft` looks equivalent and is not: it
 leaves the index full, so the *next* `git add <one file>` commits everything.
 That is how two of the four failures above happened.
+
+## 10. Commit messages
+
+**Subject line, imperative, 72 characters, no full stop, one change.** A body
+only when the subject is not enough, and never more than 12 lines.
+
+```
+Fix inaccessible selected-row state
+
+Problem:
+Selected and hovered rows were visually indistinguishable.
+
+Change:
+- Add an accent edge to selected rows
+- Update contrast checks
+
+Risk:
+One sentence, and only when there is a real one.
+```
+
+`Problem:` and `Risk:` are optional. `Change:` takes one to four points.
+
+### Not in a commit message
+
+Changelogs · file-by-file summaries · another agent's work · how the change
+was arrived at · test results, which CI already reports · ADR content · audit
+findings · alternatives that were not chosen · anything already written in a
+manifest, an ADR or a document · unfinished work, TODOs and known problems,
+which belong in an issue · AI `Co-Authored-By` trailers · session URLs.
+
+**Needing more than 12 lines is the signal, not the problem.** Split the
+commit, write the decision as an ADR, put the audit in a document, or put the
+context in the pull request.
+
+### One commit, one logical change
+
+Do not batch several agents' work, or several subsystems, into one commit.
+This is where the length came from: the three longest messages in this
+repository each described three or four subsystems, because a wide `git add`
+had made a wide commit inevitable. Rule 9's ban on `git add -A` and this rule
+are the same rule seen from two ends.
+
+### Enforced, not merely written
+
+`scripts/check-commit-msg.sh` runs from `.githooks/commit-msg` and from CI.
+Enable the hook once per clone:
+
+```sh
+git config core.hooksPath .githooks
+git config commit.template .gitmessage
+```
+
+Rule 8 already said "this applies to commit messages" and gave no number, so
+it bound nothing: twelve consecutive commits averaged 25 body lines against
+what is now a 12-line budget. A rule with no check is a preference.
