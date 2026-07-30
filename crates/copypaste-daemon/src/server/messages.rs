@@ -29,6 +29,8 @@ pub(super) const MSG_CLIPBOARD: &str = "the system clipboard could not be writte
 pub(super) const MSG_INTERNAL: &str = "the daemon failed to process the request";
 pub(super) const MSG_WATCHERS_FULL: &str = "too many clients are already watching for changes";
 pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured size limit";
+pub(super) const MSG_REORDER_TOO_MANY: &str =
+    "too many items in one reorder; a pinned list is never this long";
 pub(super) const MSG_IMPORT_EMPTY: &str = "there is nothing to import";
 pub(super) const MSG_IMPORT_TOO_MANY: &str =
     "too many items in one import; split the file into smaller batches";
@@ -78,6 +80,7 @@ mod tests {
         MSG_INTERNAL,
         MSG_WATCHERS_FULL,
         MSG_TOO_BIG,
+        MSG_REORDER_TOO_MANY,
         MSG_IMPORT_EMPTY,
         MSG_IMPORT_TOO_MANY,
         MSG_BAD_PATH,

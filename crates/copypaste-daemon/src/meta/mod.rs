@@ -45,6 +45,7 @@
 //! what may leave the device is in [`read`], and the unconditional FTS delete
 //! keeping a sensitive or deleted version out of the index is in [`write`].
 
+mod devices;
 mod error;
 mod open;
 mod read;
@@ -54,6 +55,7 @@ mod write;
 #[cfg(test)]
 mod testutil;
 
+pub use devices::Origin;
 pub(crate) use error::is_not_a_database;
 pub use error::MetaError;
 pub use open::Meta;

@@ -30,6 +30,7 @@ mod cloud;
 mod dbfile;
 mod merge;
 mod meta;
+mod notify;
 mod p2p;
 mod server;
 mod settings;
@@ -176,6 +177,15 @@ pub struct AppState {
     /// capture loop. A dropped event is safe — an event says only *that*
     /// something changed, and the client re-reads.
     events: broadcast::Sender<EventData>,
+    /// The shutdown signal every long-running task selects on.
+    ///
+    /// It lives here rather than in `main` because
+    /// [`copypaste_ipc::Method::Shutdown`] has to reach it: an app that did not
+    /// start this daemon cannot signal the process, and ADR-0004's
+    /// protocol-mismatch state has nothing to offer without it. `main` holds no
+    /// second sender — it calls [`AppState::request_shutdown`] on SIGTERM like
+    /// everything else, so there is one teardown path rather than two.
+    shutdown: watch::Sender<bool>,
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
@@ -210,10 +220,26 @@ impl AppState {
             settings,
             db_path,
             events: broadcast::channel(EVENT_BUFFER).0,
+            shutdown: watch::channel(false).0,
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
         }
+    }
+
+    /// A receiver every long-running task selects on.
+    pub fn shutdown_rx(&self) -> watch::Receiver<bool> {
+        self.shutdown.subscribe()
+    }
+
+    /// Begin an orderly shutdown. Idempotent, and safe from any thread.
+    ///
+    /// Every task finishes the unit of work it is in before observing this, so
+    /// a capture already past the clipboard read still reaches the database.
+    pub fn request_shutdown(&self) {
+        // Fails only if every receiver has been dropped, which means the tasks
+        // this would have stopped are already gone.
+        let _ = self.shutdown.send(true);
     }
 
     pub fn db_path(&self) -> &std::path::Path {
@@ -234,26 +260,44 @@ impl AppState {
     /// applied a peer's row would otherwise reset the cadence, provoke an
     /// immediate empty round on the other device, and ring back.
     pub fn note_local_change(&self) {
-        self.publish(EventKind::Items);
+        self.publish(EventKind::Items, false);
+        self.p2p.wake();
+        self.cloud.wake();
+    }
+
+    /// The user copied something and it was stored.
+    ///
+    /// [`AppState::note_local_change`] plus the one bit that distinguishes a
+    /// capture from a delete, a pin or an import: a client cannot post the
+    /// "copied" notification or play the sound on an event that only says
+    /// "history changed", because it would fire on every one of those too.
+    ///
+    /// The daemon does not consult `notify_on_copy` here. The event states what
+    /// happened; the setting says what to do about it, and the surface that
+    /// owns the notification is the one that reads it — see
+    /// [`copypaste_ipc::EventData::captured`].
+    pub fn note_capture(&self) {
+        self.publish(EventKind::Items, true);
         self.p2p.wake();
         self.cloud.wake();
     }
 
     /// History changed because a peer or the cloud delivered something.
     pub fn note_remote_change(&self) {
-        self.publish(EventKind::Items);
+        self.publish(EventKind::Items, false);
     }
 
     pub fn note_peers_changed(&self) {
-        self.publish(EventKind::Peers);
+        self.publish(EventKind::Peers, false);
     }
 
-    fn publish(&self, event: EventKind) {
+    fn publish(&self, event: EventKind, captured: bool) {
         // `send` fails only when nobody is listening, which is the ordinary
         // case: the CLI does not subscribe and the app may not be running.
         let _ = self.events.send(EventData {
             event,
             item_count: self.store.count().unwrap_or(0),
+            captured,
         });
     }
 
@@ -408,7 +452,7 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let shutdown_rx = state.shutdown_rx();
 
     let capture = tokio::spawn(capture::run(Arc::clone(&state), shutdown_rx.clone()));
     let peers_task = peer_listener.map(|listener| {
@@ -432,10 +476,13 @@ async fn main() -> anyhow::Result<()> {
     let peer_sync = tokio::spawn(p2p::poll::run(Arc::clone(&state), shutdown_rx.clone()));
     let server = tokio::spawn(server::run(listener, Arc::clone(&state), shutdown_rx));
 
-    wait_for_shutdown().await?;
+    // Either a signal or a client asking. One path out, so the IPC verb
+    // unwinds exactly as SIGTERM does rather than through a second teardown
+    // nobody exercises.
+    wait_for_shutdown(&state).await?;
     info!("shutting down");
     state.set_ready(false);
-    let _ = shutdown_tx.send(true);
+    state.request_shutdown();
 
     // Both tasks finish the unit of work they are in before observing the
     // signal, so a capture already past the clipboard read still reaches the
@@ -477,17 +524,22 @@ fn init_tracing() {
         .init();
 }
 
-/// Resolves on SIGINT or SIGTERM. launchd sends SIGTERM; a terminal sends
-/// SIGINT. Both must unwind the same way — an aborted process leaves the socket
-/// file behind and the next start has to treat it as stale.
-async fn wait_for_shutdown() -> anyhow::Result<()> {
+/// Resolves on SIGINT, SIGTERM, or a client's `shutdown` request.
+///
+/// launchd sends SIGTERM; a terminal sends SIGINT; the app sends the IPC verb,
+/// because it cannot signal a process it did not start. All three must unwind
+/// the same way — an aborted process leaves the socket file behind and the next
+/// start has to treat it as stale.
+async fn wait_for_shutdown(state: &AppState) -> anyhow::Result<()> {
     use tokio::signal::unix::{signal, SignalKind};
 
     let mut sigterm = signal(SignalKind::terminate()).context("install the SIGTERM handler")?;
     let mut sigint = signal(SignalKind::interrupt()).context("install the SIGINT handler")?;
+    let mut requested = state.shutdown_rx();
     tokio::select! {
         _ = sigterm.recv() => info!("received SIGTERM"),
         _ = sigint.recv() => info!("received SIGINT"),
+        _ = requested.wait_for(|stopping| *stopping) => info!("shutdown was requested over ipc"),
     }
     Ok(())
 }

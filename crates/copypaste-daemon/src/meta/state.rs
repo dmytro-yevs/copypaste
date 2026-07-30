@@ -32,6 +32,38 @@ impl Meta {
         Ok(())
     }
 
+    /// Write several values in one transaction.
+    ///
+    /// A set rather than one key for the same reason [`Meta::clear_state`] is:
+    /// the cloud download cursor is a *keyset* over `(created_at, item_id)`,
+    /// and a crash between two separate writes would leave a millisecond from
+    /// one round beside an item id from another. The pull query trusts the
+    /// pair, so a mismatched half does not cost re-pagination — it silently
+    /// skips the rows the stale id sorts above.
+    ///
+    /// An empty value deletes the key, because [`Meta::state`] already reads an
+    /// empty string back as absent and storing one would be a third state.
+    pub fn set_state_all(&self, entries: &[(&str, &str)]) -> Result<(), MetaError> {
+        let mut conn = self.lock()?;
+        // IMMEDIATE, for the reason `write_tx` records: a deferred transaction
+        // that upgrades to a write mid-way gets SQLITE_BUSY_SNAPSHOT the
+        // instant the other connection to this file is writing.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for (key, value) in entries {
+            if value.is_empty() {
+                tx.execute("DELETE FROM sync_device_state WHERE key = ?1", [key])?;
+            } else {
+                tx.execute(
+                    "INSERT INTO sync_device_state (key, value) VALUES (?1, ?2) \
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![key, value],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Forget a set of keys in one transaction.
     ///
     /// A set rather than one key because signing out has to clear the account,
@@ -105,6 +137,27 @@ mod tests {
         assert_eq!(f.meta.state("b").unwrap(), None);
         // The device identity lives in the same table and must survive.
         assert!(!f.meta.device_id().is_empty());
+    }
+
+    #[test]
+    fn several_values_are_written_together_and_an_empty_one_clears() {
+        let f = fixture();
+        f.meta
+            .set_state_all(&[("cursor", "42"), ("cursor_item", "item-a")])
+            .unwrap();
+        assert_eq!(f.meta.state("cursor").unwrap().as_deref(), Some("42"));
+        assert_eq!(
+            f.meta.state("cursor_item").unwrap().as_deref(),
+            Some("item-a")
+        );
+
+        // The half that no longer applies is removed rather than left behind:
+        // a stale item id beside a fresh millisecond skips rows.
+        f.meta
+            .set_state_all(&[("cursor", "43"), ("cursor_item", "")])
+            .unwrap();
+        assert_eq!(f.meta.state("cursor").unwrap().as_deref(), Some("43"));
+        assert_eq!(f.meta.state("cursor_item").unwrap(), None);
     }
 
     #[test]
