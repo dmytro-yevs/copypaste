@@ -54,6 +54,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             item_count,
             capture_running: state.capture_running(),
             clipboard_backend: state.backend_name().to_string(),
+            legacy_history_present: state.legacy_history_present(),
         }),
     )
 }
@@ -62,7 +63,7 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, offset: u32) -> Respon
     let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
     match state.store.list(limit, offset) {
         Ok(rows) => Response::ok(id, ResponseData::Page(decrypt_rows(state, rows))),
-        Err(e) => storage_error(id, "list", e),
+        Err(e) => storage_error(id, "list", &e),
     }
 }
 
@@ -77,7 +78,7 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
             let rows: Vec<StoredItem> = rows.into_iter().filter(|row| !row.is_sensitive).collect();
             Response::ok(id, ResponseData::Page(decrypt_rows(state, rows)))
         }
-        Err(e) => storage_error(id, "search", e),
+        Err(e) => storage_error(id, "search", &e),
     }
 }
 
@@ -85,12 +86,12 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
     let row = match state.store.get(item_id) {
         Ok(Some(row)) => row,
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => return storage_error(id, "get", e),
+        Err(e) => return storage_error(id, "get", &e),
     };
 
     let item = match to_wire(state, row) {
         Ok(item) => item,
-        Err(e) => return decrypt_error(id, e),
+        Err(e) => return decrypt_error(id, &e),
     };
 
     if let Err(e) = state.clipboard().set_contents(&item.content) {
@@ -111,7 +112,7 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
                 state.note_local_change();
                 Response::ok(id, ResponseData::Item(item))
             }
-            Err(e) => decrypt_error(id, e),
+            Err(e) => decrypt_error(id, &e),
         },
         Err(IngestError::Empty) => Response::err(id, ErrorCode::InvalidRequest, MSG_EMPTY_CONTENT),
         Err(IngestError::TooLarge) => Response::err(id, ErrorCode::InvalidRequest, MSG_TOO_BIG),
@@ -119,7 +120,7 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
             error!(error = ?e, "add failed to encrypt");
             Response::err(id, ErrorCode::Internal, MSG_ENCRYPT)
         }
-        Err(e @ IngestError::Storage(_)) => storage_error(id, "add", e),
+        Err(IngestError::Storage(e)) => storage_error(id, "add", &e),
     }
 }
 
@@ -132,10 +133,10 @@ pub(super) fn get(state: &AppState, id: u64, item_id: &str) -> Response {
     match state.store.get(item_id) {
         Ok(Some(row)) => match to_wire(state, row) {
             Ok(item) => Response::ok(id, ResponseData::Item(item)),
-            Err(e) => decrypt_error(id, e),
+            Err(e) => decrypt_error(id, &e),
         },
         Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => storage_error(id, "get", e),
+        Err(e) => storage_error(id, "get", &e),
     }
 }
 
@@ -144,7 +145,7 @@ pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
     // a client that deleted nothing needs to know it deleted nothing.
     let created_at = match state.store.get(item_id) {
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => return storage_error(id, "get", e),
+        Err(e) => return storage_error(id, "get", &e),
         Ok(Some(row)) => row.created_at,
     };
 
@@ -157,7 +158,7 @@ pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
             state.note_local_change();
             Response::ok(id, ResponseData::Empty {})
         }
-        Err(e) => storage_error(id, "delete", e),
+        Err(e) => storage_error(id, "delete", &e),
     }
 }
 
@@ -174,7 +175,7 @@ pub(super) fn delete_all(state: &AppState, id: u64) -> Response {
                 // Every tombstone keeps its item's original stamp, so the cloud
                 // cursor has to be pulled back to the oldest of them for the
                 // clear to propagate at all.
-                match state.meta.oldest_version_ms() {
+                match state.store.oldest_version_ms() {
                     Ok(Some(oldest)) => crate::cloud::note_version_written(state, oldest),
                     Ok(None) => {}
                     Err(e) => warn!(error = ?e, "could not reset the cloud upload cursor"),
@@ -183,19 +184,19 @@ pub(super) fn delete_all(state: &AppState, id: u64) -> Response {
             }
             Response::ok(id, ResponseData::Count(deleted))
         }
-        Err(e) => storage_error(id, "delete_all", e),
+        Err(e) => storage_error(id, "delete_all", &e),
     }
 }
 
 pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Response {
     match state.store.get(item_id) {
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => return storage_error(id, "get", e),
+        Err(e) => return storage_error(id, "get", &e),
         Ok(Some(_)) => {}
     }
 
     if let Err(e) = state.store.set_pinned(item_id, pinned) {
-        return storage_error(id, "set_pinned", e);
+        return storage_error(id, "set_pinned", &e);
     }
     state.note_local_change();
 
@@ -204,10 +205,10 @@ pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Res
     match state.store.get(item_id) {
         Ok(Some(row)) => match to_wire(state, row) {
             Ok(item) => Response::ok(id, ResponseData::Item(item)),
-            Err(e) => decrypt_error(id, e),
+            Err(e) => decrypt_error(id, &e),
         },
         Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
-        Err(e) => storage_error(id, "get", e),
+        Err(e) => storage_error(id, "get", &e),
     }
 }
 
@@ -229,14 +230,14 @@ pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Respo
     match state.store.reorder_pinned(ids) {
         Ok(0) => Response::ok(id, ResponseData::Count(0)),
         Ok(renumbered) => {
-            // A pin is local and never travels (`meta::apply` preserves both
+            // A pin is local and never travels (`Store::upsert` preserves both
             // `pinned` and `pin_order` across an incoming version), so this
             // wakes the watchers and nothing else. Waking the sync loops for a
             // change no transport will carry would be a round trip per drag.
             state.note_remote_change();
             Response::ok(id, ResponseData::Count(renumbered))
         }
-        Err(e) => storage_error(id, "reorder_pinned", e),
+        Err(e) => storage_error(id, "reorder_pinned", &e),
     }
 }
 
@@ -245,7 +246,7 @@ pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Respo
 /// One row, one origin lookup. [`decrypt_rows`] resolves a whole page in one
 /// query instead — see [`to_wire_with`], which is what the two share.
 fn to_wire(state: &AppState, row: StoredItem) -> Result<Item, copypaste_core::CryptoError> {
-    let origin = state.meta.origin_of(&row.id).unwrap_or_else(|e| {
+    let origin = state.meta.origin_of(&row).unwrap_or_else(|e| {
         // Attribution is advisory: a row whose origin cannot be read is still
         // the user's item, and the fallback is the same one the origin table's
         // absence already means — this device captured it.
@@ -298,8 +299,7 @@ fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
     };
     // One query for the page's attribution rather than one per row: a page is
     // up to `MAX_PAGE` items and this runs on every list and every search.
-    let ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
-    let origins = state.meta.origins_for(&ids).unwrap_or_else(|e| {
+    let origins = state.meta.origins_for(&rows).unwrap_or_else(|e| {
         warn!(error = ?e, "could not resolve the origin devices for a page");
         std::collections::HashMap::new()
     });
@@ -535,11 +535,10 @@ mod tests {
 
         // A row that arrived from elsewhere must not read as local, and it has
         // no name until a session with that device has told us one. Applied
-        // through the real merge path a peer's item takes, because
-        // `record_origin` deliberately refuses to restamp one already set.
-        crate::merge::apply_remote_version(
-            &state,
-            &crate::merge::RemoteVersion {
+        // through the real merge path a peer's item takes, because that is what
+        // stamps `origin_device_id` on the row.
+        crate::sync::store_source(&state)
+            .apply_version(&copypaste_core::RemoteVersion {
                 item_id: "from-the-phone",
                 content: "arrived over the peer transport",
                 content_type: copypaste_ipc::content_type::TEXT,
@@ -547,9 +546,8 @@ mod tests {
                 deleted: false,
                 content_hash: None,
                 origin_device_id: "device-b",
-            },
-        )
-        .expect("the merge must take an unknown item");
+            })
+            .expect("the merge must take an unknown item");
 
         match get(&state, 2, "from-the-phone").data {
             Some(ResponseData::Item(item)) => {

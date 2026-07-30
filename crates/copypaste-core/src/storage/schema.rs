@@ -30,7 +30,14 @@ CREATE TABLE clipboard_items (
     pin_order          REAL,
     -- Milliseconds since the Unix epoch. Every timestamp in this schema is ms.
     created_at         INTEGER NOT NULL,
-    deleted            INTEGER NOT NULL DEFAULT 0
+    deleted            INTEGER NOT NULL DEFAULT 0,
+    -- Which device first captured this version. Merge key 4, and the reason it
+    -- is a column rather than a side table: the sync view used to shadow it in
+    -- `sync_item_origin` on a second connection, which is two answers to "what
+    -- is in this device's history". Empty means "captured here" — a reader
+    -- substitutes its own device id (`storage::versions::origin_or`), so a
+    -- local capture costs no extra write.
+    origin_device_id   TEXT    NOT NULL DEFAULT ''
 );
 
 -- Serves the list query verbatim: pinned first, then pin order, then newest
@@ -63,6 +70,24 @@ CREATE INDEX idx_items_evictable
 -- so every delete path must remove the FTS row explicitly, in the same
 -- transaction as the row change.
 CREATE VIRTUAL TABLE clipboard_fts USING fts5(id UNINDEXED, content_text);
+
+-- This device's identity and every cursor, token and setting either transport
+-- keeps. Inside the encrypted database rather than a file beside it: a refresh
+-- token or a sync key in plaintext next to an encrypted history would be the
+-- weakest link. `server::dbadmin` deliberately does not restore it — a restore
+-- brings back history, not another device's identity.
+CREATE TABLE sync_device_state (
+    key   TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
+
+-- What each device id calls itself, so `origin_device_id` can be shown to a
+-- user as a name rather than a UUID. Cosmetic and untrusted: it is whatever a
+-- peer said in its hello, and nothing keys off it.
+CREATE TABLE sync_device_name (
+    device_id TEXT PRIMARY KEY NOT NULL,
+    name      TEXT NOT NULL
+);
 "#;
 
 static MIGRATIONS: LazyLock<Migrations<'static>> =

@@ -17,7 +17,9 @@
 //! * [`config`] — reading and changing the daemon's settings.
 //! * [`watch`] — the push half: a connection that has subscribed, and what it
 //!   is exempt from.
-//! * [`messages`] — every client-visible failure string, in one place.
+//! * [`messages`] — every client-visible failure string, in one place, and the
+//!   classification of the failures that carry a code of their own.
+//! * [`halted`] — the socket when there is no history to serve at all.
 //!
 //! **Errors never carry a filesystem path.** The socket path discloses the
 //! local username (CLAUDE.md rule 4), and a `StoreError` from SQLite routinely
@@ -29,10 +31,12 @@
 mod config;
 mod dbadmin;
 pub(crate) mod dispatch;
+mod halted;
 mod items;
 mod listener;
-mod messages;
+pub(crate) mod messages;
 mod transfer;
 mod watch;
 
+pub use halted::serve as serve_halted;
 pub use listener::{bind, run};

@@ -14,6 +14,7 @@
 
 use std::fmt::Display;
 
+use copypaste_core::{CryptoError, StoreError};
 use copypaste_ipc::{ErrorCode, Response};
 use tracing::error;
 
@@ -46,19 +47,79 @@ pub(super) const MSG_RESTORE_NOT_A_BACKUP: &str =
 pub(super) const MSG_RESTORE_FAILED: &str =
     "the restore could not be completed; this device's history is unchanged";
 
+/// The reassuring half is load-bearing: the old history is still on disk, byte
+/// for byte, and a user told only "cannot read it" has no way to know that.
+pub(crate) const MSG_LEGACY_DATABASE: &str =
+    "this is a CopyPaste 0.4 history; this version cannot read it and has left it as it was, \
+     so an earlier build still opens it — this version can only start a new history";
+pub(crate) const MSG_KEY_LOCKED: &str =
+    "the key store could not be read, so this history could not be unlocked; \
+     it is worth trying again once the key store is available";
+/// Says the two things `MSG_KEY_LOCKED` does not: no retry helps, and the
+/// history is gone rather than waiting.
+pub(crate) const MSG_KEY_UNUSABLE: &str =
+    "this device's key is present and cannot be used, so the history encrypted with it \
+     cannot be read by anything; trying again will not change that";
+
+/// A failure that carries a code of its own, distinct from the operation that
+/// met it.
+///
+/// `None` is the common case — the caller's own sentence applies. `Some` is
+/// reserved for conditions a client has to *render differently*: two of the
+/// three below are unrecoverable, and a client that offers **Try again**
+/// against them is the defect this exists to make impossible to reintroduce
+/// (`ErrorCode::retryable`).
+pub(crate) trait Refusal {
+    fn refusal(&self) -> Option<(ErrorCode, &'static str)>;
+}
+
+impl Refusal for StoreError {
+    fn refusal(&self) -> Option<(ErrorCode, &'static str)> {
+        match self {
+            StoreError::LegacyDatabase => Some((ErrorCode::LegacyDatabase, MSG_LEGACY_DATABASE)),
+            _ => None,
+        }
+    }
+}
+
+impl Refusal for CryptoError {
+    fn refusal(&self) -> Option<(ErrorCode, &'static str)> {
+        match self {
+            CryptoError::KeystoreUnavailable(_) => Some((ErrorCode::KeyLocked, MSG_KEY_LOCKED)),
+            CryptoError::KeystoreEntryUnusable(_) => {
+                Some((ErrorCode::KeyUnusable, MSG_KEY_UNUSABLE))
+            }
+            // `AuthFailed` deliberately stays indistinguishable from the rest
+            // (manifest 02, I-15): distinguishing it turns decryption into an
+            // oracle.
+            _ => None,
+        }
+    }
+}
+
 /// Map a storage failure onto the wire.
 ///
 /// The error itself is logged and dropped: a `StoreError` from SQLite carries
 /// the database path, and a path in a client-visible string discloses the local
-/// username.
-pub(super) fn storage_error(id: u64, operation: &'static str, error: impl Display) -> Response {
+/// username. What crosses is one of the fixed sentences above.
+pub(super) fn storage_error(
+    id: u64,
+    operation: &'static str,
+    error: &(impl Refusal + Display),
+) -> Response {
     error!(operation, error = %error, "storage operation failed");
-    Response::err(id, ErrorCode::Internal, MSG_STORAGE)
+    let (code, message) = error
+        .refusal()
+        .unwrap_or((ErrorCode::Internal, MSG_STORAGE));
+    Response::err(id, code, message)
 }
 
-pub(super) fn decrypt_error(id: u64, error: copypaste_core::CryptoError) -> Response {
+pub(super) fn decrypt_error(id: u64, error: &CryptoError) -> Response {
     error!(error = ?error, "decryption failed");
-    Response::err(id, ErrorCode::Internal, MSG_DECRYPT)
+    let (code, message) = error
+        .refusal()
+        .unwrap_or((ErrorCode::Internal, MSG_DECRYPT));
+    Response::err(id, code, message)
 }
 
 #[cfg(test)]
@@ -91,6 +152,9 @@ mod tests {
         MSG_RESTORE_NOT_FOUND,
         MSG_RESTORE_NOT_A_BACKUP,
         MSG_RESTORE_FAILED,
+        MSG_LEGACY_DATABASE,
+        MSG_KEY_LOCKED,
+        MSG_KEY_UNUSABLE,
     ];
 
     #[test]
@@ -104,5 +168,62 @@ mod tests {
                 "client-visible message looks like it contains a path: {message}"
             );
         }
+    }
+
+    /// No message may name a file either. These two are *about* a file, which
+    /// makes them the likeliest place for one to be written in by hand — and a
+    /// filename with no separators would walk straight past the check above.
+    #[test]
+    fn no_message_names_a_file() {
+        for message in ALL_MESSAGES {
+            for fragment in [".db", ".sqlite", ".sock", "clipboard.db", "~"] {
+                assert!(
+                    !message.contains(fragment),
+                    "client-visible message names a file: {message}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_v1_history_gets_its_own_code_and_never_the_generic_one() {
+        let (code, message) = StoreError::LegacyDatabase.refusal().expect("its own code");
+        assert_eq!(code, ErrorCode::LegacyDatabase);
+        assert_eq!(message, MSG_LEGACY_DATABASE);
+        assert!(!code.retryable());
+    }
+
+    /// The whole reason `KeystoreEntryUnusable` is a separate variant: the two
+    /// key-store failures must not collapse into one message, because one is
+    /// worth waiting out and one is not.
+    #[test]
+    fn the_two_key_store_failures_do_not_collapse() {
+        let locked = CryptoError::KeystoreUnavailable("locked")
+            .refusal()
+            .expect("its own code");
+        let unusable = CryptoError::KeystoreEntryUnusable("wrong length")
+            .refusal()
+            .expect("its own code");
+        assert_ne!(locked, unusable);
+        assert!(locked.0.retryable());
+        assert!(!unusable.0.retryable());
+    }
+
+    /// Fail-closed decryption keeps one sentence for every reason it can fail
+    /// (manifest 02, I-15) — the classifier must not become an oracle.
+    #[test]
+    fn a_failed_decryption_stays_indistinguishable() {
+        assert!(CryptoError::AuthFailed.refusal().is_none());
+        assert!(CryptoError::InvalidNonce.refusal().is_none());
+        let response = decrypt_error(1, &CryptoError::AuthFailed);
+        assert_eq!(response.error.as_deref(), Some(MSG_DECRYPT));
+        assert_eq!(response.error_code, Some(ErrorCode::Internal));
+    }
+
+    #[test]
+    fn an_ordinary_storage_failure_keeps_the_generic_sentence() {
+        let response = storage_error(1, "list", &StoreError::NotFound);
+        assert_eq!(response.error.as_deref(), Some(MSG_STORAGE));
+        assert_eq!(response.error_code, Some(ErrorCode::Internal));
     }
 }

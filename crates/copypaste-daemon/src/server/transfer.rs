@@ -54,7 +54,7 @@ pub(super) fn export(state: &AppState, id: u64, limit: u32, include_sensitive: b
     loop {
         let rows = match state.store.list(EXPORT_CHUNK, offset) {
             Ok(rows) => rows,
-            Err(e) => return storage_error(id, "export", e),
+            Err(e) => return storage_error(id, "export", &e),
         };
         if rows.is_empty() {
             break;
@@ -148,7 +148,7 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
                 warn!(error = ?e, "import failed to encrypt an item");
                 return Response::err(id, ErrorCode::Internal, super::messages::MSG_ENCRYPT);
             }
-            Err(e @ IngestError::Storage(_)) => return storage_error(id, "import", e),
+            Err(IngestError::Storage(e)) => return storage_error(id, "import", &e),
         }
     }
 
