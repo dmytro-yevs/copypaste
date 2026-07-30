@@ -172,16 +172,12 @@ pub fn ingest(
 
 /// The ingest path itself, in `copypaste-core` terms only.
 ///
-/// **Written to be moved.** Android cannot host a daemon, so the app links the
-/// core in-process — and `copypaste-daemon` is a binary with no `lib` target, so
-/// nothing can depend on it. This function is what the Android app needs and
-/// cannot reach. Re-typing it there is not an option: this module's header
-/// records that v1 had two ingest paths that drifted and the second one forgot
-/// the dedup probe.
-///
-/// Nothing below mentions the daemon, so moving it into `copypaste-core` is a
-/// cut-and-paste plus a re-export. What has to move with it: [`Ingested`],
-/// [`IngestError`], [`MAX_HISTORY_ITEMS`] and the tests that exercise them.
+/// **Written to be moved into `copypaste-core`.** Android links the core
+/// in-process and cannot reach this crate, which is a binary with no `lib`
+/// target — and re-typing it there is how v1 got two ingest paths that drifted
+/// (see the module header). Nothing below mentions the daemon, so the move is a
+/// cut-and-paste plus a re-export, taking [`Ingested`], [`IngestError`],
+/// [`MAX_HISTORY_ITEMS`] and their tests with it.
 pub fn ingest_into(
     store: &copypaste_core::Store,
     detector: &copypaste_core::Detector,

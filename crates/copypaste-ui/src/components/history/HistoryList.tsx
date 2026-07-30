@@ -1,23 +1,10 @@
 /**
  * The virtualised history list.
  *
- * Invariants implemented here:
- *
- *  INV-1/6  scroll anchoring and the shrink clamp — see useScrollAnchor
- *  INV-4    load-more merges: near the bottom, ask for the next page; the
- *           query keeps every loaded page, so a poll cannot replace them
- *  INV-5    every row reserves the full preview-line cap; the estimate is
- *           never derived from the content (see lib/layout)
- *  INV-7    the active-descendant pointer only ever names a mounted row
- *  INV-8    role="list" / role="listitem", never listbox/option — the rows
- *           carry buttons, and option is childrenPresentational
- *  INV-9    a visually-hidden polite live region, a **sibling** of the list
- *           (a live region inside role="list" fails aria-required-children)
- *  INV-32   selection is tracked by item id and re-resolved to an index every
- *           render; a poll can reorder between keydown and Enter
- *
- * Keyboard (manifest §3.1.4): Up/Down move without wrapping, Enter copies,
- * Backspace/Delete deletes (moving the selection on first), Escape clears.
+ * INV-8: `role="list"`/`listitem`, never listbox/option — the rows carry
+ * buttons, and option is `childrenPresentational` (axe `nested-interactive`).
+ * INV-9/A11Y-14: the announcer is a *sibling* of the list; inside it, it fails
+ * `aria-required-children` (CopyPaste-wrfn).
  */
 import {
   type KeyboardEvent,
@@ -98,14 +85,13 @@ export function HistoryList({
 
   const virtualRows = virtualizer.getVirtualItems();
 
-  // INV-9 / A11Y-2. Keyed on activeId alone so the age ticking over in a row's
-  // label can never re-announce a selection that did not change.
+  // Keyed on activeId alone: the age ticking over in a row's label must not
+  // re-announce a selection that did not change (INV-9).
   useEffect(() => {
     const item = itemsRef.current.find((candidate) => candidate.id === activeId);
     setAnnouncement(item ? rowLabel(item) : "");
   }, [activeId]);
 
-  // Copy flash, manifest §3.1.5.
   useEffect(() => {
     if (flashId === null) return;
     const timer = setTimeout(() => setFlashId(null), COPY_FLASH_MS);
@@ -121,16 +107,14 @@ export function HistoryList({
     const item = items[index];
     if (!item) return;
     onActiveIdChange(item.id);
-    // Scrolling comes from the height model, not scrollIntoView: the target row
-    // may not be in the DOM at all (manifest §3.1.4).
+    // From the height model, not scrollIntoView: the target row may not be in
+    // the DOM at all.
     virtualizer.scrollToIndex(index, { align: "auto" });
   }
 
   function onScroll(event: UIEvent<HTMLDivElement>) {
     captureAnchor();
     const el = event.currentTarget;
-    // §3.1.2: fire load-more within 300px of the bottom. The guards (ready,
-    // not already fetching, more to fetch) live in the caller's query.
     if (el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_MORE_THRESHOLD_PX) {
       onLoadMore();
     }
@@ -173,8 +157,8 @@ export function HistoryList({
       case "Delete": {
         if (item) {
           event.preventDefault();
-          // Selection moves to the next row *before* removal (§3.1.4), so it
-          // never dangles on the id that is about to disappear.
+          // Moves before removal, so the selection never dangles on the id
+          // that is about to disappear.
           const next = items[index + 1] ?? items[index - 1] ?? null;
           onActiveIdChange(next ? next.id : null);
           onDelete(item);
@@ -200,7 +184,7 @@ export function HistoryList({
         tabIndex={0}
         onKeyDown={onKeyDown}
         onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-s-2 pb-s-2 outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50"
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-s-2 pb-s-2 outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring"
       >
         <div
           role="list"
@@ -219,7 +203,8 @@ export function HistoryList({
                 key={row.key}
                 id={`history-row-${item.id}`}
                 role="listitem"
-                aria-label={rowLabel(item)}
+                // The name lives on the row's own button; naming the wrapper
+                // too would announce every row twice.
                 aria-current={item.id === activeId ? "true" : undefined}
                 className="absolute top-0 left-0 w-full"
                 style={{
@@ -236,11 +221,7 @@ export function HistoryList({
                   }
                   revealPending={item.id === revealPendingId}
                   previewLines={previewLines}
-                  onActivate={(clicked) => {
-                    onActiveIdChange(clicked.id);
-                    listRef.current?.focus();
-                    copy(clicked);
-                  }}
+                  onSelect={(clicked) => onActiveIdChange(clicked.id)}
                   onCopy={copy}
                   onTogglePin={onTogglePin}
                   onDelete={onDelete}

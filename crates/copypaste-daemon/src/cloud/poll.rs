@@ -1,14 +1,9 @@
-//! The loop that decides when a round happens, and what one round is.
+//! The loop that decides when a round happens.
 //!
-//! The cadence is not decided here. `copypaste_cloud::sync::cadence` owns it —
-//! five seconds after anything changed, doubling to five minutes while nothing
-//! does — and this loop asks the driver what to wait. Manifest 05 §4.8 is the
-//! reason it is adaptive at all: on a phone a fixed five-second poll is
-//! measurable battery, and the poll is only the correctness backstop.
-//!
-//! Missed ticks skip rather than burst (§4.8): the wait is computed after the
-//! previous round finished, so a round that ran long does not queue up the
-//! rounds it overlapped and hammer the backend just as it recovers.
+//! The cadence belongs to `copypaste_cloud::sync::cadence`; this loop asks the
+//! driver what to wait. Manifest 05 §4.8: missed ticks skip rather than burst,
+//! so the wait is computed after the previous round finished and a slow round
+//! does not queue up the ones it overlapped.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -118,7 +113,9 @@ pub fn describe(error: &SyncError) -> &'static str {
         SyncError::Source(_) => "the local history could not be read",
         SyncError::Encrypt => "an item could not be encrypted for upload",
         SyncError::Unauthorized => "the backend rejected this session even after a refresh",
-        SyncError::InvalidCredentials => "the stored account credentials were rejected; sign in again",
+        SyncError::InvalidCredentials => {
+            "the stored account credentials were rejected; sign in again"
+        }
         SyncError::SessionExpired => "the session expired; sign in again",
         SyncError::RateLimited => "the backend is rate limiting this account",
         SyncError::Transport(_) => "the sync backend could not be reached",

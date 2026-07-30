@@ -85,3 +85,13 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[profile.dev]
+# `target/debug` reached 22 GB and filled the disk twice in one session. Full
+# debug info is most of that, and cargo never collects stale artifacts, so a
+# long session accumulates a test binary per code revision — 57 of them over
+# 50 MB each, 5.4 GB, at one point. Line tables keep backtraces useful.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"

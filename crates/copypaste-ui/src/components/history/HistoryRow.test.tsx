@@ -7,7 +7,8 @@
  * string rather than a preview.
  */
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 import {
   HistoryRow,
@@ -25,7 +26,7 @@ const props = {
   revealedContent: null,
   revealPending: false,
   previewLines: 2,
-  onActivate: noop,
+  onSelect: noop,
   onCopy: noop,
   onTogglePin: noop,
   onDelete: noop,
@@ -104,21 +105,71 @@ describe("an ordinary item", () => {
         item={item({ content: "a\nb\nc\nd\ne\nf" })}
       />,
     );
-    const preview = container.querySelector("p");
-    expect(preview?.style.webkitLineClamp).toBe("4");
+    const preview = container.querySelector("[style*='line-clamp']");
+    expect((preview as HTMLElement | null)?.style.webkitLineClamp).toBe("4");
   });
 
-  it("names every icon-only control (A11Y-9)", () => {
+  it("names every control, and its title too (A11Y-9)", () => {
     const { container } = render(<HistoryRow {...props} item={item()} />);
     for (const button of container.querySelectorAll("button")) {
-      const label = button.getAttribute("aria-label");
-      expect(label?.length ?? 0).toBeGreaterThan(0);
-      // The pointer affordance has to match the accessible name.
-      expect(button.getAttribute("title")).toBe(label);
+      expect(button.getAttribute("aria-label")?.length ?? 0).toBeGreaterThan(0);
+      expect(button.getAttribute("title")?.length ?? 0).toBeGreaterThan(0);
     }
   });
 
   it("marks a pinned item in its accessible name", () => {
     expect(rowLabel(item({ pinned: true, content: "x" }))).toBe("Pinned. x");
+  });
+});
+
+describe("selecting is not copying", () => {
+  it("selects on a single click and copies nothing", async () => {
+    const onSelect = vi.fn();
+    const onCopy = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <HistoryRow {...props} item={item()} onSelect={onSelect} onCopy={onCopy} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /ordinary clipboard/ }));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    // A click that silently overwrites the system clipboard is a destructive
+    // default; copying needs its own gesture.
+    expect(onCopy).not.toHaveBeenCalled();
+  });
+
+  it("copies on a double click", () => {
+    const onCopy = vi.fn();
+    render(<HistoryRow {...props} item={item()} onCopy={onCopy} />);
+    fireEvent.doubleClick(screen.getByRole("button", { name: /ordinary clipboard/ }));
+    expect(onCopy).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives touch and screen-reader users an explicit Copy control", async () => {
+    // Not a hover affordance: Android has no hover, so a hover-revealed
+    // control does not exist there.
+    const onCopy = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(
+      <HistoryRow {...props} item={item()} onCopy={onCopy} />,
+    );
+    const copy = screen.getByRole("button", { name: "Copy to clipboard" });
+    expect(container.innerHTML).not.toContain("opacity-0");
+    await user.click(copy);
+    expect(onCopy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the row body reachable from the keyboard when it is selected", () => {
+    render(<HistoryRow {...props} item={item()} active />);
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.tabIndex).toBe(0);
+    }
+  });
+
+  it("keeps unselected rows out of the tab order", () => {
+    render(<HistoryRow {...props} item={item()} />);
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.tabIndex).toBe(-1);
+    }
   });
 });

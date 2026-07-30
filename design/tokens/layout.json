@@ -1,18 +1,26 @@
 {
   "layout": {
-    "$description": "Window and container geometry. The minimums are the accessibility contract, not a preference: A11Y-15 requires everything stay reachable at 720 × 460, so tab rows and toolbars wrap rather than hiding behind a scroller.",
+    "$description": "Window and container geometry for the two form factors: a resizable macOS window with a menu-bar popover, and a full-screen Android activity. There are no breakpoint tokens here on purpose — the compact/expanded boundary is Tailwind's own `sm` (640px), which every phone in portrait is below and every supported macOS window is above; a second boundary beside Tailwind's is how two scales start.",
     "$type": "dimension",
     "main-min-w": {
       "$value": "720px",
-      "$description": "Main window minimum width (A11Y-15). Must match tauri.conf.json."
+      "$description": "Main window minimum width (A11Y-15). Must match tauri.conf.json. macOS only — an Android activity is whatever the device is, so A11Y-15's 'everything stays reachable' has to hold well below this as well."
     },
     "main-min-h": {
       "$value": "460px",
       "$description": "Main window minimum height (A11Y-15)."
     },
+    "popover-w": {
+      "$value": "380px",
+      "$description": "The macOS menu-bar popover, and the tighter of the two width constraints the shared components face: a row that fits here fits a phone."
+    },
     "sidebar-w": {
       "$value": "200px",
-      "$description": "Fixed nav rail width on the desktop layout."
+      "$description": "Fixed nav rail width. Expanded layout only — below the `sm` boundary the nav is a bottom bar, because a 200px rail on a 380px viewport leaves no content."
+    },
+    "tabbar-h": {
+      "$value": "56px",
+      "$description": "Bottom nav height on the compact layout, the counterpart to --sidebar-w. Material 3's navigation-bar height. Add --inset-bottom to it rather than baking the inset in; the gesture bar is not always present."
     },
     "content-max-width": {
       "$value": "640px",
@@ -23,6 +31,29 @@
     },
     "modal-w-wide": {
       "$value": "560px"
+    },
+    "inset-top": {
+      "$type": "string",
+      "$value": "env(safe-area-inset-top, 0px)",
+      "$description": "Display cutout / status bar. Zero on macOS, non-zero on an edge-to-edge Android activity. A token rather than a raw env() per call site because env() with no fallback resolves to nothing rather than to 0px, and silently invalidates the calc() around it.",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
+    },
+    "inset-bottom": {
+      "$type": "string",
+      "$value": "env(safe-area-inset-bottom, 0px)",
+      "$description": "Gesture bar. The bottom nav and any bottom-anchored toast must add this.",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
+    },
+    "inset-left": {
+      "$type": "string",
+      "$value": "env(safe-area-inset-left, 0px)",
+      "$description": "Landscape cutout.",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
+    },
+    "inset-right": {
+      "$type": "string",
+      "$value": "env(safe-area-inset-right, 0px)",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
     }
   }
 }

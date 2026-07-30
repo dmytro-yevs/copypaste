@@ -23,6 +23,10 @@ const KEYCHAIN_SERVICE: &str = "com.copypaste.daemon";
 const KEYCHAIN_ACCOUNT: &str = "device-secret-key";
 
 /// Filename of the development-only file-backed secret store.
+///
+/// Dead under the keychain backend, as the two above are dead under this one —
+/// only one `mod backend` compiles.
+#[allow(dead_code)]
 const SECRET_FILE_NAME: &str = "device_secret.key";
 
 /// What a backend returns: 32 bytes, zeroized on drop (I-12).

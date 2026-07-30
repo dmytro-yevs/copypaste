@@ -276,7 +276,10 @@ mod tests {
 
         let sync = driver(FakeRest::default(), FakeAuth::default());
         let stats = sync.push(&source).await.unwrap();
-        assert_eq!(stats.uploaded, 1, "a local item was stranded below the cursor");
+        assert_eq!(
+            stats.uploaded, 1,
+            "a local item was stranded below the cursor"
+        );
         assert!(sync.rest.rows.lock().unwrap().contains_key("a"));
 
         // Once the round is over and the owner advances the floor past it, the

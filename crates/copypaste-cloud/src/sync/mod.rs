@@ -1,82 +1,40 @@
 //! The sync driver: local history in, cloud rows out, and back again.
 //!
-//! # What this module decides, and what it does not
+//! # This module does not decide which version wins
 //!
-//! It decides *when* to talk to the backend, *what* is allowed to leave the
-//! device, and how to recover from a 401 or a 429. It deliberately does **not**
-//! decide which of two versions of an item wins.
+//! Manifest 05 INV-C2: v1 had P2P using the full ordering while the cloud and
+//! relay paths each used a cut-down comparison, so two devices holding
+//! different content at an equal timestamp never converged. Here the comparator
+//! lives behind [`CloudSource::apply_remote`], in the daemon's store, alongside
+//! the one the P2P transport calls. This module hands a version down and is told
+//! whether it won; there is no second comparator to drift.
 //!
-//! That last point is load-bearing. Manifest 05 INV-C2 records the worst
-//! convergence bug in v1: P2P used the full ordering while the cloud and relay
-//! paths each used a cut-down comparison of their own, so two devices holding
-//! different content at an equal timestamp each kept their own copy and never
-//! converged. The fix was one comparator for every transport. Here that is
-//! structural rather than disciplinary — the comparator lives behind
-//! [`CloudSource::apply_remote`], in the daemon's store, alongside the one the
-//! P2P transport already calls. This module hands a remote version down and is
-//! told whether it won. There is no second comparator to drift.
+//! # `created_at` is a wall clock
 //!
-//! # The ordering key is `created_at`, and it is a wall clock
-//!
-//! The manifest's order begins with `lamport_ts`. **v2 has no Lamport clock and
-//! is not getting one.** The order is `created_at`, then `content_hash`, then
-//! `deleted`, then `origin_device_id` — the four keys
-//! `copypaste_p2p::sync::merge_decision` implements. That function is the
-//! definition; this paragraph is a pointer to it, and if the two ever disagree
-//! the function is right.
-//!
-//! What a Lamport stamp bought was monotonicity: it could not go backwards, so
-//! a device with a wrong clock could not outrank a newer write. A wall clock
-//! can. That is made safe here by refusing versions stamped implausibly far
-//! ahead — see [`MAX_FUTURE_SKEW_MS`], which mirrors the constant and the
-//! behaviour in `copypaste-p2p`. Without that guard one row stamped `i64::MAX`
-//! wins every future comparison for its `item_id` and censors that item on every
-//! device; with it, the damage a bad clock can do is bounded to winning ties it
-//! should have lost, which is the trade manifest 05 R-CLK-2 already accepts. No
-//! skew *correction* is attempted, only refusal, and refusal skips one version
-//! rather than failing the round or deleting anything.
-//!
-//! For the same reason there is no tombstone special case in this module beyond
-//! *carrying* the flag. A delete is an ordinary version with `deleted = true`
-//! and no content (manifest 05 §3.5, T-1/T-2), so delete-wins is whatever the
-//! store's comparator says — and a delete for an item this device has never
-//! seen must still be persisted as a tombstone, or a later-arriving create has
-//! nothing to lose against and resurrects it (T-3, `CopyPaste-bfiu`). That is
-//! stated on [`CloudSource::apply_remote`] as a requirement on the implementor.
-//!
-//! # Idempotency
-//!
-//! Replaying a push or a pull changes nothing. Push upserts on `item_id`, so a
-//! re-sent row overwrites itself. Pull hands every row to `apply_remote`, which
-//! keeps the local copy when the two versions tie on every ordering key — so a
-//! re-delivered version, including this device's own writes echoed back through
-//! the account, is absorbed as a no-op rather than filtered by a "did I send
-//! this?" check (manifest 05 INV-I1/INV-I2).
+//! v2 has no Lamport stamp. What the stamp bought was monotonicity — a device
+//! with a wrong clock could not outrank a newer write — and a wall clock can.
+//! [`MAX_FUTURE_SKEW_MS`] is what replaces it: a version stamped further ahead
+//! than that is refused, so one row stamped `i64::MAX` cannot win every future
+//! comparison for its `item_id` and censor that item everywhere. Refusal skips
+//! one version; it never fails the round and never deletes (R-CLK-2). No skew
+//! correction is attempted.
 //!
 //! # The watermark
 //!
-//! One cursor, in milliseconds, meaning *everything this device has reconciled
-//! with the cloud*. [`CloudSync::pull`] advances it; [`CloudSync::push`] reads
-//! it to decide what is new locally. Both bounds are **inclusive**: a row
-//! exactly on the boundary is re-offered rather than skipped, because
-//! re-offering is free (upsert and LWW both absorb it) and skipping is silent
-//! data loss. Manifest 05 §4.4 spends its longest note on precisely this — a
-//! strict `>` on a millisecond cursor permanently lost every row sharing the
-//! boundary millisecond once a burst filled a page.
+//! One cursor, in milliseconds. Both bounds are **inclusive**: manifest 05 §4.4
+//! records that a strict `>` on a millisecond cursor permanently lost every row
+//! sharing the boundary millisecond once a burst filled a page. Re-offering a
+//! boundary row is free — upsert and LWW both absorb it.
 //!
-//! The watermark is stored by the source independently of the item rows, so
-//! that evicting old rows to honour a local storage cap cannot move it
-//! backwards (INV-N5), and it only ever moves forward (INV-I4: it advances past
-//! every row that was *readable*, including rows that were skipped as an
-//! ordering loser or as undecryptable, so an unreadable row is not re-fetched
-//! forever).
+//! The source stores it independently of the item rows, so evicting history to
+//! a storage cap cannot move it backwards (INV-N5), and it only ever moves
+//! forward, including past rows that were skipped as undecryptable, so an
+//! unreadable row is not re-fetched forever (INV-I4).
 //!
 //! # Errors never carry a secret
 //!
-//! Every [`SyncError`] payload is a `&'static str`. There is no `String` field
-//! anywhere in this module's error type, so there is nothing to interpolate a
-//! filesystem path, an access token or a passphrase into — `CLAUDE.md` rule 4,
-//! made structural rather than remembered.
+//! Every [`SyncError`] payload is a `&'static str`, so there is nothing to
+//! interpolate a path, a token or a passphrase into.
 
 pub mod adapters;
 pub mod cadence;
@@ -97,10 +55,6 @@ pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
 pub use source::{CloudSource, LocalItem, SensitiveGuard};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};
-
-// Every test here runs against a fake store and a fake transport (`fakes`);
-// nothing opens a socket. What lives in this file rather than beside a path is
-// the round trip that needs both paths at once.
 
 #[cfg(test)]
 mod tests {

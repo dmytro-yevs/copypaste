@@ -53,20 +53,10 @@
 //! to tell "HTML error page" from "truncated JSON" and not enough to be worth
 //! exfiltrating.
 //!
-//! # How the module is laid out
-//!
-//! | file | owns |
-//! |---|---|
-//! | [`event`] | what a subscriber sees: [`RealtimeEvent`] and [`RealtimeError`] |
-//! | [`subscription`] | the handle, its background task, and shutdown |
-//! | [`socket`] | one session on one socket: heartbeats, dispatch, and the reconnect schedule |
-//! | [`channel`] | opening a socket and joining the channel — the URL, the JWT subject, the join frame |
-//! | [`frame`] | the Phoenix envelope and the `postgres_changes` payload |
-//!
-//! `channel` and `frame` are apart on purpose: parsing an attacker-influenced
-//! frame and deciding what to connect *as* are different jobs with different
-//! failure modes, and the per-user filter in the join belongs with the token it
-//! is derived from rather than with the parser.
+//! [`channel`] and [`frame`] are separate files on purpose: parsing an
+//! attacker-influenced frame and deciding what to connect *as* are different
+//! jobs with different failure modes, and the per-user filter in the join
+//! belongs with the token it is derived from rather than with the parser.
 
 use std::time::Duration;
 

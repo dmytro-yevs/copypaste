@@ -82,11 +82,10 @@ const banner = (what) => `/**
 const decl = (token) => `  --${token.name}: ${token.$value ?? token.value};`;
 
 /**
- * A themed block of custom properties, plus the two conditional blocks §8.5
- * and §8.6 attach to specific tokens: the prefers-reduced-motion override
- * (from a token's `reducedMotion` extension) and the translucency axis (from
- * the translucency group). Both live with the tokens rather than in a
- * stylesheet somebody has to remember to update.
+ * A themed block of custom properties, plus the conditional blocks that attach
+ * to specific tokens: the prefers-reduced-motion override, the pointer:coarse
+ * override, and the translucency axis. Each lives with its tokens rather than
+ * in a stylesheet somebody has to remember to update.
  */
 StyleDictionary.registerFormat({
   name: 'css/copypaste',
@@ -96,6 +95,7 @@ StyleDictionary.registerFormat({
     const solid = all.filter((t) => t.path[0] === 'translucency' && t.path[1] === 'solid');
     const main = all.filter((t) => t.path[0] !== 'translucency' || t.path[1] === 'solid');
     const reduced = all.filter((t) => ext(t).reducedMotion !== undefined);
+    const coarse = all.filter((t) => ext(t).coarsePointer !== undefined);
 
     const out = [banner(options.title)];
     const selectors = options.selectors.join(',\n');
@@ -111,6 +111,19 @@ StyleDictionary.registerFormat({
         '@media (prefers-reduced-motion: reduce) {',
         indent(`${selectors} {`, '  '),
         reduced.map((t) => `    --${t.name}: ${ext(t).reducedMotion};`).join('\n'),
+        '  }',
+        '}\n',
+      );
+    }
+
+    if (coarse.length) {
+      out.push(
+        '/* Touch targets. `pointer: coarse` is the primary pointer being a finger,',
+        ' * which is the Android build and a Mac in tablet-mirroring — not a screen',
+        ' * width, because a narrow window on a Mac is still driven by a mouse. */',
+        '@media (pointer: coarse) {',
+        indent(`${selectors} {`, '  '),
+        coarse.map((t) => `    --${t.name}: ${ext(t).coarsePointer};`).join('\n'),
         '  }',
         '}\n',
       );

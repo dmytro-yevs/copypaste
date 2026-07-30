@@ -1,39 +1,22 @@
 //! The daemon's history, as a cloud round sees it.
 //!
-//! The seam is `copypaste_cloud::sync::CloudSource`. Everything below reads and
-//! writes through [`crate::meta`] — the same view the peer transport uses, with
-//! the same `is_sensitive = 0` filter deciding what may leave the device and the
-//! same comparator deciding what arrives ([`crate::merge`]).
+//! Reads and writes go through [`crate::meta`] — the same view the peer
+//! transport uses, so the `is_sensitive = 0` filter and the comparator in
+//! [`crate::merge`] are shared rather than reimplemented (INV-C2).
 //!
-//! # Two cursors, not one
+//! # The two cursors
 //!
-//! [`CloudSource::watermark`] is what this device has reconciled *down* from
-//! the account; [`CloudSource::upload_floor`] is what it has offered *up*. The
-//! seam keeps them apart for the two reasons written on `upload_floor` — a
-//! watermark dragged forward by another device's clock strands local items, and
-//! a fresh sign-in has a backlog to send (manifest 05 §4.9, BUG C2).
+//! Why the upload floor is not the download watermark is on
+//! [`CloudSource::upload_floor`]. Here: [`crate::cloud::poll`] advances the
+//! floor only after a round completes, and only to the instant that round
+//! *started*, so an item captured mid-round is still offered by the next one.
 //!
-//! Both live in `sync_device_state`. [`crate::cloud::poll`] advances the floor
-//! only after a round completes, and only to the instant that round *started*,
-//! so an item captured while a round was in flight is still offered by the next
-//! one.
-//!
-//! One case the floor cannot see on its own: an item that arrives from a *peer*
-//! carries the sender's `created_at`, which may be well behind this device's
-//! floor, so it would never be forwarded to the account. The peer transport
-//! therefore lowers the floor to the stamp it just applied — see
-//! [`crate::cloud::note_version_written`].
-//!
-//! # One thing the cursor cannot see
-//!
-//! `Store::delete` tombstones a row without restamping `created_at`, so
-//! deleting an item older than the cursor produces a version no `created_at`
-//! query can find, and that delete does not propagate over the cloud path. It
-//! propagates over the peer path, which advertises full state rather than a
-//! window. The fix belongs in `copypaste-core::Store::delete` — restamp on
-//! mutation, which is exactly what `CloudItem::created_at` already documents as
-//! a requirement on writers — and not in a second bookkeeping table here, which
-//! would be one more thing to drift out of step with the rows it describes.
+//! A version can also appear *below* the floor — a peer applies rows carrying
+//! the sender's stamp, and `Store::delete` tombstones without restamping. Both
+//! call [`crate::cloud::note_version_written`] to pull the floor back; without
+//! it, peer items and deletes of old items never reach the account. The cleaner
+//! fix for the delete half is for `copypaste-core::Store::delete` to restamp on
+//! mutation, which is what `CloudItem::created_at` asks of writers anyway.
 
 use std::sync::{Arc, Mutex};
 
@@ -106,10 +89,7 @@ impl CloudSource for StoreSource {
                 .versions_since(since_ms, UPLOAD_SCAN_LIMIT)
                 .map_err(source_error)?;
 
-            *self
-                .last_offer
-                .lock()
-                .unwrap_or_else(|e| e.into_inner()) = Offer {
+            *self.last_offer.lock().unwrap_or_else(|e| e.into_inner()) = Offer {
                 truncated: rows.len() as i64 >= UPLOAD_SCAN_LIMIT,
                 max_created_at: rows.last().map_or(since_ms, |row| row.created_at),
             };
@@ -162,7 +142,12 @@ impl CloudSource for StoreSource {
     }
 
     fn watermark(&self) -> Result<i64, SyncError> {
-        blocking(|| self.state.meta.state_ms(KEY_WATERMARK).map_err(source_error))
+        blocking(|| {
+            self.state
+                .meta
+                .state_ms(KEY_WATERMARK)
+                .map_err(source_error)
+        })
     }
 
     fn upload_floor(&self) -> Result<i64, SyncError> {
@@ -255,11 +240,16 @@ mod tests {
 
         // Another device's rows dragged the download watermark past our own
         // item's stamp — clock skew, or simply a busier peer.
-        source.set_watermark(copypaste_core::now_ms() + 60_000).unwrap();
+        source
+            .set_watermark(copypaste_core::now_ms() + 60_000)
+            .unwrap();
 
         assert_eq!(source.upload_floor().unwrap(), 0);
         assert_eq!(
-            source.local_changes_since(source.upload_floor().unwrap()).unwrap().len(),
+            source
+                .local_changes_since(source.upload_floor().unwrap())
+                .unwrap()
+                .len(),
             1,
             "the item was stranded below the download cursor"
         );

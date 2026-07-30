@@ -1,0 +1,17 @@
+import { defineConfig } from "vitest/config";
+
+// WebKitWebDriver refuses a second concurrent session ("Maximum number of
+// active sessions"), and each test file drives its own app instance, so files
+// must not overlap. This is a correctness constraint, not a tuning choice.
+export default defineConfig({
+  test: {
+    include: ["tests/**/*.e2e.test.ts"],
+    globalSetup: ["./src/harness/global-setup.ts"],
+    fileParallelism: false,
+    testTimeout: 60_000,
+    hookTimeout: 240_000,
+    teardownTimeout: 30_000,
+    retry: 0,
+    reporters: ["default"],
+  },
+});

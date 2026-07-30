@@ -1,16 +1,8 @@
 /**
- * The app shell: nav rail, banner slot, and the active screen.
- *
- * INV-20 — the shell itself is **never** inside an error boundary. Navigation
- * and the main pane each get their own sibling boundary, so a crash in a screen
- * cannot take navigation with it and every fallback renders inside the shell
- * layout rather than against a bare document body (CopyPaste-8ebg.12).
- *
- * Routing is in-memory (zustand), with defensive narrowing: an unrecognised
- * view resolves to History rather than to a blank pane (manifest §3.0). There
- * is no view transition animation — v1's crossfade was deliberately stripped
- * (CopyPaste-h1n3) and the flex height chain the scroll regions depend on is
- * what remains of it.
+ * INV-20: the shell is **never** inside an error boundary — navigation and the
+ * main pane get sibling boundaries, so a crash in a screen cannot take
+ * navigation with it and the fallback renders inside the layout rather than
+ * against a bare body (CopyPaste-8ebg.12).
  */
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -40,9 +32,9 @@ export default function App() {
   const status = useStatus();
   const qc = useQueryClient();
 
-  // The pre-paint script in main.tsx owns the *first* frame; this keeps the
-  // attributes in step afterwards, and subscribes once to the OS appearance so
-  // a `system` theme follows it live without a reload (AT-53).
+  // main.tsx owns the first frame; this keeps the attributes in step, and
+  // subscribes *once* — v1 accumulated a matchMedia listener per re-apply
+  // (CopyPaste-g27b.20).
   useEffect(() => {
     applyAppearance(appearance);
     subscribeSystemTheme(() => applyAppearance(usePrefs.getState()));
@@ -52,7 +44,9 @@ export default function App() {
   const screen = SCREENS[view];
 
   return (
-    <div className="flex h-full min-h-0 bg-background text-foreground">
+    // `flex-col-reverse` puts the nav at the bottom of a phone screen — the
+    // reachable band — while keeping it first in the DOM for reading order.
+    <div className="flex h-full min-h-0 flex-col-reverse bg-background text-foreground sm:flex-row">
       <Boundary label="Navigation">
         <Sidebar />
       </Boundary>
@@ -72,7 +66,7 @@ export default function App() {
         />
 
         <Boundary label={screen.label}>
-          {/* `display: contents` keeps the boundary out of the flex height
+          {/* `display: contents`: the boundary must not join the flex height
               chain the scroll regions depend on. */}
           <div className="contents">{screen.render()}</div>
         </Boundary>

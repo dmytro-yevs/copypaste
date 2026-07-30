@@ -656,4 +656,3 @@ mod tests {
         assert_eq!(det.scan(&haystack).unwrap().rule, "aws_access_key");
     }
 }
-

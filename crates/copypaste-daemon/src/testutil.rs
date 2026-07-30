@@ -1,8 +1,5 @@
-//! A fully wired `AppState` on a temporary data directory.
-//!
-//! One fixture for the whole crate: the peer tests, the cloud tests, the merge
-//! tests and the socket tests all need the same thing, and a second copy of it
-//! is a second definition of what a daemon is.
+//! A fully wired `AppState` on a temporary data directory — one fixture for the
+//! whole crate, so there is one definition of what a daemon is.
 
 use std::sync::Arc;
 
@@ -16,10 +13,8 @@ use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::AppState;
 
-/// Reads nothing, and records what is written to it.
-///
-/// The recording half is what lets a test assert the *absence* of a pasteboard
-/// write — which is the whole difference between `get` and `copy`.
+/// Reads nothing; records what is written, so a test can assert the *absence*
+/// of a pasteboard write — the whole difference between `get` and `copy`.
 #[derive(Default)]
 pub struct FakeClipboard {
     writes: WriteLog,

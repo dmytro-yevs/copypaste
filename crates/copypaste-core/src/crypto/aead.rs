@@ -126,7 +126,6 @@ mod tests {
     use super::super::Keyring;
     use super::*;
 
-
     #[test]
     fn round_trip_recovers_the_plaintext() {
         let key = key_a();
@@ -152,7 +151,6 @@ mod tests {
         let reloaded = Keyring::from_secret(&SECRET_A).item_key();
         assert_eq!(decrypt(&ct, &nonce, &reloaded, ITEM).unwrap(), b"persisted");
     }
-
 
     #[test]
     fn wrong_key_fails() {
@@ -275,7 +273,6 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn empty_plaintext_round_trips() {
         let key = key_a();
@@ -308,7 +305,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn two_encryptions_of_the_same_plaintext_use_different_nonces() {
         let key = key_a();
@@ -335,7 +331,6 @@ mod tests {
             assert!(seen.insert(nonce), "nonce repeated");
         }
     }
-
 
     #[test]
     fn item_aad_has_the_documented_layout() {

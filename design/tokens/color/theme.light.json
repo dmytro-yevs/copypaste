@@ -28,7 +28,11 @@
     },
     "border": {
       "$value": "oklch(0.92 0.004 286.32)",
-      "$description": "zinc-200. shadcn `border` / `input`."
+      "$description": "zinc-200. shadcn `border`. 1.27:1 on --bg: decorative separation only, never the sole boundary of a control (see --border-strong)."
+    },
+    "border-strong": {
+      "$value": "oklch(0.552 0.016 285.938)",
+      "$description": "zinc-500. The boundary of an interactive control — input, checkbox, switch track, segmented button. WCAG 1.4.11 wants 3:1 and shadcn's --border is 1.27:1. Measured 4.83 on --bg, 4.62 on --panel, 4.39 on --elevated. Not for dividers."
     },
     "divider": {
       "$value": "oklch(0.94 0.004 286.32)",
@@ -40,15 +44,15 @@
     },
     "dim": {
       "$value": "oklch(0.442 0.017 285.786)",
-      "$description": "zinc-600. Secondary text, ~7:1 on white. One step darker than shadcn's default `muted-foreground` (zinc-500): that step passes AA at 4.8:1, and A11Y-10 asks for margin on text that carries meaning."
+      "$description": "zinc-600, one step darker than shadcn's `muted-foreground`. Secondary text: 7.73 on --bg, 7.02 on --elevated, 6.40 on --selected."
     },
     "faint": {
-      "$value": "oklch(0.552 0.016 285.938)",
-      "$description": "zinc-500. Tertiary text — timestamps, counts, placeholders. 4.8:1 on white, so it still clears AA (A11Y-10)."
+      "$value": "oklch(0.5 0.016 285.938)",
+      "$description": "Tertiary text. Off-ramp, between zinc-500 and zinc-600, for the same reason dark's --faint is: zinc-500 measures 4.83 on white but only 4.39 on --elevated and 3.81 on --selected, and this token labels real meta text (A11Y-10). At L=0.5 the worst backdrop measures 4.75."
     },
     "mute": {
       "$value": "oklch(0.705 0.015 286.067)",
-      "$description": "zinc-400. Decorative only. A11Y-10: never the sole carrier of text."
+      "$description": "zinc-400. 2.63:1 on --bg — below AA, deliberately. Decorative only; A11Y-10: never the sole carrier of text."
     },
     "hover": {
       "$value": "oklch(0 0 0 / 5%)",
@@ -88,27 +92,31 @@
     },
     "err": {
       "$value": "oklch(0.577 0.245 27.325)",
-      "$description": "red-600 — shadcn's `destructive` in light, verbatim."
+      "$description": "red-600 — shadcn's `destructive` in light, verbatim. 4.91 on --bg."
+    },
+    "on-err": {
+      "$value": "oklch(0.985 0 0)",
+      "$description": "Foreground on a solid --err fill: 4.71. White works here because light's --err is red-600; dark's red-400 needs dark ink."
     },
     "info": {
       "$value": "oklch(0.546 0.245 262.881)",
       "$description": "blue-600. Informational fill / dot."
     },
     "ok-strong": {
-      "$value": "oklch(0.527 0.154 150.069)",
-      "$description": "green-700. AA-corrected foreground for --ok text on its own tint. A11Y-10 — do NOT merge into --ok, which is correct as a fill and fails as small text."
+      "$value": "oklch(0.448 0.119 151.328)",
+      "$description": "green-800, not green-700: on a 15% --ok tint green-700 measures 4.16 and misses AA. green-800 measures 5.92. A11Y-10 — do NOT merge into --ok, which is correct as a fill and fails as small text."
     },
     "warn-strong": {
-      "$value": "oklch(0.555 0.163 48.998)",
-      "$description": "amber-700. AA-corrected foreground variant of --warn."
+      "$value": "oklch(0.473 0.137 46.201)",
+      "$description": "amber-800. amber-700 measures 4.29 on a 15% --warn tint; this measures 6.04."
     },
     "err-strong": {
       "$value": "oklch(0.505 0.213 27.518)",
-      "$description": "red-700. AA-corrected foreground variant of --err on its tint (destructive ghost button label)."
+      "$description": "red-700. 4.90 on a 15% --err tint (destructive ghost button label)."
     },
     "info-strong": {
       "$value": "oklch(0.488 0.243 264.376)",
-      "$description": "blue-700. AA-corrected foreground variant of --info."
+      "$description": "blue-700. 5.48 on a 15% --info tint."
     },
     "c-text": {
       "$value": "oklch(0.552 0.016 285.938)",
@@ -151,12 +159,24 @@
       "$description": "Content kind: json (renders monospace). orange-700."
     },
     "c-secret": {
-      "$value": "oklch(0.586 0.253 17.585)",
-      "$description": "Content kind: secret. rose-600."
+      "$value": "oklch(0.514 0.222 16.935)",
+      "$description": "Content kind: secret. rose-700, not rose-600: it also carries the withheld label, and rose-600 measures 4.34 on --elevated."
     },
     "c-unknown": {
       "$value": "{color.c-text}",
       "$description": "The closed kind set ends in `unknown`; it falls back to the text-kind colour and never renders blank."
+    },
+    "withheld": {
+      "$value": "{color.elevated}",
+      "$description": "Fill of the slot where a sensitive item's content would be. See the dark theme's note: the content is absent, so this reads as an empty slot and there is deliberately no blur token."
+    },
+    "withheld-border": {
+      "$value": "{color.border-strong}",
+      "$description": "Outline of the withheld slot."
+    },
+    "withheld-fg": {
+      "$value": "{color.c-secret}",
+      "$description": "The 'Sensitive — activate to reveal' label. 5.80 on --withheld, 5.28 on --selected."
     }
   }
 }

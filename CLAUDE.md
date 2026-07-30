@@ -164,3 +164,39 @@ macOS and Android. Not Windows, not Linux desktop.
 
 Every dependency added must work on both, or be behind a platform cfg with the
 other side implemented.
+
+## 8. Do not document the obvious
+
+**A comment earns its place by recording something the code cannot say.**
+Default to none.
+
+Worth writing:
+
+- A defect that actually happened. Name it: `CopyPaste-bfiu`, INV-C2, I-33.
+  The test to apply is whether deleting the comment would let a competent
+  person reintroduce a bug someone already paid for.
+- Why a non-obvious choice is what it is — an ordering, a constant, a bound,
+  a refusal. `deleted` being the third merge key is the model: subtle,
+  correct, and someone will "simplify" it away without the argument.
+- A security property and what upholds it.
+- That something is unverified, and why.
+
+Not worth writing:
+
+- What the code plainly says. `/// One peer record` above `struct Peer`.
+- The same point at two levels — in `lib.rs`, again in the module header,
+  again on the function.
+- Layout tables in a `mod.rs` listing the submodules. The directory says it,
+  and the table goes stale the moment a file moves.
+- Narration of how the code got here: "extracted from", "kept here because",
+  "rewritten after". That is git's job.
+- A long build-up to a short rule. State the rule.
+
+This applies everywhere, not just to Rust: components, documents, commit
+messages, ADRs. An ADR records a decision and its consequences, not an essay.
+
+The volume itself is the risk. Long prose rots faster than code because
+nothing compiles it — `copypaste-cloud/src/sync/mod.rs` carried an
+eighty-line header whose central claim, the merge ordering, had gone stale in
+two places while the code stayed correct. A comment that is wrong is worse
+than one that is missing.
