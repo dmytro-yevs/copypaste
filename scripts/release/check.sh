@@ -15,6 +15,7 @@
 #   * the generated tap layout is the one `brew tap` expects
 #   * the workflows are valid YAML and the release workflow still holds no
 #     Apple credential
+#   * the workflows are wired to each other correctly — check-wiring.py
 #
 # What it deliberately does NOT do is pretend to check codesign, hdiutil,
 # PlistBuddy, the Tauri bundler or whether the bundle launches. Those need a Mac
@@ -29,11 +30,10 @@ cd "$REPO_ROOT"
 
 PASS=0
 FAIL=0
-CURRENT=""
 
 ok()   { PASS=$((PASS + 1)); printf '  ok    %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$1"; [[ -n "${2:-}" ]] && printf '        %s\n' "$2"; }
-group() { CURRENT="$1"; printf '\n== %s\n' "$1"; }
+group() { printf '\n== %s\n' "$1"; }
 
 # check <description> <command...>
 check() {
@@ -242,6 +242,29 @@ PY
     rm -rf "$RUNDIR"
 else
     printf '  skip  YAML parse (python3 + PyYAML not available)\n'
+fi
+
+# ---------------------------------------------------------------------------
+group "Workflow wiring"
+# ---------------------------------------------------------------------------
+# Structural checks across all four workflows. Everything here is a mistake that
+# only a real run would otherwise report, one round trip at a time: an artifact
+# name that does not match its producer, an output nothing declares, a job that
+# reads a file no job it depends on wrote.
+if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
+    WIRING="$(mktemp)"
+    if python3 scripts/release/check-wiring.py > "$WIRING"
+    then
+        while IFS='|' read -r verdict desc detail; do
+            [[ -n "${verdict:-}" ]] || continue
+            if [[ "$verdict" == "PASS" ]]; then ok "$desc"; else bad "$desc" "$detail"; fi
+        done < "$WIRING"
+    else
+        bad "workflow wiring checks ran" "$(cat "$WIRING")"
+    fi
+    rm -f "$WIRING"
+else
+    printf '  skip  workflow wiring (python3 + PyYAML not available)\n'
 fi
 
 # ---------------------------------------------------------------------------

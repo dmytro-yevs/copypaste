@@ -126,6 +126,54 @@ jobs:
 
           exit "$fail"
 
+  release-pipeline:
+    name: release pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The release workflow runs only on a tag, so nothing here is exercised
+      # until the moment it matters. check.sh asserts the part that needs
+      # neither a Mac nor a tag: shell and Ruby syntax, the cask and formula
+      # generators' round trip, the artifact wiring between jobs, and the
+      # permission split.
+      - name: scripts/release/check.sh
+        # PyYAML is installed rather than assumed. check.sh *skips* its
+        # workflow groups when it is absent, and those are the checks worth
+        # having — a gate that silently drops them is worse than one that fails.
+        run: |
+          set -euo pipefail
+          python3 -c "import yaml" 2>/dev/null || {
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends python3-yaml
+            python3 -c "import yaml"
+          }
+          ./scripts/release/check.sh
+
+  design:
+    name: design tokens
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: design
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: design/package-lock.json
+
+      - run: npm ci
+
+      # Two gates. check-contrast.mjs composites every token pair; check-usage
+      # scans crates/copypaste-ui/src/ for the cases the token gate cannot see —
+      # a fill diluted with an alpha at the call site, or a fill utility used to
+      # paint text, both of which measure differently there than in the token
+      # file.
+      - run: npm run check
+
   # ---------------------------------------------------------------------------
   # The Rust gate. Clippy and the test suite share one runner so SQLCipher and
   # the dependency graph are compiled once, not twice.

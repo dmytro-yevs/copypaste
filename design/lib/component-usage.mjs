@@ -106,14 +106,14 @@ export const REQUIRED_UTILITIES = [
  */
 export const ALPHA_UTILITIES = [
   {
-    util: 'bg-primary/90',
-    where: 'Button, default variant, hover',
-    measure: { fill: 'var(--accent)', alpha: 0.9, fg: 'var(--on-accent)', on: ['--bg', '--card'] },
+    util: 'bg-primary/97',
+    where: 'Button, default variant, hover. Interim — see button.tsx',
+    measure: { fill: 'var(--accent)', alpha: 0.97, fg: 'var(--on-accent)', on: ['--bg', '--card'] },
   },
   {
-    util: 'bg-destructive/90',
-    where: 'Button, destructive variant, hover',
-    measure: { fill: 'var(--err)', alpha: 0.9, fg: 'var(--on-err)', on: ['--bg', '--card'] },
+    util: 'bg-destructive/94',
+    where: 'Button, destructive variant, hover. Interim — see button.tsx',
+    measure: { fill: 'var(--err)', alpha: 0.94, fg: 'var(--on-err)', on: ['--bg', '--card'] },
   },
   {
     util: 'bg-secondary/80',
