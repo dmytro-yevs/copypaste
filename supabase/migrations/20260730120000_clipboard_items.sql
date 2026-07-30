@@ -50,6 +50,24 @@ create table public.clipboard_items (
 
     origin_device_id  text not null,
 
+    -- HMAC-SHA256, base64, over every column above, under a key HKDF-derived
+    -- from the sync key (`crates/copypaste-cloud/src/crypto/sign.rs`).
+    --
+    -- This database cannot produce it and cannot check it, and that is the
+    -- point: encryption hides the content, but the columns the merge orders on
+    -- travel in the clear because this table pages on them. Without a signature
+    -- anything that can write here — including this service — can stamp a
+    -- version that outranks a device's real one, or a tombstone that deletes an
+    -- item everywhere (manifest 05 §5.3). Clients verify before merging and
+    -- refuse what does not verify.
+    --
+    -- It is a MAC of the *ciphertext*, never of the plaintext: a plaintext hash
+    -- stored beside the ciphertext would hand this server an equality oracle
+    -- over content, which is the one thing the design does not give it.
+    --
+    -- `not null` so a row that was never signed cannot be written at all.
+    signature         text not null,
+
     -- Server-assigned, for retention. The retention job orders on this and
     -- never on the client-supplied `created_at`, or a device with a forged
     -- clock escapes eviction (manifest 05 §5.1 row 4a). `authenticated` has no
@@ -94,6 +112,13 @@ create table public.clipboard_items (
     constraint clipboard_items_origin_device_id_bounded
         check (length(origin_device_id) between 1 and 128),
 
+    -- Base64 and bounded. 44 characters today (32 bytes of HMAC-SHA256); the
+    -- bound is looser than that so a longer MAC is a client change rather than
+    -- a migration, and tight enough that the column cannot become somewhere to
+    -- park bulk plaintext.
+    constraint clipboard_items_signature_bounded
+        check (signature ~ '^[A-Za-z0-9+/=]{16,128}$'),
+
     -- Storage backstop, not the product limit. The per-item cap the user should
     -- meet is client-side (10 MiB image/file, 8 MiB text — manifest 05 §5.1
     -- row 13) so the error is a local one rather than an opaque backend
@@ -118,8 +143,9 @@ comment on column public.clipboard_items.inserted_at is
 -- ---------------------------------------------------------------------------
 
 -- The upsert conflict target. PostgREST needs a unique index to resolve
--- `on_conflict`; without it a replayed batch is a 409, not a no-op, and
--- `RestError::Rejected { status: 409 }` says exactly that. Scoped to
+-- `on_conflict`; without it *every* write fails, not just a replay — PostgREST
+-- 12.2.3 answers 400 with `42P10` on the first request, measured by
+-- `supabase/dev/postgrest-harness.sh` with this index dropped. Scoped to
 -- (user_id, item_id) rather than item_id alone because this is a shared table
 -- (manifest 05 §4.2, AT-52).
 create unique index clipboard_items_user_item_uidx

@@ -77,18 +77,16 @@ pub trait RestApi: Send + Sync {
     /// explicitly, `deleted` above all: omitting it lets the column default
     /// fire and resurrects a tombstoned item (manifest 05 T-5,
     /// `CopyPaste-kgs7`).
+    ///
+    /// **The only write path.** A tombstone is an ordinary row on it — one with
+    /// `deleted = true` and no payload (T-4) — rather than a partial update of
+    /// an existing row. Two reasons, either sufficient: manifest 05 §7.5 asked
+    /// for one upsert and one code path, and a partial write cannot carry a
+    /// metadata signature that covers the columns it does not send.
     fn upsert(
         &self,
         token: &str,
         items: &[CloudItem],
-    ) -> impl Future<Output = Result<(), TransportFault>> + Send;
-
-    /// Mark rows deleted. A *tombstone*, not a row removal, and it must clear
-    /// the ciphertext rather than leave a stale one behind (manifest 05 T-4).
-    fn tombstone(
-        &self,
-        token: &str,
-        item_ids: &[String],
     ) -> impl Future<Output = Result<(), TransportFault>> + Send;
 }
 

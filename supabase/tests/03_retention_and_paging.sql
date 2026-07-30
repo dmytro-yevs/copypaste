@@ -28,7 +28,8 @@ begin;
 -- --- the pull query's plan --------------------------------------------------
 
 insert into public.clipboard_items
-    (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
+    (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id,
+     signature)
 select
     case when i % 2 = 0
          then '11111111-1111-4111-8111-111111111111'::uuid
@@ -39,7 +40,8 @@ select
     -- (created_at, item_id) ordering exists to page through (INV-N1, AT-24).
     1700000000000 + (i / 25),
     false,
-    'device-a'
+    'device-a',
+    'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA='
 from generate_series(1, 10000) as i;
 
 analyze public.clipboard_items;
@@ -54,10 +56,10 @@ declare
     -- once it does, and the index has to serve both or the compound keyset
     -- buys correctness at the price of a sort on every page.
     queries text[] := array[
-        -- select=<7 columns>&created_at=gte.<cursor>
+        -- select=<8 columns>&created_at=gte.<cursor>
         -- &order=created_at.asc,item_id.asc&limit=100
         $q$ where created_at >= 1700000000200 $q$,
-        -- select=<7 columns>
+        -- select=<8 columns>
         -- &or=(created_at.gt.M,and(created_at.eq.M,item_id.gt.ID))
         -- &order=created_at.asc,item_id.asc&limit=100
         $q$ where (created_at > 1700000000200
@@ -74,7 +76,7 @@ begin
         plan := '';
         for line in execute
             'explain (costs off) select item_id, ciphertext, nonce, content_type,'
-            || ' created_at, deleted, origin_device_id from public.clipboard_items '
+            || ' created_at, deleted, origin_device_id, signature from public.clipboard_items '
             || shape
             || ' order by created_at asc, item_id asc limit 100'
         loop
@@ -114,19 +116,20 @@ begin;
 update private.retention_policy set ttl_hours = 24, max_rows_per_user = 3 where id;
 
 insert into public.clipboard_items
-    (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, inserted_at)
+    (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id,
+     signature, inserted_at)
 values
     -- Old by the server's clock, and stamped a decade into the future by the
     -- client's. v1's relay sorted eviction on the client value, which let an
     -- intra-account writer forge a low sort key, escape eviction and displace
     -- legitimate items (`CopyPaste-1uqb`, manifest 05 §5.1 row 4a).
     ('11111111-1111-4111-8111-111111111111', 'forged-old', 'Y3Q=', 'bm8=', 'text',
-     4102444800000, false, 'device-a', now() - interval '48 hours'),
+     4102444800000, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=', now() - interval '48 hours'),
     -- Fresh by the server's clock, ancient by the client's: must survive.
     ('11111111-1111-4111-8111-111111111111', 'fresh', 'Y3Q=', 'bm8=', 'text',
-     1, false, 'device-a', now()),
+     1, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=', now()),
     ('22222222-2222-4222-8222-222222222222', 'bob-old', 'Y3Q=', 'bm8=', 'text',
-     1700000000000, false, 'device-b', now() - interval '30 hours');
+     1700000000000, false, 'device-b', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=', now() - interval '30 hours');
 
 do $$
 declare
@@ -152,13 +155,15 @@ $$;
 -- The per-account cap, with `inserted_at` and `created_at` in opposite orders
 -- so that only one of them can be the one being honoured.
 insert into public.clipboard_items
-    (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, inserted_at)
+    (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id,
+     signature, inserted_at)
 select
     '11111111-1111-4111-8111-111111111111',
     'cap-' || i,
     'Y3Q=', 'bm8=', 'text',
     2000000000000 - i,                     -- newest by the client's clock first
     false, 'device-a',
+    'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=',
     now() - make_interval(mins => 60 - i)  -- newest by the server's clock last
 from generate_series(1, 6) as i;
 
