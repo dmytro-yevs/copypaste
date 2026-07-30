@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/cn";
 import {
   KIND_TEXT_CLASS,
@@ -36,7 +37,8 @@ import {
 import type { Item } from "@/lib/ipc";
 
 /** A11Y-3, verbatim from the manifest. */
-export const SENSITIVE_A11Y_LABEL = "Sensitive item, hidden — activate to reveal";
+export const SENSITIVE_A11Y_LABEL =
+  "Sensitive item, hidden — activate to reveal";
 export const SENSITIVE_REVEAL_LABEL =
   "Sensitive content hidden — activate to reveal";
 const SENSITIVE_PLACEHOLDER = "Sensitive content hidden";
@@ -60,6 +62,11 @@ interface HistoryRowProps {
   revealedContent: string | null;
   revealPending: boolean;
   previewLines: number;
+  /** Selection mode is on, so the row shows a checkbox and a click toggles it
+   *  instead of selecting the row (§3.1.5). */
+  selecting: boolean;
+  checked: boolean;
+  onToggleChecked: (item: Item) => void;
   onSelect: (item: Item) => void;
   onCopy: (item: Item) => void;
   onTogglePin: (item: Item) => void;
@@ -79,6 +86,9 @@ function HistoryRowImpl({
   revealedContent,
   revealPending,
   previewLines,
+  selecting,
+  checked,
+  onToggleChecked,
   onSelect,
   onCopy,
   onTogglePin,
@@ -106,27 +116,53 @@ function HistoryRowImpl({
           "before:absolute before:inset-y-[var(--sel-bar-inset)] before:left-0 before:w-[var(--sel-bar-w)] before:rounded-full before:bg-selected-edge before:content-['']",
       )}
     >
-      <span
-        aria-hidden="true"
-        className={cn(
-          "mt-px flex size-[var(--icon-lg)] shrink-0 items-center justify-center",
-          KIND_TEXT_CLASS[kind],
-        )}
-      >
-        {item.is_sensitive ? (
-          <ShieldAlert size={14} />
-        ) : (
-          <Copy size={14} strokeWidth={1.75} />
-        )}
-      </span>
+      {selecting ? (
+        // Wrapped in a full tap target: `--sz-iconbtn` is 36px under a mouse
+        // and 48px under a finger, so the checkbox itself stays 16px of ink
+        // without the touch target shrinking to match.
+        <span
+          className={cn(
+            "-my-[var(--pad-row-y)] flex shrink-0 items-center justify-center",
+            ACTION,
+          )}
+        >
+          <Checkbox
+            checked={checked}
+            tabIndex={tab}
+            aria-label={`Select ${rowLabel(item)}`}
+            onCheckedChange={() => onToggleChecked(item)}
+          />
+        </span>
+      ) : (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "mt-px flex size-[var(--icon-lg)] shrink-0 items-center justify-center",
+            KIND_TEXT_CLASS[kind],
+          )}
+        >
+          {item.is_sensitive ? (
+            <ShieldAlert size={14} />
+          ) : (
+            <Copy size={14} strokeWidth={1.75} />
+          )}
+        </span>
+      )}
 
       <button
         type="button"
         aria-label={rowLabel(item)}
-        title="Click to select · double-click to copy"
+        title={
+          selecting
+            ? "Click to add to the selection"
+            : "Click to select · double-click to copy"
+        }
         tabIndex={tab}
-        onClick={() => onSelect(item)}
-        onDoubleClick={() => onCopy(item)}
+        onClick={() => (selecting ? onToggleChecked(item) : onSelect(item))}
+        // No double-click-to-copy while selecting: a second click there means
+        // "deselect", and copying on it would put an item on the clipboard the
+        // user was in the middle of un-choosing.
+        onDoubleClick={selecting ? undefined : () => onCopy(item)}
         className="flex min-w-0 flex-1 flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
         {masked ? (
@@ -166,70 +202,83 @@ function HistoryRowImpl({
               Pinned
             </span>
           )}
-          {item.is_sensitive && <span className="text-c-secret">· Sensitive</span>}
+          {item.is_sensitive && (
+            <span className="text-c-secret">· Sensitive</span>
+          )}
         </span>
       </button>
 
-      <div className="flex shrink-0 items-center gap-0.5">
-        {item.is_sensitive &&
-          (revealed ? (
-            <Button
-              variant="ghost"
-              aria-label="Hide sensitive content"
-              title="Hide sensitive content"
-              tabIndex={tab}
-              className={ACTION}
-              onClick={onHide}
-            >
-              <EyeOff aria-hidden="true" />
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              aria-label={SENSITIVE_REVEAL_LABEL}
-              title="Reveal sensitive content"
-              tabIndex={tab}
-              className={ACTION}
-              onClick={() => onReveal(item)}
-            >
-              {revealPending ? (
-                <LoaderCircle aria-hidden="true" className="animate-spin" />
-              ) : (
-                <Eye aria-hidden="true" />
-              )}
-            </Button>
-          ))}
-        <Button
-          variant="ghost"
-          aria-label="Copy to clipboard"
-          title="Copy to clipboard"
-          tabIndex={tab}
-          className={ACTION}
-          onClick={() => onCopy(item)}
-        >
-          <Copy aria-hidden="true" />
-        </Button>
-        <Button
-          variant="ghost"
-          aria-label={item.pinned ? "Unpin item" : "Pin item"}
-          title={item.pinned ? "Unpin item" : "Pin item"}
-          tabIndex={tab}
-          className={ACTION}
-          onClick={() => onTogglePin(item)}
-        >
-          {item.pinned ? <PinOff aria-hidden="true" /> : <Pin aria-hidden="true" />}
-        </Button>
-        <Button
-          variant="ghost"
-          aria-label="Delete item"
-          title="Delete item"
-          tabIndex={tab}
-          className={cn(ACTION, "hover:text-err-strong")}
-          onClick={() => onDelete(item)}
-        >
-          <Trash2 aria-hidden="true" />
-        </Button>
-      </div>
+      {/* Not rendered in selection mode — not merely hidden with a class. The
+          bulk bar duplicates these, a Delete button beside a checkbox is one
+          misclick from destroying the wrong thing (§3.1.5), and a
+          `display: none` button is still in the accessibility tree and still a
+          tab stop. */}
+      {!selecting && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          {item.is_sensitive &&
+            (revealed ? (
+              <Button
+                variant="ghost"
+                aria-label="Hide sensitive content"
+                title="Hide sensitive content"
+                tabIndex={tab}
+                className={ACTION}
+                onClick={onHide}
+              >
+                <EyeOff aria-hidden="true" />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                aria-label={SENSITIVE_REVEAL_LABEL}
+                title="Reveal sensitive content"
+                tabIndex={tab}
+                className={ACTION}
+                onClick={() => onReveal(item)}
+              >
+                {revealPending ? (
+                  <LoaderCircle aria-hidden="true" className="animate-spin" />
+                ) : (
+                  <Eye aria-hidden="true" />
+                )}
+              </Button>
+            ))}
+          <Button
+            variant="ghost"
+            aria-label="Copy to clipboard"
+            title="Copy to clipboard"
+            tabIndex={tab}
+            className={ACTION}
+            onClick={() => onCopy(item)}
+          >
+            <Copy aria-hidden="true" />
+          </Button>
+          <Button
+            variant="ghost"
+            aria-label={item.pinned ? "Unpin item" : "Pin item"}
+            title={item.pinned ? "Unpin item" : "Pin item"}
+            tabIndex={tab}
+            className={ACTION}
+            onClick={() => onTogglePin(item)}
+          >
+            {item.pinned ? (
+              <PinOff aria-hidden="true" />
+            ) : (
+              <Pin aria-hidden="true" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            aria-label="Delete item"
+            title="Delete item"
+            tabIndex={tab}
+            className={cn(ACTION, "hover:text-err-strong")}
+            onClick={() => onDelete(item)}
+          >
+            <Trash2 aria-hidden="true" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

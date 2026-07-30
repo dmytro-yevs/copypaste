@@ -28,19 +28,21 @@
 
 pub mod channel;
 pub mod handlers;
+pub mod poll;
 pub mod source;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use copypaste_p2p::discovery::Discovery;
+use copypaste_p2p::discovery::{DiscoveredPeer, Discovery};
 use copypaste_p2p::peers::{Peer, PeerStore};
 use copypaste_p2p::sync::run_responder;
 use copypaste_p2p::transport::Session;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{watch, Notify, Semaphore};
 use tracing::{debug, info, warn};
 
+use crate::cadence::Idle;
 use crate::p2p::channel::{NoiseChannel, SESSION_TIMEOUT};
 use crate::p2p::source::StoreSource;
 use crate::AppState;
@@ -59,11 +61,19 @@ const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
 /// the rest of `AppState` is (see the crate docs).
 pub struct P2p {
     peers: PeerStore,
-    /// Degraded-but-present when multicast is unavailable — see the module docs.
-    discovery: Discovery,
+    /// `None` when the user turned LAN visibility off, and
+    /// degraded-but-present when multicast is merely unavailable — see the
+    /// module docs. The two are different states and only the first is a
+    /// decision, so they are not collapsed into one.
+    discovery: Option<Discovery>,
     /// The port [`listen`] binds, which is what a pairing tells a peer to dial.
     port: u16,
     sessions: Arc<Semaphore>,
+    /// Woken by a local capture and by `copypaste sync`, so neither waits out
+    /// the idle interval. Mirrors `Cloud::wake`.
+    wake: Notify,
+    /// The idle cadence [`poll::run`] waits on.
+    idle: Idle,
 }
 
 impl std::fmt::Debug for P2p {
@@ -76,12 +86,14 @@ impl std::fmt::Debug for P2p {
 }
 
 impl P2p {
-    pub fn new(peers: PeerStore, discovery: Discovery, port: u16) -> Self {
+    pub fn new(peers: PeerStore, discovery: Option<Discovery>, port: u16) -> Self {
         Self {
             peers,
             discovery,
             port,
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
+            wake: Notify::new(),
+            idle: Idle::default(),
         }
     }
 
@@ -89,8 +101,35 @@ impl P2p {
         &self.peers
     }
 
-    pub fn discovery(&self) -> &Discovery {
-        &self.discovery
+    pub fn discovery(&self) -> Option<&Discovery> {
+        self.discovery.as_ref()
+    }
+
+    /// Everything currently visible on the LAN. Empty when discovery is off or
+    /// degraded, which is never an error: an explicit address always works.
+    pub fn seen(&self) -> Vec<DiscoveredPeer> {
+        self.discovery.as_ref().map(Discovery::peers).unwrap_or_default()
+    }
+
+    /// Whether a given pairing is visible right now.
+    pub fn find(&self, pairing_id: &str) -> Option<DiscoveredPeer> {
+        self.discovery.as_ref()?.find(pairing_id)
+    }
+
+    pub fn idle(&self) -> &Idle {
+        &self.idle
+    }
+
+    /// Ask the peer sync loop to run now.
+    pub fn wake(&self) {
+        self.idle.reset();
+        self.wake.notify_one();
+    }
+
+    /// Resolves when someone calls [`P2p::wake`]. `Notify` stores one permit,
+    /// so a wake during a round is not lost.
+    pub async fn wake_signal(&self) {
+        self.wake.notified().await;
     }
 
     pub fn port(&self) -> u16 {
@@ -108,7 +147,10 @@ impl P2p {
             .into_iter()
             .map(|peer| peer.pairing_id.clone())
             .collect();
-        if let Err(e) = self.discovery.republish(&ids) {
+        let Some(discovery) = self.discovery.as_ref() else {
+            return;
+        };
+        if let Err(e) = discovery.republish(&ids) {
             debug!(error = %e, "could not republish the discovery record");
         }
     }
@@ -230,6 +272,9 @@ async fn serve_peer(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                 skipped = outcome.stats.skipped,
                 "served a peer sync session"
             );
+            if outcome.stats.received > 0 {
+                state.note_remote_change();
+            }
             if let Some(peer) = state.p2p.peers().get(&pairing_id) {
                 // The dialler's source port is not where it listens, so only
                 // the name is learned here.

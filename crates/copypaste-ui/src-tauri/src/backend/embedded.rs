@@ -61,10 +61,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use copypaste_core::{decrypt, Keyring, Store, StoredItem};
-use copypaste_ipc::{Item, PairingData, PeerInfo, StatusData, SyncResult};
+use copypaste_ipc::{
+    DiscoveredDevice, EventData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+};
 use copypaste_p2p::PeerStore;
 
-use super::{Backend, BackendError, Result};
+use super::{Backend, BackendError, Page, Result};
 
 /// Server-side clamp on a caller-supplied page size (manifest 04 §3.3).
 /// Identical to the daemon's, because it is the same contract seen from the
@@ -84,6 +86,11 @@ const MSG_NO_PAIRING: &str = "Pairing isn't available in this build yet.";
 const MSG_NO_SYNC: &str = "Syncing isn't available in this build yet.";
 const MSG_NO_ITEM: &str = "That item is no longer there.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
+const MSG_NO_WATCH: &str = "Live updates aren't available in this build.";
+const MSG_NO_DISCOVERY: &str = "Finding nearby devices isn't available in this build yet.";
+const MSG_NO_REORDER: &str =
+    "Reordering pinned items isn't available yet. Pinned items keep the order they \
+     were pinned in.";
 
 /// Everything the in-process backend owns. Cheap to clone; `Store` is a
 /// reference-counted pool and the rest is behind an `Arc`.
@@ -190,24 +197,27 @@ impl Inner {
         })
     }
 
-    /// Decrypt a page, dropping any row that will not open.
+    /// Decrypt a page, dropping any row that will not open — and **counting**
+    /// what was dropped.
     ///
-    /// One unreadable row must not blank a whole page — the other items are
-    /// still the user's data (CLAUDE.md rule 4: data loss is the worst
-    /// outcome).
-    fn to_wire_page(&self, rows: Vec<StoredItem>) -> Vec<Item> {
-        rows.into_iter()
-            .filter_map(|row| {
-                let id = row.id.clone();
-                match self.to_wire(row) {
-                    Ok(item) => Some(item),
-                    Err(_) => {
-                        tracing::warn!(%id, "skipping an item that failed to decrypt");
-                        None
-                    }
+    /// One unreadable row must not blank a whole page: the other items are
+    /// still the user's data (CLAUDE.md rule 4). But dropping it silently makes
+    /// a short page indistinguishable from a small history, which is parity
+    /// finding 17 / `CopyPaste-00zz`. The count is what lets the UI say "3
+    /// items could not be read" instead of showing three fewer rows.
+    fn to_wire_page(&self, rows: Vec<StoredItem>) -> Page {
+        let mut page = Page::default();
+        for row in rows {
+            let id = row.id.clone();
+            match self.to_wire(row) {
+                Ok(item) => page.items.push(item),
+                Err(_) => {
+                    tracing::warn!(%id, "skipping an item that failed to decrypt");
+                    page.skipped_undecryptable = page.skipped_undecryptable.saturating_add(1);
                 }
-            })
-            .collect()
+            }
+        }
+        page
     }
 
     fn fetch(&self, id: &str) -> Result<Item> {
@@ -241,7 +251,7 @@ fn peer_info(peer: &copypaste_p2p::Peer, online: bool) -> PeerInfo {
 }
 
 impl Backend for EmbeddedBackend {
-    async fn list(&self, limit: u32, offset: u32) -> Result<Vec<Item>> {
+    async fn list(&self, limit: u32, offset: u32) -> Result<Page> {
         let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
         self.blocking(move |inner| {
             let rows = inner
@@ -253,7 +263,7 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
-    async fn search(&self, query: &str, limit: u32) -> Result<Vec<Item>> {
+    async fn search(&self, query: &str, limit: u32) -> Result<Page> {
         let limit = clamp_page(limit, DEFAULT_SEARCH_PAGE);
         let query = query.to_string();
         self.blocking(move |inner| {
@@ -339,6 +349,18 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
+    /// Needs `Store::reorder_pinned`, which does not exist.
+    ///
+    /// The `pin_order` column is there and `set_pinned` maintains it, but
+    /// rewriting the order is a transaction over the whole pinned section and
+    /// belongs beside the other `pin_order` writes in `copypaste-core`, not
+    /// re-derived here. Same refusal as the daemon backend, same reason
+    /// (parity finding 19) — so both platforms are missing exactly one thing
+    /// rather than one platform quietly growing a second implementation.
+    async fn reorder_pinned(&self, _ids: &[String]) -> Result<()> {
+        Err(BackendError::Unsupported(MSG_NO_REORDER))
+    }
+
     async fn status(&self) -> Result<StatusData> {
         self.blocking(move |inner| {
             // `status` never fails: an unreadable count is reported as zero
@@ -401,6 +423,30 @@ impl Backend for EmbeddedBackend {
     async fn sync(&self, _pairing_id: Option<&str>) -> Result<Vec<SyncResult>> {
         Err(BackendError::Unsupported(MSG_NO_SYNC))
     }
+
+    /// Needs the running p2p node, same as pairing does (ADR-0003).
+    ///
+    /// `copypaste_p2p::discovery` is importable, but browsing without also
+    /// advertising would show this device other devices while leaving it
+    /// invisible to them — half a feature that looks like a whole one.
+    async fn discovered(&self) -> Result<Vec<DiscoveredDevice>> {
+        Err(BackendError::Unsupported(MSG_NO_DISCOVERY))
+    }
+
+    async fn rescan(&self) -> Result<Vec<DiscoveredDevice>> {
+        Err(BackendError::Unsupported(MSG_NO_DISCOVERY))
+    }
+
+    /// There is nothing to subscribe to.
+    ///
+    /// Push exists because on the desktop a *separate process* changes history
+    /// under the app. Here the app is the only writer, so every change is one
+    /// this process just made and React Query has already invalidated. The
+    /// frontend falls back to its poll, which costs nothing on a platform where
+    /// history only changes when the user is looking at it.
+    async fn watch(&self) -> Result<tokio::sync::mpsc::Receiver<EventData>> {
+        Err(BackendError::Unsupported(MSG_NO_WATCH))
+    }
 }
 
 #[cfg(test)]
@@ -453,8 +499,8 @@ mod tests {
     #[tokio::test]
     async fn an_empty_history_lists_and_searches_without_failing() {
         let (backend, _clip, _dir) = backend();
-        assert!(backend.list(50, 0).await.unwrap().is_empty());
-        assert!(backend.search("anything", 20).await.unwrap().is_empty());
+        assert!(backend.list(50, 0).await.unwrap().items.is_empty());
+        assert!(backend.search("anything", 20).await.unwrap().items.is_empty());
     }
 
     #[tokio::test]

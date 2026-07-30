@@ -46,8 +46,23 @@ analyze public.clipboard_items;
 
 do $$
 declare
-    line   record;
-    plan   text := '';
+    line    record;
+    plan    text;
+    shape   text;
+    -- Both cursor shapes `SupabaseRest::fetch_since` can send, byte for byte.
+    -- The client sends the first before it knows a tie-break and the second
+    -- once it does, and the index has to serve both or the compound keyset
+    -- buys correctness at the price of a sort on every page.
+    queries text[] := array[
+        -- select=<7 columns>&created_at=gte.<cursor>
+        -- &order=created_at.asc,item_id.asc&limit=100
+        $q$ where created_at >= 1700000000200 $q$,
+        -- select=<7 columns>
+        -- &or=(created_at.gt.M,and(created_at.eq.M,item_id.gt.ID))
+        -- &order=created_at.asc,item_id.asc&limit=100
+        $q$ where (created_at > 1700000000200
+                   or (created_at = 1700000000200 and item_id > 'row-005001')) $q$
+    ];
 begin
     perform set_config(
         'request.jwt.claims',
@@ -55,36 +70,37 @@ begin
         true);
     set local role authenticated;
 
-    -- Byte for byte what `SupabaseRest::fetch_since` asks PostgREST for:
-    --   select=<7 columns>&created_at=gte.<cursor>
-    --   &order=created_at.asc,item_id.asc&limit=100
-    for line in execute $q$
-        explain (costs off)
-        select item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id
-          from public.clipboard_items
-         where created_at >= 1700000000200
-         order by created_at asc, item_id asc
-         limit 100
-    $q$
-    loop
-        plan := plan || line."QUERY PLAN" || E'\n';
+    foreach shape in array queries loop
+        plan := '';
+        for line in execute
+            'explain (costs off) select item_id, ciphertext, nonce, content_type,'
+            || ' created_at, deleted, origin_device_id from public.clipboard_items '
+            || shape
+            || ' order by created_at asc, item_id asc limit 100'
+        loop
+            plan := plan || line."QUERY PLAN" || E'\n';
+        end loop;
+
+        if plan not like '%clipboard_items_user_created_idx%' then
+            raise exception
+                E'the pull query does not use the (user_id, created_at, item_id) index.\n%\n%',
+                shape, plan;
+        end if;
+        if plan like '%Seq Scan%' then
+            raise exception E'the pull query falls back to a sequential scan.\n%\n%',
+                shape, plan;
+        end if;
+        if plan like '%Sort%' then
+            -- A sort here means the index is being read for the filter and the
+            -- ordering is being redone, which is the cost the third index
+            -- column exists to avoid.
+            raise exception
+                E'the pull query sorts instead of reading the index in order.\n%\n%',
+                shape, plan;
+        end if;
     end loop;
 
     reset role;
-
-    if plan not like '%clipboard_items_user_created_idx%' then
-        raise exception
-            E'the pull query does not use the (user_id, created_at, item_id) index.\n%', plan;
-    end if;
-    if plan like '%Seq Scan%' then
-        raise exception E'the pull query falls back to a sequential scan.\n%', plan;
-    end if;
-    if plan like '%Sort%' then
-        -- A sort here means the index is being read for the filter and the
-        -- ordering is being redone, which is the cost the third index column
-        -- exists to avoid.
-        raise exception E'the pull query sorts instead of reading the index in order.\n%', plan;
-    end if;
 end
 $$;
 

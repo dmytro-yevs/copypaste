@@ -22,6 +22,9 @@ copypaste-ipc = { path = "../../copypaste-ipc" }
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-clipboard-manager = "2"
 tokio.workspace = true
+# The one retry implementation in the workspace (CLAUDE.md rule 1). Used for
+# the bounded wait after starting the background service.
+backon.workspace = true
 tokio-util.workspace = true
 futures-util = { workspace = true, features = ["sink"] }
 serde.workspace = true

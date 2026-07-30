@@ -8,9 +8,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use backoff::backoff::Backoff;
-use backoff::future::retry;
-use backoff::{Error as Retryable, ExponentialBackoff};
+use backon::{ExponentialBuilder, Retryable};
 use reqwest::Client;
 use serde_json::json;
 
@@ -34,7 +32,7 @@ pub const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct SupabaseAuth {
     config: CloudConfig,
     http: Client,
-    retry: ExponentialBackoff,
+    retry: ExponentialBuilder,
 }
 
 impl fmt::Debug for SupabaseAuth {
@@ -60,7 +58,7 @@ impl SupabaseAuth {
     /// Replace the retry policy. Mostly for tests, which cannot afford to sleep
     /// seconds, and for a caller that wants a different envelope.
     #[must_use]
-    pub fn with_retry_policy(mut self, policy: ExponentialBackoff) -> Self {
+    pub fn with_retry_policy(mut self, policy: ExponentialBuilder) -> Self {
         self.retry = policy;
         self
     }
@@ -164,10 +162,7 @@ impl SupabaseAuth {
         bearer: &str,
         grant: GrantKind,
     ) -> Result<String, AuthError> {
-        let mut policy = self.retry.clone();
-        policy.reset();
-
-        retry(policy, || async move {
+        let attempt = || async {
             let sent = self
                 .http
                 .post(url)
@@ -178,21 +173,16 @@ impl SupabaseAuth {
                 .send()
                 .await;
 
-            let err = match sent {
-                Ok(response) => match classify(response, grant).await {
-                    Ok(text) => return Ok(text),
-                    Err(err) => err,
-                },
-                Err(err) => AuthError::from_reqwest(err),
-            };
-
-            if err.is_transient() {
-                Err(Retryable::transient(err))
-            } else {
-                Err(Retryable::permanent(err))
+            match sent {
+                Ok(response) => classify(response, grant).await,
+                Err(err) => Err(AuthError::from_reqwest(err)),
             }
-        })
-        .await
+        };
+
+        attempt
+            .retry(self.retry)
+            .when(AuthError::is_transient)
+            .await
     }
 
     fn session_from(&self, body: &str) -> Result<Session, AuthError> {

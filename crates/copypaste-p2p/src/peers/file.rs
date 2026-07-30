@@ -18,7 +18,7 @@
 //! (**CopyPaste-5lm**, port manifest 02 §3.7 and §6.3). v2 needs only the
 //! 32-byte PSK, but the file is no less sensitive for being smaller.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::Write as _;
 use std::path::Path;
 
@@ -30,17 +30,39 @@ use super::{Peer, PeerStoreError, FORMAT_TAG};
 #[cfg(unix)]
 pub(super) const STORE_MODE: u32 = 0o600;
 
-/// On-disk envelope. Separate from the in-memory map so the `format` tag is
+/// Everything the store holds, in memory and on disk.
+///
+/// `pending` and `revoked` are keyed by pairing id and hold no key material, so
+/// they are ordinary maps beside the peers rather than fields on [`Peer`] —
+/// which also keeps `Peer`'s literal shape, and therefore its `Drop`-guarded
+/// PSK handling, unchanged.
+#[derive(Default)]
+pub(super) struct State {
+    pub(super) peers: HashMap<String, Peer>,
+    /// Pairings whose code has never been redeemed, and the instant each stops
+    /// being redeemable.
+    pub(super) pending: BTreeMap<String, i64>,
+    /// Pairing ids that were cut off, and when. Kept after the peer is gone: it
+    /// is the audit trail, and it is what stops a revoked pairing being
+    /// re-added by a code someone still has.
+    pub(super) revoked: BTreeMap<String, i64>,
+}
+
+/// On-disk envelope. Separate from the in-memory state so the `format` tag is
 /// checked before anything else is believed.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoreFile {
     format: String,
     peers: Vec<Peer>,
+    #[serde(default)]
+    pending: BTreeMap<String, i64>,
+    #[serde(default)]
+    revoked: BTreeMap<String, i64>,
 }
 
 /// Parse the envelope, separating "another version wrote this" from "this is
 /// damaged".
-pub(super) fn parse(bytes: &[u8]) -> Result<HashMap<String, Peer>, PeerStoreError> {
+pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
     // Two passes rather than one: the first tells us whether the bytes are JSON
     // at all and whether the format tag is ours, which is what makes `Legacy`
     // and `Corrupt` distinguishable.
@@ -60,22 +82,32 @@ pub(super) fn parse(bytes: &[u8]) -> Result<HashMap<String, Peer>, PeerStoreErro
         peer.validate().map_err(|_| PeerStoreError::Corrupt)?;
         peers.insert(peer.pairing_id.clone(), peer);
     }
-    Ok(peers)
+    // A deadline or a revocation for a pairing that is not here decides nothing
+    // about `pending`, but a stale `revoked` entry is load-bearing and is kept.
+    let pending = file
+        .pending
+        .into_iter()
+        .filter(|(id, _)| peers.contains_key(id))
+        .collect();
+    Ok(State {
+        peers,
+        pending,
+        revoked: file.revoked,
+    })
 }
 
 /// Replace the store file in one step: temporary file in the same directory (a
 /// cross-filesystem `rename` is not atomic), `0600` before any bytes go in,
 /// `fsync` the file so the contents are durable before the rename publishes
 /// them, then `fsync` the directory so the rename survives a power loss.
-pub(super) fn write_atomically(
-    path: &Path,
-    peers: &HashMap<String, Peer>,
-) -> Result<(), PeerStoreError> {
-    let mut records: Vec<Peer> = peers.values().cloned().collect();
+pub(super) fn write_atomically(path: &Path, state: &State) -> Result<(), PeerStoreError> {
+    let mut records: Vec<Peer> = state.peers.values().cloned().collect();
     records.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
     let file = StoreFile {
         format: FORMAT_TAG.to_string(),
         peers: records,
+        pending: state.pending.clone(),
+        revoked: state.revoked.clone(),
     };
     // The serialised form contains every PSK in hex. Held in `Zeroizing` so the
     // buffer is wiped once it has been handed to the kernel.

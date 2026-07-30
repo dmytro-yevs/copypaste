@@ -41,7 +41,7 @@
 //! Everything else — copy, delete, pin — travels by id and does its work in the
 //! backend, so the secret never needs to be in the WebView to be *used*.
 
-use copypaste_ipc::{Item, PairingData, PeerInfo, StatusData, SyncResult};
+use copypaste_ipc::{DiscoveredDevice, Item, PairingData, PeerInfo, StatusData, SyncResult};
 use serde::Serialize;
 
 /// One history item, as the WebView is allowed to see it.
@@ -104,6 +104,39 @@ pub fn ui_items(items: Vec<Item>) -> Vec<UiItem> {
     items.into_iter().map(UiItem::from).collect()
 }
 
+/// A page of history, and the number of rows in it that would not decrypt.
+///
+/// The count is what the *view* needs: without it a short page and a small
+/// history look the same, which is parity finding 17. It is not an error — the
+/// rows that did open are still the user's data — so the frontend renders it as
+/// a state rather than a failure.
+#[derive(Debug, Clone, Serialize)]
+pub struct UiPage {
+    items: Vec<UiItem>,
+    /// Named exactly as the wire names it (`ItemPage::skipped_undecryptable`),
+    /// so the frontend, the bridge and the daemon all say one thing.
+    skipped_undecryptable: u32,
+}
+
+impl From<crate::backend::Page> for UiPage {
+    fn from(page: crate::backend::Page) -> Self {
+        Self {
+            items: ui_items(page.items),
+            skipped_undecryptable: page.skipped_undecryptable,
+        }
+    }
+}
+
+impl UiPage {
+    pub fn items(&self) -> &[UiItem] {
+        &self.items
+    }
+
+    pub fn skipped_undecryptable(&self) -> u32 {
+        self.skipped_undecryptable
+    }
+}
+
 /// Daemon/backend state, verbatim from the wire type. Nothing here is secret.
 pub type UiStatus = StatusData;
 
@@ -112,6 +145,13 @@ pub type UiPeer = PeerInfo;
 
 /// One peer's sync outcome, verbatim from the wire type.
 pub type UiSyncResult = SyncResult;
+
+/// A device seen on the LAN, verbatim from the wire type.
+///
+/// Passed through rather than wrapped because none of it is secret and none of
+/// it is trusted: it is unauthenticated mDNS chatter either way, and a wrapper
+/// would only invite someone to sanitise it into looking confirmed.
+pub type UiDiscovered = DiscoveredDevice;
 
 /// A freshly minted pairing.
 ///

@@ -150,7 +150,10 @@ mod tests {
     #[tokio::test]
     async fn a_401_is_distinct_and_is_not_retried() {
         let stub = Stub::start(vec![Reply::json(401, r#"{"message":"JWT expired"}"#)]).await;
-        let err = client(&stub).fetch_since(TOKEN, 0, 10).await.unwrap_err();
+        let err = client(&stub)
+            .fetch_since(TOKEN, 0, None, 10)
+            .await
+            .unwrap_err();
         assert!(matches!(err, RestError::Unauthorized), "{err:?}");
         assert_eq!(
             stub.request_count(),
@@ -173,7 +176,10 @@ mod tests {
     #[tokio::test]
     async fn a_403_is_not_confused_with_a_401() {
         let stub = Stub::start(vec![Reply::json(403, r#"{"message":"RLS"}"#)]).await;
-        let err = client(&stub).fetch_since(TOKEN, 0, 10).await.unwrap_err();
+        let err = client(&stub)
+            .fetch_since(TOKEN, 0, None, 10)
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, RestError::Forbidden),
             "refreshing a token cannot fix a policy refusal: {err:?}"
@@ -183,7 +189,10 @@ mod tests {
     #[tokio::test]
     async fn a_429_carries_retry_after_and_is_not_slept_on_here() {
         let stub = Stub::start(vec![Reply::json(429, "{}").with_header("retry-after", "17")]).await;
-        let err = client(&stub).fetch_since(TOKEN, 0, 10).await.unwrap_err();
+        let err = client(&stub)
+            .fetch_since(TOKEN, 0, None, 10)
+            .await
+            .unwrap_err();
         match err {
             RestError::RateLimited { retry_after_secs } => assert_eq!(retry_after_secs, Some(17)),
             other => panic!("expected RateLimited, got {other:?}"),
@@ -213,7 +222,7 @@ mod tests {
     async fn a_5xx_is_retried_and_then_succeeds() {
         let stub = Stub::start(vec![Reply::text(503, "down"), Reply::json(200, "[]")]).await;
         let rows = client(&stub)
-            .fetch_since(TOKEN, 0, 10)
+            .fetch_since(TOKEN, 0, None, 10)
             .await
             .expect("fetch");
         assert!(rows.is_empty());
@@ -223,7 +232,10 @@ mod tests {
     #[tokio::test]
     async fn a_persistent_5xx_gives_up_with_the_status() {
         let stub = Stub::start(vec![Reply::text(500, "boom")]).await;
-        let err = client(&stub).fetch_since(TOKEN, 0, 10).await.unwrap_err();
+        let err = client(&stub)
+            .fetch_since(TOKEN, 0, None, 10)
+            .await
+            .unwrap_err();
         assert!(matches!(err, RestError::Server { status: 500 }), "{err:?}");
         assert!(stub.request_count() > 1);
     }
@@ -255,7 +267,10 @@ mod tests {
             r#"{"message":"failed at /Users/dmytro/copypaste.db with token user-access-token"}"#,
         )])
         .await;
-        let err = client(&stub).fetch_since(TOKEN, 0, 10).await.unwrap_err();
+        let err = client(&stub)
+            .fetch_since(TOKEN, 0, None, 10)
+            .await
+            .unwrap_err();
         let rendered = format!("{err} {err:?}");
         assert!(!rendered.contains("/Users/"), "path leaked: {rendered}");
         assert!(!rendered.contains(TOKEN), "token leaked: {rendered}");
@@ -268,7 +283,7 @@ mod tests {
             anon_key: ANON.into(),
         })
         .with_retry_policy(fast_retry());
-        let err = rest.fetch_since(TOKEN, 0, 10).await.unwrap_err();
+        let err = rest.fetch_since(TOKEN, 0, None, 10).await.unwrap_err();
         assert!(matches!(err, RestError::Network(_)), "{err:?}");
         assert!(!format!("{err}").contains('/'));
     }

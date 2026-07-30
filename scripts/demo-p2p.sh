@@ -124,12 +124,25 @@ for item in "alpha one" "alpha two" "bravo one"; do
 done
 ok "alpha one, alpha two, bravo one — on both devices"
 
-step "New items on both sides, then an explicit sync"
+step "New items on both sides converge without anyone asking"
+# The daemon now syncs paired devices on a cadence, and a local capture pulls
+# that cadence to its floor — so by the time an explicit `sync` runs, the items
+# may already be across and it reports having moved nothing. Asserting on the
+# counts of one explicit run would therefore be asserting that automatic sync
+# does NOT work. What matters is convergence, so that is what is measured.
 a add "alpha three"
 b add "bravo two"
-MOVED=$(moved b)
-[[ "$MOVED" -ge 2 ]] || fail "sync moved $MOVED items; expected one each way"
-ok "sync moved items in both directions"
+
+converged() {
+    has_item "alpha three" b && has_item "bravo two" a
+}
+for _ in $(seq 1 50); do
+    converged && break
+    b sync >/dev/null 2>&1 || true
+    sleep 0.2
+done
+converged || fail "the two devices did not converge"
+ok "each device has the other's new item"
 
 step "Both devices hold the union of the items"
 for item in "alpha one" "alpha two" "alpha three" "bravo one" "bravo two"; do

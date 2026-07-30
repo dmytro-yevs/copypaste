@@ -14,23 +14,38 @@ import { DevicesView } from "@/components/devices/DevicesView";
 import { HistoryView } from "@/components/history/HistoryView";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { useStatus } from "@/hooks/useHistory";
+import { usePush } from "@/hooks/usePush";
 import { classifyError } from "@/lib/errors";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
 import { selectAppearance, usePrefs } from "@/store/prefs";
+import { useShallow } from "zustand/react/shallow";
 import { useUi } from "@/store/ui";
 
 const SCREENS = {
-  history: { label: "History", render: () => <HistoryView /> },
+  history: {
+    label: "History",
+    render: (pushLive: boolean) => <HistoryView pushLive={pushLive} />,
+  },
   devices: { label: "Devices", render: () => <DevicesView /> },
   settings: { label: "Settings", render: () => <SettingsView /> },
 } as const;
 
 export default function App() {
   const view = useUi((s) => s.view);
-  const appearance = usePrefs(selectAppearance);
+  // `useShallow` is load-bearing, not tidiness. `selectAppearance` builds a
+  // fresh object per call, and zustand v5 subscribes through
+  // `useSyncExternalStore`, which compares the snapshot by reference: a new
+  // object every call is a snapshot that never settles, so React re-renders,
+  // re-selects, and hits "Maximum update depth exceeded". The whole app
+  // unmounts and `#root` stays empty — measured at 55 renders in 2.5s against
+  // 1 for a primitive selector.
+  const appearance = usePrefs(useShallow(selectAppearance));
   const status = useStatus();
   const qc = useQueryClient();
+  // Subscribed once, here — not per screen. Two subscribers would invalidate
+  // the same queries twice for one change.
+  const pushLive = usePush();
 
   // main.tsx owns the first frame; this keeps the attributes in step, and
   // subscribes *once* — v1 accumulated a matchMedia listener per re-apply
@@ -68,7 +83,7 @@ export default function App() {
         <Boundary label={screen.label}>
           {/* `display: contents`: the boundary must not join the flex height
               chain the scroll regions depend on. */}
-          <div className="contents">{screen.render()}</div>
+          <div className="contents">{screen.render(pushLive)}</div>
         </Boundary>
       </div>
     </div>

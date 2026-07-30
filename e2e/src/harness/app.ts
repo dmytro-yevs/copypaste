@@ -8,7 +8,7 @@ import {
   requireDisplay,
 } from "./env.js";
 import { startDaemon, type Daemon } from "./daemon.js";
-import { track, type Child } from "./process.js";
+import { sleep, track, type Child } from "./process.js";
 
 export type Browser = Awaited<ReturnType<typeof remote>>;
 
@@ -21,6 +21,9 @@ export interface App {
 export interface StartOptions {
   /** Items are seeded before the window opens, so the first paint already has them. */
   seed?: readonly string[];
+  /** How long to wait for the WebDriver session. Only the guard test, which
+   *  wants a failure, has a reason to shorten it. */
+  sessionTimeoutMs?: number;
 }
 
 /**
@@ -57,8 +60,10 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
         env: { ...process.env, ...daemon.env },
         stdio: ["ignore", "pipe", "pipe"],
         reject: false,
+        detached: true,
       },
     ),
+    { group: true },
   );
 
   await waitForDriver(driverPort, driver);
@@ -71,11 +76,10 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       path: "/",
       automationProtocol: "webdriver",
       logLevel: "error",
-      // A real app answers in a few seconds. The budget is generous for a cold
-      // cache but finite, so the guard test's deliberate failure is not a
-      // multi-minute stall.
+      // A real app answers in a few seconds; the budget is generous for a cold
+      // cache but finite, because a wrong binary fails by timing out.
       connectionRetryCount: 0,
-      connectionRetryTimeout: 60_000,
+      connectionRetryTimeout: options.sessionTimeoutMs ?? 60_000,
       capabilities: {
         // @ts-expect-error tauri-driver's vendor capability is not in the W3C types.
         "tauri:options": { application: appBinary() },
@@ -93,7 +97,13 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
     browser,
     daemon,
     async stop() {
-      await browser.deleteSession().catch(() => undefined);
+      // Every WebDriver call goes through the page's main thread, so a frozen
+      // app makes a polite session close hang as surely as the probe does.
+      // Killing the driver is what actually reclaims the process.
+      await Promise.race([
+        browser.deleteSession().catch(() => undefined),
+        sleep(10_000),
+      ]);
       await shutdown(driver, daemon);
     },
   };
@@ -125,7 +135,7 @@ async function waitForDriver(port: number, driver: Child): Promise<void> {
     if (Date.now() > deadline) {
       throw new Error(`tauri-driver never listened on ${port}:\n${driver.log()}`);
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await sleep(200);
   }
 }
 
@@ -151,6 +161,30 @@ async function assertReallyRunning(browser: Browser, driver: Child): Promise<voi
     );
   }
 
+  // An app stuck in a render loop never yields its main thread, so `execute`
+  // does not return at all — the probe hangs instead of failing. Without this
+  // wall clock the whole suite stalls until the CI job is killed, which reads
+  // as an infrastructure problem rather than as the app being broken.
+  await Promise.race([
+    probeUntilMounted(browser, driver),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "the WebView never answered a script within 90s. Its main thread " +
+                "is blocked — an infinite render loop does this — so the app is " +
+                "running but cannot paint or respond.\n" +
+                `tauri-driver log:\n${driver.log()}`,
+            ),
+          ),
+        90_000,
+      ),
+    ),
+  ]);
+}
+
+async function probeUntilMounted(browser: Browser, driver: Child): Promise<void> {
   const deadline = Date.now() + 60_000;
   let last = "";
   for (;;) {
@@ -197,6 +231,6 @@ async function assertReallyRunning(browser: Browser, driver: Child): Promise<voi
           `tauri-driver log:\n${driver.log()}`,
       );
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await sleep(250);
   }
 }

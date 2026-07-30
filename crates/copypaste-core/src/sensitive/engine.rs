@@ -5,7 +5,7 @@
 
 use regex::{Regex, RegexSet};
 
-use super::finding::Finding;
+use super::finding::{Finding, Severity};
 use super::normalise::normalise;
 use super::rules::RULES;
 use super::spec::{RuleSpec, Validator};
@@ -85,6 +85,18 @@ impl Detector {
     ///
     /// **Not** the auto-wipe gate; deletion needs
     /// `scan(..).severity == Severity::HighConfidence`.
+    /// True when this text may be deleted automatically: the highest-confidence
+    /// match sits above the auto-wipe floor.
+    ///
+    /// The one gate between detection and destruction, and the only caller of
+    /// [`Severity::HighConfidence`] that deletes anything. v1 collapsed this
+    /// with [`Detector::is_sensitive`] three separate times (`AB-6a`, `PG-23`,
+    /// `PG-3`) and destroyed unrecoverable user data each time.
+    pub fn may_auto_wipe(&self, text: &str) -> bool {
+        self.scan(text)
+            .is_some_and(|finding| finding.severity == Severity::HighConfidence)
+    }
+
     pub fn is_sensitive(&self, text: &str) -> bool {
         let normalised = normalise(text);
         self.set

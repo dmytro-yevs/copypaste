@@ -23,6 +23,9 @@ const noop = () => {};
 const props = {
   active: false,
   flashing: false,
+  selecting: false,
+  checked: false,
+  onToggleChecked: noop,
   revealedContent: null,
   revealPending: false,
   previewLines: 2,

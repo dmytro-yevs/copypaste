@@ -38,28 +38,16 @@ ignore = [
     "RUSTSEC-2025-0081",
     "RUSTSEC-2025-0098",
     "RUSTSEC-2025-0100",
-    # ── Retry/backoff. THIS ONE HAS A FIX AND SHOULD NOT BE HERE LONG. ────────
-    # backoff 0.4.0 is unmaintained; the advisory names `backon` as the
-    # maintained replacement. It is a direct workspace dependency — the "ONE
-    # implementation" that Cargo.toml's comment says replaced v1's six — and it
-    # is used by copypaste-daemon and copypaste-cloud.
-    #
-    # Ignored rather than fixed here only because [workspace.dependencies] and
-    # crates/ are owned by other agents this cycle. This is a two-line swap
-    # (backoff -> backon) plus call-site updates, not an unfixable transitive.
-    # Delete both entries below once it lands; do not let them calcify.
-    "RUSTSEC-2025-0012",
-    # instant 0.1.13 unmaintained — pulled in solely by backoff 0.4. Goes away
-    # with the entry above; there is nothing else to do about it.
-    "RUSTSEC-2024-0384",
-    # ─────────────────────────────────────────────────────────────────────────
-    #
     # REMOVED 2026-07-30, with the same reasoning the note below records:
+    #   RUSTSEC-2025-0012 (backoff) — swapped for `backon`, the replacement the
+    #                                 advisory names; no longer in Cargo.lock
+    #   RUSTSEC-2024-0384 (instant) — came in with backoff 0.4 and left with it
     #   RUSTSEC-2024-0436 (paste)   — `paste` is no longer in Cargo.lock
     #   RUSTSEC-2025-0141 (bincode) — `bincode` is no longer in Cargo.lock
-    # Both were inherited from v1's deny.toml and matched nothing, which
-    # cargo-deny reports as `advisory-not-detected`. Re-add with a fresh
-    # justification if a dependency bump reintroduces either crate.
+    # An ignore that matches no advisory is itself a failure — cargo-deny
+    # reports `advisory-not-detected` — so an entry outlives its crate by
+    # exactly one commit. Re-add with a fresh justification if a dependency
+    # bump reintroduces any of them.
     #
     # NOTE: RUSTSEC-2024-0429 (glib 0.18.5 VariantStrIter unsound, Linux/webkit2gtk
     # only) was removed from this list 2026-06-30: cargo-deny v2 does not raise

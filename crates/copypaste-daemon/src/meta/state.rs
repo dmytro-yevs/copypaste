@@ -39,7 +39,15 @@ impl Meta {
     /// on disk for an account the daemon no longer thinks it holds.
     pub fn clear_state(&self, keys: &[&str]) -> Result<(), MetaError> {
         let mut conn = self.lock()?;
-        let tx = conn.transaction()?;
+        // IMMEDIATE, for the reason `copypaste_core::storage::connection::write_tx`
+        // records: a deferred transaction that upgrades to a write mid-way gets
+        // SQLITE_BUSY_SNAPSHOT the instant the other connection to this file is
+        // writing, and `busy_timeout` does not retry that. A cloud round writing
+        // through this same handle while a capture lands is the ordinary case,
+        // not a rare one — it surfaced as "the item could not be stored" in
+        // `demo-cloud.sh` two runs in five once the idle poll ceiling dropped
+        // to 10 s.
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for key in keys {
             tx.execute("DELETE FROM sync_device_state WHERE key = ?1", [key])?;
         }

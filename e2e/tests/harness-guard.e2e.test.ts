@@ -14,7 +14,7 @@ test("startApp refuses a process that is not the app under test", async () => {
   const previous = process.env.COPYPASTE_UI_BIN;
   process.env.COPYPASTE_UI_BIN = cliBinary();
   try {
-    await expect(startApp()).rejects.toThrow();
+    await expect(startApp({ sessionTimeoutMs: 20_000 })).rejects.toThrow();
   } finally {
     if (previous === undefined) delete process.env.COPYPASTE_UI_BIN;
     else process.env.COPYPASTE_UI_BIN = previous;

@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import type { Item, PeerInfo, StatusData } from "@/lib/ipc";
+import type { Item, ItemPage, PeerInfo, StatusData } from "@/lib/ipc";
 
 /** A test item. `content: null` is what the bridge sends for a sensitive one —
  *  the plaintext is dropped before it crosses (INV-10). */
@@ -33,6 +33,13 @@ export function items(count: number, over: Partial<Item> = {}): Item[] {
   return Array.from({ length: count }, (_, index) =>
     item({ id: `row-${index}`, content: `entry ${index}`, ...over }),
   );
+}
+
+/** The wire shape `list` and `search` answer with. `skipped_undecryptable` is
+ *  always present, including when it is zero — a count that only appears when
+ *  it is non-zero is one nobody knows to look for. */
+export function page(items: readonly Item[], skipped = 0): ItemPage {
+  return { items, skipped_undecryptable: skipped };
 }
 
 export function status(over: Partial<StatusData> = {}): StatusData {

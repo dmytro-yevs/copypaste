@@ -38,14 +38,18 @@ pub enum TransportFault {
 /// The REST surface this driver uses. `SupabaseRest` is the production
 /// implementation, via the adapter in [`super::adapters`].
 pub trait RestApi: Send + Sync {
-    /// Rows with `created_at >= since_ms`, **oldest first**, at most `limit` of
-    /// them.
+    /// One page of rows, **oldest first**, at most `limit` of them, positioned
+    /// by a keyset cursor.
     ///
-    /// Inclusive, for the reason on
+    /// `after_item_id` is the tie-break half of that cursor. With it, the page
+    /// starts strictly after the pair `(since_ms, after_item_id)`; without it,
+    /// the bound is inclusive on `since_ms` alone, for the reason on
     /// [`CloudSource::local_changes_since`](super::CloudSource::local_changes_since).
+    ///
     /// The ordering must be total and tie-free — `(created_at, item_id)`, not
     /// `created_at` alone — or a burst sharing one millisecond is silently lost
-    /// (manifest 05 INV-N1).
+    /// (manifest 05 INV-N1). The cursor must be expressed in the same pair, or
+    /// a millisecond holding more than one page can never be paged past.
     ///
     /// **Oldest first is a hard requirement, not a preference.** The cursor is
     /// a lower bound that moves forward, so a newest-first page cannot be
@@ -64,6 +68,7 @@ pub trait RestApi: Send + Sync {
         &self,
         token: &str,
         since_ms: i64,
+        after_item_id: Option<&str>,
         limit: u32,
     ) -> impl Future<Output = Result<Vec<CloudItem>, TransportFault>> + Send;
 

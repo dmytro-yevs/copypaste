@@ -26,6 +26,8 @@ pub struct SyncStats {
     pub skipped_undecryptable: usize,
     /// Remote rows stamped implausibly far in the future.
     pub skipped_future: usize,
+    /// Local items over the per-item upload cap. Withheld, never deleted.
+    pub skipped_too_large: usize,
 }
 
 impl SyncStats {
@@ -43,6 +45,7 @@ impl SyncStats {
             skipped_sensitive: self.skipped_sensitive + other.skipped_sensitive,
             skipped_undecryptable: self.skipped_undecryptable + other.skipped_undecryptable,
             skipped_future: self.skipped_future + other.skipped_future,
+            skipped_too_large: self.skipped_too_large + other.skipped_too_large,
         }
     }
 }

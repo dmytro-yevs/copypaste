@@ -12,33 +12,33 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use backoff::{ExponentialBackoff, ExponentialBackoffBuilder};
+use backon::ExponentialBuilder;
 use reqwest::header::HeaderMap;
 use serde::Deserialize;
 
 /// Longest error body we will put in a log line.
 const MAX_ERROR_SNIPPET: usize = 200;
 
-/// Retry envelope for transient failures: ~1 s, 2 s, 4 s, 8 s and stop.
-///
-/// `backoff` bounds a retry by elapsed time rather than attempt count; with the
-/// intervals below that is four to five attempts, which is the manifest's "hard
-/// cap of 4 attempts" (§4.6.3) expressed in the vocabulary the crate has.
+/// Retry envelope for transient failures: the first attempt, then ~1 s, 2 s and
+/// 4 s — the manifest's hard cap of four attempts (§4.6.3).
 const RETRY_INITIAL: Duration = Duration::from_secs(1);
 const RETRY_MAX_INTERVAL: Duration = Duration::from_secs(30);
-const RETRY_MAX_ELAPSED: Duration = Duration::from_secs(16);
+const RETRY_MAX_RETRIES: usize = 3;
 
 /// The one retry policy in this crate.
 ///
 /// `rest` uses it too, and [`crate::sync`] deliberately does not add a second
 /// ladder on top of it — a transient failure that reaches the sync driver has
 /// already spent this budget.
-pub fn transient_backoff() -> ExponentialBackoff {
-    ExponentialBackoffBuilder::new()
-        .with_initial_interval(RETRY_INITIAL)
-        .with_max_interval(RETRY_MAX_INTERVAL)
-        .with_max_elapsed_time(Some(RETRY_MAX_ELAPSED))
-        .build()
+///
+/// Jitter is on so that every device of a large account does not retry in
+/// lockstep after a backend blip.
+pub fn transient_backoff() -> ExponentialBuilder {
+    ExponentialBuilder::new()
+        .with_min_delay(RETRY_INITIAL)
+        .with_max_delay(RETRY_MAX_INTERVAL)
+        .with_max_times(RETRY_MAX_RETRIES)
+        .with_jitter()
 }
 
 /// `Retry-After`, delta-seconds form only.

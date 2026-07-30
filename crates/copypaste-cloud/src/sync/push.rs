@@ -6,13 +6,24 @@
 
 use super::driver::CloudSync;
 use super::outcome::{SyncError, SyncStats};
-use super::source::CloudSource;
+use super::source::{CloudSource, LocalItem};
 use super::transport::{AuthApi, RestApi};
 use crate::crypto::encrypt_row;
 use crate::rest::CloudItem;
 
 /// Rows per upsert request. Bounds request size without needing to measure it.
 const UPLOAD_BATCH: usize = 50;
+
+/// Per-item upload cap for text.
+///
+/// Split from [`MAX_BINARY_BYTES`] rather than unified at the larger number
+/// because that is what the relay enforced (manifest 05 §5.1 row 13) and the
+/// split exists so a text item large enough to be suspicious is refused while
+/// an image of the same size is not.
+pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
+
+/// Per-item upload cap for anything that is not text.
+pub const MAX_BINARY_BYTES: usize = 10 * 1024 * 1024;
 
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// Seal every local change since the upload floor and upsert it.
@@ -59,6 +70,23 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 continue;
             }
 
+            // Before sealing, so an item that cannot be uploaded is not paid
+            // for in AEAD work, and so the limit is expressed in the size the
+            // user can see rather than in base64-of-ciphertext.
+            if let Some(limit) = over_size_limit(&item) {
+                // Withheld, never deleted: the local copy is the durable one,
+                // and refusing to upload an item is not a reason to lose it
+                // (`CLAUDE.md` rule 4).
+                stats.skipped_too_large += 1;
+                tracing::warn!(
+                    item_id = %item.item_id,
+                    bytes = item.content.len(),
+                    limit,
+                    "withholding an item larger than the per-item upload cap"
+                );
+                continue;
+            }
+
             let (nonce, ciphertext) = encrypt_row(&item.content, &self.key, &item.item_id)
                 .map_err(|_| SyncError::Encrypt)?;
 
@@ -93,6 +121,22 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
         Ok(stats)
     }
+}
+
+/// The cap this item exceeded, or `None` if it fits.
+///
+/// Enforced here rather than left to the backend so the failure is local and
+/// legible: the server's `octet_length(ciphertext) <= 16 MiB` check is a
+/// backstop against a writer that is not this client, not the product limit,
+/// and an item that trips it comes back as an opaque rejection with the whole
+/// round already spent uploading it (manifest 05 §5.1 row 13).
+fn over_size_limit(item: &LocalItem) -> Option<usize> {
+    let limit = if item.content_type == "text" {
+        MAX_TEXT_BYTES
+    } else {
+        MAX_BINARY_BYTES
+    };
+    (item.content.len() > limit).then_some(limit)
 }
 
 #[cfg(test)]
@@ -255,6 +299,64 @@ mod tests {
         let row = &rows["a"];
         assert!(row.deleted, "the tombstone did not propagate");
         assert!(row.ciphertext.is_empty(), "a tombstone carried ciphertext");
+    }
+
+    /// Manifest 05 §5.1 row 13: the caps are the client's, split by type, and
+    /// an item over one of them is withheld rather than lost or uploaded.
+    #[tokio::test]
+    async fn an_item_over_the_per_type_cap_is_withheld_and_the_rest_still_upload() {
+        let big_text = || {
+            let mut item = item("huge-text", 1_000, "");
+            item.content = vec![b'x'; MAX_TEXT_BYTES + 1];
+            item
+        };
+        // The same bytes as an image are under the binary cap and go up.
+        let big_image = || {
+            let mut item = item("big-image", 2_000, "");
+            item.content = vec![0u8; MAX_TEXT_BYTES + 1];
+            item.content_type = "image".into();
+            item
+        };
+        let huge_image = || {
+            let mut item = item("huge-image", 3_000, "");
+            item.content = vec![0u8; MAX_BINARY_BYTES + 1];
+            item.content_type = "image".into();
+            item
+        };
+
+        let source = FakeSource::with_outgoing(vec![
+            big_text(),
+            big_image(),
+            huge_image(),
+            item("ok", 4_000, "small"),
+        ]);
+        let sync = driver(FakeRest::default(), FakeAuth::default());
+
+        let stats = sync.push(&source).await.unwrap();
+
+        assert_eq!(stats.skipped_too_large, 2);
+        assert_eq!(stats.uploaded, 2);
+        let rows = sync.rest.rows.lock().unwrap();
+        assert!(rows.contains_key("ok"));
+        assert!(
+            rows.contains_key("big-image"),
+            "8 MiB is under the binary cap"
+        );
+        assert!(!rows.contains_key("huge-text"));
+        assert!(!rows.contains_key("huge-image"));
+    }
+
+    #[test]
+    fn the_caps_are_the_manifests_and_the_boundary_is_inclusive() {
+        let mut at_limit = item("a", 1, "");
+        at_limit.content = vec![b'x'; MAX_TEXT_BYTES];
+        assert_eq!(over_size_limit(&at_limit), None, "the cap itself must fit");
+
+        at_limit.content.push(b'x');
+        assert_eq!(over_size_limit(&at_limit), Some(MAX_TEXT_BYTES));
+
+        assert_eq!(MAX_TEXT_BYTES, 8 * 1024 * 1024);
+        assert_eq!(MAX_BINARY_BYTES, 10 * 1024 * 1024);
     }
 
     #[tokio::test]

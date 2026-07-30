@@ -17,6 +17,7 @@ import {
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
+import { Button } from "@/components/ui/button";
 import { useScrollAnchor } from "@/hooks/useScrollAnchor";
 import type { Item } from "@/lib/ipc";
 import {
@@ -26,6 +27,24 @@ import {
   rowHeight,
 } from "@/lib/layout";
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
+import type { Selection } from "@/hooks/useSelection";
+
+/** ⌘1–⌘9 only; there is no ⌘0 and no second row of ten. */
+export const QUICK_SLOTS = 9;
+
+/**
+ * Which row a quick-copy digit means, or `null`.
+ *
+ * Inactive while a search is running (manifest §3.5.3): the digits address
+ * positions in the history, and a filtered list renumbers them under the
+ * user's fingers between keystrokes.
+ */
+export function quickSlot(key: string, searching: boolean): number | null {
+  if (searching) return null;
+  const digit = Number.parseInt(key, 10);
+  if (!Number.isInteger(digit) || digit < 1 || digit > QUICK_SLOTS) return null;
+  return digit - 1;
+}
 
 interface HistoryListProps {
   items: readonly Item[];
@@ -35,9 +54,15 @@ interface HistoryListProps {
   revealedContent: string | null;
   revealPendingId: string | null;
   previewLines: number;
+  searching: boolean;
+  selection: Selection;
+  hasMore: boolean;
+  loadingMore: boolean;
   onReveal: (item: Item) => void;
   onHide: () => void;
   onCopy: (item: Item) => void;
+  /** Copy and then dismiss the window — the ⌘1–⌘9 path. */
+  onQuickCopy: (item: Item) => void;
   onTogglePin: (item: Item) => void;
   onDelete: (item: Item) => void;
   onLoadMore: () => void;
@@ -52,9 +77,14 @@ export function HistoryList({
   revealedContent,
   revealPendingId,
   previewLines,
+  searching,
+  selection,
+  hasMore,
+  loadingMore,
   onReveal,
   onHide,
   onCopy,
+  onQuickCopy,
   onTogglePin,
   onDelete,
   onLoadMore,
@@ -123,6 +153,27 @@ export function HistoryList({
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (items.length === 0) return;
 
+    // ⌘1–⌘9: the fastest path in a clipboard manager — hotkey, glance, ⌘3.
+    // Checked before the switch because the digit keys carry no other meaning
+    // here and the modifier makes them unambiguous.
+    if (event.metaKey || event.ctrlKey) {
+      if (event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        selection.selectAll();
+        return;
+      }
+      const slot = quickSlot(event.key, searching);
+      if (slot !== null) {
+        const item = items[slot];
+        if (item) {
+          event.preventDefault();
+          setFlashId(item.id);
+          onQuickCopy(item);
+        }
+        return;
+      }
+    }
+
     // INV-32: resolve the index from the id, every time.
     const index = activeId
       ? items.findIndex((item) => item.id === activeId)
@@ -147,15 +198,25 @@ export function HistoryList({
         event.preventDefault();
         select(items.length - 1);
         break;
+      case " ":
+        // Space toggles the checkbox, but only in selection mode — otherwise
+        // it is the browser's page-down and taking that away breaks scrolling
+        // for a keyboard user.
+        if (selection.selecting && item) {
+          event.preventDefault();
+          selection.toggle(item.id);
+        }
+        break;
       case "Enter":
         if (item) {
           event.preventDefault();
-          copy(item);
+          if (selection.selecting) selection.toggle(item.id);
+          else copy(item);
         }
         break;
       case "Backspace":
       case "Delete": {
-        if (item) {
+        if (item && !selection.selecting) {
           event.preventDefault();
           // Moves before removal, so the selection never dangles on the id
           // that is about to disappear.
@@ -166,7 +227,10 @@ export function HistoryList({
         break;
       }
       case "Escape":
-        onActiveIdChange(null);
+        // Leaves selection mode first (§3.1.4): Escape clears the multi-select
+        // if there is one, and only then the single selection.
+        if (selection.selecting) selection.end();
+        else onActiveIdChange(null);
         break;
       default:
         break;
@@ -189,6 +253,7 @@ export function HistoryList({
         <div
           role="list"
           aria-label="Clipboard history"
+          aria-multiselectable={selection.selecting || undefined}
           data-active-descendant={
             activeRendered ? `history-row-${activeId}` : undefined
           }
@@ -221,6 +286,9 @@ export function HistoryList({
                   }
                   revealPending={item.id === revealPendingId}
                   previewLines={previewLines}
+                  selecting={selection.selecting}
+                  checked={selection.selected.has(item.id)}
+                  onToggleChecked={(clicked) => selection.toggle(clicked.id)}
                   onSelect={(clicked) => onActiveIdChange(clicked.id)}
                   onCopy={copy}
                   onTogglePin={onTogglePin}
@@ -232,6 +300,23 @@ export function HistoryList({
             );
           })}
         </div>
+
+        {/* An explicit control, not only the near-bottom trigger. A filtered
+            list can be three rows long with a thousand unpaged matches behind
+            it, and three rows do not scroll — so scrolling alone would strand
+            the user on an empty result that is not empty. */}
+        {hasMore && (
+          <div className="flex justify-center py-s-3">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loadingMore}
+              onClick={onLoadMore}
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* INV-9 / A11Y-14: a sibling of the list, never a child of it. */}

@@ -16,18 +16,22 @@ import { toast } from "sonner";
 import { toFriendly } from "@/lib/errors";
 import { PEERS_POLL_MS, POLL_BACKOFF_MS } from "@/lib/layout";
 import {
+  type DiscoveredDevice,
   type PairingData,
   type PeerInfo,
   type SyncResult,
+  listDiscovered,
   listPeers,
   pairAccept,
   pairCreate,
+  rescanDiscovered,
   syncNow,
   unpair,
 } from "@/lib/ipc";
 import { HISTORY_KEY } from "@/hooks/useHistory";
 
 export const PEERS_KEY = ["peers"] as const;
+export const DISCOVERED_KEY = ["discovered"] as const;
 
 export function usePeers() {
   return useQuery<PeerInfo[]>({
@@ -36,6 +40,38 @@ export function usePeers() {
     refetchInterval: (q) =>
       q.state.status === "error" ? POLL_BACKOFF_MS : PEERS_POLL_MS,
     retry: false,
+  });
+}
+
+/**
+ * Devices this network has advertised.
+ *
+ * Only while the pairing dialog is open (`enabled`): mDNS browsing is chatter
+ * on the LAN, and a clipboard manager that broadcasts continuously is a
+ * clipboard manager that announces its presence to every network its owner
+ * joins. Nothing here is authenticated — see `PairAcceptDialog` for what the
+ * UI has to say about that (INV-15).
+ */
+export function useDiscovered(enabled: boolean) {
+  return useQuery<DiscoveredDevice[]>({
+    queryKey: DISCOVERED_KEY,
+    queryFn: listDiscovered,
+    enabled,
+    refetchInterval: PEERS_POLL_MS,
+    // A build with no discovery answers `unavailable`, which is a fact rather
+    // than a transient failure.
+    retry: false,
+  });
+}
+
+/** Advertise and browse again. Multicast is unreliable exactly where people
+ *  pair — a phone that just joined, a Mac that just woke. */
+export function useRescan() {
+  const qc = useQueryClient();
+  return useMutation<DiscoveredDevice[], unknown, void>({
+    mutationFn: () => rescanDiscovered(),
+    onSuccess: (devices) => qc.setQueryData(DISCOVERED_KEY, devices),
+    onError: (raw) => toast.error(toFriendly(raw)),
   });
 }
 

@@ -5,6 +5,11 @@
 //! decides who may connect; it also remembers where a peer was last seen. It
 //! holds the PSKs, so the file is itself a key store — see [`file`].
 //!
+//! Two answers it gives that are not "is this device paired?": whether an
+//! unredeemed pairing code has aged out ([`PAIRING_CODE_TTL`], see [`store`])
+//! and whether a pairing was revoked ([`PeerStore::revoke`]). Both are refusals,
+//! and both are enforced on every read path rather than at one gate.
+//!
 //! # No backward compatibility
 //!
 //! `CLAUDE.md` rule 3: v2 must not open, or appear to open, anything v1 wrote.
@@ -25,9 +30,28 @@ mod store;
 #[cfg(test)]
 mod testutil;
 
+use std::time::Duration;
+
 pub use error::PeerStoreError;
 pub use peer::Peer;
 pub use store::PeerStore;
+
+/// How long a freshly minted pairing code stays redeemable.
+///
+/// v1's `QR_PAIRING_TTL_SECS` was 120 s, for a QR code the screen regenerated on
+/// a timer. This code is 52 characters read off one device and typed into
+/// another, sometimes in a different room, and a deadline that expires mid-typing
+/// teaches people to distrust the feature rather than to hurry. Five minutes is
+/// the shortest window that does not do that.
+pub const PAIRING_CODE_TTL: Duration = Duration::from_secs(300);
+
+/// A pairing that was cut off, and when.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RevokedDevice {
+    pub pairing_id: String,
+    /// Unix milliseconds.
+    pub revoked_at_ms: i64,
+}
 
 /// Filename the daemon should use.
 ///

@@ -3,7 +3,7 @@ import path from "node:path";
 import { execa } from "execa";
 
 import { RUN_ROOT, cliBinary, daemonBinary, freePort } from "./env.js";
-import { track } from "./process.js";
+import { sleep, track } from "./process.js";
 
 export interface Daemon {
   /** Injected into the app process so the bridge finds this daemon's socket. */
@@ -55,7 +55,7 @@ export async function startDaemon(): Promise<Daemon> {
     if (Date.now() > deadline) {
       throw new Error(`the daemon never became reachable:\n${child.log()}`);
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await sleep(250);
   }
 
   let stopped = false;
@@ -86,7 +86,11 @@ export async function startDaemon(): Promise<Daemon> {
       // less here silently disagrees with what is on screen.
       const result = await cli(["--json", "list", "--limit", "1000"]);
       if (result.exitCode !== 0) throw new Error(`\`copypaste list\` failed`);
-      return (JSON.parse(result.stdout) as { data: CliItem[] }).data;
+      // `data` is a page envelope, not a bare array: it carries the count of
+      // rows that would not decrypt alongside the ones that did
+      // (`ItemPage.skipped_undecryptable`).
+      const { data } = JSON.parse(result.stdout) as { data: { items: CliItem[] } };
+      return data.items;
     },
     async remove(id) {
       await removeOne(id);

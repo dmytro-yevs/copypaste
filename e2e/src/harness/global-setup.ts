@@ -1,8 +1,10 @@
+import path from "node:path";
+
 import { execa } from "execa";
 import waitOn from "wait-on";
 
 import { DEV_SERVER_PORT, DEV_SERVER_URL, UI_DIR, requireDisplay } from "./env.js";
-import { track, type Child } from "./process.js";
+import { sleep, track, type Child } from "./process.js";
 
 let server: Child | undefined;
 
@@ -10,12 +12,17 @@ export async function setup(): Promise<void> {
   requireDisplay();
   await assertPortFree();
 
+  // The vite binary directly, not `npm run dev`: killing npm leaves the vite
+  // grandchild holding port 1420, and the next run then silently tests
+  // whatever tree that orphan was started from.
   server = track(
-    execa("npm", ["run", "dev", "--", "--port", String(DEV_SERVER_PORT)], {
+    execa(path.join(UI_DIR, "node_modules/.bin/vite"), ["--port", String(DEV_SERVER_PORT)], {
       cwd: UI_DIR,
       stdio: ["ignore", "pipe", "pipe"],
       reject: false,
+      detached: true,
     }),
+    { group: true },
   );
 
   try {
@@ -82,7 +89,7 @@ async function warmEntrypoint(server: Child): Promise<void> {
         `the dev server never served /src/main.tsx:\n${server.log()}`,
       );
     }
-    await new Promise((r) => setTimeout(r, 500));
+    await sleep(500);
   }
 }
 

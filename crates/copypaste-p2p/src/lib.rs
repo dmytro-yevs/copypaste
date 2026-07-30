@@ -25,7 +25,7 @@ pub mod protocol;
 pub mod sync;
 pub mod transport;
 
-pub use peers::{Peer, PeerStore, PeerStoreError};
+pub use peers::{Peer, PeerStore, PeerStoreError, RevokedDevice, PAIRING_CODE_TTL};
 pub use protocol::{ItemSummary, SyncItem, SyncMessage, PROTOCOL_VERSION};
 pub use sync::{merge_decision, MergeDecision, SyncOutcome, SyncStats};
 pub use transport::{PairingToken, Session, TransportError};
@@ -39,3 +39,18 @@ pub const DEFAULT_PORT: u16 = 47_654;
 
 /// mDNS service type used for discovery.
 pub const SERVICE_TYPE: &str = "_copypaste._tcp.local.";
+
+/// Milliseconds since the Unix epoch.
+///
+/// Local because this crate does not depend on `copypaste-core`, where the
+/// shared helper lives — but one copy, not one per module: discovery, sync and
+/// the pairing deadline had grown their own. A clock before the epoch reads as
+/// 0, which loses every comparison, and losing is the safe direction for all
+/// three.
+pub(crate) fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}

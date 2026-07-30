@@ -26,7 +26,7 @@ impl From<rusqlite::Error> for MetaError {
     }
 }
 
-pub(super) fn is_not_a_database(e: &rusqlite::Error) -> bool {
+pub(crate) fn is_not_a_database(e: &rusqlite::Error) -> bool {
     matches!(
         e,
         rusqlite::Error::SqliteFailure(err, _)

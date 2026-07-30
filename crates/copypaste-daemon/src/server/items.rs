@@ -7,11 +7,14 @@
 //! between the two files is the split between the two thread pools.
 
 use copypaste_core::StoredItem;
-use copypaste_ipc::{ErrorCode, Item, Response, ResponseData, StatusData, PROTOCOL_VERSION};
+use copypaste_ipc::{
+    ErrorCode, Item, ItemPage, Response, ResponseData, StatusData, PROTOCOL_VERSION,
+};
 use tracing::{error, warn};
 
 use super::messages::{
     decrypt_error, storage_error, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT, MSG_NOT_FOUND,
+    MSG_TOO_BIG,
 };
 use crate::capture::{self, IngestError};
 use crate::AppState;
@@ -51,7 +54,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
 pub(super) fn list(state: &AppState, id: u64, limit: u32, offset: u32) -> Response {
     let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
     match state.store.list(limit, offset) {
-        Ok(rows) => Response::ok(id, ResponseData::Items(decrypt_rows(state, rows))),
+        Ok(rows) => Response::ok(id, ResponseData::Page(decrypt_rows(state, rows))),
         Err(e) => storage_error(id, "list", e),
     }
 }
@@ -65,7 +68,7 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
             // is the second of the three layers the rule demands, and it is
             // what protects a database written before the rule existed.
             let rows: Vec<StoredItem> = rows.into_iter().filter(|row| !row.is_sensitive).collect();
-            Response::ok(id, ResponseData::Items(decrypt_rows(state, rows)))
+            Response::ok(id, ResponseData::Page(decrypt_rows(state, rows)))
         }
         Err(e) => storage_error(id, "search", e),
     }
@@ -97,10 +100,14 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
     // as likely to be a credential as one copied from the pasteboard.
     match capture::ingest(state, content, "text") {
         Ok(ingested) => match to_wire(state, ingested.into_item()) {
-            Ok(item) => Response::ok(id, ResponseData::Item(item)),
+            Ok(item) => {
+                state.note_local_change();
+                Response::ok(id, ResponseData::Item(item))
+            }
             Err(e) => decrypt_error(id, e),
         },
         Err(IngestError::Empty) => Response::err(id, ErrorCode::InvalidRequest, MSG_EMPTY_CONTENT),
+        Err(IngestError::TooLarge) => Response::err(id, ErrorCode::InvalidRequest, MSG_TOO_BIG),
         Err(e @ IngestError::Crypto(_)) => {
             error!(error = ?e, "add failed to encrypt");
             Response::err(id, ErrorCode::Internal, MSG_ENCRYPT)
@@ -140,6 +147,7 @@ pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
             // of anything older than the cloud upload cursor is invisible to it
             // until the cursor is pulled back.
             crate::cloud::note_version_written(state, created_at);
+            state.note_local_change();
             Response::ok(id, ResponseData::Empty {})
         }
         Err(e) => storage_error(id, "delete", e),
@@ -164,6 +172,7 @@ pub(super) fn delete_all(state: &AppState, id: u64) -> Response {
                     Ok(None) => {}
                     Err(e) => warn!(error = ?e, "could not reset the cloud upload cursor"),
                 }
+                state.note_local_change();
             }
             Response::ok(id, ResponseData::Count(deleted))
         }
@@ -181,6 +190,7 @@ pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Res
     if let Err(e) = state.store.set_pinned(item_id, pinned) {
         return storage_error(id, "set_pinned", e);
     }
+    state.note_local_change();
 
     // Reply with the updated row so a client does not have to re-list to learn
     // the new state.
@@ -211,21 +221,30 @@ fn to_wire(state: &AppState, row: StoredItem) -> Result<Item, copypaste_core::Cr
     })
 }
 
-/// Decrypt a page of rows, dropping any row that will not open.
+/// Decrypt a page of rows, dropping any row that will not open — and saying how
+/// many.
 ///
-/// One unreadable row must not blank an entire page of history — the other
-/// items are still the user's data. The failure is logged with the row id so it
-/// is diagnosable.
-fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> Vec<Item> {
-    let mut items = Vec::with_capacity(rows.len());
+/// One unreadable row must not blank an entire page of history: the other items
+/// are still the user's data. But a page that is silently one item shorter, with
+/// the reason only in the daemon's log, is what v1 shipped and what
+/// `CopyPaste-00zz` fixed — the user sees fewer items and is told nothing. The
+/// count goes back on the wire so a client can say "3 items could not be read".
+fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
+    let mut page = ItemPage {
+        items: Vec::with_capacity(rows.len()),
+        skipped_undecryptable: 0,
+    };
     for row in rows {
         let row_id = row.id.clone();
         match to_wire(state, row) {
-            Ok(item) => items.push(item),
-            Err(e) => warn!(id = %row_id, error = ?e, "skipping an item that failed to decrypt"),
+            Ok(item) => page.items.push(item),
+            Err(e) => {
+                warn!(id = %row_id, error = ?e, "skipping an item that failed to decrypt");
+                page.skipped_undecryptable += 1;
+            }
         }
     }
-    items
+    page
 }
 
 fn clamp_page(limit: u32, default: u32) -> u32 {
@@ -316,10 +335,10 @@ mod tests {
             },
         );
         match response.data {
-            Some(ResponseData::Items(items)) => {
-                assert!(items.iter().any(|item| item.id == added.id));
+            Some(ResponseData::Page(page)) => {
+                assert!(page.items.iter().any(|item| item.id == added.id));
             }
-            other => panic!("expected items, got {other:?}"),
+            other => panic!("expected a page, got {other:?}"),
         }
 
         let response = dispatch_store(
@@ -331,11 +350,11 @@ mod tests {
             },
         );
         match response.data {
-            Some(ResponseData::Items(items)) => assert!(
-                !items.iter().any(|item| item.id == added.id),
+            Some(ResponseData::Page(page)) => assert!(
+                !page.items.iter().any(|item| item.id == added.id),
                 "a sensitive item reached the search results"
             ),
-            other => panic!("expected items, got {other:?}"),
+            other => panic!("expected a page, got {other:?}"),
         }
     }
 

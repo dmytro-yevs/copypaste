@@ -140,24 +140,48 @@ class Handler(BaseHTTPRequestHandler):
             return self._reply(401, {"message": "no bearer"})
 
         query = parse_qs(url.query)
+        after = None
         since = 0
-        raw = (query.get("created_at") or ["gte.0"])[0]
-        if raw.startswith("gte."):
-            since = int(raw[4:])
-        elif raw.startswith("gt."):
-            # The client must never send this: a strict bound drops every row
-            # sharing the boundary millisecond (manifest 05 §4.4).
-            return self._reply(400, {"message": "exclusive cursor bound"})
+
+        keyset = (query.get("or") or [""])[0]
+        if keyset:
+            # The compound cursor: strictly after the pair (created_at, item_id).
+            # Exclusive is correct *only* in this form, because the pair is a
+            # total order with no ties (manifest 05 §5.1 row 6, INV-N1).
+            match = re.fullmatch(
+                r"\(created_at\.gt\.(\d+),and\(created_at\.eq\.(\d+),item_id\.gt\.([A-Za-z0-9_-]+)\)\)",
+                keyset,
+            )
+            if not match or match.group(1) != match.group(2):
+                return self._reply(400, {"message": "unparseable keyset cursor"})
+            since = int(match.group(1))
+            after = match.group(3)
+        else:
+            raw = (query.get("created_at") or ["gte.0"])[0]
+            if raw.startswith("gte."):
+                since = int(raw[4:])
+            elif raw.startswith("gt."):
+                # A strict bound on the millisecond *alone* drops every row
+                # sharing the boundary millisecond (manifest 05 §4.4).
+                return self._reply(400, {"message": "exclusive cursor bound"})
+
         order = (query.get("order") or [""])[0]
-        if not order.startswith("created_at.asc"):
+        if order != "created_at.asc,item_id.asc":
             # Equally load-bearing: a forward cursor cannot drain a
-            # newest-first page.
-            return self._reply(400, {"message": "page order is not ascending"})
+            # newest-first page, and the keyset's tie-break needs item_id in
+            # the same direction.
+            return self._reply(400, {"message": "page order is not the keyset order"})
         limit = int((query.get("limit") or ["100"])[0])
 
+        def key(row):
+            return (int(row.get("created_at", 0)), row["item_id"])
+
         with STATE_LOCK:
-            rows = [r for r in ROWS.values() if int(r.get("created_at", 0)) >= since]
-        rows.sort(key=lambda r: (int(r.get("created_at", 0)), r["item_id"]))
+            if after is None:
+                rows = [r for r in ROWS.values() if key(r)[0] >= since]
+            else:
+                rows = [r for r in ROWS.values() if key(r) > (since, after)]
+        rows.sort(key=key)
         self._reply(200, rows[:limit])
 
 

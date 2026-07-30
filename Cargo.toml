@@ -41,10 +41,10 @@ toml = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = "0.3"
-# retry/backoff — ONE implementation (v1 had six)
-backoff = { version = "0.4", features = ["tokio"] }
-# rate limiting — ONE implementation (v1 had three)
-governor = "0.6"
+# retry/backoff — ONE implementation (v1 had six). `backon`, not `backoff`:
+# backoff 0.4 is unmaintained (RUSTSEC-2025-0012, which names this as the
+# replacement) and pulled unmaintained `instant` in with it (RUSTSEC-2024-0384).
+backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
 # P2P secure channel. Noise (NNpsk0) gives a mutually-authenticated, forward-
 # secret channel from the pairing PSK alone: no TLS stack, no certificate
 # lifecycle, and no hand-written pinning verifier. v1 carried rustls + rcgen +
@@ -72,6 +72,10 @@ hex = "0.4"
 regex = "1.10"
 unicode-normalization = "0.1"
 directories = "5"
+# flock(2) for the socket-bind critical section (CopyPaste-ah1m). rustix rather
+# than a libc call: it is already in the tree, is maintained, and covers macOS
+# and Android.
+rustix = { version = "1", features = ["fs"] }
 tempfile = "3"
 comfy-table = "7"
 # macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
