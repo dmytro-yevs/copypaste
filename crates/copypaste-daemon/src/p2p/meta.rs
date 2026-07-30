@@ -40,7 +40,6 @@
 //! `rusqlite::Connection` is not `Sync`; the guard is never held across an
 //! `.await`.
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -406,25 +405,6 @@ impl Meta {
         Ok(true)
     }
 
-    /// How many items are eligible to sync, for logging and tests.
-    pub fn eligible_count(&self) -> Result<i64, MetaError> {
-        let conn = self.lock()?;
-        Ok(conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_sensitive = 0",
-            [],
-            |r| r.get(0),
-        )?)
-    }
-
-    /// Origins for a batch of ids, for callers that already hold the rows.
-    pub fn origins(&self, ids: &[String]) -> Result<HashMap<String, String>, MetaError> {
-        Ok(self
-            .fetch(ids)?
-            .into_iter()
-            .map(|row| (row.item_id, row.origin_device_id))
-            .collect())
-    }
-
     /// Poisoning is surfaced rather than recovered: this connection decides
     /// what leaves the device, and a map observed mid-update is not a basis for
     /// that decision.
@@ -603,7 +583,10 @@ mod tests {
         let summaries = f.meta.summaries().unwrap();
         let ids: Vec<&str> = summaries.iter().map(|s| s.item_id.as_str()).collect();
         assert!(ids.contains(&"plain"), "{ids:?}");
-        assert!(ids.contains(&"gone"), "a tombstone is a version, not an absence");
+        assert!(
+            ids.contains(&"gone"),
+            "a tombstone is a version, not an absence"
+        );
         assert!(
             !ids.contains(&"secret"),
             "a sensitive item must never be advertised"
@@ -698,7 +681,11 @@ mod tests {
             })
             .unwrap();
 
-        assert!(f.store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty());
+        assert!(f
+            .store
+            .search("AKIAIOSFODNN7EXAMPLE", 10)
+            .unwrap()
+            .is_empty());
         assert!(f.store.get("flagged").unwrap().is_some());
     }
 

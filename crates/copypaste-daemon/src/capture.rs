@@ -198,6 +198,19 @@ pub fn ingest(
         created_at: copypaste_core::now_ms(),
     })?;
 
+    // This device captured it, so this device is its origin — the one thing a
+    // sync session needs about an item that the store has no column for. Read
+    // as advisory on the way out (`p2p::meta::local_version` treats an absent
+    // row as "captured here"), so a failure here costs nothing but is still
+    // worth reporting.
+    if let Err(e) = state
+        .p2p
+        .meta
+        .record_origin(&stored.id, state.p2p.meta.device_id())
+    {
+        warn!(error = ?e, "could not record the origin of a captured item");
+    }
+
     // Best-effort, and deliberately after the insert: the item is already
     // durable, and a failed sweep must never turn a stored capture into a lost
     // one.

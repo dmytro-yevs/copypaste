@@ -55,10 +55,6 @@ impl NoiseChannel {
             tracing::debug!(error = %e, "peer session did not close cleanly");
         }
     }
-
-    pub fn peer_addr(&self) -> std::net::SocketAddr {
-        self.session.peer_addr()
-    }
 }
 
 impl SyncChannel for NoiseChannel {
@@ -66,10 +62,11 @@ impl SyncChannel for NoiseChannel {
         let bytes = msg.encode()?;
         // `RawValue` is emitted verbatim, so what reaches the wire is exactly
         // the bytes `encode` validated.
-        let raw = RawValue::from_string(String::from_utf8(bytes).map_err(|_| {
-            SyncError::Channel("outgoing message was not valid text".to_string())
-        })?)
-        .map_err(|_| SyncError::Channel("outgoing message could not be framed".to_string()))?;
+        let raw =
+            RawValue::from_string(String::from_utf8(bytes).map_err(|_| {
+                SyncError::Channel("outgoing message was not valid text".to_string())
+            })?)
+            .map_err(|_| SyncError::Channel("outgoing message could not be framed".to_string()))?;
 
         self.session
             .send(&raw)
@@ -78,11 +75,8 @@ impl SyncChannel for NoiseChannel {
     }
 
     async fn recv(&mut self) -> Result<SyncMessage, SyncError> {
-        let received = tokio::time::timeout(
-            self.read_timeout,
-            self.session.recv::<Box<RawValue>>(),
-        )
-        .await;
+        let received =
+            tokio::time::timeout(self.read_timeout, self.session.recv::<Box<RawValue>>()).await;
 
         match received {
             Err(_) => Err(SyncError::Channel(
@@ -90,7 +84,9 @@ impl SyncChannel for NoiseChannel {
             )),
             // A clean close at a message boundary. The session functions expect
             // a message; ending here is the peer walking away mid-protocol.
-            Ok(Ok(None)) => Err(SyncError::Channel("the peer closed the session".to_string())),
+            Ok(Ok(None)) => Err(SyncError::Channel(
+                "the peer closed the session".to_string(),
+            )),
             Ok(Ok(Some(raw))) => Ok(SyncMessage::decode(raw.get().as_bytes())?),
             Ok(Err(e)) => Err(SyncError::Channel(e.to_string())),
         }
@@ -101,7 +97,7 @@ impl SyncChannel for NoiseChannel {
 mod tests {
     use super::*;
     use copypaste_p2p::transport::PairingToken;
-    use tokio::net::{TcpListener, TcpStream};
+    use tokio::net::TcpListener;
 
     async fn pair() -> (NoiseChannel, NoiseChannel) {
         let token = PairingToken::generate();
@@ -155,7 +151,10 @@ mod tests {
         let mut channel = NoiseChannel::new(Session::connect(addr, &token.psk()).await.unwrap());
         channel.read_timeout = Duration::from_millis(150);
 
-        let err = channel.recv().await.expect_err("a silent peer must time out");
+        let err = channel
+            .recv()
+            .await
+            .expect_err("a silent peer must time out");
         assert!(matches!(err, SyncError::Channel(_)), "{err:?}");
         accepting.abort();
     }
@@ -164,7 +163,10 @@ mod tests {
     async fn a_peer_that_hangs_up_is_an_error_not_an_empty_message() {
         let (a, mut b) = pair().await;
         a.close().await;
-        let err = b.recv().await.expect_err("a closed session is not a message");
+        let err = b
+            .recv()
+            .await
+            .expect_err("a closed session is not a message");
         assert!(matches!(err, SyncError::Channel(_)), "{err:?}");
     }
 

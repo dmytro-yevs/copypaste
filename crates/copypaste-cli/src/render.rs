@@ -5,7 +5,7 @@
 //! without a wall clock.
 
 use comfy_table::{presets, ContentArrangement, Table};
-use copypaste_ipc::{Item, StatusData, PROTOCOL_VERSION};
+use copypaste_ipc::{Item, PairingData, PeerInfo, StatusData, SyncResult, PROTOCOL_VERSION};
 
 /// Stand-in printed instead of a sensitive item's content.
 ///
@@ -138,6 +138,100 @@ pub fn items_table(items: &[Item], now_ms: i64, empty: &str) -> String {
         out.push_str(&legend.join("   "));
     }
     out
+}
+
+/// Render paired devices as a table, or `empty` when there are none.
+///
+/// No secret appears here: a peer record holds a pre-shared key, but
+/// [`PeerInfo`] does not carry it and the daemon never puts it on the wire. The
+/// pairing id is a derived, non-secret identifier and is shown in full because
+/// it is what `unpair` and `sync --peer` take.
+pub fn peers_table(peers: &[PeerInfo], now_ms: i64, empty: &str) -> String {
+    if peers.is_empty() {
+        return empty.to_string();
+    }
+
+    let mut table = Table::new();
+    table.load_preset(presets::UTF8_HORIZONTAL_ONLY);
+    table.set_content_arrangement(ContentArrangement::Disabled);
+    table.set_header(vec!["PAIRING ID", "NAME", "SEEN", "ADDRESS", "STATUS"]);
+
+    for peer in peers {
+        table.add_row(vec![
+            peer.pairing_id.clone(),
+            one_line(&peer.name, 24),
+            if peer.last_seen_ms > 0 {
+                relative_time(peer.last_seen_ms, now_ms)
+            } else {
+                "never".to_string()
+            },
+            peer.last_addr.clone().unwrap_or_else(|| "—".to_string()),
+            // "offline" is "not seen on the network", never "unreachable":
+            // discovery is a convenience and an explicit address always works.
+            if peer.online { "online" } else { "offline" }.to_string(),
+        ]);
+    }
+    table.to_string()
+}
+
+/// Render one sync run, one row per peer.
+pub fn sync_table(results: &[SyncResult], empty: &str) -> String {
+    if results.is_empty() {
+        return empty.to_string();
+    }
+
+    let mut table = Table::new();
+    table.load_preset(presets::UTF8_HORIZONTAL_ONLY);
+    table.set_content_arrangement(ContentArrangement::Disabled);
+    table.set_header(vec!["PEER", "SENT", "RECEIVED", "RESULT"]);
+
+    for result in results {
+        table.add_row(vec![
+            one_line(&result.name, 24),
+            result.sent.to_string(),
+            result.received.to_string(),
+            match &result.error {
+                // Already a fixed sentence from the daemon; scrubbed anyway,
+                // because this CLI is what the user actually reads.
+                Some(error) => crate::error::scrub_paths(error),
+                None => "ok".to_string(),
+            },
+        ]);
+    }
+    table.to_string()
+}
+
+/// Render a freshly minted pairing, code and all.
+///
+/// The code is the one secret this CLI ever prints. It goes to stdout so it can
+/// be read out or piped, and the surrounding text says plainly what it is worth
+/// — a code in a chat log is a paired device.
+pub fn pairing_text(pairing: &PairingData) -> String {
+    let mut lines = vec![
+        format!("{:<12} {}", "code", pairing.code),
+        format!("{:<12} {}", "pairing id", pairing.pairing_id),
+    ];
+    match &pairing.listen_addr {
+        Some(addr) => lines.push(format!("{:<12} {}", "address", addr)),
+        None => lines.push(format!(
+            "{:<12} {}",
+            "address", "unknown — give the other device this host's address"
+        )),
+    }
+    lines.push(String::new());
+    lines.push("On the other device, run:".to_string());
+    lines.push(format!(
+        "  copypaste pair accept {} --addr {}",
+        pairing.code,
+        pairing.listen_addr.as_deref().unwrap_or("HOST:PORT")
+    ));
+    lines.push(String::new());
+    lines.push(
+        "The code is a secret and is shown only once: anyone holding it can pair \
+         with this device."
+            .to_string(),
+    );
+    lines.join("\n")
 }
 
 /// Render `status` as an aligned key/value block.
@@ -359,6 +453,111 @@ mod tests {
     fn status_flags_a_fake_clipboard_backend() {
         let text = status_text(&status(PROTOCOL_VERSION, "fake"));
         assert!(text.contains("not the system clipboard"), "{text}");
+    }
+
+    fn peer(name: &str) -> PeerInfo {
+        PeerInfo {
+            pairing_id: "0123456789abcdef0123456789abcdef".into(),
+            name: name.into(),
+            last_addr: Some("192.168.1.24:47654".into()),
+            last_seen_ms: 0,
+            online: false,
+        }
+    }
+
+    #[test]
+    fn an_empty_peer_list_renders_the_empty_message() {
+        assert_eq!(
+            peers_table(&[], 0, "no paired devices"),
+            "no paired devices"
+        );
+    }
+
+    #[test]
+    fn peers_table_shows_the_full_pairing_id_so_it_can_be_copied() {
+        let p = peer("phone");
+        let table = peers_table(std::slice::from_ref(&p), 1_000_000, "none");
+        assert!(table.contains(&p.pairing_id), "{table}");
+        assert!(table.contains("192.168.1.24:47654"), "{table}");
+    }
+
+    #[test]
+    fn a_peer_never_seen_says_so_rather_than_showing_the_epoch() {
+        let table = peers_table(&[peer("phone")], 1_000_000, "none");
+        assert!(table.contains("never"), "{table}");
+    }
+
+    #[test]
+    fn discovery_state_reads_as_seen_or_not_seen() {
+        let mut p = peer("phone");
+        assert!(peers_table(std::slice::from_ref(&p), 0, "none").contains("offline"));
+        p.online = true;
+        p.last_seen_ms = 1_000;
+        let table = peers_table(&[p], 31_000, "none");
+        assert!(table.contains("online"), "{table}");
+        assert!(table.contains("30s ago"), "{table}");
+    }
+
+    fn sync_result(error: Option<&str>) -> SyncResult {
+        SyncResult {
+            pairing_id: "0123456789abcdef0123456789abcdef".into(),
+            name: "phone".into(),
+            sent: 3,
+            received: 2,
+            error: error.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn sync_table_reports_counts_and_failures_side_by_side() {
+        let table = sync_table(
+            &[sync_result(None), sync_result(Some("unreachable"))],
+            "none",
+        );
+        assert!(table.contains("ok"), "{table}");
+        assert!(table.contains("unreachable"), "{table}");
+        assert!(table.contains('3') && table.contains('2'), "{table}");
+    }
+
+    #[test]
+    fn a_daemon_supplied_path_is_scrubbed_out_of_a_sync_failure() {
+        let table = sync_table(
+            &[sync_result(Some("failed at /Users/dmitriy/Library/x.db"))],
+            "none",
+        );
+        assert!(!table.contains("dmitriy"), "{table}");
+    }
+
+    #[test]
+    fn an_empty_sync_run_renders_the_empty_message() {
+        assert_eq!(sync_table(&[], "no paired devices"), "no paired devices");
+    }
+
+    #[test]
+    fn a_pairing_shows_the_code_and_says_it_is_a_secret() {
+        let text = pairing_text(&PairingData {
+            code: "ABCD-EFGH-JKMN".into(),
+            pairing_id: "0123456789abcdef".into(),
+            listen_addr: Some("192.168.1.24:47654".into()),
+        });
+        assert!(text.contains("ABCD-EFGH-JKMN"), "{text}");
+        assert!(text.contains("secret"), "{text}");
+        // The command to run on the other device must be copy-pasteable whole.
+        assert!(
+            text.contains("copypaste pair accept ABCD-EFGH-JKMN --addr 192.168.1.24:47654"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_pairing_with_no_reachable_address_says_what_to_do() {
+        let text = pairing_text(&PairingData {
+            code: "ABCD-EFGH".into(),
+            pairing_id: "0123456789abcdef".into(),
+            listen_addr: None,
+        });
+        assert!(text.contains("HOST:PORT"), "{text}");
+        assert!(text.contains("unknown"), "{text}");
     }
 
     #[test]
