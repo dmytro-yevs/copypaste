@@ -1,0 +1,16 @@
+# Bindings configuration.
+#
+# Only what changes the output. Everything else is UniFFI's default on purpose:
+# the fewer knobs this file turns, the fewer things there are to keep in step
+# with a generator upgrade.
+
+[bindings.kotlin]
+# Default would be `uniffi.copypaste_ffi`, which reads like an implementation
+# detail in an import list. `com.copypaste.ffi` matches the app's namespace and
+# is what `apps/android/app/proguard-rules.pro` keeps from R8.
+package_name = "com.copypaste.ffi"
+
+# The `.so` the generated `loadIndirect` looks for. Must match the `[lib] name`
+# in Cargo.toml — Android's loader prepends `lib` and appends `.so`, so this is
+# `libcopypaste_ffi.so` on disk, one per ABI under `app/src/main/jniLibs/`.
+cdylib_name = "copypaste_ffi"
