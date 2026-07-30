@@ -72,14 +72,30 @@ test("scroll offset is never left past the end when the list shrinks (INV-6)", a
   );
 
   const items = await app.daemon.items();
-  for (const item of items.slice(0, Math.floor(items.length * 0.7))) {
-    await app.daemon.remove(item.id);
-  }
+  const doomed = items.slice(0, Math.floor(items.length * 0.7));
+  await app.daemon.removeMany(doomed.map((item) => item.id));
 
-  await browser.waitUntil(
-    async () => (await scroller(browser)).totalSize < bottom.totalSize / 2,
-    { timeout: 40_000, interval: 500, timeoutMsg: "the list never shrank" },
-  );
+  const remaining = await app.daemon.items();
+  expect(remaining.length).toBeLessThan(items.length / 2);
+
+  const seen: string[] = [];
+  const deadline = Date.now() + 45_000;
+  let shrank = false;
+  while (Date.now() < deadline) {
+    const now = await scroller(browser);
+    seen.push(`${Math.round(now.totalSize)}@${Math.round(now.scrollTop)}`);
+    if (now.totalSize < bottom.totalSize / 2) {
+      shrank = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
+  expect(
+    shrank,
+    `list height never fell below ${bottom.totalSize / 2}px after deleting ` +
+      `${doomed.length} of ${items.length} items (daemon now has ` +
+      `${remaining.length}). Observed totalSize@scrollTop: ${seen.join(" ")}`,
+  ).toBe(true);
 
   const after = await scroller(browser);
   expect(after.scrollTop).toBeLessThanOrEqual(
@@ -95,4 +111,4 @@ test("scroll offset is never left past the end when the list shrinks (INV-6)", a
       row.start <= after.scrollTop && row.start + row.height > after.scrollTop,
   );
   expect(covered).toBe(true);
-});
+}, 120_000);
