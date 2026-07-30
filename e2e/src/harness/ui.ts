@@ -73,20 +73,30 @@ export async function scrollTo(browser: Browser, top: number): Promise<void> {
   );
 }
 
-export async function rowCount(browser: Browser): Promise<number> {
+/** How many nodes match, over the whole document and ignoring CSS — so a
+ *  control hidden with `display: none` still counts as rendered. */
+export async function count(browser: Browser, selector: string): Promise<number> {
   return (await browser.execute(
-    (selector: string) => document.querySelectorAll(selector).length,
-    ROW,
+    (query: string) => document.querySelectorAll(query).length,
+    selector,
   )) as number;
 }
 
-export async function waitForRows(browser: Browser, atLeast = 1): Promise<void> {
+export async function rowCount(browser: Browser): Promise<number> {
+  return count(browser, ROW);
+}
+
+export async function waitForRows(
+  browser: Browser,
+  atLeast = 1,
+  timeout = 60_000,
+): Promise<void> {
   await browser.waitUntil(
     async () => (await rowCount(browser)) >= atLeast,
     {
       // Generous on purpose: the first paint waits on a poll of the daemon,
       // and CI runners share a machine with whatever else is building.
-      timeout: 60_000,
+      timeout,
       interval: 250,
       timeoutMsg: `fewer than ${atLeast} rows ever rendered`,
     },
@@ -108,12 +118,98 @@ export async function activeRowId(browser: Browser): Promise<string | null> {
   }, HISTORY_LIST)) as string | null;
 }
 
+/**
+ * Switch screens the way a user does.
+ *
+ * The nav is located first and the text selector applied to it: WebDriver has
+ * no "CSS then text" syntax, and `nav[…] button=History` is rejected as one
+ * malformed selector rather than treated as two.
+ */
 export async function gotoView(browser: Browser, label: string): Promise<void> {
-  const button = await browser.$(`nav[aria-label="Primary"] button=${label}`);
+  const nav = await browser.$('nav[aria-label="Primary"]');
+  await nav.waitForExist({ timeout: 15_000 });
+  const button = await nav.$(`button=${label}`);
   await button.waitForClickable({ timeout: 15_000 });
   await button.click();
+  await browser.waitUntil(
+    async () => (await button.getAttribute("aria-current")) === "page",
+    { timeout: 15_000, timeoutMsg: `the ${label} screen never became current` },
+  );
 }
 
 export async function visibleText(browser: Browser): Promise<string> {
   return (await browser.execute(() => document.body.innerText)) as string;
+}
+
+/**
+ * Wait for a phrase to be *rendered*.
+ *
+ * Against `innerText`, never against a catalogue key: the strings are moving
+ * into i18n, and a test that matched a key would keep passing while the screen
+ * showed one.
+ */
+export async function waitForText(
+  browser: Browser,
+  needle: string,
+  timeout = 30_000,
+): Promise<void> {
+  await browser.waitUntil(
+    async () => (await visibleText(browser)).includes(needle),
+    {
+      timeout,
+      interval: 250,
+      timeoutMsg: `never rendered ${JSON.stringify(needle)}`,
+    },
+  );
+}
+
+/** Every element carrying this accessible name, with the box it was laid out
+ *  at — so "present" and "rendered" are told apart. */
+export async function byLabel(
+  browser: Browser,
+  label: string,
+): Promise<Array<{ tag: string; width: number; height: number; text: string }>> {
+  return (await browser.execute(function (name: string) {
+    return Array.prototype.map.call(
+      document.querySelectorAll('[aria-label="' + name + '"]'),
+      function (node) {
+        const el = node as HTMLElement;
+        const rect = el.getBoundingClientRect();
+        return {
+          tag: el.tagName,
+          width: rect.width,
+          height: rect.height,
+          text: el.innerText,
+        };
+      },
+    );
+  }, label)) as Array<{ tag: string; width: number; height: number; text: string }>;
+}
+
+/**
+ * Click a button by the label a user sees — its rendered text, or its
+ * accessible name when it has only an icon.
+ *
+ * A real WebDriver click, not `element.click()` from a script: hit-testing,
+ * pointer events and focus are the parts of a control this suite exists to
+ * exercise, and a synthetic dispatch skips all three.
+ */
+export async function clickButton(
+  browser: Browser,
+  label: string,
+  options: { within?: string; timeout?: number } = {},
+): Promise<void> {
+  const { within, timeout = 15_000 } = options;
+  const root = within ? await browser.$(within) : browser;
+  const byText = await root.$(`button=${label}`);
+  const target = (await byText.isExisting())
+    ? byText
+    : await root.$(`button[aria-label="${label}"]`);
+  await target.waitForClickable({
+    timeout,
+    timeoutMsg:
+      `no clickable button labelled ${JSON.stringify(label)}` +
+      (within ? ` inside ${within}` : ""),
+  });
+  await target.click();
 }
