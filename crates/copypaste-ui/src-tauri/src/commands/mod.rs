@@ -20,6 +20,7 @@
 //! and because one file per concern keeps each well inside the rule 5 budget.
 
 pub mod capture;
+pub mod clipboard;
 pub mod config;
 pub mod history;
 pub mod peers;

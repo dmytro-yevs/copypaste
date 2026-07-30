@@ -171,6 +171,10 @@ impl Backend for FakeBackend {
         Err(refused())
     }
 
+    async fn revoke(&self, _pairing_id: &str) -> Result<()> {
+        Err(refused())
+    }
+
     async fn sync(&self, _pairing_id: Option<&str>) -> Result<Vec<SyncResult>> {
         Err(refused())
     }

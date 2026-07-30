@@ -95,6 +95,17 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Unpair { pairing_id } => Method::Unpair {
             pairing_id: pairing_id.clone(),
         },
+        Command::Revoke { pairing_id, yes } => {
+            // Irreversible, and the key on the other device is gone with it:
+            // both halves have to be paired again by hand (CLAUDE.md rule 4).
+            if !yes && !confirm_revoke(pairing_id)? {
+                out("cancelled; that device is still paired");
+                return Ok(());
+            }
+            Method::Revoke {
+                pairing_id: pairing_id.clone(),
+            }
+        }
         Command::Sync { peer } => Method::SyncNow {
             pairing_id: peer.clone(),
         },
@@ -326,6 +337,26 @@ fn confirm_clear() -> Result<bool, CliError> {
     Ok(is_affirmative(&answer))
 }
 
+fn confirm_revoke(pairing_id: &str) -> Result<bool, CliError> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        return Err(CliError::local(
+            "refusing to revoke a device without confirmation: pass --yes",
+        ));
+    }
+    eprint!(
+        "Revoke {pairing_id}? Its code can never be used again, and pairing these \
+         devices means a new code on both. [y/N] "
+    );
+    let _ = std::io::stderr().flush();
+
+    let mut answer = String::new();
+    stdin
+        .read_line(&mut answer)
+        .map_err(|e| CliError::local(format!("could not read the answer: {e}")))?;
+    Ok(is_affirmative(&answer))
+}
+
 /// Only an explicit yes counts. Anything else, including empty, is no.
 fn is_affirmative(answer: &str) -> bool {
     matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
@@ -535,6 +566,24 @@ mod tests {
         }
     }
 
+    /// Revoking is irreversible, so the prompt is the default and `--yes` is
+    /// the way past it — the shape `clear` and `restore` already use.
+    #[test]
+    fn revoke_takes_a_pairing_id_and_confirms_by_default() {
+        assert!(Cli::try_parse_from(["copypaste", "revoke"]).is_err());
+        match parse(&["copypaste", "revoke", "abc123"]).command {
+            Command::Revoke { pairing_id, yes } => {
+                assert_eq!(pairing_id, "abc123");
+                assert!(!yes);
+            }
+            other => panic!("{other:?}"),
+        }
+        match parse(&["copypaste", "revoke", "abc123", "--yes"]).command {
+            Command::Revoke { yes, .. } => assert!(yes),
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[test]
     fn peer_commands_map_onto_the_wire_methods() {
         // The mapping is the whole of `run`'s first half; a typo here is a
@@ -543,6 +592,10 @@ mod tests {
             (vec!["copypaste", "peers"], r#""method":"peers""#),
             (vec!["copypaste", "sync"], r#""method":"sync_now""#),
             (vec!["copypaste", "unpair", "x"], r#""method":"unpair""#),
+            (
+                vec!["copypaste", "revoke", "x", "--yes"],
+                r#""method":"revoke""#,
+            ),
             (
                 vec!["copypaste", "pair", "create"],
                 r#""method":"pair_create""#,
@@ -562,6 +615,9 @@ mod tests {
                 pairing_id: peer.clone(),
             },
             Command::Unpair { pairing_id } => Method::Unpair {
+                pairing_id: pairing_id.clone(),
+            },
+            Command::Revoke { pairing_id, .. } => Method::Revoke {
                 pairing_id: pairing_id.clone(),
             },
             Command::Pair {

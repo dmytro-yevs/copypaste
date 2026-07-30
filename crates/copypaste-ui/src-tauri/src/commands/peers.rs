@@ -88,6 +88,25 @@ pub async fn unpair(backend: State<'_, SelectedBackend>, pairing_id: String) -> 
     backend.unpair(&pairing_id).await
 }
 
+/// Cut a device off for good.
+///
+/// [`unpair`] and this differ in one respect, and it is the one that matters
+/// after a phone is lost: the pairing code is the long-term key, so an unpaired
+/// device can be paired again by re-entering the code someone kept, while a
+/// revoked pairing id is refused from here on. Nothing is negotiated — the
+/// other device is not told and keeps its own half — and no clipboard history
+/// is deleted on either side.
+///
+/// Irreversible, so the confirmation is the caller's to obtain. Reaching here
+/// *is* the confirmation, exactly as with `delete_all`.
+#[tauri::command]
+pub async fn revoke(backend: State<'_, SelectedBackend>, pairing_id: String) -> Result<()> {
+    if pairing_id.trim().is_empty() {
+        return Err(BackendError::Invalid("There is no device to revoke."));
+    }
+    backend.revoke(pairing_id.trim()).await
+}
+
 /// Sync with one device, or with all of them when `pairing_id` is absent.
 ///
 /// Named for `copypaste_ipc::Method::SyncNow` rather than plain `sync`, for the

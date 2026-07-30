@@ -122,6 +122,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::PairCreate { .. }
         | Method::PairAccept { .. }
         | Method::Unpair { .. }
+        | Method::Revoke { .. }
         | Method::Peers
         | Method::SyncNow { .. }
         // Cloud operations touch the same history and keep their cursors in
@@ -166,6 +167,7 @@ async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
             crate::p2p::handlers::pair_accept(state, id, &code, &addr).await
         }
         Method::Unpair { pairing_id } => crate::p2p::handlers::unpair(state, id, &pairing_id).await,
+        Method::Revoke { pairing_id } => crate::p2p::handlers::revoke(state, id, &pairing_id).await,
         Method::Peers => crate::p2p::handlers::peers(state, id).await,
         Method::SyncNow { pairing_id } => {
             crate::p2p::handlers::sync_now(state, id, pairing_id.as_deref()).await
@@ -226,6 +228,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::PairCreate { .. }
         | Method::PairAccept { .. }
         | Method::Unpair { .. }
+        | Method::Revoke { .. }
         | Method::Peers
         | Method::SyncNow { .. }
         | Method::Discovered
@@ -278,6 +281,9 @@ mod tests {
             addr: "127.0.0.1:1".into()
         }));
         assert!(requires_ready(&Method::Unpair {
+            pairing_id: "x".into()
+        }));
+        assert!(requires_ready(&Method::Revoke {
             pairing_id: "x".into()
         }));
         assert!(requires_ready(&Method::Peers));

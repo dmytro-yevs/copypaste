@@ -121,10 +121,28 @@ pub(crate) enum Command {
     /// Forget a paired device.
     ///
     /// Local and one-sided: the other device keeps its half until it also
-    /// unpairs.
+    /// unpairs. The code that made the pairing still works, so re-entering it
+    /// pairs the two devices again — use `revoke` for a device you no longer
+    /// have.
     Unpair {
         /// The pairing id, as shown by `copypaste peers`.
         pairing_id: String,
+    },
+
+    /// Cut a device off for good, so its code can never be used again.
+    ///
+    /// What a lost or stolen device needs, and what `unpair` deliberately is
+    /// not: the pairing id is refused from here on, so a code that was written
+    /// down or a stale copy of the device list cannot bring the pairing back.
+    /// It cannot be undone, and the other device is not told — pairing the two
+    /// again means a new code on both.
+    Revoke {
+        /// The pairing id, as shown by `copypaste peers`.
+        pairing_id: String,
+
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
     },
 
     /// Sync clipboard history with paired devices.

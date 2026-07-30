@@ -25,6 +25,7 @@ import {
   pairAccept,
   pairCreate,
   rescanDiscovered,
+  revokeDevice,
   syncNow,
   unpair,
 } from "@/lib/ipc";
@@ -105,6 +106,25 @@ export function useUnpair() {
     mutationFn: (peer) => unpair(peer.pairing_id),
     onSuccess: (_data, peer) => {
       toast.success(t("devices.toast.unpaired", { name: peer.name }));
+      void qc.invalidateQueries({ queryKey: PEERS_KEY });
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+/**
+ * The heavier half of the pair. `unpair` stops this device syncing and leaves
+ * the pairing code working; this bars the pairing id for good, which is what a
+ * device the user no longer has needs.
+ *
+ * The confirmation lives in the view, and reaching here *is* the confirmation.
+ */
+export function useRevoke() {
+  const qc = useQueryClient();
+  return useMutation<void, unknown, PeerInfo>({
+    mutationFn: (peer) => revokeDevice(peer.pairing_id),
+    onSuccess: (_data, peer) => {
+      toast.success(t("devices.toast.revoked", { name: peer.name }));
       void qc.invalidateQueries({ queryKey: PEERS_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),

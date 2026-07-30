@@ -18,7 +18,6 @@
  */
 import { useEffect, useState } from "react";
 import { Check, Copy, Eye, LoaderCircle, RefreshCw } from "lucide-react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { QrCode } from "@/components/devices/QrCode";
 import { usePairCreate } from "@/hooks/useDevices";
 import { useTranslation } from "@/i18n";
+import { copyText } from "@/lib/ipc";
 import { encodePairing } from "@/lib/pairing";
 import { isUnavailable, toFriendly } from "@/lib/errors";
 import { cn } from "@/lib/cn";
@@ -49,6 +49,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
   const [name, setName] = useState("");
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   // Every open starts from nothing: no stale code, no stale reveal, no stale
   // error. A code from a previous episode must never be on screen.
@@ -57,6 +58,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
       create.reset();
       setRevealed(false);
       setCopied(false);
+      setCopyFailed(false);
     }
     // `create` is a stable mutation object; depending on it would reset on
     // every render.
@@ -69,18 +71,32 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
     // Re-blur *before* the new code arrives: it is a new credential.
     setRevealed(false);
     setCopied(false);
+    setCopyFailed(false);
     create.mutate(name.trim() || t("devices.create.defaultName"));
   }
 
+  /**
+   * Through the backend, not `@tauri-apps/plugin-clipboard-manager`: the
+   * capability file withholds `clipboard-manager:allow-write-text`, so the
+   * plugin call this used to make always rejected and the empty `catch` around
+   * it made the button do nothing, silently.
+   *
+   * A failure is *shown*. Not as a toast — the code is a credential and a toast
+   * outlives the dialog — but the alternative is a user who walks to the other
+   * device to paste something that was never copied.
+   */
   async function copyCode() {
     if (!pairing) return;
+    setCopyFailed(false);
     try {
-      await writeText(pairing.code);
+      await copyText(pairing.code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Nothing is reported: the code is on screen, and a failed clipboard
-      // write must not put it anywhere else.
+      // The raw failure is not rendered: `lib/errors` has already logged and
+      // classified it, and nothing about a clipboard write is actionable
+      // beyond "read it off the screen" (INV-12).
+      setCopyFailed(true);
     }
   }
 
@@ -188,6 +204,15 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
                 {t("devices.create.addressHint")}
               </p>
             </div>
+
+            {copyFailed && (
+              <p
+                role="alert"
+                className="rounded-md bg-warn/15 px-s-2 py-s-2 text-sm text-warn-strong"
+              >
+                {t("devices.create.copyFailed")}
+              </p>
+            )}
           </div>
         )}
 
