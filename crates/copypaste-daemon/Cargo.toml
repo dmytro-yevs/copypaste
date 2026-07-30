@@ -8,12 +8,17 @@ license.workspace = true
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
 copypaste-ipc = { path = "../copypaste-ipc" }
+copypaste-p2p = { path = "../copypaste-p2p" }
 tokio.workspace = true
 tokio-util.workspace = true
 futures-util.workspace = true
 backoff.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# `raw_value` so a received sync message can be handed to
+# `SyncMessage::decode` verbatim: the bounds and the timestamp clamp live in
+# that function, and re-deriving them here would be a second implementation of
+# the wire contract (CLAUDE.md rule 1).
+serde_json = { workspace = true, features = ["raw_value"] }
 thiserror.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
@@ -21,6 +26,20 @@ tracing-subscriber.workspace = true
 clap.workspace = true
 uuid.workspace = true
 directories.workspace = true
+# The sync metadata the item table already holds but `StoredItem` does not
+# carry — see `p2p::meta` for why the daemon opens the same SQLCipher file on
+# its own connection rather than shadowing those columns in a second store.
+rusqlite.workspace = true
+hex.workspace = true
+zeroize.workspace = true
+# Local interface addresses for the `listen_addr` a freshly minted pairing
+# reports. `getifaddrs` behind a maintained crate rather than a hand-rolled
+# `SIOCGIFCONF` walk or a "connect a UDP socket and read its local end" trick;
+# works on macOS and Android, which is the whole of CLAUDE.md rule 5.
+if-addrs = "0.15"
+# Device name. Reading /etc/hostname works on Linux only, and `uname -n` is a
+# subprocess; this is the portable `gethostname(3)` binding.
+gethostname = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
