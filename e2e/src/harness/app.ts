@@ -1,4 +1,4 @@
-import { execa, type ResultPromise } from "execa";
+import { execa } from "execa";
 import { remote } from "webdriverio";
 
 import {
@@ -8,6 +8,7 @@ import {
   requireDisplay,
 } from "./env.js";
 import { startDaemon, type Daemon } from "./daemon.js";
+import { track, type Child } from "./process.js";
 
 export type Browser = Awaited<ReturnType<typeof remote>>;
 
@@ -38,30 +39,29 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   const driverPort = await freePort();
   const nativePort = await freePort();
 
-  const driver = execa(
-    "tauri-driver",
-    [
-      "--port",
-      String(driverPort),
-      "--native-port",
-      String(nativePort),
-      "--native-driver",
-      NATIVE_DRIVER,
-    ],
-    {
-      // tauri-driver spawns the app as a child, so the app's view of
-      // XDG_DATA_HOME — and therefore which daemon socket it dials — is decided
-      // here and nowhere else.
-      env: { ...process.env, ...daemon.env },
-      stdio: ["ignore", "pipe", "pipe"],
-      reject: false,
-    },
+  const driver = track(
+    execa(
+      "tauri-driver",
+      [
+        "--port",
+        String(driverPort),
+        "--native-port",
+        String(nativePort),
+        "--native-driver",
+        NATIVE_DRIVER,
+      ],
+      {
+        // tauri-driver spawns the app as a child, so the app's view of
+        // XDG_DATA_HOME — and therefore which daemon socket it dials — is
+        // decided here and nowhere else.
+        env: { ...process.env, ...daemon.env },
+        stdio: ["ignore", "pipe", "pipe"],
+        reject: false,
+      },
+    ),
   );
-  const driverLog: string[] = [];
-  driver.stdout?.on("data", (c: Buffer) => driverLog.push(c.toString()));
-  driver.stderr?.on("data", (c: Buffer) => driverLog.push(c.toString()));
 
-  await waitForDriver(driverPort, driver, driverLog);
+  await waitForDriver(driverPort, driver);
 
   let browser: Browser;
   try {
@@ -84,7 +84,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   } catch (cause) {
     await shutdown(driver, daemon);
     throw new Error(
-      `could not open a WebDriver session against the app:\n${driverLog.join("")}`,
+      `could not open a WebDriver session against the app:\n${driver.log()}`,
       { cause },
     );
   }
@@ -99,7 +99,7 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   };
 
   try {
-    await assertReallyRunning(browser, driverLog);
+    await assertReallyRunning(browser, driver);
   } catch (error) {
     await app.stop();
     throw error;
@@ -108,15 +108,11 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   return app;
 }
 
-async function waitForDriver(
-  port: number,
-  driver: ResultPromise,
-  log: string[],
-): Promise<void> {
+async function waitForDriver(port: number, driver: Child): Promise<void> {
   const deadline = Date.now() + 30_000;
   for (;;) {
-    if (driver.exitCode !== null && driver.exitCode !== undefined) {
-      throw new Error(`tauri-driver exited (${driver.exitCode}):\n${log.join("")}`);
+    if (driver.exited()) {
+      throw new Error(`tauri-driver exited during startup:\n${driver.log()}`);
     }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/status`, {
@@ -127,19 +123,14 @@ async function waitForDriver(
       /* not listening yet */
     }
     if (Date.now() > deadline) {
-      throw new Error(`tauri-driver never listened on ${port}:\n${log.join("")}`);
+      throw new Error(`tauri-driver never listened on ${port}:\n${driver.log()}`);
     }
     await new Promise((r) => setTimeout(r, 200));
   }
 }
 
-async function shutdown(driver: ResultPromise, daemon: Daemon): Promise<void> {
-  driver.kill("SIGTERM");
-  await Promise.race([
-    driver.catch(() => undefined),
-    new Promise((r) => setTimeout(r, 5_000)),
-  ]);
-  driver.kill("SIGKILL");
+async function shutdown(driver: Child, daemon: Daemon): Promise<void> {
+  await driver.stop();
   await daemon.stop();
 }
 
@@ -151,7 +142,7 @@ async function shutdown(driver: ResultPromise, daemon: Daemon): Promise<void> {
  * answers `execute` with `null`, and a dev server that is down produces a
  * WebKit error page whose DOM is a valid, queryable, entirely wrong document.
  */
-async function assertReallyRunning(browser: Browser, driverLog: string[]): Promise<void> {
+async function assertReallyRunning(browser: Browser, driver: Child): Promise<void> {
   const capabilities = browser.capabilities as { browserName?: string };
   if (capabilities.browserName !== "wry") {
     throw new Error(
@@ -203,7 +194,7 @@ async function assertReallyRunning(browser: Browser, driverLog: string[]): Promi
     if (Date.now() > deadline) {
       throw new Error(
         `the app never mounted a UI. Last probe: ${last}\n` +
-          `tauri-driver log:\n${driverLog.join("")}`,
+          `tauri-driver log:\n${driver.log()}`,
       );
     }
     await new Promise((r) => setTimeout(r, 250));
