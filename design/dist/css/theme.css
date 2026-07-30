@@ -48,6 +48,7 @@
   --color-brand-2: var(--accent-2);
   --color-selected: var(--selected);
   --color-pressed: var(--pressed);
+  --color-selected-edge: var(--selected-edge);
   --color-withheld: var(--withheld);
   --color-withheld-fg: var(--withheld-fg);
   --color-withheld-border: var(--withheld-border);
