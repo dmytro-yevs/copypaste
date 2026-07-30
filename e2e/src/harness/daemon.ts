@@ -12,6 +12,7 @@ export interface Daemon {
   addMany(contents: readonly string[]): Promise<void>;
   items(): Promise<CliItem[]>;
   remove(id: string): Promise<void>;
+  removeMany(ids: readonly string[]): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -67,6 +68,13 @@ export async function startDaemon(): Promise<Daemon> {
     }
   }
 
+  async function removeOne(id: string): Promise<void> {
+    const result = await cli(["delete", id]);
+    if (result.exitCode !== 0) {
+      throw new Error(`\`copypaste delete\` failed: ${result.stderr || result.stdout}`);
+    }
+  }
+
   return {
     env: { XDG_DATA_HOME: dataHome },
     dataHome,
@@ -80,9 +88,14 @@ export async function startDaemon(): Promise<Daemon> {
       return (JSON.parse(result.stdout) as { data: CliItem[] }).data;
     },
     async remove(id) {
-      const result = await cli(["delete", id]);
-      if (result.exitCode !== 0) {
-        throw new Error(`\`copypaste delete\` failed: ${result.stderr || result.stdout}`);
+      await removeOne(id);
+    },
+    async removeMany(ids) {
+      // Each call is a process spawn against a debug binary; sequentially this
+      // takes longer than the UI's poll interval, which makes "the list
+      // shrank" impossible to observe as one event.
+      for (let i = 0; i < ids.length; i += 8) {
+        await Promise.all(ids.slice(i, i + 8).map(removeOne));
       }
     },
     async stop() {

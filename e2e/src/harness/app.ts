@@ -71,8 +71,11 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
       path: "/",
       automationProtocol: "webdriver",
       logLevel: "error",
-      connectionRetryCount: 1,
-      connectionRetryTimeout: 180_000,
+      // A real app answers in a few seconds. The budget is generous for a cold
+      // cache but finite, so the guard test's deliberate failure is not a
+      // multi-minute stall.
+      connectionRetryCount: 0,
+      connectionRetryTimeout: 60_000,
       capabilities: {
         // @ts-expect-error tauri-driver's vendor capability is not in the W3C types.
         "tauri:options": { application: appBinary() },
