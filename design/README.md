@@ -6,10 +6,16 @@ committed.
 ```sh
 cd design && npm install
 npm run rebuild        # clean + build + check
-npm run check          # contrast gate alone; --verbose lists all 636 pairs
+npm run check          # both gates
+npm run check:contrast # token values; --verbose lists all 756 pairs
+npm run check:usage    # the component tree; --verbose lists rules and exemptions
 ```
 
-`npm run build` without `npm run check` is not enough — see *Contrast* below.
+`npm run build` without `npm run check` is not enough — see *Contrast* and
+*The component tree* below. The two gates cover different failures and neither
+subsumes the other: `check:contrast` reads `dist/` and knows nothing about
+which utility a component picked, `check:usage` reads
+`crates/copypaste-ui/src/` and does not re-derive the palette.
 
 ---
 
@@ -49,18 +55,28 @@ else that differs from upstream is a bug.
 | shadcn default | Measured | What we do instead |
 |---|---|---|
 | white on dark `destructive` (red-400) | **2.75:1** | dark theme takes dark ink on `--err`; light keeps white on red-600 (4.71) |
-| `ring-ring/50` focus halo | **1.78–2.98:1** | the ring is the accent at full alpha (3.37 worst) |
+| `ring-ring/50` focus halo | **1.51–2.98:1** | the ring is the accent at full alpha (3.12 worst) |
 | `--input` = `--border` as a field's boundary | **1.25:1** | `--color-input` routes to `--border-strong` (3.64 worst) |
+
+Two of the three are one `npx shadcn@latest add` away from coming back, and a
+token gate cannot see either: `ring-ring/50` puts the alpha at the call site
+and leaves every token value untouched. `npm run check:usage` is what notices —
+see *The component tree*.
 
 ---
 
 ## Contrast
 
-`npm run check` composites every foreground against every surface it can
-actually land on — including the alpha state layers and the `color-mix()`
+`npm run check:contrast` composites every foreground against every surface it
+can actually land on — including the alpha state layers and the `color-mix()`
 selection fill, which have no ratio until they are composited — across both
 themes and all six accents, and fails the build below **4.5:1 for text** and
-**3:1 for control boundaries and focus indicators**. 636 pairs.
+**3:1 for control boundaries and focus indicators**. 756 pairs.
+
+The last 84 measure the shadcn aliases (`--color-input`, `--color-ring`,
+`--color-sidebar-ring`) rather than the tokens beneath them. A component says
+`border-input` and never names `--border-strong`, so pointing the alias back at
+the 1.25:1 `--border` would leave every other pair green.
 
 It exists because the previous revision of this file asserted AA compliance
 while eight combinations were below it. Do not replace a measurement here with
@@ -80,9 +96,19 @@ Worst case in each category, over both themes and all six accents:
 | `--withheld-fg` on `--withheld` | 5.32 | 4.5 |
 | content-kind glyph on `--bg` | 4.83 | 3.0 |
 | status dot on `--bg` | 3.21 | 3.0 |
-| focus ring on `--bg` / `--card` | 3.37 | 3.0 |
+| focus ring on `--bg` / `--card` / `--elevated` | 3.12 | 3.0 |
+| `--color-input` through the alias | 3.64 | 3.0 |
 | `--border-strong` on any surface | 3.64 | 3.0 |
-| `--selected-edge` on `--selected` | 3.33 | 3.0 |
+| `--selected-edge` on `--selected` | 3.75 | 3.0 |
+
+**`--elevated` is the focus ring's tightest surface, and it was the pair that
+was missing.** shadcn's `TabsList` and `ToggleGroup` are `bg-muted` with 3 px
+of padding that a 3 px `ring-ring` fills exactly, and the `Slider` thumb rings
+against a `bg-muted` track — so the ring's adjacent colour there is
+`--elevated`, not `--bg`. Adding the pair put the dark theme's blue accent at
+2.83:1. blue is now blue-500 with dark ink (4.01 as a ring, 4.78 as a fill)
+rather than blue-600 with white (2.83 and 5.26). Every accent now clears the
+floor on all three surfaces.
 
 Two tokens are deliberately below AA and are checked by nothing: `--mute`
 (4.12 dark, 2.63 light) and `--border` (1.25 dark, 1.27 light). Both are
@@ -105,13 +131,17 @@ recovery action, not colour — and none of the three may carry a filesystem pat
 (INV-12).
 
 **`--accent` is a fill, `--accent-2` is text.** This is the one distinction the
-whole accent axis hangs on. `--accent` is only guaranteed against
-`--on-accent`; as text it measures 3.21–4.37 depending on accent and theme. So
+whole accent axis hangs on. `--accent` is only guaranteed against `--on-accent`
+and against the 3:1 ring floor; as text it measures 3.12–9.22 depending on
+accent, theme and surface, so it is not AA text on its worst one. So
 `text-primary` and `text-brand` are wrong for accent-coloured text and
-`text-brand-2` is right. The consequence is that the six fills are not one ramp
-step — indigo, teal, green and amber sit at -500 in dark, blue and rose at
--600, and teal/green/amber take dark ink because darkening those hues far
-enough to carry white reads as muddy on a near-black ground.
+`text-brand-2` is right — `check:usage` fails on the first two.
+
+The six fills are not one ramp step, because each has to clear `--on-accent` at
+4.5 *and* the ring at 3:1 on `--bg`, `--card` and `--elevated`. Five sit at -500
+in dark and rose at -600; teal, green, amber and blue take dark ink, because at
+-500 those hues are too light to carry white and darkening them far enough
+reads as muddy on a near-black ground.
 
 ---
 
@@ -135,6 +165,11 @@ Rows need no coarse variant: a one-line row already computes to 63 px from
 `--pad-row-y` and the two line heights. That is deliberate — `--pad-row-y` is
 read by the virtualiser (INV-5), and a media query on it would change the
 row-height model without the virtualiser knowing.
+
+`check:usage` asserts the coarse block declares **exactly** those three, so
+adding `--pad-row-y` to it fails with that reason rather than being read as an
+omission and "fixed". It also fails any width query that redefines one of the
+three.
 
 **There is no breakpoint token.** The compact/expanded boundary is Tailwind's
 own `sm` (640 px). Every phone in portrait is below it and every supported
@@ -178,6 +213,53 @@ is exactly the treatment the manifest README rules out: a blur says the content
 is present behind a filter, which for a screenshot, a screen recording or a
 shoulder is both a lie and a leak.
 
+An absence nobody checks is an absence that returns, so `check:usage` checks
+this one three ways: no token whose name contains `blur` other than
+`--scrim-blur`, which backs a modal scrim and obscures nothing meant to be
+read; no blur or backdrop-filter utility in the history components or on any
+line mentioning withheld content; and no `opacity-` below 50 there either,
+which is what the row hand-rolled before `--withheld` existed. Faint text is
+still the plaintext — in the DOM, in a screenshot and in the accessibility
+tree.
+
+The pairing code is the one blur that stays, and it is recorded as an
+exemption: it is a credential the user asks to see, and manifest 06 requires it
+blurred by default and re-blurred before a regenerate lands (INV-13, AT-35).
+
+---
+
+## The component tree
+
+`npm run check:usage` reads `crates/copypaste-ui/src/`. It exists because the
+contrast gate reads token *values*, and a component can hold every one of them
+fixed while shipping the defect: `ring-ring/50` puts the alpha back at the call
+site, `text-primary` uses a fill token in a text role, `hover:bg-primary/90`
+invents a colour that is in no token file. All three are shadcn defaults, and
+re-running the CLI restores the first two.
+
+What it fails on:
+
+| | Instead |
+|---|---|
+| an alpha on a focus indicator (`ring-ring/50`) | `ring-ring` |
+| `text-primary` · `text-brand` · `text-accent` | `text-brand-2` |
+| `border-border` in a class string that also carries `focus-visible:`, `disabled:` or `data-[state=` | `border-border-strong` |
+| a blur or `opacity-` under 50 on withheld content | the `--withheld` slot |
+| a colour literal in a component | a token here |
+| an alpha-modified colour utility that is not measured | add it to `lib/component-usage.mjs` |
+| `bg-withheld`, `text-withheld-fg`, `border-withheld-border` or `bg-selected-edge` reaching no component | use it |
+| `@media (pointer: coarse)` declaring anything but the three touch tokens | see *Two form factors* |
+| an exemption naming a file that has moved | delete or repoint it |
+
+The last two rows are the ones worth keeping. A check that only forbids things
+lets a deliberate absence be deleted as an oversight, and an exemption whose
+file has been renamed silences a rule for a path nothing matches.
+
+Every alpha-modified utility found in the tree is composited across both themes
+and all six accents and measured, because `bg-primary/90` has no ratio until it
+lands on a surface. `lib/component-usage.mjs` holds the table: an entry either
+carries a measurement or states why it has no floor.
+
 ---
 
 ## What you may and may not change
@@ -195,6 +277,8 @@ value and re-run `npm run rebuild` — if the gate passes, the change is fine.
 - Redefine Tailwind's own `spacing` or `text` scales. shadcn components are
   built against `p-2` and `text-sm`; ours are additive (`p-s-4`, `text-fs-sm`).
 - Weaken a floor in `check-contrast.mjs` to make a value pass.
+- Silence a rule in `check-usage.mjs` by narrowing its pattern. Record an
+  exemption with its reason instead; a stale one is itself a failure.
 - Reintroduce v1's palette. `docs/rewrite/port-manifest/README.md` explains why
   manifest 06 §8 is a map of which tokens exist, not of what they hold.
 
@@ -246,24 +330,57 @@ cd crates/copypaste-ui && npx shadcn@latest add <component>
 > to CONNECT), so the components in `src/components/ui/` were written to match
 > the canonical `new-york` sources rather than pulled by the CLI. Anyone with
 > network access should prefer the CLI; re-adding a component overwrites ours
-> with upstream's, which is the intended direction — but it will also restore
-> `ring-ring/50` and `border-input`, so re-check the three overrides above.
+> with upstream's, which is the intended direction.
+
+Re-adding a component restores `ring-ring/50` and `border-input`. Run
+`npm run check:usage` afterwards: it fails on the first and measures the
+alias behind the second, which is the check that used to be "re-read the table
+above and remember".
 
 ---
 
 ## Unverified
 
 Every ratio here is computed from the generated CSS. **Nothing in this token
-set has been seen rendered.** WebKitGTK on this host executes no JavaScript
-under headless Xvfb, so the app has never painted. What needs a human eye on a
-real device:
+set has been seen rendered.** An earlier revision of this section blamed the
+engine — it said WebKitGTK on this host executes no JavaScript under headless
+Xvfb. That is not true and `e2e/README.md` says so: WebKitGTK 2.52 runs
+JavaScript and computes layout under plain Xvfb, and the e2e suite drives the
+real wry WebView through it. The accurate statement is narrower and worse: the
+pixels have never been looked at, by anyone, on any engine. Nothing here is
+blocked on tooling.
+
+What a machine cannot settle:
 
 - Whether `--border-strong` at 40% white reads as heavy-handed on dark cards.
   It is the value the 3:1 floor requires; if it looks wrong, the fix is a
   different surface relationship, not a weaker border.
-- Whether dark ink on the dark theme's destructive button reads as intended or
-  as a rendering fault.
+- Whether dark ink on a coloured fill reads as intended or as a rendering
+  fault. This now covers the dark theme's destructive button and four of the
+  six accents — teal, green, amber and, since the ring was measured on
+  `--elevated`, blue.
 - Whether the frosted chrome values land the same on WKWebView and on Android
   WebView. Only the solid fallback is guaranteed.
 - Coarse-pointer sizing on a real phone. `pointer: coarse` is inferred from the
   media query, not observed.
+- Whether a hover state that does not change the fill is legible as a hover
+  state. See below — the current one is not AA, and every fix for it either
+  changes the fill less or replaces it with something that is not a fill.
+
+### Open, measured, and not fixable here
+
+`check:usage` fails on two lines of `crates/copypaste-ui/src/components/ui/`
+`button.tsx`, which this package does not own:
+
+| Line | Measured | Floor |
+|---|---|---|
+| `hover:bg-primary/90` with `text-primary-foreground` | **4.02:1** worst (dark/blue on `--bg`) | 4.5 |
+| `hover:bg-destructive/90` with `text-destructive-foreground` | **4.45:1** worst (light/indigo on `--bg`) | 4.5 |
+
+Diluting a fill toward the page moves it toward the label on one theme or the
+other, and `--on-accent` / `--on-err` were only ever measured against the
+undiluted fill. `/97` and `/94` respectively are the first alphas that clear
+4.5, with 0.04 of headroom — which is a number, not a fix. The fix is a hover
+token per accent that mixes the fill *away* from its ink, so the label's ratio
+can only rise; it is not here yet because no component can use it until
+`button.tsx` changes.

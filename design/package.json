@@ -8,8 +8,10 @@
   "files": [
     "tokens",
     "dist",
+    "lib",
     "style-dictionary.config.js",
-    "check-contrast.mjs"
+    "check-contrast.mjs",
+    "check-usage.mjs"
   ],
   "exports": {
     "./css": "./dist/css/index.css",
@@ -19,7 +21,9 @@
   },
   "scripts": {
     "build": "node style-dictionary.config.js",
-    "check": "node check-contrast.mjs",
+    "check": "node check-contrast.mjs && node check-usage.mjs",
+    "check:contrast": "node check-contrast.mjs",
+    "check:usage": "node check-usage.mjs",
     "clean": "node -e \"import('node:fs').then(fs=>fs.rmSync('dist',{recursive:true,force:true}))\"",
     "rebuild": "npm run clean && npm run build && npm run check"
   },
