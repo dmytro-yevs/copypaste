@@ -1,0 +1,17 @@
+{
+  "name": "copypaste-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
+    "test:headed": "vitest run"
+  },
+  "devDependencies": {
+    "execa": "^10.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
+    "wait-on": "^9.1.0",
+    "webdriverio": "^9.30.0"
+  }
+}

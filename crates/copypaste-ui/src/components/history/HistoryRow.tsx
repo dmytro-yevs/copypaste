@@ -1,22 +1,24 @@
 /**
  * One history row.
  *
- * Two rules here are the ones v1 paid for:
+ * INV-10: a sensitive item's plaintext is *absent*, not blurred — the bridge
+ * sends `content: null`. Nothing here can reconstruct it, and the row's
+ * accessible name is a fixed string (AT-13).
  *
- *  - **A sensitive item never renders its content** (INV-10, CLAUDE.md rule 4).
- *    It is not blurred, it is *absent*: the bridge sends `content: null`, so
- *    there is nothing in this component to leak into a screenshot or the
- *    accessibility tree. The row's accessible name is a fixed string with no
- *    substring of the item in it (AT-13). Revealing is an explicit act that
- *    fetches the plaintext, and it re-hides on blur and after 10s (INV-11).
- *  - The row is laid out inside the box the virtualiser reserved and clips to
- *    it (`h-full overflow-hidden`), so a long clip can never overlap its
- *    neighbour regardless of pane width (INV-5).
+ * INV-8: `role="listitem"`, never `role="option"` — option is
+ * `childrenPresentational` and would flatten these buttons into an axe
+ * `nested-interactive` violation. For the same reason the body button and the
+ * action buttons are siblings; nesting them would recreate the violation
+ * under a different tag.
  *
- * Rows are `role="listitem"`, never `role="option"`: option is
- * `childrenPresentational` and would flatten the copy/pin/delete buttons into
- * an axe `nested-interactive` violation (INV-8). Selection is exposed with
- * `aria-current` and announced by the list's sibling live region (INV-9).
+ * **Click selects, double-click copies.** Selecting and copying are different
+ * intents, and a single click that overwrites the system clipboard is a
+ * destructive default. Keyboard: Enter on the focused list copies (§3.1.4);
+ * every row also carries an explicit Copy button, which is the path a screen
+ * reader or a touch user takes.
+ *
+ * Actions are always visible. Hover is not available on Android, so a
+ * hover-revealed control is a control that does not exist there.
  */
 import { memo } from "react";
 import {
@@ -42,7 +44,7 @@ import {
 } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 
-/** INV-10 / A11Y-3 — exact strings from manifest 06. */
+/** A11Y-3, exact strings from the manifest. */
 export const SENSITIVE_A11Y_LABEL = "Sensitive item, hidden — activate to reveal";
 export const SENSITIVE_REVEAL_LABEL =
   "Sensitive content hidden — activate to reveal";
@@ -50,11 +52,8 @@ const SENSITIVE_PLACEHOLDER = "Sensitive content hidden";
 const EMPTY_LABEL = "Empty item";
 
 /**
- * The row's accessible name, and the string the live region mirrors.
- *
- * Deliberately free of the relative age: the age changes on its own, and a live
- * region that re-announces every minute is worse than one that announces only
- * on selection changes (INV-9).
+ * Carries no relative age: the age changes on its own, and the live region
+ * mirrors this string on every selection change (INV-9).
  */
 export function rowLabel(item: Item): string {
   const body = item.is_sensitive
@@ -69,17 +68,21 @@ interface HistoryRowProps {
   item: Item;
   active: boolean;
   flashing: boolean;
-  /** The plaintext, present only while this row is the revealed one. */
+  /** Present only while this row is the revealed one. */
   revealedContent: string | null;
   revealPending: boolean;
   previewLines: number;
-  onActivate: (item: Item) => void;
+  onSelect: (item: Item) => void;
   onCopy: (item: Item) => void;
   onTogglePin: (item: Item) => void;
   onDelete: (item: Item) => void;
   onReveal: (item: Item) => void;
   onHide: () => void;
 }
+
+/** 36px under a mouse, 48px under a finger — `--sz-iconbtn` carries the
+ *  coarse-pointer floor so one token moves every target. */
+const ACTION = "size-[var(--sz-iconbtn)]";
 
 function HistoryRowImpl({
   item,
@@ -88,7 +91,7 @@ function HistoryRowImpl({
   revealedContent,
   revealPending,
   previewLines,
-  onActivate,
+  onSelect,
   onCopy,
   onTogglePin,
   onDelete,
@@ -99,9 +102,9 @@ function HistoryRowImpl({
   const revealed = revealedContent !== null;
   const masked = item.is_sensitive && !revealed;
   const body = revealed ? revealedContent : item.content;
-  // Action buttons are only in the tab order for the active row — a roving
-  // tabindex, so 200 rows do not mean 800 tab stops.
-  const actionTab = active ? 0 : -1;
+  // Roving tabindex: 200 rows must not be 1000 tab stops. Arrow keys on the
+  // list move the selection, which moves what is tabbable.
+  const tab = active ? 0 : -1;
 
   return (
     <div
@@ -111,7 +114,6 @@ function HistoryRowImpl({
         active && "border-border bg-selected",
         flashing && "bg-selected",
       )}
-      onClick={() => onActivate(item)}
     >
       <span
         aria-hidden="true"
@@ -127,32 +129,25 @@ function HistoryRowImpl({
         )}
       </span>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <button
+        type="button"
+        aria-label={rowLabel(item)}
+        title="Click to select · double-click to copy"
+        tabIndex={tab}
+        onClick={() => onSelect(item)}
+        onDoubleClick={() => onCopy(item)}
+        className="flex min-w-0 flex-1 flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+      >
         {masked ? (
-          <button
-            type="button"
-            aria-label={SENSITIVE_REVEAL_LABEL}
-            title="Reveal sensitive content"
-            tabIndex={actionTab}
-            onClick={(event) => {
-              event.stopPropagation();
-              onReveal(item);
-            }}
-            className="flex w-fit items-center gap-2 rounded-sm text-sm text-c-secret outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          >
+          <span className="flex items-center gap-2 text-sm text-c-secret">
             <span
               className="h-[var(--fs-sm)] w-20 rounded-xs bg-current opacity-25"
               aria-hidden="true"
             />
-            <span>{SENSITIVE_PLACEHOLDER}</span>
-            {revealPending ? (
-              <LoaderCircle size={12} aria-hidden="true" className="animate-spin" />
-            ) : (
-              <Eye size={12} aria-hidden="true" />
-            )}
-          </button>
+            {SENSITIVE_PLACEHOLDER}
+          </span>
         ) : (
-          <p
+          <span
             className={cn(
               "min-w-0 overflow-hidden text-sm leading-normal break-words whitespace-pre-wrap text-foreground",
               MONO_KINDS.has(kind) && "font-mono text-xs",
@@ -164,10 +159,10 @@ function HistoryRowImpl({
             }}
           >
             {body === null ? "" : previewOf(body)}
-          </p>
+          </span>
         )}
 
-        <div className="mt-1 flex h-[18px] items-center gap-2 text-xs text-muted-foreground">
+        <span className="mt-1 flex h-[18px] items-center gap-2 text-xs text-muted-foreground">
           <time
             dateTime={new Date(item.created_at).toISOString()}
             title={absoluteTime(item.created_at)}
@@ -180,75 +175,66 @@ function HistoryRowImpl({
               Pinned
             </span>
           )}
-          {item.is_sensitive && (
-            <span className="text-c-secret">· Sensitive</span>
-          )}
-        </div>
-      </div>
+          {item.is_sensitive && <span className="text-c-secret">· Sensitive</span>}
+        </span>
+      </button>
 
-      <div
-        className={cn(
-          "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-[var(--dur-fast)]",
-          "group-hover:opacity-100 group-focus-within:opacity-100",
-          active && "opacity-100",
-        )}
-      >
-        {revealed && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Hide sensitive content"
-            title="Hide sensitive content"
-            tabIndex={actionTab}
-            onClick={(event) => {
-              event.stopPropagation();
-              onHide();
-            }}
-          >
-            <EyeOff aria-hidden="true" />
-          </Button>
-        )}
+      <div className="flex shrink-0 items-center gap-0.5">
+        {item.is_sensitive &&
+          (revealed ? (
+            <Button
+              variant="ghost"
+              aria-label="Hide sensitive content"
+              title="Hide sensitive content"
+              tabIndex={tab}
+              className={ACTION}
+              onClick={onHide}
+            >
+              <EyeOff aria-hidden="true" />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              aria-label={SENSITIVE_REVEAL_LABEL}
+              title="Reveal sensitive content"
+              tabIndex={tab}
+              className={ACTION}
+              onClick={() => onReveal(item)}
+            >
+              {revealPending ? (
+                <LoaderCircle aria-hidden="true" className="animate-spin" />
+              ) : (
+                <Eye aria-hidden="true" />
+              )}
+            </Button>
+          ))}
         <Button
           variant="ghost"
-          size="icon-sm"
           aria-label="Copy to clipboard"
           title="Copy to clipboard"
-          tabIndex={actionTab}
-          onClick={(event) => {
-            event.stopPropagation();
-            onCopy(item);
-          }}
+          tabIndex={tab}
+          className={ACTION}
+          onClick={() => onCopy(item)}
         >
           <Copy aria-hidden="true" />
         </Button>
         <Button
           variant="ghost"
-          size="icon-sm"
           aria-label={item.pinned ? "Unpin item" : "Pin item"}
           title={item.pinned ? "Unpin item" : "Pin item"}
-          tabIndex={actionTab}
-          onClick={(event) => {
-            event.stopPropagation();
-            onTogglePin(item);
-          }}
+          tabIndex={tab}
+          className={ACTION}
+          onClick={() => onTogglePin(item)}
         >
-          {item.pinned ? (
-            <PinOff aria-hidden="true" />
-          ) : (
-            <Pin aria-hidden="true" />
-          )}
+          {item.pinned ? <PinOff aria-hidden="true" /> : <Pin aria-hidden="true" />}
         </Button>
         <Button
           variant="ghost"
-          size="icon-sm"
           aria-label="Delete item"
           title="Delete item"
-          tabIndex={actionTab}
-          className="hover:text-err-strong"
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete(item);
-          }}
+          tabIndex={tab}
+          className={cn(ACTION, "hover:text-err-strong")}
+          onClick={() => onDelete(item)}
         >
           <Trash2 aria-hidden="true" />
         </Button>
@@ -258,8 +244,8 @@ function HistoryRowImpl({
 }
 
 /**
- * A plain `memo`, not the 20-field comparator manifest §9.1 calls a maintenance
- * hazard. Every prop is either a primitive or a stable callback, so the default
- * shallow compare is correct and stays correct when a field is added to `Item`.
+ * Plain `memo`, not v1's twenty-field comparator: every prop is a primitive or
+ * a stable callback, so the shallow compare stays correct when `Item` grows a
+ * field. The comparator silently stopped re-rendering when it did not (§9.1).
  */
 export const HistoryRow = memo(HistoryRowImpl);

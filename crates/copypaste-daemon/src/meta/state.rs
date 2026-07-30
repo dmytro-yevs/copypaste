@@ -1,14 +1,8 @@
-//! The small key/value table both transports keep their cursors in.
+//! The key/value table both transports keep their cursors and credentials in.
 //!
-//! `sync_device_state` already held this device's identity; the cloud path adds
-//! its account, its tokens and its two cursors. They live here rather than in a
-//! file beside the database for one reason: this file is SQLCipher-encrypted
-//! under the device key from the OS keystore, and a refresh token or a sync key
-//! in a plain JSON file next to it would be the weakest link in a design whose
-//! whole claim is that the backend never sees plaintext.
-//!
-//! Values are opaque strings. Nothing here interprets them, and no `Debug`
-//! renders one.
+//! It is inside the SQLCipher database rather than a file beside it because a
+//! refresh token or a sync key in plaintext next to an encrypted database would
+//! be the weakest link in the design.
 
 use rusqlite::{params, OptionalExtension};
 

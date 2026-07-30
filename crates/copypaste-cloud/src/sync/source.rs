@@ -46,7 +46,8 @@ pub trait CloudSource: Send + Sync {
     /// This device's stable id. Stamped onto rows this device uploads.
     fn device_id(&self) -> String;
 
-    /// Local versions with `created_at >= since_ms`.
+    /// Local versions with `created_at >= since_ms`, where `since_ms` is
+    /// [`CloudSource::upload_floor`] — not the download watermark.
     ///
     /// Inclusive on purpose: re-offering the boundary row costs one idempotent
     /// upsert, and excluding it loses every row that shares the boundary
@@ -164,19 +165,7 @@ pub trait CloudSource: Send + Sync {
 /// confidence model and the false-positive defences of manifest 07.
 /// Re-implementing even a "quick check" here would be a second regex engine,
 /// which is one of the duplications `CLAUDE.md` rule 1 was written about. The
-/// daemon wires it:
-///
-/// ```ignore
-/// let detector = copypaste_core::sensitive::Detector::new()?;
-/// let guard = SensitiveGuard::new(move |item| {
-///     std::str::from_utf8(&item.content)
-///         .map(|text| detector.is_sensitive(text))
-///         // Not decodable as text: not something the ruleset can judge, and
-///         // not something to guess about. Let it through; the store's own
-///         // capture-time flag is the first layer.
-///         .unwrap_or(false)
-/// });
-/// ```
+/// daemon wires the real detector in `cloud::sensitive_guard`.
 #[derive(Clone)]
 pub struct SensitiveGuard(Arc<dyn Fn(&LocalItem) -> bool + Send + Sync>);
 

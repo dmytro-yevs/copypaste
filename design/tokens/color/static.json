@@ -1,19 +1,11 @@
 {
   "color": {
-    "$description": "Colours that do not vary by theme: the inks that sit on a coloured fill, and the tint alpha the status containers are built from.",
+    "$description": "Colours that do not vary by theme.",
     "$type": "color",
-    "on-err": {
-      "$value": "oklch(0.985 0 0)",
-      "$description": "Foreground on a solid --err fill (shadcn `destructive-foreground`)."
-    },
-    "on-accent-2": {
-      "$value": "oklch(0.141 0.005 285.823)",
-      "$description": "Foreground on the light --accent-2 ramp step. zinc-950, the same ink as the light theme's --text."
-    },
     "alpha-tint": {
       "$type": "number",
       "$value": 0.15,
-      "$description": "The alpha a status colour is tinted to when it backs a container (a warning banner, a danger ghost button). Paired with the matching *-strong foreground, which is what keeps the label at AA."
+      "$description": "The alpha a status colour is tinted to when it backs a container (a warning banner, a danger ghost button). Paired with the matching *-strong foreground, which is what keeps the label at AA; changing this alpha invalidates the measured ratios on those four tokens."
     }
   }
 }

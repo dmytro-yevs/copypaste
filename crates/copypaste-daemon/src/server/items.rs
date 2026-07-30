@@ -239,8 +239,8 @@ fn clamp_page(limit: u32, default: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::test_state;
     use crate::server::dispatch::dispatch_store;
+    use crate::testutil::test_state;
     use copypaste_ipc::Method;
 
     #[test]

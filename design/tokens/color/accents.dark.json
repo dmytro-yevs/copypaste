@@ -1,6 +1,6 @@
 {
   "accents": {
-    "$description": "The accent axis, dark resolution. Six user-selectable accents drawn straight from the Tailwind v4 palette: --accent is the -500 step, --accent-2 the -400. Indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks and feed shadcn's `primary` / `ring` / `sidebar-primary` slots, so choosing an accent re-tints every stock component with no per-component override.",
+    "$description": "The accent axis, dark resolution. Six user-selectable accents drawn straight from the Tailwind v4 palette: --accent is the -500 step (a FILL, paired with --on-accent) and --accent-2 the -400 (TEXT, >=4.5 on --bg). Indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks and feed shadcn's `primary` / `ring` / `sidebar-primary` slots, so choosing an accent re-tints every stock component with no per-component override.",
     "$type": "color",
     "indigo": {
       "$description": "Default accent. indigo-500 / indigo-400.",
@@ -9,7 +9,7 @@
       },
       "accent-2": {
         "$value": "oklch(0.673 0.182 276.935)",
-        "$description": "Lighter ramp step, for emphasis text and glyphs on dark surfaces."
+        "$description": "The text-safe accent step. --accent is a fill (indigo-500 measures 4.37 as text on --bg and misses AA); this is what accent-coloured TEXT uses."
       },
       "on-accent": {
         "$value": "oklch(1 0 0)",
@@ -88,7 +88,7 @@
     },
     "accent-2": {
       "$value": "{accents.indigo.accent-2}",
-      "$description": "The active accent's lighter ramp step."
+      "$description": "The text-safe accent step: lighter than --accent in dark, darker in light. --accent is a fill and is not guaranteed to clear 4.5 as text."
     },
     "on-accent": {
       "$value": "{accents.indigo.on-accent}",

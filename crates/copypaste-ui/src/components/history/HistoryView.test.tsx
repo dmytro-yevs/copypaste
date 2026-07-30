@@ -12,7 +12,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { HistoryView } from "@/components/history/HistoryView";
 import { historyCount } from "@/components/history/SearchBar";
 import { IpcFailure } from "@/lib/errors";
-import { items, status, withClient } from "@/test/harness";
+import { items, status, withClient, withUser } from "@/test/harness";
 import { useUi } from "@/store/ui";
 
 const listItems = vi.fn();
@@ -39,19 +39,17 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the service is not running", () => {
-  it("offers to start it instead of showing an empty list", async () => {
+  it("hands over to the start-the-service screen instead of an empty list", async () => {
     listItems.mockRejectedValue(new IpcFailure("offline"));
     withClient(<HistoryView />);
 
+    // Which variant of the offer is shown depends on whether the bridge is
+    // there to start it — see ServiceOffline.test.tsx. Either way it is an
+    // offer with an action, and emphatically not "Nothing copied yet".
     await waitFor(() =>
-      expect(
-        screen.getByText("The clipboard service isn't running"),
-      ).toBeTruthy(),
+      expect(screen.getByText(/clipboard service/i)).toBeTruthy(),
     );
-
-    // The offer, not a shrug.
-    expect(screen.getByRole("button", { name: /start the service/i })).toBeTruthy();
-    // And emphatically not the empty state.
+    expect(screen.getByRole("button", { name: /check again/i })).toBeTruthy();
     expect(screen.queryByText("Nothing copied yet")).toBeNull();
   });
 
@@ -63,9 +61,7 @@ describe("the service is not running", () => {
     const { container } = withClient(<HistoryView />);
 
     await waitFor(() =>
-      expect(
-        screen.getByText("The clipboard service isn't running"),
-      ).toBeTruthy(),
+      expect(screen.getByText(/clipboard service/i)).toBeTruthy(),
     );
     expect(container.innerHTML).not.toMatch(/\/Users\/|dmitriy|\.sock/);
   });
@@ -113,20 +109,42 @@ describe("the count badge follows the filter (AT-68)", () => {
 });
 
 describe("clear all", () => {
-  it("is offered only when there is something to clear", async () => {
-    listItems.mockResolvedValue([]);
-    const { rerender } = withClient(<HistoryView />);
-    await waitFor(() => expect(screen.getByText("Nothing copied yet")).toBeTruthy());
-    expect(
-      screen.queryByRole("button", { name: /clear clipboard history/i }),
-    ).toBeNull();
-
+  it("is offered when there is something to clear", async () => {
     listItems.mockResolvedValue(items(2));
-    rerender(<HistoryView />);
+    withClient(<HistoryView />);
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: /clear clipboard history/i }),
       ).toBeTruthy(),
     );
+  });
+
+  it("is not offered when there is nothing to clear", async () => {
+    listItems.mockResolvedValue([]);
+    withClient(<HistoryView />);
+    await waitFor(() => expect(screen.getByText("Nothing copied yet")).toBeTruthy());
+    expect(
+      screen.queryByRole("button", { name: /clear clipboard history/i }),
+    ).toBeNull();
+  });
+
+  it("asks first, and the prompt names what is lost and what is kept", async () => {
+    // Destructive and un-undoable: 5j9x / kayk / fjvz / vcnv / w6xc are all
+    // the same defect, a destructive action one misclick away.
+    listItems.mockResolvedValue(items(2));
+    const { user } = withUser(<HistoryView />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /clear clipboard history/i }),
+      ).toBeTruthy(),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /clear clipboard history/i }),
+    );
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Clear all clipboard history?");
+    expect(dialog.textContent).toContain("Pinned items are kept");
+    expect(dialog.textContent).toContain("cannot be undone");
   });
 });
