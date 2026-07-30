@@ -58,6 +58,16 @@ pub struct UiItem {
     created_at: i64,
     pinned: bool,
     is_sensitive: bool,
+    /// Which device captured this. Not secret, and the whole point of it is to
+    /// be shown: an item that arrived from the Mac and one captured on this
+    /// phone are different things to a user, and the android access doc's §5
+    /// rule 5 turns a gap in the history from a mystery into an explanation.
+    origin_device_id: String,
+    origin_device_name: Option<String>,
+    /// Cloud sync will not carry this item. Passed through so the row can say
+    /// so before the first attempt rather than after it silently never arrives
+    /// (`CopyPaste-f72f`).
+    too_large_to_sync: bool,
 }
 
 impl From<Item> for UiItem {
@@ -77,6 +87,9 @@ impl From<Item> for UiItem {
             created_at: item.created_at,
             pinned: item.pinned,
             is_sensitive: item.is_sensitive,
+            origin_device_id: item.origin_device_id,
+            origin_device_name: item.origin_device_name,
+            too_large_to_sync: item.too_large_to_sync,
         }
     }
 }
@@ -175,6 +188,9 @@ mod tests {
             created_at: 1_700_000_000_000,
             pinned: false,
             is_sensitive,
+            origin_device_id: "device-1".into(),
+            origin_device_name: Some("Mac".into()),
+            too_large_to_sync: false,
         }
     }
 
