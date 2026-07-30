@@ -129,8 +129,7 @@ echo "==> Building the frontend and the .app bundle"
     # an identity leaking in from the runner environment cannot silently change
     # what this produces. There is no credential anywhere in this pipeline and
     # this is one of the places that has to stay true.
-    APPLE_SIGNING_IDENTITY= \
-    npm run tauri -- build --target "$TRIPLE" --bundles app
+    APPLE_SIGNING_IDENTITY='' npm run tauri -- build --target "$TRIPLE" --bundles app
 )
 
 BUILT_APP="target/${TRIPLE}/release/bundle/macos/${APP_NAME}.app"
