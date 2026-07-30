@@ -1,0 +1,16 @@
+[package]
+name = "copypaste-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The ONE model of the wire contract. v1 modelled it three times: typed DTOs the
+# CLI never imported, a duplicate in the daemon, and untyped Value poking in the
+# CLI. Both the daemon and the CLI depend on this crate and on nothing else for
+# wire types.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+directories.workspace = true
