@@ -11,14 +11,11 @@ use super::file::{parse, warn_if_permissive, write_atomically};
 use super::{Peer, PeerStoreError};
 use crate::transport::TOKEN_LEN;
 
-/// The paired-device list.
-///
-/// Backed by a file, cached in memory, safe to share across the daemon's tasks
-/// behind an `Arc`. Every mutation writes the whole file — there are a handful
-/// of peers, not a database — and every write is atomic.
-///
-/// The read methods never touch the disk, so the hot path (a listener checking
-/// PSKs on every inbound connection) costs a read lock and nothing else.
+/// The paired-device list: backed by a file, cached in memory, shareable behind
+/// an `Arc`. Every mutation rewrites the whole file atomically — there are a
+/// handful of peers, not a database — and the read methods never touch the
+/// disk, so a listener checking PSKs on every inbound connection costs a read
+/// lock and nothing else.
 pub struct PeerStore {
     path: PathBuf,
     peers: RwLock<HashMap<String, Peer>>,
@@ -26,17 +23,13 @@ pub struct PeerStore {
 
 impl PeerStore {
     /// Open the store at `path`, creating an empty one in memory if the file
-    /// does not exist yet.
-    ///
-    /// Nothing is written until the first mutation, so opening a store for a
-    /// device that has never paired leaves the filesystem untouched.
+    /// does not exist. Nothing is written until the first mutation.
     ///
     /// # Errors
     ///
-    /// [`PeerStoreError::Legacy`] if the file was written by another version —
-    /// distinguishable on purpose, so the daemon can explain rather than report
-    /// corruption. [`PeerStoreError::Corrupt`] if it is damaged;
-    /// [`PeerStoreError::Io`] if it could not be read.
+    /// [`PeerStoreError::Legacy`] if another version wrote it — distinguishable
+    /// on purpose, so the daemon can explain rather than report corruption;
+    /// `Corrupt` if damaged; `Io` if it could not be read.
     pub fn open(path: &Path) -> Result<Self, PeerStoreError> {
         let peers = match std::fs::read(path) {
             Ok(bytes) => {
@@ -76,17 +69,16 @@ impl PeerStore {
         guard.get(pairing_id).cloned()
     }
 
-    /// Insert a peer, or replace the one with the same pairing id.
-    ///
-    /// The file is rewritten atomically before this returns. If the write
-    /// fails, the in-memory map is rolled back to what is actually on disk, so
-    /// a caller can never be told a pairing was saved when it was not.
+    /// Insert a peer, or replace the one with the same pairing id. The file is
+    /// rewritten atomically before this returns, and a failed write rolls the
+    /// in-memory map back to what is on disk, so a caller is never told a
+    /// pairing was saved when it was not.
     ///
     /// # Errors
     ///
     /// [`PeerStoreError::Invalid`] if the record does not validate — nothing is
-    /// written; [`PeerStoreError::Io`] if the file could not be replaced;
-    /// [`PeerStoreError::Poisoned`] if another thread panicked holding the lock.
+    /// written; `Io` if the file could not be replaced; `Poisoned` if another
+    /// thread panicked holding the lock.
     pub fn upsert(&self, peer: Peer) -> Result<(), PeerStoreError> {
         peer.validate()?;
         let mut guard = self.peers.write().map_err(|_| PeerStoreError::Poisoned)?;
@@ -112,8 +104,8 @@ impl PeerStore {
     /// # Errors
     ///
     /// [`PeerStoreError::Io`] if the file could not be replaced — the peer stays
-    /// in memory in that case, matching what is still on disk;
-    /// [`PeerStoreError::Poisoned`] if another thread panicked holding the lock.
+    /// in memory, matching what is still on disk; `Poisoned` if another thread
+    /// panicked holding the lock.
     pub fn remove(&self, pairing_id: &str) -> Result<bool, PeerStoreError> {
         let mut guard = self.peers.write().map_err(|_| PeerStoreError::Poisoned)?;
         let Some(removed) = guard.remove(pairing_id) else {

@@ -150,7 +150,7 @@ async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Result<(), ()
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::p2p::tests::test_state;
+    use crate::testutil::test_state;
     use copypaste_ipc::{Method, Request, ResponseData, PROTOCOL_VERSION};
 
     fn request(id: u64, method: Method) -> Request {

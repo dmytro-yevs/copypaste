@@ -26,16 +26,15 @@ const AAD_PREFIX: &[u8] = b"copypaste/v2/item-aead|";
 /// Associated data for the item AEAD: `copypaste/v2/item-aead|<len>:<item_id>`.
 ///
 /// `item_id` is the cross-device logical item id, not a storage row id. Binding
-/// it means a ciphertext copied into a different row fails to authenticate; the
-/// row-swap detection is the entire reason per-item AEAD exists on top of an
-/// already-encrypted SQLCipher file.
+/// it means a ciphertext copied into a different row fails to authenticate,
+/// which is the entire reason per-item AEAD exists on top of an already
+/// encrypted SQLCipher file.
 ///
-/// The `<len>:` prefix is not decoration. Port manifest 02, §3.2.2 records bug
-/// **CopyPaste-lkmy**: an info string that concatenated two caller-controlled
-/// ids with `|` collided when an id contained `|`, deriving identical keys for
-/// different inputs. Only one caller-controlled field appears here and it is
-/// terminal, so the length prefix is not strictly required today — it is here
-/// so that adding a second field later cannot silently reintroduce the bug.
+/// The `<len>:` prefix is not decoration. Port manifest 02 §3.2.2 records
+/// **CopyPaste-lkmy**: an info string concatenating two caller-controlled ids
+/// with `|` collided when an id contained `|`, deriving identical keys for
+/// different inputs. One terminal field does not need it today; it is here so
+/// that adding a second later cannot silently reintroduce the bug.
 fn item_aad(item_id: &str) -> Vec<u8> {
     let id = item_id.as_bytes();
     let mut aad = Vec::with_capacity(AAD_PREFIX.len() + 24 + id.len());
@@ -49,10 +48,9 @@ fn item_aad(item_id: &str) -> Vec<u8> {
 /// Seal `plaintext` under `key`, binding `item_id` into the AAD.
 ///
 /// Returns `(nonce, ciphertext)`. The nonce is [`NONCE_LEN`] bytes, freshly
-/// drawn from the OS CSPRNG for every call. The ciphertext is
-/// `body || poly1305_tag`, so it is [`TAG_LEN`] bytes longer than the
-/// plaintext — an empty plaintext yields a 16-byte ciphertext, not an empty
-/// one. Both are opaque to the caller; store them as written.
+/// drawn from the OS CSPRNG every call; the ciphertext is
+/// `body || poly1305_tag`, so an empty plaintext yields a 16-byte ciphertext,
+/// not an empty one. Both are opaque; store them as written.
 ///
 /// # Errors
 ///
@@ -91,9 +89,8 @@ pub fn encrypt(
 /// [`CryptoError::InvalidNonce`] if `nonce` is not [`NONCE_LEN`] bytes.
 ///
 /// [`CryptoError::AuthFailed`] for everything else — wrong key, wrong
-/// `item_id`, a modified nonce, a modified or truncated ciphertext, or a
-/// modified tag. These are not distinguished from each other by design; see
-/// the variant's documentation.
+/// `item_id`, or a modified nonce, ciphertext or tag. Not distinguished from
+/// each other by design; see the variant.
 pub fn decrypt(
     ciphertext: &[u8],
     nonce: &[u8],
@@ -123,17 +120,12 @@ pub fn decrypt(
         .map_err(|_| CryptoError::AuthFailed)
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::super::test_support::{key_a, ITEM, SECRET_A, SECRET_B};
     use super::super::Keyring;
     use super::*;
 
-    // --- round trip ------------------------------------------------------
 
     #[test]
     fn round_trip_recovers_the_plaintext() {
@@ -161,7 +153,6 @@ mod tests {
         assert_eq!(decrypt(&ct, &nonce, &reloaded, ITEM).unwrap(), b"persisted");
     }
 
-    // --- fail closed -----------------------------------------------------
 
     #[test]
     fn wrong_key_fails() {
@@ -284,7 +275,6 @@ mod tests {
         ));
     }
 
-    // --- shapes of plaintext ---------------------------------------------
 
     #[test]
     fn empty_plaintext_round_trips() {
@@ -318,7 +308,6 @@ mod tests {
         }
     }
 
-    // --- nonces -----------------------------------------------------------
 
     #[test]
     fn two_encryptions_of_the_same_plaintext_use_different_nonces() {
@@ -347,7 +336,6 @@ mod tests {
         }
     }
 
-    // --- AAD --------------------------------------------------------------
 
     #[test]
     fn item_aad_has_the_documented_layout() {

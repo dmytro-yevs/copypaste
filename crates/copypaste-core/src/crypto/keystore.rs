@@ -12,11 +12,9 @@ use zeroize::Zeroizing;
 use super::{CryptoError, KEY_LEN};
 
 /// macOS Keychain service name. Frozen (port manifest 02, I-10) — renaming it
-/// makes an existing install's database unopenable.
-///
-/// Read only by the macOS backend below, so it is unused on other targets;
-/// the name is still defined unconditionally because a test pins it and
-/// because moving a frozen identifier behind a `cfg` is how it drifts.
+/// makes an existing install's database unopenable. Defined unconditionally
+/// even though only the macOS backend reads it: moving a frozen identifier
+/// behind a `cfg` is how it drifts.
 #[allow(dead_code)]
 const KEYCHAIN_SERVICE: &str = "com.copypaste.daemon";
 
@@ -32,22 +30,10 @@ pub(super) type DeviceSecret = Zeroizing<[u8; KEY_LEN]>;
 
 pub(super) use backend::load_or_create_secret;
 
-/// macOS Keychain backend.
-///
-/// Gated on the `macos-keychain` cargo feature because `security-framework` is
-/// declared in `[workspace.dependencies]` but is not yet a dependency of this
-/// crate, and this module may not edit `Cargo.toml`. Enabling it needs:
-///
-/// ```toml
-/// [dependencies]
-/// security-framework = { workspace = true, optional = true }
-///
-/// [features]
-/// macos-keychain = ["dep:security-framework"]
-/// ```
-///
-/// Until then macOS falls through to the file backend, which is a development
-/// posture and not a shipping one.
+/// macOS Keychain backend, gated on the `macos-keychain` cargo feature: this
+/// crate's `Cargo.toml` still needs `security-framework` as an optional
+/// dependency and the feature that enables it. Until then macOS falls through
+/// to the file backend, which is a development posture, not a shipping one.
 #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
 mod backend {
     use super::super::keys::random_secret;
@@ -120,11 +106,10 @@ mod backend {
     pub(in crate::crypto) fn load_or_create_secret() -> Result<DeviceSecret, CryptoError> {
         let path = secret_path()?;
 
-        // Try to create it first, atomically. `create_new` fails if the file
-        // already exists, so two daemons racing on first run cannot clobber
-        // each other's secret — the loser reads the winner's. Note there is no
-        // temp-file-and-rename dance: rename replaces, and replacing this file
-        // is exactly the operation that orphans a database.
+        // `create_new` fails if the file exists, so two daemons racing on
+        // first run cannot clobber each other's secret — the loser reads the
+        // winner's. No temp-file-and-rename: rename replaces, and replacing
+        // this file is exactly what orphans a database.
         match create_secret_file(&path) {
             Ok(secret) => return Ok(secret),
             Err(CreateOutcome::Exists) => {}
@@ -210,10 +195,9 @@ mod backend {
             .try_into()
             .map_err(|_| CryptoError::KeystoreUnavailable("stored secret has wrong length"))?;
 
-        // Re-assert 0600 if something loosened it. Refusing to start would be
-        // the stricter choice, but it locks the user out of their own history
-        // over a permission bit; tightening and continuing keeps the secret
-        // protected without risking data loss.
+        // Re-assert 0600 if something loosened it. Refusing to start is
+        // stricter but locks the user out of their own history over a
+        // permission bit; tightening and continuing risks no data loss.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

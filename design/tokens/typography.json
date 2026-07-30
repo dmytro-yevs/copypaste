@@ -1,108 +1,81 @@
 {
   "type": {
-    "$description": "Type scale (port-manifest §8.5). The font-size ladder is deliberately dense and includes half-pixel steps — CopyPaste is an information-dense list app and those halves are what keeps a 74px row readable. Do not round them.",
+    "$description": "Type scale: Tailwind v4's ladder, adopted as-is. v1 carried a fifteen-step ramp with half-pixel entries (9.5px, 12.5px, 13.5px); the halves were there because the ramp was hand-tuned per component rather than chosen once. Seven steps is the whole product. The two load-bearing derivations are noted below — the virtualiser's row-height model reads them (INV-5).",
     "f-ui": {
       "$type": "fontFamily",
       "$value": [
-        "Inter",
+        "ui-sans-serif",
+        "system-ui",
         "-apple-system",
         "BlinkMacSystemFont",
-        "Segoe UI Variable",
         "Segoe UI",
-        "system-ui",
-        "sans-serif"
+        "Roboto",
+        "sans-serif",
+        "Apple Color Emoji",
+        "Segoe UI Emoji",
+        "Noto Color Emoji"
       ],
-      "$description": "UI face. Android resolves this to Inter with the platform sans fallback."
+      "$description": "Tailwind v4's default `font-sans`. No webfont: the UI face is San Francisco on macOS and Roboto on Android, which is what makes one build read as native on both. v1 shipped Inter as the first entry and never bundled it."
     },
     "f-mono": {
       "$type": "fontFamily",
       "$value": [
-        "JetBrains Mono",
         "ui-monospace",
-        "SF Mono",
-        "Cascadia Mono",
-        "Roboto Mono",
+        "SFMono-Regular",
         "Menlo",
+        "Monaco",
+        "Consolas",
+        "Liberation Mono",
+        "Courier New",
         "monospace"
       ],
-      "$description": "Monospace face. §8.7: the code, json, num and color content kinds render in it."
-    },
-    "fs-3xs": {
-      "$type": "dimension",
-      "$value": "9.5px"
-    },
-    "fs-2xs": {
-      "$type": "dimension",
-      "$value": "10px"
+      "$description": "Tailwind v4's default `font-mono`. The code, json, num and color content kinds render in it."
     },
     "fs-xs": {
       "$type": "dimension",
-      "$value": "11px"
+      "$value": "12px",
+      "$description": "Tailwind `text-xs`. Row meta line: 12 × lh-normal = 18px, which is META_LINE_PX in the row-height model."
     },
     "fs-sm": {
       "$type": "dimension",
-      "$value": "11.5px"
-    },
-    "fs-smd": {
-      "$type": "dimension",
-      "$value": "12px"
-    },
-    "fs-125": {
-      "$type": "dimension",
-      "$value": "12.5px"
-    },
-    "fs-md": {
-      "$type": "dimension",
-      "$value": "13px",
-      "$description": "Button and field label size."
-    },
-    "fs-135": {
-      "$type": "dimension",
-      "$value": "13.5px"
+      "$value": "14px",
+      "$description": "Tailwind `text-sm`, and shadcn's default control size. Row body: 14 × lh-normal = 21px, which is TITLE_LINE_PX in the row-height model."
     },
     "fs-base": {
       "$type": "dimension",
-      "$value": "14px",
-      "$description": "Body. TITLE_LINE_PX = 21 is fs-base × lh-normal; the virtualizer's height model depends on it."
+      "$value": "16px",
+      "$description": "Tailwind `text-base`."
     },
     "fs-lg": {
       "$type": "dimension",
-      "$value": "15px"
+      "$value": "18px",
+      "$description": "Tailwind `text-lg`. Empty-state and dialog titles."
     },
     "fs-xl": {
       "$type": "dimension",
-      "$value": "17px"
-    },
-    "fs-19": {
-      "$type": "dimension",
-      "$value": "19px"
-    },
-    "fs-20": {
-      "$type": "dimension",
-      "$value": "20px"
+      "$value": "20px",
+      "$description": "Tailwind `text-xl`. Screen titles."
     },
     "fs-2xl": {
       "$type": "dimension",
-      "$value": "24px"
+      "$value": "24px",
+      "$description": "Tailwind `text-2xl`."
     },
-    "fs-34": {
+    "fs-3xl": {
       "$type": "dimension",
-      "$value": "34px"
+      "$value": "30px",
+      "$description": "Tailwind `text-3xl`. The pairing code, which has to be read aloud across a room."
     },
     "fw-normal": {
       "$type": "fontWeight",
-      "$value": 450,
-      "$description": "Body weight is 450, not 400 — Inter at 400 is thin on dark surfaces."
+      "$value": 400,
+      "$description": "Tailwind `font-normal`. v1 used 450 because Inter at 400 was thin; a system face does not need the correction."
     },
     "fw-medium": {
       "$type": "fontWeight",
       "$value": 500
     },
     "fw-semibold": {
-      "$type": "fontWeight",
-      "$value": 550
-    },
-    "fw-strong": {
       "$type": "fontWeight",
       "$value": 600
     },
@@ -112,32 +85,33 @@
     },
     "lh-tight": {
       "$type": "number",
-      "$value": 1.2
+      "$value": 1.25,
+      "$description": "Tailwind `leading-tight`. Titles."
     },
     "lh-normal": {
       "$type": "number",
       "$value": 1.5,
-      "$description": "Load-bearing: TITLE_LINE_PX = 21 = fs-base 14 × 1.5."
-    },
-    "ls-body": {
-      "$type": "dimension",
-      "$value": "-0.006em"
+      "$description": "Tailwind `leading-normal`. LOAD-BEARING: TITLE_LINE_PX = 21 = fs-sm 14 × 1.5, and META_LINE_PX = 18 = fs-xs 12 × 1.5. The virtualiser reserves row height from both."
     },
     "ls-tight": {
       "$type": "dimension",
-      "$value": "-0.01em"
+      "$value": "-0.025em",
+      "$description": "Tailwind `tracking-tight`. Headings only."
     },
     "ls-none": {
       "$type": "dimension",
-      "$value": "0em"
+      "$value": "0em",
+      "$description": "Tailwind `tracking-normal`, and the body default. v1 tracked body text at -0.006em to compensate for Inter; a system face is drawn for its own metrics."
     },
     "ls-wide": {
       "$type": "dimension",
-      "$value": "0.05em"
+      "$value": "0.025em",
+      "$description": "Tailwind `tracking-wide`. Uppercase labels."
     },
     "ls-wider": {
       "$type": "dimension",
-      "$value": "0.06em"
+      "$value": "0.05em",
+      "$description": "Tailwind `tracking-wider`. The pairing code, grouped for reading aloud."
     }
   }
 }

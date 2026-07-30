@@ -1,81 +1,61 @@
 //! The wire contract for one sync session.
 //!
-//! Five message types, five bounds, and nothing else. The session itself lives
-//! in [`crate::sync`]; this module only says what may be said and how large it
-//! may be.
+//! What may be said and how large it may be; the session itself is in
+//! [`crate::sync`].
 //!
-//! # Content is plaintext here
-//!
-//! [`SyncItem::content`] is the item's plaintext, for the reason set out in the
-//! crate docs: the sender's ciphertext is sealed under a key the receiver does
-//! not have, with the item id bound into the AEAD, so forwarding it could never
-//! be opened. The confidentiality of this module's bytes is entirely the Noise
-//! channel's job — nothing here should be written to disk or a log.
+//! [`SyncItem::content`] is **plaintext** — the sender's ciphertext is sealed
+//! under a key the receiver does not have, with the item id bound into the
+//! AEAD, so forwarding it could never be opened. Confidentiality here is
+//! entirely the Noise channel's job; nothing in this module should reach disk
+//! or a log.
 //!
 //! # Why the bounds exist
 //!
-//! Every message arrives from a peer, and a peer is a program on the local
-//! network that may be hostile or merely broken. Each bound below is checked at
-//! the **decode boundary** rather than at the point of use, because a check that
-//! lives in one consumer is a check the next consumer will silently skip
-//! (manifest 05, rule R-CLK-1). [`SyncMessage::decode`] is the only ingress
-//! path, so validating there covers every caller.
-//!
-//! The same validation runs on [`SyncMessage::encode`]. We do not send what we
-//! would refuse to receive: a bug on this side should surface as a clear local
-//! error, not as a peer dropping the connection.
+//! Every message arrives from a peer that may be hostile or merely broken.
+//! Each bound is checked at the **decode boundary** rather than at the point of
+//! use, because a check that lives in one consumer is one the next consumer
+//! will silently skip (manifest 05, R-CLK-1); [`SyncMessage::decode`] is the
+//! only ingress path. The same validation runs on [`SyncMessage::encode`], so a
+//! bug on this side surfaces as a local error rather than a peer hanging up.
 //!
 //! # Timestamps
 //!
-//! `created_at` is milliseconds since the Unix epoch and is semantically
+//! `created_at` is milliseconds since the Unix epoch and semantically
 //! non-negative. A hostile peer sending a negative value is a real historical
-//! bug (`CopyPaste-psx7`): the value was later widened to an unsigned type and
-//! became "larger than every legitimate timestamp forever". Decode **clamps** to
-//! zero rather than rejecting — a clamped value simply loses the merge, which is
-//! the safe outcome. Encode *rejects* a negative timestamp, because on the
-//! outbound side it can only mean a local bug.
-//!
-//! The upper bound is not enforced here. It needs the local clock, and the
-//! sensible response is to skip one item rather than to fail the whole message,
-//! so it lives in [`crate::sync`] (see `MAX_FUTURE_SKEW_MS`).
+//! bug (`CopyPaste-psx7`): it was later widened to an unsigned type and became
+//! "larger than every legitimate timestamp forever". Decode **clamps** to zero
+//! — a clamped value simply loses the merge — while encode *rejects*, because
+//! outbound it can only be a local bug. The upper bound needs the local clock
+//! and should skip one item rather than fail a message, so it lives in
+//! [`crate::sync`] (`MAX_FUTURE_SKEW_MS`).
 
 use serde::{Deserialize, Serialize};
 
-/// Version of the message set in this module.
-///
-/// Bumped whenever a change would confuse an older peer. There is no
-/// negotiation and no compatibility shim: v2 has no old peers to be compatible
-/// with, and a mismatch is a clear error rather than a degraded session.
+/// Version of the message set. Bumped whenever a change would confuse an older
+/// peer. No negotiation and no compatibility shim: a mismatch is a clear error
+/// rather than a degraded session.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Most summaries one [`SyncMessage::Summary`] may carry.
-///
-/// Sized for a full local history (the store caps itself well below this) at
-/// roughly 200 bytes per summary — about 2 MiB on the wire. A peer with more
-/// than this syncs its newest 10,000 items this session and the rest on the
-/// next one; sessions repeat, so convergence is reached either way.
+/// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
+/// local history at roughly 200 bytes each, about 2 MiB on the wire. A peer
+/// with more syncs its newest 10,000 items now and the rest next session;
+/// sessions repeat, so convergence is reached either way.
 pub const MAX_SUMMARIES_PER_MESSAGE: usize = 10_000;
 
-/// Most ids one [`SyncMessage::Request`] may carry, and therefore the most
-/// items one session transfers in one direction.
-///
-/// Deliberately smaller than the summary bound: a request is a promise of
-/// transfer work, and bounding it bounds how long one session can run. Leftover
-/// wants are picked up by the next session.
+/// Most ids one [`SyncMessage::Request`] may carry, and so the most items one
+/// session transfers in one direction. Smaller than the summary bound: a
+/// request is a promise of transfer work, and bounding it bounds how long a
+/// session can run. Leftover wants go to the next session.
 pub const MAX_REQUEST_IDS_PER_MESSAGE: usize = 1_000;
 
-/// Most items one [`SyncMessage::Items`] may carry.
-///
-/// Small on purpose. Items are the only messages that carry payloads, and the
-/// receiver holds a whole message in memory before it can look at it.
+/// Most items one [`SyncMessage::Items`] may carry. Small on purpose: items are
+/// the only messages carrying payloads, and the receiver holds a whole message
+/// in memory before it can look at it.
 pub const MAX_ITEMS_PER_MESSAGE: usize = 8;
 
-/// Largest plaintext one item may carry.
-///
-/// A clipboard entry larger than this is pathological; v1 capped text uploads
-/// at 8 MiB and this is a deliberate tightening, chosen so that one item always
-/// fits inside [`MAX_ITEM_BYTES_PER_MESSAGE`] and a single oversized item can
-/// never wedge a session.
+/// Largest plaintext one item may carry. A deliberate tightening of v1's 8 MiB,
+/// chosen so one item always fits inside [`MAX_ITEM_BYTES_PER_MESSAGE`] and a
+/// single oversized item can never wedge a session.
 pub const MAX_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 
 /// Content-byte budget for one [`SyncMessage::Items`], summed over its items.
@@ -84,13 +64,10 @@ pub const MAX_CONTENT_BYTES: usize = 4 * 1024 * 1024;
 /// message; this caps the actual memory a single message can cost.
 pub const MAX_ITEM_BYTES_PER_MESSAGE: usize = 4 * 1024 * 1024;
 
-/// Hard ceiling on one encoded message, checked before any parsing.
-///
-/// Well above [`MAX_ITEM_BYTES_PER_MESSAGE`] because JSON string escaping
-/// inflates: a payload of control characters becomes six bytes (`\u00XX`) per
-/// byte. Eight times the content budget covers that worst case with room for
-/// the envelope, while still refusing an unbounded stream before a single byte
-/// is parsed.
+/// Hard ceiling on one encoded message, checked before any parsing. Well above
+/// [`MAX_ITEM_BYTES_PER_MESSAGE`] because JSON escaping inflates control
+/// characters to six bytes (`\u00XX`) each; 8× the content budget covers that
+/// worst case and still refuses an unbounded stream before parsing.
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Longest item id, device id, or origin device id.
@@ -105,12 +82,10 @@ pub const MAX_CONTENT_TYPE_BYTES: usize = 64;
 /// Longest content hash. A hex SHA-256 is 64.
 pub const MAX_HASH_BYTES: usize = 128;
 
-/// What one side knows about an item, without the content.
-///
-/// This is the whole input to the merge. `created_at` is the **version** stamp,
-/// not the birth of the item: a tombstone carries the time of the deletion, and
-/// that is what lets a delete beat the version it deleted (see
-/// [`crate::sync::merge_decision`]).
+/// What one side knows about an item, without the content — the whole input to
+/// the merge. `created_at` is the **version** stamp, not the birth of the item:
+/// a tombstone carries the time of the deletion, which is what lets a delete
+/// beat the version it deleted ([`crate::sync::merge_decision`]).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ItemSummary {
     pub item_id: String,
@@ -122,6 +97,21 @@ pub struct ItemSummary {
     pub content_hash: String,
 }
 
+/// The wire definition of content identity: lowercase hex SHA-256 of the
+/// content bytes, never truncated (a v1 helper cut it to 16 bytes and threw
+/// away second-preimage resistance for nothing, `CopyPaste-y4v1`).
+///
+/// This must equal `copypaste_core::storage::compute_content_hash`, which
+/// computes the same value for the dedup index. Stating it twice is the cost of
+/// not pulling SQLCipher into the transport crate for one digest; identical
+/// pinned vectors in each crate's tests are what stop the two drifting, since
+/// the compiler cannot.
+#[must_use]
+pub fn content_hash(content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(content.as_bytes()))
+}
+
 /// An item being transferred. `content` is plaintext — see the module docs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SyncItem {
@@ -130,6 +120,11 @@ pub struct SyncItem {
     pub content_type: String,
     pub created_at: i64,
     pub deleted: bool,
+    /// [`content_hash`] of `content` for a live item; for a tombstone, the hash
+    /// of the item it deletes. **A peer's word, until it is checked** — the
+    /// receiving session recomputes it, because this is comparator key 2 and a
+    /// hostile peer that controls it can force a dedup collision on a targeted
+    /// item.
     pub content_hash: String,
     /// The device the item was *first* captured on — never the forwarding
     /// device. Restamping this on every hop destroys the tie-break's
@@ -231,12 +226,10 @@ impl SyncMessage {
         }
     }
 
-    /// Serialises to JSON, after checking every bound.
-    ///
-    /// JSON rather than a compact binary format on purpose: the volume is one
-    /// clipboard history, the channel already compresses nothing and encrypts
-    /// everything, and a readable frame is worth more than the bytes saved. If
-    /// that ever stops being true, this is the only function that has to change.
+    /// Serialises to JSON, after checking every bound. JSON rather than a
+    /// compact binary format on purpose: the volume is one clipboard history
+    /// and a readable frame is worth more than the bytes saved. This is the
+    /// only function that would have to change.
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         self.validate()?;
         let bytes = serde_json::to_vec(self).map_err(|e| ProtocolError::Encode(e.to_string()))?;
@@ -269,11 +262,9 @@ impl SyncMessage {
         Ok(msg)
     }
 
-    /// Raises every negative `created_at` to zero.
-    ///
-    /// Applies inside `Summary` *and* inside `Items`; a check that covered only
-    /// the top level would miss the nested case, which is exactly how the
-    /// original bug survived its first fix.
+    /// Raises every negative `created_at` to zero, inside `Summary` *and*
+    /// inside `Items` — covering only the top level is how the original bug
+    /// survived its first fix.
     fn clamp_timestamps(&mut self) {
         match self {
             Self::Summary { items } => {
@@ -397,6 +388,23 @@ fn check_timestamp(created_at: i64) -> Result<(), ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The anti-drift pin promised by [`content_hash`]'s docs: the same vectors
+    /// `copypaste_core::storage::compute_content_hash` pins. If either side ever
+    /// changes, one of these two tests fails instead of sync quietly rejecting
+    /// every item.
+    #[test]
+    fn content_hash_is_the_full_sha256_hex() {
+        assert_eq!(
+            content_hash(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            content_hash("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert!(content_hash("abc").len() <= MAX_HASH_BYTES);
+    }
 
     fn summary(id: &str) -> ItemSummary {
         ItemSummary {

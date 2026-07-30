@@ -1,71 +1,60 @@
 {
   "space": {
-    "$description": "Spacing scale, gaps and component padding (port-manifest §8.5). The s-* ladder is 2/4/6/8/11/14/16/20/24 — it is NOT a 4pt grid and the odd steps (11, 14) are used deliberately. Do not 'regularise' it.",
+    "$description": "Spacing: Tailwind v4's 4px rhythm, adopted as-is. v1's ladder was 2/4/6/8/11/14/16/20/24 and its own comment insisted the odd steps were deliberate — that is what a hand-built scale looks like after two years of one-off adjustments. Ten control paddings (pad-btn, pad-field, pad-chip, pad-seg-btn, pad-kbd, …) are gone with it: shadcn components own their own padding, and re-specifying it here is how a second design system starts.",
     "s-1": {
-      "$type": "dimension",
-      "$value": "2px"
-    },
-    "s-2": {
       "$type": "dimension",
       "$value": "4px"
     },
-    "s-3": {
-      "$type": "dimension",
-      "$value": "6px"
-    },
-    "s-4": {
+    "s-2": {
       "$type": "dimension",
       "$value": "8px"
     },
-    "s-5": {
-      "$type": "dimension",
-      "$value": "11px"
-    },
-    "s-6": {
-      "$type": "dimension",
-      "$value": "14px"
-    },
-    "s-7": {
-      "$type": "dimension",
-      "$value": "16px"
-    },
-    "s-8": {
-      "$type": "dimension",
-      "$value": "20px"
-    },
-    "s-9": {
-      "$type": "dimension",
-      "$value": "24px"
-    },
-    "gap-field": {
-      "$type": "dimension",
-      "$value": "9px"
-    },
-    "gap-badge": {
-      "$type": "dimension",
-      "$value": "5px"
-    },
-    "gap-row": {
+    "s-3": {
       "$type": "dimension",
       "$value": "12px"
     },
-    "gap-modal-sub": {
+    "s-4": {
       "$type": "dimension",
-      "$value": "18px"
+      "$value": "16px"
+    },
+    "s-5": {
+      "$type": "dimension",
+      "$value": "20px"
+    },
+    "s-6": {
+      "$type": "dimension",
+      "$value": "24px"
+    },
+    "s-7": {
+      "$type": "dimension",
+      "$value": "32px"
+    },
+    "s-8": {
+      "$type": "dimension",
+      "$value": "40px"
+    },
+    "s-9": {
+      "$type": "dimension",
+      "$value": "48px"
+    },
+    "gap-row": {
+      "$type": "dimension",
+      "$value": "12px",
+      "$description": "Between a row's glyph, its body and its actions."
     },
     "pad-row-y": {
       "$type": "dimension",
-      "$value": "9px",
-      "$description": "LOAD-BEARING. ROW_PAD_V = 18 in the virtualizer is 2 × this. If it changes, the row height model must change with it or rows overlap (§8.5 note, §5.2)."
+      "$value": "10px",
+      "$description": "LOAD-BEARING. ROW_PAD_V in the virtualiser is 2 × this. If it changes, the row-height model changes with it or rows overlap (INV-5)."
     },
     "pad-row-x": {
       "$type": "dimension",
-      "$value": "10px"
+      "$value": "12px"
     },
     "pad-row": {
       "$type": "string",
       "$value": "{space.pad-row-y} {space.pad-row-x}",
-      "$description": "CSS shorthand composed from the two scalars above so the virtualizer and the stylesheet cannot drift.",
+      "$description": "CSS shorthand composed from the two scalars above so the virtualiser and the stylesheet cannot drift.",
       "$extensions": {
         "com.copypaste": {
           "platforms": [
@@ -73,124 +62,11 @@
           ]
         }
       }
-    },
-    "pad-btn": {
-      "$type": "string",
-      "$value": "7px 13px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-btn-sm": {
-      "$type": "string",
-      "$value": "5px 10px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-field": {
-      "$type": "string",
-      "$value": "8px 11px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-chip": {
-      "$type": "string",
-      "$value": "3px 9px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-seg-btn": {
-      "$type": "string",
-      "$value": "5px 12px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-tpill": {
-      "$type": "string",
-      "$value": "2px 8px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-badge": {
-      "$type": "string",
-      "$value": "2px 7px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-kbd": {
-      "$type": "string",
-      "$value": "0 5px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-grouphead": {
-      "$type": "string",
-      "$value": "10px 10px 5px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-bulkbar": {
-      "$type": "string",
-      "$value": "8px 10px 10px",
-      "$extensions": {
-        "com.copypaste": {
-          "platforms": [
-            "css"
-          ]
-        }
-      }
-    },
-    "pad-modal": {
-      "$type": "dimension",
-      "$value": "22px"
     },
     "pad-empty": {
       "$type": "dimension",
-      "$value": "30px"
+      "$value": "32px",
+      "$description": "Inset around an empty / error / offline state."
     }
   }
 }

@@ -1,164 +1,82 @@
 /**
- * The history window: search, list, status line. One view, no routing.
+ * The app shell: nav rail, banner slot, and the active screen.
  *
- * State resolution follows manifest 06 §3.1.11, with one adjustment: an error
- * only replaces the list when there is nothing to show. A background poll that
- * fails while 200 rows are on screen must not throw those rows away — the
- * status line says the service went away and the rows stay readable. Copy for
- * each state is verbatim from the manifest, except where a v2 command does not
- * exist (see below).
+ * INV-20 — the shell itself is **never** inside an error boundary. Navigation
+ * and the main pane each get their own sibling boundary, so a crash in a screen
+ * cannot take navigation with it and every fallback renders inside the shell
+ * layout rather than against a bare document body (CopyPaste-8ebg.12).
+ *
+ * Routing is in-memory (zustand), with defensive narrowing: an unrecognised
+ * view resolves to History rather than to a blank pane (manifest §3.0). There
+ * is no view transition animation — v1's crossfade was deliberately stripped
+ * (CopyPaste-h1n3) and the flex height chain the scroll regions depend on is
+ * what remains of it.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CircleAlert, Inbox, Search, WifiOff } from "lucide-react";
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { EmptyState } from "./components/EmptyState";
-import { HistoryList } from "./components/HistoryList";
-import { SearchBar } from "./components/SearchBar";
-import { StatusLine } from "./components/StatusLine";
-import {
-  useCopy,
-  useDeferredDelete,
-  useHistory,
-  usePin,
-  useStatus,
-} from "./hooks/useClipboard";
-import { useReveal } from "./hooks/useReveal";
-import { type ErrorKind, classifyError, friendlyError } from "./lib/errors";
-import type { Item } from "./lib/ipc";
-import { SEARCH_DEBOUNCE_MS } from "./lib/layout";
+import { BannerBar } from "@/components/shell/Banners";
+import { Boundary } from "@/components/shell/Boundary";
+import { Sidebar } from "@/components/shell/Sidebar";
+import { DevicesView } from "@/components/devices/DevicesView";
+import { HistoryView } from "@/components/history/HistoryView";
+import { SettingsView } from "@/components/settings/SettingsView";
+import { useStatus } from "@/hooks/useHistory";
+import { classifyError } from "@/lib/errors";
+import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
+import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
+import { selectAppearance, usePrefs } from "@/store/prefs";
+import { useUi } from "@/store/ui";
 
-const NO_ITEMS: readonly Item[] = [];
-
-/** Manifest §5.3: the FTS query is debounced 250ms. */
-function useDebounced(value: string, delay: number): string {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
-}
+const SCREENS = {
+  history: { label: "History", render: () => <HistoryView /> },
+  devices: { label: "Devices", render: () => <DevicesView /> },
+  settings: { label: "Settings", render: () => <SettingsView /> },
+} as const;
 
 export default function App() {
-  const [rawQuery, setRawQuery] = useState("");
-  const query = useDebounced(rawQuery, SEARCH_DEBOUNCE_MS);
-  const [activeId, setActiveId] = useState<string | null>(null);
-
-  const searchRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
-
-  const history = useHistory(query);
+  const view = useUi((s) => s.view);
+  const appearance = usePrefs(selectAppearance);
   const status = useStatus();
-  const copy = useCopy();
-  const pin = usePin();
-  const { pending, remove } = useDeferredDelete();
-  const { revealedId, reveal, hide } = useReveal();
+  const qc = useQueryClient();
 
-  /**
-   * INV-2: when nothing is pending this returns the query's own array, so an
-   * idle poll that fetched byte-identical data produces the identical
-   * reference React Query's structural sharing handed us — no re-render, and
-   * the scroll anchor is never disturbed.
-   */
-  const items = useMemo(() => {
-    const data = history.data ?? NO_ITEMS;
-    return pending.size === 0
-      ? data
-      : data.filter((item) => !pending.has(item.id));
-  }, [history.data, pending]);
-
-  const errorKind: ErrorKind | null = history.error
-    ? classifyError(history.error)
-    : status.error
-      ? classifyError(status.error)
-      : null;
-
-  // ⌘F / Ctrl+F focuses the field and selects what is in it (§3.1.4).
+  // The pre-paint script in main.tsx owns the *first* frame; this keeps the
+  // attributes in step afterwards, and subscribes once to the OS appearance so
+  // a `system` theme follows it live without a reload (AT-53).
   useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+    applyAppearance(appearance);
+    subscribeSystemTheme(() => applyAppearance(usePrefs.getState()));
+  }, [appearance]);
 
-  const filtered = query.length > 0;
+  const statusKind = status.error ? classifyError(status.error) : null;
+  const screen = SCREENS[view];
 
   return (
-    <div className="flex h-full flex-col bg-bg text-text">
-      <SearchBar
-        value={rawQuery}
-        onChange={setRawQuery}
-        onEnterList={() => listRef.current?.focus()}
-        inputRef={searchRef}
-      />
+    <div className="flex h-full min-h-0 bg-background text-foreground">
+      <Boundary label="Navigation">
+        <Sidebar />
+      </Boundary>
 
-      {history.isPending ? (
-        <EmptyState
-          busy
-          title="Loading…"
-          body="Fetching your clipboard history."
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <BannerBar
+          conditions={{
+            serviceOffline: statusKind === "offline",
+            protocolMismatch:
+              status.data !== undefined &&
+              status.data.protocol_version !== CURRENT_PROTOCOL_VERSION
+                ? status.data.protocol_version
+                : null,
+            capturePaused: status.data?.capture_running === false,
+          }}
+          onRetry={() => void qc.invalidateQueries()}
         />
-      ) : items.length > 0 ? (
-        <HistoryList
-          items={items}
-          activeId={activeId}
-          onActiveIdChange={setActiveId}
-          revealedId={revealedId}
-          onReveal={(item) => reveal(item.id)}
-          onHide={hide}
-          onCopy={copy.mutate}
-          onTogglePin={pin.mutate}
-          onDelete={remove}
-          listRef={listRef}
-        />
-      ) : errorKind === "offline" ? (
-        <EmptyState
-          icon={WifiOff}
-          title="Clipboard service offline"
-          body={friendlyError("offline")}
-          // v2's bridge exposes no restart command, so the manifest's "Restart
-          // background service" button becomes a retry. Same recovery, one
-          // fewer thing to claim we can do.
-          action={{ label: "Try again", onClick: () => void history.refetch() }}
-        />
-      ) : errorKind === "not_ready" ? (
-        <EmptyState
-          busy
-          title="Starting up…"
-          body={friendlyError("not_ready")}
-        />
-      ) : errorKind !== null ? (
-        <EmptyState
-          icon={CircleAlert}
-          title="Failed to load history"
-          body={friendlyError(errorKind)}
-          action={{ label: "Try again", onClick: () => void history.refetch() }}
-        />
-      ) : filtered ? (
-        <EmptyState
-          icon={Search}
-          title={`No results for "${query}"`}
-          body="Try a different search term."
-        />
-      ) : (
-        <EmptyState
-          icon={Inbox}
-          title="Nothing copied yet"
-          body="Copy something and it will appear here."
-        />
-      )}
 
-      <StatusLine
-        status={status.data}
-        error={errorKind}
-        visible={items.length}
-        filtered={filtered}
-      />
+        <Boundary label={screen.label}>
+          {/* `display: contents` keeps the boundary out of the flex height
+              chain the scroll regions depend on. */}
+          <div className="contents">{screen.render()}</div>
+        </Boundary>
+      </div>
     </div>
   );
 }

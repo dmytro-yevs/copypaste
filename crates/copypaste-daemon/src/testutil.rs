@@ -1,0 +1,107 @@
+//! A fully wired `AppState` on a temporary data directory.
+//!
+//! One fixture for the whole crate: the peer tests, the cloud tests, the merge
+//! tests and the socket tests all need the same thing, and a second copy of it
+//! is a second definition of what a daemon is.
+
+use std::sync::Arc;
+
+use copypaste_core::{Detector, Keyring, Store};
+use copypaste_p2p::discovery::Discovery;
+use copypaste_p2p::peers::PeerStore;
+
+use crate::clipboard::{Capture, ClipboardSource};
+use crate::cloud::Cloud;
+use crate::meta::Meta;
+use crate::p2p::P2p;
+use crate::AppState;
+
+/// Writes nowhere and reads nothing: these tests are about sync, not the
+/// pasteboard.
+#[derive(Default)]
+pub struct FakeClipboard;
+
+impl ClipboardSource for FakeClipboard {
+    fn poll(&mut self) -> Option<Capture> {
+        None
+    }
+    fn set_contents(&mut self, _text: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn backend_name(&self) -> &'static str {
+        "fake"
+    }
+}
+
+/// A daemon state on its own database, with no cloud deployment configured.
+///
+/// The keyring is deterministic rather than loaded: a test must not touch the
+/// developer's real keystore, and two states built with different names get
+/// different secrets, which is what makes "re-encrypted under the local key" a
+/// meaningful assertion.
+pub fn test_state(name: &str) -> (Arc<AppState>, tempfile::TempDir) {
+    test_state_with_cloud(name, Cloud::new(None))
+}
+
+pub fn test_state_with_cloud(name: &str, cloud: Cloud) -> (Arc<AppState>, tempfile::TempDir) {
+    reopen(tempfile::tempdir().expect("tempdir"), cloud, name)
+}
+
+/// A second daemon over an existing data directory — a restart, in other words.
+///
+/// The keyring is derived from `name`, so passing the same name is what makes
+/// the database openable again.
+pub fn reopen(
+    dir: tempfile::TempDir,
+    cloud: Cloud,
+    name: &str,
+) -> (Arc<AppState>, tempfile::TempDir) {
+    let db_path = dir.path().join("copypaste-v2.db");
+
+    let mut secret = [0u8; 32];
+    for (slot, byte) in secret.iter_mut().zip(name.bytes().cycle()) {
+        *slot = byte;
+    }
+    let keyring = Keyring::from_secret(&secret);
+    let store = Store::open(&db_path, &keyring.db_key()).expect("store");
+    let meta = Meta::open(&db_path, &keyring.db_key(), name).expect("meta");
+    let peers = PeerStore::open(&dir.path().join("peers-v2.json")).expect("peer store");
+    // Port 0 is never bound in these tests; discovery degrades either way.
+    let discovery = Discovery::start(name, &[], 0).expect("discovery");
+
+    let state = AppState::new(
+        store,
+        keyring,
+        Arc::new(Detector::new().expect("detector")),
+        Box::new(FakeClipboard),
+        meta,
+        P2p::new(peers, discovery, 0),
+        cloud,
+    );
+    state.set_ready(true);
+    (Arc::new(state), dir)
+}
+
+/// Ingest one item as if it had been captured locally, returning its id.
+pub fn add(state: &Arc<AppState>, content: &str) -> String {
+    crate::capture::ingest(state, content, "text")
+        .expect("ingest")
+        .into_item()
+        .id
+}
+
+/// Every item's plaintext on one device, decrypted through the local key.
+pub fn contents(state: &Arc<AppState>) -> Vec<String> {
+    let key = state.keyring.item_key();
+    state
+        .store
+        .list(100, 0)
+        .expect("list")
+        .into_iter()
+        .map(|row| {
+            let plain = copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
+                .expect("decrypt");
+            String::from_utf8(plain).expect("utf-8")
+        })
+        .collect()
+}

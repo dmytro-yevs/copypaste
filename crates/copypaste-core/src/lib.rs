@@ -1,7 +1,4 @@
 //! Core: crypto, storage, and sensitive-content detection.
-//!
-//! Module boundaries are fixed here so the three areas can be built
-//! independently. Everything a caller needs is re-exported from this file.
 
 #![forbid(unsafe_code)]
 

@@ -187,19 +187,16 @@ mod tests {
         let hash = hash_of("repeated clipboard content");
         let first = s.insert(item("repeated clipboard content", T0)).unwrap();
 
-        // Hit: the item is inside the window.
         let hit = s
             .find_recent_by_hash(&hash, (T0 + 30_000) - DEDUP_WINDOW_MS)
             .unwrap();
         assert_eq!(hit.map(|i| i.id), Some(first.id.clone()));
 
-        // Miss: the item is older than the window.
         let miss = s
             .find_recent_by_hash(&hash, (T0 + 90_000) - DEDUP_WINDOW_MS)
             .unwrap();
         assert!(miss.is_none());
 
-        // Miss: unknown hash.
         assert!(s
             .find_recent_by_hash(&hash_of("never copied"), T0 - DEDUP_WINDOW_MS)
             .unwrap()
@@ -226,7 +223,6 @@ mod tests {
         assert_eq!(again.id, first.id);
         assert_eq!(s.count().unwrap(), 1);
 
-        // A later bucket is a genuinely new clipboard event.
         let later = s.insert(item("same content", T0 + 120_000)).unwrap();
         assert_ne!(later.id, first.id);
         assert_eq!(s.count().unwrap(), 2);
@@ -253,7 +249,6 @@ mod tests {
         assert_eq!(removed, 3);
         assert_eq!(s.count().unwrap(), 2);
 
-        // The pinned oldest survived; so did the newest unpinned item.
         assert!(s.get(&ids[0]).unwrap().is_some());
         assert!(s.get(&ids[4]).unwrap().is_some());
         for id in &ids[1..4] {
@@ -293,7 +288,6 @@ mod tests {
             compute_content_hash(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
-        // Content-only: identical bytes hash identically, different bytes do not.
         assert_eq!(compute_content_hash(b"abc"), compute_content_hash(b"abc"));
         assert_ne!(compute_content_hash(b"abc"), compute_content_hash(b"abd"));
     }

@@ -1,42 +1,35 @@
 {
   "elevation": {
-    "$description": "Dark theme shadow ramp (port-manifest §8.1). CSS-only: Compose expresses depth with Material 3 tonal elevation, which we cover through the surfaceContainer* slots in tokens/semantic/material.json rather than by porting box-shadows.",
+    "$description": "Dark shadow ramp: Tailwind v4's shadow-xs / shadow-md / shadow-xl geometry, at the higher alphas a dark surface needs for the shadow to be visible at all.",
     "$type": "shadow",
-    "$extensions": {
-      "com.copypaste": {
-        "platforms": [
-          "css"
-        ]
-      }
-    },
     "sh1": {
       "$value": {
-        "color": "rgba(0,0,0,0.30)",
+        "color": "oklch(0 0 0 / 0.4)",
         "offsetX": "0",
         "offsetY": "1px",
         "blur": "2px"
       },
-      "$description": "Resting card / row lift."
+      "$description": "Tailwind `shadow-xs`. Resting lift: a raised control, a row."
     },
     "sh2": {
       "$value": {
-        "color": "rgba(0,0,0,0.45)",
+        "color": "oklch(0 0 0 / 0.5)",
         "offsetX": "0",
-        "offsetY": "8px",
-        "blur": "24px",
-        "spread": "-6px"
+        "offsetY": "4px",
+        "blur": "12px",
+        "spread": "-2px"
       },
-      "$description": "Popover, dropdown, toast."
+      "$description": "Tailwind `shadow-md`. Popover, dropdown, toast."
     },
     "sh3": {
       "$value": {
-        "color": "rgba(0,0,0,0.60)",
+        "color": "oklch(0 0 0 / 0.6)",
         "offsetX": "0",
-        "offsetY": "24px",
-        "blur": "64px",
+        "offsetY": "20px",
+        "blur": "40px",
         "spread": "-12px"
       },
-      "$description": "Modal."
+      "$description": "Tailwind `shadow-xl`. Dialog."
     }
   }
 }

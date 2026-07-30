@@ -67,8 +67,16 @@ pub trait CloudSource: Send + Sync {
     ///
     /// **The implementor owns the ordering decision, and it must be the same
     /// comparator the P2P transport uses** — `copypaste_p2p::sync::merge_decision`,
-    /// ordering on `created_at`, then `content_hash`, then `origin_device_id`
-    /// (manifest 05 INV-C2). `created_at` is a wall clock, not a logical one:
+    /// ordering on `created_at`, then `content_hash`, then `deleted`, then
+    /// `origin_device_id` (manifest 05 INV-C2). Four keys, and `deleted` sits
+    /// third rather than last for a reason worth reading before reimplementing
+    /// this: a tombstone keeps the hash of the item it deletes, so a delete ties
+    /// its own live version on the first two keys, and an order that consulted
+    /// the origin before `deleted` would decide it by device id — which
+    /// resurrects deletes (`CopyPaste-ojhe`, INV-N2). Do not restate the order;
+    /// call the function.
+    ///
+    /// `created_at` is a wall clock, not a logical one:
     /// v2 has no Lamport stamp, and what makes a wall clock safe as the primary
     /// key is the refusal in [`CloudSync::pull`](super::CloudSync::pull) of
     /// versions stamped further ahead than
@@ -97,6 +105,32 @@ pub trait CloudSource: Send + Sync {
     ///
     /// [`SyncError::Source`] for a store failure.
     fn watermark(&self) -> Result<i64, SyncError>;
+
+    /// The cursor [`CloudSync::push`](super::CloudSync::push) offers from.
+    ///
+    /// Defaults to [`CloudSource::watermark`], which is what a source with
+    /// nothing better to say should use. It is a separate method because the
+    /// two cursors measure different things, and using the download watermark
+    /// for both loses uploads in two ways:
+    ///
+    /// * **The watermark can outrun local time.** It advances to the newest
+    ///   stamp *another* device wrote, so on a device whose clock runs behind
+    ///   its peers' the local items sit below it and are never offered.
+    /// * **Signing in has a backlog to send.** The watermark says nothing about
+    ///   what has been uploaded, so a source that conflates them uploads only
+    ///   what is captured *after* sign-in (manifest 05 §4.9, BUG C2).
+    ///
+    /// The driver never advances this: it does not know when a round is over
+    /// from the source's point of view, and advancing it on a round that then
+    /// failed would drop everything in the window. The owner of the source
+    /// advances it, after a complete round, to the instant that round *began*.
+    ///
+    /// # Errors
+    ///
+    /// [`SyncError::Source`] for a store failure.
+    fn upload_floor(&self) -> Result<i64, SyncError> {
+        self.watermark()
+    }
 
     /// Persist the cursor.
     ///

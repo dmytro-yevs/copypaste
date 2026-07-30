@@ -1,16 +1,12 @@
 //! What a match means — the deletion decision, kept apart from the detection
-//! decision (manifest I2).
-//!
-//! Nothing here knows how a match was made. That is deliberate: the only thing
-//! that turns a confidence number into permission to delete user data is the
-//! floor below, and it should be readable in one screen.
+//! decision (manifest I2). The floor below is the only thing that turns a
+//! confidence number into permission to delete user data.
 
 /// Manifest §4.1. Nothing may sit *exactly* on the floor: `ip_with_port` did,
 /// and RFC1918 addresses in docker-compose snippets were silently auto-wiped
 /// (`CopyPaste-8ys1`). Pinned by `no_rule_sits_exactly_on_the_floor`.
 pub(super) const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.70;
 
-/// What a match means for automatic deletion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     /// Flag and keep out of the index, but never auto-delete.

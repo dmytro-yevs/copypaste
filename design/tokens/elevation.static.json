@@ -1,22 +1,16 @@
 {
   "elevation": {
-    "$description": "Shadows that do not vary by theme (port-manifest §8.5). CSS-only.",
+    "$description": "Shadows that do not vary by theme.",
     "$type": "shadow",
-    "$extensions": {
-      "com.copypaste": {
-        "platforms": [
-          "css"
-        ]
-      }
-    },
-    "sh-knob": {
+    "sh-focus": {
       "$value": {
-        "color": "rgba(0,0,0,0.3)",
+        "color": "color-mix(in oklab, var(--accent) 50%, transparent)",
         "offsetX": "0",
-        "offsetY": "1px",
-        "blur": "2px"
+        "offsetY": "0",
+        "blur": "0",
+        "spread": "3px"
       },
-      "$description": "Toggle knob drop shadow — identical in both themes because the knob is always white on a coloured track."
+      "$description": "shadcn's focus halo: a 3px ring of the accent at 50%, drawn as a shadow so it does not affect layout. Identical in both themes because it is derived from the live accent."
     }
   }
 }

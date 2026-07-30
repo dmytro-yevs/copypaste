@@ -14,7 +14,7 @@ use super::{
     merge_decision, run_initiator, run_responder, MergeDecision, SyncChannel, SyncError,
     SyncOutcome, SyncSource,
 };
-use crate::protocol::{ItemSummary, SyncItem, SyncMessage};
+use crate::protocol::{content_hash, ItemSummary, SyncItem, SyncMessage};
 
 pub(super) fn summary(id: &str, created_at: i64, hash: &str, deleted: bool) -> ItemSummary {
     ItemSummary {
@@ -32,11 +32,9 @@ pub(super) fn item(id: &str, created_at: i64, content: &str, origin: &str) -> Sy
         content_type: "text".into(),
         created_at,
         deleted: false,
-        // Stands in for a real digest: short, and different for different
-        // content. A hash the length of the content would be rejected by
-        // the field bounds, which is the correct behaviour but a poor
-        // fixture.
-        content_hash: format!("h-{}-{}", content.len(), &content[..content.len().min(16)]),
+        // A real digest, because the receiving session recomputes it: a fixture
+        // with a stand-in hash would be dropped exactly as a hostile peer's is.
+        content_hash: content_hash(content),
         origin_device_id: origin.into(),
     }
 }

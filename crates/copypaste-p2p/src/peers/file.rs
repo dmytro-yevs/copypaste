@@ -1,27 +1,22 @@
 //! Reading and replacing the file on disk.
 //!
-//! # This file is a key store
-//!
-//! It holds the pre-shared keys. Anything that can read it can impersonate
+//! **This file is a key store.** Anything that can read it can impersonate
 //! every paired device and decrypt every future sync session, so the file mode
 //! is not hygiene, it is the access control:
 //!
-//! * Written through a temporary file in the same directory and `rename`d over
-//!   the target, so a crash mid-write leaves the previous file intact rather
-//!   than a truncated one. Losing a pairing means re-pairing every device by
-//!   hand; `CLAUDE.md` rule 4 ranks data loss as the worst outcome.
-//! * `0600` on unix, set on the temporary file *before* any key material is
-//!   written to it, so there is no window in which the keys exist at a wider
-//!   mode. `tempfile` already creates at `0600`; setting it explicitly means a
-//!   test can pin the property instead of trusting a dependency's default.
+//! * Written to a temporary file in the same directory and `rename`d over the
+//!   target, so a crash mid-write leaves the previous file intact rather than a
+//!   truncated one. Losing a pairing means re-pairing every device by hand, and
+//!   `CLAUDE.md` rule 4 ranks data loss as the worst outcome.
+//! * `0600` on unix, set on the temporary file *before* any key material goes
+//!   into it, so the keys never exist at a wider mode. `tempfile` already
+//!   creates at `0600`; setting it explicitly lets a test pin the property.
 //! * An existing file whose mode is wider than `0600` is reported at `warn`.
 //!
-//! v1 shipped this file with the OPAQUE `PasswordFile` in plaintext inside it
-//! and its own ADR-008 recorded that as an unresolved Medium finding
-//! (**CopyPaste-5lm**, port manifest 02 §3.7 and §6.3). v2 has no
-//! `PasswordFile` — `NNpsk0` needs only the 32-byte PSK — but the file is no
-//! less sensitive for being smaller, so the handling above is the answer to
-//! that finding rather than a repeat of it.
+//! v1 shipped this file with the OPAQUE `PasswordFile` in plaintext inside it,
+//! recorded by its own ADR-008 as an unresolved Medium finding
+//! (**CopyPaste-5lm**, port manifest 02 §3.7 and §6.3). v2 needs only the
+//! 32-byte PSK, but the file is no less sensitive for being smaller.
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -68,12 +63,10 @@ pub(super) fn parse(bytes: &[u8]) -> Result<HashMap<String, Peer>, PeerStoreErro
     Ok(peers)
 }
 
-/// Replace the store file in one step.
-///
-/// Temporary file in the same directory (a `rename` across filesystems is not
-/// atomic and would fail here), `0600` before any bytes go in, `fsync` the file
-/// so the contents are durable before the rename publishes them, then `fsync`
-/// the directory so the rename itself survives a power loss.
+/// Replace the store file in one step: temporary file in the same directory (a
+/// cross-filesystem `rename` is not atomic), `0600` before any bytes go in,
+/// `fsync` the file so the contents are durable before the rename publishes
+/// them, then `fsync` the directory so the rename survives a power loss.
 pub(super) fn write_atomically(
     path: &Path,
     peers: &HashMap<String, Peer>,

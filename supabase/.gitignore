@@ -1,0 +1,4 @@
+# Supabase CLI scratch state — never committed.
+.branches/
+.temp/
+.env

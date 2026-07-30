@@ -1,7 +1,5 @@
-//! The FTS5 layer, and two of the three layers that keep sensitive content out
-//! of it (ADR-015).
-//!
-//! The three layers, so they can be counted in one place:
+//! The FTS5 layer, and two of the three ADR-015 layers that keep sensitive
+//! content out of it. Counted in one place:
 //!
 //! 1. **Write guard** — [`super::Store::insert`] drops any `search_text` on an
 //!    item marked sensitive, whatever the caller passed.
@@ -11,8 +9,8 @@
 //!    `ci.is_sensitive = 0`, so even a row planted directly in the FTS table
 //!    can never surface.
 //!
-//! All three are required. v1 shipped databases with plaintext passwords in
-//! FTS because one of them was missing.
+//! All three are required: v1 shipped databases with plaintext passwords in FTS
+//! because one was missing.
 
 use rusqlite::{params, OptionalExtension, Transaction};
 
@@ -20,12 +18,9 @@ use super::model::{item_columns_ci, row_to_item, StoreError, StoredItem};
 use super::store::Store;
 
 impl Store {
-    /// Full-text search over non-sensitive items, best match first.
-    ///
-    /// Never returns a sensitive item: the JOIN filters `is_sensitive = 0` even
-    /// though the write path already refuses to index one. That is layer 3 — a
-    /// stale FTS row (from test tooling, or from a database written before a
-    /// fix) can never surface.
+    /// Full-text search over non-sensitive items, best match first. Layer 3:
+    /// the JOIN filters `is_sensitive = 0` even though the write path already
+    /// refuses to index one, so a stale FTS row can never surface.
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<StoredItem>, StoreError> {
         let Some(match_expr) = sanitize_fts5_query(query) else {
             return Ok(Vec::new());
@@ -73,8 +68,7 @@ pub(super) fn upsert_fts_in_tx(tx: &Transaction<'_>, id: &str, text: &str) -> ru
 /// Turns arbitrary user input into an FTS5 MATCH expression, or `None` when
 /// there is nothing left to search for.
 ///
-/// A whitelist tokenizer, not an escaper. Each rule here was a reported bug in
-/// v1:
+/// A whitelist tokenizer, not an escaper. Each rule was a reported v1 bug:
 ///
 /// * `-` becomes a space *first*: FTS5 reads `-bar` as a column filter and
 ///   errors with "no such column: bar", so `foo-bar` must become
@@ -152,14 +146,11 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, hit.id);
 
-        // Prefix / search-as-you-type.
         assert_eq!(s.search("meet", 10).unwrap().len(), 1);
-        // Multi-token: every token gets a prefix star.
         assert_eq!(s.search("meeting notes", 10).unwrap().len(), 1);
         // A hyphenated query must not error (FTS5 would read `-notes` as a
         // column filter).
         assert_eq!(s.search("meeting-notes", 10).unwrap().len(), 1);
-        // No match, and queries that sanitize away to nothing.
         assert!(s.search("zzzznotpresent", 10).unwrap().is_empty());
         assert!(s.search("   ", 10).unwrap().is_empty());
         assert!(s.search("^:;", 10).unwrap().is_empty());
@@ -196,7 +187,6 @@ mod tests {
         assert!(!dump.contains("correcthorse"));
         assert!(dump.contains("shopping"));
 
-        // Searching for the secret finds nothing.
         assert!(s.search("hunter2", 10).unwrap().is_empty());
         assert!(s.search("passphrase", 10).unwrap().is_empty());
 
@@ -242,7 +232,6 @@ mod tests {
         );
         // Unbalanced quote: strip rather than hand FTS5 a syntax error.
         assert_eq!(sanitize_fts5_query("\"oops").as_deref(), Some("oops*"));
-        // Reserved words are dropped, non-word noise is stripped.
         assert_eq!(
             sanitize_fts5_query("foo OR bar").as_deref(),
             Some("foo* AND bar*")

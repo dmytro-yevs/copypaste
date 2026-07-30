@@ -1,9 +1,7 @@
 //! The row types, the one column projection every read shares, and the error
-//! set.
-//!
-//! Kept together because they are one contract: the projection lists the
-//! columns, [`row_to_item`] maps exactly those columns, and [`StoredItem`] is
-//! their shape. Splitting them is how the three drift apart.
+//! set. One contract: the projection lists the columns, [`row_to_item`] maps
+//! exactly those, and [`StoredItem`] is their shape. Splitting them is how the
+//! three drift apart.
 
 use rusqlite::{ErrorCode, Row};
 
@@ -30,15 +28,11 @@ pub(super) use {item_columns, item_columns_ci};
 
 /// An item on its way into the store.
 pub struct NewItem {
-    /// Primary key, chosen by the caller — not generated here.
-    ///
-    /// The item AEAD binds this id as associated data, so the ciphertext in
-    /// `content_ciphertext` was sealed against it and cannot be moved to a row
-    /// with a different id. That means the id has to exist before the seal, and
-    /// therefore before this insert. Letting the store mint it would produce
-    /// rows whose ciphertext authenticates against an id they do not have,
-    /// which fails closed on every later read — a silent, total loss of the
-    /// item's content.
+    /// Primary key, chosen by the caller — not generated here. The item AEAD
+    /// binds this id as associated data, so the id must exist before the seal
+    /// and therefore before this insert. A store-minted id would produce rows
+    /// whose ciphertext authenticates against an id they do not have, failing
+    /// closed on every later read: a silent, total loss of the content.
     pub id: String,
     pub content_ciphertext: Vec<u8>,
     pub nonce: Vec<u8>,
@@ -108,13 +102,9 @@ pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Error shapes
-// ---------------------------------------------------------------------------
-//
-// Two classifications, both matched on the SQLite result code rather than on a
-// message string — v1's migration runner string-matched `"duplicate column
-// name"` and broke when the wording changed.
+// Both classifications match on the SQLite result code, never on a message
+// string: v1's migration runner string-matched `"duplicate column name"` and
+// broke when the wording changed.
 
 pub(super) fn is_constraint_violation(err: &rusqlite::Error) -> bool {
     matches!(err, rusqlite::Error::SqliteFailure(e, _)

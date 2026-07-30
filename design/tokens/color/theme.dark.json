@@ -1,66 +1,66 @@
 {
   "color": {
-    "$description": "Dark theme surface, text, state and status colours. Values lifted verbatim from port-manifest/06-ui-behaviour.md §8.1. Dark is the default theme.",
+    "$description": "Dark theme surfaces, text, state layers and status colours. Adopted from shadcn/ui's default theme on the `zinc` base (its neutral ramp is Tailwind v4's `zinc`, in OKLCH); the status and content-kind hues are Tailwind v4 palette steps. Dark is the default theme. Nothing here is a v1 value — see design/README.md.",
     "$type": "color",
     "bg": {
-      "$value": "#0E0F14",
-      "$description": "Window background, behind every panel."
+      "$value": "oklch(0.141 0.005 285.823)",
+      "$description": "zinc-950. shadcn `background`: the window ground behind every panel."
     },
     "panel": {
-      "$value": "#16181F",
-      "$description": "Chrome surface: sidebar, title bar, tab bar, popup container."
+      "$value": "oklch(0.21 0.006 285.885)",
+      "$description": "zinc-900. shadcn `sidebar`: chrome surface — sidebar, header, tab bar."
     },
     "elevated": {
-      "$value": "#1E2027",
-      "$description": "Inset control surface: fields, chips, kbd, badges, empty-state icon."
+      "$value": "oklch(0.274 0.006 286.033)",
+      "$description": "zinc-800. shadcn `muted`: the inset surface for fields, chips and badges."
     },
     "card": {
-      "$value": "#1E2027",
-      "$description": "Content card surface."
+      "$value": "oklch(0.21 0.006 285.885)",
+      "$description": "zinc-900. shadcn `card` and `popover`."
     },
     "raised": {
-      "$value": "#282B33",
-      "$description": "Raised control surface: segmented-control on-state, secondary button hover."
+      "$value": "oklch(0.274 0.006 286.033)",
+      "$description": "zinc-800. shadcn `secondary`: secondary buttons, segmented on-state."
     },
     "raised-2": {
-      "$value": "#33373F",
-      "$description": "Highest neutral surface: toggle off track, scrollbar thumb, spinner track."
+      "$value": "oklch(0.37 0.013 285.805)",
+      "$description": "zinc-700. Highest neutral surface: scrollbar thumb, switch off-track."
     },
     "border": {
-      "$value": "#33363F",
-      "$description": "Control and card outline."
+      "$value": "oklch(1 0 0 / 10%)",
+      "$description": "shadcn `border` in dark is white at 10%, not a solid grey — it holds its weight over every surface in the ramp instead of only over one."
     },
     "divider": {
-      "$value": "#24262D",
-      "$description": "Hairline separator between regions."
+      "$value": "oklch(1 0 0 / 6%)",
+      "$description": "Hairline between regions. Lighter than --border so a separator never reads as a control edge."
     },
     "text": {
-      "$value": "#E7E9EE",
-      "$description": "Primary text."
+      "$value": "oklch(0.985 0 0)",
+      "$description": "shadcn `foreground`."
     },
     "dim": {
-      "$value": "#9CA1AC",
-      "$description": "Secondary text; ghost button rest state."
+      "$value": "oklch(0.705 0.015 286.067)",
+      "$description": "zinc-400. shadcn `muted-foreground`: secondary text. ~7.6:1 on --bg."
     },
     "faint": {
-      "$value": "#8F94A0",
-      "$description": "Tertiary text: placeholders, field icons, counts."
+      "$value": "oklch(0.65 0.015 286.067)",
+      "$description": "Tertiary text — timestamps, counts, placeholders. Deliberately between zinc-400 and zinc-500 rather than on a scale step: A11Y-10 requires it clear AA (~6:1 on --bg) because it labels real meta text. The same reason v1 lifted its own --faint."
     },
     "mute": {
-      "$value": "#5C616B",
-      "$description": "Lowest-emphasis text; disabled."
+      "$value": "oklch(0.552 0.016 285.938)",
+      "$description": "zinc-500. Decorative only (disabled glyphs, separating dots). A11Y-10: never the sole carrier of text."
     },
     "hover": {
-      "$value": "rgba(255,255,255,.045)",
-      "$description": "Neutral hover state layer over any surface."
+      "$value": "oklch(1 0 0 / 8%)",
+      "$description": "Neutral hover state layer. This is shadcn's `accent` — its menu/list hover surface, NOT the brand colour."
     },
     "pressed": {
-      "$value": "rgba(255,255,255,.075)",
+      "$value": "oklch(1 0 0 / 12%)",
       "$description": "Neutral pressed state layer."
     },
     "selected": {
-      "$value": "color-mix(in srgb,var(--accent) 16%,transparent)",
-      "$description": "Accent-tinted selection fill (list rows, active sidebar item). CSS-only: the equivalent on Compose is accent.copy(alpha = alpha-selected).",
+      "$value": "color-mix(in oklab, var(--accent) 18%, transparent)",
+      "$description": "Accent-tinted selection fill for list rows and the active nav item. Mixed in oklab so the tint stays perceptually even across all six accents.",
       "$extensions": {
         "com.copypaste": {
           "platforms": [
@@ -71,92 +71,92 @@
     },
     "alpha-selected": {
       "$type": "number",
-      "$value": 0.16,
-      "$description": "Accent alpha behind --selected. The single source both platforms compute the selection fill from."
+      "$value": 0.18,
+      "$description": "The accent alpha behind --selected, in one place so nothing re-derives it."
     },
     "scrim": {
-      "$value": "rgba(0,0,0,.55)",
-      "$description": "Modal scrim."
+      "$value": "oklch(0 0 0 / 60%)",
+      "$description": "Dialog scrim."
     },
     "ok": {
-      "$value": "#4FB866",
-      "$description": "Success fill / dot."
+      "$value": "oklch(0.792 0.209 151.711)",
+      "$description": "green-400. Success fill / dot."
     },
     "warn": {
-      "$value": "#E0A33F",
-      "$description": "Warning fill / dot."
+      "$value": "oklch(0.828 0.189 84.429)",
+      "$description": "amber-400. Warning fill / dot."
     },
     "err": {
-      "$value": "#E5645F",
-      "$description": "Error fill / dot."
+      "$value": "oklch(0.704 0.191 22.216)",
+      "$description": "red-400 — shadcn's `destructive` in dark, verbatim."
     },
     "info": {
-      "$value": "#5B9DFF",
-      "$description": "Informational fill / dot."
+      "$value": "oklch(0.707 0.165 254.624)",
+      "$description": "blue-400. Informational fill / dot."
     },
     "ok-strong": {
       "$value": "{color.ok}",
-      "$description": "AA-corrected foreground variant of --ok on its own 12% tint. §8.3: identical to the base hue in dark."
+      "$description": "AA-corrected foreground variant. In dark the -400 steps already clear AA on their own tints, so these alias the base hue; light is where they differ."
     },
     "warn-strong": {
       "$value": "{color.warn}",
-      "$description": "AA-corrected foreground variant of --warn. §8.3."
+      "$description": "See --ok-strong."
     },
     "err-strong": {
       "$value": "{color.err}",
-      "$description": "AA-corrected foreground variant of --err on its 9%/16% tint (.btn--danger label). §8.3."
+      "$description": "See --ok-strong."
     },
     "info-strong": {
       "$value": "{color.info}",
-      "$description": "AA-corrected foreground variant of --info on its 12% tint (log level badge). §8.3."
+      "$description": "See --ok-strong."
     },
     "c-text": {
-      "$value": "#8B93A5",
-      "$description": "Content kind: text."
+      "$value": "oklch(0.705 0.015 286.067)",
+      "$description": "Content kind: text. zinc-400 — plain text gets the neutral, so a coloured glyph always means something."
     },
     "c-url": {
-      "$value": "#34D1BF",
-      "$description": "Content kind: url."
+      "$value": "oklch(0.789 0.154 211.53)",
+      "$description": "Content kind: url. cyan-400."
     },
     "c-code": {
-      "$value": "#A78BFA",
-      "$description": "Content kind: code (renders monospace)."
+      "$value": "oklch(0.702 0.183 293.541)",
+      "$description": "Content kind: code (renders monospace). violet-400."
     },
     "c-image": {
-      "$value": "#E879C6",
-      "$description": "Content kind: image."
+      "$value": "oklch(0.74 0.238 322.16)",
+      "$description": "Content kind: image. fuchsia-400."
     },
     "c-mail": {
-      "$value": "#4ED98A",
-      "$description": "Content kind: mail."
+      "$value": "oklch(0.765 0.177 163.223)",
+      "$description": "Content kind: mail. emerald-400."
     },
     "c-color": {
-      "$value": "#F5A524",
-      "$description": "Content kind: color (renders monospace)."
+      "$value": "oklch(0.828 0.189 84.429)",
+      "$description": "Content kind: color (renders monospace). amber-400."
     },
     "c-num": {
-      "$value": "#5CC1CE",
-      "$description": "Content kind: num (renders monospace)."
+      "$value": "oklch(0.777 0.152 181.912)",
+      "$description": "Content kind: num (renders monospace). teal-400."
     },
     "c-path": {
-      "$value": "#5B9DFF",
-      "$description": "Content kind: path."
+      "$value": "oklch(0.746 0.16 232.661)",
+      "$description": "Content kind: path. sky-400."
     },
     "c-file": {
-      "$value": "#5B9DFF",
-      "$description": "Content kind: file."
+      "$value": "oklch(0.707 0.165 254.624)",
+      "$description": "Content kind: file. blue-400."
     },
     "c-json": {
-      "$value": "#FB7B53",
-      "$description": "Content kind: json (renders monospace)."
+      "$value": "oklch(0.75 0.183 55.934)",
+      "$description": "Content kind: json (renders monospace). orange-400."
     },
     "c-secret": {
-      "$value": "#F2616B",
-      "$description": "Content kind: secret."
+      "$value": "oklch(0.712 0.194 13.428)",
+      "$description": "Content kind: secret. rose-400 — next to --err on purpose: a detected secret is a warning about the item, not a failure."
     },
     "c-unknown": {
       "$value": "{color.c-text}",
-      "$description": "ADDED (not in the v1 dump). §8.7 closes the kind set with `unknown`, which must never render blank; it falls back to the text-kind colour."
+      "$description": "The kind set is closed and ends in `unknown`, which must never render blank; it falls back to the text-kind colour."
     }
   }
 }
