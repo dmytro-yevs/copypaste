@@ -7,23 +7,10 @@
 //!
 //! # What this file will not do, and why that matters
 //!
-//! Four operations — `add`, `pair_create`, `pair_accept` and `sync` — return
+//! Three operations — `pair_create`, `pair_accept` and `sync` — return
 //! [`BackendError::Unsupported`] rather than an implementation. That is a
 //! deliberate refusal, not an oversight, and it is worth being precise about
 //! because the alternative is the exact defect this rewrite exists to end.
-//!
-//! **`add` needs the ingest pipeline**, which is
-//! `copypaste_daemon::capture::ingest`: trim, hash, dedup-probe, detect,
-//! choose the id *before* the seal because the AEAD binds it, encrypt, insert,
-//! record origin, evict. Every step of that is a decision with a bug behind it
-//! — manifest 01 I-33 (a dedup-probe failure must fall through to the insert),
-//! the `cutoff_ms` argument that is an absolute epoch stamp and not a window
-//! width, the write-time half of "sensitive items never reach the search
-//! index". Re-typing those forty lines here would produce a second ingest path,
-//! and `capture.rs`'s own module docs record what happened last time there were
-//! two: *"v1 had two ingest paths that drifted: the IPC one forgot the dedup
-//! probe."* CLAUDE.md rule 1 names "it's only a few lines" as the failure mode
-//! by name.
 //!
 //! **The three peer operations need a running node** — a TCP listener holding
 //! the pre-shared keys, mDNS discovery, and the sync-metadata connection that
@@ -33,18 +20,17 @@
 //! that node currently lives inside the daemon binary.
 //!
 //! `copypaste-daemon` has no `[lib]` target, so none of it is importable. The
-//! fix is one refactor in a crate this change does not own, and it is written
-//! up in ADR-0003: lift `capture::ingest` down into `copypaste-core` (whose
-//! three modules — crypto, storage, sensitive — are already the only things it
-//! touches) and lift the p2p node up into `copypaste-p2p`. Until then these
-//! four report a structural failure that says so, instead of a plausible one
-//! that invites a retry.
+//! other half of ADR-0003 has since landed — `capture::ingest` now lives in
+//! `copypaste_core::ingest`, which is what makes [`Backend::add`] real here and
+//! therefore what makes rung 0 of the Android capture ladder work at all. The
+//! p2p node has not, so the three above still report a structural failure that
+//! says so, instead of a plausible one that invites a retry.
 //!
 //! # What it does do
 //!
 //! Everything reachable through the library API as it stands: the read paths,
-//! the clipboard write, delete/clear/pin, status, and the two peer operations
-//! that are pure `PeerStore` calls. Those are real and complete.
+//! ingest, the clipboard write, delete/clear/pin, status, and the two peer
+//! operations that are pure `PeerStore` calls. Those are real and complete.
 //!
 //! # Unverified
 //!
@@ -60,7 +46,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use copypaste_core::{decrypt, Keyring, Store, StoredItem};
+use copypaste_core::{decrypt, ingest, Detector, IngestError, Keyring, Store, StoredItem};
 use copypaste_ipc::{
     DiscoveredDevice, EventData, Item, PairingData, PeerInfo, StatusData, SyncResult,
 };
@@ -80,8 +66,9 @@ const DEFAULT_SEARCH_PAGE: u32 = 20;
 /// anything cannot be mistaken for one that is.
 const BACKEND_NAME: &str = "android-inprocess";
 
-const MSG_NO_INGEST: &str =
-    "Adding items isn't available in this build yet. Copy from another app instead.";
+const MSG_EMPTY: &str = "There was nothing to save.";
+const MSG_TOO_LARGE: &str = "That item is larger than the size limit you set.";
+const MSG_NOT_STORED: &str = "That item could not be saved.";
 const MSG_NO_PAIRING: &str = "Pairing isn't available in this build yet.";
 const MSG_NO_SYNC: &str = "Syncing isn't available in this build yet.";
 const MSG_NO_ITEM: &str = "That item is no longer there.";
@@ -103,6 +90,10 @@ struct Inner {
     store: Store,
     keyring: Keyring,
     peers: PeerStore,
+    detector: Detector,
+    /// The defaults, and only the defaults: there is no daemon here and no
+    /// config file, so a settings screen on Android will not stick (ADR-0005).
+    settings: copypaste_ipc::ConfigData,
     /// Writes the system clipboard. Held as a boxed trait object so this file
     /// does not depend on Tauri's plugin types, and so tests can substitute
     /// one — see `Clipboard`.
@@ -151,11 +142,16 @@ impl EmbeddedBackend {
         let peers = PeerStore::open(&data_dir.join("peers.json"))
             .map_err(|e| BackendError::internal(&format!("could not open paired devices: {e}")))?;
 
+        let detector = Detector::new()
+            .map_err(|e| BackendError::internal(&format!("could not build the detector: {e}")))?;
+
         Ok(Self {
             inner: Arc::new(Inner {
                 store,
                 keyring,
                 peers,
+                detector,
+                settings: copypaste_ipc::ConfigData::default(),
                 clipboard,
             }),
         })
@@ -194,6 +190,15 @@ impl Inner {
             created_at: row.created_at,
             pinned: row.pinned,
             is_sensitive: row.is_sensitive,
+            // The wire type says this is never empty, because the daemon
+            // substitutes its own device id. This build has none to substitute
+            // — the origin table belongs to sync metadata and there is no peer
+            // node here (ADR-0003) — so empty means "captured on this phone",
+            // and the p2p node landing closes the deviation.
+            origin_device_id: String::new(),
+            origin_device_name: None,
+            // Nothing here talks to a cloud account.
+            too_large_to_sync: false,
         })
     }
 
@@ -283,10 +288,39 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
-    /// See the module docs: this needs `capture::ingest`, which is inside the
-    /// `copypaste-daemon` binary.
-    async fn add(&self, _content: &str) -> Result<Item> {
-        Err(BackendError::Unsupported(MSG_NO_INGEST))
+    /// Every capture on this platform ends here — the share sheet, the
+    /// text-selection action, the Quick Settings tile and rung 2's background
+    /// listener alike (`crate::capture::intake`).
+    ///
+    /// `copypaste_core::ingest` is the daemon's ingest path, moved down into
+    /// the core rather than re-typed here: dedup, the write-time secret rule,
+    /// the id-before-seal ordering and eviction are one implementation with
+    /// two callers, not two that will drift (CLAUDE.md rule 1, ADR-0003).
+    async fn add(&self, content: &str) -> Result<Item> {
+        let content = content.to_string();
+        self.blocking(move |inner| {
+            let outcome = ingest(
+                &inner.store,
+                &inner.detector,
+                &inner.keyring,
+                &content,
+                copypaste_ipc::content_type::TEXT,
+                &inner.settings,
+            );
+            match outcome {
+                Ok(ingested) => inner.to_wire(ingested.into_item()),
+                // Both refusals are the user's own configuration answering, so
+                // they are reported as invalid input rather than as a fault —
+                // and neither is retryable with the same content.
+                Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
+                Err(IngestError::TooLarge) => Err(BackendError::Invalid(MSG_TOO_LARGE)),
+                Err(e) => {
+                    tracing::warn!(error = ?e, "a capture could not be stored");
+                    Err(BackendError::internal(MSG_NOT_STORED))
+                }
+            }
+        })
+        .await
     }
 
     async fn get(&self, id: &str) -> Result<Item> {
@@ -541,7 +575,6 @@ mod tests {
     async fn the_unimplemented_operations_say_so_plainly() {
         let (backend, _clip, _dir) = backend();
         for err in [
-            backend.add("x").await.unwrap_err(),
             backend.pair_create("phone").await.unwrap_err(),
             backend.pair_accept("code", "1.2.3.4:1").await.unwrap_err(),
             backend.sync(None).await.unwrap_err(),
@@ -554,6 +587,64 @@ mod tests {
             assert!(!shown.contains("try again"), "reads as transient: {shown}");
             assert!(!shown.contains('/'), "a path reached the user: {shown}");
         }
+    }
+
+    /// Rung 0 has no value at all unless this works: the share sheet, the
+    /// text-selection action and the tile all end here.
+    #[tokio::test]
+    async fn a_captured_clip_is_stored_searchable_and_readable_again() {
+        let (backend, _clip, _dir) = backend();
+        let item = backend.add("a shared note").await.unwrap();
+        assert_eq!(item.content, "a shared note");
+
+        assert_eq!(backend.list(50, 0).await.unwrap().items.len(), 1);
+        assert_eq!(backend.search("shared", 20).await.unwrap().items.len(), 1);
+        assert_eq!(
+            backend.get(&item.id).await.unwrap().content,
+            "a shared note"
+        );
+    }
+
+    /// The same text twice is one row. Not because this file says so — the
+    /// dedup probe inside `copypaste_core::ingest` says so, and that is the
+    /// point of calling it rather than re-deriving it.
+    #[tokio::test]
+    async fn the_same_clip_captured_twice_does_not_double() {
+        let (backend, _clip, _dir) = backend();
+        backend.add("same").await.unwrap();
+        backend.add("same").await.unwrap();
+        assert_eq!(backend.list(50, 0).await.unwrap().items.len(), 1);
+    }
+
+    /// CLAUDE.md rule 4, the write-time layer: a detected secret is stored but
+    /// never indexed, on this platform as on the other.
+    #[tokio::test]
+    async fn a_captured_secret_is_stored_and_stays_out_of_the_index() {
+        let (backend, _clip, _dir) = backend();
+        let item = backend.add("AKIAIOSFODNN7EXAMPLE").await.unwrap();
+        assert!(item.is_sensitive, "the detector did not flag a known key");
+        assert!(
+            backend
+                .search("AKIAIOSFODNN7EXAMPLE", 20)
+                .await
+                .unwrap()
+                .items
+                .is_empty(),
+            "a sensitive item reached the search index"
+        );
+        // …and it is still the user's data: reachable by id, which is how the
+        // reveal gesture gets to it.
+        assert!(backend.get(&item.id).await.unwrap().is_sensitive);
+    }
+
+    #[tokio::test]
+    async fn an_empty_capture_is_refused_without_storing_anything() {
+        let (backend, _clip, _dir) = backend();
+        assert!(matches!(
+            backend.add("   ").await.unwrap_err(),
+            BackendError::Invalid(_)
+        ));
+        assert!(backend.list(50, 0).await.unwrap().items.is_empty());
     }
 
     #[tokio::test]

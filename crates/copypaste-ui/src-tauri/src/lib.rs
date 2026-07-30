@@ -2,6 +2,9 @@
 //!
 //! This file does one job: assemble the app. The parts it assembles are:
 //!
+//! * [`capture`] — the Android clipboard ladder (rung 0 and rung 2), and the
+//!   one state that says whether it is actually working. On macOS it is a
+//!   constant, so the same commands and the same status component serve both.
 //! * [`backend`] — one command surface over two backends. macOS talks IPC to
 //!   the daemon over its `0600` Unix socket; Android runs `copypaste-core` and
 //!   `copypaste-p2p` in the app process, because Android hosts no daemon. The
@@ -35,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 pub mod backend;
+pub mod capture;
 pub mod commands;
 pub mod model;
 pub mod service;
@@ -56,10 +60,19 @@ pub fn run() {
         .plugin(shell::hotkey::plugin())
         .plugin(shell::autostart::plugin());
 
+    // The Kotlin half of the capture ladder. Its setup registers the Android
+    // plugin and publishes the `SelectedCapture` the commands are written
+    // against; on the desktop the equivalent is managed below.
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(capture::android::init());
+
     builder
         .setup(|app| {
             app.manage(make_backend(app)?);
             app.manage(Supervisor::default());
+
+            #[cfg(not(target_os = "android"))]
+            app.manage(capture::desktop::DesktopCapture::default());
 
             // A menu-bar app, not a windowed one: no Dock icon, no app menu,
             // and the popover does not steal the active application. Without
@@ -105,6 +118,10 @@ pub fn run() {
             // the frontend's poll whenever it is not delivering (finding 15).
             service::push::spawn(app.handle().clone());
 
+            // Moves what the platform captured into the database. Inert on the
+            // desktop, where the daemon is the thing doing the capturing.
+            capture::intake::spawn(app.handle().clone());
+
             Ok(())
         })
         .on_window_event(|_window, _event| {
@@ -124,6 +141,15 @@ pub fn run() {
             commands::history::reorder_pinned,
             // state
             commands::status::status,
+            // clipboard capture, and the Android ladder
+            commands::capture::capture_state,
+            commands::capture::capture_refresh,
+            commands::capture::capture_arm,
+            commands::capture::capture_disarm,
+            commands::capture::capture_set_enabled,
+            commands::capture::capture_now,
+            commands::capture::capture_toast_explanation,
+            commands::capture::capture_set_toast_suppressed,
             // the background service, and the window
             commands::service::service_state,
             commands::service::start_service,

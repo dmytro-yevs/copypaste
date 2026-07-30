@@ -28,6 +28,9 @@ enum Liveness {
 pub struct FakeBackend {
     liveness: Liveness,
     page: Mutex<Page>,
+    /// `None` when `add` refuses, which is the default: a test that stored
+    /// something by accident should fail rather than pass on a stub.
+    added: Option<Mutex<Vec<String>>>,
 }
 
 impl FakeBackend {
@@ -35,6 +38,7 @@ impl FakeBackend {
         Self {
             liveness,
             page: Mutex::new(Page::default()),
+            added: None,
         }
     }
 
@@ -55,6 +59,24 @@ impl FakeBackend {
         *self.page.lock().unwrap() = page;
         self
     }
+
+    /// Let `add` succeed, recording what it was given.
+    ///
+    /// For `crate::capture::intake`, which has to be tested against a backend
+    /// that stores — the Android one does not yet, and that refusal is the
+    /// thing being tested around.
+    pub fn accepting_adds(mut self) -> Self {
+        self.added = Some(Mutex::new(Vec::new()));
+        self
+    }
+
+    /// What `add` was given, oldest first.
+    pub fn added(&self) -> Vec<String> {
+        self.added
+            .as_ref()
+            .map(|a| a.lock().unwrap().clone())
+            .unwrap_or_default()
+    }
 }
 
 fn refused() -> BackendError {
@@ -70,8 +92,26 @@ impl Backend for FakeBackend {
         Ok(self.page.lock().unwrap().clone())
     }
 
-    async fn add(&self, _content: &str) -> Result<Item> {
-        Err(refused())
+    async fn add(&self, content: &str) -> Result<Item> {
+        let Some(added) = self.added.as_ref() else {
+            return Err(refused());
+        };
+        let mut added = added.lock().unwrap();
+        added.push(content.to_string());
+        Ok(Item {
+            id: format!("item-{}", added.len()),
+            content: content.to_string(),
+            content_type: "text/plain".into(),
+            created_at: 0,
+            pinned: false,
+            // The detector lives behind the backend, so the fake stands in for
+            // it with the one rule the intake tests need: anything containing
+            // this marker is treated as a secret.
+            is_sensitive: content.contains("AKIA"),
+            origin_device_id: "fake-device".into(),
+            origin_device_name: None,
+            too_large_to_sync: false,
+        })
     }
 
     async fn get(&self, _id: &str) -> Result<Item> {
