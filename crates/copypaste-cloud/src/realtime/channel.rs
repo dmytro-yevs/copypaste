@@ -4,7 +4,17 @@
 //! The three things that decide whether the subscription is *safe* rather than
 //! merely working all live here — the token's subject becomes the per-user
 //! filter, the anon key goes in a header rather than the URL, and the join is
-//! not considered done until the server says so.
+//! not considered done until the server has confirmed **the subscription we
+//! asked for**.
+//!
+//! That last one is stronger than it sounds. Supabase answers `phx_join` with
+//! `{"status":"ok","response":{"postgres_changes":[…]}}`, and the array it
+//! returns is what the server actually registered — which is not necessarily
+//! what was requested. A server that dropped or narrowed the
+//! `user_id=eq.<uuid>` filter, or registered `INSERT` where `*` was asked for,
+//! still answers `ok`. Taking that as a healthy join means believing a channel
+//! is carrying deletes when it is carrying none, and slowing the poll loop to
+//! its long ceiling on the strength of it (manifest 05 §4.8).
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
 use base64::Engine as _;
@@ -58,9 +68,9 @@ pub(super) async fn open_channel(
         // first.
         loop {
             match ws.next().await {
-                Some(Ok(Message::Text(text))) => match join_reply(&text) {
-                    Some(true) => return Ok(ws),
-                    Some(false) => return Err(RealtimeError::JoinRefused),
+                Some(Ok(Message::Text(text))) => match join_reply(&text, user_id) {
+                    Some(Ok(())) => return Ok(ws),
+                    Some(Err(e)) => return Err(e),
                     None => continue,
                 },
                 Some(Ok(Message::Close(_))) | None => {
@@ -98,25 +108,76 @@ fn join_frame(access_token: &str, user_id: &str) -> Value {
         {
             "config": {
                 "access_token": access_token,
-                "postgres_changes": [{
-                    "event": "*",
-                    "schema": "public",
-                    "table": TABLE,
-                    "filter": format!("user_id=eq.{user_id}"),
-                }],
+                "postgres_changes": [subscription(user_id)],
             }
         }
     ])
 }
 
-/// `Some(true)` for a confirmed join, `Some(false)` for a refused one, `None`
-/// if this frame is not a reply to our join at all.
-fn join_reply(text: &str) -> Option<bool> {
+/// The one subscription this client asks for, and the one it checks it got.
+///
+/// Written once, so the request and the assertion cannot drift — a check
+/// against a separately-spelled expectation is a check that keeps passing after
+/// the request changes.
+fn subscription(user_id: &str) -> Value {
+    json!({
+        "event": "*",
+        "schema": "public",
+        "table": TABLE,
+        "filter": format!("user_id=eq.{user_id}"),
+    })
+}
+
+/// `Some(Ok(()))` for a confirmed join of the subscription we asked for,
+/// `Some(Err(_))` for a refused or altered one, `None` if this frame is not a
+/// reply to our join at all.
+fn join_reply(text: &str, user_id: &str) -> Option<Result<(), RealtimeError>> {
     let frame = parse_frame(text).ok()?;
     if frame.event != "phx_reply" || frame.topic != TOPIC {
         return None;
     }
-    Some(frame.payload.get("status").and_then(Value::as_str) == Some("ok"))
+    if frame.payload.get("status").and_then(Value::as_str) != Some("ok") {
+        return Some(Err(RealtimeError::JoinRefused));
+    }
+    Some(confirms_subscription(&frame.payload, user_id))
+}
+
+/// Does the server's echo describe the subscription that was requested?
+///
+/// Compared field by field rather than as whole values: the echo adds a server
+/// -assigned `id` that the request does not have, and an equality test would
+/// therefore fail on every healthy join.
+///
+/// An **absent** echo is a mismatch, not a pass. A server that says nothing
+/// about what it registered is indistinguishable, from here, from one that
+/// registered something narrower — and the cost of being wrong is asymmetric:
+/// refusing a good join loses latency, while accepting a bad one loses events
+/// with no symptom at all. The poll loop is the correctness mechanism either
+/// way (manifest 05 §5.1 row 9a).
+fn confirms_subscription(payload: &Value, user_id: &str) -> Result<(), RealtimeError> {
+    let confirmed = payload
+        .get("response")
+        .and_then(|r| r.get("postgres_changes"))
+        .and_then(Value::as_array)
+        .ok_or(RealtimeError::JoinMismatch)?;
+
+    let [confirmed] = confirmed.as_slice() else {
+        return Err(RealtimeError::JoinMismatch);
+    };
+
+    let requested = subscription(user_id);
+    let same = ["event", "schema", "table", "filter"]
+        .into_iter()
+        .all(|field| confirmed.get(field) == requested.get(field));
+
+    if same {
+        Ok(())
+    } else {
+        // Not logged with the two configurations in it: the filter carries the
+        // account's user id, and this module logs no payloads.
+        tracing::warn!("the realtime server confirmed a different subscription than requested");
+        Err(RealtimeError::JoinMismatch)
+    }
 }
 
 /// `https://…` / `http://…` -> the realtime websocket endpoint.
@@ -211,26 +272,101 @@ mod tests {
         assert_eq!(frame[3], "phx_join");
     }
 
+    /// A `phx_reply` carrying the server's echo of what it registered.
+    fn reply(status: &str, confirmed: &str) -> String {
+        format!(
+            r#"["1","1","realtime:clipboard_items","phx_reply",
+                {{"status":"{status}","response":{{"postgres_changes":{confirmed}}}}}]"#
+        )
+    }
+
+    /// What a healthy Supabase join answers: our four fields plus a
+    /// server-assigned id.
+    fn echo(user: &str) -> String {
+        format!(
+            r#"[{{"id":12345,"event":"*","schema":"public",
+                  "table":"clipboard_items","filter":"user_id=eq.{user}"}}]"#
+        )
+    }
+
     #[test]
     fn only_an_ok_reply_on_our_topic_confirms_the_join() {
+        assert_eq!(join_reply(&reply("ok", &echo(USER)), USER), Some(Ok(())));
         assert_eq!(
-            join_reply(r#"["1","1","realtime:clipboard_items","phx_reply",{"status":"ok"}]"#),
-            Some(true)
-        );
-        assert_eq!(
-            join_reply(r#"["1","1","realtime:clipboard_items","phx_reply",{"status":"error"}]"#),
-            Some(false)
+            join_reply(&reply("error", &echo(USER)), USER),
+            Some(Err(RealtimeError::JoinRefused))
         );
         // A reply for another topic, or another event, is not our confirmation.
         assert_eq!(
-            join_reply(r#"[null,"2","phoenix","phx_reply",{"status":"ok"}]"#),
+            join_reply(r#"[null,"2","phoenix","phx_reply",{"status":"ok"}]"#, USER),
             None
         );
         assert_eq!(
-            join_reply(r#"["1","1","realtime:clipboard_items","phx_error",{}]"#),
+            join_reply(
+                r#"["1","1","realtime:clipboard_items","phx_error",{}]"#,
+                USER
+            ),
             None
         );
-        assert_eq!(join_reply("garbage"), None);
+        assert_eq!(join_reply("garbage", USER), None);
+    }
+
+    #[test]
+    fn an_ok_reply_that_confirms_a_different_subscription_is_not_a_join() {
+        // Each of these is a channel that would look healthy and deliver less
+        // than the caller believes. The filter cases are the sharp ones: a
+        // subscription without `user_id=eq.<uuid>` sees another account's rows
+        // before RLS applies, and one narrowed to somebody else's id sees
+        // nothing at all.
+        let other = "6b1e2f80-0000-4000-8000-000000000002";
+        let cases = [
+            // INSERT-only: no updates, and therefore no deletes.
+            r#"[{"id":1,"event":"INSERT","schema":"public","table":"clipboard_items","filter":"user_id=eq.6b1e2f80-0000-4000-8000-000000000001"}]"#.to_string(),
+            // The filter dropped entirely.
+            r#"[{"id":1,"event":"*","schema":"public","table":"clipboard_items"}]"#.to_string(),
+            // The filter silently narrowed to another account.
+            format!(r#"[{{"id":1,"event":"*","schema":"public","table":"clipboard_items","filter":"user_id=eq.{other}"}}]"#),
+            // Another table.
+            r#"[{"id":1,"event":"*","schema":"public","table":"other","filter":"user_id=eq.6b1e2f80-0000-4000-8000-000000000001"}]"#.to_string(),
+            // Nothing registered, or more than we asked for.
+            "[]".to_string(),
+            format!("[{}, {}]", &echo(USER)[1..echo(USER).len() - 1], &echo(USER)[1..echo(USER).len() - 1]),
+        ];
+
+        for confirmed in cases {
+            assert_eq!(
+                join_reply(&reply("ok", &confirmed), USER),
+                Some(Err(RealtimeError::JoinMismatch)),
+                "accepted a join that confirmed {confirmed}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ok_reply_that_says_nothing_about_what_it_registered_is_refused() {
+        // Believing an unqualified `ok` is exactly the hole this closes: we
+        // cannot tell "registered what you asked for" from "registered
+        // something narrower" without being told.
+        for payload in [
+            r#"{"status":"ok"}"#,
+            r#"{"status":"ok","response":{}}"#,
+            r#"{"status":"ok","response":{"postgres_changes":null}}"#,
+        ] {
+            let frame = format!(r#"["1","1","realtime:clipboard_items","phx_reply",{payload}]"#);
+            assert_eq!(
+                join_reply(&frame, USER),
+                Some(Err(RealtimeError::JoinMismatch)),
+                "accepted {payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_request_and_the_check_read_the_same_configuration() {
+        // One spelling of the subscription. If these ever came apart, the check
+        // would keep passing while the request changed underneath it.
+        let requested = &join_frame("jwt", USER)[4]["config"]["postgres_changes"][0];
+        assert_eq!(requested, &subscription(USER));
     }
 
     #[test]

@@ -38,10 +38,10 @@ set local role authenticated;
 -- Exactly the column list the client sends: no `user_id`, and `deleted` always
 -- explicit (manifest 05 T-5).
 insert into public.clipboard_items
-    (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
+    (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
 values
-    ('alice-1', 'Y2lwaGVy', 'bm9uY2U=', 'text', 1700000000000, false, 'device-a'),
-    ('alice-2', 'Y2lwaGVy', 'bm9uY2U=', 'text', 1700000000001, false, 'device-a');
+    ('alice-1', 'Y2lwaGVy', 'bm9uY2U=', 'text', 1700000000000, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA='),
+    ('alice-2', 'Y2lwaGVy', 'bm9uY2U=', 'text', 1700000000001, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
 
 do $$
 begin
@@ -54,18 +54,19 @@ $$;
 
 -- The upsert the client actually issues: PostgREST turns
 -- `?on_conflict=user_id,item_id` + `Prefer: resolution=merge-duplicates` into
--- this statement. Replaying it must be a no-op, not a 409.
+-- this statement. Replaying it must be a no-op, not a conflict.
 insert into public.clipboard_items
-    (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
+    (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
 values
-    ('alice-1', 'bmV3ZXI=', 'bm9uY2Uy', 'text', 1700000000002, false, 'device-a')
+    ('alice-1', 'bmV3ZXI=', 'bm9uY2Uy', 'text', 1700000000002, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=')
 on conflict (user_id, item_id) do update set
     ciphertext       = excluded.ciphertext,
     nonce            = excluded.nonce,
     content_type     = excluded.content_type,
     created_at       = excluded.created_at,
     deleted          = excluded.deleted,
-    origin_device_id = excluded.origin_device_id;
+    origin_device_id = excluded.origin_device_id,
+    signature        = excluded.signature;
 
 do $$
 begin
@@ -84,9 +85,11 @@ do $$
 begin
     begin
         insert into public.clipboard_items
-            (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
+            (user_id, item_id, ciphertext, nonce, content_type, created_at, deleted,
+             origin_device_id, signature)
         values
-            ('22222222-2222-4222-8222-222222222222', 'planted', 'Y3Q=', 'bm8=', 'text', 1, false, 'd');
+            ('22222222-2222-4222-8222-222222222222', 'planted', 'Y3Q=', 'bm8=', 'text', 1, false,
+             'd', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
         raise exception 'a row was written into another account';
     exception when insufficient_privilege then
         null;  -- either the `with check` or the missing column grant; both are correct
@@ -134,8 +137,8 @@ begin
     -- T-4: a tombstone must never carry a payload.
     begin
         insert into public.clipboard_items
-            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
-        values ('leaky', 'c3RhbGU=', 'bm8=', 'text', 5, true, 'device-a');
+            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+        values ('leaky', 'c3RhbGU=', 'bm8=', 'text', 5, true, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
         raise exception 'a tombstone carrying ciphertext was accepted';
     exception when check_violation then
         null;
@@ -144,8 +147,8 @@ begin
     -- A live row with no payload is equally refused.
     begin
         insert into public.clipboard_items
-            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
-        values ('empty', '', '', 'text', 5, false, 'device-a');
+            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+        values ('empty', '', '', 'text', 5, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
         raise exception 'a live row with no ciphertext was accepted';
     exception when check_violation then
         null;
@@ -154,8 +157,8 @@ begin
     -- An id that would change the meaning of a PostgREST `in.(…)` filter.
     begin
         insert into public.clipboard_items
-            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
-        values ('a1,*', 'Y3Q=', 'bm8=', 'text', 5, false, 'device-a');
+            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+        values ('a1,*', 'Y3Q=', 'bm8=', 'text', 5, false, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=');
         raise exception 'an item_id outside [A-Za-z0-9_-] was accepted';
     exception when check_violation then
         null;
@@ -163,17 +166,59 @@ begin
 end
 $$;
 
--- The PATCH path: `deleted = true`, payload nulled, `created_at` restamped so
--- the deletion sorts above every device's watermark.
-update public.clipboard_items
-   set deleted = true, ciphertext = null, nonce = null, created_at = 1700000009999
- where item_id = 'alice-2';
+-- A delete: an ordinary upsert of a version with `deleted = true`, no payload,
+-- and `created_at` restamped so the deletion sorts above every device's
+-- watermark. There is no id-only PATCH path any more — a partial write cannot
+-- carry a signature over the columns it does not send.
+insert into public.clipboard_items
+    (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+values
+    ('alice-2', '', '', 'text', 1700000009999, true, 'device-a', 'c2lnbmF0dXJlLXBsYWNlaG9sZGVyLTAwMDAwMDAwMDAwMDA=')
+on conflict (user_id, item_id) do update set
+    ciphertext       = excluded.ciphertext,
+    nonce            = excluded.nonce,
+    content_type     = excluded.content_type,
+    created_at       = excluded.created_at,
+    deleted          = excluded.deleted,
+    origin_device_id = excluded.origin_device_id,
+    signature        = excluded.signature;
 
 do $$
 begin
     if not (select deleted from public.clipboard_items where item_id = 'alice-2') then
-        raise exception 'the tombstone patch did not apply';
+        raise exception 'the tombstone upsert did not apply';
     end if;
+    if (select coalesce(ciphertext, '') from public.clipboard_items where item_id = 'alice-2') <> '' then
+        raise exception 'the tombstone kept a payload';
+    end if;
+end
+$$;
+
+-- --- an unsigned row cannot be written at all ------------------------------
+
+do $$
+begin
+    -- The deployment half of manifest 05 §5.3. The client refuses unsigned rows
+    -- on the way out and refuses them again on the way in; this is the third
+    -- point, and the only one an attacker with the account password has to get
+    -- past before the row exists at all.
+    begin
+        insert into public.clipboard_items
+            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
+        values ('unsigned', 'Y3Q=', 'bm8=', 'text', 5, false, 'device-a');
+        raise exception 'a row with no signature was accepted';
+    exception when not_null_violation then
+        null;
+    end;
+
+    begin
+        insert into public.clipboard_items
+            (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id, signature)
+        values ('junk-signature', 'Y3Q=', 'bm8=', 'text', 5, false, 'device-a', 'not base64!!');
+        raise exception 'a signature outside the base64 alphabet was accepted';
+    exception when check_violation then
+        null;
+    end;
 end
 $$;
 

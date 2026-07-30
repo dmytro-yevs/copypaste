@@ -5,7 +5,7 @@
 //! The SQL below is the contract this module codes against. It is written out
 //! here rather than in a `docs/` file that drifts, because two things in it are
 //! load-bearing for code in this module: the unique index (without it the upsert
-//! conflict target does not resolve and every replay fails at runtime), and the
+//! conflict target does not resolve and every write fails at runtime), and the
 //! `user_id` default (without it the client would have to spell out `user_id`,
 //! which the RLS `with check` would then have to be trusted to police).
 //!
@@ -39,6 +39,12 @@
 //!     -- resurrects a deleted item (manifest T-5).
 //!     deleted           boolean not null default false,
 //!     origin_device_id  text not null,
+//!     -- HMAC over every column above, under a key derived from the sync key
+//!     -- (`crypto::sign`). The server can neither produce nor check it; it is
+//!     -- what stops an account-password holder forging the metadata the merge
+//!     -- orders on (manifest §5.3). `not null`, so a row that was never signed
+//!     -- cannot be written at all.
+//!     signature         text not null,
 //!     -- Server-assigned, for retention. A retention job must order on this,
 //!     -- never on the client-supplied `created_at`, or a device with a forged
 //!     -- clock can escape eviction (manifest §5.1 row 4a).
@@ -47,7 +53,8 @@
 //! );
 //!
 //! -- The upsert conflict target. PostgREST needs a unique index to resolve
-//! -- `on_conflict`; without this, a replayed batch is a 409, not a no-op.
+//! -- `on_conflict`; without this, every write fails 400 (`42P10`), not just a
+//! -- replay. Measured against PostgREST 12.2.3.
 //! -- Scoped to (user_id, item_id) rather than item_id alone because this is a
 //! -- shared table (manifest §4.2).
 //! create unique index clipboard_items_user_item_uidx
@@ -112,6 +119,16 @@
 //! so every device signed into the account reads every other device's rows.
 //! That is the model the whole design assumes.
 //!
+//! # One write path
+//!
+//! Everything this client writes goes through [`SupabaseRest::upsert`],
+//! tombstones included. There is no id-only `PATCH` path: a partial write
+//! cannot carry a correct metadata signature, because the signature covers
+//! columns a `PATCH` does not hold (`content_type`, `origin_device_id`), and a
+//! row whose signature does not cover them is a row every device refuses.
+//! Manifest 05 §7.5 asked for one upsert and one code path for a different
+//! reason — v1's second path dropped every re-push — and this is that path.
+//!
 //! # What this module does not do
 //!
 //! It does not merge. It fetches a page, writes a batch, and reports what the
@@ -153,7 +170,7 @@ pub const TABLE: &str = "clipboard_items";
 /// Explicit column list. Naming the columns rather than `select=*` means a
 /// column added to the table later cannot change what this client parses.
 pub const SELECT_COLUMNS: &str =
-    "item_id,ciphertext,nonce,content_type,created_at,deleted,origin_device_id";
+    "item_id,ciphertext,nonce,content_type,created_at,deleted,origin_device_id,signature";
 
 /// Upper bound on a page, whatever the caller asks for.
 ///
@@ -166,10 +183,6 @@ pub const MAX_PAGE_LIMIT: u32 = 200;
 /// Batches keep the round-trip count down; chunking keeps any one request
 /// inside the backend's body limit and keeps a retry cheap.
 pub const UPSERT_CHUNK: usize = 100;
-
-/// Item ids per tombstone request. Smaller than [`UPSERT_CHUNK`] because these
-/// go into the query string, which has a much lower practical ceiling.
-pub const TOMBSTONE_CHUNK: usize = 50;
 
 /// The conflict target, and the unique index it needs.
 ///

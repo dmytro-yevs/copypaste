@@ -46,6 +46,18 @@ pub enum CloudCryptoError {
     #[error("the stored row is not well formed")]
     Malformed,
 
+    /// The row's metadata was not signed by a holder of the sync key: the
+    /// signature is absent, unparseable, or simply wrong.
+    ///
+    /// Not distinguished from one another, for the same reason
+    /// [`CloudCryptoError::AuthFailed`] is not: the only correct response to any
+    /// of them is to refuse the row before it participates in the merge
+    /// (manifest 05 §5.3), and a caller that could tell "unsigned" from "wrongly
+    /// signed" would be an oracle for whichever of the two an attacker was
+    /// probing.
+    #[error("the row's metadata signature did not verify")]
+    SignatureInvalid,
+
     /// A primitive failed for a reason that is not attacker-controlled — an
     /// Argon2 parameter the implementation rejects, or an AEAD input past the
     /// ~256 GiB per-message limit.
@@ -68,6 +80,7 @@ mod tests {
             CloudCryptoError::PassphraseTooShort,
             CloudCryptoError::EmptyAccountId,
             CloudCryptoError::Malformed,
+            CloudCryptoError::SignatureInvalid,
             CloudCryptoError::Internal("AEAD rejected the plaintext (too large)"),
         ];
         for e in errors {
