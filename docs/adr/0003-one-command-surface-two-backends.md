@@ -157,30 +157,36 @@ build — revoked on every update, for a setting the user made once.
 
 ## What the Android backend cannot do yet, and why it refuses rather than guesses
 
-Six operations — `set_config`, `export`, `import`, `backup`, `restore` and
-`reorder_pinned` — return a typed `Unsupported` error instead of an
-implementation. **This is a refusal, not an oversight.** `copypaste-daemon` is a
-binary crate with no `[lib]` target, so the logic behind each still lives
-somewhere Android cannot import: `server::transfer` owns the export/import skip
-accounting and the detector-re-runs-on-import rule, and `server::dbadmin` owns
-the validate-then-swap that keeps a bad backup from replacing a working history.
-Approximating either is the second implementation CLAUDE.md rule 1 exists to
-stop, and a file copy that looks like a restore and is not would be data loss.
-`set_config` refuses because there is nowhere to put the answer: a setting that
-does not outlive the process is not a setting.
+Four operations — `set_config`, `backup`, `restore` and `reorder_pinned` —
+return a typed `Unsupported` error instead of an implementation. **This is a
+refusal, not an oversight.** `copypaste-daemon` is a binary crate with no
+`[lib]` target, so the logic behind `backup` and `restore` still lives somewhere
+Android cannot import: `server::dbadmin` owns the validate-then-swap that keeps
+a bad backup from replacing a working history. Approximating it is the second
+implementation CLAUDE.md rule 1 exists to stop, and a file copy that looks like
+a restore and is not would be data loss. `set_config` refuses because there is
+nowhere to put the answer: a setting that does not outlive the process is not a
+setting.
 
 `reorder_pinned` refuses on both platforms — `Store::reorder_pinned` exists, but
 this build has no `Backend` route to it yet (parity finding 19).
 
 ### What has since been unblocked — the record of what it took
 
-This section listed `add`, `pair_create`, `pair_accept` and `sync` as blocked.
-All four now work, by the two moves this ADR called for, and the shape of the
-fix is worth keeping because the next refusal above will be resolved the same
-way.
+This section listed `add`, `pair_create`, `pair_accept`, `sync`, `export` and
+`import` as blocked. All six now work, by the moves this ADR called for, and the
+shape of the fix is worth keeping because the next refusal above will be
+resolved the same way.
 
 * **`add`** — `capture::ingest` moved down into `copypaste_core::ingest`. One
   implementation, four callers.
+* **`export`, `import`** — `server::transfer` moved down into
+  `copypaste_core::transfer`. The two rules that had to survive the move are the
+  reason it was a move and not a reimplementation: an export *counts* what it
+  withheld, and an import re-runs the detector over every item so an edited file
+  cannot mark a credential clean (manifest 04, PG-26). The daemon's handler is
+  now only the wire mapping — a pathless `Response`, and waking the two sync
+  transports once something was written.
 * **`pair_create`, `pair_accept`, `sync`, and both discovery operations** — the
   peer node moved up into `copypaste_p2p::node`, generic over `SyncSource`, and
   then `SyncSource` itself moved down into `copypaste_core::sync::StoreSource`.
