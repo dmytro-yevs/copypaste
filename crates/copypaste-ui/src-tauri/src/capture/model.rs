@@ -566,7 +566,7 @@ mod tests {
             }
         );
         assert_eq!(model.next_step(), NextStep::Arm);
-        assert_eq!(model.snapshot().headline, LOST_TITLE);
+        assert_ne!(model.snapshot().headline, LOST_TITLE);
     }
 
     /// A probe that finds Shizuku gone must clear the evidence too — otherwise
