@@ -36,7 +36,17 @@ defining it. v2 inverts that default. See [CLAUDE.md](CLAUDE.md).
 | `docs/rewrite/port-manifest/` | ~9,100 lines of specification harvested from v1 and its tests: ~500 acceptance tests, 200+ recovered bug IDs. **These are the requirements.** |
 | `docs/rewrite/target-architecture.md` | The library-first stack, per subsystem, and the six things that stay custom on purpose. |
 | `docs/rewrite/design-reference.html` | Visual reference for the v1 UI; its tokens are captured in manifest 06. |
-| `compat/` | Ciphertext and database files written by released v0.4.1, plus the tests that read them. The only implementation-independent proof that user data survives the upgrade. |
+
+## No upgrade path
+
+v2 does not read data written by v0.4.x. Existing installs lose their clipboard
+history and their paired devices; devices must be paired again.
+
+This is deliberate. It removes the migration ladder, `key_version` dispatch, the
+rotation and repair sweeps, and every wart kept only for bug-compatibility — a
+large share of the complexity this rewrite exists to shed. v2 uses a distinct
+database filename, so an old file is never opened or modified and remains on
+disk if you downgrade.
 
 ## What the manifests cover
 
@@ -54,11 +64,16 @@ defining it. v2 inverts that default. See [CLAUDE.md](CLAUDE.md).
 
 Nothing to build yet. The intended order is:
 
-1. Core crate: crypto and storage, wiring `compat/` in as the first tests that
-   must pass.
-2. Daemon: capture and IPC, against manifests 01 and 04.
+1. Core crate: crypto and storage — a single schema and a single key derivation,
+   with no legacy paths.
+2. Daemon: capture and IPC, against manifests 01 and 04. Manifest 01 is where
+   the hard-won macOS behaviour lives and is binding in full.
 3. Sync against manifest 05, on Supabase rather than a bespoke relay.
 4. UI against manifest 06, on the library stack in the architecture doc.
+
+[`docs/rewrite/port-manifest/README.md`](docs/rewrite/port-manifest/README.md)
+records which manifest sections are binding requirements and which became
+reference material when backward compatibility was dropped.
 
 ## Licence
 
