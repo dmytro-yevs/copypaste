@@ -23,8 +23,8 @@ extraction behind F-1 and F-2.
    it yet."* As of this review's final pass that is false:
    `daemon/src/cloud/{mod,handlers,poll,source}.rs` exist and
    `cloud/source.rs:107` calls `apply_remote_version`. Every cloud finding below
-   should therefore be read as live rather than latent, and the sentence needs
-   correcting. (The cloud module landed too late in the review for me to give it
+   should therefore be read as live rather than latent. **`SECURITY.md` has since
+   been corrected.** (The cloud module landed too late in the review for me to give it
    the same depth as the peer path — see "Suspected, not confirmed".)
 3. **Files moved during the review.** `daemon/src/p2p/meta/` became
    `daemon/src/meta/`, and `p2p/source.rs`'s duplicated merge logic was hoisted
@@ -39,16 +39,16 @@ extraction behind F-1 and F-2.
 
 | # | Severity | Finding |
 |---|---|---|
-| F-1 | High | Quoted credential values are systematically invisible to the detector |
-| F-2 | High | `aws_secret_access_key = …` — the literal `~/.aws/credentials` line — matches no rule |
-| F-3 | Medium | Peer-supplied `content_hash` is never checked against the content it arrived with |
-| F-4 | Medium | A remote tombstone clears `pinned`; a local `delete_all` deliberately does not |
+| F-1 | High | Quoted credential values are systematically invisible to the detector — **closed** |
+| F-2 | High | `aws_secret_access_key = …` — the literal `~/.aws/credentials` line — matches no rule — **closed** |
+| F-3 | Medium | Peer-supplied `content_hash` is never checked against the content it arrived with — **closed** |
+| F-4 | Medium | A remote tombstone clears `pinned`; a local `delete_all` deliberately does not — **decided the other way** |
 | F-5 | Medium | The clock-skew ceiling is enforced at one point per transport, not at the shared merge |
-| F-6 | Medium | A pairing token is minted, persisted and valid forever, with no expiry and no cap |
-| F-7 | Low | `SECURITY.md`'s mDNS claim is false: the advertised pairing id *is* a digest of the token |
+| F-6 | Medium | A pairing token is minted, persisted and valid forever, with no expiry and no cap — **closed** |
+| F-7 | Low | `SECURITY.md`'s mDNS claim is false: the advertised pairing id *is* a digest of the token — **half closed** |
 | F-8 | Low | Every inbound TCP connection copies all PSKs into a heap buffer that is never zeroized |
 | F-9 | Low | TOCTOU window between `bind()` and `chmod 0600` on the daemon socket |
-| F-10 | Low | Undecryptable rows vanish from `list`/`search` with no user-visible signal |
+| F-10 | Low | Undecryptable rows vanish from `list`/`search` with no user-visible signal — **closed** |
 | F-11 | Low | `--data-dir` does not relocate the device secret |
 | F-12 | Low | The "purge pass" three comments promise does not exist, and nothing ever re-evaluates `is_sensitive` |
 | F-13 | Low | `accept_any` does one X25519 per stored pairing per unauthenticated connection; pairings are uncapped |
@@ -65,7 +65,7 @@ divergence F-5/V-5 did *not* find, since you asked specifically.
 
 ## Findings
 
-### F-1 — High — Quoted credential values are systematically not detected
+### F-1 — High — Quoted credential values are systematically not detected · **closed** (`validators.rs` `unquote()`, and a quoted key in `generic_password_kv`)
 
 **Files:** `crates/copypaste-core/src/sensitive/validators.rs:15,71` ·
 `crates/copypaste-core/src/sensitive/rules.rs:340-346`
@@ -109,7 +109,7 @@ code-shape test (`"S3cr3tValue"` → `S3cr3tValue`), keep the rejection for
 the keyword pattern so `"password"\s*:\s*"…"` matches. Add all six rows above to
 the true-positive table in `engine.rs`.
 
-### F-2 — High — `aws_secret_access_key = …` matches no rule
+### F-2 — High — `aws_secret_access_key = …` matches no rule · **closed** (its own rule at 0.99, `sensitive/rules.rs`)
 
 **File:** `crates/copypaste-core/src/sensitive/rules.rs:340-346` (keyword list)
 
@@ -136,7 +136,7 @@ caught only because it happens to end in `_KEY`.
 While there: `glpat-` (GitLab PAT) and `Authorization: Basic <base64>` also match
 nothing today; `generic_bearer` covers only `Bearer`.
 
-### F-3 — Medium — Peer-supplied `content_hash` is stored and ordered on, unverified
+### F-3 — Medium — Peer-supplied `content_hash` is stored and ordered on, unverified · **closed** (`sync/session.rs`'s `receive_items` recomputes it and drops a live item that disagrees; a tombstone stays exempt)
 
 **Files:** `crates/copypaste-daemon/src/p2p/source.rs:113` ·
 `crates/copypaste-daemon/src/merge.rs:121-127,138-146`
@@ -176,7 +176,7 @@ from the content and either reject a mismatch or ignore the supplied value. That
 also removes the difference between the two transports, which is the point of the
 module.
 
-### F-4 — Medium — A remote tombstone clears `pinned`; a local `delete_all` does not
+### F-4 — Medium — A remote tombstone clears `pinned`; a local `delete_all` does not · **decided the other way** (`daemon/src/merge.rs` refuses a remote delete of a pinned row; manifest 05 §3.6 amended to match)
 
 **Files:** `crates/copypaste-daemon/src/meta/write.rs:56-57` ·
 `crates/copypaste-core/src/storage/items.rs:149-159`
@@ -244,7 +244,7 @@ nothing.
 already meet, and leave the `plan`/`pull` checks as the cheap early-out. Same
 argument as the comparator: the guard belongs where the two paths converge.
 
-### F-6 — Medium — A pairing token never expires and is never single-use
+### F-6 — Medium — A pairing token never expires and is never single-use · **closed** (`PAIRING_CODE_TTL` 300 s, burnt by the first completed session; the list is still uncapped — F-13)
 
 **File:** `crates/copypaste-daemon/src/p2p/handlers.rs:59-87`
 
@@ -266,7 +266,7 @@ expire it (minutes, not days); drop the entry once a session succeeds, or mark i
 established. Cap the pairing list. Surface unused pairings in `peers` so the UI
 can show "waiting to pair — expires in N minutes", which is also rule 6.
 
-### F-7 — Low — The mDNS claim is false as written
+### F-7 — Low — The mDNS claim is false as written · **half closed** (`SECURITY.md` corrected; `discovery/record.rs`'s module doc and its test are not)
 
 **Files:** `SECURITY.md:103` · `crates/copypaste-p2p/src/discovery/record.rs:14-19` ·
 `crates/copypaste-p2p/src/transport/token.rs:129-133`
@@ -345,7 +345,7 @@ parent-directory `0700` that would otherwise cover this is applied warn-only
 **Fix.** Set `umask(0o177)` around the bind and restore it, or bind to a
 temporary name inside the (already `0700`) directory and `rename` it into place.
 
-### F-10 — Low — Undecryptable rows disappear silently from every read path
+### F-10 — Low — Undecryptable rows disappear silently from every read path · **closed** (`ItemPage::skipped_undecryptable`, shown by `history/SkippedNotice.tsx`)
 
 **Files:** `crates/copypaste-daemon/src/server/items.rs:185-195` ·
 `crates/copypaste-ui/src-tauri/src/backend/embedded.rs:196-210`

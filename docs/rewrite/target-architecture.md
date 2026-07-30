@@ -13,7 +13,7 @@ version pins and the RustSec reasoning attached.
 | Concern | v1 (hand-rolled) | v2 |
 |---|---|---|
 | DB migrations | `user_version` ladder + three layers of race guards | `rusqlite_migration` |
-| Row mapping | positional column lists, hand-synced in three places | `serde_rusqlite`, by name |
+| Row mapping | positional column lists, hand-synced in three places | `rusqlite`'s `row.get("name")`, by name |
 | Connection pool | *(already correct)* | `r2d2` + `r2d2_sqlite` |
 | SQLCipher | *(inherent)* | `rusqlite` `bundled-sqlcipher` |
 | Retry / backoff | six implementations | one policy object |
@@ -139,8 +139,8 @@ sources of truth with a test between them.
 
 The visual system is decided — shadcn/ui on Tailwind v4, zinc base in OKLCH —
 and the accessibility numbers are measured rather than asserted: `npm run check`
-computes 636 composited pairs across both themes and all six accents and gates
-the build. [`design/README.md`](../../design/README.md) has the comparison that
+composites every pair across both themes and all six accents and gates the
+build. [`design/README.md`](../../design/README.md) has the comparison that
 was made and the three shadcn defaults that failed the contract.
 
 ## Release

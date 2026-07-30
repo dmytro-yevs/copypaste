@@ -31,7 +31,7 @@ and reviewed, and never observed doing its job on a platform we ship to.
 | Secret detection | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence bands; a flagged item never reaches the index and never leaves the device |
 | Capture | Clipboard behind a trait, so `changeCount` detection, burst handling, self-write suppression and the `org.nspasteboard.*` opt-outs are all tested against the fake source on any host |
 | IPC | `0600` Unix socket, newline-JSON, `LinesCodec` framing; `copypaste-ipc` is the only model of the contract, shared by daemon, CLI and the Tauri bridge |
-| CLI | `list search add copy get delete clear pin unpin status pair peers unpair sync cloud`, `--json` for scripting |
+| CLI | `list search add copy delete clear pin unpin status pair peers unpair sync cloud discover export import backup restore config watch`, `--json` for scripting |
 | Peer sync | Noise `NNpsk0` over TCP, pairing codes, LWW merge, delete-wins |
 | Cloud sync | Supabase auth, PostgREST, Realtime, rows sealed client-side under an Argon2id key; wired to the daemon and the CLI — but see below |
 | App | History, search, devices/pairing, settings; menu-bar item, popover, global hotkey and launch-at-login via Tauri plugins |
@@ -49,24 +49,18 @@ and reviewed, and never observed doing its job on a platform we ship to.
 
 ### Missing
 
-A [parity audit](docs/rewrite/parity-audit.md) against v0.4.1 found nineteen
-capabilities that were neither ported nor recorded as dropped. Pairing UI and
-the popup/hotkey shell have since landed; the rest have not. In rough order of
-what a user loses: no sensitive-item auto-wipe, no export/import, no
-backup/restore, no device revocation or key rotation, dedup only inside a
-60-second window (so re-copying an old item makes a second row), no daemon
-config or server-owned settings, pairing codes that never expire, no streaming
-updates, no discovery listing, no notifications, no bulk actions. The audit is
-the list; it and the [security review](docs/rewrite/security-review.md) also
-name two safety gaps — the socket bind is TOCTOU-racy, and the IPC accept loop
-has no connection cap and no read or write timeouts.
+[`docs/backlog.md`](docs/backlog.md) is the live list. The [parity
+audit](docs/rewrite/parity-audit.md) and the [security
+review](docs/rewrite/security-review.md) are dated, and about half of what they
+record has since closed. Outstanding, in rough order of what a user loses: no
+sensitive-item auto-wipe, no device revocation or key rotation reachable from a
+client, no notifications, and keyset pagination that exists in `copypaste-core`
+with no caller (`page::list_from` — the wire and the app still page by offset).
 
 Also absent: image, file and rich-text capture (text only), frontmost-app
 attribution — which manifest 07 makes an independent *sensitivity* signal, not
 just metadata — private mode, the app-exclusion list, rate limiting, and
-telemetry. Two capabilities exist in `copypaste-core` with no caller:
-`retention::evict_older_than` (age-based retention) and `page::list_from`
-(keyset pagination — the wire and the app still page by offset).
+telemetry.
 
 ## Build and run
 
