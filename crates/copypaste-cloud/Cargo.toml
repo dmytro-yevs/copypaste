@@ -29,3 +29,5 @@ hex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# `start_paused` for deterministic backoff tests without real sleeping.
+tokio = { workspace = true, features = ["test-util"] }
