@@ -96,14 +96,22 @@ jobs:
       - uses: actions/checkout@v5
 
       - id: resolve
+        # The dispatch inputs arrive as environment variables rather than
+        # through `${{ }}`. Interpolation splices the value into the script
+        # text before bash sees it, so a version containing a backtick or a
+        # semicolon would execute rather than fail validation.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "push" ]]; then
+          if [[ "$EVENT_NAME" == "push" ]]; then
             version="${GITHUB_REF_NAME#v}"
             publish=true
           else
-            version="${{ inputs.version }}"
-            publish="${{ inputs.publish }}"
+            version="${INPUT_VERSION:-}"
+            publish="${INPUT_PUBLISH:-false}"
           fi
           version="${version#v}"
 
@@ -132,6 +140,15 @@ jobs:
     name: Build macOS (arm64)
     needs: version
     runs-on: macos-14
+    # A macOS runner bills at ten times a Linux one, and the default job timeout
+    # is six hours. A Tauri build that hangs would spend a day of quota.
+    timeout-minutes: 90
+    env:
+      # `dtolnay/rust-toolchain` sets its toolchain with `rustup default`, and
+      # rust-toolchain.toml — channel = "stable" — outranks the default. Without
+      # this the release scripts' bare `cargo` builds on whatever stable is that
+      # week, not on the pinned 1.96. RUSTUP_TOOLCHAIN outranks both.
+      RUSTUP_TOOLCHAIN: "1.96"
     steps:
       - uses: actions/checkout@v5
 
@@ -219,7 +236,13 @@ jobs:
     name: Build Android (universal APK)
     needs: version
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
+      # See the macOS job: rust-toolchain.toml outranks `rustup default`, so
+      # without this the Rust half of the Gradle build runs under stable — for
+      # which `dtolnay/rust-toolchain` installed no Android target. The symptom
+      # is `can't find crate for 'std'` from inside a Gradle task.
+      RUSTUP_TOOLCHAIN: "1.96"
       # Pinned for the reason rust-toolchain.toml exists. An NDK that floats is
       # a build that changes under you, and the failure surfaces as a linker
       # error three layers down.
@@ -264,9 +287,25 @@ jobs:
             "ndk;${NDK_VERSION}" \
             "platforms;${ANDROID_PLATFORM}" \
             "build-tools;${BUILD_TOOLS_VERSION}"
+
+          # Asserted, not assumed. sdkmanager reports an unknown package as
+          # `Warning: Failed to find package …` and has exited 0 doing it, which
+          # would leave NDK_HOME pointing at nothing and surface four steps later
+          # as a linker error. The runner image pins its own NDK revision, so
+          # this list is exactly the set that had to be downloaded.
+          ndk="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+          tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          [[ -d "$ndk" ]] || { echo "::error::sdkmanager did not install ndk;${NDK_VERSION} — $ndk is absent"; exit 1; }
+          [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] \
+            || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
+          for t in zipalign apksigner aapt2; do
+            [[ -x "${tools}/${t}" ]] \
+              || { echo "::error::${tools}/${t} is missing — build-tools;${BUILD_TOOLS_VERSION} did not install"; exit 1; }
+          done
+
           {
-            echo "NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}"
-            echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}"
+            echo "NDK_HOME=${ndk}"
+            echo "ANDROID_NDK_HOME=${ndk}"
             echo "ANDROID_SDK_ROOT=${ANDROID_HOME}"
           } >> "$GITHUB_ENV"
 
@@ -284,13 +323,34 @@ jobs:
           cd crates/copypaste-ui
           npm ci
 
-          # Some of the scaffold is generated and git-ignored (tauri.properties,
-          # tauri.build.gradle.kts, the jniLibs). Regenerate only when it is
-          # absent, so a committed customisation is never clobbered.
+          # Part of the scaffold is generated and git-ignored, and two pieces of
+          # it are load-bearing at configuration time: settings.gradle does
+          # `apply from: 'tauri.settings.gradle'` and app/build.gradle.kts does
+          # `apply(from = "tauri.build.gradle.kts")`. Neither is in the
+          # repository, so this branch is taken on every clean checkout — it is
+          # the normal path in CI, not a fallback.
           # UNVERIFIED: whether `android build` alone would have regenerated it.
           if [[ ! -f "src-tauri/gen/android/app/tauri.build.gradle.kts" ]]; then
             echo "Generated Gradle files are absent; running 'tauri android init'."
             npm run tauri -- android init --skip-targets-install
+
+            for f in src-tauri/gen/android/tauri.settings.gradle \
+                     src-tauri/gen/android/app/tauri.build.gradle.kts; do
+              [[ -f "$f" ]] || {
+                echo "::error::'tauri android init' did not produce $f, which Gradle applies unconditionally"
+                exit 1
+              }
+            done
+
+            # `android init` regenerates the scaffold in place, and the
+            # committed half of gen/android is where the clipboard capture
+            # plugin lives. An overwrite would build, install and silently do
+            # nothing, so it fails here instead.
+            if ! git diff --quiet -- src-tauri/gen/android; then
+              echo "::error::'tauri android init' overwrote committed files under gen/android:"
+              git diff --name-only -- src-tauri/gen/android | sed 's/^/::error::  /'
+              exit 1
+            fi
           fi
 
           npm run tauri -- android build --apk
@@ -313,7 +373,10 @@ jobs:
           # The universal APK is the one a person can download and install on
           # any device. Per-ABI splits are smaller and are not what a release
           # page wants.
-          unsigned="$(find "$outputs" -name '*universal*release*.apk' | head -n1)"
+          # `-print -quit` rather than `| head -n1`: under `set -o pipefail`,
+          # head exiting first kills find with SIGPIPE, the pipeline reports
+          # 141, and the step dies with no message at all.
+          unsigned="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
           if [[ -z "$unsigned" ]]; then
             echo "::error::no universal release APK under $outputs. Found:"
             find "$outputs" -name '*.apk' | sed 's/^/::error::  /'
@@ -384,7 +447,7 @@ jobs:
         run: |
           set -euo pipefail
           tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
-          apk="$(find dist -name '*.apk' | head -n1)"
+          apk="$(find dist -name '*.apk' -print -quit)"
           {
             echo '## Android'
             echo
@@ -474,9 +537,7 @@ jobs:
       # The only widened permission in this file, and only on this job.
       contents: write
     steps:
-      # Needed for packaging/release-notes.md. The artefacts land in dist/
-      # (already gitignored) and tap/ (not — worth adding, but .gitignore is a
-      # shared file and this job only ever runs on a throwaway checkout).
+      # Needed for packaging/release-notes.md.
       - uses: actions/checkout@v5
 
       - uses: actions/download-artifact@v4

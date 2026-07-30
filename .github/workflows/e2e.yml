@@ -31,6 +31,11 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: 1
   MSRV: "1.96"
+  # `dtolnay/rust-toolchain` below sets 1.96 with `rustup default`, which
+  # rust-toolchain.toml (channel = "stable") outranks — so without this the
+  # bare `cargo` calls in this job silently build on stable and the declared
+  # pin means nothing.
+  RUSTUP_TOOLCHAIN: "1.96"
 
 jobs:
   e2e:
