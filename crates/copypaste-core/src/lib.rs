@@ -7,6 +7,7 @@ pub mod ingest;
 pub mod sensitive;
 pub mod storage;
 pub mod sync;
+pub mod transfer;
 
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
 pub use ingest::{ingest, ingest_into, IngestError, Ingested};
@@ -20,6 +21,7 @@ pub use storage::{
     V1_DATABASE_FILENAME,
 };
 pub use sync::{MergeError, RemoteVersion, StoreSource};
+pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};
 
 /// Milliseconds since the Unix epoch.
 ///
