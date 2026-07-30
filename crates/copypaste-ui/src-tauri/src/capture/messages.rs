@@ -28,7 +28,10 @@ pub const TOAST_EXPLANATION: &str = "Android shows \"Shell pasted from your clip
 pub const MSG_TOAST_UNEXPLAINED: &str =
     "CopyPaste won't turn off Android's clipboard notice until you've read what that does.";
 
-/// The notification raised the instant background capture stops.
+/// The notification raised the instant background capture stops. Notification
+/// copy only — in the app the user is already looking at the button, so "tap
+/// to restart" has nothing to tap on, and the screen is often reached
+/// deliberately rather than because something just stopped.
 pub const LOST_TITLE: &str = "Background capture stopped.";
 pub const LOST_BODY: &str =
     "CopyPaste is only saving what you copy inside the app. Tap to restart.";
@@ -50,7 +53,7 @@ pub(super) fn headline(platform: Rung, health: CaptureHealth) -> &'static str {
         CaptureHealth::GrantedNotWorking { reason } => match reason {
             NotWorkingReason::AwaitingFirstCopy => "Background capture is armed.",
             NotWorkingReason::ReadRefused => "Background capture isn't working.",
-            NotWorkingReason::NotArmed => LOST_TITLE,
+            NotWorkingReason::NotArmed => "Background capture needs turning back on.",
         },
     }
 }
@@ -86,7 +89,13 @@ pub(super) fn detail(platform: Rung, health: CaptureHealth) -> Option<&'static s
                 "Shizuku is running, but reading the clipboard was refused. Only what you copy \
                  inside the app is being saved."
             }
-            NotWorkingReason::NotArmed => LOST_BODY,
+            // Not LOST_BODY. A lost arm is what a reboot does, and the
+            // sibling NotRunning sentence says so; sharing the notification's
+            // wording made the routine case read as a fault.
+            NotWorkingReason::NotArmed => {
+                "Background capture stops whenever Shizuku does, which Android does on every \
+                 restart. Turning it back on takes one tap."
+            }
         },
     })
 }
