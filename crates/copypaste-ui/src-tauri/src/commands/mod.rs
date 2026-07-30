@@ -19,6 +19,7 @@
 //! Split by what the commands are *for*, because that is what changes together
 //! and because one file per concern keeps each well inside the rule 5 budget.
 
+pub mod capture;
 pub mod history;
 pub mod peers;
 pub mod service;
