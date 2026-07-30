@@ -181,6 +181,41 @@ attribute needs removing. The cost is that the user needs the Xcode command
 line tools and a long build — SQLCipher compiles from source — which is why it
 is the fallback and not the default.
 
+## An untested third path: re-sign on the user's machine
+
+Recorded because it would buy back auto-paste for nothing, and because it
+falls out of something v1 already shipped without noticing.
+
+v1's cask re-signed the app **on the user's machine at install time**:
+
+```ruby
+postflight do
+  system_command "/usr/bin/xattr",    args: ["-dr", "com.apple.quarantine", app_path]
+  system_command "/usr/bin/codesign", args: ["--force", "--deep", "--sign", "-", app_path]
+end
+```
+
+That was aimed at Gatekeeper. But re-signing locally is also the shape that
+fixes TCC: sign in `postflight` with a **self-signed certificate generated
+once on that machine and kept in the user's keychain**, and every later update
+is signed by the same certificate. The designated requirement stops moving, so
+the grant survives the upgrade — no Apple account, no CI secret, and no
+private key ever leaving the machine. TCC is per-machine anyway, so per-machine
+identities cost nothing.
+
+**Unresolved, and not answerable from documentation:** whether TCC requires a
+trusted certificate chain or only a valid signature matching the stored
+`csreq`. Trusting a self-signed root needs admin rights, which is real install
+friction if it turns out to be required.
+
+Ten minutes on a Mac settles it: sign with the certificate, grant
+Accessibility, rebuild, relaunch, see whether the grant survived. Until then
+the app requires no permission and this changes nothing we ship.
+
+Note also that v1 hit the ad-hoc instability and patched around it —
+`1bd33bf4`, "eliminate recurring Keychain prompt on ad-hoc installs …
+stable codesign identifier" — without connecting it to TCC.
+
 ## What would change this
 
 Enrolling in the Apple Developer Program. It would give a stable Team ID
