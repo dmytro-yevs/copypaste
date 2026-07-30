@@ -196,6 +196,46 @@ mod tests {
         Ok(())
     }
 
+    /// `copypaste-ipc` cannot depend on `copypaste-core` — the CLI depends on
+    /// the wire crate and must not be able to open a database — so the defaults
+    /// are written out there and pinned to the core constants here. Two numbers
+    /// for one decision is the duplication CLAUDE.md rule 1 is about; this test
+    /// is what keeps them one decision.
+    #[test]
+    fn defaults_agree_with_the_core_constants() {
+        let defaults = ConfigData::default();
+        assert_eq!(
+            defaults.sensitive_ttl_secs,
+            copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL.as_secs(),
+        );
+        assert_eq!(
+            i64::from(defaults.dedup_window_secs) * 1_000,
+            copypaste_core::storage::DEDUP_WINDOW_MS,
+        );
+    }
+
+    /// The disabled sentinel has to survive the round trip as itself: a `0`
+    /// that came back as the default would silently switch auto-deletion back
+    /// on for a user who turned it off.
+    #[test]
+    fn disabling_the_sensitive_ttl_survives_a_restart() {
+        let (state, dir) = test_state("alpha");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &ConfigPatch {
+                    sensitive_ttl_secs: Some(0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let (restarted, _dir) =
+            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
+        assert_eq!(restarted.settings.get().sensitive_ttl_secs, 0);
+    }
+
     #[test]
     fn no_settings_error_names_a_file() {
         for message in [
