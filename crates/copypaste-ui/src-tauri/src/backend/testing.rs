@@ -5,10 +5,12 @@
 //! anything interesting; the rest refuse, loudly enough that a test which
 //! reached one by accident fails rather than passing on a default.
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use copypaste_ipc::{
-    DiscoveredDevice, EventData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
+    ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
 };
 
 use super::{Backend, BackendError, Page, Result};
@@ -148,6 +150,7 @@ impl Backend for FakeBackend {
                 item_count: 0,
                 capture_running: true,
                 clipboard_backend: "fake".into(),
+                legacy_history_present: false,
             }),
         }
     }
@@ -177,6 +180,30 @@ impl Backend for FakeBackend {
     }
 
     async fn rescan(&self) -> Result<Vec<DiscoveredDevice>> {
+        Err(refused())
+    }
+
+    async fn get_config(&self) -> Result<ConfigApplied> {
+        Err(refused())
+    }
+
+    async fn set_config(&self, _patch: ConfigPatch) -> Result<ConfigApplied> {
+        Err(refused())
+    }
+
+    async fn export(&self, _limit: u32, _include_sensitive: bool) -> Result<ExportData> {
+        Err(refused())
+    }
+
+    async fn import(&self, _items: Vec<ExportItem>) -> Result<ImportData> {
+        Err(refused())
+    }
+
+    async fn backup(&self, _dest: &Path) -> Result<BackupData> {
+        Err(refused())
+    }
+
+    async fn restore(&self, _src: &Path) -> Result<()> {
         Err(refused())
     }
 

@@ -1,5 +1,23 @@
+/**
+ * What this device is holding, and every way of moving it.
+ *
+ * Three of the four actions here are irreversible in some direction, so each
+ * one that is asks first and says what it costs (CLAUDE.md rule 4):
+ *
+ * * **Export** is not destructive but it *leaks*: it writes every clip out as
+ *   readable text. The dialog says so, and the opt-in for flagged items is
+ *   inside it — which is the second ask the wire default exists to require.
+ * * **Import** adds and never replaces. The dialog says that too, because
+ *   "import" reads as "overwrite" and a user who expects to lose their history
+ *   will not press it.
+ * * **Restore** replaces everything, pinned items included, with nothing kept.
+ *   It is the one confirmation whose action is worded "Replace".
+ *
+ * Where the file goes is asked by the platform's own panel, in Rust. No path
+ * enters this component, so none can reach the DOM (INV-12).
+ */
 import { useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Archive, Download, RotateCcw, Trash2, Upload } from "lucide-react";
 
 import {
   AlertDialog,
@@ -11,18 +29,35 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { Row } from "@/components/settings/Row";
 import { useClearHistory, useStatus } from "@/hooks/useHistory";
+import {
+  useBackupDatabase,
+  useExportHistory,
+  useImportHistory,
+  useRestoreDatabase,
+} from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
+
+type Confirming = "none" | "clear" | "export" | "import" | "restore";
 
 export function StorageTab() {
   const { t } = useTranslation();
   const status = useStatus();
   const clear = useClearHistory();
-  const [confirming, setConfirming] = useState(false);
+  const exportHistory = useExportHistory();
+  const importHistory = useImportHistory();
+  const backup = useBackupDatabase();
+  const restore = useRestoreDatabase();
+
+  const [confirming, setConfirming] = useState<Confirming>("none");
+  const [includeSensitive, setIncludeSensitive] = useState(false);
+
+  const close = () => setConfirming("none");
 
   return (
     <div className="flex flex-col">
@@ -38,10 +73,68 @@ export function StorageTab() {
       </Row>
 
       <Row
-        title={t("settings.storage.retention.title")}
-        description={t("settings.storage.retention.description")}
+        title={t("settings.transfer.export.title")}
+        description={t("settings.transfer.export.description")}
       >
-        <Badge variant="secondary">{t("settings.storage.retention.badge")}</Badge>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={exportHistory.isPending}
+          onClick={() => {
+            // Reset every time: an opt-in that remembers is not an opt-in.
+            setIncludeSensitive(false);
+            setConfirming("export");
+          }}
+        >
+          <Download aria-hidden="true" />
+          {t("settings.transfer.export.action")}
+        </Button>
+      </Row>
+
+      <Row
+        title={t("settings.transfer.import.title")}
+        description={t("settings.transfer.import.description")}
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={importHistory.isPending}
+          onClick={() => setConfirming("import")}
+        >
+          <Upload aria-hidden="true" />
+          {t("settings.transfer.import.action")}
+        </Button>
+      </Row>
+
+      <Row
+        title={t("settings.transfer.backup.title")}
+        description={t("settings.transfer.backup.description")}
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={backup.isPending}
+          onClick={() => backup.mutate()}
+        >
+          <Archive aria-hidden="true" />
+          {t("settings.transfer.backup.action")}
+        </Button>
+      </Row>
+
+      <Row
+        title={t("settings.transfer.restore.title")}
+        description={t("settings.transfer.restore.description")}
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-err-strong"
+          disabled={restore.isPending}
+          onClick={() => setConfirming("restore")}
+        >
+          <RotateCcw aria-hidden="true" />
+          {t("settings.transfer.restore.action")}
+        </Button>
       </Row>
 
       <Row
@@ -53,14 +146,14 @@ export function StorageTab() {
           size="sm"
           className="text-err-strong"
           disabled={clear.isPending}
-          onClick={() => setConfirming(true)}
+          onClick={() => setConfirming("clear")}
         >
           <Trash2 aria-hidden="true" />
           {t("settings.storage.clear.action")}
         </Button>
       </Row>
 
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+      <AlertDialog open={confirming === "clear"} onOpenChange={close}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("history.clear.title")}</AlertDialogTitle>
@@ -74,10 +167,101 @@ export function StorageTab() {
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
                 clear.mutate();
-                setConfirming(false);
+                close();
               }}
             >
               {t("history.clear.action")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirming === "export"} onOpenChange={close}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("settings.transfer.export.dialogTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.transfer.export.dialogBody")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex flex-col gap-s-1">
+            <div className="flex items-center gap-s-2">
+              <Checkbox
+                id="export-include-sensitive"
+                checked={includeSensitive}
+                onCheckedChange={(checked) => setIncludeSensitive(checked === true)}
+              />
+              <Label htmlFor="export-include-sensitive">
+                {t("settings.transfer.export.includeSensitive")}
+              </Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("settings.transfer.export.includeSensitiveHint")}
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                exportHistory.mutate(includeSensitive);
+                close();
+              }}
+            >
+              {t("settings.transfer.export.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirming === "import"} onOpenChange={close}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("settings.transfer.import.dialogTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.transfer.import.dialogBody")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                importHistory.mutate();
+                close();
+              }}
+            >
+              {t("settings.transfer.import.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirming === "restore"} onOpenChange={close}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("settings.transfer.restore.dialogTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings.transfer.restore.dialogBody")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.transfer.restore.dialogSafety")}
+          </p>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: "destructive" }))}
+              onClick={() => {
+                restore.mutate();
+                close();
+              }}
+            >
+              {t("settings.transfer.restore.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -363,6 +363,109 @@ export function captureSetToastSuppressed(
   });
 }
 
+/* ------------------------------------------------- the service's settings --- */
+
+/**
+ * `copypaste_ipc::ConfigData`. These are the *service's* settings — what it
+ * captures, keeps and advertises — as opposed to the appearance and list
+ * preferences, which never leave the WebView.
+ *
+ * `excluded_app_bundle_ids` is carried so the shape matches the wire, and is
+ * deliberately not offered as a control: the service stores and returns it but
+ * does not yet enforce it, and a switch that does nothing is worse than none.
+ */
+export interface ConfigData {
+  readonly poll_interval_ms: number;
+  readonly history_limit: number;
+  /** `0` disables age-based eviction. */
+  readonly retention_days: number;
+  /** Two identical captures inside this window are one item. */
+  readonly dedup_window_secs: number;
+  readonly max_item_bytes: number;
+  /** `0` is **off**, not "delete immediately" (`CopyPaste-8ebg.1`). */
+  readonly sensitive_ttl_secs: number;
+  readonly excluded_app_bundle_ids: readonly string[];
+  readonly lan_visibility: boolean;
+  readonly sync_enabled: boolean;
+  readonly notify_on_copy: boolean;
+  readonly sound_on_copy: boolean;
+}
+
+/** Every field optional: a patch names only what changed, so two screens
+ *  editing different settings cannot overwrite each other (the reason
+ *  `SetConfig` is not a whole record). */
+export type ConfigPatch = Partial<{
+  -readonly [K in Exclude<keyof ConfigData, "excluded_app_bundle_ids">]: ConfigData[K];
+}>;
+
+/**
+ * `restart_required` names the fields the service has kept but not yet acted
+ * on. It comes back from the write rather than being derived here, so the app
+ * and the service cannot disagree about which those are.
+ */
+export interface ConfigApplied {
+  readonly config: ConfigData;
+  readonly restart_required: readonly string[];
+}
+
+export function getConfig(): Promise<ConfigApplied> {
+  return call<ConfigApplied>("get_config");
+}
+
+export function setConfig(patch: ConfigPatch): Promise<ConfigApplied> {
+  return call<ConfigApplied>("set_config", { patch });
+}
+
+/* -------------------------------------------------------------- transfer --- */
+
+/**
+ * **The three skip counts are always present, including when they are zero.**
+ * An export withholds every flagged item unless it was asked twice, and a user
+ * who is not told the number believes they exported everything.
+ */
+export interface ExportReport {
+  readonly exported: number;
+  readonly skipped_sensitive: number;
+  readonly skipped_non_text: number;
+  readonly skipped_undecryptable: number;
+}
+
+/** `skipped` counts items the service already held, not failures: a malformed
+ *  file is refused whole, before anything is written. */
+export interface ImportReport {
+  readonly inserted: number;
+  readonly skipped: number;
+}
+
+/**
+ * Where the file goes is asked and answered in Rust, by the platform's own
+ * panel. No path is passed in and none comes back — that is INV-12 held by the
+ * shape of the command rather than by remembering.
+ *
+ * `null` means the user closed the panel, which is not a failure.
+ */
+export function exportHistory(
+  includeSensitive: boolean,
+): Promise<ExportReport | null> {
+  return call<ExportReport | null>("export_history", { includeSensitive });
+}
+
+/** Overwrites nothing: every item goes through the same ingest a copy does, so
+ *  duplicates collapse and the detector runs again. */
+export function importHistory(): Promise<ImportReport | null> {
+  return call<ImportReport | null>("import_history");
+}
+
+/** The size of the backup in bytes, or `null` if the panel was closed. */
+export function backupDatabase(): Promise<number | null> {
+  return call<number | null>("backup_database");
+}
+
+/** **Replaces this device's history.** `false` means the panel was closed. */
+export function restoreDatabase(): Promise<boolean> {
+  return call<boolean>("restore_database");
+}
+
 /* -------------------------------------------------------------- shortcut --- */
 
 /** Not routed yet. The default must come from the backend rather than a TS

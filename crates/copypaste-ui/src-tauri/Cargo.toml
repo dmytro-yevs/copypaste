@@ -21,6 +21,12 @@ copypaste-ipc = { path = "../../copypaste-ipc" }
 # out the Mac App Store, which does not apply — we ship through Homebrew Cask.
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-clipboard-manager = "2"
+# The native save/open panel, used **only from Rust** (`commands::transfer`).
+# Two things follow from that and both are the point: the chosen path never
+# crosses into the WebView, so no authored string can carry one (CLAUDE.md rule
+# 4); and no capability entry is needed, because the ACL gates the JS bridge and
+# nothing here calls the plugin from JS.
+tauri-plugin-dialog = "2"
 tokio.workspace = true
 # The one retry implementation in the workspace (CLAUDE.md rule 1). Used for
 # the bounded wait after starting the background service.

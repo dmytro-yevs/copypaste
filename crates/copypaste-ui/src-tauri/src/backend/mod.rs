@@ -43,8 +43,11 @@
 //! * **No error carries content.** A failure to decrypt or store an item names
 //!   the operation, never the item's text.
 
+use std::path::Path;
+
 use copypaste_ipc::{
-    DiscoveredDevice, EventData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
+    ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -173,6 +176,50 @@ pub trait Backend: Send + Sync + 'static {
 
     /// Re-advertise and re-browse, then answer as [`Backend::discovered`] does.
     async fn rescan(&self) -> Result<Vec<DiscoveredDevice>>;
+
+    // ---- settings --------------------------------------------------------
+
+    /// The backend's effective settings.
+    async fn get_config(&self) -> Result<ConfigApplied>;
+
+    /// Change some settings.
+    ///
+    /// A patch rather than a whole [`copypaste_ipc::ConfigData`], and the
+    /// reason is a lost update: two Settings screens — or a screen and the CLI
+    /// — each send the field they changed, so neither carries a stale copy of
+    /// the other's. Rejected whole if any value is out of range, and a
+    /// rejection leaves the backend on the configuration it already had.
+    ///
+    /// The reply names the fields that will not take effect until a restart, at
+    /// the moment of the change rather than afterwards
+    /// ([`copypaste_ipc::ConfigData::field_liveness`]).
+    async fn set_config(&self, patch: ConfigPatch) -> Result<ConfigApplied>;
+
+    // ---- transfer and database administration ----------------------------
+
+    /// Read history out. `limit` of 0 means everything.
+    ///
+    /// [`ExportData`] carries three skip counts and they are the reason this
+    /// returns the whole struct rather than a `Vec`: an export that quietly
+    /// withheld a flagged item is one the user believes is complete.
+    async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData>;
+
+    /// Put items back, through the same ingest path a capture takes.
+    async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData>;
+
+    /// Copy the encrypted database to `dest`, which must not already exist.
+    ///
+    /// A `&Path` rather than a `String` so a caller cannot hand this something
+    /// that merely looks like one, and so the only way to obtain it is from the
+    /// platform's own save panel.
+    async fn backup(&self, dest: &Path) -> Result<BackupData>;
+
+    /// Replace history with the contents of the backup at `src`.
+    ///
+    /// The most destructive operation in the product. The confirmation is the
+    /// caller's to obtain — reaching here *is* the confirmation, so nothing
+    /// below this point asks again.
+    async fn restore(&self, src: &Path) -> Result<()>;
 
     // ---- change stream ---------------------------------------------------
 
