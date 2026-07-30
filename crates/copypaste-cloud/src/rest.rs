@@ -53,10 +53,10 @@
 //! create unique index clipboard_items_user_item_uidx
 //!     on public.clipboard_items (user_id, item_id);
 //!
-//! -- The read path: `user_id` from RLS, then the (created_at desc, item_id
+//! -- The read path: `user_id` from RLS, then the (created_at asc, item_id
 //! -- desc) keyset this module orders on.
 //! create index clipboard_items_user_created_idx
-//!     on public.clipboard_items (user_id, created_at desc, item_id desc);
+//!     on public.clipboard_items (user_id, created_at, item_id);
 //!
 //! create or replace function public.touch_updated_at() returns trigger
 //!     language plpgsql as $$
@@ -448,10 +448,21 @@ impl SupabaseRest {
     /// boundary rows are free to absorb, because applying a version already
     /// applied is a no-op (INV-I1).
     ///
-    /// The order is `(created_at desc, item_id desc)` — a compound key with no
-    /// ties, so paging is deterministic. `limit` is clamped to
-    /// [`MAX_PAGE_LIMIT`]; a full page means "there may be more", and the
-    /// caller should drain rather than wait for the next tick.
+    /// The order is **ascending** — `(created_at asc, item_id asc)` — a compound
+    /// key with no ties, so paging is deterministic.
+    ///
+    /// Ascending is load-bearing, not a preference. A forward cursor cannot
+    /// drain a newest-first page: take the newest `limit` rows and advance past
+    /// them and everything older is skipped forever; do not advance and the
+    /// same page is returned on every tick. The failure is invisible in steady
+    /// state, where the backlog is smaller than one page, and appears only for
+    /// a device that has been offline long enough to matter — which is exactly
+    /// when history matters most. Manifest 05 §4.4 records this as a shipped v1
+    /// bug: `order=wall_time.desc&limit=20` re-fetched the same newest twenty
+    /// rows and older history never downloaded at all.
+    ///
+    /// `limit` is clamped to [`MAX_PAGE_LIMIT`]; a full page means "there may
+    /// be more", and the caller should drain rather than wait for the next tick.
     pub async fn fetch_since(
         &self,
         token: &str,
@@ -463,7 +474,7 @@ impl SupabaseRest {
         let query = [
             ("select", SELECT_COLUMNS.to_string()),
             ("created_at", format!("gte.{}", since_ms.max(0))),
-            ("order", "created_at.desc,item_id.desc".to_string()),
+            ("order", "created_at.asc,item_id.asc".to_string()),
             ("limit", limit.to_string()),
         ];
 
@@ -801,7 +812,8 @@ mod tests {
             "gte.1700000000000",
             "a strict `gt` loses every row in the boundary millisecond"
         );
-        assert_eq!(value_of(&pairs, "order"), "created_at.desc,item_id.desc");
+        // Ascending: a forward cursor cannot drain a newest-first page.
+        assert_eq!(value_of(&pairs, "order"), "created_at.asc,item_id.asc");
         assert_eq!(value_of(&pairs, "limit"), "20");
     }
 

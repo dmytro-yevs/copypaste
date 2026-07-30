@@ -518,7 +518,9 @@ mod tests {
     /// are *about* derivation call [`derive_sync_key`] directly.
     fn key() -> SyncKey {
         static KEY: std::sync::OnceLock<[u8; KEY_LEN]> = std::sync::OnceLock::new();
-        SyncKey::from_bytes(*KEY.get_or_init(|| *derive_sync_key(PASS, ACCOUNT).unwrap().to_bytes()))
+        SyncKey::from_bytes(
+            *KEY.get_or_init(|| *derive_sync_key(PASS, ACCOUNT).unwrap().to_bytes()),
+        )
     }
 
     // --- round trip -------------------------------------------------------
@@ -559,7 +561,10 @@ mod tests {
 
         let (nonce, ct) = encrypt_row(b"", &k, ITEM).unwrap();
         assert_eq!(B64.decode(&ct).unwrap().len(), TAG_LEN);
-        assert_eq!(decrypt_row(&ct, &nonce, &k, ITEM).unwrap(), Vec::<u8>::new());
+        assert_eq!(
+            decrypt_row(&ct, &nonce, &k, ITEM).unwrap(),
+            Vec::<u8>::new()
+        );
 
         let big: Vec<u8> = (0..512 * 1024).map(|i| (i % 251) as u8).collect();
         let (nonce, ct) = encrypt_row(&big, &k, ITEM).unwrap();
@@ -593,8 +598,7 @@ mod tests {
         // The cross-tenant case: same passphrase, different account. If the
         // salt were shared, this would decrypt.
         let (nonce, ct) = encrypt_row(b"secret", &key(), ITEM).unwrap();
-        let other_account =
-            derive_sync_key(PASS, "3f2b1c0a-0000-4000-8000-000000000002").unwrap();
+        let other_account = derive_sync_key(PASS, "3f2b1c0a-0000-4000-8000-000000000002").unwrap();
 
         assert_eq!(
             decrypt_row(&ct, &nonce, &other_account, ITEM),
@@ -720,8 +724,7 @@ mod tests {
     fn derivation_diverges_when_either_input_changes() {
         let base = derive_sync_key(PASS, ACCOUNT).unwrap();
         let other_pass = derive_sync_key("a different passphrase entirely", ACCOUNT).unwrap();
-        let other_account =
-            derive_sync_key(PASS, "3f2b1c0a-0000-4000-8000-000000000002").unwrap();
+        let other_account = derive_sync_key(PASS, "3f2b1c0a-0000-4000-8000-000000000002").unwrap();
 
         assert_ne!(base.to_bytes().as_ref(), other_pass.to_bytes().as_ref());
         assert_ne!(base.to_bytes().as_ref(), other_account.to_bytes().as_ref());
@@ -858,7 +861,10 @@ mod tests {
 
     #[test]
     fn cloud_aad_has_the_documented_layout() {
-        assert_eq!(cloud_aad("item-abc"), b"copypaste/v2/cloud-row-aead|1|8:item-abc");
+        assert_eq!(
+            cloud_aad("item-abc"),
+            b"copypaste/v2/cloud-row-aead|1|8:item-abc"
+        );
         assert_eq!(cloud_aad(""), b"copypaste/v2/cloud-row-aead|1|0:");
         // The length is in bytes, not chars.
         assert_eq!(cloud_aad("é"), b"copypaste/v2/cloud-row-aead|1|2:\xc3\xa9");
@@ -913,7 +919,10 @@ mod tests {
         let crypto = CloudCrypto::derive(PASS, ACCOUNT).unwrap();
         let (nonce, ct) = crypto.seal(b"through the handle", ITEM).unwrap();
 
-        assert_eq!(crypto.open(&ct, &nonce, ITEM).unwrap(), b"through the handle");
+        assert_eq!(
+            crypto.open(&ct, &nonce, ITEM).unwrap(),
+            b"through the handle"
+        );
         // And the free function opens what the handle sealed, with the key the
         // handle exposes.
         assert_eq!(

@@ -186,7 +186,8 @@ pub struct RealtimeSubscription {
 
 impl std::fmt::Debug for RealtimeSubscription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RealtimeSubscription").finish_non_exhaustive()
+        f.debug_struct("RealtimeSubscription")
+            .finish_non_exhaustive()
     }
 }
 
@@ -212,10 +213,7 @@ impl RealtimeSubscription {
     ///
     /// [`RealtimeError::JoinRefused`] if the channel join is not confirmed
     /// within [`JOIN_TIMEOUT`].
-    pub async fn connect(
-        config: &CloudConfig,
-        access_token: &str,
-    ) -> Result<Self, RealtimeError> {
+    pub async fn connect(config: &CloudConfig, access_token: &str) -> Result<Self, RealtimeError> {
         let user_id = jwt_subject(access_token).ok_or(RealtimeError::MissingUserId)?;
         let url = websocket_url(&config.url);
         let anon_key = config.anon_key.clone();
@@ -313,7 +311,9 @@ async fn run(
         let Some(delay) = policy.next_backoff() else {
             // `max_elapsed_time` is `None`, so this is unreachable; treat it as
             // "give up" rather than as a reason to spin.
-            let _ = tx.send(Err(RealtimeError::Connect("reconnects exhausted"))).await;
+            let _ = tx
+                .send(Err(RealtimeError::Connect("reconnects exhausted")))
+                .await;
             return;
         };
 
@@ -463,11 +463,9 @@ async fn open_channel(
             .await
             .map_err(|_| RealtimeError::Connect("the websocket could not be opened"))?;
 
-        ws.send(Message::Text(
-            join_frame(access_token, user_id).to_string(),
-        ))
-        .await
-        .map_err(|_| RealtimeError::Connect("the join could not be sent"))?;
+        ws.send(Message::Text(join_frame(access_token, user_id).to_string()))
+            .await
+            .map_err(|_| RealtimeError::Connect("the join could not be sent"))?;
 
         // Wait for the join confirmation, ignoring anything else that arrives
         // first.
@@ -663,9 +661,7 @@ fn change_event(payload: &Value) -> Result<Option<RealtimeEvent>, RealtimeError>
             let item_id = old()
                 .and_then(|o| o.get("item_id"))
                 .and_then(Value::as_str)
-                .ok_or(RealtimeError::Protocol(
-                    "delete payload carries no item id",
-                ))?
+                .ok_or(RealtimeError::Protocol("delete payload carries no item id"))?
                 .to_owned();
             Ok(Some(RealtimeEvent::Delete { item_id }))
         }
@@ -742,9 +738,9 @@ fn jwt_subject(token: &str) -> Option<String> {
     let mut parts = token.split('.');
     let _header = parts.next()?;
     let payload = parts.next()?;
-    if parts.next().is_none() {
-        return None;
-    }
+    // A JWT has three parts. Two is not a token we should be reading, and the
+    // signature is not checked here — see the doc comment.
+    parts.next()?;
     let decoded = B64URL.decode(payload).ok()?;
     let claims: Value = serde_json::from_slice(&decoded).ok()?;
     let sub = claims.get("sub")?.as_str()?;
@@ -779,8 +775,9 @@ mod tests {
 
     #[test]
     fn a_five_element_frame_parses() {
-        let frame = parse_frame(r#"["1","2","realtime:clipboard_items","phx_reply",{"status":"ok"}]"#)
-            .unwrap();
+        let frame =
+            parse_frame(r#"["1","2","realtime:clipboard_items","phx_reply",{"status":"ok"}]"#)
+                .unwrap();
         assert_eq!(frame.join_ref.as_deref(), Some("1"));
         assert_eq!(frame.msg_ref.as_deref(), Some("2"));
         assert_eq!(frame.topic, TOPIC);
@@ -833,7 +830,10 @@ mod tests {
         assert_eq!(config["access_token"], "the.jwt.here");
 
         let change = &config["postgres_changes"][0];
-        assert_eq!(change["event"], "*", "INSERT-only drops updates and deletes");
+        assert_eq!(
+            change["event"], "*",
+            "INSERT-only drops updates and deletes"
+        );
         assert_ne!(change["event"], "INSERT");
         assert_eq!(change["schema"], "public");
         assert_eq!(change["table"], TABLE);

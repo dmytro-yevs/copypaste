@@ -535,9 +535,9 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     ///
     /// The tests set it to zero so the recovery rules can be asserted without
     /// wall-clock sleeps: the workspace does not enable tokio's `test-util`, so
-    /// the clock cannot be paused. The *durations* those rules compute are
-    /// asserted separately and directly, against [`rate_limit_delay`] and
-    /// [`transient_policy`], which are pure.
+    /// the clock cannot be paused. The *duration* the 429 rule computes is
+    /// asserted separately and directly, against [`rate_limit_delay`], which is
+    /// pure.
     delay_scale: f64,
 }
 
@@ -779,7 +779,9 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             // unusable in a way that does not advance the cursor. Stop rather
             // than re-requesting the same window forever (manifest 05 AT-29).
             if advanced == cursor {
-                tracing::warn!("a full page of rows produced no cursor progress; pausing the drain");
+                tracing::warn!(
+                    "a full page of rows produced no cursor progress; pausing the drain"
+                );
                 break;
             }
             cursor = advanced;
@@ -1043,7 +1045,9 @@ fn classify_rest(err: crate::rest::RestError) -> TransportFault {
         // response, or an item this client refused to send.
         E::Forbidden => TransportFault::Permanent("the account may not touch these rows"),
         E::Rejected { .. } => TransportFault::Permanent("the sync backend rejected the request"),
-        E::Malformed => TransportFault::Permanent("the sync backend returned an unexpected response"),
+        E::Malformed => {
+            TransportFault::Permanent("the sync backend returned an unexpected response")
+        }
         E::InvalidItem { reason } => TransportFault::Permanent(reason),
     }
 }
@@ -1128,11 +1132,12 @@ mod tests {
     /// that. Argon2id is deliberately expensive; a hundred-row fixture that
     /// re-derived per row would take minutes.
     fn key() -> SyncKey {
-        static KEY: std::sync::OnceLock<[u8; crate::crypto::KEY_LEN]> =
-            std::sync::OnceLock::new();
-        SyncKey::from_bytes(
-            *KEY.get_or_init(|| *crate::crypto::derive_sync_key(PASS, ACCOUNT).unwrap().to_bytes()),
-        )
+        static KEY: std::sync::OnceLock<[u8; crate::crypto::KEY_LEN]> = std::sync::OnceLock::new();
+        SyncKey::from_bytes(*KEY.get_or_init(|| {
+            *crate::crypto::derive_sync_key(PASS, ACCOUNT)
+                .unwrap()
+                .to_bytes()
+        }))
     }
 
     fn config() -> CloudConfig {
@@ -1468,7 +1473,10 @@ mod tests {
         use base64::engine::general_purpose::STANDARD as B64;
         use base64::Engine as _;
         assert_eq!(B64.decode(&row.nonce).unwrap().len(), 24);
-        assert_eq!(B64.decode(&row.ciphertext).unwrap().len(), "round trip".len() + 16);
+        assert_eq!(
+            B64.decode(&row.ciphertext).unwrap().len(),
+            "round trip".len() + 16
+        );
         assert_eq!(
             decrypt_row(&row.ciphertext, &row.nonce, &key(), "a").unwrap(),
             b"round trip"
@@ -1477,17 +1485,25 @@ mod tests {
 
     #[tokio::test]
     async fn push_is_idempotent() {
-        let source = FakeSource::with_outgoing(vec![
-            item("a", 1_000, "one"),
-            item("b", 2_000, "two"),
-        ]);
+        let source =
+            FakeSource::with_outgoing(vec![item("a", 1_000, "one"), item("b", 2_000, "two")]);
         let sync = driver(FakeRest::default(), FakeAuth::default());
 
         sync.push(&source).await.unwrap();
-        let after_first: Vec<_> = sync.rest.sorted_rows().iter().map(|r| r.item_id.clone()).collect();
+        let after_first: Vec<_> = sync
+            .rest
+            .sorted_rows()
+            .iter()
+            .map(|r| r.item_id.clone())
+            .collect();
 
         sync.push(&source).await.unwrap();
-        let after_second: Vec<_> = sync.rest.sorted_rows().iter().map(|r| r.item_id.clone()).collect();
+        let after_second: Vec<_> = sync
+            .rest
+            .sorted_rows()
+            .iter()
+            .map(|r| r.item_id.clone())
+            .collect();
 
         // Same set of rows: the upsert conflict target is `item_id`, so a
         // replay overwrites rather than duplicating.
@@ -1849,7 +1865,10 @@ mod tests {
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "x")]);
         let sync = driver(rest, FakeAuth::default());
 
-        assert_eq!(sync.push(&source).await.unwrap_err(), SyncError::Unauthorized);
+        assert_eq!(
+            sync.push(&source).await.unwrap_err(),
+            SyncError::Unauthorized
+        );
         assert_eq!(
             sync.auth.refreshes.load(Ordering::SeqCst),
             1,
@@ -1948,7 +1967,10 @@ mod tests {
             Reply::Ok,
         ]);
         let sync = driver(rest, FakeAuth::default());
-        assert_eq!(sync.push(&source).await.unwrap_err(), SyncError::RateLimited);
+        assert_eq!(
+            sync.push(&source).await.unwrap_err(),
+            SyncError::RateLimited
+        );
     }
 
     #[tokio::test]
@@ -1995,7 +2017,10 @@ mod tests {
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "x")]);
         let sync = driver(rest, FakeAuth::default());
 
-        assert_eq!(sync.push(&source).await.unwrap_err(), SyncError::Unauthorized);
+        assert_eq!(
+            sync.push(&source).await.unwrap_err(),
+            SyncError::Unauthorized
+        );
         assert_eq!(sync.rest.tokens.lock().unwrap().len(), 3);
     }
 
@@ -2167,10 +2192,7 @@ mod tests {
     fn the_driver_and_the_guard_redact_their_debug_output() {
         let sync = driver(FakeRest::default(), FakeAuth::default());
         assert_eq!(format!("{sync:?}"), "CloudSync { .. }");
-        assert_eq!(
-            format!("{:?}", allow_everything()),
-            "SensitiveGuard { .. }"
-        );
+        assert_eq!(format!("{:?}", allow_everything()), "SensitiveGuard { .. }");
     }
 
     #[test]
