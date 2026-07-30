@@ -9,6 +9,27 @@
 //! *spelling* is not): `NSPasteboard::generalPasteboard`, `changeCount`,
 //! `clearContents`, `availableTypeFromArray`, `dataForType`, `setString_forType`,
 //! `NSArray::from_slice`, `NSData::length`/`bytes`.
+//!
+//! # macOS 16 will make this read a user-visible event
+//!
+//! macOS 16 alerts the user when an app reads the general pasteboard
+//! programmatically, and adds `NSPasteboard.accessBehavior` to request
+//! always-allow. Every clipboard manager on the platform is affected; polling
+//! `changeCount` without reading is not what trips it, `dataForType` is.
+//!
+//! Two things this is *not*. It is not the TCC problem in ADR-0001 — that one
+//! comes from ad-hoc signing and is why the app needs no Accessibility
+//! permission, whereas this arrives however the app is signed and cannot be
+//! bought off with a Developer ID. And it is not a reason to poll less often:
+//! the alert is about reading at all, so a slower loop would only make capture
+//! worse without making the prompt rarer.
+//!
+//! Left as a note rather than an implementation because the API cannot be
+//! exercised here and guessing at its shape is how a binding-level assumption
+//! becomes a bug. Whoever first builds on macOS 16 should decide where the
+//! always-allow request belongs — most likely the app at first run, not the
+//! daemon mid-poll, since a prompt raised by a background process with no
+//! window is a prompt with no context.
 
 // objc2 0.2/0.5 marks a shifting set of pasteboard accessors `unsafe`.
 // Wrapping every call and allowing the redundant ones keeps this module
