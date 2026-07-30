@@ -1,0 +1,20 @@
+[package]
+name = "copypaste-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "copypaste"
+path = "src/main.rs"
+
+# No copypaste-core dependency: the CLI speaks IPC only.
+[dependencies]
+copypaste-ipc = { path = "../copypaste-ipc" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+comfy-table.workspace = true
