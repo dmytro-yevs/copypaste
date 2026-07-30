@@ -4,6 +4,7 @@
 //! [`super::keystore`]; the envelope that consumes [`ItemKey`] is
 //! [`super::aead`].
 
+use std::path::Path;
 use std::sync::OnceLock;
 
 use hkdf::Hkdf;
@@ -41,32 +42,34 @@ pub struct Keyring {
 }
 
 impl Keyring {
-    /// Load the device secret from the OS keystore, creating one on first run.
+    /// Load the device secret that opens the history in `data_dir`, creating
+    /// one on first run.
     ///
     /// * **macOS** — a Keychain generic-password item under service
     ///   `com.copypaste.daemon`, account `device-secret-key`. Selected by the
     ///   target, not by a cargo feature: a feature is a way to ship without it,
     ///   and that is what happened.
-    /// * **Every other platform** — a `0600` file named `device_secret.key`
-    ///   under the platform data directory.
+    /// * **Android** — a 32-byte secret sealed with an AES-GCM key held in the
+    ///   Android Keystore, kept as a blob in app-private storage.
+    /// * **Everywhere else** — a `0600` file named `device_secret.key`, for
+    ///   development only. See `keystore::file` for why it is not a keystore.
     ///
-    /// **The file backend is for development only.** It is not a keystore: the
-    /// secret sits in plaintext under the user's home directory, protected by
-    /// file permissions alone and readable by any process running as that user
-    /// or by anything that backs the directory up. It exists so the daemon can
-    /// be built and tested on a Linux workstation. Android must use the Android
-    /// Keystore before shipping — a platform-`cfg`'d backend added here,
-    /// alongside the macOS one.
+    /// `data_dir` is the directory holding the history database, so the secret
+    /// stays with the data it opens when `--data-dir` moves it (security review
+    /// F-11). The two keystore backends are app- or user-scoped and ignore it;
+    /// the argument is still theirs to receive, because the guard that refuses
+    /// to mint over an existing history needs it on every platform.
     ///
-    /// `COPYPASTE_EPHEMERAL_KEY` short-circuits both backends and mints a
+    /// `COPYPASTE_EPHEMERAL_KEY` short-circuits every backend and mints a
     /// throwaway secret; data written under it is unrecoverable after exit.
     ///
     /// # Errors
     ///
     /// [`CryptoError::KeystoreUnavailable`] when the keystore's state could not
     /// be determined — *not* the same as "no secret exists yet", which creates
-    /// one and returns `Ok`.
-    pub fn load_or_create() -> Result<Self, CryptoError> {
+    /// one and returns `Ok`. [`CryptoError::KeystoreEntryUnusable`] when a
+    /// secret is there and cannot be read, which no retry will fix.
+    pub fn load_or_create(data_dir: &Path) -> Result<Self, CryptoError> {
         if ephemeral_requested() {
             tracing::warn!(
                 "{ENV_EPHEMERAL} is set: using a throwaway device secret. \
@@ -74,7 +77,7 @@ impl Keyring {
             );
             return Ok(Self::from_secret(&random_secret()));
         }
-        let secret = super::keystore::load_or_create_secret()?;
+        let secret = super::keystore::load_or_create_secret(data_dir)?;
         Ok(Self { secret })
     }
 
