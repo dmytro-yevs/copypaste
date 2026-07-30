@@ -13,6 +13,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod redact;
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 

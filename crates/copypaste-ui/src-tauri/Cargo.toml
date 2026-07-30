@@ -16,7 +16,10 @@ tauri-build = { version = "2", features = [] }
 # dependency: the UI never touches crypto or the database directly.
 [dependencies]
 copypaste-ipc = { path = "../../copypaste-ipc" }
-tauri = { version = "2", features = ["tray-icon"] }
+# `macos-private-api` is what `"transparent": true` + `macOSPrivateApi` in
+# tauri.conf.json require; without it tauri-build rejects the config. It rules
+# out the Mac App Store, which does not apply — we ship through Homebrew Cask.
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-clipboard-manager = "2"
 tokio.workspace = true
 tokio-util.workspace = true
