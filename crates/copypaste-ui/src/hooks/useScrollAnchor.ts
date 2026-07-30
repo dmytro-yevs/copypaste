@@ -81,13 +81,17 @@ export function useScrollAnchor({ scrollRef, virtualizer, items }: Options) {
     previousItems.current = items;
     if (!hadItems) return; // first paint: nothing to preserve
 
+    // Called first on purpose: getTotalSize() is what recomputes the
+    // measurement table, and measurementsCache is only index-aligned with the
+    // current item list once it has run.
+    const max = Math.max(0, virtualizer.getTotalSize() - el.clientHeight);
+
     const anchor = anchorRef.current;
     let desired = el.scrollTop;
 
     if (anchor) {
       const index = items.findIndex((item) => item.id === anchor.id);
       if (index >= 0) {
-        // measurementsCache is index-aligned with the current item list.
         const measurement = virtualizer.measurementsCache[index];
         if (measurement) desired = measurement.start + anchor.offset;
       }
@@ -95,7 +99,6 @@ export function useScrollAnchor({ scrollRef, virtualizer, items }: Options) {
       // the clamp below deal with it.
     }
 
-    const max = Math.max(0, virtualizer.getTotalSize() - el.clientHeight);
     const next = Math.min(Math.max(desired, 0), max);
 
     if (Math.abs(next - el.scrollTop) > 0.5) {
