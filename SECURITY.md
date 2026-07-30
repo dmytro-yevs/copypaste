@@ -126,7 +126,10 @@ Written, never observed working. Treat these claims as unproven:
   exercised only over explicit addresses.
 - **Cloud sync against a live Supabase project** — every test uses in-process
   fakes.
-- The **native apps** — neither has been built or run.
+- The **app on either target**. The Tauri shell builds and launches on Linux,
+  but WebKitGTK executes no JavaScript under headless Xvfb, so what it renders
+  is covered only by jsdom unit tests. It has never been built for macOS or
+  Android.
 
 ## Not implemented
 
