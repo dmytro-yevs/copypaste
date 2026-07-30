@@ -1,31 +1,60 @@
-import { execa, type ResultPromise } from "execa";
+import { execa } from "execa";
 import waitOn from "wait-on";
 
 import { DEV_SERVER_PORT, DEV_SERVER_URL, UI_DIR, requireDisplay } from "./env.js";
+import { track, type Child } from "./process.js";
 
-let server: ResultPromise | undefined;
+let server: Child | undefined;
 
 export async function setup(): Promise<void> {
   requireDisplay();
+  await assertPortFree();
 
-  server = execa("npm", ["run", "dev", "--", "--port", String(DEV_SERVER_PORT)], {
-    cwd: UI_DIR,
-    stdio: ["ignore", "pipe", "pipe"],
-    reject: false,
-  });
-  const log: string[] = [];
-  server.stdout?.on("data", (c: Buffer) => log.push(c.toString()));
-  server.stderr?.on("data", (c: Buffer) => log.push(c.toString()));
+  server = track(
+    execa("npm", ["run", "dev", "--", "--port", String(DEV_SERVER_PORT)], {
+      cwd: UI_DIR,
+      stdio: ["ignore", "pipe", "pipe"],
+      reject: false,
+    }),
+  );
 
   try {
     await waitOn({ resources: [DEV_SERVER_URL], timeout: 120_000, interval: 250 });
   } catch {
     throw new Error(
-      `the Vite dev server never came up on ${DEV_SERVER_URL}:\n${log.join("")}`,
+      `the Vite dev server never came up on ${DEV_SERVER_URL}:\n${server.log()}`,
     );
   }
 
-  await warmEntrypoint(log);
+  if (server.exited()) {
+    throw new Error(
+      `the dev server exited but ${DEV_SERVER_URL} still answers, so something ` +
+        `else is serving it and the suite would test the wrong tree:\n${server.log()}`,
+    );
+  }
+
+  await warmEntrypoint(server);
+}
+
+/**
+ * `strictPort` is set in the UI's vite.config, so a dev server left behind by
+ * an earlier run does not lose the port — it keeps it, our own server dies, and
+ * every assertion afterwards runs against whatever tree that stale process was
+ * started from. Refusing to start is the only way that failure is visible.
+ */
+async function assertPortFree(): Promise<void> {
+  try {
+    const response = await fetch(DEV_SERVER_URL, { signal: AbortSignal.timeout(3_000) });
+    throw new Error(
+      `something is already serving ${DEV_SERVER_URL} (HTTP ${response.status}). ` +
+        `Stop it first — with strictPort set, this suite cannot tell its own dev ` +
+        `server apart from a stale one.`,
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("something is already")) {
+      throw error;
+    }
+  }
 }
 
 /**
@@ -34,7 +63,7 @@ export async function setup(): Promise<void> {
  * which looks exactly like an app that is broken. Pulling the entrypoint until
  * it is really served makes the wait deterministic.
  */
-async function warmEntrypoint(log: string[]): Promise<void> {
+async function warmEntrypoint(server: Child): Promise<void> {
   const deadline = Date.now() + 180_000;
   for (;;) {
     try {
@@ -50,7 +79,7 @@ async function warmEntrypoint(log: string[]): Promise<void> {
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `the dev server never served /src/main.tsx:\n${log.join("")}`,
+        `the dev server never served /src/main.tsx:\n${server.log()}`,
       );
     }
     await new Promise((r) => setTimeout(r, 500));
@@ -58,10 +87,5 @@ async function warmEntrypoint(log: string[]): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
-  server?.kill("SIGTERM");
-  await Promise.race([
-    server?.catch(() => undefined) ?? Promise.resolve(),
-    new Promise((r) => setTimeout(r, 5_000)),
-  ]);
-  server?.kill("SIGKILL");
+  await server?.stop();
 }

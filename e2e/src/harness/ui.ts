@@ -73,9 +73,16 @@ export async function scrollTo(browser: Browser, top: number): Promise<void> {
   );
 }
 
+export async function rowCount(browser: Browser): Promise<number> {
+  return (await browser.execute(
+    (selector: string) => document.querySelectorAll(selector).length,
+    ROW,
+  )) as number;
+}
+
 export async function waitForRows(browser: Browser, atLeast = 1): Promise<void> {
   await browser.waitUntil(
-    async () => (await browser.$$(ROW)).length >= atLeast,
+    async () => (await rowCount(browser)) >= atLeast,
     {
       timeout: 30_000,
       interval: 250,
