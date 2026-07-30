@@ -1,0 +1,90 @@
+{
+  "size": {
+    "$description": "Fixed control, icon and stroke sizes (port-manifest §8.5).",
+    "$type": "dimension",
+    "icon-sm": {
+      "$value": "14px"
+    },
+    "icon-md": {
+      "$value": "16px"
+    },
+    "icon-lg": {
+      "$value": "20px"
+    },
+    "ctl-h-sm": {
+      "$value": "26px"
+    },
+    "ctl-h-md": {
+      "$value": "30px"
+    },
+    "ctl-h-lg": {
+      "$value": "34px"
+    },
+    "sz-iconbtn": {
+      "$value": "30px"
+    },
+    "sz-toggle-w": {
+      "$value": "38px"
+    },
+    "sz-toggle-h": {
+      "$value": "22px"
+    },
+    "sz-toggle-knob": {
+      "$value": "18px"
+    },
+    "sz-tile": {
+      "$value": "34px"
+    },
+    "sz-dot": {
+      "$value": "8px"
+    },
+    "sz-spinner": {
+      "$value": "16px"
+    },
+    "sz-kbd": {
+      "$value": "22px"
+    },
+    "sz-chip-dot": {
+      "$value": "7px"
+    },
+    "sz-badge-dot": {
+      "$value": "5px"
+    },
+    "hairline": {
+      "$value": "1px",
+      "$description": "Separator thickness."
+    },
+    "stroke-1": {
+      "$value": "1px"
+    },
+    "stroke-2": {
+      "$value": "2px"
+    },
+    "stroke-3": {
+      "$value": "3px"
+    },
+    "chk-bw": {
+      "$value": "1.5px",
+      "$description": "Checkbox border width."
+    },
+    "sel-bar-w": {
+      "$value": "3px",
+      "$description": "Accent bar on a selected row."
+    },
+    "sel-bar-inset": {
+      "$value": "6px",
+      "$description": "Top/bottom inset of that bar inside the row."
+    },
+    "focus-ring-width": {
+      "$value": "2px",
+      "$description": "§4: the focus ring is never removed, only restyled."
+    },
+    "focus-ring-offset": {
+      "$value": "2px"
+    },
+    "mask-blur": {
+      "$value": "6px",
+      "$description": "Blur radius that masks sensitive content until revealed."
+    }
+  }
+}

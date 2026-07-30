@@ -1,0 +1,31 @@
+{
+  "color": {
+    "$description": "Colours that do not vary by theme. The first four are lifted from the :root block of port-manifest §8.5; the last two are documented additions the semantic layers need.",
+    "$type": "color",
+    "knob-fill": {
+      "$value": "#FFFFFF",
+      "$description": "Toggle knob fill — white in both themes."
+    },
+    "ring-inset": {
+      "$value": "rgba(255,255,255,.18)",
+      "$description": "Inner highlight ring on accent-filled controls."
+    },
+    "sheen": {
+      "$value": "rgba(255,255,255,.22)",
+      "$description": "Top sheen on accent-filled controls."
+    },
+    "on-err": {
+      "$value": "#FFFFFF",
+      "$description": "ADDED. v1 never rendered a solid error fill (.btn--danger is a 9% tint with --err-strong text), but shadcn's destructive variant and Material 3's onError both require a foreground for a solid --err surface."
+    },
+    "on-accent-2": {
+      "$value": "#1A1C22",
+      "$description": "ADDED. Foreground on the light --accent-2 ramp step. Required by Material 3 onPrimaryContainer / onTertiary; equals the light theme's --text so the ink is one we already ship."
+    },
+    "alpha-tint": {
+      "$type": "number",
+      "$value": 0.16,
+      "$description": "The tint alpha v1 uses for status-coloured containers (.btn--danger hover is color-mix(--err 16%)). Material 3's errorContainer is derived from it."
+    }
+  }
+}

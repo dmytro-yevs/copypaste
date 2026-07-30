@@ -27,7 +27,7 @@ subtle = "2.5"
 # storage — rusqlite_migration replaces v1's hand-rolled user_version ladder
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup"] }
 rusqlite_migration = "1.2"
-serde_rusqlite = "0.35"
+serde_rusqlite = "0.36"
 r2d2 = "0.8"
 r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled-sqlcipher"] }
 # serde

@@ -27,5 +27,15 @@ regex.workspace = true
 unicode-normalization.workspace = true
 directories.workspace = true
 
+# macOS Keychain backend for the device secret. Optional so the crate still
+# builds on Linux, where the file-backed development store is used instead.
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { workspace = true, optional = true }
+
+[features]
+# Enabled by default on macOS builds; without it the daemon falls back to the
+# 0600 file store, which is a development posture and not a shipping one.
+macos-keychain = ["dep:security-framework"]
+
 [dev-dependencies]
 tempfile.workspace = true
