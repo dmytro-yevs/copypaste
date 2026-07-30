@@ -114,7 +114,30 @@ longer be in the tree.
 - **Fail closed on crypto.** A wrong key, a wrong AAD or a wrong key version
   must produce an authentication failure, never a fallback read.
 
-## 5. Scope
+## 5. File-size budget
+
+**Target ≤500 source lines per file. Above that, split it.**
+
+Test modules do not count toward the budget — a file may be 500 lines of code
+and 900 of tests and still be fine.
+
+The only exemption is a file that is one genuinely indivisible responsibility,
+most often a data table. Claiming it requires a line in the module header naming
+what you considered extracting and why doing so would make the code worse.
+"It's cohesive" is not an argument on its own: every god file feels cohesive to
+whoever wrote it.
+
+v1 reached ~25 production files over 1000 lines, with the worst mixing many
+responsibilities — `daemon/p2p/mod.rs` at 2415, `ipc.rs` at ~12,500 before it
+was broken up. The cost is not aesthetic. Edits carry a blast radius across
+unrelated concerns, tests get coarse, and cohesive logic stays buried instead of
+being reused — which is one of the ways the duplication in rule 1 accumulated.
+
+Splitting is behaviour-preserving refactoring. Move a responsibility, keep the
+public surface identical by re-exporting from a thin `mod.rs`, move each test
+with the code it exercises, and compile and test after every extraction.
+
+## 6. Scope
 
 macOS and Android. Not Windows, not Linux desktop.
 
