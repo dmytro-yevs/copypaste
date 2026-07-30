@@ -167,8 +167,15 @@ pub fn ingest_into(
     }
     // Age-based retention, disabled by the `0` sentinel. Best-effort and after
     // the insert, for the same reason the cap sweep is.
+    //
+    // Measured from the wall clock, never from `created_at`. `created_at` is
+    // caller-supplied and, on the import path, comes straight out of a user's
+    // JSON file: one row stamped a year ahead put the cutoff a year ahead too
+    // and hard-deleted every unpinned item in the history. Both sync
+    // transports already refuse an implausibly-future stamp; import is the
+    // third writer and inherits neither guard, so this is where it holds.
     if settings.retention_days > 0 {
-        let cutoff = created_at - i64::from(settings.retention_days) * 86_400_000;
+        let cutoff = crate::now_ms() - i64::from(settings.retention_days) * 86_400_000;
         if let Err(e) = store.evict_older_than(cutoff) {
             warn!(error = ?e, "age-based retention failed");
         }
@@ -317,14 +324,38 @@ mod tests {
 
     #[test]
     fn age_based_retention_is_off_by_default_and_applied_when_set() {
+        // Stamps are relative to the wall clock because the cutoff is.
+        let now = crate::now_ms();
         let mut f = fixture();
-        f.at("old", T0 - 10 * 86_400_000).unwrap();
-        f.at("new", T0).unwrap();
+        f.at("old", now - 10 * 86_400_000).unwrap();
+        f.at("new", now).unwrap();
         assert_eq!(f.store.count().unwrap(), 2, "0 days must disable retention");
 
         f.settings.retention_days = 7;
-        f.at("newer", T0 + 1_000).unwrap();
+        f.at("newer", now + 1_000).unwrap();
         assert_eq!(f.store.count().unwrap(), 2, "the old item must be evicted");
+    }
+
+    /// An imported row carries a caller-supplied `created_at`. Deriving the
+    /// retention cutoff from it let one row stamped in the future delete every
+    /// live item in the history.
+    #[test]
+    fn a_future_stamped_item_evicts_nothing() {
+        let now = crate::now_ms();
+        let mut f = fixture();
+        f.settings.retention_days = 30;
+        for n in 0..5 {
+            f.at(&format!("item-{n}"), now - i64::from(n) * 60_000)
+                .unwrap();
+        }
+        assert_eq!(f.store.count().unwrap(), 5);
+
+        f.at("imported", now + 60 * 86_400_000).unwrap();
+        assert_eq!(
+            f.store.count().unwrap(),
+            6,
+            "a future stamp must not move the cutoff"
+        );
     }
 
     #[test]
