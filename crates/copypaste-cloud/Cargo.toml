@@ -1,0 +1,31 @@
+[package]
+name = "copypaste-cloud"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# Supabase replaces v1's bespoke relay: 12k lines of write-behind cache, custom
+# retry queue, SSE fan-out, supervisor and a second rate limiter, for a service
+# that already exists.
+[dependencies]
+reqwest.workspace = true
+tokio-tungstenite.workspace = true
+tokio.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+backoff.workspace = true
+argon2.workspace = true
+base64.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
