@@ -218,8 +218,15 @@ somebody else was writing.
 
 ### The rules
 
-1. **Stage explicit paths.** Not `git add -A`, ever, while another agent holds
-   any part of the tree. The index is shared; a wide stage is a wide commit.
+1. **Name the paths on `git commit`, not on `git add`.** The index is shared,
+   so staging explicit paths is not enough — somebody else's `git add` or
+   `git mv` is already in the index when you get there, and `git commit` takes
+   the whole index. `git commit -F msg -- <paths>` commits exactly those paths
+   and ignores everything else staged. `git add -A` remains banned outright.
+
+   This is not hypothetical: `cdd9d1ff` said "fix the macOS clipboard backend"
+   and also carried a `git mv` another agent had staged, which broke the build
+   on `main`.
 2. **Verify before committing, not after.** Build, tests, and whatever
    end-to-end checks exist. A red tree goes to a scratch branch, never here.
    `.githooks/pre-commit` enforces the one part of this that is mechanical:
