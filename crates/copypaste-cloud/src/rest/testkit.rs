@@ -11,10 +11,21 @@ use backon::ExponentialBuilder;
 
 use super::{CloudItem, SupabaseRest};
 use crate::auth::stub::Stub;
+use crate::crypto::{derive_sync_key, SyncKey, KEY_LEN};
 use crate::CloudConfig;
 
 pub(super) const ANON: &str = "anon-key-abc";
 pub(super) const TOKEN: &str = "user-access-token";
+const PASS: &str = "correct horse battery staple";
+const ACCOUNT: &str = "acct-rest";
+
+/// The fixture key, derived once per binary. Argon2id is deliberately
+/// expensive; a per-row derivation would make the suite slow enough that people
+/// stop running it.
+pub(super) fn key() -> SyncKey {
+    static KEY: std::sync::OnceLock<[u8; KEY_LEN]> = std::sync::OnceLock::new();
+    SyncKey::from_bytes(*KEY.get_or_init(|| *derive_sync_key(PASS, ACCOUNT).unwrap().to_bytes()))
+}
 
 /// A retry policy that finishes in milliseconds, so a test that exercises the
 /// transient path does not sleep for seconds.
@@ -33,15 +44,18 @@ pub(super) fn client(stub: &Stub) -> SupabaseRest {
     .with_retry_policy(fast_retry())
 }
 
+/// A signed row, because an unsigned one is not a row this client will send.
 pub(super) fn item(id: &str) -> CloudItem {
-    CloudItem::sealed(
+    let mut row = CloudItem::sealed(
         id,
         b"sealed-bytes",
         b"nonce12",
         "text",
         1_700_000_000_000,
         "device-a",
-    )
+    );
+    row.sign(&key());
+    row
 }
 
 /// Split a captured `?a=b&c=d` target into pairs, percent-decoded enough for

@@ -31,6 +31,15 @@
 //! forward, including past rows that were skipped as undecryptable, so an
 //! unreadable row is not re-fetched forever (INV-I4).
 //!
+//! # A version has to prove where it came from
+//!
+//! [`CloudSync::pull`] verifies each row's metadata signature before anything
+//! else looks at it, and refuses what does not verify — an unsigned or wrongly
+//! signed row is not a version of anything, it is a write by something that
+//! does not hold the sync key (manifest 05 §5.3). Refusing is not free of
+//! consequences for the cursor, and the rule that follows from that is on
+//! [`pull`].
+//!
 //! # Errors never carry a secret
 //!
 //! Every [`SyncError`] payload is a `&'static str`, so there is nothing to
@@ -125,9 +134,6 @@ mod tests {
         }
         async fn upsert(&self, token: &str, items: &[CloudItem]) -> Result<(), TransportFault> {
             self.0.upsert(token, items).await
-        }
-        async fn tombstone(&self, token: &str, ids: &[String]) -> Result<(), TransportFault> {
-            self.0.tombstone(token, ids).await
         }
     }
 

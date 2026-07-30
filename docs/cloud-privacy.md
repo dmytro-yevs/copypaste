@@ -21,6 +21,7 @@ One row per clipboard item, in one table:
 | `origin_device_id` | Which of your devices produced this version. |
 | `created_at` | When that version was written, to the millisecond. |
 | `deleted` | Whether this version is a deletion. |
+| `signature` | An authentication tag over all of the above. The backend cannot produce it or check it. |
 | `inserted_at`, `updated_at` | Server clock, for retention. |
 
 Plus, in the account service: **the email address** the account was created
@@ -37,7 +38,12 @@ nothing about content.
   not it.
 - **It cannot search or compare content.** There is no content column, no
   content hash, no full-text index. `tests/01_schema_audit.sql` fails the build
-  if one appears.
+  if one appears. The `signature` column is not an exception: it authenticates
+  the *ciphertext* and the metadata, never the plaintext, so it says nothing
+  about whether two items are the same.
+- **It cannot forge a version.** The fields sync orders on are in the clear
+  because the backend pages on them, but they are signed on the device under a
+  key derived from the same passphrase. See below.
 - **It cannot see items marked sensitive.** Anything the detector flags — a
   password, a key, a card number — is withheld from upload entirely, at two
   independent points. It never leaves the device that captured it.
@@ -81,22 +87,44 @@ passphrase** decrypts them.
 Someone who compromises the account but not the passphrase therefore can:
 
 - read all ciphertext and all metadata — but not decrypt anything;
-- **write rows into the account**, which every device will fetch, try to
-  decrypt, and correctly discard.
+- **write rows into the account**, which every device will fetch and refuse.
 
-What bounds that today: the AEAD binds each item's ciphertext to its `item_id`,
-so a row cannot be moved onto another item; a version stamped more than a day
-into the future is refused rather than allowed to outrank real versions; the
-server checks the shape of every row it accepts; and retention runs on a column
-no client can forge.
+## The metadata is signed, and that is what makes "refuse" true
 
-What does **not** bound it yet: an injected row's *metadata* is not
-authenticated, so a forged version stamped within the accepted window can still
-outrank a real one for an item id it names, and effectively censor that item on
-every device. Signing the merge metadata under the sync key is the fix, it is
-manifest 05 §5.3's own recommendation, and **it is not implemented**. Until it
-is, treat the account password as a secret that matters, and turn on whatever
-second factor the deployment offers.
+Encryption protects content. It does nothing for the fields sync *orders* on —
+`item_id`, `created_at`, `deleted`, `origin_device_id`, `content_type` — because
+the backend has to sort and page on them, so they travel in the clear. Left
+unauthenticated, whoever can write to the table decides which version of an item
+every device keeps: stamp a competing version a minute into the future and the
+real one loses; stamp a tombstone and the item disappears everywhere.
+
+So every row carries an HMAC over all of those fields plus the ciphertext and
+the nonce, under a key derived from the sync passphrase with HKDF — a separate
+key from the one that encrypts, from the same secret. A device verifies before
+the row reaches the merge and refuses what does not verify: it is not applied,
+not counted as a delete, and never allowed to displace a local version.
+
+Each round counts its refusals, and a non-zero count means something wrote a row
+into your account that does not hold your passphrase. **That count does not
+reach the app yet** — the sync engine reports it, the daemon's status message
+does not carry it, so today it is only in the log. Sync itself is not affected;
+what is missing is the ability to be told.
+
+Because the ciphertext is under the signature too, a real version cannot be
+spliced onto another version's stamp — an attacker cannot roll an item back to
+older content while keeping the newer metadata.
+
+What this does **not** stop: someone with the account password can still read
+all the metadata, and can fill the table with rows every device throws away.
+Treat the account password as a secret that matters, and turn on whatever second
+factor the deployment offers.
+
+The rest of what bounds an injected row is unchanged: the AEAD binds each item's
+ciphertext to its `item_id`, so a row cannot be moved onto another item; a
+version stamped more than a day into the future is refused rather than allowed
+to outrank real versions; the server checks the shape of every row it accepts,
+and refuses one with no signature at all; and retention runs on a column no
+client can forge.
 
 ## Turning it off
 

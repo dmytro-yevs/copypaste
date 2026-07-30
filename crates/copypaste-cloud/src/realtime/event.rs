@@ -59,6 +59,19 @@ pub enum RealtimeError {
     #[error("realtime protocol error: {0}")]
     Protocol(&'static str),
 
+    /// The server confirmed the join, but for a different subscription than the
+    /// one requested — a narrowed or absent filter, another table, or an event
+    /// set that is not `*`.
+    ///
+    /// Treated as a failed join rather than a warning. An `INSERT`-only
+    /// registration delivers no updates and therefore no deletes, and a channel
+    /// that silently carries less than it was asked for is worse than no
+    /// channel: the poll loop backs off to its long idle ceiling on the strength
+    /// of a join that is "healthy" (manifest 05 §4.8). A join that never
+    /// succeeds costs latency; one that lies costs events.
+    #[error("realtime confirmed a different subscription than the one requested")]
+    JoinMismatch,
+
     /// The access token did not carry a subject claim, so the per-user filter
     /// cannot be built.
     ///
@@ -80,6 +93,7 @@ mod tests {
         let errors = [
             RealtimeError::Connect("the websocket could not be opened"),
             RealtimeError::JoinRefused,
+            RealtimeError::JoinMismatch,
             RealtimeError::Protocol("frame is not json"),
             RealtimeError::MissingUserId,
         ];

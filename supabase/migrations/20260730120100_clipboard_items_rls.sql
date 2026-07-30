@@ -40,12 +40,17 @@ revoke all on public.clipboard_items from anon, public;
 -- (it is the account's own metadata) while risking a broken subscription.
 grant select on public.clipboard_items to authenticated;
 
-grant insert (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
+grant insert (item_id, ciphertext, nonce, content_type, created_at, deleted,
+              origin_device_id, signature)
     on public.clipboard_items to authenticated;
 
--- The same seven columns: PostgREST's merge-duplicates upsert issues
+-- The same eight columns: PostgREST's merge-duplicates upsert issues
 -- `insert … on conflict do update set` over exactly the columns in the body.
-grant update (item_id, ciphertext, nonce, content_type, created_at, deleted, origin_device_id)
+-- `signature` is in both lists because it is written with every row and must be
+-- replaced with every row: a merge that updated the metadata and kept the old
+-- signature would leave a row no device can accept.
+grant update (item_id, ciphertext, nonce, content_type, created_at, deleted,
+              origin_device_id, signature)
     on public.clipboard_items to authenticated;
 
 -- Granted although the client never uses it: deletes travel as tombstones

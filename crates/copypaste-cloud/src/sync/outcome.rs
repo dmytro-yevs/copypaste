@@ -24,6 +24,12 @@ pub struct SyncStats {
     pub skipped_sensitive: usize,
     /// Remote rows that would not open. Never treated as a delete (INV-N3).
     pub skipped_undecryptable: usize,
+    /// Remote rows whose metadata was unsigned or wrongly signed, and which
+    /// therefore never reached the comparator (manifest 05 §5.3).
+    ///
+    /// A non-zero count here is not routine. It means something wrote a row
+    /// into the account that does not hold the sync passphrase.
+    pub skipped_forged: usize,
     /// Remote rows stamped implausibly far in the future.
     pub skipped_future: usize,
     /// Local items over the per-item upload cap. Withheld, never deleted.
@@ -44,6 +50,7 @@ impl SyncStats {
             applied: self.applied + other.applied,
             skipped_sensitive: self.skipped_sensitive + other.skipped_sensitive,
             skipped_undecryptable: self.skipped_undecryptable + other.skipped_undecryptable,
+            skipped_forged: self.skipped_forged + other.skipped_forged,
             skipped_future: self.skipped_future + other.skipped_future,
             skipped_too_large: self.skipped_too_large + other.skipped_too_large,
         }

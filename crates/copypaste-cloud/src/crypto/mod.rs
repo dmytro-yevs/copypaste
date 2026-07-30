@@ -12,9 +12,15 @@
 //!   ▼
 //! Argon2id(m = 19456 KiB, t = 2, p = 1, v = 0x13, out = 32 B)
 //!   ▼
-//! SyncKey ──► XChaCha20-Poly1305, AAD = "copypaste/v2/cloud-row-aead|1|<len>:<item_id>"
-//!   ▼
-//! (nonce_b64, ciphertext_b64)  ──►  Supabase
+//! SyncKey ─┬► XChaCha20-Poly1305, AAD = "copypaste/v2/cloud-row-aead|1|<len>:<item_id>"
+//!          │    ▼
+//!          │  (nonce_b64, ciphertext_b64)  ──►  Supabase
+//!          │
+//!          └► HKDF-Expand(info = ".../cloud-row-signature/hmac-sha256")
+//!               ▼
+//!             HMAC-SHA256 over every column the client writes
+//!               ▼
+//!             signature_b64  ──►  Supabase
 //! ```
 //!
 //! Supabase holds the two base64 strings, the `item_id`, and metadata. It holds
@@ -23,6 +29,11 @@
 //! knows — a salt is not a secret, it exists so that two users who pick the same
 //! passphrase do not get the same key, and so that one Argon2id table cannot be
 //! precomputed against every account at once.
+//!
+//! The AEAD protects content; [`sign`] protects the metadata the merge orders
+//! on, which travels in the clear because the backend pages on it. Read that
+//! module's header for the attack it closes — encryption cannot fix an ordering
+//! attack.
 //!
 //! The two halves of that diagram are the two files below: [`key`] turns a
 //! passphrase into a key, [`row`] turns a key and a row into ciphertext. They
@@ -61,6 +72,7 @@ pub mod error;
 pub mod handle;
 pub mod key;
 pub mod row;
+pub mod sign;
 
 #[cfg(test)]
 mod testkit;
@@ -72,3 +84,4 @@ pub use key::{
     MIN_PASSPHRASE_CHARS,
 };
 pub use row::{decrypt_row, encrypt_row, NONCE_LEN, TAG_LEN};
+pub use sign::{sign_metadata, verify_metadata, RowMetadata, SIGNATURE_LEN};

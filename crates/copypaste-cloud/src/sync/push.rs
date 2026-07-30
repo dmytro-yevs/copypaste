@@ -1,13 +1,15 @@
-//! The upload path: what leaves the device, sealed, and what never does.
+//! The upload path: what leaves the device, sealed, signed, and what never does.
 //!
-//! Two rules are enforced here and nowhere else in this module: the sensitive
-//! gate runs before anything is sealed or counted, and a tombstone is sent as a
-//! tombstone rather than as a row that happens to have a flag set.
+//! Three rules are enforced here and nowhere else in this module: the sensitive
+//! gate runs before anything is sealed or counted, a tombstone is sent as a
+//! tombstone rather than as a row that happens to have a flag set, and every
+//! row is signed before it is handed to the transport.
 
 use super::driver::CloudSync;
 use super::outcome::{SyncError, SyncStats};
 use super::source::{CloudSource, LocalItem};
 use super::transport::{AuthApi, RestApi};
+use crate::auth::now_ms;
 use crate::crypto::encrypt_row;
 use crate::rest::CloudItem;
 
@@ -47,10 +49,9 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         let device_id = source.device_id();
         let mut stats = SyncStats::default();
 
-        let mut live: Vec<CloudItem> = Vec::new();
-        let mut dead: Vec<String> = Vec::new();
+        let mut rows: Vec<CloudItem> = Vec::new();
 
-        for item in source.local_changes_since(since)? {
+        for mut item in source.local_changes_since(since)? {
             // The gate, before anything is sealed or counted. A sensitive item
             // is not merely withheld from this request — it is never given an
             // opportunity to reach the network at all.
@@ -63,10 +64,36 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 continue;
             }
 
+            // Preserve the original origin across hops; restamping it breaks
+            // the ordering's final tie-break. Taken rather than cloned because
+            // both branches below consume the rest of `item`.
+            let origin = if item.origin_device_id.is_empty() {
+                device_id.clone()
+            } else {
+                std::mem::take(&mut item.origin_device_id)
+            };
+
             if item.deleted {
                 // A tombstone carries no ciphertext, even if the caller handed
-                // us a version that still has content in memory (T-4).
-                dead.push(item.item_id);
+                // us a version that still has content in memory (T-4), and it
+                // travels on the same upsert as a live row — the id-only PATCH
+                // path is gone, because a partial write cannot sign the columns
+                // it does not send.
+                //
+                // Restamped, for the reason that path restamped it: `created_at`
+                // is what the poll cursor pages on, and a tombstone that kept
+                // the item's original stamp sits below the watermark of every
+                // device that already has the item, so the deletion never
+                // propagates. `max` rather than a bare `now`, so a delete
+                // stamped ahead of this device's clock cannot be demoted below
+                // the very version it deletes.
+                stats.tombstoned += 1;
+                rows.push(self.signed(CloudItem::tombstone(
+                    item.item_id,
+                    item.content_type,
+                    item.created_at.max(now_ms()),
+                    origin,
+                )));
                 continue;
             }
 
@@ -90,7 +117,8 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             let (nonce, ciphertext) = encrypt_row(&item.content, &self.key, &item.item_id)
                 .map_err(|_| SyncError::Encrypt)?;
 
-            live.push(CloudItem {
+            stats.uploaded += 1;
+            rows.push(self.signed(CloudItem {
                 item_id: item.item_id,
                 ciphertext,
                 nonce,
@@ -98,28 +126,28 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 created_at: item.created_at,
                 // Always explicit, never left to the column default (T-5).
                 deleted: false,
-                origin_device_id: if item.origin_device_id.is_empty() {
-                    device_id.clone()
-                } else {
-                    // Preserve the original origin across hops; restamping it
-                    // breaks the ordering's final tie-break.
-                    item.origin_device_id
-                },
-            });
+                origin_device_id: origin,
+                signature: String::new(),
+            }));
         }
 
-        for batch in live.chunks(UPLOAD_BATCH) {
+        for batch in rows.chunks(UPLOAD_BATCH) {
             self.execute(|token| async move { self.rest.upsert(&token, batch).await })
                 .await?;
-            stats.uploaded += batch.len();
-        }
-        for batch in dead.chunks(UPLOAD_BATCH) {
-            self.execute(|token| async move { self.rest.tombstone(&token, batch).await })
-                .await?;
-            stats.tombstoned += batch.len();
         }
 
         Ok(stats)
+    }
+
+    /// Stamp the metadata signature.
+    ///
+    /// Here, on the way out, rather than in each constructor: this is the last
+    /// point every outbound row passes through, so there is no second place a
+    /// row can be built and shipped unsigned. `CloudItem::validate` refuses an
+    /// unsigned row at the transport as the backstop.
+    fn signed(&self, mut row: CloudItem) -> CloudItem {
+        row.sign(&self.key);
+        row
     }
 }
 
@@ -200,6 +228,46 @@ mod tests {
             decrypt_row(&row.ciphertext, &row.nonce, &key(), "a").unwrap(),
             b"round trip"
         );
+    }
+
+    #[tokio::test]
+    async fn every_row_that_leaves_the_device_is_signed() {
+        // The upload half of manifest 05 §5.3. Asserted over the rows the
+        // backend ends up holding rather than at the call site, so a second
+        // construction path added later fails here.
+        let mut dead = tombstone("gone", 3_000);
+        dead.content = b"still in memory".to_vec();
+        let source = FakeSource::with_outgoing(vec![item("a", 1_000, "live"), dead]);
+        let sync = driver(FakeRest::default(), FakeAuth::default());
+
+        let stats = sync.push(&source).await.unwrap();
+        assert_eq!((stats.uploaded, stats.tombstoned), (1, 1));
+
+        for row in sync.rest.sorted_rows() {
+            row.verify(&key())
+                .unwrap_or_else(|_| panic!("{} was uploaded unsigned", row.item_id));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tombstone_is_restamped_so_it_sorts_above_every_watermark() {
+        // `created_at` is what the poll cursor pages on. A tombstone that kept
+        // the item's original stamp would sit below the watermark of every
+        // device that already has the item, and the delete would never arrive.
+        let before = now_ms();
+        let source = FakeSource::with_outgoing(vec![tombstone("a", 1_000)]);
+        let sync = driver(FakeRest::default(), FakeAuth::default());
+        sync.push(&source).await.unwrap();
+
+        let rows = sync.rest.rows.lock().unwrap();
+        let row = &rows["a"];
+        assert!(row.deleted);
+        assert!(
+            row.created_at >= before,
+            "the tombstone kept the item's original stamp"
+        );
+        // And the restamp is under the signature, so the backend cannot move it.
+        row.verify(&key()).expect("signed at the restamped value");
     }
 
     #[tokio::test]

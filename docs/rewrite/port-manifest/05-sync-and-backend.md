@@ -308,6 +308,11 @@ Local-only, must NOT travel: the row PK (R-ID-2), the image thumbnail
 > not an LWW *version* on the cloud path at all — a cloud row that wins the merge
 > does not carry pin state with it, so the receiver keeps its own.
 >
+> There is now a third thing to carry: `pinned` and `pin_order` would be merge
+> inputs, so they must go under the row signature (§5.3) in the same change. A
+> merge key outside the signature is a merge key an account-password holder can
+> forge, and "unpin the row you want to delete" is a particularly cheap forgery.
+>
 > What it entangles: the daemon **refuses a remote delete of a pinned row**
 > precisely because pin state does not sync — without that refusal, a device that
 > cannot see the pin would delete a row the user had pinned, and data loss is the
@@ -920,6 +925,30 @@ distinguish a forged version from a real one.
 > a row whose metadata was not produced by a sync-key holder can be rejected
 > before it participates in the merge. This is the one security capability the
 > relay had that Supabase does not, and it is cheap to add client-side.
+>
+> **Implemented in v2, 2026-07-30.** `crates/copypaste-cloud/src/crypto/sign.rs`:
+> HMAC-SHA256 under `HKDF-Expand(sync_key, "…/cloud-row-signature/hmac-sha256")`,
+> covering every column a client writes — `item_id`, `content_type`,
+> `origin_device_id`, `created_at`, `deleted`, `nonce`, `ciphertext` — with each
+> field length-prefixed so the encoding is injective. The ciphertext is under it
+> as well as the metadata, because the AEAD binds a payload to its `item_id` but
+> not to its *version*, so without that an attacker could keep the newest signed
+> stamp and restore an older version's content.
+>
+> Consequences worth knowing before changing anything here:
+>
+> * `sync::pull` verifies **before** decrypting and refuses what does not verify.
+>   A refusal advances the cursor past the row but never past the local clock:
+>   not advancing at all lets a page of forged rows stall sync permanently, and
+>   advancing without the ceiling lets one forged stamp skip a day of honest rows
+>   — which is the censorship the signature exists to prevent.
+> * The id-only `PATCH` tombstone path is **gone**, and §7.5's "one upsert, one
+>   code path" is now structural rather than advisory: a partial write cannot
+>   sign the columns it does not send, so a tombstone travels as an ordinary
+>   signed row with `deleted = true` and no payload.
+> * The signature covers what the comparator reads. **Anything added to the
+>   comparator must be added to the signature in the same change**, or it is
+>   forgeable — see §3.6 for the pin fields specifically.
 
 ### 5.4 Summary verdict
 
@@ -935,7 +964,10 @@ Three things must be handled deliberately, not by omission:
    unbounded server-side retention.
 3. **Record the threat-model change** (row 10/16): account password now gates
    ciphertext access, metadata visibility increases, sync requires an account,
-   and metadata forgery becomes possible without the sync key.
+   and metadata forgery becomes possible without the sync key. Recorded in
+   `docs/cloud-privacy.md`. The last of the four — metadata forgery — is no
+   longer merely recorded: it is closed by the row signature above. The other
+   three stand.
 
 Everything else is either covered, cheaply replicated client-side, or was never
 used.

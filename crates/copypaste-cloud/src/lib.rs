@@ -23,6 +23,15 @@
 //!
 //! RLS is the second layer, not the first: a misconfigured policy exposes rows
 //! that are still unreadable.
+//!
+//! # The metadata is signed, because encryption cannot order anything
+//!
+//! The fields the merge orders on travel in the clear — the backend pages on
+//! them. Whoever can write to the table could therefore decide which version of
+//! an item every device keeps, without ever decrypting anything. Every row
+//! carries an HMAC over those fields and the ciphertext, under a key derived
+//! from the same passphrase, and a row that does not verify is refused before it
+//! reaches the merge. See [`crypto::sign`].
 
 #![forbid(unsafe_code)]
 

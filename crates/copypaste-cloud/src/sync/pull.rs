@@ -1,5 +1,24 @@
-//! The download path: the cursor, the paging, and the three ways a row can be
-//! refused without failing the round.
+//! The download path: the cursor, the paging, and the ways a row can be refused
+//! without failing the round.
+//!
+//! # Refusal and the cursor
+//!
+//! A refused row still advances the cursor past itself, but **never past the
+//! local clock**. Both halves of that are load-bearing, and each fixes what the
+//! other would break:
+//!
+//! * Advancing is what stops a refusal from stalling sync. Anyone who can write
+//!   to the account can inject a page's worth of rows stamped one millisecond
+//!   after the cursor; if refusing them left the cursor where it was, that page
+//!   would come back on every pull and nothing behind it would ever download.
+//! * The clock ceiling is what stops a refusal from *becoming* the censorship it
+//!   is meant to prevent. A forged row stamped a day ahead would otherwise drag
+//!   the cursor a day forward and skip every honest row written in between. A
+//!   row stamped at or behind `now` cannot skip anything: pages arrive in
+//!   ascending keyset order with no gaps, so everything before it has already
+//!   been offered. A row stamped ahead of `now` sorts after every honest row, so
+//!   leaving the cursor behind it costs one re-fetched row per pull and blocks
+//!   nothing.
 //!
 //! The cursor rules live here because they are one rule seen from three angles
 //! — the inclusive bound, the ascending page order, and the watermark that only
@@ -122,6 +141,23 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     continue;
                 }
 
+                // Before the payload is touched, and before anything reaches
+                // the comparator: a row whose metadata was not signed by a
+                // holder of the sync key is not a version of anything. The
+                // backend cannot produce this signature, so this is what stops
+                // an account-password holder from stamping a competing version
+                // that outranks the real one — or a tombstone that deletes it
+                // everywhere (manifest 05 §5.3).
+                if row.verify(&self.key).is_err() {
+                    stats.skipped_forged += 1;
+                    tracing::warn!(
+                        item_id = %row.item_id,
+                        "refusing a row whose metadata is unsigned or wrongly signed"
+                    );
+                    advanced.advance_after_refusal(created_at, &row.item_id, now);
+                    continue;
+                }
+
                 let content = if row.deleted {
                     // A tombstone has no ciphertext to open. It is still a
                     // version, and it must reach the store even for an item
@@ -138,7 +174,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                                 item_id = %row.item_id,
                                 "skipping a row this device cannot decrypt"
                             );
-                            advanced.advance_past(created_at, &row.item_id);
+                            advanced.advance_after_refusal(created_at, &row.item_id, now);
                             continue;
                         }
                     }
@@ -216,6 +252,17 @@ impl Cursor {
             self.item_id = Some(item_id.to_owned());
         }
     }
+
+    /// Move past a row this device refused, if it is safe to.
+    ///
+    /// Refused rows are the only ones whose stamp is entirely attacker-chosen,
+    /// so they are the only ones the cursor must not follow into the future.
+    /// See the module docs for why both the advance and the ceiling are needed.
+    fn advance_after_refusal(&mut self, created_at: i64, item_id: &str, now: i64) {
+        if created_at <= now {
+            self.advance_past(created_at, item_id);
+        }
+    }
 }
 
 /// Put a page in the order the cursor needs, and say so if it was not already.
@@ -259,7 +306,9 @@ fn clamp_stamp(raw: i64) -> i64 {
 mod tests {
     use std::sync::atomic::Ordering;
 
-    use super::super::fakes::{cloud_row, driver, item, FakeAuth, FakeRest, FakeSource, PASS};
+    use super::super::fakes::{
+        cloud_row, cloud_tombstone, driver, item, signed, FakeAuth, FakeRest, FakeSource, PASS,
+    };
     use super::*;
     use crate::crypto::encrypt_row;
 
@@ -318,13 +367,11 @@ mod tests {
     async fn a_tombstone_reaches_the_store_even_for_an_unknown_item() {
         // T-3 / CopyPaste-bfiu. Dropping it here lets a later-arriving create
         // resurrect the item, so the tombstone must be handed down.
-        let mut row = cloud_row("gone", 4_000, "");
-        row.deleted = true;
-        row.ciphertext = String::new();
-        row.nonce = String::new();
-
         let source = FakeSource::default();
-        let sync = driver(FakeRest::seeded(vec![row]), FakeAuth::default());
+        let sync = driver(
+            FakeRest::seeded(vec![cloud_tombstone("gone", 4_000)]),
+            FakeAuth::default(),
+        );
 
         let stats = sync.pull(&source).await.unwrap();
         assert_eq!(stats.applied, 1);
@@ -345,14 +392,11 @@ mod tests {
         assert!(!source.get("a").unwrap().deleted);
 
         // Now the delete arrives, stamped later.
-        {
-            let mut rows = sync.rest.rows.lock().unwrap();
-            let row = rows.get_mut("a").unwrap();
-            row.deleted = true;
-            row.ciphertext = String::new();
-            row.nonce = String::new();
-            row.created_at = 2_000;
-        }
+        sync.rest
+            .rows
+            .lock()
+            .unwrap()
+            .insert("a".into(), cloud_tombstone("a", 2_000));
         sync.pull(&source).await.unwrap();
 
         let stored = source.get("a").unwrap();
@@ -364,12 +408,10 @@ mod tests {
     async fn an_older_live_version_cannot_resurrect_a_newer_tombstone() {
         let source = FakeSource::default();
         // Tombstone first, at a later stamp than the create that follows it.
-        let mut dead = cloud_row("a", 5_000, "");
-        dead.deleted = true;
-        dead.ciphertext = String::new();
-        dead.nonce = String::new();
-
-        let sync = driver(FakeRest::seeded(vec![dead]), FakeAuth::default());
+        let sync = driver(
+            FakeRest::seeded(vec![cloud_tombstone("a", 5_000)]),
+            FakeAuth::default(),
+        );
         sync.pull(&source).await.unwrap();
         assert!(source.get("a").unwrap().deleted);
 
@@ -397,7 +439,9 @@ mod tests {
 
         let rest = FakeRest::seeded(vec![
             cloud_row("a", 1_000, "readable"),
-            CloudItem {
+            // Signed with *our* key so the row gets as far as the decrypt: the
+            // point of this test is the payload, not the metadata.
+            signed(CloudItem {
                 item_id: "b".into(),
                 ciphertext,
                 nonce,
@@ -405,7 +449,8 @@ mod tests {
                 created_at: 2_000,
                 deleted: false,
                 origin_device_id: "device-b".into(),
-            },
+                signature: String::new(),
+            }),
         ]);
         let source = FakeSource::default();
         let sync = driver(rest, FakeAuth::default());
@@ -420,6 +465,139 @@ mod tests {
         // INV-I4: the cursor advanced past the unreadable row, so it is not
         // re-fetched forever.
         assert_eq!(source.watermark().unwrap(), 2_000);
+    }
+
+    // --- signed metadata (manifest 05 §5.3) --------------------------------
+
+    #[tokio::test]
+    async fn a_row_whose_metadata_was_restamped_is_refused() {
+        // The §5.3 attack in full: something holding the account password, but
+        // not the sync passphrase, rewrites a real row's `created_at` so its
+        // version outranks every honest one for that item. The ciphertext is
+        // untouched and still opens — encryption cannot see this — so the
+        // signature is the only thing that can refuse it.
+        let source = FakeSource::default();
+        let sync = driver(
+            FakeRest::seeded(vec![cloud_row("a", 1_000, "the real version")]),
+            FakeAuth::default(),
+        );
+        sync.pull(&source).await.unwrap();
+        assert_eq!(source.get("a").unwrap().content, b"the real version");
+
+        // The backend rewrites the stamp, leaving the signature as it was.
+        sync.rest
+            .rows
+            .lock()
+            .unwrap()
+            .get_mut("a")
+            .unwrap()
+            .created_at = 9_000;
+        source.rewind(0);
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.skipped_forged, 1);
+        assert_eq!(stats.applied, 0);
+        assert_eq!(
+            source.get("a").unwrap().created_at,
+            1_000,
+            "a forged stamp reached the merge"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_forged_tombstone_cannot_delete_an_item() {
+        // The most destructive shape: one write into the account, and the item
+        // is gone from every device. Data loss is the worst outcome
+        // (`CLAUDE.md` rule 4), so this one is asserted on its own.
+        let source = FakeSource::default();
+        let sync = driver(
+            FakeRest::seeded(vec![cloud_row("a", 1_000, "keep me")]),
+            FakeAuth::default(),
+        );
+        sync.pull(&source).await.unwrap();
+
+        // Signed by something that is not us: a real signature, wrong key.
+        let attacker = crate::crypto::derive_sync_key(PASS, "attacker-account").unwrap();
+        let mut forged = CloudItem::tombstone("a", "text", 5_000, "device-b");
+        forged.sign(&attacker);
+        sync.rest.rows.lock().unwrap().insert("a".into(), forged);
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.skipped_forged, 1);
+        let stored = source.get("a").expect("the item was deleted by a forgery");
+        assert!(!stored.deleted);
+        assert_eq!(stored.content, b"keep me");
+    }
+
+    #[tokio::test]
+    async fn an_unsigned_row_is_refused_and_does_not_stall_the_cursor() {
+        // Fail closed, but not fail stuck: a page full of unsigned rows must
+        // not park the cursor in front of them forever, or anyone who can write
+        // to the account can stop sync with a hundred cheap rows.
+        let mut unsigned = cloud_row("forged", 1_000, "not from a key holder");
+        unsigned.signature = String::new();
+
+        let rest = FakeRest::seeded(vec![unsigned, cloud_row("real", 2_000, "genuine")]);
+        let source = FakeSource::default();
+        let sync = driver(rest, FakeAuth::default());
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.skipped_forged, 1);
+        assert_eq!(stats.applied, 1);
+        assert!(source.get("forged").is_none());
+        assert_eq!(source.get("real").unwrap().content, b"genuine");
+        assert_eq!(source.watermark().unwrap(), 2_000);
+
+        // And the refused row is not re-offered forever: the cursor is past it.
+        source.rewind(0);
+        let mut only_forged = FakeRest::seeded(vec![]);
+        only_forged.rows = std::sync::Mutex::new(
+            sync.rest
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(id, _)| id.as_str() == "forged")
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        );
+        let sync = driver(only_forged, FakeAuth::default());
+        sync.pull(&source).await.unwrap();
+        assert_eq!(
+            source.watermark().unwrap(),
+            1_000,
+            "the cursor did not move past a refused row, so it can be stalled"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_row_cannot_drag_the_cursor_into_the_future() {
+        // The other half of the rule. If refusal advanced unconditionally, one
+        // forged row stamped just inside the skew window would push the cursor
+        // most of a day forward and skip every honest row written in between —
+        // the censorship the signature exists to prevent, delivered by the
+        // check that is meant to prevent it.
+        let ahead = now_ms() + MAX_FUTURE_SKEW_MS / 2;
+        let mut forged = cloud_row("forged", ahead, "tomorrow");
+        forged.signature = String::new();
+
+        let source = FakeSource::default();
+        let sync = driver(
+            FakeRest::seeded(vec![cloud_row("real", 1_000, "genuine"), forged]),
+            FakeAuth::default(),
+        );
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.skipped_forged, 1);
+        assert_eq!(
+            source.watermark().unwrap(),
+            1_000,
+            "the cursor followed a refused row into the future"
+        );
     }
 
     #[tokio::test]

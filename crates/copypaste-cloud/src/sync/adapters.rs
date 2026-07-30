@@ -60,13 +60,6 @@ impl RestApi for crate::rest::SupabaseRest {
             .map(|_| ())
             .map_err(classify_rest)
     }
-
-    async fn tombstone(&self, token: &str, item_ids: &[String]) -> Result<(), TransportFault> {
-        crate::rest::SupabaseRest::tombstone(self, token, item_ids)
-            .await
-            .map(|_| ())
-            .map_err(classify_rest)
-    }
 }
 
 /// `AuthError` -> [`AuthFault`].

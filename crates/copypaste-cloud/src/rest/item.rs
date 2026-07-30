@@ -3,12 +3,25 @@
 //! The base64 encoding lives here rather than at the call sites so that there
 //! is one alphabet in the crate, and the validation lives here rather than in
 //! the client so that a second request path cannot forget to run it.
+//!
+//! # Decoding is per row, never per page
+//!
+//! Three columns are decoded leniently: a JSON `null` or an absent field
+//! becomes an empty string rather than a deserialisation failure. That is not
+//! sloppiness, it is the difference between refusing one row and refusing a
+//! page. `serde` fails the whole array on the first bad element, so a single
+//! row with `"ciphertext": null` — which the table permits, and which anyone
+//! who can write to the account can produce — would otherwise stall the cursor
+//! for good. Empty is a value the ordinary checks already reject: an unsigned
+//! row fails [`CloudItem::verify`] and a live row without ciphertext fails the
+//! send-side validation below.
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use super::error::RestError;
+use crate::crypto::{sign_metadata, verify_metadata, CloudCryptoError, RowMetadata, SyncKey};
 
 /// One row as it travels to and from the backend.
 ///
@@ -22,8 +35,10 @@ pub struct CloudItem {
     /// quoting rules deciding what the filter means — see [`RestError::InvalidItem`].
     pub item_id: String,
     /// base64. The server cannot read this. Empty on a tombstone.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub ciphertext: String,
     /// base64.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub nonce: String,
     pub content_type: String,
     /// Version wall clock, ms since epoch. **Not the row's birth time**: it is
@@ -35,6 +50,16 @@ pub struct CloudItem {
     /// Tombstone flag. Always serialised, including `false` (manifest T-5).
     pub deleted: bool,
     pub origin_device_id: String,
+    /// HMAC over every other column, under a key derived from the sync key.
+    ///
+    /// The backend can neither produce nor check it: it is what tells a
+    /// receiving device that this version came from something holding the sync
+    /// passphrase, rather than from something holding only the account password
+    /// (manifest 05 §5.3). Set by [`CloudItem::sign`], required by the
+    /// send-side validation, and checked by [`CloudItem::verify`] before a row
+    /// reaches the merge.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub signature: String,
 }
 
 impl CloudItem {
@@ -59,6 +84,7 @@ impl CloudItem {
             created_at,
             deleted: false,
             origin_device_id: origin_device_id.into(),
+            signature: String::new(),
         }
     }
 
@@ -84,6 +110,7 @@ impl CloudItem {
             created_at,
             deleted: false,
             origin_device_id: origin_device_id.into(),
+            signature: String::new(),
         }
     }
 
@@ -106,6 +133,7 @@ impl CloudItem {
             created_at,
             deleted: true,
             origin_device_id: origin_device_id.into(),
+            signature: String::new(),
         }
     }
 
@@ -121,9 +149,49 @@ impl CloudItem {
         BASE64.decode(&self.nonce).map_err(|_| RestError::Malformed)
     }
 
+    /// Stamp the metadata signature. Call this on every row before it is sent;
+    /// the send-side validation refuses one that has not been.
+    pub fn sign(&mut self, key: &SyncKey) {
+        self.signature = sign_metadata(key, &self.metadata());
+    }
+
+    /// Check the metadata signature.
+    ///
+    /// # Errors
+    ///
+    /// [`CloudCryptoError::SignatureInvalid`] if the row was not signed by a
+    /// holder of the sync key. The caller must refuse the row — never merge it,
+    /// never treat a refusal as a delete.
+    pub fn verify(&self, key: &SyncKey) -> Result<(), CloudCryptoError> {
+        verify_metadata(key, &self.metadata(), &self.signature)
+    }
+
+    /// The fields under the signature: every column except the signature
+    /// itself. Built from `self`, so signing and verifying cannot read
+    /// different rows.
+    fn metadata(&self) -> RowMetadata<'_> {
+        RowMetadata {
+            item_id: &self.item_id,
+            ciphertext: &self.ciphertext,
+            nonce: &self.nonce,
+            content_type: &self.content_type,
+            created_at: self.created_at,
+            deleted: self.deleted,
+            origin_device_id: &self.origin_device_id,
+        }
+    }
+
     /// Client-side preconditions, checked before anything is sent.
     pub(super) fn validate(&self) -> Result<(), RestError> {
         validate_item_id(&self.item_id)?;
+        // An unsigned row is refused here rather than at the receiver, where it
+        // would look like an attack: every device verifies on arrival, so
+        // uploading one would silently publish a version nothing can accept.
+        if self.signature.is_empty() {
+            return Err(RestError::InvalidItem {
+                reason: "the row's metadata was never signed",
+            });
+        }
         if self.deleted && !self.ciphertext.is_empty() {
             return Err(RestError::InvalidItem {
                 reason: "a tombstone must not carry ciphertext",
@@ -141,6 +209,15 @@ impl CloudItem {
         }
         Ok(())
     }
+}
+
+/// `null` (or an absent field) reads as an empty string. See the module docs:
+/// this is what keeps one bad row from failing a whole page.
+fn null_as_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// An `item_id` goes into a PostgREST filter (`item_id=in.(…)`), where quoting
@@ -171,7 +248,7 @@ pub(super) fn validate_item_id(item_id: &str) -> Result<(), RestError> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::testkit::item;
+    use super::super::testkit::{item, key};
     use super::super::SELECT_COLUMNS;
     use super::*;
 
@@ -198,7 +275,7 @@ mod tests {
     #[test]
     fn a_row_can_be_built_from_payloads_that_are_already_base64() {
         let sealed = CloudItem::sealed("a1", b"ct", b"nc", "text", 9, "device-a");
-        let same = CloudItem::from_sealed_b64(
+        let mut same = CloudItem::from_sealed_b64(
             "a1",
             BASE64.encode(b"ct"),
             BASE64.encode(b"nc"),
@@ -207,16 +284,64 @@ mod tests {
             "device-a",
         );
         assert_eq!(sealed, same, "the two constructors must agree");
+        same.sign(&key());
         same.validate().expect("valid row");
     }
 
     #[test]
     fn a_constructed_tombstone_carries_no_payload() {
-        let row = CloudItem::tombstone("a1", "text", 5, "device-a");
+        let mut row = CloudItem::tombstone("a1", "text", 5, "device-a");
         assert!(row.deleted);
         assert!(row.ciphertext.is_empty());
         assert!(row.nonce.is_empty());
+        row.sign(&key());
         row.validate().expect("a tombstone is a valid row to send");
+    }
+
+    #[test]
+    fn an_unsigned_row_cannot_be_sent() {
+        // The send-side half of the fail-closed rule: every device verifies on
+        // arrival, so uploading an unsigned row would publish a version that
+        // nothing — including this device — can accept.
+        let row = CloudItem::sealed("a1", b"ct", b"nc", "text", 9, "device-a");
+        assert!(row.signature.is_empty());
+        assert!(matches!(row.validate(), Err(RestError::InvalidItem { .. })));
+    }
+
+    #[test]
+    fn signing_covers_the_row_and_verification_refuses_a_tampered_one() {
+        let row = item("a1");
+        row.verify(&key()).expect("a freshly signed row verifies");
+
+        // The attack of manifest 05 §5.3: restamp a version so it outranks the
+        // real one. The signature is what makes that visible.
+        let mut restamped = row.clone();
+        restamped.created_at += 60_000;
+        assert_eq!(
+            restamped.verify(&key()),
+            Err(CloudCryptoError::SignatureInvalid)
+        );
+
+        let mut forged_tombstone = row.clone();
+        forged_tombstone.deleted = true;
+        forged_tombstone.ciphertext = String::new();
+        assert!(forged_tombstone.verify(&key()).is_err());
+    }
+
+    #[test]
+    fn a_null_column_reads_as_empty_rather_than_failing_the_page() {
+        // `serde` fails a whole array on its first bad element, so a single row
+        // carrying `null` here would stall the cursor for good.
+        let row: CloudItem = serde_json::from_str(
+            r#"{"item_id":"a1","ciphertext":null,"nonce":null,"content_type":"text",
+                "created_at":7,"deleted":true,"origin_device_id":"dev","signature":null}"#,
+        )
+        .expect("a null payload column must not fail deserialisation");
+        assert!(row.ciphertext.is_empty());
+        assert!(row.nonce.is_empty());
+        assert!(row.signature.is_empty());
+        // And it is still refused, by the check that is meant to refuse it.
+        assert_eq!(row.verify(&key()), Err(CloudCryptoError::SignatureInvalid));
     }
 
     #[test]
@@ -235,6 +360,7 @@ mod tests {
                 "item_id",
                 "nonce",
                 "origin_device_id",
+                "signature",
             ]
         );
         let mut selected: Vec<&str> = SELECT_COLUMNS.split(',').collect();

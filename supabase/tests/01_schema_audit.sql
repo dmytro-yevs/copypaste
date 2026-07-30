@@ -20,7 +20,7 @@ do $$
 declare
     expected text[] := array[
         'ciphertext', 'content_type', 'created_at', 'deleted',
-        'item_id', 'nonce', 'origin_device_id'
+        'item_id', 'nonce', 'origin_device_id', 'signature'
     ];
     found text[];
 begin
@@ -35,6 +35,31 @@ begin
     if found is distinct from expected then
         raise exception 'clipboard_items is missing columns the client selects: expected %, found %',
             expected, found;
+    end if;
+end
+$$;
+
+-- --- the metadata signature (manifest 05 §5.3) -----------------------------
+
+do $$
+declare
+    nullable boolean;
+begin
+    -- The column exists and is `not null`, so a row that was never signed
+    -- cannot be written. Clients verify on the way in and refuse what does not
+    -- verify; this is the write-side backstop, and it is the only one that
+    -- applies to a writer that is not this client.
+    select is_nullable = 'YES'
+      into nullable
+      from information_schema.columns
+     where table_schema = 'public' and table_name = 'clipboard_items'
+       and column_name = 'signature';
+
+    if nullable is null then
+        raise exception 'clipboard_items has no signature column: the merge metadata is unauthenticated';
+    end if;
+    if nullable then
+        raise exception 'signature is nullable, so an unsigned row can be written';
     end if;
 end
 $$;
@@ -69,7 +94,8 @@ $$;
 do $$
 begin
     -- AT-52. PostgREST resolves `on_conflict=user_id,item_id` through this
-    -- index; without it every replayed batch is a 409 instead of a no-op.
+    -- index; without it every write fails 400 (`42P10`), measured against
+    -- PostgREST 12.2.3 by `supabase/dev/postgrest-harness.sh`.
     if not exists (
         select 1 from pg_indexes
          where schemaname = 'public' and tablename = 'clipboard_items'

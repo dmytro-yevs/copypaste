@@ -1,4 +1,4 @@
-//! The three requests, and the one place both auth headers are attached.
+//! The two requests, and the one place both auth headers are attached.
 //!
 //! Every query-shape decision that the cursor depends on is here — the
 //! inclusive `gte`, the ascending compound order, the clamped `limit` — and
@@ -11,11 +11,8 @@ use reqwest::Client;
 
 use super::error::{classify, RestError};
 use super::item::{validate_item_id, CloudItem};
-use super::{
-    CONFLICT_TARGET, MAX_PAGE_LIMIT, REST_TIMEOUT, SELECT_COLUMNS, TABLE, TOMBSTONE_CHUNK,
-    UPSERT_CHUNK,
-};
-use crate::auth::{now_ms, transient_backoff};
+use super::{CONFLICT_TARGET, MAX_PAGE_LIMIT, REST_TIMEOUT, SELECT_COLUMNS, TABLE, UPSERT_CHUNK};
+use crate::auth::transient_backoff;
 use crate::CloudConfig;
 
 /// PostgREST client for one Supabase project.
@@ -175,55 +172,6 @@ impl SupabaseRest {
         Ok(written)
     }
 
-    /// Mark items deleted, rather than removing the rows.
-    ///
-    /// A delete has to be a *version* of the item, not the absence of one: a
-    /// device that is offline now and syncs next week must be told the item
-    /// died, and a row that is simply gone tells it nothing — its own copy
-    /// would be re-uploaded and the item would come back.
-    ///
-    /// The payload wipes `ciphertext` and `nonce` (manifest T-4) and restamps
-    /// `created_at` to now, because that column is what the poll cursor pages
-    /// on: leaving the original creation time would hide the deletion below the
-    /// watermark of every device that already has the item.
-    ///
-    /// Prefer [`SupabaseRest::upsert`] with a full [`CloudItem::tombstone`]
-    /// when the caller holds the item's merge metadata; this is the id-only
-    /// path.
-    pub async fn tombstone(&self, token: &str, item_ids: &[String]) -> Result<usize, RestError> {
-        for item_id in item_ids {
-            validate_item_id(item_id)?;
-        }
-        if item_ids.is_empty() {
-            return Ok(0);
-        }
-
-        let url = self.table_url();
-        let payload = serde_json::json!({
-            "deleted": true,
-            "ciphertext": serde_json::Value::Null,
-            "nonce": serde_json::Value::Null,
-            "created_at": now_ms(),
-        });
-
-        let mut tombstoned = 0usize;
-        for chunk in item_ids.chunks(TOMBSTONE_CHUNK) {
-            let filter = in_list(chunk);
-            self.send(token, || {
-                self.http
-                    .patch(&url)
-                    .query(&[("item_id", filter.as_str())])
-                    .header("Prefer", "return=minimal")
-                    .json(&payload)
-            })
-            .await?;
-            tombstoned += chunk.len();
-        }
-
-        tracing::debug!(rows = tombstoned, "tombstoned");
-        Ok(tombstoned)
-    }
-
     fn table_url(&self) -> String {
         format!(
             "{}/rest/v1/{}",
@@ -278,22 +226,13 @@ fn keyset_after(created_at: i64, item_id: &str) -> String {
     format!("(created_at.gt.{created_at},and(created_at.eq.{created_at},item_id.gt.{item_id}))")
 }
 
-/// PostgREST's `in.(…)` filter value.
-///
-/// Values are known to be `[A-Za-z0-9_-]` by
-/// [`validate_item_id`](super::item::validate_item_id), so there is no quoting
-/// to get wrong.
-fn in_list(item_ids: &[String]) -> String {
-    format!("in.({})", item_ids.join(","))
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
-    use super::super::testkit::{client, item, query_pairs, value_of, ANON, TOKEN};
+    use super::super::testkit::{client, item, key, query_pairs, value_of, ANON, TOKEN};
     use super::*;
     use crate::auth::stub::{Reply, Stub};
 
@@ -414,7 +353,7 @@ mod tests {
         let body = r#"[
             {"item_id":"a1","ciphertext":"c2VhbGVk","nonce":"bm9uY2U=",
              "content_type":"text","created_at":1700000000001,"deleted":false,
-             "origin_device_id":"device-b"},
+             "origin_device_id":"device-b","signature":"c2ln"},
             {"item_id":"a2","ciphertext":"","nonce":"",
              "content_type":"text","created_at":1700000000000,"deleted":true,
              "origin_device_id":"device-c"}
@@ -429,8 +368,13 @@ mod tests {
         assert_eq!(rows[0].item_id, "a1");
         assert_eq!(rows[0].ciphertext_bytes().expect("base64"), b"sealed");
         assert_eq!(rows[0].nonce_bytes().expect("base64"), b"nonce");
+        assert_eq!(rows[0].signature, "c2ln");
         assert!(rows[1].deleted, "a tombstone must survive the round trip");
         assert!(rows[1].ciphertext.is_empty());
+        assert!(
+            rows[1].signature.is_empty(),
+            "an absent signature must decode as absent, not fail the page"
+        );
     }
 
     #[tokio::test]
@@ -547,6 +491,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_tombstone_travels_through_the_same_upsert_as_a_live_row() {
+        // One write path (manifest 05 §7.5), and here it is also the only one
+        // that can carry a signature: a PATCH does not hold `content_type` or
+        // `origin_device_id`, so it could not sign what the merge reads.
+        let stub = Stub::start(vec![Reply::empty(201)]).await;
+        let mut dead = CloudItem::tombstone("a1", "text", 1_700_000_000_002, "device-a");
+        dead.sign(&key());
+
+        client(&stub).upsert(TOKEN, &[dead]).await.expect("upsert");
+
+        let request = stub.only_request();
+        assert_eq!(
+            request.method, "POST",
+            "a delete is a row version, not a PATCH"
+        );
+        let row = &request.json()[0];
+        assert_eq!(row["deleted"], true);
+        assert_eq!(row["ciphertext"], "");
+        assert!(
+            row["signature"].as_str().is_some_and(|s| !s.is_empty()),
+            "an unsigned tombstone is the most destructive forgery there is"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unsigned_row_never_reaches_the_network() {
+        let stub = Stub::start(vec![Reply::empty(201)]).await;
+        let unsigned = CloudItem::sealed("a1", b"ct", b"nc", "text", 1, "device-a");
+        let err = client(&stub).upsert(TOKEN, &[unsigned]).await.unwrap_err();
+        assert!(matches!(err, RestError::InvalidItem { .. }), "{err:?}");
+        assert_eq!(stub.request_count(), 0);
+    }
+
+    #[tokio::test]
     async fn a_live_item_with_no_ciphertext_is_refused() {
         let stub = Stub::start(vec![Reply::empty(201)]).await;
         let mut empty = item("a1");
@@ -576,83 +554,6 @@ mod tests {
         let err = client(&stub).upsert(TOKEN, &items).await.unwrap_err();
         assert!(matches!(err, RestError::Unauthorized), "{err:?}");
         assert_eq!(stub.request_count(), 2);
-    }
-
-    // -- tombstone ----------------------------------------------------------
-
-    #[tokio::test]
-    async fn tombstone_patches_a_flag_rather_than_deleting_the_row() {
-        let stub = Stub::start(vec![Reply::empty(204)]).await;
-        let before = now_ms();
-        let count = client(&stub)
-            .tombstone(TOKEN, &["a1".to_string(), "a2".to_string()])
-            .await
-            .expect("tombstone");
-        assert_eq!(count, 2);
-
-        let request = stub.only_request();
-        assert_eq!(
-            request.method, "PATCH",
-            "a hard DELETE would not propagate to a device that is offline"
-        );
-        assert_eq!(
-            value_of(&query_pairs(&request.target), "item_id"),
-            "in.(a1,a2)"
-        );
-
-        let body = request.json();
-        assert_eq!(body["deleted"], true);
-        assert!(
-            body["ciphertext"].is_null(),
-            "a tombstone must wipe the payload"
-        );
-        assert!(body["nonce"].is_null());
-        let restamped = body["created_at"].as_i64().expect("created_at");
-        assert!(
-            restamped >= before,
-            "a tombstone that kept the original timestamp hides below every \
-             device's watermark and never propagates"
-        );
-    }
-
-    #[tokio::test]
-    async fn tombstone_chunks_its_id_list() {
-        let stub = Stub::start(vec![Reply::empty(204)]).await;
-        let ids: Vec<String> = (0..120).map(|i| format!("id-{i}")).collect();
-        let count = client(&stub)
-            .tombstone(TOKEN, &ids)
-            .await
-            .expect("tombstone");
-
-        assert_eq!(count, 120);
-        let requests = stub.requests();
-        assert_eq!(requests.len(), 3, "120 ids at {TOMBSTONE_CHUNK}/request");
-        let first = value_of(&query_pairs(&requests[0].target), "item_id");
-        assert_eq!(first.matches(',').count(), TOMBSTONE_CHUNK - 1);
-    }
-
-    #[tokio::test]
-    async fn tombstoning_nothing_sends_nothing() {
-        let stub = Stub::start(vec![Reply::empty(204)]).await;
-        assert_eq!(client(&stub).tombstone(TOKEN, &[]).await.expect("ok"), 0);
-        assert_eq!(stub.request_count(), 0);
-    }
-
-    #[tokio::test]
-    async fn a_hostile_id_cannot_widen_the_tombstone_filter() {
-        let stub = Stub::start(vec![Reply::empty(204)]).await;
-        let err = client(&stub)
-            .tombstone(TOKEN, &["a1,*".to_string()])
-            .await
-            .unwrap_err();
-        assert!(matches!(err, RestError::InvalidItem { .. }), "{err:?}");
-        assert_eq!(stub.request_count(), 0);
-    }
-
-    #[test]
-    fn the_in_filter_has_the_shape_postgrest_expects() {
-        assert_eq!(in_list(&["a".into()]), "in.(a)");
-        assert_eq!(in_list(&["a".into(), "b".into()]), "in.(a,b)");
     }
 
     #[test]

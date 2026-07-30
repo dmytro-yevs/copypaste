@@ -76,10 +76,12 @@ pub(super) fn tombstone(id: &str, created_at: i64) -> LocalItem {
     }
 }
 
-/// A cloud row sealed with the test key, as the backend would hold it.
+/// A cloud row sealed *and signed* with the test key, as the backend would hold
+/// it. Signed because an unsigned row is not one any device will accept — a
+/// fixture that skipped it would be testing the refusal path by accident.
 pub(super) fn cloud_row(id: &str, created_at: i64, content: &str) -> CloudItem {
     let (nonce, ciphertext) = encrypt_row(content.as_bytes(), &key(), id).unwrap();
-    CloudItem {
+    signed(CloudItem {
         item_id: id.into(),
         ciphertext,
         nonce,
@@ -87,7 +89,20 @@ pub(super) fn cloud_row(id: &str, created_at: i64, content: &str) -> CloudItem {
         created_at,
         deleted: false,
         origin_device_id: "device-b".into(),
-    }
+        signature: String::new(),
+    })
+}
+
+/// A cloud tombstone, signed.
+pub(super) fn cloud_tombstone(id: &str, created_at: i64) -> CloudItem {
+    signed(CloudItem::tombstone(id, "text", created_at, "device-b"))
+}
+
+/// Re-sign a row after a test has changed it, so that the test exercises the
+/// rule it is about rather than the signature check.
+pub(super) fn signed(mut row: CloudItem) -> CloudItem {
+    row.sign(&key());
+    row
 }
 
 pub(super) fn driver(rest: FakeRest, auth: FakeAuth) -> CloudSync<FakeRest, FakeAuth> {
@@ -243,8 +258,6 @@ pub(super) struct FakeRest {
     /// Scripted failures, consumed in order before any request succeeds.
     script: Mutex<Vec<Reply>>,
     pub(super) upserts: AtomicUsize,
-    #[allow(dead_code)]
-    pub(super) tombstones: AtomicUsize,
     pub(super) fetches: AtomicUsize,
     /// Tokens seen, so a test can assert the refreshed one was used.
     pub(super) tokens: Mutex<Vec<String>>,
@@ -317,31 +330,23 @@ impl RestApi for FakeRest {
             .collect())
     }
 
+    /// Validates like the real transport does, so a test cannot upload a row
+    /// the deployment would refuse — an unsigned one above all.
     async fn upsert(&self, token: &str, items: &[CloudItem]) -> Result<(), TransportFault> {
         if let Some(fault) = self.next(token) {
             return Err(fault);
+        }
+        for item in items {
+            if item.signature.is_empty() {
+                return Err(TransportFault::Permanent(
+                    "the row's metadata was never signed",
+                ));
+            }
         }
         self.upserts.fetch_add(items.len(), Ordering::SeqCst);
         let mut rows = self.rows.lock().unwrap();
         for item in items {
             rows.insert(item.item_id.clone(), item.clone());
-        }
-        Ok(())
-    }
-
-    async fn tombstone(&self, token: &str, ids: &[String]) -> Result<(), TransportFault> {
-        if let Some(fault) = self.next(token) {
-            return Err(fault);
-        }
-        self.tombstones.fetch_add(ids.len(), Ordering::SeqCst);
-        let mut rows = self.rows.lock().unwrap();
-        for id in ids {
-            if let Some(row) = rows.get_mut(id) {
-                row.deleted = true;
-                // A tombstone carries no ciphertext (T-4).
-                row.ciphertext = String::new();
-                row.nonce = String::new();
-            }
         }
         Ok(())
     }

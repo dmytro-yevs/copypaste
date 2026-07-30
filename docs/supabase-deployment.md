@@ -21,6 +21,7 @@ supabase/
   tests/                          assertions, plain SQL, runnable by psql anywhere
   dev/verify-schema.sh            applies everything to a throwaway cluster and runs the assertions
   dev/smoke.sh                    the same round trip through PostgREST and GoTrue
+  dev/postgrest-harness.sh        runs smoke.sh against a real PostgREST, without Docker
 ```
 
 ## The server cannot decrypt anything
@@ -48,22 +49,29 @@ payload sizes, timing, delete activity) is a real disclosure on its own.
 | The pull query gets an index scan with no sort, in **both** cursor shapes | **verified** — `tests/03`, 10,000 rows, many of them sharing a millisecond |
 | Retention evicts on the server clock, not the client's | **verified** — `tests/03` |
 | The assertions fail when the schema is wrong | **verified** — 20 mutations (RLS off, force off, policy widened, index dropped, `inserted_at` made writable, retention re-pointed at `created_at`, DELETE re-published, …), each detected by at least one suite. One is worth knowing: widening the UPDATE policy to `using (true)` is caught by the static audit but *not* by the behavioural one, because the SELECT policy still hides the row from the `where` clause. Defence in depth, and a reason to keep both suites. |
-| PostgREST resolves `on_conflict=user_id,item_id` with no `user_id` in the body | **not verified** |
+| PostgREST resolves `on_conflict=user_id,item_id` with no `user_id` in the body | **verified** — `supabase/dev/postgrest-harness.sh`, PostgREST 12.2.3 |
+| The client's `select=`, `order=`, `created_at=gte.` and keyset query strings are accepted verbatim | **verified** — same run |
+| A row with no `signature` is refused by the deployment, not just by the client | **verified** — same run |
+| The publishable key on its own reaches nothing | **verified** — same run |
 | GoTrue password sign-in against the seeded accounts | **not verified** |
 | Realtime delivers `postgres_changes` for the client's join frame | **not verified** |
 | `supabase start` / `supabase db reset` | **not verified** |
 
-The container this was built in has a Docker client but no daemon and no
-Supabase CLI, so nothing that needs a container was run. What *was* run is a
+The container this was built in has a Docker client but no reachable registry
+and no Supabase CLI, so nothing that needs an image was run. What *was* run: a
 stock PostgreSQL 16 server with `auth.uid()`, `auth.users` and the API roles
-stubbed (`supabase/dev/harness/00-supabase-stubs.sql`) — enough to prove the SQL
-and the policies, and not enough to prove anything about PostgREST, GoTrue or
-Realtime. `supabase/dev/smoke.sh` covers that half and is marked unverified at
-the top of the file.
+stubbed (`supabase/dev/harness/00-supabase-stubs.sql`), and — since PostgREST
+ships as a single binary — a real PostgREST 12.2.3 on top of it, with JWTs
+minted locally in place of GoTrue. That is enough to prove the SQL, the
+policies, and the request shapes. It is not enough to prove anything about
+GoTrue, Realtime, or the platform's own PostgREST configuration.
 
-**Run `smoke.sh` before trusting the upsert.** If PostgREST will not resolve the
-conflict target without `user_id` in the request body, every replayed batch is a
-409 and push breaks in a way no test in this repository can currently see.
+**The upsert assumption held.** `?on_conflict=user_id,item_id` resolves with no
+`user_id` in the request body: the column default fills it before the conflict
+is inferred, exactly as designed. The negative control matters as much — with
+the unique index dropped, the *first* upsert fails **400** (`42P10`), not a 409
+on the replay as this document previously claimed. Either way the client
+classifies it `Permanent` and the round fails loudly.
 
 `scripts/cloud-stub.py` is a different thing and is not evidence about this
 deployment: it answers the client's HTTP shapes in memory, with no Postgres, no
@@ -83,7 +91,9 @@ psql "$(supabase status -o json | jq -r .DB_URL)" -f supabase/tests/01_schema_au
 Without Docker:
 
 ```bash
-supabase/dev/verify-schema.sh       # needs a PostgreSQL server installation only
+supabase/dev/verify-schema.sh       # SQL, policies, plans: a PostgreSQL server only
+PGRST_BIN=./postgrest \
+  supabase/dev/postgrest-harness.sh # + the API surface: a postgrest binary too
 ```
 
 The two seeded accounts are `dev-a@example.test` and `dev-b@example.test`, both
@@ -117,19 +127,28 @@ this table (`tests/02` asserts the refusal).
 
 ## The table
 
-Exactly the shape `rest/mod.rs` codes against: seven columns the client writes
+Exactly the shape `rest/mod.rs` codes against: eight columns the client writes
 and reads (`item_id`, `ciphertext`, `nonce`, `content_type`, `created_at`,
-`deleted`, `origin_device_id`), plus `id`, `user_id`, `inserted_at`,
-`updated_at`, which the client never sends.
+`deleted`, `origin_device_id`, `signature`), plus `id`, `user_id`,
+`inserted_at`, `updated_at`, which the client never sends.
 
-Three things are load-bearing and easy to lose in a refactor:
+Four things are load-bearing and easy to lose in a refactor:
 
 - **`ciphertext` is `text`, not `bytea`.** Assigning a bare base64 string to a
   `bytea` column stores the ASCII bytes of the base64 text and reads back as
   `\x…` hex. That is manifest 05 §4.5 — the bug that made cloud download fail
   outright in v1.
 - **The unique index on `(user_id, item_id)`** is what PostgREST resolves
-  `on_conflict` through. Without it the upsert is a 409 and every replay fails.
+  `on_conflict` through. Without it every write fails 400 (`42P10`) — measured,
+  not assumed; see the verification table above.
+- **`signature` is `not null`.** It is an HMAC over every other client column
+  under a key derived from the sync key, and this database can neither produce
+  nor check it. That is the point: the columns the merge orders on travel in the
+  clear, so without a signature anything that can write here — including this
+  service — can stamp a version that outranks a device's real one, or a
+  tombstone that deletes an item everywhere (manifest 05 §5.3). It is a MAC of
+  the *ciphertext*, never of the plaintext: a plaintext hash stored beside the
+  ciphertext would be an equality oracle over content.
 - **`(user_id, created_at, item_id)`** is the pull query's index: equality on
   the RLS pivot, range on the cursor, and the third column supplying the
   tie-break the ordering needs so the page comes back in order without a sort.
@@ -150,7 +169,7 @@ Four policies, all `to authenticated`, all `user_id = auth.uid()`: SELECT
 Two additions beyond the contract, both about the same attack:
 
 - **Column-level INSERT/UPDATE grants.** `authenticated` may write only the
-  seven client columns. `id`, `user_id`, `inserted_at` and `updated_at` are not
+  eight client columns. `id`, `user_id`, `inserted_at` and `updated_at` are not
   writable at all. Without this, any account holder could restamp `inserted_at`
   and escape eviction — the forgery of manifest 05 §5.1 row 4a, moved from v1's
   `wall_time` to v2's retention column.
@@ -258,7 +277,7 @@ principle.
 | 8 | `Relay-Has-More` header | Not needed: PostgREST has no byte budget, so a short page is unambiguously "caught up" | ⚪ Dropped — **conditional on `max_rows` (1000) staying above the client's page limit (200)**, which is now written down in `config.toml`. |
 | 9 | At-least-once delivery, replay from a cursor | Rows persist until retention; poll replays from the watermark | ✅ Covered, and now bounded by our own TTL exactly as the relay's was. |
 | 9a | Push channel is at-most-once; the poll is mandatory | `sync::pull` + `sync::cadence`; Realtime only resets the interval | ✅ Covered — and nothing in this deployment tempts anyone to remove the poll. Retention deletes are invisible to Realtime by design, which makes the poll the only path for them, which is correct. |
-| 10 | Proof-of-possession registration | GoTrue account auth + RLS | ⚠️ Structurally replaced, and **the secret being proven is different**. An attacker with the account password but not the sync passphrase can read all ciphertext and metadata and *write rows*. Bounded here by: the AEAD's AAD binding `item_id` (client), `created_at >= 0` and the charset check (server), the future-skew refusal (client), and `inserted_at` being unforgeable so an injected row cannot escape eviction. **Still owed:** signing the LWW metadata under the sync key, which is the manifest's own suggested mitigation and the one capability the relay had that this does not. It is stated plainly in [cloud-privacy](cloud-privacy.md) rather than left to a table nobody reads, and it needs a column here, so it is a deployment change as well as a client one. |
+| 10 | Proof-of-possession registration | GoTrue account auth + RLS, **plus the `signature` column** | ✅ **Gap closed.** The secret being proven is still different — the account password gates the rows, the sync passphrase decrypts them — but an attacker holding only the former can no longer produce a row any device will merge. Bounded by: the metadata signature (client + `not null` here), the AEAD's AAD binding `item_id`, `created_at >= 0` and the charset checks, the future-skew refusal, and `inserted_at` being unforgeable so an injected row cannot escape eviction. What such an attacker can still do is *read* ciphertext and metadata, and fill the table with rows every device refuses. |
 | 11 | Per-(IP, device) registration rate limit | GoTrue sign-in throttling | 🟡 Roughly covered by the platform. No per-item-id analogue is needed. |
 | 12 | Per-account device cap | — | ⚪ Dropped. Billing lever. |
 | 13 | Per-item size cap, split by type | Client caps in `sync::push` (8 MiB text, 10 MiB otherwise), server `check` at 16 MiB base64 as the backstop | ✅ **Covered.** Measured on the plaintext, before sealing, so the number is the one the user can see; an item over the cap is withheld and counted (`skipped_too_large`), never deleted and never sent for the backend to refuse. |
