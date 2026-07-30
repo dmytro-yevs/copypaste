@@ -16,7 +16,14 @@ open class BuildTask : DefaultTask() {
 
     @TaskAction
     fun assemble() {
-        val executable = """node""";
+        // `tauri android init` bakes this pair from how the CLI was invoked when
+        // it ran: argv[0] and $npm_execpath. Generated from a bare
+        // `node .../tauri.js`, it comes out as `node` + `["tauri", ...]`, which
+        // makes Gradle run `node tauri …` in src-tauri and die on a missing
+        // module. `npm` + `["run", "--", "tauri", …]` is what the CLI emits
+        // under `npm run tauri --`, which is how every build here starts, and
+        // `npm run` walks up to crates/copypaste-ui for the package.json.
+        val executable = """npm""";
         try {
             runTauriCli(executable)
         } catch (e: Exception) {
@@ -48,7 +55,7 @@ open class BuildTask : DefaultTask() {
         val rootDirRel = rootDirRel ?: throw GradleException("rootDirRel cannot be null")
         val target = target ?: throw GradleException("target cannot be null")
         val release = release ?: throw GradleException("release cannot be null")
-        val args = listOf("tauri", "android", "android-studio-script");
+        val args = listOf("run", "--", "tauri", "android", "android-studio-script");
 
         project.exec {
             workingDir(File(project.projectDir, rootDirRel))
