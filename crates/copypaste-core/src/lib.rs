@@ -10,10 +10,12 @@ pub mod storage;
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
 pub use ingest::{ingest, ingest_into, IngestError, Ingested};
 pub use sensitive::{
-    sweep_sensitive, Detector, Finding, Severity, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
+    purge_indexed_secrets, sweep_sensitive, Detector, Finding, PurgeReport, Severity,
+    DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
 };
 pub use storage::{
-    compute_content_hash, Ingest, ItemCursor, NewItem, Page, Store, StoreError, StoredItem,
+    compute_content_hash, is_v1_database, v1_database_in, IndexedText, Ingest, ItemCursor, NewItem,
+    Page, Store, StoreError, StoredItem, V1_DATABASE_FILENAME,
 };
 
 /// Milliseconds since the Unix epoch.

@@ -9,7 +9,9 @@
 //!   ([`items`]), the in-transaction re-read in `upsert_fts_in_tx` and the
 //!   `is_sensitive = 0` predicate on the search JOIN (both [`search`]). v1
 //!   shipped databases containing plaintext passwords in FTS because one layer
-//!   was missing.
+//!   was missing. All three decide at capture, which is why
+//!   [`crate::sensitive::purge_indexed_secrets`] exists to revisit rows a later
+//!   ruleset would have caught.
 //! * **Tombstones.** [`Store::delete`] soft-deletes: the ciphertext and nonce
 //!   are wiped, the FTS row is removed in the same transaction, and the row
 //!   survives as a delete event that a later sync/LWW layer can propagate.
@@ -32,10 +34,14 @@
 //! v2 drops backward compatibility (`CLAUDE.md` rule 3), so the v1→v15
 //! migration ladder, `migration_state` and `key_version` dispatch are gone: the
 //! schema starts clean at version 1 and `rusqlite_migration` owns the ladder.
+//! The one obligation that creates is [`legacy`]: a v0.4.x file is identified
+//! and refused with [`StoreError::LegacyDatabase`], never opened and never
+//! reported as corrupt.
 
 mod connection;
 mod dbfile;
 mod items;
+mod legacy;
 mod model;
 mod page;
 mod pinning;
@@ -45,9 +51,11 @@ mod search;
 mod store;
 
 pub use dbfile::{attach_key_literal, open_validated, verify_integrity};
+pub use legacy::{is_v1_database, v1_database_in, V1_DATABASE_FILENAME};
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};
+pub use search::IndexedText;
 pub use store::Store;
 
 /// Fixtures shared by every test module under `storage`. The direct-SQL helpers
@@ -101,6 +109,17 @@ pub(crate) mod test_support {
             search_text: None,
             ..item(text, created_at)
         }
+    }
+
+    /// An index row written straight past every write-time guard — the state a
+    /// database from before a guard existed is actually in.
+    pub(crate) fn plant_fts_row(store: &Store, id: &str, text: &str) {
+        let conn = store.conn().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
+            rusqlite::params![id, text],
+        )
+        .unwrap();
     }
 
     pub(crate) fn fts_row_count(store: &Store, id: &str) -> i64 {

@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn a_future_schema_version_is_refused() {
         let dir = TempDir::new().unwrap();
-        let path = dir.path().join("clipboard.db");
+        let path = dir.path().join("copypaste-v2.db");
         {
             let s = Store::open(&path, &KEY).unwrap();
             let conn = s.conn().unwrap();
