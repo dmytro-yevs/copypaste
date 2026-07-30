@@ -55,6 +55,33 @@ jobs:
           components: rustfmt
       - run: cargo +1.96 fmt --all --check
 
+  commit-messages:
+    name: commit messages
+    runs-on: ubuntu-latest
+    # Only on pull requests: the range is the PR's own commits, and rewriting a
+    # pushed branch to satisfy this is cheap while rewriting main is not.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: check each commit in the range
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          status=0
+          for sha in $(git rev-list "$base..$head"); do
+            msg="$(mktemp)"
+            git log -1 --pretty=%B "$sha" > "$msg"
+            if ! ./scripts/check-commit-msg.sh "$msg"; then
+              echo "::error::$(git log -1 --pretty='%h %s' "$sha")"
+              status=1
+            fi
+          done
+          exit "$status"
+
   file-size:
     name: file-size budget
     runs-on: ubuntu-latest
