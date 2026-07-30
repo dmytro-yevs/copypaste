@@ -1,7 +1,8 @@
 name: Release
 
-# Builds and publishes a macOS release: the .app in a DMG, the CLI and daemon
-# in a tarball, and the Homebrew cask and formula that point at both.
+# Builds and publishes a release for both platforms from one page: the macOS
+# .app in a DMG, the CLI and daemon in a tarball, the Homebrew cask and formula
+# that point at both, and an Android APK a user can download and install.
 #
 # ---------------------------------------------------------------------------
 # NOTHING IN THIS FILE HOLDS A SIGNING CREDENTIAL
@@ -13,10 +14,17 @@ name: Release
 # change first — a Developer ID would make most of this workflow, and the
 # cask's postflight, unnecessary.
 #
-# The one optional secret is HOMEBREW_TAP_TOKEN, and it signs nothing: it is
-# contents:write on the tap repository so the workflow can publish the updated
-# cask. Without it the workflow still succeeds and attaches the cask and
-# formula to the release for a maintainer to copy across by hand.
+# The one optional secret that is not a signing credential is
+# HOMEBREW_TAP_TOKEN: contents:write on the tap repository so the workflow can
+# publish the updated cask. Without it the workflow still succeeds and attaches
+# the cask and formula to the release for a maintainer to copy across by hand.
+#
+# ANDROID_* is a different matter and is not covered by the paragraph above.
+# Android will not install an unsigned APK at all, so there is no ad-hoc
+# equivalent and no way to defer signing to the device. Those four secrets are
+# optional, none of them is set today, and the fallback is described in ADR-0006
+# — which also explains why the fallback is labelled in the filename rather than
+# passed off as equivalent.
 #
 # ---------------------------------------------------------------------------
 # UNVERIFIED
@@ -193,6 +201,218 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------------
+  # Build the Android APK.
+  #
+  # UNVERIFIED, in the same sense as the macOS job and then some: no Android
+  # build has ever run in this repository, and the Tauri Android scaffold under
+  # crates/copypaste-ui/src-tauri/gen/android is new. Every path below is
+  # asserted before it is used, so a scaffold that landed somewhere else fails
+  # with a sentence rather than a stack trace.
+  #
+  # Signing is ADR-0006. Short version: Android will not install an unsigned
+  # APK, so unlike macOS there is no way to defer signing to the device. Four
+  # optional secrets give a stable release key; without them the APK is signed
+  # with a key generated in this run, which installs fine but cannot upgrade an
+  # existing install — and the filename says so.
+  # ---------------------------------------------------------------------------
+  android:
+    name: Build Android (universal APK)
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      # Pinned for the reason rust-toolchain.toml exists. An NDK that floats is
+      # a build that changes under you, and the failure surfaces as a linker
+      # error three layers down.
+      NDK_VERSION: "27.2.12479018"
+      ANDROID_PLATFORM: "android-36"
+      BUILD_TOOLS_VERSION: "36.0.0"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-release
+          save-if: "true"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install the pinned SDK components
+        run: |
+          set -euo pipefail
+          # The runner image ships the SDK and cmdline-tools; this only adds the
+          # pinned pieces. Asserting ANDROID_HOME rather than assuming it keeps
+          # a runner-image change from failing later and less clearly.
+          : "${ANDROID_HOME:?ANDROID_HOME is unset — the runner image has no Android SDK}"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [[ -x "$sdkmanager" ]] || { echo "::error::$sdkmanager not found"; exit 1; }
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager" --install \
+            "ndk;${NDK_VERSION}" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+          {
+            echo "NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}"
+            echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_HOME}"
+          } >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        run: |
+          set -euo pipefail
+          gen="crates/copypaste-ui/src-tauri/gen/android"
+          if [[ ! -d "$gen" ]]; then
+            echo "::error::$gen does not exist. The Tauri Android project has not been"
+            echo "::error::scaffolded, or it landed elsewhere. Run 'tauri android init' and"
+            echo "::error::commit the result, or fix this path — do not skip the job."
+            exit 1
+          fi
+
+          cd crates/copypaste-ui
+          npm ci
+
+          # Some of the scaffold is generated and git-ignored (tauri.properties,
+          # tauri.build.gradle.kts, the jniLibs). Regenerate only when it is
+          # absent, so a committed customisation is never clobbered.
+          # UNVERIFIED: whether `android build` alone would have regenerated it.
+          if [[ ! -f "src-tauri/gen/android/app/tauri.build.gradle.kts" ]]; then
+            echo "Generated Gradle files are absent; running 'tauri android init'."
+            npm run tauri -- android init --skip-targets-install
+          fi
+
+          npm run tauri -- android build --apk
+
+      - name: Locate and sign the APK
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          outputs="crates/copypaste-ui/src-tauri/gen/android/app/build/outputs/apk"
+          if [[ ! -d "$outputs" ]]; then
+            echo "::error::no APK output directory at $outputs — the Gradle build produced nothing"
+            exit 1
+          fi
+
+          # The universal APK is the one a person can download and install on
+          # any device. Per-ABI splits are smaller and are not what a release
+          # page wants.
+          unsigned="$(find "$outputs" -name '*universal*release*.apk' | head -n1)"
+          if [[ -z "$unsigned" ]]; then
+            echo "::error::no universal release APK under $outputs. Found:"
+            find "$outputs" -name '*.apk' | sed 's/^/::error::  /'
+            exit 1
+          fi
+          echo "Built: $unsigned"
+
+          tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          mkdir -p dist
+
+          # Report what the APK claims about itself before signing it. The macOS
+          # job makes the same check on CFBundleShortVersionString: a version
+          # that silently loses its -alpha.1 suffix is survivable, a version that
+          # disagrees in its numeric core is a broken release.
+          if [[ -x "${tools}/aapt2" ]]; then
+            badging="$("${tools}/aapt2" dump badging "$unsigned" 2>/dev/null || true)"
+            name="$(printf '%s' "$badging" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -n1)"
+            code="$(printf '%s' "$badging" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" | head -n1)"
+            echo "APK versionName=${name:-<unset>} versionCode=${code:-<unset>}"
+            if [[ -n "$name" && "$name" != "$VERSION" ]]; then
+              if [[ "$name" == "${VERSION%%-*}" ]]; then
+                echo "::warning::the APK versionName is '$name' but this release is '$VERSION' — the pre-release suffix was dropped"
+              else
+                echo "::error::the APK versionName is '$name' but this release is '$VERSION'"
+                exit 1
+              fi
+            fi
+          fi
+
+          keystore="${RUNNER_TEMP}/release.jks"
+          if [[ -n "${KEYSTORE_BASE64:-}" && -n "${KEYSTORE_PASSWORD:-}" \
+                && -n "${KEY_ALIAS:-}" && -n "${KEY_PASSWORD:-}" ]]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+            suffix=""
+            echo "Signing with the release keystore from repository secrets."
+          else
+            # ADR-0006. This produces an APK that installs and cannot upgrade an
+            # earlier install, and the filename is the only honest place to say
+            # so, because the filename is what survives being downloaded.
+            echo "::warning::no Android release keystore is configured; signing with a throwaway key (ADR-0006)"
+            KEYSTORE_PASSWORD="$(openssl rand -base64 24)"
+            KEY_PASSWORD="$KEYSTORE_PASSWORD"
+            KEY_ALIAS="copypaste-unstable"
+            keytool -genkeypair -v \
+              -keystore "$keystore" -storepass "$KEYSTORE_PASSWORD" \
+              -alias "$KEY_ALIAS" -keypass "$KEY_PASSWORD" \
+              -keyalg RSA -keysize 4096 -validity 10000 \
+              -dname "CN=CopyPaste Unstable Key, O=CopyPaste" >/dev/null
+            suffix="-unstable-key"
+          fi
+
+          out="dist/CopyPaste-v${VERSION}-android${suffix}.apk"
+          "${tools}/zipalign" -p -f 4 "$unsigned" "${out}.aligned"
+          "${tools}/apksigner" sign \
+            --ks "$keystore" \
+            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:${KEY_PASSWORD}" \
+            --out "$out" \
+            "${out}.aligned"
+          rm -f "${out}.aligned" "$keystore"
+
+          "${tools}/apksigner" verify --verbose --print-certs "$out"
+          ( cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
+          cat "${out}.sha256"
+
+      - name: Summary
+        run: |
+          set -euo pipefail
+          tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          apk="$(find dist -name '*.apk' | head -n1)"
+          {
+            echo '## Android'
+            echo
+            echo '```'
+            ( cd dist && sha256sum ./*.apk )
+            # The certificate digest is the number that decides whether the next
+            # release can upgrade this one. Publishing it costs nothing and makes
+            # a key change visible without installing anything.
+            "${tools}/apksigner" verify --print-certs "$apk" 2>/dev/null \
+              | grep -i 'SHA-256 digest' || true
+            echo '```'
+            echo
+            if [[ "$apk" == *-unstable-key.apk ]]; then
+              echo 'Signed with a throwaway key: this APK installs, but Android will'
+              echo 'refuse to install it over an earlier CopyPaste. See ADR-0006.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: |
+            dist/*.apk
+            dist/*.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
   # Generate the cask and the formula from the artefacts that were actually
   # built, so the checksums come from the files being published rather than
   # from a re-download.
@@ -244,7 +464,10 @@ jobs:
   # ---------------------------------------------------------------------------
   publish:
     name: Publish release
-    needs: [version, macos, packaging]
+    # android is a hard dependency, not a nice-to-have: ADR-0006 says one
+    # release page serves both platforms, and a page that silently serves one is
+    # worse than a failed run.
+    needs: [version, macos, android, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -259,6 +482,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: macos-arm64
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android
           path: dist
 
       - uses: actions/download-artifact@v4
@@ -290,6 +518,7 @@ jobs:
             $([[ "$VERSION" == *-* ]] && echo --prerelease) \
             dist/*.dmg dist/*.dmg.sha256 \
             dist/*.tar.gz dist/*.tar.gz.sha256 \
+            dist/*.apk dist/*.apk.sha256 \
             tap/Casks/copypaste.rb \
             tap/Formula/copypaste-cli.rb
 
