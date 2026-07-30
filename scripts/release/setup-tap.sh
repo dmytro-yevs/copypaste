@@ -90,8 +90,9 @@ CopyPaste is ad-hoc signed and not notarised — the project has no Apple
 Developer ID. homebrew/cask's audit requires notarisation and removes casks
 that fail it, so the app is distributed from here instead.
 
-The cask strips the \`com.apple.quarantine\` attribute from
-\`/Applications/CopyPaste.app\` — and only from that bundle — on install.
+On install, the cask strips the \`com.apple.quarantine\` attribute from
+\`/Applications/CopyPaste.app\` — and only from that bundle — and re-signs the
+app with a certificate generated on your own machine, which never leaves it.
 Homebrew's \`--no-quarantine\` flag was deprecated in Homebrew 5.1 with no
 replacement, and Homebrew's own guidance is that post-processing is now
 required for software distributed this way.
