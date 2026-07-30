@@ -228,8 +228,7 @@ impl ConfigPatch {
                     field: "excluded_app_bundle_ids",
                 });
             }
-            next.excluded_app_bundle_ids =
-                list.iter().map(|id| id.trim().to_string()).collect();
+            next.excluded_app_bundle_ids = list.iter().map(|id| id.trim().to_string()).collect();
         }
         if let Some(v) = self.lan_visibility {
             next.lan_visibility = v;
@@ -425,7 +424,12 @@ mod tests {
     #[test]
     fn every_field_is_classified_for_liveness() {
         let json = serde_json::to_value(ConfigData::default()).unwrap();
-        let fields: Vec<&str> = json.as_object().unwrap().keys().map(String::as_str).collect();
+        let fields: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         for field in &fields {
             assert!(
                 ConfigData::field_liveness().iter().any(|(n, _)| n == field),
