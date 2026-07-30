@@ -24,6 +24,37 @@ export async function setup(): Promise<void> {
       `the Vite dev server never came up on ${DEV_SERVER_URL}:\n${log.join("")}`,
     );
   }
+
+  await warmEntrypoint(log);
+}
+
+/**
+ * The root URL answers before Vite has pre-bundled dependencies, and a page
+ * that loads during that window gets a module graph that fails to import —
+ * which looks exactly like an app that is broken. Pulling the entrypoint until
+ * it is really served makes the wait deterministic.
+ */
+async function warmEntrypoint(log: string[]): Promise<void> {
+  const deadline = Date.now() + 180_000;
+  for (;;) {
+    try {
+      const response = await fetch(`${DEV_SERVER_URL}/src/main.tsx`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) {
+        const body = await response.text();
+        if (body.length > 0) return;
+      }
+    } catch {
+      /* still optimizing */
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `the dev server never served /src/main.tsx:\n${log.join("")}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }
 
 export async function teardown(): Promise<void> {
