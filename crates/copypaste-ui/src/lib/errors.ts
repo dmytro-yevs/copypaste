@@ -46,10 +46,13 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, ErrorKind]> = [
   ],
   [/not[_ ]ready|starting up|initiali[sz]ing/i, "not_ready"],
   [/protocol[_ ]mismatch|incompatible version|different versions/i, "protocol_mismatch"],
-  [/not[_ ]found|no such item/i, "not_found"],
+  // "That item is no longer there." is the bridge's own NotFound sentence; the
+  // patterns are matched against text this app does not author, so they track
+  // what `BackendError` actually renders.
+  [/not[_ ]found|no such item|no longer there|no longer in your/i, "not_found"],
   [/invalid[_ ]request/i, "invalid_request"],
   [
-    /connection refused|econnrefused|enoent|no such file|isn't running|not running|socket|broken pipe|timed? out/i,
+    /connection refused|econnrefused|enoent|no such file|isn't running|not running|socket|\.sock\b|broken pipe|timed? out/i,
     "offline",
   ],
   [/internal/i, "internal"],

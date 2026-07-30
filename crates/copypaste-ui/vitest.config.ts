@@ -10,5 +10,12 @@ export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
-  test: { environment: "jsdom", globals: false, include: ["src/**/*.test.{ts,tsx}"] },
+  test: {
+    environment: "jsdom",
+    globals: false,
+    include: ["src/**/*.test.{ts,tsx}"],
+    // jsdom has no layout and no ResizeObserver; see the file for what is
+    // faked and why it has to be.
+    setupFiles: ["./src/test/setup.ts"],
+  },
 });
