@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Peer sync talks to another device on the local network over TCP.
+      INTERNET covers that; there is no server and no account, so nothing here
+      needs an account permission or a background-location permission.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Android 13 (API 33) made the notification a runtime permission. A
+      foreground service still runs if the user denies it, but its notification
+      is silently suppressed, which is a service the user cannot see or stop.
+      The app asks for it before starting the service, and degrades by not
+      starting the service rather than by running an invisible one.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+      Android 14 (API 34) requires the permission that matches the service's
+      declared type. `dataSync` is the honest one: this service exists to talk
+      to paired devices. It is deliberately NOT a clipboard-reading service —
+      see SyncService and the README for why that is not a thing Android
+      permits.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <application
+        android:name=".CopyPasteApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CopyPaste">
+
+        <!--
+          allowBackup="false" is not laziness. The device secret is wrapped by
+          a key that lives in this device's Keystore and cannot leave it, so a
+          backup would restore a database that nothing on the new device can
+          open. Refusing the backup means the user is told their history did
+          not come across; allowing it would mean an app that starts up locked
+          and looks broken.
+        -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!--
+              The share sheet. Since Android 10 an app cannot read the
+              clipboard unless it has focus, so "the user shares text into
+              CopyPaste" is one of the two capture routes the platform actually
+              supports. The other is the app being open.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!--
+              The text-selection context menu ("CopyPaste" appears next to Copy
+              and Share when text is selected in any app). Same reason.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".service.SyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>
