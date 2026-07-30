@@ -510,8 +510,15 @@ mod tests {
     const ACCOUNT: &str = "3f2b1c0a-0000-4000-8000-000000000001";
     const ITEM: &str = "1f3c9a4e-0000-4000-8000-000000000001";
 
+    /// The fixture key.
+    ///
+    /// Derived once for the whole binary and rebuilt from bytes thereafter:
+    /// Argon2id is deliberately expensive, and paying 19 MiB per fixture would
+    /// make the suite slow enough that people stop running it. The tests that
+    /// are *about* derivation call [`derive_sync_key`] directly.
     fn key() -> SyncKey {
-        derive_sync_key(PASS, ACCOUNT).unwrap()
+        static KEY: std::sync::OnceLock<[u8; KEY_LEN]> = std::sync::OnceLock::new();
+        SyncKey::from_bytes(*KEY.get_or_init(|| *derive_sync_key(PASS, ACCOUNT).unwrap().to_bytes()))
     }
 
     // --- round trip -------------------------------------------------------
@@ -747,15 +754,24 @@ mod tests {
         assert_ne!(per_account_salt("acct-a").as_ref(), &[0u8; ARGON2_SALT_LEN]);
     }
 
+    /// `SyncKey` has no `Debug` on purpose, so `unwrap_err` is unavailable —
+    /// which is the point. Compare the error without ever formatting the key.
+    fn rejection(result: Result<SyncKey, CloudCryptoError>) -> CloudCryptoError {
+        match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected a rejection, got a key"),
+        }
+    }
+
     #[test]
     fn short_passphrases_are_rejected_before_any_work() {
         // Eleven characters, counted in chars.
         assert_eq!(
-            derive_sync_key("elevenchar!", ACCOUNT).unwrap_err(),
+            rejection(derive_sync_key("elevenchar!", ACCOUNT)),
             CloudCryptoError::PassphraseTooShort
         );
         assert_eq!(
-            derive_sync_key("", ACCOUNT).unwrap_err(),
+            rejection(derive_sync_key("", ACCOUNT)),
             CloudCryptoError::PassphraseTooShort
         );
 
@@ -768,7 +784,7 @@ mod tests {
     #[test]
     fn an_empty_account_id_is_rejected() {
         assert_eq!(
-            derive_sync_key(PASS, "").unwrap_err(),
+            rejection(derive_sync_key(PASS, "")),
             CloudCryptoError::EmptyAccountId
         );
     }
@@ -778,7 +794,7 @@ mod tests {
         // Both invalid: the user should be told about the thing they typed,
         // and it should cost no Argon2 memory to find out.
         assert_eq!(
-            derive_sync_key("short", "").unwrap_err(),
+            rejection(derive_sync_key("short", "")),
             CloudCryptoError::PassphraseTooShort
         );
     }
