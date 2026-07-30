@@ -52,7 +52,7 @@ tempting violation:
 | Capability | What we do | What we must not do |
 |---|---|---|
 | Read the clipboard | Poll `NSPasteboard`, which needs no permission | Install a `CGEvent` tap to notice Cmd+C |
-| Global hotkey | `KeyboardShortcuts`, which wraps Carbon `RegisterEventHotKey` — the one public global-hotkey API that needs no Accessibility, because the app is told about exactly one combination and never sees other input | `NSEvent.addGlobalMonitorForEvents` or `CGEvent.tapCreate`, both of which require Accessibility |
+| Global hotkey | Carbon `RegisterEventHotKey` — the one public global-hotkey API that needs no Accessibility, because the app is told about exactly one combination and never sees other input. **Which path `tauri-plugin-global-shortcut` actually takes is unverified; see ADR-0002.** | `NSEvent.addGlobalMonitorForEvents` or `CGEvent.tapCreate`, both of which require Accessibility |
 | Paste back | Put the item on the pasteboard; the user presses Cmd+V | Synthesise Cmd+V with `CGEventPost`, which requires Accessibility |
 
 Two costs we accept in exchange:

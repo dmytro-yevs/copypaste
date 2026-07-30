@@ -8,12 +8,13 @@ socket; two devices pair and sync over a Noise channel. What is *not* yet
 verified is listed below, in detail, because most of it is unverifiable on the
 Linux host this is developed on.
 
-**The apps go native: SwiftUI on macOS, Jetpack Compose on Android.** Neither
-exists yet. The Tauri + React window in `crates/copypaste-ui` is an interim
-surface that stays until the macOS app replaces it, and it is not where new work
-goes. v1's visual design is not being carried over either — the new look is
-undecided, so the design tokens in `design/` still hold v1's values and those
-values are placeholders, not the target.
+**One cross-platform app: Tauri v2 + React, for macOS and Android both.**
+`crates/copypaste-ui` is the product surface, not a placeholder — see
+[ADR-0002](docs/adr/0002-one-cross-platform-app.md), which reverses an earlier
+decision to write a SwiftUI app and a Compose app. v1's visual design is not
+being carried over: the new look is undecided, so the design tokens in
+`design/` still hold v1's values and those values are placeholders, not the
+target.
 
 ---
 
@@ -76,9 +77,9 @@ unpairing. Both pass.
 
 ### Not built
 
-**The two native apps** — the SwiftUI macOS app and the Compose Android one,
-including the UniFFI layer the latter needs — and **the new visual design they
-will share**. Also: image, file and rich-text capture (text only today) ·
+**The Android target** of the Tauri app, which needs the bridge to embed the
+core in-process rather than speak to a daemon (ADR-0002), and **the new visual
+design**. Also: image, file and rich-text capture (text only today) ·
 frontmost-app attribution, private mode, the app-exclusion list · cloud sync
 wired to the daemon, with its quota/TTL job and signed LWW metadata ·
 age-based retention (`evict_older_than` exists, no loop calls it) · rate
@@ -97,8 +98,8 @@ telemetry.
 | `crates/copypaste-ipc` | The one model of the wire contract, plus the path redactor every client shares. |
 | `crates/copypaste-p2p` | Noise `NNpsk0` transport, pairing, the LWW merge, mDNS discovery. |
 | `crates/copypaste-cloud` | Supabase auth, PostgREST, Realtime, client-side encryption, the sync driver. Not yet wired in. |
-| `crates/copypaste-ui` | The interim Tauri v2 + React 19 window and its thin bridge to the daemon socket. Replaced by the native macOS app when that exists. |
-| `design/` | The Style Dictionary pipeline. Its structure survives the move to native — one token source, compiled per platform — but its current values are v1's and the outputs will become SwiftUI and Compose rather than CSS. |
+| `crates/copypaste-ui` | The app: Tauri v2 + React 19, and the bridge to the daemon socket. macOS and Android both. |
+| `design/` | The Style Dictionary pipeline. One token source compiled per target; its current values are v1's and are placeholders. |
 | `scripts/` | `demo.sh` and `demo-p2p.sh`. |
 | `docs/rewrite/port-manifest/` | ~9,100 lines of specification harvested from v1 and its tests: ~500 acceptance tests, 200+ recovered bug IDs. **The behaviour in them is the requirements.** |
 | `docs/rewrite/target-architecture.md` | The library-first stack, per subsystem, the things that stay custom on purpose, and the three decisions taken since it was written. |

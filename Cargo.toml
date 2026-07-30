@@ -8,7 +8,6 @@ members = [
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
     "crates/copypaste-ui/src-tauri",
-    "crates/copypaste-ffi",
 ]
 
 [workspace.package]
@@ -62,13 +61,6 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["c
 # Passphrase -> sync key. The server must never be able to derive it.
 argon2 = "0.5"
 base64 = "0.22"
-# Kotlin/Swift bindings for the Android app, which embeds the core directly
-# because Android will not host a background daemon. Proc-macro mode
-# (`#[uniffi::export]`) only: v1 maintained a `.udl` file that restated every
-# signature a second time, and the two drifted. UniFFI also generates and
-# verifies its own contract checksums, which is why there is no hand-written
-# ABI version counter anywhere in `copypaste-ffi` (v1 carried a 366-line one).
-uniffi = "0.32"
 # errors, logging, cli, misc
 thiserror = "1"
 anyhow = "1"

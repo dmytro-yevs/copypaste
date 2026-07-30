@@ -10,10 +10,12 @@
 >    constraints were retired outright.
 > 2. **The peer channel is Noise `NNpsk0`, not TLS** (`4aef3482`). That struck
 >    four rows from the stack table and retired one of the earned exceptions.
-> 3. **The apps go native — SwiftUI on macOS, Compose on Android**, and v1's
->    visual design is explicitly rejected. That replaced the UI section wholesale
->    and changed what the design-token pipeline emits. The Rust core, daemon,
->    IPC, p2p and cloud crates are untouched by it.
+> 3. **One cross-platform app — Tauri v2 + React, on macOS and Android**
+>    (ADR-0002), and v1's visual design is explicitly rejected. An intermediate
+>    revision of this document said the apps go native, per platform; that was
+>    reversed, and the React dependency table below is live again rather than
+>    historical. The Rust core, daemon, IPC, p2p and cloud crates are untouched
+>    by any of it.
 
 ## The governing rule (this replaces the old norm)
 
@@ -183,25 +185,18 @@ Three things must be handled deliberately rather than simply omitted:
 **Superseded.** This section previously prescribed a webview stack:
 `@tanstack/react-query` for fetching and cache, `@tanstack/react-virtual` for the
 list, `radix-ui` and `@floating-ui/react` for overlays, `sonner` for toasts,
-Tailwind + shadcn/ui for styling, `zod`, `zustand`, `lucide-react`. Those were
-the right answers *for a webview app*. The apps are now **native per platform**:
-**SwiftUI** on macOS, **Jetpack Compose** on Android, each using its own
-platform's tools rather than a shared web layer. A React dependency table has
-nothing to say about either.
+Tailwind + shadcn/ui for styling, `zod`, `zustand`, `lucide-react`. Those are the
+right answers, and they are current: `crates/copypaste-ui` **is** the product
+surface on both platforms (ADR-0002), not a placeholder to be replaced.
 
-The Tauri + React history window in `crates/copypaste-ui` is not the product
-surface. It stays only until the native macOS app exists, and it should not
-acquire new dependencies or new architecture in the meantime — work put into it
-is work to be deleted.
-
-What the library-first rule means on native:
+What the library-first rule means here:
 
 | Concern | Where it goes |
 |---|---|
-| List virtualisation, overlays, focus management, toasts, styling, icons | The platform's own frameworks. SwiftUI `List`/`LazyVStack` and Compose `LazyColumn` already are the library; wrapping them in a house abstraction is the v1 mistake in a new language. |
+| List virtualisation, overlays, focus management, toasts, styling, icons | The React ecosystem above. Wrapping any of them in a house abstraction is the v1 mistake in a new language. |
 | Server state — history, status, mutations | The Rust core over the IPC contract. Neither app re-implements polling, caching or merge; the daemon is the authority and `copypaste-ipc` is the one model of the contract. |
-| Client state | Platform-idiomatic (`@Observable` / `StateFlow`). Small, and never a second copy of what the daemon owns. |
-| Rust ↔ platform binding | `#[uniffi::export]` proc-macros for Android — no hand-written `.udl` and no manual ABI counter, since UniFFI ships contract-version checksums. macOS talks to the daemon over the same Unix socket the CLI uses. |
+| Client state | `zustand`. Small, and never a second copy of what the daemon owns. |
+| Rust ↔ UI binding | Tauri commands, one surface for both targets. macOS reaches the daemon over the same Unix socket the CLI uses; Android has no daemon to reach, so the bridge links the core in-process instead. Keeping the command names identical across the two is what stops the React side growing platform branches. |
 
 **The Rust core is unaffected by this decision.** `copypaste-core`,
 `copypaste-daemon`, `copypaste-ipc`, `copypaste-p2p` and `copypaste-cloud` are
@@ -228,9 +223,9 @@ single source.
 
 Two things about it change:
 
-- **The outputs are SwiftUI and Compose**, not CSS custom properties and a
-  Tailwind `@theme`. The web outputs remain only for as long as the interim
-  Tauri window does.
+- **The outputs are CSS custom properties and a Tailwind `@theme`**, which is
+  what the pipeline already emits. An intermediate revision retargeted them at
+  SwiftUI and Compose; ADR-0002 reversed that.
 - **The values are open.** The current tokens are v1's, ported verbatim from
   manifest 06 §8, and v1's design is explicitly rejected. The new visual
   language has not been decided, and it is not decided here — nobody should

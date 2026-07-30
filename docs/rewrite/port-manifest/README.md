@@ -8,10 +8,12 @@ and *appearance*; neither narrows behaviour.
 
 1. **v2 drops backward compatibility** with v0.4.x (CLAUDE.md rule 3). The
    on-disk and on-wire formats stop being contracts.
-2. **v1's visual design is explicitly rejected**, and the apps go native —
-   SwiftUI on macOS, Jetpack Compose on Android. The look is being redesigned,
+2. **v1's visual design is explicitly rejected.** The look is being redesigned,
    so manifest 06's *visual* sections stop being requirements. What the UI must
-   *do* is unaffected.
+   *do* is unaffected. (The surface is one Tauri v2 + React app for both
+   platforms — see [ADR-0002](../../adr/0002-one-cross-platform-app.md). An
+   earlier revision of this file said the apps go native; that decision was
+   reversed and the toolkit never affected which sections bind.)
 
 The behaviour survives both, and that is most of the value here: a bug that
 someone found in production is still a bug in a clean-slate implementation, and
@@ -40,11 +42,12 @@ reference only.
 Two cautions about that split, because it is the one most likely to be read too
 broadly:
 
-- **A native app does not get to drop the behaviour.** Scroll anchoring, the
+- **The toolkit does not get to drop the behaviour.** Scroll anchoring, the
   row-height rule, the accessibility contract and the sensitive-content rule are
-  requirements of the *product*, not of a webview. SwiftUI and Compose have
-  their own ways to satisfy each; none of them satisfies it for free, and the
-  manifest's acceptance tests still say what "satisfied" means.
+  requirements of the *product*. Nothing satisfies them for free — a webview
+  reaches them through DOM and ARIA where a native app would have used SwiftUI
+  and TalkBack — and the manifest's acceptance tests still say what "satisfied"
+  means either way.
 - **"Visual is reference" is not "visual is undecided by default".** The new
   look is a decision that has not been taken yet. Until it is, do not treat
   §8's values as a fallback and do not invent replacements in passing — an
