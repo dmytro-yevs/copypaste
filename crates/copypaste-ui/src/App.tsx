@@ -9,9 +9,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { BannerBar } from "@/components/shell/Banners";
 import { Boundary } from "@/components/shell/Boundary";
 import { Sidebar } from "@/components/shell/Sidebar";
+import { CaptureSetup } from "@/components/capture/CaptureSetup";
 import { DevicesView } from "@/components/devices/DevicesView";
 import { HistoryView } from "@/components/history/HistoryView";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { useCaptureSync } from "@/hooks/useCapture";
 import { useStatus } from "@/hooks/useHistory";
 import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
@@ -29,6 +31,7 @@ const SCREENS = {
   },
   devices: { label: "nav.devices", render: () => <DevicesView /> },
   settings: { label: "nav.settings", render: () => <SettingsView /> },
+  capture: { label: "capture.title", render: () => <CaptureSetup /> },
 } as const;
 
 export default function App() {
@@ -43,6 +46,9 @@ export default function App() {
   // Subscribed once, here — not per screen. Two subscribers would invalidate
   // the same queries twice for one change.
   const pushLive = usePush();
+  // Also once: it re-reads capture state on every resume, and navigates here
+  // when the loss notification asked for a re-arm.
+  useCaptureSync();
 
   // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply
   // (CopyPaste-g27b.20).

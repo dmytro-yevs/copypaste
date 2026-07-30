@@ -8,7 +8,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import type { Item, ItemPage, PeerInfo, StatusData } from "@/lib/ipc";
+import type {
+  CaptureSnapshot,
+  Item,
+  ItemPage,
+  PeerInfo,
+  ShizukuProbe,
+  StatusData,
+} from "@/lib/ipc";
 
 /** A test item. `content: null` is what the bridge sends for a sensitive one —
  *  the plaintext is dropped before it crosses (INV-10). */
@@ -56,6 +63,46 @@ export function peer(over: Partial<PeerInfo> = {}): PeerInfo {
     last_addr: "192.168.1.24:7420",
     last_seen_ms: 1_700_000_000_000,
     online: true,
+    ...over,
+  };
+}
+
+export function probe(over: Partial<ShizukuProbe> = {}): ShizukuProbe {
+  return {
+    supported: true,
+    installed: true,
+    running: true,
+    permission: true,
+    toastSuppressed: false,
+    rearmRequested: false,
+    ...over,
+  };
+}
+
+/**
+ * A capture snapshot as the bridge sends one.
+ *
+ * `headline` and `detail` are the sentences `capture::messages` actually
+ * produces, quoted rather than invented, so a test asserts on what a phone
+ * would show. A test that needs a different state supplies both — the view is
+ * not allowed to derive them, so neither is the fixture.
+ */
+export function captureSnapshot(
+  over: Partial<CaptureSnapshot> = {},
+): CaptureSnapshot {
+  return {
+    rung: "shizuku",
+    health: { state: "working" },
+    shizuku: probe(),
+    nextStep: "none",
+    headline: "Capturing from every app.",
+    detail: null,
+    lastReadOkAt: 1_700_000_000_000,
+    lastCaptureAt: 1_700_000_000_000,
+    droppedClips: 0,
+    toastSuppressed: false,
+    toastAcknowledged: false,
+    rearmRequested: false,
     ...over,
   };
 }
