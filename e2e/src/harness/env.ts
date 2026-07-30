@@ -8,7 +8,11 @@ export const E2E_ROOT = path.resolve(
   "../..",
 );
 export const REPO_ROOT = path.resolve(E2E_ROOT, "..");
-export const UI_DIR = path.join(REPO_ROOT, "crates/copypaste-ui");
+
+/** Which tree the dev server serves. Overridable so the suite can be run
+ *  against a git worktree without disturbing the working copy. */
+export const UI_DIR =
+  process.env.COPYPASTE_UI_DIR ?? path.join(REPO_ROOT, "crates/copypaste-ui");
 
 /**
  * The app is a Tauri *dev* build unless it was built for release: a debug
