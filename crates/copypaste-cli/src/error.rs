@@ -111,35 +111,10 @@ impl std::error::Error for CliError {}
 /// thing the user actually reads, so it does not rely on that promise. Matching
 /// is token-based and deliberately blunt: over-redacting a message is harmless,
 /// leaking `/Users/<name>` is not.
-pub fn scrub_paths(message: &str) -> String {
-    message
-        .split_inclusive(char::is_whitespace)
-        .map(|token| {
-            let trimmed = token.trim_end();
-            let trailing = &token[trimmed.len()..];
-            if looks_like_path(trimmed) {
-                format!("<path>{trailing}")
-            } else {
-                token.to_string()
-            }
-        })
-        .collect()
-}
-
-fn looks_like_path(token: &str) -> bool {
-    // Strip leading punctuation a message might wrap a path in.
-    let core = token.trim_start_matches(['(', '[', '"', '\'']);
-    if core.is_empty() {
-        return false;
-    }
-    core.starts_with('/')
-        || core.starts_with("~/")
-        || core.starts_with("./")
-        || core.starts_with("../")
-        || core.starts_with("file://")
-        || core.contains("/Users/")
-        || core.contains("/home/")
-}
+/// Re-exported so existing call sites keep working. The implementation
+/// lives in `copypaste_ipc::redact` because the Tauri bridge needs the same
+/// guarantee and cannot import it from this crate (bin-only, no lib target).
+pub use copypaste_ipc::redact::scrub_paths;
 
 #[cfg(test)]
 mod tests {
