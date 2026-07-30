@@ -2,6 +2,7 @@ import { execa } from "execa";
 import { remote } from "webdriverio";
 
 import {
+  DEV_SERVER_URL,
   NATIVE_DRIVER,
   appBinary,
   freePort,
@@ -35,6 +36,7 @@ export interface StartOptions {
  */
 export async function startApp(options: StartOptions = {}): Promise<App> {
   requireDisplay();
+  await requireDevServer();
 
   const daemon = await startDaemon();
   if (options.seed?.length) await daemon.addMany(options.seed);
@@ -116,6 +118,28 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
   }
 
   return app;
+}
+
+/**
+ * A debug build loads `devUrl`, so a dead dev server produces a WebKit error
+ * page — a real, queryable document that mounts nothing. The probe then reports
+ * "the app never mounted a UI", which sends whoever reads it looking at the
+ * app. Checking here names the actual cause, which in a shared container is
+ * usually another process reclaiming port 1420.
+ */
+async function requireDevServer(): Promise<void> {
+  try {
+    const response = await fetch(DEV_SERVER_URL, { signal: AbortSignal.timeout(5_000) });
+    if (response.ok) return;
+    throw new Error(`HTTP ${response.status}`);
+  } catch (cause) {
+    throw new Error(
+      `the Vite dev server on ${DEV_SERVER_URL} is not answering, so the app ` +
+        `would load an error page instead of the UI. Global setup started one, ` +
+        `so something outside this run took the port or killed it.`,
+      { cause },
+    );
+  }
 }
 
 async function waitForDriver(port: number, driver: Child): Promise<void> {
