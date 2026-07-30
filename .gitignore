@@ -28,7 +28,11 @@ ruflo-setup-log.md
 # Claude config
 .claude/
 .claude/worktrees/
-CLAUDE.md
+# CLAUDE.md is TRACKED on purpose. v1 ignored it, the file left the repo, and
+# its "prefer hand-rolling" rule survived only as a citation in source comments
+# pointing at a document nobody could read — which is how the duplication this
+# rewrite exists to undo went unchallenged for a year. The governing rules
+# belong in version control.
 GEMINI.md
 AGENTS.md
 .agents/
