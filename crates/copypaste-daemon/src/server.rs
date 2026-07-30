@@ -29,11 +29,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
+use copypaste_core::StoredItem;
 use copypaste_ipc::{
     ErrorCode, Item, Method, Request, Response, ResponseData, StatusData, MAX_FRAME_BYTES,
     PROTOCOL_VERSION,
 };
-use copypaste_core::StoredItem;
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::unix::OwnedWriteHalf;
@@ -162,16 +162,7 @@ async fn handle_connection(stream: UnixStream, state: Arc<AppState>) {
             continue;
         }
 
-        let handler_state = Arc::clone(&state);
-        let handled =
-            tokio::task::spawn_blocking(move || dispatch_line(&handler_state, &line)).await;
-        let response = match handled {
-            Ok(response) => response,
-            Err(e) => {
-                error!(error = %e, "request handler did not complete");
-                Response::err(0, ErrorCode::Internal, MSG_INTERNAL)
-            }
-        };
+        let response = dispatch_line(&state, &line).await;
 
         if send(&mut writer, &response).await.is_err() {
             break;
@@ -195,27 +186,46 @@ async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Result<(), ()
 }
 
 /// Parse one request line, run the gates, dispatch.
+fn dispatch_line(state: &Arc<AppState>, line: &str) -> impl std::future::Future<Output = Response> {
+    let parsed = parse_and_gate(state, line);
+    let state = Arc::clone(state);
+    async move {
+        match parsed {
+            Err(rejection) => *rejection,
+            Ok(request) => dispatch(&state, request).await,
+        }
+    }
+}
+
+/// Everything that can reject a request before a handler sees it.
 ///
-/// Synchronous by design: every handler below is blocking work (SQLite, AEAD,
-/// the pasteboard), so the whole thing runs on one `spawn_blocking` hop rather
-/// than sprinkling them through the handlers.
-fn dispatch_line(state: &AppState, line: &str) -> Response {
+/// The rejection is boxed: a `Response` carries a whole payload variant, and an
+/// error type that large would be paid for on the success path too.
+fn parse_and_gate(state: &AppState, line: &str) -> Result<Request, Box<Response>> {
     let request: Request = match serde_json::from_str(line) {
         Ok(request) => request,
         Err(e) => {
             debug!(error = %e, "could not parse a request");
-            return Response::err(recover_id(line), ErrorCode::InvalidRequest, MSG_MALFORMED);
+            return Err(Box::new(Response::err(
+                recover_id(line),
+                ErrorCode::InvalidRequest,
+                MSG_MALFORMED,
+            )));
         }
     };
 
     if let Some(rejection) = protocol_gate(&request) {
-        return rejection;
+        return Err(Box::new(rejection));
     }
     if requires_ready(&request.method) && !state.is_ready() {
-        return Response::err(request.id, ErrorCode::NotReady, MSG_NOT_READY);
+        return Err(Box::new(Response::err(
+            request.id,
+            ErrorCode::NotReady,
+            MSG_NOT_READY,
+        )));
     }
 
-    dispatch(state, request)
+    Ok(request)
 }
 
 /// Best-effort id recovery for a request that did not deserialise.
@@ -261,13 +271,55 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Add { .. }
         | Method::Delete { .. }
         | Method::DeleteAll
-        | Method::Pin { .. } => true,
+        | Method::Pin { .. }
+        // Peer operations read and write the same history, and pairing needs
+        // the device identity that comes out of the same database.
+        | Method::PairCreate { .. }
+        | Method::PairAccept { .. }
+        | Method::Unpair { .. }
+        | Method::Peers
+        | Method::SyncNow { .. } => true,
     }
 }
 
-fn dispatch(state: &AppState, request: Request) -> Response {
+/// Route one request.
+///
+/// Two kinds of work, and they belong on different threads. The peer
+/// operations are network I/O — a TCP connect, a Noise handshake, a session
+/// that can last as long as the peer takes — so they run on the reactor and
+/// `await` like any other socket work. Everything else is blocking (SQLite,
+/// AEAD, the pasteboard) and takes one `spawn_blocking` hop, exactly as it did
+/// before peers existed.
+async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
     let id = request.id;
     match request.method {
+        Method::PairCreate { name } => crate::p2p::handlers::pair_create(state, id, &name).await,
+        Method::PairAccept { code, addr } => {
+            crate::p2p::handlers::pair_accept(state, id, &code, &addr).await
+        }
+        Method::Unpair { pairing_id } => crate::p2p::handlers::unpair(state, id, &pairing_id).await,
+        Method::Peers => crate::p2p::handlers::peers(state, id).await,
+        Method::SyncNow { pairing_id } => {
+            crate::p2p::handlers::sync_now(state, id, pairing_id.as_deref()).await
+        }
+        // Not `_`: a method added to the enum lands here and then fails to
+        // build inside `dispatch_store`, which is where it has to be handled.
+        method => {
+            let state = Arc::clone(state);
+            match tokio::task::spawn_blocking(move || dispatch_store(&state, id, method)).await {
+                Ok(response) => response,
+                Err(e) => {
+                    error!(error = %e, "request handler did not complete");
+                    Response::err(id, ErrorCode::Internal, MSG_INTERNAL)
+                }
+            }
+        }
+    }
+}
+
+/// The blocking half of [`dispatch`]. Exhaustive over `Method` by design.
+fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
+    match method {
         Method::Status => status(state, id),
         Method::List { limit, offset } => list(state, id, limit, offset),
         Method::Search { query, limit } => search(state, id, &query, limit),
@@ -275,7 +327,21 @@ fn dispatch(state: &AppState, request: Request) -> Response {
         Method::Add { content } => add(state, id, &content),
         Method::Delete { id: item_id } => delete(state, id, &item_id),
         Method::DeleteAll => delete_all(state, id),
-        Method::Pin { id: item_id, pinned } => pin(state, id, &item_id, pinned),
+        Method::Pin {
+            id: item_id,
+            pinned,
+        } => pin(state, id, &item_id, pinned),
+        // Unreachable: `dispatch` takes these first. Spelled out rather than
+        // left to a `_` so that adding a method to the enum is still a compile
+        // error here, which is the whole point of dispatching on a type.
+        Method::PairCreate { .. }
+        | Method::PairAccept { .. }
+        | Method::Unpair { .. }
+        | Method::Peers
+        | Method::SyncNow { .. } => {
+            error!("a peer operation reached the blocking dispatcher");
+            Response::err(id, ErrorCode::Internal, MSG_INTERNAL)
+        }
     }
 }
 
@@ -387,10 +453,7 @@ fn delete_all(state: &AppState, id: u64) -> Response {
     // would put the rule in two places and leave the store's own callers with
     // the other behaviour.
     match state.store.delete_all() {
-        Ok(deleted) => Response::ok(
-            id,
-            ResponseData::Count(u64::try_from(deleted).unwrap_or(0)),
-        ),
+        Ok(deleted) => Response::ok(id, ResponseData::Count(u64::try_from(deleted).unwrap_or(0))),
         Err(e) => storage_error(id, "delete_all", e),
     }
 }
@@ -478,8 +541,7 @@ fn decrypt_error(id: u64, error: copypaste_core::CryptoError) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clipboard::{Capture, ClipboardSource};
-    use copypaste_core::{Detector, Keyring, Store};
+    use crate::p2p::tests::test_state;
 
     /// Every string this server can put in `Response.error`.
     const ALL_MESSAGES: &[&str] = &[
@@ -495,39 +557,12 @@ mod tests {
         MSG_INTERNAL,
     ];
 
-    #[derive(Default)]
-    struct FakeClipboard {
-        written: Vec<String>,
-    }
-
-    impl ClipboardSource for FakeClipboard {
-        fn poll(&mut self) -> Option<Capture> {
-            None
-        }
-        fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
-            self.written.push(text.to_string());
-            Ok(())
-        }
-        fn backend_name(&self) -> &'static str {
-            "fake"
-        }
-    }
-
     fn request(id: u64, method: Method) -> Request {
         Request {
             id,
             protocol_version: PROTOCOL_VERSION,
             method,
         }
-    }
-
-    fn test_state(dir: &Path) -> Arc<AppState> {
-        let keyring = Keyring::load_or_create().expect("keyring");
-        let store = Store::open(&dir.join("test.db"), &keyring.db_key()).expect("store");
-        let detector = Detector::new().expect("detector");
-        let state = AppState::new(store, keyring, detector, Box::new(FakeClipboard::default()));
-        state.set_ready(true);
-        Arc::new(state)
     }
 
     #[test]
@@ -564,6 +599,16 @@ mod tests {
     #[test]
     fn only_status_answers_before_readiness() {
         assert!(!requires_ready(&Method::Status));
+        assert!(requires_ready(&Method::PairCreate { name: "x".into() }));
+        assert!(requires_ready(&Method::PairAccept {
+            code: "x".into(),
+            addr: "127.0.0.1:1".into()
+        }));
+        assert!(requires_ready(&Method::Unpair {
+            pairing_id: "x".into()
+        }));
+        assert!(requires_ready(&Method::Peers));
+        assert!(requires_ready(&Method::SyncNow { pairing_id: None }));
         assert!(requires_ready(&Method::List {
             limit: 10,
             offset: 0
@@ -629,18 +674,15 @@ mod tests {
     /// read time, and by a purge migration").
     #[test]
     fn search_never_returns_a_sensitive_item() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = test_state(dir.path());
+        let (state, _dir) = test_state("server");
 
         let secret = "AKIAIOSFODNN7EXAMPLE";
-        let response = dispatch(
+        let response = dispatch_store(
             &state,
-            request(
-                1,
-                Method::Add {
-                    content: secret.into(),
-                },
-            ),
+            1,
+            Method::Add {
+                content: secret.into(),
+            },
         );
         let added = match response.data {
             Some(ResponseData::Item(item)) => item,
@@ -650,15 +692,13 @@ mod tests {
 
         // Data loss is the worse outcome: flagged, but still stored and still
         // listed.
-        let response = dispatch(
+        let response = dispatch_store(
             &state,
-            request(
-                2,
-                Method::List {
-                    limit: 50,
-                    offset: 0,
-                },
-            ),
+            2,
+            Method::List {
+                limit: 50,
+                offset: 0,
+            },
         );
         match response.data {
             Some(ResponseData::Items(items)) => {
@@ -667,15 +707,13 @@ mod tests {
             other => panic!("expected items, got {other:?}"),
         }
 
-        let response = dispatch(
+        let response = dispatch_store(
             &state,
-            request(
-                3,
-                Method::Search {
-                    query: secret.into(),
-                    limit: 50,
-                },
-            ),
+            3,
+            Method::Search {
+                query: secret.into(),
+                limit: 50,
+            },
         );
         match response.data {
             Some(ResponseData::Items(items)) => assert!(
@@ -690,18 +728,15 @@ mod tests {
     /// twice inside the dedup window is one row.
     #[test]
     fn adding_the_same_content_twice_deduplicates() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = test_state(dir.path());
+        let (state, _dir) = test_state("server");
 
         let add = |id| {
-            let response = dispatch(
+            let response = dispatch_store(
                 &state,
-                request(
-                    id,
-                    Method::Add {
-                        content: "the same thing".into(),
-                    },
-                ),
+                id,
+                Method::Add {
+                    content: "the same thing".into(),
+                },
             );
             match response.data {
                 Some(ResponseData::Item(item)) => item,
@@ -718,17 +753,14 @@ mod tests {
     /// Empty content is a rejected request, not an empty row.
     #[test]
     fn adding_empty_content_is_rejected() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = test_state(dir.path());
+        let (state, _dir) = test_state("server");
 
-        let response = dispatch(
+        let response = dispatch_store(
             &state,
-            request(
-                1,
-                Method::Add {
-                    content: "   \n".into(),
-                },
-            ),
+            1,
+            Method::Add {
+                content: "   \n".into(),
+            },
         );
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
@@ -739,9 +771,8 @@ mod tests {
     /// pipelined requests.
     #[tokio::test]
     async fn requests_round_trip_over_a_socket() {
-        let dir = tempfile::tempdir().unwrap();
+        let (state, dir) = test_state("server");
         let path = dir.path().join("daemon.sock");
-        let state = test_state(dir.path());
         let listener = bind(&path).expect("bind");
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -872,7 +903,8 @@ mod tests {
         }
 
         async fn call(&mut self, request: Request) -> Response {
-            self.call_raw(&serde_json::to_string(&request).unwrap()).await
+            self.call_raw(&serde_json::to_string(&request).unwrap())
+                .await
         }
 
         async fn call_raw(&mut self, line: &str) -> Response {
