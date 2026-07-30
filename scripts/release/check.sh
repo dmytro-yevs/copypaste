@@ -428,6 +428,52 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+group "SQLCipher's crypto backend (ADR-0007)"
+# ---------------------------------------------------------------------------
+# Every invariant here is invisible in a green build. Vendoring OpenSSL on macOS
+# succeeds — it just spends what ADR-0007 declined to spend — and a macOS binary
+# linked against the runner's Homebrew libcrypto builds, signs, and mounts.
+if grep -q 'bundled-sqlcipher-vendored-openssl' Cargo.toml; then
+    bad "root Cargo.toml keeps vendored OpenSSL off the default path" \
+        "a feature in [workspace.dependencies] reaches macOS too; ADR-0007 scopes it to Android"
+else
+    ok "root Cargo.toml keeps vendored OpenSSL off the default path"
+fi
+
+# Where the feature does appear it must sit under an android cfg. In a plain
+# [dependencies] it vendors on every target — the same mistake, wider blast
+# radius, and resolver v2 is the only reason the scoped form works at all.
+misplaced=""
+while IFS= read -r f; do
+    grep -q 'bundled-sqlcipher-vendored-openssl' "$f" || continue
+    awk '
+        /^[[:space:]]*\[/ { android = ($0 ~ /^\[target\.[^]]*android[^]]*\.dependencies\]/) }
+        /bundled-sqlcipher-vendored-openssl/ { if (!android) offending = 1 }
+        END { exit offending ? 1 : 0 }
+    ' "$f" || misplaced="${misplaced} ${f}"
+done < <(find crates -name Cargo.toml)
+if [[ -n "$misplaced" ]]; then
+    bad "vendored OpenSSL is android-scoped wherever it appears" \
+        "found outside a cfg(target_os = \"android\") section in:${misplaced}"
+else
+    ok "vendored OpenSSL is android-scoped wherever it appears"
+fi
+
+if grep -q 'name = "openssl-sys", wrappers = \["libsqlite3-sys"\]' deny.toml; then
+    ok "deny.toml admits openssl-sys only beneath libsqlite3-sys"
+else
+    bad "deny.toml admits openssl-sys only beneath libsqlite3-sys" \
+        "unscoped, either the Android graph fails cargo-deny or native-tls stops being caught"
+fi
+
+if grep -q 'check-macos-linkage.sh' .github/workflows/release.yml; then
+    ok "release.yml runs the macOS linkage check"
+else
+    bad "release.yml runs the macOS linkage check" \
+        "nothing else in this pipeline would notice a bundle linked against the runner's Homebrew"
+fi
+
+# ---------------------------------------------------------------------------
 group "The bits that need real hardware"
 # ---------------------------------------------------------------------------
 cat <<'EOS'
