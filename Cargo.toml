@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/copypaste-ipc",
     "crates/copypaste-core",
+    "crates/copypaste-p2p",
+    "crates/copypaste-cloud",
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
     "crates/copypaste-ui/src-tauri",
@@ -43,6 +45,22 @@ futures-util = "0.3"
 backoff = { version = "0.4", features = ["tokio"] }
 # rate limiting — ONE implementation (v1 had three)
 governor = "0.6"
+# P2P secure channel. Noise (NNpsk0) gives a mutually-authenticated, forward-
+# secret channel from the pairing PSK alone: no TLS stack, no certificate
+# lifecycle, and no hand-written pinning verifier. v1 carried rustls + rcgen +
+# a bespoke verifier and two hand-rolled DER parsers for the same job.
+snow = "0.10"
+# mDNS-SD discovery. Convenience only — an explicit address always works.
+mdns-sd = "0.20"
+# base32 for the pairing code (case-insensitive, no ambiguous glyphs)
+data-encoding = "2"
+# Cloud sync (Supabase). rustls rather than native-tls so no OpenSSL C build
+# enters the tree.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+# Passphrase -> sync key. The server must never be able to derive it.
+argon2 = "0.5"
+base64 = "0.22"
 # errors, logging, cli, misc
 thiserror = "1"
 anyhow = "1"

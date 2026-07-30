@@ -1,0 +1,28 @@
+[package]
+name = "copypaste-p2p"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+snow.workspace = true
+mdns-sd.workspace = true
+data-encoding.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+subtle.workspace = true
+hex.workspace = true
+uuid.workspace = true
+# Atomic peer-file writes, not just tests: the file holds PSKs.
+tempfile.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

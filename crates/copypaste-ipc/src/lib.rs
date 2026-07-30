@@ -60,6 +60,22 @@ pub enum Method {
     Delete { id: String },
     DeleteAll,
     Pin { id: String, pinned: bool },
+
+    // ---- peer-to-peer sync -------------------------------------------------
+    /// Mint a pairing token on this device and return the code to read out.
+    /// The token is the Noise pre-shared key; the code is its transferable form.
+    PairCreate { name: String },
+    /// Consume a code produced by `PairCreate` on another device, connect to
+    /// `addr`, and complete the pairing.
+    PairAccept { code: String, addr: String },
+    /// Forget a peer. Its half of the pairing keeps working until it also
+    /// unpairs — this is a local decision, not a negotiated one.
+    Unpair { pairing_id: String },
+    /// Known peers and when each was last reachable.
+    Peers,
+    /// Sync now with one peer, or with every known peer when `pairing_id` is
+    /// absent. Returns per-peer counts.
+    SyncNow { pairing_id: Option<String> },
 }
 
 /// One reply. `ok` distinguishes success from failure without inspecting the
@@ -104,7 +120,44 @@ pub enum ResponseData {
     Items(Vec<Item>),
     Item(Item),
     Count(u64),
+    Pairing(PairingData),
+    Peers(Vec<PeerInfo>),
+    Sync(Vec<SyncResult>),
     Empty {},
+}
+
+/// A freshly minted pairing, returned once and never retrievable again.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairingData {
+    /// The transferable form of the pre-shared key. Read this to the other
+    /// device. It is secret: anyone holding it can pair, so it must not be
+    /// logged, and the UI should treat it like a password.
+    pub code: String,
+    /// Non-secret identifier for the pairing. Safe to log and to display.
+    pub pairing_id: String,
+    /// Where the other device should connect, when it can be determined.
+    pub listen_addr: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerInfo {
+    pub pairing_id: String,
+    pub name: String,
+    pub last_addr: Option<String>,
+    pub last_seen_ms: i64,
+    /// True when the peer is currently visible on the network. Discovery is a
+    /// convenience, so `false` means "not seen", never "unreachable".
+    pub online: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncResult {
+    pub pairing_id: String,
+    pub name: String,
+    pub sent: u32,
+    pub received: u32,
+    /// Present when this peer failed; the rest of the run still reports.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
