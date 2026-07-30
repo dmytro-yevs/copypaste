@@ -54,6 +54,7 @@
     "color-selected": { "$value": "{color.selected}", "$description": "NON-shadcn, ours. The accent-tinted list-row selection fill, exposed as a utility rather than an inline style." },
     "color-pressed": { "$value": "{color.pressed}", "$description": "NON-shadcn, ours. The neutral pressed state layer." },
 
+    "color-selected-edge": { "$value": "{color.selected-edge}", "$description": "NON-shadcn, ours. The selection marker. `border-border` is NOT a substitute — it measures 1.25:1." },
     "color-withheld": { "$value": "{color.withheld}", "$description": "NON-shadcn, ours. The slot standing in for a sensitive item's absent content (INV-10). A fill, not a filter — there is no blur token and there must not be one." },
     "color-withheld-fg": { "$value": "{color.withheld-fg}", "$description": "NON-shadcn, ours. The label on --color-withheld." },
     "color-withheld-border": { "$value": "{color.withheld-border}", "$description": "NON-shadcn, ours. The reveal affordance is a real button (A11Y-3), so its boundary carries the 1.4.11 weight." },

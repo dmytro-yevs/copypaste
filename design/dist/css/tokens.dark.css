@@ -25,6 +25,7 @@
   --hover: oklch(1 0 0 / 8%);
   --pressed: oklch(1 0 0 / 12%);
   --selected: color-mix(in oklab, var(--accent) 18%, transparent);
+  --selected-edge: var(--accent);
   --alpha-selected: 0.18;
   --scrim: oklch(0 0 0 / 60%);
   --ok: oklch(0.792 0.209 151.711);

@@ -96,10 +96,14 @@ function HistoryRowImpl({
   return (
     <div
       className={cn(
-        "group relative flex h-full items-start gap-[var(--gap-row)] overflow-hidden rounded-lg border border-transparent px-[var(--pad-row-x)] py-[var(--pad-row-y)] transition-colors duration-[var(--dur-fast)]",
+        "group relative flex h-full items-start gap-[var(--gap-row)] overflow-hidden rounded-lg px-[var(--pad-row-x)] py-[var(--pad-row-y)] transition-colors duration-[var(--dur-fast)]",
         "hover:bg-accent",
-        active && "border-border bg-selected",
-        flashing && "bg-selected",
+        (active || flashing) && "bg-selected",
+        // Selection is carried by the edge, not the fill: --selected differs
+        // from --bg by ~1.1:1, so a selected row and a hovered row are
+        // indistinguishable without it (WCAG 1.4.11).
+        active &&
+          "before:absolute before:inset-y-[var(--sel-bar-inset)] before:left-0 before:w-[var(--sel-bar-w)] before:rounded-full before:bg-selected-edge before:content-['']",
       )}
     >
       <span

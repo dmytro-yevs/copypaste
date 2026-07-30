@@ -57,6 +57,14 @@
       "$value": "36px",
       "$description": "Content-kind tile in a row."
     },
+    "sel-bar-w": {
+      "$value": "3px",
+      "$description": "Width of the --selected-edge marker on a list row. A shape indicator, because the fill cannot carry selection on its own — see --selected-edge."
+    },
+    "sel-bar-inset": {
+      "$value": "6px",
+      "$description": "Vertical inset of the selection bar from the row's edges, so the marker reads as belonging to the row rather than as a divider."
+    },
     "sz-dot": {
       "$value": "8px",
       "$description": "Status dot."

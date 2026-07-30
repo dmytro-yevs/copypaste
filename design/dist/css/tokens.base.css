@@ -65,6 +65,8 @@
   --hit-slop: 0px;
   --sz-iconbtn: 36px;
   --sz-tile: 36px;
+  --sel-bar-w: 3px;
+  --sel-bar-inset: 6px;
   --sz-dot: 8px;
   --sz-badge-dot: 6px;
   --sz-spinner: 16px;
