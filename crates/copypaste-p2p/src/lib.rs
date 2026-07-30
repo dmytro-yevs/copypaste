@@ -20,11 +20,14 @@
 #![forbid(unsafe_code)]
 
 pub mod discovery;
+pub mod netif;
+pub mod node;
 pub mod peers;
 pub mod protocol;
 pub mod sync;
 pub mod transport;
 
+pub use node::{Node, NodeError};
 pub use peers::{Peer, PeerStore, PeerStoreError, RevokedDevice, PAIRING_CODE_TTL};
 pub use protocol::{ItemSummary, SyncItem, SyncMessage, PROTOCOL_VERSION};
 pub use sync::{merge_decision, MergeDecision, SyncOutcome, SyncStats};

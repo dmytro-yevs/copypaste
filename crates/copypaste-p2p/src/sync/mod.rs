@@ -15,7 +15,7 @@ mod session;
 mod source;
 
 #[cfg(test)]
-mod testutil;
+pub(crate) mod testutil;
 
 pub use error::SyncError;
 pub use merge::{merge_decision, merge_decision_by_summary, MergeDecision};

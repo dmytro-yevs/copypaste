@@ -11,6 +11,7 @@
 //! receiver, so they can be driven from a plain `Vec` of events with no network
 //! and no daemon.
 
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -21,6 +22,7 @@ use super::names::{instance_of, sanitise_instance};
 use super::record::{build_service_info, peers_from_resolved};
 use super::table::{now_ms, DiscoveredPeer, PeerTable};
 use super::DiscoveryError;
+use crate::netif::LocalAddrs;
 use crate::SERVICE_TYPE;
 
 /// How long teardown waits for the mDNS daemon to acknowledge. Bounded so
@@ -50,6 +52,39 @@ struct Shared {
     /// name conflicts by renaming, so it is not necessarily what we asked for;
     /// the monitor thread keeps it current.
     registration: Mutex<Option<Registration>>,
+    /// The port this device listens on, and its own addresses — together, the
+    /// endpoint an advertisement of ours would resolve to. See [`is_own_endpoint`].
+    port: u16,
+    own_addrs: LocalAddrs,
+}
+
+impl Shared {
+    fn for_port(port: u16) -> Self {
+        Self {
+            port,
+            ..Self::default()
+        }
+    }
+}
+
+/// Whether a resolved address is this device's own listener.
+///
+/// The fullname check ([`is_self`]) is the first line and handles the ordinary
+/// case, but it is only as good as the registration we think we hold: it is
+/// `None` when mDNS accepted a browse and refused our registration, and it is
+/// briefly stale after a conflict-driven rename, and in both windows our own
+/// record is taken for a peer. What follows is a timer dialling this device's
+/// own listener, which the responder refuses with
+/// [`SyncError::SelfSync`](crate::sync::SyncError::SelfSync) — correct, and a
+/// round wasted every interval.
+///
+/// The endpoint is the fact that does not depend on any of that: an
+/// advertisement pointing at one of our own addresses *on our own port* is
+/// ours. A second daemon on the same host binds a different port, so it is
+/// still a peer; a device elsewhere on the LAN using the same port has an
+/// address that is not ours.
+fn is_own_endpoint(shared: &Shared, addr: SocketAddr, now_ms: i64) -> bool {
+    addr.port() == shared.port && shared.own_addrs.is_local(addr.ip(), now_ms)
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +112,7 @@ impl Discovery {
             fullname: info.get_fullname().to_string(),
         };
 
-        let shared = Arc::new(Shared::default());
+        let shared = Arc::new(Shared::for_port(port));
         let mut this = Self {
             daemon: None,
             shared: Arc::clone(&shared),
@@ -229,7 +264,10 @@ fn browse_loop(shared: &Shared, events: impl IntoIterator<Item = ServiceEvent>) 
                     continue;
                 }
                 let now = now_ms();
-                let peers = peers_from_resolved(&resolved, now);
+                let peers: Vec<_> = peers_from_resolved(&resolved, now)
+                    .into_iter()
+                    .filter(|peer| !is_own_endpoint(shared, peer.addr, now))
+                    .collect();
                 if peers.is_empty() {
                     continue;
                 }
@@ -370,6 +408,71 @@ mod tests {
             )],
         );
         assert!(lock(&shared.table).snapshot(now_ms()).is_empty());
+    }
+
+    /// The case the fullname check misses: mDNS took our browse and refused our
+    /// registration, so there is no fullname to compare against — and the
+    /// record on the wire is still ours. Without this the sync timer dials this
+    /// device's own listener every round.
+    #[test]
+    fn our_own_advertisement_is_not_a_peer_even_with_no_registration_to_compare() {
+        let shared = Shared::for_port(47_654);
+        assert!(
+            lock(&shared.registration).is_none(),
+            "the fullname check must have nothing to work with"
+        );
+        let ids = vec!["pair-one".to_string()];
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "Laptop",
+                &ids,
+                "127.0.0.1",
+                47_654,
+            )))],
+        );
+        assert!(lock(&shared.table).snapshot(now_ms()).is_empty());
+    }
+
+    /// A second daemon on this host binds a different port, so it is a peer.
+    /// That is the demo's whole arrangement and it must keep working.
+    #[test]
+    fn another_daemon_on_the_same_host_is_still_a_peer() {
+        let shared = Shared::for_port(47_701);
+        let ids = vec!["pair-one".to_string()];
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "device-b",
+                &ids,
+                "127.0.0.1",
+                47_702,
+            )))],
+        );
+        let found = lock(&shared.table).snapshot(now_ms());
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].addr.port(), 47_702);
+    }
+
+    /// The port alone is not the test: every device on a LAN uses the default.
+    #[test]
+    fn a_device_elsewhere_on_the_same_port_is_a_peer() {
+        let shared = Shared::for_port(47_654);
+        let ids = vec!["pair-one".to_string()];
+
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "Elsewhere",
+                &ids,
+                // TEST-NET-1: never one of this host's own addresses.
+                "192.0.2.7",
+                47_654,
+            )))],
+        );
+        assert_eq!(lock(&shared.table).snapshot(now_ms()).len(), 1);
     }
 
     #[test]
