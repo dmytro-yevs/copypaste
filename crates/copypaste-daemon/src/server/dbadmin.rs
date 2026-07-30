@@ -188,7 +188,10 @@ fn validate(staging: &Path, key: &[u8; 32]) -> Result<(), &'static str> {
             return Err(MSG_RESTORE_NOT_A_BACKUP);
         }
     }
-    if let Some(unknown) = tables.iter().find(|name| !KNOWN_TABLES.contains(&name.as_str())) {
+    if let Some(unknown) = tables
+        .iter()
+        .find(|name| !KNOWN_TABLES.contains(&name.as_str()))
+    {
         warn!(table = %unknown, "the backup holds a table this build cannot restore");
         return Err(MSG_RESTORE_NOT_A_BACKUP);
     }

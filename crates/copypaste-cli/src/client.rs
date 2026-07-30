@@ -481,10 +481,14 @@ mod tests {
 
     #[test]
     fn an_empty_page_is_not_a_shape_error() {
-        let response: Response =
-            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":0}}"#)
-                .unwrap();
-        assert!(expect_page(into_data(response).unwrap()).unwrap().items.is_empty());
+        let response: Response = serde_json::from_str(
+            r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":0}}"#,
+        )
+        .unwrap();
+        assert!(expect_page(into_data(response).unwrap())
+            .unwrap()
+            .items
+            .is_empty());
     }
 
     /// The untagged decoder tries variants in order, and an export's payload is
@@ -497,7 +501,11 @@ mod tests {
         let response: Response = serde_json::from_str(line).unwrap();
         let export = expect_export(into_data(response).unwrap()).unwrap();
         assert_eq!(
-            (export.skipped_non_text, export.skipped_sensitive, export.skipped_undecryptable),
+            (
+                export.skipped_non_text,
+                export.skipped_sensitive,
+                export.skipped_undecryptable
+            ),
             (1, 2, 3)
         );
     }

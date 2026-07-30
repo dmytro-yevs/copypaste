@@ -27,7 +27,6 @@ use std::io::{IsTerminal, Read, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let cli = Cli::parse();

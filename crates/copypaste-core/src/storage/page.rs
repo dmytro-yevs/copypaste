@@ -80,11 +80,7 @@ impl Store {
     /// Same order and same filter as [`Store::list`]; only the window differs.
     /// A short page ends the list, so `next` is `None` exactly when the caller
     /// should stop asking.
-    pub fn list_from(
-        &self,
-        after: Option<&ItemCursor>,
-        limit: u32,
-    ) -> Result<Page, StoreError> {
+    pub fn list_from(&self, after: Option<&ItemCursor>, limit: u32) -> Result<Page, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(concat!(
             "SELECT ",
@@ -184,7 +180,8 @@ mod tests {
     fn paging_visits_every_item_exactly_once_in_list_order() {
         let s = store();
         for n in 0..7 {
-            s.insert(item(&format!("item-{n}"), T0 + n * 60_000)).unwrap();
+            s.insert(item(&format!("item-{n}"), T0 + n * 60_000))
+                .unwrap();
         }
         let expected: Vec<String> = s.list(100, 0).unwrap().into_iter().map(|i| i.id).collect();
         for page_size in [1, 2, 3, 7, 100] {

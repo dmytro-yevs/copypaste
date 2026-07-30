@@ -25,11 +25,7 @@ type Result<T> = std::result::Result<T, BackendError>;
 /// Returns a page rather than a bare array so the count of rows that would not
 /// decrypt travels with them (parity finding 17).
 #[tauri::command]
-pub async fn list(
-    backend: State<'_, SelectedBackend>,
-    limit: u32,
-    offset: u32,
-) -> Result<UiPage> {
+pub async fn list(backend: State<'_, SelectedBackend>, limit: u32, offset: u32) -> Result<UiPage> {
     Ok(backend.list(limit, offset).await?.into())
 }
 
@@ -121,10 +117,7 @@ pub async fn set_pinned(
 /// offered: see `Backend::reorder_pinned` for why a full ordering is the only
 /// shape that survives a concurrent pin.
 #[tauri::command]
-pub async fn reorder_pinned(
-    backend: State<'_, SelectedBackend>,
-    ids: Vec<String>,
-) -> Result<()> {
+pub async fn reorder_pinned(backend: State<'_, SelectedBackend>, ids: Vec<String>) -> Result<()> {
     if ids.is_empty() {
         // Not an error worth a round trip, and not something to send: an empty
         // ordering would be indistinguishable from "unpin everything" to a

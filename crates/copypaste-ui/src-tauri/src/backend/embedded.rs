@@ -500,7 +500,12 @@ mod tests {
     async fn an_empty_history_lists_and_searches_without_failing() {
         let (backend, _clip, _dir) = backend();
         assert!(backend.list(50, 0).await.unwrap().items.is_empty());
-        assert!(backend.search("anything", 20).await.unwrap().items.is_empty());
+        assert!(backend
+            .search("anything", 20)
+            .await
+            .unwrap()
+            .items
+            .is_empty());
     }
 
     #[tokio::test]

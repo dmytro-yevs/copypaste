@@ -163,15 +163,25 @@ mod tests {
         assert!(f.store.get(&id).unwrap().unwrap().is_sensitive);
 
         // Still inside the TTL.
-        let removed =
-            sweep_sensitive(&f.store, &f.detector, &f.key, Duration::from_secs(30), T0 + 29_000)
-                .unwrap();
+        let removed = sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 29_000,
+        )
+        .unwrap();
         assert_eq!(removed, 0);
         assert!(f.store.get(&id).unwrap().is_some());
 
-        let removed =
-            sweep_sensitive(&f.store, &f.detector, &f.key, Duration::from_secs(30), T0 + 31_000)
-                .unwrap();
+        let removed = sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 31_000,
+        )
+        .unwrap();
         assert_eq!(removed, 1);
         assert!(f.store.get(&id).unwrap().is_none());
         // Hard delete: no tombstone is left to travel to another device.
@@ -287,15 +297,25 @@ mod tests {
         assert_eq!(again, id, "the re-copy must have bumped, not duplicated");
 
         // 30 s after the first capture, but only 5 s after the re-copy.
-        let removed =
-            sweep_sensitive(&f.store, &f.detector, &f.key, Duration::from_secs(30), T0 + 30_000)
-                .unwrap();
+        let removed = sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 30_000,
+        )
+        .unwrap();
         assert_eq!(removed, 0);
         assert!(f.store.get(&id).unwrap().is_some());
 
-        let removed =
-            sweep_sensitive(&f.store, &f.detector, &f.key, Duration::from_secs(30), T0 + 56_000)
-                .unwrap();
+        let removed = sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 56_000,
+        )
+        .unwrap();
         assert_eq!(removed, 1);
     }
 
@@ -324,8 +344,14 @@ mod tests {
         // sweep does not leave an orphan behind for anything that was.
         capture(&f, "ordinary searchable text", T0);
         let id = capture(&f, SECRET, T0);
-        sweep_sensitive(&f.store, &f.detector, &f.key, Duration::from_secs(30), T0 + 60_000)
-            .unwrap();
+        sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &f.key,
+            Duration::from_secs(30),
+            T0 + 60_000,
+        )
+        .unwrap();
 
         assert_eq!(fts_row_count(&f.store, &id), 0);
         assert_eq!(f.store.search("ordinary", 10).unwrap().len(), 1);

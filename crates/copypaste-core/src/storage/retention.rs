@@ -366,10 +366,7 @@ mod tests {
         let earlier = s.insert_or_bump(item("same content", T0)).unwrap();
         assert!(earlier.is_bump());
         assert_eq!(earlier.item().created_at, T0 + 600_000);
-        assert_eq!(
-            s.get(&first.id).unwrap().unwrap().created_at,
-            T0 + 600_000
-        );
+        assert_eq!(s.get(&first.id).unwrap().unwrap().created_at, T0 + 600_000);
     }
 
     /// T-39 names pinned rows explicitly, and INV-31 says what a bump may not

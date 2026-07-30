@@ -129,8 +129,8 @@ async fn pump(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{test_state, test_state_with_cloud};
     use crate::cloud::Cloud;
+    use crate::testutil::{test_state, test_state_with_cloud};
 
     #[tokio::test]
     async fn an_unconfigured_daemon_does_not_start_a_subscription() {

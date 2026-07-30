@@ -48,7 +48,9 @@ impl Settings {
     pub fn load(meta: &Meta) -> Self {
         let stored = match meta.state(KEY_SETTINGS) {
             Ok(Some(raw)) => serde_json::from_str::<ConfigData>(&raw)
-                .map_err(|e| warn!(error = %e, "stored settings are unreadable; using the defaults"))
+                .map_err(
+                    |e| warn!(error = %e, "stored settings are unreadable; using the defaults"),
+                )
                 .ok(),
             Ok(None) => None,
             Err(e) => {
@@ -187,8 +189,8 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_stored_record_falls_back_to_the_defaults(
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn a_corrupt_stored_record_falls_back_to_the_defaults() -> Result<(), Box<dyn std::error::Error>>
+    {
         let (state, _dir) = test_state("alpha");
         state.meta.set_state(KEY_SETTINGS, "{not json")?;
         let settings = Settings::load(&state.meta);
