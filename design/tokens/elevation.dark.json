@@ -1,0 +1,42 @@
+{
+  "elevation": {
+    "$description": "Dark theme shadow ramp (port-manifest §8.1). CSS-only: Compose expresses depth with Material 3 tonal elevation, which we cover through the surfaceContainer* slots in tokens/semantic/material.json rather than by porting box-shadows.",
+    "$type": "shadow",
+    "$extensions": {
+      "com.copypaste": {
+        "platforms": [
+          "css"
+        ]
+      }
+    },
+    "sh1": {
+      "$value": {
+        "color": "rgba(0,0,0,0.30)",
+        "offsetX": "0",
+        "offsetY": "1px",
+        "blur": "2px"
+      },
+      "$description": "Resting card / row lift."
+    },
+    "sh2": {
+      "$value": {
+        "color": "rgba(0,0,0,0.45)",
+        "offsetX": "0",
+        "offsetY": "8px",
+        "blur": "24px",
+        "spread": "-6px"
+      },
+      "$description": "Popover, dropdown, toast."
+    },
+    "sh3": {
+      "$value": {
+        "color": "rgba(0,0,0,0.60)",
+        "offsetX": "0",
+        "offsetY": "24px",
+        "blur": "64px",
+        "spread": "-12px"
+      },
+      "$description": "Modal."
+    }
+  }
+}

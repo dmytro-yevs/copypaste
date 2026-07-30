@@ -1,0 +1,246 @@
+//! CLI error type, exit-code mapping, and the user-facing message rules.
+//!
+//! Two rules from CLAUDE.md are enforced here rather than at each call site:
+//!
+//! * **Errors shown to users must never contain paths** (rule 4). The daemon
+//!   socket lives under the user's home directory, so printing it discloses the
+//!   local username. Nothing in this module ever formats [`socket_path`], and
+//!   [`scrub_paths`] is a belt-and-braces pass over daemon-supplied text so a
+//!   future daemon regression cannot leak one through the CLI.
+//! * **Clients branch on `error_code`, never on the `error` string**
+//!   (port manifest 04, I9). [`CliError::exit_code`] matches on
+//!   [`ErrorCode`] only.
+//!
+//! [`socket_path`]: copypaste_ipc::socket_path
+
+use copypaste_ipc::{ErrorCode, PROTOCOL_VERSION};
+use std::fmt;
+
+/// The command did what was asked.
+pub const EXIT_OK: i32 = 0;
+/// The daemon could not be reached at all.
+pub const EXIT_UNREACHABLE: i32 = 1;
+/// The daemon answered, but the thing asked for does not exist.
+pub const EXIT_NOT_FOUND: i32 = 2;
+/// Everything else.
+pub const EXIT_OTHER: i32 = 3;
+
+#[derive(Debug)]
+pub enum CliError {
+    /// The socket is absent, refused the connection, or the daemon hung up
+    /// before answering. Exit [`EXIT_UNREACHABLE`].
+    DaemonUnreachable,
+    /// The daemon answered `ok: false`. `code` is `None` for an untagged
+    /// failure, which the protocol permits and clients must tolerate.
+    Daemon {
+        code: Option<ErrorCode>,
+        message: String,
+    },
+    /// A client-side problem: a malformed frame, an over-long line, a response
+    /// whose shape does not match the request, or bad user input.
+    Local(String),
+}
+
+impl CliError {
+    pub fn local(message: impl Into<String>) -> Self {
+        CliError::Local(message.into())
+    }
+
+    /// Map to a process exit status.
+    ///
+    /// Only `not_found` gets its own code; every other daemon-reported failure
+    /// is "other error", because a script that wants to distinguish them should
+    /// be reading `--json` and branching on `error_code`.
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            CliError::DaemonUnreachable => EXIT_UNREACHABLE,
+            CliError::Daemon {
+                code: Some(ErrorCode::NotFound),
+                ..
+            } => EXIT_NOT_FOUND,
+            CliError::Daemon { .. } => EXIT_OTHER,
+            CliError::Local(_) => EXIT_OTHER,
+        }
+    }
+
+    /// The single line printed to stderr. Never contains a filesystem path.
+    pub fn user_message(&self) -> String {
+        match self {
+            CliError::DaemonUnreachable => {
+                // Deliberately no path: naming the socket would disclose the
+                // local username (CLAUDE.md rule 4).
+                "cannot reach the CopyPaste daemon. Start it with `copypaste-daemon`, \
+                 then run this command again."
+                    .to_string()
+            }
+            CliError::Daemon {
+                code: Some(ErrorCode::ProtocolMismatch),
+                ..
+            } => {
+                format!(
+                    "daemon and CLI versions differ: this CLI speaks IPC protocol v{PROTOCOL_VERSION}, \
+                     which the running daemon does not accept. Upgrade both to the same release \
+                     and restart the daemon."
+                )
+            }
+            CliError::Daemon {
+                code: Some(ErrorCode::NotReady),
+                ..
+            } => "the daemon is still starting up. Try again in a few seconds.".to_string(),
+            CliError::Daemon {
+                code: Some(ErrorCode::NotFound),
+                message,
+            } => scrub_paths(message),
+            CliError::Daemon { message, .. } => scrub_paths(message),
+            CliError::Local(message) => scrub_paths(message),
+        }
+    }
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.user_message())
+    }
+}
+
+impl std::error::Error for CliError {}
+
+/// Replace anything that looks like a filesystem path with `<path>`.
+///
+/// The daemon promises not to put paths in `error` strings, but this CLI is the
+/// thing the user actually reads, so it does not rely on that promise. Matching
+/// is token-based and deliberately blunt: over-redacting a message is harmless,
+/// leaking `/Users/<name>` is not.
+pub fn scrub_paths(message: &str) -> String {
+    message
+        .split_inclusive(char::is_whitespace)
+        .map(|token| {
+            let trimmed = token.trim_end();
+            let trailing = &token[trimmed.len()..];
+            if looks_like_path(trimmed) {
+                format!("<path>{trailing}")
+            } else {
+                token.to_string()
+            }
+        })
+        .collect()
+}
+
+fn looks_like_path(token: &str) -> bool {
+    // Strip leading punctuation a message might wrap a path in.
+    let core = token.trim_start_matches(['(', '[', '"', '\'']);
+    if core.is_empty() {
+        return false;
+    }
+    core.starts_with('/')
+        || core.starts_with("~/")
+        || core.starts_with("./")
+        || core.starts_with("../")
+        || core.starts_with("file://")
+        || core.contains("/Users/")
+        || core.contains("/home/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unreachable_daemon_exits_one() {
+        assert_eq!(CliError::DaemonUnreachable.exit_code(), EXIT_UNREACHABLE);
+    }
+
+    #[test]
+    fn not_found_exits_two() {
+        let err = CliError::Daemon {
+            code: Some(ErrorCode::NotFound),
+            message: "no such item".into(),
+        };
+        assert_eq!(err.exit_code(), EXIT_NOT_FOUND);
+    }
+
+    #[test]
+    fn every_other_daemon_code_exits_three() {
+        for code in [
+            ErrorCode::InvalidRequest,
+            ErrorCode::ProtocolMismatch,
+            ErrorCode::NotReady,
+            ErrorCode::Internal,
+        ] {
+            let err = CliError::Daemon {
+                code: Some(code),
+                message: "boom".into(),
+            };
+            assert_eq!(err.exit_code(), EXIT_OTHER, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn untagged_daemon_failure_exits_three() {
+        let err = CliError::Daemon {
+            code: None,
+            message: "unknown method".into(),
+        };
+        assert_eq!(err.exit_code(), EXIT_OTHER);
+    }
+
+    #[test]
+    fn local_failure_exits_three() {
+        assert_eq!(CliError::local("bad frame").exit_code(), EXIT_OTHER);
+    }
+
+    #[test]
+    fn unreachable_message_is_actionable_and_pathless() {
+        let msg = CliError::DaemonUnreachable.user_message();
+        assert!(msg.contains("copypaste-daemon"), "{msg}");
+        assert!(!msg.contains('/'), "message must not contain a path: {msg}");
+    }
+
+    #[test]
+    fn protocol_mismatch_message_says_versions_differ() {
+        let err = CliError::Daemon {
+            code: Some(ErrorCode::ProtocolMismatch),
+            message: "unsupported protocol version 9".into(),
+        };
+        let msg = err.user_message();
+        assert!(msg.contains("versions differ"), "{msg}");
+        assert!(msg.contains("Upgrade"), "{msg}");
+    }
+
+    #[test]
+    fn daemon_supplied_path_is_scrubbed_from_the_user_message() {
+        let err = CliError::Daemon {
+            code: Some(ErrorCode::Internal),
+            message: "could not open /Users/dmitriy/Library/Application Support/CopyPaste/x.db"
+                .into(),
+        };
+        let msg = err.user_message();
+        assert!(!msg.contains("dmitriy"), "{msg}");
+        assert!(msg.contains("<path>"), "{msg}");
+    }
+
+    #[test]
+    fn scrub_leaves_ordinary_text_alone() {
+        let msg = "item not found: 3f2a91c4-0000-4000-8000-000000000000";
+        assert_eq!(scrub_paths(msg), msg);
+    }
+
+    #[test]
+    fn scrub_handles_several_path_shapes() {
+        for raw in [
+            "/tmp/daemon.sock",
+            "~/Library/Application",
+            "./local.db",
+            "../up.db",
+            "file:///etc/passwd",
+        ] {
+            let out = scrub_paths(&format!("failed at {raw} sorry"));
+            assert_eq!(out, "failed at <path> sorry", "{raw}");
+        }
+    }
+
+    #[test]
+    fn scrub_preserves_whitespace_layout() {
+        assert_eq!(scrub_paths("a  b\nc"), "a  b\nc");
+    }
+}

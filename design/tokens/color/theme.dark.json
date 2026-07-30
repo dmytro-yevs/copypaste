@@ -1,0 +1,162 @@
+{
+  "color": {
+    "$description": "Dark theme surface, text, state and status colours. Values lifted verbatim from port-manifest/06-ui-behaviour.md §8.1. Dark is the default theme.",
+    "$type": "color",
+    "bg": {
+      "$value": "#0E0F14",
+      "$description": "Window background, behind every panel."
+    },
+    "panel": {
+      "$value": "#16181F",
+      "$description": "Chrome surface: sidebar, title bar, tab bar, popup container."
+    },
+    "elevated": {
+      "$value": "#1E2027",
+      "$description": "Inset control surface: fields, chips, kbd, badges, empty-state icon."
+    },
+    "card": {
+      "$value": "#1E2027",
+      "$description": "Content card surface."
+    },
+    "raised": {
+      "$value": "#282B33",
+      "$description": "Raised control surface: segmented-control on-state, secondary button hover."
+    },
+    "raised-2": {
+      "$value": "#33373F",
+      "$description": "Highest neutral surface: toggle off track, scrollbar thumb, spinner track."
+    },
+    "border": {
+      "$value": "#33363F",
+      "$description": "Control and card outline."
+    },
+    "divider": {
+      "$value": "#24262D",
+      "$description": "Hairline separator between regions."
+    },
+    "text": {
+      "$value": "#E7E9EE",
+      "$description": "Primary text."
+    },
+    "dim": {
+      "$value": "#9CA1AC",
+      "$description": "Secondary text; ghost button rest state."
+    },
+    "faint": {
+      "$value": "#8F94A0",
+      "$description": "Tertiary text: placeholders, field icons, counts."
+    },
+    "mute": {
+      "$value": "#5C616B",
+      "$description": "Lowest-emphasis text; disabled."
+    },
+    "hover": {
+      "$value": "rgba(255,255,255,.045)",
+      "$description": "Neutral hover state layer over any surface."
+    },
+    "pressed": {
+      "$value": "rgba(255,255,255,.075)",
+      "$description": "Neutral pressed state layer."
+    },
+    "selected": {
+      "$value": "color-mix(in srgb,var(--accent) 16%,transparent)",
+      "$description": "Accent-tinted selection fill (list rows, active sidebar item). CSS-only: the equivalent on Compose is accent.copy(alpha = alpha-selected).",
+      "$extensions": {
+        "com.copypaste": {
+          "platforms": [
+            "css"
+          ]
+        }
+      }
+    },
+    "alpha-selected": {
+      "$type": "number",
+      "$value": 0.16,
+      "$description": "Accent alpha behind --selected. The single source both platforms compute the selection fill from."
+    },
+    "scrim": {
+      "$value": "rgba(0,0,0,.55)",
+      "$description": "Modal scrim."
+    },
+    "ok": {
+      "$value": "#4FB866",
+      "$description": "Success fill / dot."
+    },
+    "warn": {
+      "$value": "#E0A33F",
+      "$description": "Warning fill / dot."
+    },
+    "err": {
+      "$value": "#E5645F",
+      "$description": "Error fill / dot."
+    },
+    "info": {
+      "$value": "#5B9DFF",
+      "$description": "Informational fill / dot."
+    },
+    "ok-strong": {
+      "$value": "{color.ok}",
+      "$description": "AA-corrected foreground variant of --ok on its own 12% tint. §8.3: identical to the base hue in dark."
+    },
+    "warn-strong": {
+      "$value": "{color.warn}",
+      "$description": "AA-corrected foreground variant of --warn. §8.3."
+    },
+    "err-strong": {
+      "$value": "{color.err}",
+      "$description": "AA-corrected foreground variant of --err on its 9%/16% tint (.btn--danger label). §8.3."
+    },
+    "info-strong": {
+      "$value": "{color.info}",
+      "$description": "AA-corrected foreground variant of --info on its 12% tint (log level badge). §8.3."
+    },
+    "c-text": {
+      "$value": "#8B93A5",
+      "$description": "Content kind: text."
+    },
+    "c-url": {
+      "$value": "#34D1BF",
+      "$description": "Content kind: url."
+    },
+    "c-code": {
+      "$value": "#A78BFA",
+      "$description": "Content kind: code (renders monospace)."
+    },
+    "c-image": {
+      "$value": "#E879C6",
+      "$description": "Content kind: image."
+    },
+    "c-mail": {
+      "$value": "#4ED98A",
+      "$description": "Content kind: mail."
+    },
+    "c-color": {
+      "$value": "#F5A524",
+      "$description": "Content kind: color (renders monospace)."
+    },
+    "c-num": {
+      "$value": "#5CC1CE",
+      "$description": "Content kind: num (renders monospace)."
+    },
+    "c-path": {
+      "$value": "#5B9DFF",
+      "$description": "Content kind: path."
+    },
+    "c-file": {
+      "$value": "#5B9DFF",
+      "$description": "Content kind: file."
+    },
+    "c-json": {
+      "$value": "#FB7B53",
+      "$description": "Content kind: json (renders monospace)."
+    },
+    "c-secret": {
+      "$value": "#F2616B",
+      "$description": "Content kind: secret."
+    },
+    "c-unknown": {
+      "$value": "{color.c-text}",
+      "$description": "ADDED (not in the v1 dump). §8.7 closes the kind set with `unknown`, which must never render blank; it falls back to the text-kind colour."
+    }
+  }
+}
