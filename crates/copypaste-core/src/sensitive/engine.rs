@@ -3,7 +3,7 @@
 //! through its [`super::validators`] gate, survivors ranked into a
 //! [`Finding`](super::finding::Finding).
 
-use regex::{Regex, RegexSet};
+use regex::{Regex, RegexSet, RegexSetBuilder};
 
 use super::finding::{Finding, Severity};
 use super::normalise::normalise;
@@ -26,6 +26,19 @@ pub enum DetectorError {
     #[error("the sensitive-content rule set failed to compile")]
     RuleSet(#[source] regex::Error),
 }
+
+/// Lazy-DFA cache ceiling for the prefilter, and the difference between the
+/// prefilter being an optimisation and being a 55× pessimisation.
+///
+/// `regex` defaults to 2 MiB. The combined automaton for these ~45 patterns does
+/// not fit in it: the cache thrashes, every search falls back to the NFA
+/// simulation, and the one pass that is supposed to save 45 individual searches
+/// costs more than all 45 together. Measured on 116 KB of benign ASCII —
+/// 2 MiB: 1.0 MB/s · 4 MiB: 400 MB/s · flat to 32 MiB; running the 45 regexes
+/// serially instead: 59 MB/s. 8 MiB is past the knee with room for the ruleset
+/// to grow. The cache is allocated on demand, so this is a ceiling and not a
+/// cost.
+const PREFILTER_DFA_SIZE_LIMIT: usize = 8 * 1024 * 1024;
 
 /// The compiled ruleset. Construct **once** and share it: `new()` compiles ~42
 /// regexes plus the prefilter, and this runs on the clipboard hot path
@@ -54,7 +67,10 @@ impl Detector {
             })?;
             rules.push(Rule { spec, regex });
         }
-        let set = RegexSet::new(RULES.iter().map(|r| r.pattern)).map_err(DetectorError::RuleSet)?;
+        let set = RegexSetBuilder::new(RULES.iter().map(|r| r.pattern))
+            .dfa_size_limit(PREFILTER_DFA_SIZE_LIMIT)
+            .build()
+            .map_err(DetectorError::RuleSet)?;
         Ok(Self { set, rules })
     }
 
@@ -656,6 +672,55 @@ mod tests {
             elapsed < linear * SLACK,
             "scan cost is superlinear: {elapsed:?} for {FACTOR}x the text that scanned \
              in {per_small:?} (linear would be about {linear:?})"
+        );
+    }
+
+    /// The prefilter must be faster than the work it replaces.
+    ///
+    /// [`PREFILTER_DFA_SIZE_LIMIT`] is the only thing making that true: at
+    /// `regex`'s 2 MiB default the combined automaton does not fit its lazy DFA
+    /// cache, every search degrades to the NFA simulation, and one `RegexSet`
+    /// pass costs ~55× all 45 individual searches together. Nothing else in the
+    /// suite notices — every verdict stays correct — so this is the test that
+    /// fails if the limit is "simplified" away.
+    ///
+    /// A ratio against a same-machine baseline rather than a wall-clock budget,
+    /// for the reason [`ruleset_scan_cost_stays_linear_in_input_size`] gives.
+    /// The real ratio is ~7× in the prefilter's favour; asserting merely
+    /// *no worse than* the serial baseline leaves an order of magnitude of slack
+    /// and still catches a 55× regression.
+    #[test]
+    fn the_prefilter_is_faster_than_the_searches_it_replaces() {
+        const UNIT: &str = "ordinary paragraph of notes, about sixty characters long.\n";
+        const RUNS: u32 = 5;
+
+        let det = detector();
+        let serial: Vec<_> = RULES
+            .iter()
+            .map(|spec| Regex::new(spec.pattern).unwrap())
+            .collect();
+        let text = UNIT.repeat(2_000);
+
+        // Warm both lazy DFAs before either is timed.
+        assert!(!det.is_sensitive(&text));
+        assert!(!serial.iter().any(|re| re.is_match(&text)));
+
+        let started = std::time::Instant::now();
+        for _ in 0..RUNS {
+            assert!(!det.is_sensitive(&text));
+        }
+        let prefiltered = started.elapsed();
+
+        let started = std::time::Instant::now();
+        for _ in 0..RUNS {
+            assert!(!serial.iter().any(|re| re.is_match(&text)));
+        }
+        let one_at_a_time = started.elapsed();
+
+        assert!(
+            prefiltered <= one_at_a_time,
+            "the prefilter costs more than running every rule separately \
+             ({prefiltered:?} vs {one_at_a_time:?}) — check PREFILTER_DFA_SIZE_LIMIT"
         );
     }
 
