@@ -23,6 +23,7 @@
   --mute: oklch(0.705 0.015 286.067);
   --hover: oklch(0 0 0 / 5%);
   --pressed: oklch(0 0 0 / 9%);
+  --accent-hover: color-mix(in oklab, var(--accent) 88%, var(--accent-away));
   --selected: color-mix(in oklab, var(--accent) 12%, transparent);
   --selected-edge: var(--accent);
   --alpha-selected: 0.12;
@@ -31,6 +32,7 @@
   --warn: oklch(0.666 0.179 58.318);
   --err: oklch(0.577 0.245 27.325);
   --on-err: oklch(0.985 0 0);
+  --err-hover: color-mix(in oklab, var(--err) 88%, oklch(0 0 0));
   --info: oklch(0.546 0.245 262.881);
   --ok-strong: oklch(0.448 0.119 151.328);
   --warn-strong: oklch(0.473 0.137 46.201);
@@ -54,6 +56,7 @@
   --accent: oklch(0.511 0.262 276.966);
   --accent-2: oklch(0.457 0.24 277.023);
   --on-accent: oklch(1 0 0);
+  --accent-away: oklch(0 0 0);
   --sh1: 0 1px 2px oklch(0 0 0 / 0.05);
   --sh2: 0 4px 12px -2px oklch(0 0 0 / 0.1);
   --sh3: 0 20px 40px -12px oklch(0 0 0 / 0.15);

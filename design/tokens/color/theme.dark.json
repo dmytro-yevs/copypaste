@@ -62,6 +62,11 @@
       "$value": "oklch(1 0 0 / 12%)",
       "$description": "Neutral pressed state layer."
     },
+    "accent-hover": {
+      "$value": "color-mix(in oklab, var(--accent) 88%, var(--accent-away))",
+      "$description": "Hover fill for a solid --accent button: --accent mixed 12% toward --accent-away, the pole opposite --on-accent, and never toward the surface. Diluting toward the surface moves the fill toward the ink on whichever theme the page is on the ink's side of the fill — that is how shadcn's 10% alpha lands the label at 4.02:1 against a 4.5 floor. Away from the ink it can only rise: 5.77 worst, where the rest state is 4.78. 12% is about one Tailwind palette step. The tradeoff: in dark, the two accents with white ink darken on hover, so the fill falls from 3.12 to 2.35 against --elevated. A filled button is identified by its rest state; the hover state is not its boundary.",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
+    },
     "selected": {
       "$value": "color-mix(in oklab, var(--accent) 18%, transparent)",
       "$description": "Accent-tinted selection fill for list rows and the active nav item. Mixed in oklab so the tint stays perceptually even across all six accents.",
@@ -102,6 +107,11 @@
     "on-err": {
       "$value": "oklch(0.21 0.05 22.216)",
       "$description": "Foreground on a solid --err fill. Dark ink, not white: shadcn pairs its dark `destructive` (red-400) with white and that measures 2.75:1, which fails A11Y-10 on every destructive button in the app. Dark ink measures 6.25. This is the one place the adopted system is overridden on contrast rather than followed; light keeps white ink because there --err is red-600."
+    },
+    "err-hover": {
+      "$value": "color-mix(in oklab, var(--err) 88%, oklch(1 0 0))",
+      "$description": "Hover fill for a solid --err button. Same construction as --accent-hover, with the pole written out rather than a token because --on-err does not vary by accent: the ink is dark here, so the hover mixes toward white. 6.25 at rest, 7.22 on hover.",
+      "$extensions": { "com.copypaste": { "platforms": ["css"] } }
     },
     "info": {
       "$value": "oklch(0.707 0.165 254.624)",

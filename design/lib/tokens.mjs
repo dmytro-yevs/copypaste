@@ -8,10 +8,22 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { parse, converter, wcagContrast } from 'culori';
+import { parse, converter, interpolate, wcagContrast } from 'culori';
 
 const DIST = new URL('../dist/css/', import.meta.url);
 const rgb = converter('rgb');
+
+/** CSS colour-space names to culori modes. Unlisted spaces throw rather than
+ *  being mixed in the wrong one — the space changes the result. */
+const MIX_SPACE = {
+  oklab: 'oklab',
+  oklch: 'oklch',
+  lab: 'lab',
+  lch: 'lch',
+  srgb: 'rgb',
+  'srgb-linear': 'lrgb',
+  hsl: 'hsl',
+};
 
 export const AA_TEXT = 4.5; // WCAG 1.4.3, small text
 export const NON_TEXT = 3.0; // WCAG 1.4.11, control boundaries and focus indicators
@@ -60,18 +72,14 @@ export function resolve(expr, vars, depth = 0) {
     return resolve(vars[v[1]], vars, depth + 1);
   }
 
-  const mix = /^color-mix\(in [\w-]+,\s*(.+?)\s+([\d.]+)%,\s*(.+?)\s*\)$/.exec(expr);
+  const mix = /^color-mix\(in ([\w-]+),\s*(.+?)\s+([\d.]+)%,\s*(.+?)\s*\)$/.exec(expr);
   if (mix) {
-    const c = resolve(mix[1], vars, depth + 1);
-    const pct = parseFloat(mix[2]) / 100;
-    if (mix[3].trim() === 'transparent') return { ...c, alpha: (c.alpha ?? 1) * pct };
-    const d = resolve(mix[3], vars, depth + 1);
-    return {
-      mode: 'rgb',
-      r: c.r * pct + d.r * (1 - pct),
-      g: c.g * pct + d.g * (1 - pct),
-      b: c.b * pct + d.b * (1 - pct),
-    };
+    const c = resolve(mix[2], vars, depth + 1);
+    const pct = parseFloat(mix[3]) / 100;
+    if (mix[4].trim() === 'transparent') return { ...c, alpha: (c.alpha ?? 1) * pct };
+    const mode = MIX_SPACE[mix[1]];
+    if (!mode) throw new Error(`unsupported color-mix space: in ${mix[1]}`);
+    return rgb(interpolate([c, resolve(mix[4], vars, depth + 1)], mode)(1 - pct));
   }
 
   const parsed = parse(expr);
