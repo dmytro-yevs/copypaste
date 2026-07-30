@@ -1,9 +1,9 @@
 //! The pairing token: the 256-bit shared secret that makes two devices a pair,
 //! and the human-transferable code it prints as.
 //!
-//! Everything in this file is pure — no sockets, no filesystem. The token is
-//! the *input* to the handshake in [`super::handshake`]; nothing here knows
-//! that Noise exists beyond borrowing its BLAKE2s.
+//! Pure — no sockets, no filesystem. The token is the *input* to the handshake
+//! in [`super::handshake`]; nothing here knows Noise exists beyond borrowing
+//! its BLAKE2s.
 
 use std::fmt;
 use std::sync::OnceLock;
@@ -33,27 +33,21 @@ const CODE_SEPARATOR: char = '-';
 /// same function (port manifest 02, I-16).
 const PAIRING_ID_DOMAIN: &[u8] = b"copypaste/v2/pairing-id|";
 
-/// Bytes of the pairing-id digest that are kept. 128 bits of a 256-bit digest:
-/// long enough that a collision between a user's handful of devices is not a
-/// thing that happens, short enough to read in a log line.
+/// Bytes of the pairing-id digest that are kept: 128 bits, collision-free for a
+/// user's handful of devices and short enough to read in a log line.
 const PAIRING_ID_LEN: usize = 16;
 
 /// The shared secret that makes two devices a pair.
 ///
-/// 256 bits from the OS CSPRNG. Possession of it *is* the authentication: there
-/// is no account, no certificate and nothing else to check. It is zeroized on
-/// drop, compared in constant time, and never rendered by `Debug`.
-///
-/// It is intentionally not `Clone` (port manifest 02, I-12). Handing out copies
-/// of key material should be an explicit act, which is what [`PairingToken::psk`]
-/// is — the [`crate::PeerStore`] needs a plain `[u8; 32]` to persist.
+/// 256 bits from the OS CSPRNG. Possession of it *is* the authentication.
+/// Zeroized on drop, compared in constant time, never rendered by `Debug`, and
+/// intentionally not `Clone` (port manifest 02, I-12): copying key material
+/// should be an explicit act, which is what [`PairingToken::psk`] is.
 pub struct PairingToken(Zeroizing<[u8; TOKEN_LEN]>);
 
 impl PairingToken {
-    /// Mint a fresh token from the OS CSPRNG.
-    ///
-    /// `OsRng`, never `thread_rng` — one entropy source across the whole crypto
-    /// surface (port manifest 02, I-11).
+    /// Mint a fresh token. `OsRng`, never `thread_rng` — one entropy source
+    /// across the whole crypto surface (port manifest 02, I-11).
     #[must_use]
     pub fn generate() -> Self {
         let mut bytes = Zeroizing::new([0u8; TOKEN_LEN]);
@@ -61,26 +55,22 @@ impl PairingToken {
         Self(bytes)
     }
 
-    /// Build a token from bytes that came from somewhere else.
-    ///
-    /// The caller is asserting these bytes are 256 bits of CSPRNG output. The
-    /// security of everything downstream rests on that.
+    /// Build a token from bytes obtained elsewhere. The caller asserts they are
+    /// 256 bits of CSPRNG output; everything downstream rests on that.
     #[must_use]
     pub fn from_bytes(bytes: &[u8; TOKEN_LEN]) -> Self {
         Self(Zeroizing::new(*bytes))
     }
 
     /// The human-transferable form: 52 Crockford base32 characters in groups of
-    /// four, e.g. `0G7M-XQ4V-…` (64 characters including separators).
+    /// four, e.g. `0G7M-XQ4V-…`.
     ///
-    /// Crockford's alphabet rather than RFC 4648's, because this string gets
-    /// read aloud and retyped: it has no `I`, `L`, `O` or `U`, so there is no
-    /// `0`/`O` or `1`/`I`/`l` confusion to resolve and no accidental profanity.
-    /// [`PairingToken::parse`] additionally folds case and translates the
-    /// ambiguous glyphs anyway, so a user who types `O` for `0` still succeeds.
+    /// Crockford rather than RFC 4648 because this string gets read aloud and
+    /// retyped: no `I`, `L`, `O` or `U`, so no `0`/`O` or `1`/`I`/`l` confusion
+    /// and no accidental profanity. [`PairingToken::parse`] folds case and
+    /// translates the ambiguous glyphs anyway.
     ///
-    /// The code is a secret. It is safe to *show* — that is its job — but never
-    /// log it, and never put it in an error.
+    /// The code is a secret: safe to *show*, never to log or put in an error.
     #[must_use]
     pub fn to_code(&self) -> String {
         let raw = code_encoding().encode(&self.0[..]);
@@ -96,13 +86,11 @@ impl PairingToken {
         out
     }
 
-    /// Parse a pairing code produced by [`PairingToken::to_code`].
-    ///
-    /// Tolerant of how a human retypes it: case is folded, `-`, `_` and
-    /// whitespace are ignored wherever they appear, and `O`/`o` → `0`,
-    /// `I`/`i`/`L`/`l` → `1`. Not tolerant of anything else — a code with a
-    /// character outside the alphabet, the wrong decoded length, or non-zero
-    /// trailing bits is rejected rather than silently coerced.
+    /// Parse a pairing code produced by [`PairingToken::to_code`]. Tolerant of
+    /// how a human retypes it — case folded, `-`/`_`/whitespace ignored,
+    /// `O`/`o` → `0`, `I`/`i`/`L`/`l` → `1` — and of nothing else: a character
+    /// outside the alphabet, the wrong decoded length or non-zero trailing bits
+    /// is rejected rather than silently coerced.
     ///
     /// # Errors
     ///
@@ -121,10 +109,9 @@ impl PairingToken {
         Ok(Self(bytes))
     }
 
-    /// The token as a Noise pre-shared key.
-    ///
-    /// This is a copy of the secret and is *not* zeroized for you. Hold it in a
-    /// `zeroize::Zeroizing` if it outlives the call that needs it.
+    /// The token as a Noise pre-shared key. A copy of the secret, *not*
+    /// zeroized for you: wrap it in `zeroize::Zeroizing` if it outlives the
+    /// call that needs it.
     #[must_use]
     pub fn psk(&self) -> [u8; TOKEN_LEN] {
         *self.0
@@ -133,15 +120,11 @@ impl PairingToken {
     /// A stable, non-secret identifier for this pairing: 32 lowercase hex
     /// characters, safe to log and to use as the [`crate::PeerStore`] key.
     ///
-    /// `BLAKE2s(domain || token)`, truncated to 128 bits. BLAKE2s because it is
-    /// already in the tree as the Noise suite's hash — reaching it through
-    /// `snow`'s resolver avoids adding a second hash implementation for one
-    /// call (`CLAUDE.md` rule 1).
-    ///
-    /// Inverting this to recover the token would require preimaging a 256-bit
-    /// random input, so the id is safe in log files and in a world-readable
-    /// place. It is one-way on purpose: the id identifies a pairing, it does not
-    /// stand in for it.
+    /// `BLAKE2s(domain || token)`, truncated to 128 bits — BLAKE2s because the
+    /// Noise suite already provides it, so no second hash implementation enters
+    /// the tree (`CLAUDE.md` rule 1). One-way on purpose: recovering the token
+    /// would mean preimaging a 256-bit random input, so the id is safe to log.
+    /// It identifies a pairing; it does not stand in for it.
     #[must_use]
     pub fn pairing_id(&self) -> String {
         let digest = blake2s(&[PAIRING_ID_DOMAIN, &self.0[..]]);
@@ -161,12 +144,10 @@ impl PartialEq for PairingToken {
 
 impl Eq for PairingToken {}
 
-/// Prints the pairing id and nothing else.
-///
-/// v1's rule was that `PairingToken` has no `Debug` at all. A `Debug` that is
+/// Prints the pairing id and nothing else. v1 had no `Debug` at all; a `Debug`
 /// structurally incapable of reaching the secret gets the same property while
-/// still letting the type sit inside a `#[derive(Debug)]` struct, which is
-/// where an accidental `{:?}` on a secret normally comes from.
+/// letting the type sit inside a `#[derive(Debug)]` struct, which is where an
+/// accidental `{:?}` on a secret normally comes from.
 impl fmt::Debug for PairingToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PairingToken")
@@ -175,15 +156,11 @@ impl fmt::Debug for PairingToken {
     }
 }
 
-/// Crockford base32, built once.
-///
-/// * symbols — digits plus the 22 letters that are not `I`, `L`, `O` or `U`.
-/// * translate — lowercase folds to uppercase; `O`/`o` → `0`; `I`/`i`/`L`/`l`
-///   → `1`. These are the substitutions a human actually makes.
-/// * ignore — `-`, `_`, space, tab, CR and LF, so grouping and line wrapping
-///   survive a round trip through a chat window.
-/// * no padding, and `check_trailing_bits` left at its default of `true`, so
-///   there is exactly one valid encoding of a given token.
+/// Crockford base32, built once: digits plus the 22 letters that are not `I`,
+/// `L`, `O` or `U`; lowercase folded and the ambiguous glyphs translated;
+/// `-`, `_` and whitespace ignored so grouping and line wrapping survive a chat
+/// window; no padding and `check_trailing_bits` left `true`, so a given token
+/// has exactly one valid encoding.
 fn code_encoding() -> &'static Encoding {
     static ENCODING: OnceLock<Encoding> = OnceLock::new();
     ENCODING.get_or_init(|| {
@@ -192,9 +169,8 @@ fn code_encoding() -> &'static Encoding {
         spec.translate.from.push_str("abcdefghjkmnpqrstvwxyzOoIiLl");
         spec.translate.to.push_str("ABCDEFGHJKMNPQRSTVWXYZ001111");
         spec.ignore.push_str("-_ \t\r\n");
-        // The specification is a compile-time constant expressed in data; a
-        // failure here is a typo in the three literals above, caught by this
-        // module's tests on every build, and unreachable from any input.
+        // A failure here is a typo in the three literals above, caught by this
+        // module's tests, and unreachable from any input.
         spec.encoding()
             .expect("the pairing-code alphabet is well-formed")
     })

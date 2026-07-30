@@ -1,8 +1,6 @@
-//! The compiled ruleset and the two verdicts callers may ask for.
-//!
-//! This is the only place the pieces meet: [`super::rules::RULES`] compiled
-//! against a `RegexSet` prefilter, each hit put through its
-//! [`super::validators`] gate, and the survivors ranked into a
+//! The compiled ruleset and the two verdicts callers may ask for:
+//! [`super::rules::RULES`] compiled behind a `RegexSet` prefilter, each hit put
+//! through its [`super::validators`] gate, survivors ranked into a
 //! [`Finding`](super::finding::Finding).
 
 use regex::{Regex, RegexSet};
@@ -13,10 +11,8 @@ use super::rules::RULES;
 use super::spec::{RuleSpec, Validator};
 use super::validators::{luhn_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong};
 
-/// Regex compilation failures.
-///
-/// No variant carries a path or any input text: errors reach users, and the
-/// daemon socket path discloses the local username (CLAUDE.md rule 4).
+/// Regex compilation failures. No variant carries a path or any input text
+/// (CLAUDE.md rule 4).
 #[derive(Debug, thiserror::Error)]
 pub enum DetectorError {
     /// A single rule's regex failed to compile.
@@ -31,11 +27,9 @@ pub enum DetectorError {
     RuleSet(#[source] regex::Error),
 }
 
-/// The compiled ruleset.
-///
-/// Construct **once** and share it: `new()` compiles ~42 regexes plus the
-/// prefilter, and this runs on the clipboard hot path (`CopyPaste-mnte`: v1
-/// built the detector once per history page, not once per item).
+/// The compiled ruleset. Construct **once** and share it: `new()` compiles ~42
+/// regexes plus the prefilter, and this runs on the clipboard hot path
+/// (`CopyPaste-mnte`: v1 built the detector once per history page).
 pub struct Detector {
     /// Prefilter. One pass says which rules can possibly match; only those
     /// individual regexes are then run.
@@ -49,9 +43,8 @@ pub struct Detector {
 }
 
 impl Detector {
-    /// Compile the ruleset. Fallible only in the sense that a typo in a
-    /// literal would be caught here; `ruleset_compiles` pins that it does not
-    /// happen in a shipped build.
+    /// Compile the ruleset. Fails only on a typo in a pattern literal, which
+    /// `ruleset_compiles` pins.
     pub fn new() -> Result<Self, DetectorError> {
         let mut rules = Vec::with_capacity(RULES.len());
         for spec in RULES {
@@ -85,14 +78,13 @@ impl Detector {
         best.map(|(spec, _)| spec.finding())
     }
 
-    /// True when the text must be kept out of the search index.
+    /// True when the text must be kept out of the search index: any validated
+    /// match at any confidence, including the inert band — an email address is
+    /// not worth deleting but is not worth writing to a plaintext FTS table
+    /// either (manifest I4).
     ///
-    /// Any validated match at any confidence, including the inert band — an
-    /// email address is not worth deleting but is still not worth writing to a
-    /// plaintext FTS table (manifest I4).
-    ///
-    /// This is **not** the auto-wipe gate. Callers deciding whether to delete
-    /// must use `scan(..).severity == Severity::HighConfidence`.
+    /// **Not** the auto-wipe gate; deletion needs
+    /// `scan(..).severity == Severity::HighConfidence`.
     pub fn is_sensitive(&self, text: &str) -> bool {
         let normalised = normalise(text);
         self.set
@@ -109,12 +101,9 @@ struct Rule {
 }
 
 impl Rule {
-    /// Length of the first match that passes this rule's validator.
-    ///
-    /// There is no separate fast/slow path: v1's `RegexSet` shortcut skipped
-    /// the value-strength validator and needed a bespoke `generic_password_kv`
-    /// special case to compensate (§5.3, `engine.rs:107-117`). Validating on
-    /// the one and only path removes the class of bug.
+    /// Length of the first match that passes this rule's validator. No separate
+    /// fast path: v1's `RegexSet` shortcut skipped the value-strength validator
+    /// and needed a bespoke `generic_password_kv` case to compensate (§5.3).
     fn hit(&self, text: &str) -> Option<usize> {
         for caps in self.regex.captures_iter(text) {
             let Some(whole) = caps.get(0) else { continue };
@@ -135,14 +124,8 @@ impl Rule {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Test support
-// ---------------------------------------------------------------------------
-
-/// Fixtures and helpers shared by every test module under `sensitive`.
-///
-/// It lives inside `engine` because [`all_rules`] needs `Detector`'s private
-/// fields; nothing here is compiled into a shipping build.
+/// Fixtures and helpers shared by every test module under `sensitive`. Here
+/// because [`all_rules`] needs `Detector`'s private fields.
 #[cfg(test)]
 pub(super) mod test_support {
     use super::super::normalise::normalise;
@@ -210,10 +193,6 @@ pub(super) mod test_support {
         "fn main() { println!(\"Hello, world!\"); }",
     ];
 }
-
-// ---------------------------------------------------------------------------
-// Tests — manifest §9
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -624,11 +603,9 @@ mod tests {
         }
     }
 
-    /// §9.3 perf pin: no rule may be catastrophically backtracking. The `regex`
-    /// crate gives linear-time guarantees by construction, so this is a smoke
-    /// test that the *ruleset* (prefilter + per-rule passes) stays sane — the
-    /// 10 MB / 500 ms budget in the manifest is a release-build benchmark and
-    /// does not belong in a debug unit test.
+    /// §9.3 perf pin. `regex` is linear-time by construction, so this only
+    /// smoke-tests that the *ruleset* stays sane; the manifest's 10 MB / 500 ms
+    /// budget is a release-build benchmark, not a debug unit test.
     #[test]
     fn large_benign_input_completes_quickly() {
         let det = detector();
@@ -649,5 +626,54 @@ mod tests {
         haystack.push_str("AKIAIOSFODNN7EXAMPLE\n");
         haystack.push_str(&"more ordinary notes\n".repeat(2_000));
         assert_eq!(det.scan(&haystack).unwrap().rule, "aws_access_key");
+    }
+}
+
+#[cfg(test)]
+mod tmp_ab {
+    use super::*;
+
+    const OLD_KV: &str = r"(?i)(?:password|passwd|secret|api_key|apikey|auth_token|access_token|client_secret|refresh_token|db_password)\s*[:=]\s*(\S{6,})";
+    const NEW_NAMES: &[&str] = &[
+        "aws_secret_access_key",
+        "gitlab_pat",
+        "http_basic_auth",
+    ];
+
+    fn time(patterns: Vec<&str>, haystack: &str) -> std::time::Duration {
+        let set = RegexSet::new(&patterns).unwrap();
+        let regexes: Vec<Regex> = patterns.iter().map(|p| Regex::new(p).unwrap()).collect();
+        let t = std::time::Instant::now();
+        for _ in 0..3 {
+            for idx in set.matches(haystack) {
+                let _ = regexes[idx].find(haystack);
+            }
+        }
+        t.elapsed() / 3
+    }
+
+    #[test]
+    fn ab() {
+        let haystack = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(4_000);
+        let now: Vec<&str> = RULES.iter().map(|r| r.pattern).collect();
+        let before: Vec<&str> = RULES
+            .iter()
+            .filter(|r| !NEW_NAMES.contains(&r.name))
+            .map(|r| {
+                if r.name == "generic_password_kv" {
+                    OLD_KV
+                } else {
+                    r.pattern
+                }
+            })
+            .collect();
+        eprintln!("rules before={} after={}", before.len(), now.len());
+        for _ in 0..3 {
+            eprintln!(
+                "BEFORE {:?}   AFTER {:?}",
+                time(before.clone(), &haystack),
+                time(now.clone(), &haystack)
+            );
+        }
     }
 }

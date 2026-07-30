@@ -19,11 +19,11 @@
 //! # The ordering key is `created_at`, and it is a wall clock
 //!
 //! The manifest's order begins with `lamport_ts`. **v2 has no Lamport clock and
-//! is not getting one.** The order is `created_at` (Unix ms), then
-//! `content_hash`, then `origin_device_id` — three keys, deterministic and
-//! symmetric — which is exactly what `copypaste-p2p`'s `merge_decision` already
-//! implements. One order for both transports is the whole point of INV-C2, so
-//! the cloud path uses that one rather than introducing a second.
+//! is not getting one.** The order is `created_at`, then `content_hash`, then
+//! `deleted`, then `origin_device_id` — the four keys
+//! `copypaste_p2p::sync::merge_decision` implements. That function is the
+//! definition; this paragraph is a pointer to it, and if the two ever disagree
+//! the function is right.
 //!
 //! What a Lamport stamp bought was monotonicity: it could not go backwards, so
 //! a device with a wrong clock could not outrank a newer write. A wall clock
@@ -77,23 +77,6 @@
 //! anywhere in this module's error type, so there is nothing to interpolate a
 //! filesystem path, an access token or a passphrase into — `CLAUDE.md` rule 4,
 //! made structural rather than remembered.
-//!
-//! # How the module is laid out
-//!
-//! One responsibility per file, and each file carries the reasoning for the
-//! rule it enforces:
-//!
-//! | file | owns |
-//! |---|---|
-//! | [`source`] | the local seam: [`LocalItem`], [`CloudSource`], [`SensitiveGuard`] |
-//! | [`transport`] | the network seam: [`RestApi`], [`AuthApi`] and the faults they report |
-//! | [`outcome`] | what one round reports: [`SyncStats`] and [`SyncError`] |
-//! | [`driver`] | the [`CloudSync`] value itself, and `push`-then-`pull` |
-//! | [`push`] | the upload path and the sensitive gate |
-//! | [`pull`] | the download path, the cursor, paging and the skew refusal |
-//! | [`retry`] | the 401 and 429 recovery rules — the only retry layer here |
-//! | [`cadence`] | the idle poll interval and how [`crate::realtime`] resets it |
-//! | [`adapters`] | `SupabaseRest`/`SupabaseAuth` mapped onto the two seams |
 
 pub mod adapters;
 pub mod cadence;
@@ -115,16 +98,9 @@ pub use pull::MAX_FUTURE_SKEW_MS;
 pub use source::{CloudSource, LocalItem, SensitiveGuard};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-//
-// Every test in this module runs against a fake store and a fake transport
-// (see `fakes`). Nothing here opens a socket.
-//
-// The tests that belong to one path live beside it; what is left here is the
-// round trip that needs both paths at once, and the assertions on constants
-// that span several files.
+// Every test here runs against a fake store and a fake transport (`fakes`);
+// nothing opens a socket. What lives in this file rather than beside a path is
+// the round trip that needs both paths at once.
 
 #[cfg(test)]
 mod tests {

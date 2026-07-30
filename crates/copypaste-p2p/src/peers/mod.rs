@@ -1,35 +1,9 @@
 //! The list of devices this one is paired with, and their pre-shared keys.
 //!
-//! # What this module is
-//!
-//! A small, file-backed, thread-safe map from [`crate::PairingToken::pairing_id`] to
-//! [`Peer`]. The daemon reads it to decide who may connect ([`PeerStore::psks`]
-//! feeds [`crate::Session::accept_any`]) and to remember where a peer was last
-//! seen so a reconnect does not have to wait for mDNS.
-//!
-//! ```text
-//! peers-v2.json  (0600)
-//! {
-//!   "format": "copypaste-peers-v2",
-//!   "peers": [
-//!     { "pairing_id": "…32 hex…", "name": "Laptop",
-//!       "psk": "…64 hex…", "last_addr": "192.168.1.7:47654",
-//!       "last_seen_ms": 1753900000000 }
-//!   ]
-//! }
-//! ```
-//!
-//! # Layout
-//!
-//! Three responsibilities, and the middle one is where the security properties
-//! live:
-//!
-//! * [`peer`] — one record: what is secret in it, what `Debug` may show, and
-//!   what makes it valid.
-//! * [`file`] — the bytes on disk: the format tag that separates "another
-//!   version wrote this" from "damaged", the atomic replace, and the `0600`.
-//!   This is the file that *is* a key store, and its module docs say why.
-//! * [`store`] — the in-memory map, the lock, and the write-through.
+//! A file-backed, thread-safe map from [`crate::PairingToken::pairing_id`] to
+//! [`Peer`]. [`PeerStore::psks`] feeds [`crate::Session::accept_any`], so this
+//! decides who may connect; it also remembers where a peer was last seen. It
+//! holds the PSKs, so the file is itself a key store — see [`file`].
 //!
 //! # No backward compatibility
 //!

@@ -1,12 +1,8 @@
-//! Turning arbitrary text into something DNS and a log line can hold.
-//!
-//! Both directions need this and for different reasons. On the way *out*, a
-//! device name is user-supplied and has to fit the label rules of mDNS. On the
-//! way *in*, every field arrived from an unauthenticated source on the LAN, so
-//! it is length-bounded and stripped of control characters before it can reach
-//! a log line or the UI.
-//!
-//! Pure functions only — no sockets, no daemon, no clock.
+//! Turning arbitrary text into something DNS and a log line can hold. On the way
+//! *out*, a user-supplied device name has to fit mDNS label rules; on the way
+//! *in*, every field came from an unauthenticated source on the LAN, so it is
+//! length-bounded and stripped of control characters before it can reach a log
+//! line or the UI.
 
 use crate::SERVICE_TYPE;
 

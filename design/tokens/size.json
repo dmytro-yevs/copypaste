@@ -1,54 +1,49 @@
 {
   "size": {
-    "$description": "Fixed control, icon and stroke sizes (port-manifest §8.5).",
+    "$description": "Fixed control, icon and stroke sizes, aligned to shadcn's control heights (h-8 / h-9 / h-10) and its size-4 icon default. The switch, checkbox and selection-bar sizes v1 defined here are gone: those components come from the library now, and a token nobody reads is a value that drifts.",
     "$type": "dimension",
     "icon-sm": {
-      "$value": "14px"
+      "$value": "14px",
+      "$description": "Inline glyph inside dense text."
     },
     "icon-md": {
-      "$value": "16px"
+      "$value": "16px",
+      "$description": "shadcn's default icon size inside a control (`size-4`)."
     },
     "icon-lg": {
-      "$value": "20px"
+      "$value": "20px",
+      "$description": "Standalone glyph — empty-state plate, nav item."
     },
     "ctl-h-sm": {
-      "$value": "26px"
+      "$value": "32px",
+      "$description": "shadcn Button `sm` (h-8)."
     },
     "ctl-h-md": {
-      "$value": "30px"
+      "$value": "36px",
+      "$description": "shadcn Button default (h-9). Also the search field."
     },
     "ctl-h-lg": {
-      "$value": "34px"
+      "$value": "40px",
+      "$description": "shadcn Button `lg` (h-10)."
     },
     "sz-iconbtn": {
-      "$value": "30px"
-    },
-    "sz-toggle-w": {
-      "$value": "38px"
-    },
-    "sz-toggle-h": {
-      "$value": "22px"
-    },
-    "sz-toggle-knob": {
-      "$value": "18px"
+      "$value": "36px",
+      "$description": "Square icon button (shadcn `size-9`). 36px is above the 24px WCAG 2.2 target minimum and comfortable under a finger on Android."
     },
     "sz-tile": {
-      "$value": "34px"
+      "$value": "36px",
+      "$description": "Content-kind tile in a row."
     },
     "sz-dot": {
-      "$value": "8px"
+      "$value": "8px",
+      "$description": "Status dot."
+    },
+    "sz-badge-dot": {
+      "$value": "6px",
+      "$description": "Smaller dot inside a badge or status line."
     },
     "sz-spinner": {
       "$value": "16px"
-    },
-    "sz-kbd": {
-      "$value": "22px"
-    },
-    "sz-chip-dot": {
-      "$value": "7px"
-    },
-    "sz-badge-dot": {
-      "$value": "5px"
     },
     "hairline": {
       "$value": "1px",
@@ -60,31 +55,12 @@
     "stroke-2": {
       "$value": "2px"
     },
-    "stroke-3": {
-      "$value": "3px"
-    },
-    "chk-bw": {
-      "$value": "1.5px",
-      "$description": "Checkbox border width."
-    },
-    "sel-bar-w": {
-      "$value": "3px",
-      "$description": "Accent bar on a selected row."
-    },
-    "sel-bar-inset": {
-      "$value": "6px",
-      "$description": "Top/bottom inset of that bar inside the row."
-    },
     "focus-ring-width": {
-      "$value": "2px",
-      "$description": "§4: the focus ring is never removed, only restyled."
+      "$value": "3px",
+      "$description": "shadcn's focus ring is a 3px accent halo at 50% alpha plus a 1px border shift. The ring is never removed, only restyled (A11Y contract)."
     },
     "focus-ring-offset": {
       "$value": "2px"
-    },
-    "mask-blur": {
-      "$value": "6px",
-      "$description": "Blur radius that masks sensitive content until revealed."
     }
   }
 }

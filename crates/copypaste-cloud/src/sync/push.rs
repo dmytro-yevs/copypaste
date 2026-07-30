@@ -15,11 +15,13 @@ use crate::rest::CloudItem;
 const UPLOAD_BATCH: usize = 50;
 
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
-    /// Seal every local change since the watermark and upsert it.
+    /// Seal every local change since the upload floor and upsert it.
     ///
-    /// Does not move the watermark: that is [`CloudSync::pull`]'s job, and
-    /// moving it here would mean an upload advanced the *download* cursor past
-    /// rows another device wrote in the same window.
+    /// Moves no cursor at all. The download watermark is
+    /// [`CloudSync::pull`]'s, and moving it here would advance it past rows
+    /// another device wrote in the same window; the upload floor belongs to the
+    /// source, which is the only side that knows when a round finished — see
+    /// [`CloudSource::upload_floor`].
     ///
     /// Idempotent. Running it twice sends the same rows twice, and the second
     /// send is an upsert onto identical values.
@@ -30,7 +32,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// row cannot be sealed, and the auth and transport variants per
     /// [`CloudSync::pull`].
     pub async fn push(&self, source: &dyn CloudSource) -> Result<SyncStats, SyncError> {
-        let since = source.watermark()?;
+        let since = source.upload_floor()?;
         let device_id = source.device_id();
         let mut stats = SyncStats::default();
 
@@ -262,5 +264,24 @@ mod tests {
 
         sync.push(&source).await.unwrap();
         assert_eq!(source.watermark().unwrap(), 0);
+    }
+
+    /// The upload floor is what push offers from, so a download watermark that
+    /// has run ahead of local time cannot strand local items.
+    #[tokio::test]
+    async fn push_offers_from_the_upload_floor_not_the_watermark() {
+        let source = FakeSource::with_outgoing(vec![item("a", 1_000, "written here")]);
+        // Another device's rows dragged the download cursor past ours.
+        source.set_watermark(9_000).unwrap();
+
+        let sync = driver(FakeRest::default(), FakeAuth::default());
+        let stats = sync.push(&source).await.unwrap();
+        assert_eq!(stats.uploaded, 1, "a local item was stranded below the cursor");
+        assert!(sync.rest.rows.lock().unwrap().contains_key("a"));
+
+        // Once the round is over and the owner advances the floor past it, the
+        // same item stops being re-offered.
+        source.set_upload_floor(2_000);
+        assert_eq!(sync.push(&source).await.unwrap().uploaded, 0);
     }
 }

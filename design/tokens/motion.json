@@ -1,10 +1,10 @@
 {
   "motion": {
-    "$description": "Motion (port-manifest §8.5). All three durations collapse to 0ms under prefers-reduced-motion; that override is emitted into the generated CSS from the reducedMotion extension below, so the accessibility rule lives with the token rather than in a stylesheet someone can forget to update.",
+    "$description": "Motion: Tailwind v4's default transition duration and its ease-out curve, which is what shadcn's own animations are timed against. All three durations collapse to 0ms under prefers-reduced-motion (A11Y-11); that override is emitted into the generated CSS from the reducedMotion extension below, so the accessibility rule lives with the token rather than in a stylesheet someone has to remember.",
     "dur-fast": {
       "$type": "duration",
-      "$value": "120ms",
-      "$description": "Hover, press, colour transitions.",
+      "$value": "150ms",
+      "$description": "Tailwind's default transition duration. Hover, press, colour.",
       "$extensions": {
         "com.copypaste": {
           "reducedMotion": "0ms"
@@ -14,7 +14,7 @@
     "dur": {
       "$type": "duration",
       "$value": "200ms",
-      "$description": "Default transition: row collapse, opacity, layout.",
+      "$description": "Enter/exit of an overlay — dialog, popover, toast.",
       "$extensions": {
         "com.copypaste": {
           "reducedMotion": "0ms"
@@ -34,12 +34,12 @@
     "ease": {
       "$type": "cubicBezier",
       "$value": [
-        0.2,
-        0.8,
+        0,
+        0,
         0.2,
         1
       ],
-      "$description": "The single easing curve. Everything uses it."
+      "$description": "Tailwind's `ease-out`. One curve for the whole app: UI motion should decelerate into place and never ease in."
     }
   }
 }

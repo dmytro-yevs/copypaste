@@ -2,18 +2,14 @@
 //!
 //! # Why last-write-wins, and why it is not a library
 //!
-//! CLAUDE.md rule 1 says reach for a crate first. The structural CRDT crates
-//! (`automerge`, `yrs`) are the obvious candidates and they cannot be used here,
-//! under exemption 2: **the package cannot see what it would need to see.** A
-//! structural CRDT merges *inside* a value — it needs to read the text to
-//! produce a character-level merge. Our items are opaque ciphertext at rest and
-//! the merge runs over metadata alone, so there is nothing for a structural CRDT
-//! to operate on. Last-write-wins over four metadata keys is not a shortcut
-//! here; it is the only thing that can work, and it is about forty lines.
-//!
-//! The cost of that decision, stated rather than hidden: two devices that edit
-//! the *same* item concurrently keep one version and drop the other. For a
-//! clipboard that is correct — a clipboard entry is a snapshot, not a document.
+//! The structural CRDT crates (`automerge`, `yrs`) cannot be used here, under
+//! `CLAUDE.md` rule 1 exemption 2: a structural CRDT merges *inside* a value,
+//! and our items are opaque ciphertext at rest with the merge running over
+//! metadata alone, so there is nothing for it to operate on. Last-write-wins
+//! over four metadata keys is not a shortcut, it is the only thing that works.
+//! Its cost, stated rather than hidden: two devices that edit the *same* item
+//! concurrently keep one version and drop the other — correct for a clipboard,
+//! where an entry is a snapshot, not a document.
 //!
 //! # The order
 //!
@@ -22,41 +18,37 @@
 //! 1. `created_at` — the version stamp in milliseconds. A tombstone carries the
 //!    time of the *deletion*, which is what makes a delete beat the version it
 //!    deleted.
-//! 2. `content_hash` — lexicographic. Deterministic, and equal hashes mean equal
-//!    content, so this key only ever separates versions that genuinely differ.
+//! 2. `content_hash` — lexicographic; equal hashes mean equal content, so this
+//!    key only ever separates versions that genuinely differ.
 //! 3. `deleted` — a tombstone beats a live version. See below.
 //! 4. `origin_device_id` — lexicographic; exists only to make the order total.
 //!
 //! Ties on all four keep the local copy. That strict `>` at the end is what
-//! makes re-delivery free: a version that has already been applied compares
-//! equal and loses, so replaying a whole session changes nothing.
+//! makes re-delivery free: an already-applied version compares equal and loses,
+//! so replaying a whole session changes nothing.
 //!
 //! ## Why `deleted` is key 3 and not key 5
 //!
 //! The specification for this module named three keys: `created_at`,
 //! `content_hash`, `origin_device_id`. `deleted` is inserted between the second
-//! and the third — the three named keys keep their relative priority — for two
-//! reasons, and the second one is load-bearing:
+//! and the third — the named keys keep their relative priority — for two
+//! reasons, the second load-bearing:
 //!
 //! * **Delete-wins on an exact-timestamp tie.** A tombstone keeps the item's
-//!   content hash (the store does this deliberately, so that re-copying deleted
-//!   content is not swallowed by dedup). So a delete of an unmodified item ties
-//!   its own live version on keys 1 and 2, and without key 3 the winner would be
-//!   whichever device id sorts higher. That resurrects deletes — the exact class
-//!   of bug the sync manifest spends the most words on (INV-N2, `CopyPaste-ojhe`).
-//! * **One comparator on both sides of the session.** An [`ItemSummary`] does not
-//!   carry `origin_device_id`, so the *planning* half of a session cannot
-//!   evaluate key 4 — it only sees keys 1-3. If `deleted` sat below the origin,
-//!   the planner and the applier could reach different answers for the same pair
-//!   and the two devices would never converge. With `deleted` above the origin,
-//!   key 4 is consulted only when two versions are identical in time, content and
-//!   state — a case where there is nothing to transfer and nothing to disagree
-//!   about. Manifest 05 INV-C2 is precisely the bug that comes from two
-//!   comparators; this keeps there being one.
+//!   content hash (deliberately, so re-copying deleted content is not swallowed
+//!   by dedup), so a delete of an unmodified item ties its own live version on
+//!   keys 1 and 2, and without key 3 the winner would be whichever device id
+//!   sorts higher. That resurrects deletes (INV-N2, `CopyPaste-ojhe`).
+//! * **One comparator on both sides of the session.** An [`ItemSummary`] does
+//!   not carry `origin_device_id`, so the *planning* half sees only keys 1-3.
+//!   If `deleted` sat below the origin, planner and applier could reach
+//!   different answers for the same pair and the two devices would never
+//!   converge. Above it, key 4 is consulted only when two versions are
+//!   identical in time, content and state — nothing to transfer, nothing to
+//!   disagree about (manifest 05 INV-C2, the bug two comparators produce).
 
 use crate::protocol::ItemSummary;
 
-/// Which of two versions of one item survives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MergeDecision {
     KeepLocal,
@@ -68,12 +60,9 @@ pub enum MergeDecision {
 /// Deterministic, symmetric and total: `merge_decision(a, b)` and
 /// `merge_decision(b, a)` name the same survivor, so two peers cannot ping-pong
 /// a pair of versions between each other. Equal on every key keeps the local
-/// copy, which is what makes applying the same item twice a no-op.
-///
-/// Order: `created_at`, then `content_hash`, then `deleted`, then
-/// `origin_device_id` — see the module docs for why `deleted` sits where it
-/// does. Content is never an input: at rest it is ciphertext, and the whole
-/// design depends on the decision being reachable from metadata alone.
+/// copy, which is what makes applying the same item twice a no-op. Content is
+/// never an input — at rest it is ciphertext, and the design depends on the
+/// decision being reachable from metadata alone.
 pub fn merge_decision(
     local: &ItemSummary,
     local_origin: &str,
@@ -99,14 +88,12 @@ pub fn merge_decision(
 /// The same comparator over the keys a summary carries.
 ///
 /// A summary has no `origin_device_id`, so the fourth key is neutralised by
-/// passing the same value on both sides. That is not a second comparator — it is
+/// passing the same value on both sides. Not a second comparator — it is
 /// [`merge_decision`] with one input held equal, which is why the two can never
 /// drift apart (manifest 05 §7.2: if two shapes are needed, define one in terms
-/// of the other).
-///
-/// When this returns `KeepLocal` because all three visible keys tie, the two
-/// versions hold the same content at the same instant in the same state: there
-/// is nothing worth transferring, whatever the origins say.
+/// of the other). A `KeepLocal` from tying all three visible keys means the two
+/// versions hold the same content at the same instant in the same state, so
+/// there is nothing worth transferring whatever the origins say.
 pub fn merge_decision_by_summary(local: &ItemSummary, remote: &ItemSummary) -> MergeDecision {
     merge_decision(local, "", remote, "")
 }

@@ -1,53 +1,32 @@
 //! The ruleset (manifest §3.2, §3.3 and the gitleaks mapping in §8).
 //!
-//! # Why this file is nothing but a table
+//! One `static` array of declarative entries; everything that *acts* on a rule
+//! lives in [`super::engine`], [`super::validators`], [`super::normalise`] and
+//! [`super::spec`]. That is why it may stay whole past the size budget
+//! (`CLAUDE.md` rule 5): splitting by vendor turns "is anything else at this
+//! confidence?" into a nine-file grep, and splitting by confidence band moves a
+//! rule between files whenever a validator is tuned.
 //!
-//! Everything that *acts* on a rule has been moved out: the compiled engine and
-//! the confidence ranking to [`super::engine`], the false-positive gates to
-//! [`super::validators`], NFKC folding to [`super::normalise`], and the rule
-//! vocabulary (`Category`, `Validator`, `RuleSpec`) to [`super::spec`]. What is
-//! left is one `static` array of declarative entries — no control flow, no
-//! helpers, nothing to call — which is why it may stay whole even as it grows
-//! past the budget. The two splits considered, and rejected:
+//! `⚠ INERT` marks a rule deliberately tuned below the 0.70 auto-wipe floor.
+//! Two reasons live in that band (§4.2): data the user legitimately owns and
+//! meant to copy (IBAN, SSN, email, phone, passport), and shapes too weak to
+//! prove a secret (`discord_bot_token`, `twilio_signing_key_sid`,
+//! `generic_bearer`, `http_basic_auth`, `ip_with_port`).
 //!
-//! * **By vendor** (`rules/aws.rs`, `rules/github.rs`, …). The comment banners
-//!   already group them, and grouping is the *only* thing declaration order
-//!   means (§7.2). Splitting turns "is anything else at this confidence?" and
-//!   "does another rule already cover this shape?" — the two questions actually
-//!   asked when editing a rule — into a nine-file grep, and invites a rule to
-//!   be added to a *file* rather than to the ruleset.
-//! * **By confidence band** (above/below the auto-wipe floor). Worse: the band
-//!   is a property that changes when a validator is added, so a rule's file
-//!   would flip on tuning and the diff would hide what `⚠ INERT` makes obvious
-//!   in place.
-//!
-//! # Reading the table
-//!
-//! Declaration order is **not** semantic (§7.2). It is grouped by vendor purely
-//! so a human can read it.
-//!
-//! `⚠ INERT` in a comment marks a rule deliberately tuned below the 0.70
-//! auto-wipe floor. Two different reasons live in that band (§4.2): data the
-//! user legitimately owns and meant to copy (IBAN, SSN, email, phone,
-//! passport), and shapes too weak to prove a secret (`discord_bot_token`,
-//! `twilio_signing_key_sid`, `generic_bearer`, `ip_with_port`).
-//!
-//! Where §8 names a gitleaks rule that is compatible with the manifest's
-//! acceptance tests, the gitleaks form is used and its rule id is cited.
-//! Where adopting it would fail an acceptance test in §9.1, the v1 form is
-//! kept and the conflict is written down — §8 is explicit that its table is
-//! "a starting point, not a contract", while §9 is a requirements list.
+//! Where §8 names a gitleaks rule compatible with the acceptance tests, the
+//! gitleaks form is used and its id cited; where adopting it would fail a §9.1
+//! test, the v1 form is kept and the conflict written down (§8 is "a starting
+//! point, not a contract", §9 is a requirements list).
 
 use super::spec::{Category, RuleSpec, Validator};
 
 pub(super) static RULES: &[RuleSpec] = &[
     // -- AWS ---------------------------------------------------------------
     RuleSpec {
-        // gitleaks `aws-access-token`. Broader than v1's `AKIA|ASIA`: a recall
-        // win (§8 row 0). Leading `\b` stops mid-token hits (`XAKIA…`);
-        // **no trailing `\b` on purpose** — ASIA temp keys carry trailing
-        // digits and `E1` has no boundary between two word chars (§5.2,
-        // "deliberate omissions … must not be fixed blindly").
+        // gitleaks `aws-access-token`; broader than v1's `AKIA|ASIA` (§8 row 0).
+        // Leading `\b` stops mid-token hits (`XAKIA…`); **no trailing `\b` on
+        // purpose** — ASIA temp keys carry trailing digits (§5.2, "deliberate
+        // omissions … must not be fixed blindly").
         name: "aws_access_key",
         category: Category::Credential,
         confidence: 0.99,
@@ -55,11 +34,10 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // §7.1: an ARN is a *resource identifier*, not credential material —
-        // the same reasoning that got `ip_with_port` demoted under
-        // `CopyPaste-8ys1`. v1 had it at 0.90, so pasting an ARN into a ticket
-        // deleted it 30 s later. Demoted to the inert band. ⚠ INERT
-        // gitleaks correctly ships no ARN rule (§8 row 32).
+        // ⚠ INERT. §7.1: an ARN is a *resource identifier*, not credential
+        // material (the reasoning that demoted `ip_with_port` under
+        // `CopyPaste-8ys1`). v1 had it at 0.90, so pasting an ARN into a ticket
+        // deleted it 30 s later. gitleaks ships no ARN rule (§8 row 32).
         name: "aws_arn",
         category: Category::Infrastructure,
         confidence: 0.50,
@@ -110,10 +88,9 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     // -- AI vendors --------------------------------------------------------
     RuleSpec {
-        // gitleaks `openai-api-key` anchors on the `T3BlbkFJ` infix, which is
-        // far more precise (§8 row 4/5) — but §9.1 requires `sk-proj-` + 48×A
-        // to be detected, and that fixture has no infix. v1 form kept; revisit
-        // together with the fixture.
+        // gitleaks `openai-api-key` anchors on the `T3BlbkFJ` infix and is more
+        // precise (§8 row 4/5), but §9.1 requires `sk-proj-` + 48×A and that
+        // fixture has no infix. v1 form kept; revisit with the fixture.
         name: "openai_new",
         category: Category::Credential,
         confidence: 0.99,
@@ -123,8 +100,8 @@ pub(super) static RULES: &[RuleSpec] = &[
     RuleSpec {
         // Must NOT double-fire on `sk-proj-` keys. The exclusion is
         // **structural, not lookahead** (the `regex` crate has none): the
-        // hyphen after `proj` breaks the contiguous 48-char alnum run. The old
-        // "(?!proj-) lookahead" comment was wrong and was corrected in P2 `r6cw`.
+        // hyphen after `proj` breaks the contiguous 48-char alnum run
+        // (P2 `r6cw`).
         name: "openai_legacy",
         category: Category::Credential,
         confidence: 0.95,
@@ -132,10 +109,9 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // gitleaks `anthropic-api-key` / `anthropic-admin-api-key` require the
-        // full 93-char body + `AA` suffix; §9.1's fixture is `sk-ant-api03-` +
-        // 80×A, so the v1 length form is kept. `admin` added to close the
-        // admin-key gap named in §8 row 6.
+        // gitleaks `anthropic-api-key` requires the full 93-char body + `AA`
+        // suffix; §9.1's fixture is `sk-ant-api03-` + 80×A, so the v1 length
+        // form is kept. `admin` closes the gap in §8 row 6.
         name: "anthropic",
         category: Category::Credential,
         confidence: 0.99,
@@ -144,9 +120,9 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     // -- Payments / SaaS ---------------------------------------------------
     RuleSpec {
-        // gitleaks `stripe-access-token` also covers `sk_test_`; v1 excluded
-        // test keys deliberately and that stays — test keys live in public
-        // docs and deleting them is pure cost. `rk_` and `prod` adopted.
+        // gitleaks `stripe-access-token` also covers `sk_test_`; test keys stay
+        // excluded deliberately — they live in public docs and deleting them is
+        // pure cost. `rk_` and `prod` adopted.
         name: "stripe_live",
         category: Category::Credential,
         confidence: 0.99,
@@ -179,9 +155,9 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // gitleaks `slack-bot-token` and friends. v1 matched only `xoxb` and
-        // fixed both numeric segments at exactly 11 digits; `xoxa/xoxp/xoxr/
-        // xoxs` were named gaps (§3.2 row 11, §8 row 11).
+        // gitleaks `slack-bot-token` and friends. v1 matched only `xoxb` with
+        // both numeric segments fixed at 11 digits; `xoxa/xoxp/xoxr/xoxs` were
+        // named gaps (§3.2 row 11, §8 row 11).
         name: "slack_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -197,13 +173,12 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // ⚠ INERT. **P2 fb3e**: lowered 0.85 → 0.65 and `\b`-anchored. The
-        // shape fires on any dot-separated base64url triple, not just Discord.
-        // gitleaks `discord-api-token` is keyword-anchored on "discord" and is
-        // strictly better — but §9.2 requires the bare shape to still be
-        // *detected* (inert), which a keyword anchor would not do. Kept
-        // sub-floor; adopting the keyword anchor is what would justify raising
-        // it (§8 row 13).
+        // ⚠ INERT. **P2 fb3e**: lowered 0.85 → 0.65 and `\b`-anchored — the
+        // shape fires on any dot-separated base64url triple. gitleaks
+        // `discord-api-token` keyword-anchors on "discord" and is better, but
+        // §9.2 requires the bare shape to still be *detected*, which a keyword
+        // anchor would not do. Adopting that anchor is what would justify
+        // raising it (§8 row 13).
         name: "discord_bot_token",
         category: Category::Credential,
         confidence: 0.65,
@@ -211,11 +186,10 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // ⚠ INERT. **P2 fb3e**: was misnamed `twilio_auth_token`; this shape is
-        // a Twilio **Signing-Key SID**, not the auth token. Real auth tokens
-        // are bare 32-hex with no prefix and are not regex-distinguishable.
-        // gitleaks `twilio-api-key` keyword-anchors; without that anchor this
-        // stays below the floor (§8 row 14).
+        // ⚠ INERT. **P2 fb3e**: was misnamed `twilio_auth_token`; this is a
+        // Signing-Key SID. Real auth tokens are bare 32-hex and not
+        // regex-distinguishable. Without gitleaks' keyword anchor
+        // (`twilio-api-key`) this stays below the floor (§8 row 14).
         name: "twilio_signing_key_sid",
         category: Category::Credential,
         confidence: 0.65,
@@ -232,8 +206,8 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // gitleaks `terraform-api-token` requires a 14-char org prefix before
-        // `.atlasv1.`; §9.1's fixture is a bare `atlasv1.` + 64×A, so the v1
-        // form is kept (§8 row 39).
+        // `.atlasv1.`; §9.1's fixture is bare, so the v1 form is kept
+        // (§8 row 39).
         name: "terraform_cloud_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -268,9 +242,8 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // gitleaks `heroku-api-key`. Context-anchored on the word `heroku`
-        // within 50 chars of a UUID — the anchor is what makes 0.95 safe,
-        // since a bare UUID is not a secret.
+        // gitleaks `heroku-api-key`. The `heroku`-within-50-chars anchor is
+        // what makes 0.95 safe: a bare UUID is not a secret.
         name: "heroku_api_key",
         category: Category::Credential,
         confidence: 0.95,
@@ -278,11 +251,10 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // gitleaks `vault-service-token` / `vault-batch-token`. gitleaks
-        // requires 90–100 chars; §9.1 requires `hvs.` + 32×A to be detected
-        // *and auto-wipe*, so v1's `{32,}` minimum stays (it was itself added
-        // to kill FPs on short `hvs.`-prefixed strings). `hvb.` closes the gap
-        // named in §8 row 17.
+        // gitleaks `vault-service-token` requires 90–100 chars; §9.1 requires
+        // `hvs.` + 32×A to be detected *and auto-wiped*, so v1's `{32,}`
+        // minimum stays (added to kill FPs on short `hvs.` strings). `hvb.`
+        // closes the gap in §8 row 17.
         name: "hashicorp_vault",
         category: Category::Credential,
         confidence: 0.95,
@@ -291,10 +263,10 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // **P2 ozzt + bug-hunt HIGH finding.** A bare 88-char base64 blob is
-        // indistinguishable from a SHA-512 dump, an Ed25519 key or a random
-        // token; matching it bare at 0.90 would silently auto-wipe benign
-        // content. The `AccountKey=` context anchor is **mandatory** and is the
-        // only reason this rule is allowed above the floor (§5.2, §8.1.2).
+        // indistinguishable from a SHA-512 dump or an Ed25519 key, so matching
+        // it bare at 0.90 would auto-wipe benign content. The `AccountKey=`
+        // anchor is **mandatory** and the only reason this rule is allowed
+        // above the floor (§5.2, §8.1.2).
         name: "azure_storage_key",
         category: Category::Credential,
         confidence: 0.90,
@@ -303,8 +275,8 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // **P2 ozzt.** Anchors only on the two stable, order-independent
-        // markers (`sv=` version and `&sig=`). The previous over-specified form
-        // matched almost no real tokens — a recall bug from over-specification.
+        // markers (`sv=` and `&sig=`); the previous over-specified form matched
+        // almost no real tokens.
         name: "azure_sas_token",
         category: Category::Credential,
         confidence: 0.92,
@@ -323,11 +295,10 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     // -- Private keys ------------------------------------------------------
     RuleSpec {
-        // gitleaks `private-key`. Subsumes v1's `ssh_private_key` (rule 19) and
-        // `ssh_private_key_pkcs8_encrypted` (rule 20, Audit MED #5 — a real
-        // miss: rule 19 did not cover the ENCRYPTED header) and adds PGP,
-        // `SSH2`, `KEY BLOCK` and every other header variant (§8 row 19/20).
-        // No `^` anchor, so a header mid-blob still matches.
+        // gitleaks `private-key`. Subsumes v1's rules 19 and 20 (Audit MED #5 —
+        // a real miss: rule 19 did not cover the ENCRYPTED header) and adds
+        // PGP, `SSH2`, `KEY BLOCK` and the other header variants (§8 row
+        // 19/20). No `^` anchor, so a header mid-blob still matches.
         name: "private_key",
         category: Category::Credential,
         confidence: 0.99,
@@ -346,11 +317,10 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     // -- Generic / keyword-driven ------------------------------------------
     RuleSpec {
-        // ⚠ INERT. **P2 fb3e**: lowered 0.80 → 0.65. Fires on
-        // `Bearer YOUR_TOKEN_HERE` in curl examples and READMEs. A post-match
-        // entropy guard would be a **no-op** here — the 20-char minimum already
-        // satisfies any strength check — so the confidence floor is the only
-        // correct control (`detector/fp.rs:36-40`).
+        // ⚠ INERT. **P2 fb3e**: lowered 0.80 → 0.65; fires on
+        // `Bearer YOUR_TOKEN_HERE` in curl examples. A post-match entropy guard
+        // would be a **no-op** — the 20-char minimum already satisfies any
+        // strength check — so the floor is the only correct control.
         name: "generic_bearer",
         category: Category::Credential,
         confidence: 0.65,
@@ -359,25 +329,60 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // Above the floor *only* because of the value-strength validator
-        // (§5.3, §7.1). `CopyPaste-2eet` added `access_token`, `client_secret`,
-        // `refresh_token`, `db_password`; `access_token`/`refresh_token` were a
-        // genuine miss (the others were already covered by the unbounded
-        // `secret`/`password` substrings).
-        // gitleaks `generic-api-key` gates on Shannon entropy ≥ 3.5, which
-        // would reject §9.1's own fixtures (`hunter2` scores 2.81), so the
-        // manifest's variety gate is kept and extended — see `value_is_strong`.
+        // (§5.3, §7.1). `CopyPaste-2eet` added the `access_token` /
+        // `refresh_token` keywords, a genuine miss. gitleaks
+        // `generic-api-key` gates on Shannon entropy ≥ 3.5, which would reject
+        // §9.1's own fixtures (`hunter2` scores 2.81), so the manifest's
+        // variety gate is kept — see `value_is_strong`.
+        // The `["']?` after the keyword is a v2 addition to §3.2 row 23: JSON
+        // and YAML write `"password": "hunter2xyz"`, and the manifest pattern
+        // requires `[:=]` immediately after the keyword, so that whole shape
+        // matched no rule at all. Pinned by `quoted_credentials_are_detected`.
         name: "generic_password_kv",
         category: Category::Credential,
         confidence: 0.75,
-        pattern: r"(?i)(?:password|passwd|secret|api_key|apikey|auth_token|access_token|client_secret|refresh_token|db_password)\s*[:=]\s*(\S{6,})",
+        pattern: r#"(?i)(?:password|passwd|secret|api_key|apikey|auth_token|access_token|client_secret|refresh_token|db_password)["']?\s*[:=]\s*(\S{6,})"#,
         validator: Validator::ValueStrength,
+    },
+    RuleSpec {
+        // The other half of an AWS key pair. `aws_access_key` catches the public
+        // `AKIA…` id at 0.99 while the actual secret next to it in
+        // `~/.aws/credentials` matched nothing: `secret` is in
+        // `generic_password_kv`'s keyword list, but `aws_secret_access_key` is
+        // followed by `_access_key`, not by `[:=]`. The keyword is a mandatory
+        // context anchor (§5.2) — a bare 40-char base64 run is not
+        // distinctive — and is what makes 0.99 safe here.
+        name: "aws_secret_access_key",
+        category: Category::Credential,
+        confidence: 0.99,
+        pattern: r#"(?i)aws_secret_access_key["']?\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})"#,
+        validator: Validator::None,
+    },
+    RuleSpec {
+        // gitleaks `gitlab-pat`. A distinctive vendor prefix, like the GitHub
+        // rules above; it was simply absent.
+        name: "gitlab_pat",
+        category: Category::Credential,
+        confidence: 0.99,
+        pattern: r"\bglpat-[0-9a-zA-Z_-]{20}\b",
+        validator: Validator::None,
+    },
+    RuleSpec {
+        // ⚠ INERT. `Basic` carries base64(user:password), so it is credential
+        // material — but it sits in curl examples and API docs exactly like
+        // `generic_bearer`, which **P2 fb3e** demoted for that reason. Same
+        // treatment: detected and kept out of the index, never auto-deleted.
+        name: "http_basic_auth",
+        category: Category::Credential,
+        confidence: 0.65,
+        pattern: r"(?i)\bAuthorization:\s*Basic\s+[A-Za-z0-9+/]{16,}={0,2}",
+        validator: Validator::None,
     },
     RuleSpec {
         // §7.1: v1 had this at 0.80 with **no** value-strength validator, so
         // `API_KEY=changeme`, `DB_PASSWORD=xxx` and `MY_TOKEN=TODO` all
-        // auto-wiped. The manifest offers "apply the §5.3 validator or demote";
-        // applying the validator keeps the recall, so group 1 was added to the
-        // regex and the rule now shares `generic_password_kv`'s gate.
+        // auto-wiped. Applying the §5.3 validator keeps the recall, so group 1
+        // was added and the rule shares `generic_password_kv`'s gate.
         name: "dotenv_secret",
         category: Category::Infrastructure,
         confidence: 0.80,
@@ -385,12 +390,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::ValueStrength,
     },
     RuleSpec {
-        // gitleaks `jwt` requires **both** the header and the payload segment
-        // to be base64-`ey`-prefixed — tighter than v1's single `\beyJ`
-        // (§8 row 24). Adopted: it keeps §9.1's JWT fixtures and independently
-        // rejects §9.2's `configsomethingeyJabc.def.ghi`.
-        // The `\b` itself was Audit MED #5 (`mykeyeyJabc.def.ghi` classified as
-        // a JWT).
+        // gitleaks `jwt` requires **both** header and payload to be
+        // base64-`ey`-prefixed, tighter than v1's single `\beyJ` (§8 row 24):
+        // keeps §9.1's fixtures and rejects §9.2's
+        // `configsomethingeyJabc.def.ghi`. The `\b` was Audit MED #5
+        // (`mykeyeyJabc.def.ghi` classified as a JWT).
         name: "jwt",
         category: Category::Credential,
         confidence: 0.95,
@@ -408,12 +412,10 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // ⚠ INERT. `CopyPaste-8ys1`, a real FP **with data loss**: this sat at
-        // exactly 0.70 — on the floor — so RFC1918 addresses (`10.x`,
-        // `172.16–31.x`, `192.168.x`) in config files and docker-compose
-        // snippets silently expired. A bare `IP:port` is topology, not
-        // credential material; credentialed connections are caught by
-        // `db_conn_string` at 0.99.
+        // ⚠ INERT. `CopyPaste-8ys1`, a real FP **with data loss**: this sat
+        // exactly on the 0.70 floor, so RFC1918 addresses in config files and
+        // docker-compose snippets silently expired. A bare `IP:port` is
+        // topology; credentialed connections are `db_conn_string` at 0.99.
         name: "ip_with_port",
         category: Category::Infrastructure,
         confidence: 0.65,
@@ -422,16 +424,12 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     // -- Financial / personal ----------------------------------------------
     RuleSpec {
-        // Manifest §3.3 / §5.4. Not a regex-only rule: the candidate scan finds
-        // 13–19-digit runs (optionally single-space/hyphen separated) and Luhn
-        // decides. **Audit MED #6**: v1's original gate was
-        // `normalised.len() <= 25 && luhn_valid(normalised)`, i.e. a card was
-        // only detected when the clipboard held *nothing but* the number — a
-        // card embedded in ordinary text was a silent miss.
-        // In v1 this lived outside the pattern table and therefore produced no
-        // spans and no rule name, while the FFI docs advertised a
-        // `"credit_card"` pattern name that did not exist. §3.3 says v2 must
-        // make it a first-class rule; it now is.
+        // Manifest §3.3 / §5.4. Not regex-only: the scan finds 13–19-digit
+        // runs and Luhn decides. **Audit MED #6**: v1 gated on
+        // `normalised.len() <= 25 && luhn_valid(...)`, so a card was detected
+        // only when the clipboard held *nothing but* the number — embedded in
+        // text it was a silent miss. §3.3 requires it to be a first-class rule
+        // rather than living outside the table with no rule name.
         name: "credit_card",
         category: Category::Financial,
         confidence: 0.99,
@@ -440,10 +438,9 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // ⚠ INERT. **P2 fb3e**, a real FP **with data loss**: legitimately
-        // copied IBANs (invoices, bank transfers) were being silently
-        // auto-wiped. The correct long-term fix is a mod-97 checksum validator
-        // analogous to Luhn; until then the floor is the safe fallback.
-        // gitleaks is secrets-only and ships no PII rules (§8.1.4).
+        // copied IBANs (invoices, transfers) were auto-wiped. The long-term fix
+        // is a mod-97 validator analogous to Luhn; until then the floor is the
+        // safe fallback. gitleaks ships no PII rules (§8.1.4).
         name: "iban",
         category: Category::Financial,
         confidence: 0.65,
@@ -452,9 +449,8 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // ⚠ INERT. **P2 fb3e**: lowered 0.80 → 0.65 — it also matches dates and
-        // unit strings (`012 31 2024`). §4.2 names the structural validator as
-        // the correct fix; it is applied here (see `ssn_structure_plausible`)
-        // but the confidence stays sub-floor, because a plausible SSN is still
+        // unit strings (`012 31 2024`). §4.2's structural validator is applied,
+        // but the confidence stays sub-floor because a plausible SSN is still
         // the user's own data (§4.2 reason 1).
         name: "ssn_us",
         category: Category::PersonalId,
@@ -472,10 +468,9 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // ⚠ INERT. v1 had no leading anchor, so this matched inside longer
-        // digit runs. The benign corpus entry `the order number is 1234567890`
-        // is exactly that failure, and §7.7 says v2 must assert **zero** FPs on
-        // the corpus rather than budget for two. Hence `PhoneShape`: an
-        // unformatted 10-digit run is a number, not a phone number.
+        // digit runs — the benign-corpus entry `the order number is 1234567890`
+        // is that failure, and §7.7 requires **zero** FPs on the corpus. Hence
+        // `PhoneShape`: an unformatted 10-digit run is a number, not a phone.
         name: "phone_us",
         category: Category::PersonalId,
         confidence: 0.55,
@@ -493,8 +488,7 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
 ];
 
-/// Look a rule up by name. Test-only: production never addresses a single rule,
-/// it runs the whole set.
+/// Look a rule up by name. Test-only: production runs the whole set.
 #[cfg(test)]
 pub(super) fn rule(name: &str) -> &'static RuleSpec {
     RULES
@@ -502,10 +496,6 @@ pub(super) fn rule(name: &str) -> &'static RuleSpec {
         .find(|r| r.name == name)
         .unwrap_or_else(|| panic!("no rule named {name}"))
 }
-
-// ---------------------------------------------------------------------------
-// Tests — the table's own invariants (manifest §9.3)
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -531,6 +521,7 @@ mod tests {
             "iban",
             "ssn_us",
             "generic_bearer",
+            "http_basic_auth",
             "ip_with_port",
             "email",
             "phone_us",
@@ -569,6 +560,7 @@ mod tests {
             "cloudflare_api_token",
             "twilio_signing_key_sid",
             "discord_bot_token",
+            "gitlab_pat",
         ] {
             assert!(
                 rule(name).pattern.contains(r"\b"),

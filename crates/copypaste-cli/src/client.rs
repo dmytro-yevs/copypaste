@@ -12,8 +12,8 @@
 
 use crate::error::CliError;
 use copypaste_ipc::{
-    socket_path, ErrorCode, Item, Method, PairingData, PeerInfo, Request, Response, ResponseData,
-    StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    socket_path, CloudStatusData, CloudSyncData, ErrorCode, Item, Method, PairingData, PeerInfo,
+    Request, Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::path::Path;
@@ -191,6 +191,22 @@ pub fn expect_peers(data: Option<ResponseData>) -> Result<Vec<PeerInfo>, CliErro
         Some(ResponseData::Peers(peers)) => Ok(peers),
         Some(ResponseData::Items(items)) if items.is_empty() => Ok(Vec::new()),
         _ => Err(shape_error("a list of peers")),
+    }
+}
+
+/// A response that must carry cloud sync status.
+pub fn expect_cloud_status(data: Option<ResponseData>) -> Result<CloudStatusData, CliError> {
+    match data {
+        Some(ResponseData::CloudStatus(status)) => Ok(status),
+        _ => Err(shape_error("cloud sync status")),
+    }
+}
+
+/// A response that must carry the counts from one cloud round.
+pub fn expect_cloud_sync(data: Option<ResponseData>) -> Result<CloudSyncData, CliError> {
+    match data {
+        Some(ResponseData::CloudSync(stats)) => Ok(stats),
+        _ => Err(shape_error("cloud sync results")),
     }
 }
 

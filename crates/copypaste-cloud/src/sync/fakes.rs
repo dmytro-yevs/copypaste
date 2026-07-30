@@ -114,6 +114,9 @@ pub(super) struct FakeSource {
     outgoing: Mutex<Vec<LocalItem>>,
     stored: Mutex<HashMap<String, LocalItem>>,
     watermark: Mutex<i64>,
+    /// Tracked separately from the watermark, as a real source must — see
+    /// [`CloudSource::upload_floor`].
+    floor: Mutex<i64>,
     #[allow(dead_code)]
     applies: AtomicUsize,
 }
@@ -134,6 +137,11 @@ impl FakeSource {
     /// the driver itself would never produce.
     pub(super) fn rewind(&self, ms: i64) {
         *self.watermark.lock().unwrap() = ms;
+    }
+
+    /// What the owner of a source does after a round completes.
+    pub(super) fn set_upload_floor(&self, ms: i64) {
+        *self.floor.lock().unwrap() = ms;
     }
 }
 
@@ -169,6 +177,10 @@ impl CloudSource for FakeSource {
 
     fn watermark(&self) -> Result<i64, SyncError> {
         Ok(*self.watermark.lock().unwrap())
+    }
+
+    fn upload_floor(&self) -> Result<i64, SyncError> {
+        Ok(*self.floor.lock().unwrap())
     }
 
     fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {

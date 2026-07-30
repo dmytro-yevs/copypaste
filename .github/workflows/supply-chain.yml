@@ -1,0 +1,105 @@
+name: Supply chain
+
+# SECURITY.md tells readers to run `cargo deny check` and `cargo audit`. This
+# workflow is what makes that claim true in CI rather than only on a
+# maintainer's laptop.
+#
+# Two tools, deliberately both, because they do not overlap as much as they
+# look like they do:
+#
+#   cargo-deny   licences, crate sources, banned/duplicated crates, and
+#                advisories — driven entirely by `deny.toml`.
+#   cargo-audit  advisories only, but it is the RustSec reference
+#                implementation and reports yanked crates, which cargo-deny's
+#                advisories check does not cover the same way.
+#
+# The schedule matters more than the push trigger. An advisory lands against a
+# dependency that has not changed; without a cron, a new CVE is invisible until
+# somebody happens to push.
+
+on:
+  push:
+    branches: [main, v2-main]
+  pull_request:
+    branches: [main, v2-main]
+  schedule:
+    # Mondays, 06:17 UTC. Off the hour so this is not queued behind everyone
+    # else's midnight cron.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deny:
+    name: cargo-deny (${{ matrix.check }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Split so a licence failure and an advisory failure are distinguishable
+        # at a glance in the checks list, and so one failing does not mask the
+        # others.
+        check: [advisories, bans, licenses, sources]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.check }}
+          # `arguments` go before the subcommand, `command-arguments` after —
+          # the action distinguishes them and `--show-stats` is a check flag.
+          arguments: --all-features
+          # Stats print the duplicate count. The inclusion graph is left on
+          # (it is only suppressed by --hide-inclusion-graph), which is what
+          # makes a licence or ban rejection diagnosable: it names who pulled
+          # the crate in.
+          command-arguments: --show-stats
+
+  audit:
+    name: cargo-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Advisory DB cache key
+        id: stamp
+        run: echo "week=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache advisory-db
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/advisory-db
+          key: advisory-db-${{ steps.stamp.outputs.week }}
+          restore-keys: advisory-db-
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Plain `cargo audit`, which clones or updates the advisory DB into the
+      # cached path. v1 learned the hard way that `--no-fetch` fails on a cold
+      # cache with "advisory-db/crates: No such file or directory", because
+      # nothing has populated it yet.
+      #
+      # Deliberately NOT `--deny warnings`.
+      #
+      # Informational advisories (unmaintained, unsound) are already a gate via
+      # cargo-deny, where an exception carries a written justification next to
+      # it in deny.toml. Making them fatal here too would mean maintaining the
+      # same ignore list in a second place with no reasons attached — which is
+      # the duplication CLAUDE.md rule 1 is about, applied to configuration.
+      #
+      # Division of labour: cargo-deny owns policy (licences, bans, sources,
+      # and advisories-with-exceptions); cargo-audit owns the vulnerability
+      # feed, where a non-zero exit means a real CVE with no recorded decision
+      # behind it. Yanked crates are printed but not fatal.
+      - name: cargo audit
+        run: cargo audit

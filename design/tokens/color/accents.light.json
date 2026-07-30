@@ -1,76 +1,78 @@
 {
   "accents": {
-    "$description": "The accent axis (port-manifest §8.4), light resolution. v1 expressed this as a partial override — :root[data-theme=\"light\"][data-accent=\"…\"] restated only --accent (and --on-accent for teal/green/amber). Here every accent is written out fully: this file is the cascade already resolved, so Compose and CSS read the same numbers instead of one of them re-deriving them.",
+    "$description": "The accent axis, light resolution. The whole axis shifts one step darker than dark's — --accent is the Tailwind -600 step, --accent-2 the -500 — so a filled button clears AA against white text on every accent. Every accent is written out in full rather than as a partial override of the dark block: the file is the cascade already resolved, so nothing re-derives it.",
     "$type": "color",
     "indigo": {
-      "$description": "Default accent. Darkened for AA on a light background.",
+      "$description": "Default accent. indigo-600 / indigo-500.",
       "accent": {
-        "$value": "#5B49E0"
+        "$value": "oklch(0.511 0.262 276.966)"
       },
       "accent-2": {
-        "$value": "#9C8FFF",
-        "$description": "Unchanged from dark — v1's light block does not override --accent-2."
+        "$value": "oklch(0.585 0.233 277.117)"
       },
       "on-accent": {
-        "$value": "#FFFFFF"
+        "$value": "oklch(1 0 0)"
       }
     },
     "blue": {
+      "$description": "blue-600 / blue-500.",
       "accent": {
-        "$value": "#2563EB"
+        "$value": "oklch(0.546 0.245 262.881)"
       },
       "accent-2": {
-        "$value": "#7CB0FF"
+        "$value": "oklch(0.623 0.214 259.815)"
       },
       "on-accent": {
-        "$value": "#FFFFFF"
+        "$value": "oklch(1 0 0)"
       }
     },
     "teal": {
+      "$description": "teal-600 / teal-500.",
       "accent": {
-        "$value": "#0E9E8C"
+        "$value": "oklch(0.6 0.118 184.704)"
       },
       "accent-2": {
-        "$value": "#5FE0D2"
+        "$value": "oklch(0.704 0.14 182.503)"
       },
       "on-accent": {
-        "$value": "#FFFFFF",
-        "$description": "Overridden in light: the darkened teal takes white text."
+        "$value": "oklch(1 0 0)",
+        "$description": "The darkened teal carries white text; dark's lighter fill does not."
       }
     },
     "green": {
+      "$description": "green-600 / green-500.",
       "accent": {
-        "$value": "#1FA85B"
+        "$value": "oklch(0.627 0.194 149.214)"
       },
       "accent-2": {
-        "$value": "#84E29A"
+        "$value": "oklch(0.723 0.219 149.579)"
       },
       "on-accent": {
-        "$value": "#FFFFFF",
-        "$description": "Overridden in light: the darkened green takes white text."
+        "$value": "oklch(1 0 0)"
       }
     },
     "amber": {
+      "$description": "amber-600 / amber-500.",
       "accent": {
-        "$value": "#C77F1A"
+        "$value": "oklch(0.666 0.179 58.318)"
       },
       "accent-2": {
-        "$value": "#FFC56B"
+        "$value": "oklch(0.769 0.188 70.08)"
       },
       "on-accent": {
-        "$value": "#FFFFFF",
-        "$description": "Overridden in light: the darkened amber takes white text."
+        "$value": "oklch(1 0 0)"
       }
     },
     "rose": {
+      "$description": "rose-600 / rose-500.",
       "accent": {
-        "$value": "#E11D6B"
+        "$value": "oklch(0.586 0.253 17.585)"
       },
       "accent-2": {
-        "$value": "#FF85AC"
+        "$value": "oklch(0.645 0.246 16.439)"
       },
       "on-accent": {
-        "$value": "#FFFFFF"
+        "$value": "oklch(1 0 0)"
       }
     }
   },

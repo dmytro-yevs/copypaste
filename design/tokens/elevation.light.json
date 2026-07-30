@@ -1,42 +1,35 @@
 {
   "elevation": {
-    "$description": "Light theme shadow ramp (port-manifest §8.2). Same geometry as dark at materially lower opacity — a light surface needs a hint, not a hole. CSS-only.",
+    "$description": "Light shadow ramp: the same Tailwind v4 geometry as dark at Tailwind's own alphas. A light surface needs a hint of depth, not a hole.",
     "$type": "shadow",
-    "$extensions": {
-      "com.copypaste": {
-        "platforms": [
-          "css"
-        ]
-      }
-    },
     "sh1": {
       "$value": {
-        "color": "rgba(20,22,30,0.06)",
+        "color": "oklch(0 0 0 / 0.05)",
         "offsetX": "0",
         "offsetY": "1px",
         "blur": "2px"
       },
-      "$description": "Resting card / row lift."
+      "$description": "Tailwind `shadow-xs`."
     },
     "sh2": {
       "$value": {
-        "color": "rgba(20,22,30,0.12)",
+        "color": "oklch(0 0 0 / 0.1)",
         "offsetX": "0",
-        "offsetY": "8px",
-        "blur": "24px",
-        "spread": "-8px"
+        "offsetY": "4px",
+        "blur": "12px",
+        "spread": "-2px"
       },
-      "$description": "Popover, dropdown, toast. Note the -8px spread: light uses a tighter spread than dark's -6px."
+      "$description": "Tailwind `shadow-md`."
     },
     "sh3": {
       "$value": {
-        "color": "rgba(20,22,30,0.18)",
+        "color": "oklch(0 0 0 / 0.15)",
         "offsetX": "0",
-        "offsetY": "24px",
-        "blur": "64px",
+        "offsetY": "20px",
+        "blur": "40px",
         "spread": "-12px"
       },
-      "$description": "Modal."
+      "$description": "Tailwind `shadow-xl`."
     }
   }
 }

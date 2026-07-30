@@ -1,0 +1,262 @@
+name: CI
+
+# The repository had no CI before this file. Every check here was previously a
+# human running it by hand, so the guiding principle is: run exactly what a
+# maintainer runs, in the order they run it, and make the expensive parts
+# survivable through caching.
+#
+# The expensive part is SQLCipher. `rusqlite`'s `bundled-sqlcipher` feature
+# compiles it from C source on every cold build, which dominates wall-clock
+# time. `Swatinem/rust-cache` keeps `target/` for dependency crates (the
+# `libsqlite3-sys` build output among them) across runs, so only the first run
+# on a new `Cargo.lock` pays for it.
+
+on:
+  push:
+    branches: [main, v2-main]
+  pull_request:
+    branches: [main, v2-main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# No job in this workflow needs to write anything, and none of them reads a
+# secret. Least privilege is the default here and the release workflow is the
+# only place that widens it.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  # 1.96 is `rust-version` in the workspace manifest. `rust-toolchain.toml`
+  # pins the channel to `stable`, which floats — so a plain `cargo` here would
+  # silently test a newer compiler than the declared floor. Every step that
+  # matters therefore says `cargo +1.96` explicitly, which overrides the
+  # toolchain file.
+  MSRV: "1.96"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Cheap gates. No compilation, so they fail in seconds rather than minutes.
+  # ---------------------------------------------------------------------------
+
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          components: rustfmt
+      - run: cargo +1.96 fmt --all --check
+
+  file-size:
+    name: file-size budget (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # CLAUDE.md rule 5 targets <=500 source lines per file. The script is
+      # advisory by design (its own header says so), and this job preserves
+      # that: it always reports, and it never fails the build.
+      #
+      # It writes the result to the run summary so the number is visible
+      # without opening logs, and emits a GitHub warning annotation per
+      # offending file so the count shows up on the PR itself.
+      - name: check-file-size.sh
+        run: |
+          set -uo pipefail
+          out="$(./scripts/check-file-size.sh 500 || true)"
+          printf '%s\n' "$out"
+
+          {
+            echo '## File-size budget (CLAUDE.md rule 5)'
+            echo
+            echo '```'
+            printf '%s\n' "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Annotate each offender. Field 1 is the path relative to crates/.
+          printf '%s\n' "$out" \
+            | awk '/^[^ ]+\.rs[[:space:]]+[0-9]+$/ { print $1, $2 }' \
+            | while read -r file lines; do
+                echo "::warning file=crates/${file}::${lines} source lines, over the 500-line budget (CLAUDE.md rule 5)"
+              done
+
+  # ---------------------------------------------------------------------------
+  # The Rust gate. Clippy and the test suite share one runner so SQLCipher and
+  # the dependency graph are compiled once, not twice.
+  # ---------------------------------------------------------------------------
+
+  rust:
+    name: test + clippy (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-1.96
+          # The demo job builds the same crates in release profile; sharing the
+          # key would make the two jobs fight over one cache entry.
+          key: dev-profile
+
+      - name: System dependencies
+        # `crates/copypaste-ui/src-tauri` is a workspace member, so
+        # `--workspace` builds it, and Tauri v2 on Linux resolves
+        # webkit2gtk/gtk/soup through pkg-config. Without these the workspace
+        # does not configure, let alone type-check.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libayatana-appindicator3-dev libxdo-dev
+
+      - name: cargo test --workspace
+        run: cargo +1.96 test --workspace --locked
+
+      - name: cargo clippy --all-targets
+        # Runs even when the tests fail, so one run reports both. Clippy is a
+        # gate: warnings are denied.
+        if: success() || failure()
+        run: cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: cargo clippy --features embedded-backend
+        # `copypaste-ui`'s `embedded-backend` feature exists, in its own words,
+        # "so this code is type-checked somewhere": it is the Android in-process
+        # backend, which is unconditional on Android and off everywhere else.
+        # Without this step the whole Android path is dead text that no machine
+        # ever compiles.
+        if: success() || failure()
+        run: cargo +1.96 clippy -p copypaste-ui --features embedded-backend --all-targets --locked -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  # The only end-to-end proof the project has.
+  # ---------------------------------------------------------------------------
+
+  demo:
+    name: demo.sh + demo-p2p.sh
+    runs-on: ubuntu-latest
+    env:
+      # Both demo scripts try to pin themselves with
+      #   command -v cargo +1.96 >/dev/null && CARGO="cargo +1.96"
+      # which does not work: `command -v` is given two arguments, fails on the
+      # second, and the pin never activates. Rather than edit scripts owned by
+      # another agent, set RUSTUP_TOOLCHAIN — rustup honours it above
+      # `rust-toolchain.toml`, so a bare `cargo` inside the scripts is 1.96.
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-1.96
+          key: release-profile
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config
+
+      # Built here rather than left to the scripts so a compile failure is
+      # reported as a build failure instead of as a demo failure.
+      - name: Build release binaries
+        run: cargo build --release --locked -p copypaste-daemon -p copypaste-cli
+
+      - name: scripts/demo.sh
+        # On Linux the clipboard source is the fake backend; the daemon reports
+        # which backend is live, so this cannot be mistaken for proof of the
+        # NSPasteboard path. It does prove capture -> encrypt -> store ->
+        # search -> paste-back, that sensitive content stays out of the index,
+        # and that no plaintext reaches the database file.
+        timeout-minutes: 10
+        run: ./scripts/demo.sh
+
+      - name: scripts/demo-p2p.sh
+        # Two daemons, separate data dirs, ports 47701/47702, explicit --addr
+        # because the runner has no usable multicast.
+        timeout-minutes: 10
+        run: ./scripts/demo-p2p.sh
+
+  # ---------------------------------------------------------------------------
+  # Frontend.
+  # ---------------------------------------------------------------------------
+
+  frontend:
+    name: npm build + test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/copypaste-ui
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      # `npm ci` rather than `npm install`: it fails when package.json and the
+      # lockfile disagree, which is the check we want in CI.
+      - run: npm ci
+
+      # `npm run build` is `tsc --noEmit && vite build`, so this is the
+      # TypeScript type-check as well as the bundle.
+      - run: npm run build
+
+      - run: npm test
+
+  # ---------------------------------------------------------------------------
+  # macOS. This is the job that changes "never compiled" into "compiles".
+  # ---------------------------------------------------------------------------
+
+  macos-check:
+    name: macOS check (arm64)
+    # macos-14 and later are Apple Silicon. Pinned rather than `macos-latest`
+    # so the compiler and SDK under test do not move without a commit — and so
+    # it matches the runner in release.yml.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-14-1.96
+
+      # README and SECURITY.md both list the macOS clipboard backend and the
+      # Keychain device-secret store as "written, never compiled, because
+      # development happens on Linux". This step is the cheapest possible
+      # correction of that: it will not run them, but it will no longer be true
+      # that nothing has ever type-checked them.
+      #
+      # `--all-features` reaches the `macos-keychain` feature.
+      - name: cargo clippy (macOS paths)
+        run: cargo +1.96 clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: cargo test --workspace
+        # Kept separate from the Linux test job because a macOS runner is an
+        # order of magnitude more expensive; if this becomes the bottleneck,
+        # narrow it to `-p copypaste-core -p copypaste-daemon`.
+        run: cargo +1.96 test --workspace --locked

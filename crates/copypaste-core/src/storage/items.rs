@@ -1,9 +1,7 @@
 //! Item CRUD: everything that writes or reads a `clipboard_items` row without
-//! going through FTS or a retention sweep.
-//!
-//! Two invariants live here rather than in a comment somewhere else:
-//! layer 1 of the ADR-015 sensitive/FTS exclusion (in [`Store::insert`]), and
-//! the fact that a delete is a *tombstone*, not a row removal.
+//! going through FTS or a retention sweep. Two invariants live here: layer 1 of
+//! the ADR-015 sensitive/FTS exclusion (in [`Store::insert`]), and that a
+//! delete is a *tombstone*, not a row removal.
 
 use rusqlite::{params, OptionalExtension};
 
@@ -21,9 +19,8 @@ impl Store {
     /// bucket, no new row is written and the existing item is returned, so the
     /// call is idempotent under a race.
     pub fn insert(&self, item: NewItem) -> Result<StoredItem, StoreError> {
-        // Layer 1 of the ADR-015 enforcement — unconditional, and it ignores
-        // what the caller passed. A sensitive item is never indexed even if the
-        // caller hands us plaintext for it.
+        // ADR-015 layer 1: unconditional, and it ignores what the caller
+        // passed. A sensitive item is never indexed.
         let search_text = if item.is_sensitive {
             if item.search_text.is_some() {
                 tracing::warn!(
@@ -252,7 +249,6 @@ mod tests {
             vec![newest.id.clone(), middle.id.clone(), oldest.id.clone()]
         );
 
-        // Pinning the oldest floats it to the top; the rest stay newest-first.
         assert!(s.set_pinned(&oldest.id, true).unwrap());
         let page = s.list(10, 0).unwrap();
         assert_eq!(page[0].id, oldest.id);
@@ -260,12 +256,10 @@ mod tests {
         assert_eq!(page[1].id, newest.id);
         assert_eq!(page[2].id, middle.id);
 
-        // Pins keep their pin order among themselves.
         assert!(s.set_pinned(&middle.id, true).unwrap());
         let ids: Vec<_> = s.list(10, 0).unwrap().into_iter().map(|i| i.id).collect();
         assert_eq!(ids, vec![oldest.id, middle.id, newest.id]);
 
-        // Offset pagination walks the same total order.
         let s2 = store();
         for n in 0..5 {
             s2.insert(item(&format!("item-{n}"), T0 + n * 60_000))
@@ -303,7 +297,6 @@ mod tests {
             assert!(ct.is_none());
         }
 
-        // Deleting twice, or deleting an unknown id, reports "nothing done".
         assert!(!s.delete(&a.id).unwrap());
         assert!(!s.delete("no-such-id").unwrap());
         assert!(s.get(&b.id).unwrap().is_some());
@@ -324,16 +317,12 @@ mod tests {
         assert!(s.search("payload", 10).unwrap().is_empty());
         assert_eq!(fts_dump(&s), "");
 
-        // Idempotent.
         assert_eq!(s.delete_all().unwrap(), 0);
     }
 
-    /// Manifest 04: `delete_all` tombstones non-pinned rows only.
-    ///
-    /// Pinning is the one gesture by which a user says "keep this", so clearing
-    /// history must not be the thing that discards it. This regression existed
-    /// and was silent — every other test passed with pinned rows being wiped,
-    /// because none of them pinned anything first.
+    /// Manifest 04: `delete_all` tombstones non-pinned rows only. The
+    /// regression was silent — every other test passed with pinned rows being
+    /// wiped, because none of them pinned anything first.
     #[test]
     fn delete_all_leaves_pinned_items_intact() {
         let s = store();
@@ -344,7 +333,6 @@ mod tests {
         }
         assert!(s.set_pinned(&keep.id, true).unwrap());
 
-        // Only the three unpinned rows are cleared.
         assert_eq!(s.delete_all().unwrap(), 3);
         assert_eq!(s.count().unwrap(), 1);
 
@@ -373,7 +361,6 @@ mod tests {
 
         assert!(s.set_pinned(&a.id, true).unwrap());
         assert!(s.get(&a.id).unwrap().unwrap().pinned);
-        // Idempotent.
         assert!(s.set_pinned(&a.id, true).unwrap());
         assert!(s.get(&a.id).unwrap().unwrap().pinned);
 
@@ -382,7 +369,6 @@ mod tests {
 
         assert!(!s.set_pinned("no-such-id", true).unwrap());
 
-        // A tombstone cannot be pinned.
         s.delete(&a.id).unwrap();
         assert!(!s.set_pinned(&a.id, true).unwrap());
     }

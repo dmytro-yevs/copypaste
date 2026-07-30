@@ -1,9 +1,7 @@
-//! The schema and the migration ladder.
-//!
-//! One version, one `M::up`. The ladder exists as a `Migrations` value rather
-//! than as a hand-rolled `user_version` runner so that adding version 2 later
-//! is an append, and so that a database written by a *newer* build is refused
-//! instead of silently downgraded.
+//! The schema and the migration ladder: one version, one `M::up`. A
+//! `Migrations` value rather than a hand-rolled `user_version` runner, so
+//! adding version 2 later is an append and a database written by a *newer*
+//! build is refused rather than silently downgraded.
 
 use std::sync::LazyLock;
 

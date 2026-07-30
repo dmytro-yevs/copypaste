@@ -12,9 +12,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-# Speaks IPC to the daemon over the same socket the CLI uses. No copypaste-core
-# dependency: the UI never touches crypto or the database directly.
 [dependencies]
+# The ONE model of the wire contract, shared with the daemon and the CLI. Both
+# backends below speak these types; neither defines its own (CLAUDE.md rule 1).
 copypaste-ipc = { path = "../../copypaste-ipc" }
 # `macos-private-api` is what `"transparent": true` + `macOSPrivateApi` in
 # tauri.conf.json require; without it tauri-build rejects the config. It rules
@@ -27,3 +27,44 @@ futures-util = { workspace = true, features = ["sink"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
+
+# The in-process backend's crates. Optional here so the Android code path can be
+# type-checked on a Linux host with `--features embedded-backend`; the target
+# table below makes them unconditional on Android, so the real build needs no
+# flag. See `backend::mod` for why the cfg predicate names both.
+copypaste-core = { path = "../../copypaste-core", optional = true }
+copypaste-p2p = { path = "../../copypaste-p2p", optional = true }
+
+# ---------------------------------------------------------------------------
+# Desktop only
+# ---------------------------------------------------------------------------
+# Both plugins are meaningless on Android and neither compiles there:
+# `tauri-plugin-global-shortcut` is itself
+# `#![cfg(not(any(target_os = "android", target_os = "ios")))]`.
+#
+# `tauri-plugin-global-shortcut` delegates to `global-hotkey`, which on macOS
+# registers through Carbon `RegisterEventHotKey` and therefore needs no
+# Accessibility grant — settled in ADR-0002, and guarded in `shell::hotkey`
+# because one corner of that crate does take a `CGEventTap`.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+
+# ---------------------------------------------------------------------------
+# Android only
+# ---------------------------------------------------------------------------
+# Android hosts no background daemon (ADR-0002), so there is no socket to talk
+# to and the core is linked into the app process instead.
+[target.'cfg(target_os = "android")'.dependencies]
+copypaste-core = { path = "../../copypaste-core" }
+copypaste-p2p = { path = "../../copypaste-p2p" }
+
+[features]
+# Compile the in-process backend on a host that is not Android. Exists so this
+# code is type-checked somewhere: without it the whole Android path would be
+# dead text on every machine the project is actually built on.
+embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p"]
+
+[dev-dependencies]
+tempfile.workspace = true

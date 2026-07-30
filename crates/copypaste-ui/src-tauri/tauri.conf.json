@@ -15,17 +15,6 @@
       {
         "label": "main",
         "title": "CopyPaste",
-        "width": 420,
-        "height": 600,
-        "minWidth": 360,
-        "minHeight": 400,
-        "resizable": false,
-        "alwaysOnTop": true,
-        "decorations": false,
-        "transparent": true,
-        "shadow": true,
-        "center": true,
-        "skipTaskbar": true,
         "visible": true,
         "dragDropEnabled": false
       }
@@ -36,7 +25,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
     "category": "Productivity",
     "shortDescription": "Clipboard history that stays on your machine.",
     "icon": [

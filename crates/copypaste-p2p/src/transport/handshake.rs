@@ -2,29 +2,26 @@
 //!
 //! # Why NNpsk0
 //!
-//! `NN` is the anonymous pattern: neither side has a static key, so there is no
-//! key to generate, distribute, pin, rotate or revoke — and no certificate
-//! lifecycle, which is what v1 spent a rustls + rcgen + two hand-written DER
-//! parsers on. The `psk0` modifier mixes the pairing token into the chaining
-//! key *before* the first ephemeral is written, which buys three things at
-//! once:
+//! `NN` is the anonymous pattern: no static keys, so nothing to generate,
+//! distribute, pin, rotate or revoke and no certificate lifecycle — which is
+//! what v1 spent rustls + rcgen + two hand-written DER parsers on. `psk0` mixes
+//! the pairing token into the chaining key *before* the first ephemeral is
+//! written, which buys three things:
 //!
 //! * **Authentication.** Possession of the token is the identity. Both sides
 //!   prove possession by being able to decrypt at all.
-//! * **Fail-closed by construction.** Because `psk0` establishes a cipher key
-//!   before message one's payload, message one is already an AEAD ciphertext.
-//!   A responder holding the wrong token fails to decrypt it. There is no
-//!   downgrade, no "unauthenticated but encrypted" mode to fall back to, and
-//!   no code path in this file that could offer one (port manifest 02, I-15 —
-//!   fail closed on crypto; `CLAUDE.md` rule 4).
+//! * **Fail-closed by construction.** `psk0` establishes a cipher key before
+//!   message one's payload, so message one is already an AEAD ciphertext and a
+//!   responder holding the wrong token cannot decrypt it. No downgrade, no
+//!   "unauthenticated but encrypted" mode, and no code path here that could
+//!   offer one (port manifest 02, I-15; `CLAUDE.md` rule 4).
 //! * **Forward secrecy.** The `ee` DH in message two means a token disclosed
 //!   later does not decrypt traffic captured earlier.
 //!
-//! `NNpsk0` is *not* a PAKE and does not need to be. A PAKE exists to protect a
-//! low-entropy human secret from an offline dictionary attack; our token is 256
-//! bits from the OS CSPRNG, so the dictionary does not exist (see the crate
-//! docs, and port manifest 02 §6.3, which reaches the same conclusion about
-//! v1's OPAQUE).
+//! `NNpsk0` is *not* a PAKE and does not need to be: a PAKE protects a
+//! low-entropy human secret from an offline dictionary attack, and our token is
+//! 256 bits from the OS CSPRNG, so the dictionary does not exist (port manifest
+//! 02 §6.3 reaches the same conclusion about v1's OPAQUE).
 //!
 //! # A handshake cannot pin a task
 //!
@@ -47,19 +44,15 @@ use super::session::{codec, Session, MAX_NOISE_MESSAGE};
 use super::token::TOKEN_LEN;
 use super::TransportError;
 
-/// The Noise handshake pattern, verbatim.
-///
-/// Changing any component of this string is a wire break: both ends must parse
-/// the identical name or the handshake fails. It is public so that the daemon
-/// can report it and so a test can pin it.
+/// The Noise handshake pattern, verbatim. Changing any component is a wire
+/// break: both ends must parse the identical name. Public so the daemon can
+/// report it and a test can pin it.
 pub const NOISE_PARAMS: &str = "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 
-/// Wall-clock budget for connecting and completing the handshake.
-///
-/// A peer that opens a TCP connection and then says nothing must not be able to
-/// hold a daemon task open indefinitely. Ten seconds is generous for two
-/// round-trips of X25519 on a LAN and short enough that a stalled listener
-/// recovers without operator action.
+/// Wall-clock budget for connecting and completing the handshake, so a peer
+/// that connects and then says nothing cannot hold a daemon task open. Ten
+/// seconds is generous for two X25519 round-trips on a LAN and short enough
+/// that a stalled listener recovers without operator action.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Session {
@@ -113,16 +106,14 @@ impl Session {
     /// knows about, and report which one matched.
     ///
     /// A listener does not know who is dialling until the handshake succeeds,
-    /// so it has to try each stored PSK — this is what
-    /// [`crate::PeerStore::psks`] exists to feed. The first handshake message
-    /// is read once and replayed against each candidate in turn; only its
-    /// authentication tag distinguishes them, so a wrong candidate costs one
-    /// failed AEAD open and nothing else.
+    /// so it tries each stored PSK ([`crate::PeerStore::psks`] feeds this). The
+    /// first handshake message is read once and replayed against each candidate
+    /// in turn; only the authentication tag distinguishes them, so a wrong
+    /// candidate costs one failed AEAD open.
     ///
-    /// Candidates are tried in the order given. Every one is attempted even
-    /// after a failure, and the error is identical whether zero candidates
-    /// matched or the list was empty — nothing about which pairings this device
-    /// holds leaks to the dialler.
+    /// The error is identical whether no candidate matched or the list was
+    /// empty — nothing about which pairings this device holds leaks to the
+    /// dialler.
     ///
     /// # Errors
     ///
@@ -209,9 +200,9 @@ impl Session {
         } else {
             let first = next_handshake_frame(&mut framed).await?;
             hs.read_message(&first, &mut buf).map_err(|err| {
-                // The overwhelmingly likely cause is a peer with a different
-                // pairing token. Debug level, and the token is not in scope to
-                // be logged even by accident.
+                // Almost always a peer with a different pairing token. Debug
+                // level, and the token is not in scope to be logged by
+                // accident.
                 tracing::debug!(%peer_addr, ?err, "handshake initiation rejected");
                 TransportError::Handshake
             })?;
@@ -255,9 +246,8 @@ mod tests {
 
     #[test]
     fn noise_pattern_is_the_documented_one() {
-        // The whole design rests on `psk0` (authentication + fail-closed) and
-        // on `NN` (no static keys to manage). If this string drifts, both
-        // properties change silently.
+        // The design rests on `psk0` (authentication + fail-closed) and `NN`
+        // (no static keys). If this string drifts, both change silently.
         assert_eq!(NOISE_PARAMS, "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s");
         let params = noise_params().expect("pattern must parse");
         assert_eq!(params.name, NOISE_PARAMS);
@@ -284,10 +274,9 @@ mod tests {
 
         let client = Session::connect(addr, &bad).await.map(|_| ());
 
-        // The responder is where the mismatch is detected: `psk0` keys the
-        // cipher before message one's payload, so a wrong PSK is an AEAD
-        // failure on the very first message. No degraded, unauthenticated mode
-        // exists to fall through to.
+        // `psk0` keys the cipher before message one's payload, so a wrong PSK
+        // is an AEAD failure on the first message, with no degraded
+        // unauthenticated mode to fall through to.
         let server_result = server.await.expect("server task");
         assert!(
             matches!(server_result, Err(TransportError::Handshake)),
@@ -372,9 +361,9 @@ mod tests {
 
     #[tokio::test]
     async fn handshake_times_out_on_a_silent_peer() {
-        // A peer that accepts the TCP connection and then says nothing must not
-        // hold the task. Proven with a short local timeout rather than by
-        // waiting out HANDSHAKE_TIMEOUT.
+        // A peer that connects and says nothing must not hold the task. Proven
+        // with a short local timeout rather than by waiting out
+        // HANDSHAKE_TIMEOUT.
         let (listener, addr) = loopback().await;
         let _keep = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("accept");

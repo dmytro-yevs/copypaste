@@ -37,11 +37,10 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// Constant-time comparison of this peer's PSK against a candidate.
-    ///
-    /// `==` on key bytes short-circuits at the first differing byte and leaks
-    /// the matching-prefix length by timing (port manifest 02, I-13). This is
-    /// the only PSK comparison this type offers.
+    /// Constant-time comparison of this peer's PSK against a candidate, and the
+    /// only PSK comparison this type offers: `==` on key bytes short-circuits
+    /// at the first differing byte and leaks the matching-prefix length by
+    /// timing (port manifest 02, I-13).
     #[must_use]
     pub fn psk_matches(&self, candidate: &[u8; TOKEN_LEN]) -> bool {
         self.psk[..].ct_eq(&candidate[..]).into()
@@ -66,12 +65,9 @@ impl Peer {
 }
 
 /// Wipes the pre-shared key when the record goes out of scope (port manifest
-/// 02, I-12).
-///
-/// Note the consequence: `Peer` has a `Drop`, so its fields cannot be moved out
-/// individually (`let Peer { psk, .. } = peer;` will not compile). Clone the
-/// field instead. That is the intended friction — every copy of a PSK should be
-/// a deliberate act.
+/// 02, I-12). Consequence: fields cannot be moved out individually
+/// (`let Peer { psk, .. } = peer;` will not compile) — clone instead. That
+/// friction is intended; every copy of a PSK should be deliberate.
 impl Drop for Peer {
     fn drop(&mut self) {
         self.psk.zeroize();

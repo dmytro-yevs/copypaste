@@ -1,10 +1,7 @@
-//! Keying a connection, the per-connection pragmas, and the pool that has to
-//! re-apply both to every connection it opens.
-//!
-//! Everything here is *per connection*, which is the whole reason it is one
-//! module: none of these settings persist in the file, so the pool's `with_init`
-//! and the one-off probe connection in [`super::store`] must run the same
-//! sequence in the same order.
+//! Keying a connection, the per-connection pragmas, and the pool that re-applies
+//! both to every connection it opens. None of these settings persist in the
+//! file, so the pool's `with_init` and the probe connection in [`super::store`]
+//! must run the same sequence in the same order.
 
 use std::time::Duration;
 
@@ -20,9 +17,6 @@ use super::model::{is_not_a_database, StoreError};
 const POOL_SIZE: u32 = 4;
 
 /// Per-connection pragmas, applied in order *after* `PRAGMA key`.
-///
-/// These are connection-scoped and are not persisted, so they must be
-/// re-applied to every connection the pool creates.
 const CONNECTION_PRAGMAS: &[&str] = &[
     // Without it a reader and the writer race instantly and surface a silent
     // SQLITE_BUSY.
@@ -66,11 +60,10 @@ pub(super) fn build_pool(
 /// `PRAGMA key` in SQLCipher raw-key form. **Must be the first statement on
 /// every connection**, before any other pragma or query.
 ///
-/// The `x'<64 lowercase hex>'` form means SQLCipher takes the 32 bytes as the
-/// page key directly and skips PBKDF2 over a passphrase. No other cipher
-/// parameter is set: the SQLCipher 4 defaults are what we want, and setting
-/// `cipher_page_size` / `kdf_iter` / `cipher_hmac_algorithm` would change the
-/// derived key or the page layout.
+/// The `x'<64 lowercase hex>'` form takes the 32 bytes as the page key directly
+/// and skips PBKDF2. No other cipher parameter is set: the SQLCipher 4 defaults
+/// are what we want, and `cipher_page_size` / `kdf_iter` /
+/// `cipher_hmac_algorithm` would change the derived key or the page layout.
 pub(super) fn apply_key(conn: &Connection, db_key: &[u8; 32]) -> rusqlite::Result<()> {
     let key_hex = Zeroizing::new(hex::encode(db_key));
     let stmt = Zeroizing::new(format!("PRAGMA key = \"x'{}'\"", key_hex.as_str()));

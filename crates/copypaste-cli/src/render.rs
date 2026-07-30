@@ -5,7 +5,10 @@
 //! without a wall clock.
 
 use comfy_table::{presets, ContentArrangement, Table};
-use copypaste_ipc::{Item, PairingData, PeerInfo, StatusData, SyncResult, PROTOCOL_VERSION};
+use copypaste_ipc::{
+    CloudStatusData, CloudSyncData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    PROTOCOL_VERSION,
+};
 
 /// Stand-in printed instead of a sensitive item's content.
 ///
@@ -267,6 +270,86 @@ pub fn status_text(status: &StatusData) -> String {
         );
     }
 
+    lines.join("\n")
+}
+
+/// Render cloud sync status as an aligned key/value block.
+///
+/// Names no URL and no token: `configured` is the only thing a user needs to
+/// know about the deployment, and printing the project URL puts it in every
+/// screenshot of a bug report.
+pub fn cloud_status_text(status: &CloudStatusData, now_ms: i64) -> String {
+    if !status.configured {
+        return "cloud sync is not configured on this daemon\n\n\
+                Start the daemon with --cloud-url and --cloud-anon-key (or set \
+                COPYPASTE_CLOUD_URL and COPYPASTE_CLOUD_ANON_KEY) to enable it."
+            .to_string();
+    }
+
+    let mut lines = vec![
+        format!("{:<12} {}", "configured", "yes"),
+        format!(
+            "{:<12} {}",
+            "account",
+            status.email.as_deref().unwrap_or("signed out")
+        ),
+        format!(
+            "{:<12} {}",
+            "sync key",
+            if status.key_ready {
+                "unlocked"
+            } else {
+                "locked — sign in to derive it"
+            }
+        ),
+        format!(
+            "{:<12} {}",
+            "last sync",
+            match status.last_sync_ms {
+                Some(ms) => relative_time(ms, now_ms),
+                None => "never".to_string(),
+            }
+        ),
+        format!("{:<12} {}s", "polling", status.poll_interval_secs),
+    ];
+    if let Some(error) = &status.last_error {
+        lines.push(format!("{:<12} {}", "last error", error));
+    }
+    if !status.signed_in {
+        lines.push(String::new());
+        lines.push("Sign in with: copypaste cloud sign-in --email you@example.com".to_string());
+    }
+    lines.join("\n")
+}
+
+/// Render one cloud round.
+///
+/// `withheld` is always printed, including zero: it is the line a user checks
+/// the "a sensitive item is never uploaded" rule against, and a count that only
+/// appears when it is non-zero is one nobody knows to look for.
+pub fn cloud_sync_text(stats: &CloudSyncData) -> String {
+    let mut lines = vec![
+        format!("{:<12} {}", "uploaded", stats.uploaded),
+        format!("{:<12} {}", "deleted", stats.tombstoned),
+        format!("{:<12} {}", "downloaded", stats.downloaded),
+        format!("{:<12} {}", "applied", stats.applied),
+        format!(
+            "{:<12} {} (sensitive, never uploaded)",
+            "withheld", stats.skipped_sensitive
+        ),
+    ];
+    if stats.skipped_undecryptable > 0 {
+        lines.push(format!(
+            "{:<12} {} (not readable with this sync passphrase)",
+            "skipped", stats.skipped_undecryptable
+        ));
+    }
+    if stats.skipped_future > 0 {
+        lines.push(format!(
+            "{:<12} {} (stamped implausibly far in the future)",
+            "refused", stats.skipped_future
+        ));
+    }
     lines.join("\n")
 }
 

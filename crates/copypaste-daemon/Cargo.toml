@@ -9,6 +9,7 @@ license.workspace = true
 copypaste-core = { path = "../copypaste-core" }
 copypaste-ipc = { path = "../copypaste-ipc" }
 copypaste-p2p = { path = "../copypaste-p2p" }
+copypaste-cloud = { path = "../copypaste-cloud" }
 tokio.workspace = true
 tokio-util.workspace = true
 futures-util.workspace = true

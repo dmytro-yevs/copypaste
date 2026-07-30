@@ -2,7 +2,7 @@
 //!
 //! One SQLCipher-encrypted SQLite file, one schema version, one r2d2 pool.
 //!
-//! # What this module carries over from v1 (port manifest 03)
+//! # Carried over from v1 (port manifest 03)
 //!
 //! * **Sensitive items never reach the search index** (ADR-015). Three
 //!   enforcement layers, all required: the write guard in [`Store::insert`]
@@ -25,27 +25,9 @@
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
 //!
-//! # What this module deliberately does *not* carry over
-//!
-//! v2 drops backward compatibility (`docs/rewrite/port-manifest/README.md`), so
-//! the v1→v15 migration ladder, `migration_state`, `key_version` dispatch and
-//! the `(wall_time / 60)` millisecond dedup bucket are gone. The schema starts
-//! clean at version 1 and the ladder is owned by `rusqlite_migration` rather
-//! than by a hand-rolled `user_version` runner with a retry loop that
-//! string-matched `"duplicate column name"`.
-//!
-//! # Layout
-//!
-//! [`Store`] is one handle with one pool; its methods are grouped by what they
-//! are *for*, because that is what changes together:
-//!
-//! * [`model`] — the row types, the shared column projection and its mapper.
-//! * [`schema`] — the DDL and the migration ladder.
-//! * [`connection`] — `PRAGMA key`, the connection pragmas, the pool.
-//! * [`store`] — the handle itself: open, open-in-memory, checkout.
-//! * [`items`] — insert / read / pin / soft-delete.
-//! * [`search`] — FTS5 and the three-layer sensitive exclusion.
-//! * [`retention`] — the dedup bucket and both eviction sweeps.
+//! v2 drops backward compatibility (`CLAUDE.md` rule 3), so the v1→v15
+//! migration ladder, `migration_state` and `key_version` dispatch are gone: the
+//! schema starts clean at version 1 and `rusqlite_migration` owns the ladder.
 
 mod connection;
 mod items;
@@ -59,10 +41,8 @@ pub use model::{NewItem, StoreError, StoredItem};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};
 pub use store::Store;
 
-/// Fixtures shared by every test module under `storage`.
-///
-/// Not compiled into a shipping build. The direct-SQL helpers exist so a test
-/// can assert what is *in* the FTS table rather than only what `search`
+/// Fixtures shared by every test module under `storage`. The direct-SQL helpers
+/// let a test assert what is *in* the FTS table rather than only what `search`
 /// returns — that is how a missing ADR-015 layer would be caught.
 #[cfg(test)]
 pub(super) mod test_support {

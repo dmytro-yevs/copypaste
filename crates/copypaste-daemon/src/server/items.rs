@@ -112,14 +112,20 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
 pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
     // Read first so an unknown id is `not_found` rather than a silent success:
     // a client that deleted nothing needs to know it deleted nothing.
-    match state.store.get(item_id) {
+    let created_at = match state.store.get(item_id) {
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
         Err(e) => return storage_error(id, "get", e),
-        Ok(Some(_)) => {}
-    }
+        Ok(Some(row)) => row.created_at,
+    };
 
     match state.store.delete(item_id) {
-        Ok(_) => Response::ok(id, ResponseData::Empty {}),
+        Ok(_) => {
+            // A tombstone keeps the item's original `created_at`, so a delete
+            // of anything older than the cloud upload cursor is invisible to it
+            // until the cursor is pulled back.
+            crate::cloud::note_version_written(state, created_at);
+            Response::ok(id, ResponseData::Empty {})
+        }
         Err(e) => storage_error(id, "delete", e),
     }
 }
@@ -132,7 +138,19 @@ pub(super) fn delete_all(state: &AppState, id: u64) -> Response {
     // would put the rule in two places and leave the store's own callers with
     // the other behaviour.
     match state.store.delete_all() {
-        Ok(deleted) => Response::ok(id, ResponseData::Count(deleted)),
+        Ok(deleted) => {
+            if deleted > 0 {
+                // Every tombstone keeps its item's original stamp, so the cloud
+                // cursor has to be pulled back to the oldest of them for the
+                // clear to propagate at all.
+                match state.meta.oldest_version_ms() {
+                    Ok(Some(oldest)) => crate::cloud::note_version_written(state, oldest),
+                    Ok(None) => {}
+                    Err(e) => warn!(error = ?e, "could not reset the cloud upload cursor"),
+                }
+            }
+            Response::ok(id, ResponseData::Count(deleted))
+        }
         Err(e) => storage_error(id, "delete_all", e),
     }
 }
@@ -205,7 +223,7 @@ fn clamp_page(limit: u32, default: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::p2p::tests::test_state;
+    use crate::testutil::test_state;
     use crate::server::dispatch::dispatch_store;
     use copypaste_ipc::Method;
 

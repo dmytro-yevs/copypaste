@@ -1,29 +1,21 @@
-//! What we currently believe about the LAN: the peer table, its expiry, and
-//! its cap.
-//!
-//! Pure — no daemon, no sockets, and the clock is a parameter — so both the
-//! expiry rule and the eviction rule are tested directly.
+//! What we currently believe about the LAN: the peer table, its expiry, and its
+//! cap. Pure, and the clock is a parameter, so both rules are tested directly.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// How long a peer stays in the table after it was last seen.
-///
-/// mdns-sd publishes host records (A/SRV) with a 120 s TTL and refreshes ahead
-/// of expiry, so three minutes rides out a single lost refresh while still
-/// dropping a device that walked out of the building. Removal is normally
-/// prompt anyway — `ServiceRemoved` deletes the entry immediately — this is the
-/// backstop for the case where the goodbye packet never arrives.
+/// How long a peer stays in the table after it was last seen. mdns-sd publishes
+/// host records with a 120 s TTL and refreshes ahead of expiry, so three minutes
+/// rides out one lost refresh while still dropping a device that left the
+/// building. `ServiceRemoved` normally removes entries promptly; this is the
+/// backstop for a goodbye packet that never arrives.
 pub const PEER_TTL: Duration = Duration::from_secs(180);
 
-/// Hard ceiling on tracked peers.
-///
-/// mDNS is unauthenticated: anyone on the LAN can announce as many instances as
-/// they like. The table is bounded so that costs them nothing and us nothing.
-/// When full, the least recently seen entry is evicted — a live peer refreshes
-/// itself well inside [`PEER_TTL`], so flooding cannot push out a real device
-/// that is still talking.
+/// Hard ceiling on tracked peers. mDNS is unauthenticated, so anyone on the LAN
+/// can announce as many instances as they like; when full the least recently
+/// seen entry is evicted, and a live peer refreshes well inside [`PEER_TTL`], so
+/// a flood cannot push out a device that is still talking.
 pub const MAX_PEERS: usize = 256;
 
 /// A peer seen on the network. Presence here means "reachable", never
@@ -176,7 +168,6 @@ mod tests {
         assert_eq!(table.snapshot(10_500).len(), 1);
         assert!(table.find("fresh", 10_500).is_some());
 
-        // Exactly at the TTL is already stale.
         assert!(table.snapshot(11_000).is_empty());
         assert!(table.find("fresh", 11_000).is_none());
     }

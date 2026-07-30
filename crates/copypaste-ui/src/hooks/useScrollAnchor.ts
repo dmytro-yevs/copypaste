@@ -27,7 +27,7 @@
 import { type RefObject, useCallback, useLayoutEffect, useRef } from "react";
 import type { Virtualizer } from "@tanstack/react-virtual";
 
-import type { Item } from "../lib/ipc";
+import type { Item } from "@/lib/ipc";
 
 interface Anchor {
   readonly id: string;
@@ -39,11 +39,25 @@ interface Options {
   scrollRef: RefObject<HTMLDivElement | null>;
   virtualizer: Virtualizer<HTMLDivElement, Element>;
   items: readonly Item[];
+  /**
+   * The live preview-line setting. It is here for INV-6 rather than for
+   * measurement: changing it re-sizes every row at once, which is the one
+   * mutation that shrinks total height without changing the item list, and
+   * AT-4 requires the clamp to run *immediately* on that — not on the next
+   * user scroll.
+   */
+  previewLines: number;
 }
 
-export function useScrollAnchor({ scrollRef, virtualizer, items }: Options) {
+export function useScrollAnchor({
+  scrollRef,
+  virtualizer,
+  items,
+  previewLines,
+}: Options) {
   const anchorRef = useRef<Anchor | null>(null);
   const previousItems = useRef<readonly Item[] | null>(null);
+  const previousLines = useRef(previewLines);
 
   /**
    * Record which row the user is looking at. Called on every scroll event, so
@@ -76,7 +90,10 @@ export function useScrollAnchor({ scrollRef, virtualizer, items }: Options) {
     const el = scrollRef.current;
     if (!el) return;
 
-    if (previousItems.current === items) return;
+    const linesChanged = previousLines.current !== previewLines;
+    previousLines.current = previewLines;
+
+    if (previousItems.current === items && !linesChanged) return;
     const hadItems = previousItems.current !== null;
     previousItems.current = items;
     if (!hadItems) return; // first paint: nothing to preserve

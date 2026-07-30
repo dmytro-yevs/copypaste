@@ -8,11 +8,13 @@
 //! Layout:
 //! * [`client`] — socket, framing, typed request/response
 //! * [`render`] — human-readable output (pure functions)
+//! * [`cloud`] — where `cloud sign-in` gets its two secrets, and why not argv
 //! * [`error`] — exit codes and the "no paths in errors" rule
 
 #![forbid(unsafe_code)]
 
 mod client;
+mod cloud;
 mod error;
 mod render;
 
@@ -127,6 +129,43 @@ enum Command {
         #[arg(long, value_name = "PAIRING_ID")]
         peer: Option<String>,
     },
+
+    /// Sync clipboard history through a cloud account.
+    Cloud {
+        #[command(subcommand)]
+        action: CloudAction,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum CloudAction {
+    /// Sign in to the sync account and unlock the sync key.
+    ///
+    /// The password and the sync passphrase are read from
+    /// `COPYPASTE_CLOUD_PASSWORD` and `COPYPASTE_SYNC_PASSPHRASE`, or from
+    /// stdin as two lines. There is no flag for either: process arguments are
+    /// readable by every process running as this user.
+    ///
+    /// The passphrase is what the rows are encrypted with, and the backend
+    /// never sees it. Use the same one on every device, or each device will
+    /// hold rows the others cannot read.
+    SignIn {
+        /// The account email address.
+        #[arg(long, short = 'e', value_name = "EMAIL")]
+        email: String,
+    },
+
+    /// Forget the account, its tokens and the sync key on this device.
+    ///
+    /// Local history is untouched, and the daemon keeps the deployment it is
+    /// configured with.
+    SignOut,
+
+    /// Whether cloud sync is configured, signed in, and when it last ran.
+    Status,
+
+    /// Run one cloud sync round now instead of waiting for the poll.
+    Sync,
 }
 
 #[derive(Subcommand, Debug)]
@@ -217,6 +256,19 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Sync { peer } => Method::SyncNow {
             pairing_id: peer.clone(),
         },
+        Command::Cloud { action } => match action {
+            CloudAction::SignIn { email } => {
+                let (password, passphrase) = cloud::read_credentials()?;
+                Method::CloudSignIn {
+                    email: email.clone(),
+                    password,
+                    passphrase,
+                }
+            }
+            CloudAction::SignOut => Method::CloudSignOut,
+            CloudAction::Status => Method::CloudStatus,
+            CloudAction::Sync => Method::CloudSyncNow,
+        },
     };
 
     let response = client::request(method).await?;
@@ -283,6 +335,18 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             );
         }
         Command::Unpair { pairing_id } => println!("unpaired {pairing_id}"),
+        Command::Cloud { action } => match action {
+            CloudAction::Sync => {
+                let stats = client::expect_cloud_sync(data)?;
+                println!("{}", render::cloud_sync_text(&stats));
+            }
+            // Sign-in, sign-out and status all answer with the new status, so
+            // the user sees the state they just moved the daemon into.
+            _ => {
+                let status = client::expect_cloud_status(data)?;
+                println!("{}", render::cloud_status_text(&status, now_ms()));
+            }
+        },
         Command::Sync { .. } => {
             let results = client::expect_sync(data)?;
             println!("{}", render::sync_table(&results, "no paired devices"));

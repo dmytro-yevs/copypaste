@@ -5,18 +5,22 @@
  * be rendered.** The daemon's Unix socket path contains the local username, and
  * a transport error carrying it would leak that into the DOM, into screenshots
  * and into the accessibility tree. Raw errors are `console.error`'d and thrown
- * away; only a `ErrorKind` crosses into the view layer, and only
+ * away; only an `ErrorKind` crosses into the view layer, and only
  * `friendlyError()` turns one into text.
+ *
+ * Vocabulary is the canonical one (manifest §3.2.5): "clipboard service" /
+ * "background service", never "daemon", and American spelling.
  */
 
 /** The bridge surfaces these; they mirror `copypaste_ipc::ErrorCode` plus the
- *  two transport conditions the daemon itself cannot report. */
+ *  transport conditions the daemon itself cannot report. */
 export type ErrorKind =
   | "offline"
   | "not_ready"
   | "protocol_mismatch"
   | "not_found"
   | "invalid_request"
+  | "unavailable"
   | "internal"
   | "unknown";
 
@@ -34,12 +38,18 @@ export class IpcFailure extends Error {
 
 /** Patterns are matched against the *raw* text, which is then discarded. */
 const PATTERNS: ReadonlyArray<readonly [RegExp, ErrorKind]> = [
+  // Ordered: a Tauri "command not found" also mentions the word "command",
+  // so the unavailable test has to run before the generic ones.
+  [
+    /not allowed|command .* not found|unknown command|unimplemented|not implemented|not available in this build|unsupported/i,
+    "unavailable",
+  ],
   [/not[_ ]ready|starting up|initiali[sz]ing/i, "not_ready"],
-  [/protocol[_ ]mismatch|incompatible version/i, "protocol_mismatch"],
+  [/protocol[_ ]mismatch|incompatible version|different versions/i, "protocol_mismatch"],
   [/not[_ ]found|no such item/i, "not_found"],
   [/invalid[_ ]request/i, "invalid_request"],
   [
-    /connection refused|econnrefused|enoent|no such file|not running|socket|broken pipe|timed? out/i,
+    /connection refused|econnrefused|enoent|no such file|isn't running|not running|socket|broken pipe|timed? out/i,
     "offline",
   ],
   [/internal/i, "internal"],
@@ -47,7 +57,7 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, ErrorKind]> = [
 
 /**
  * Reduce anything thrown by the bridge to a safe kind. The raw value is logged
- * to the console (developer surface, not a rendered one) and never returned.
+ * to the console (a developer surface, not a rendered one) and never returned.
  */
 export function classifyError(raw: unknown): ErrorKind {
   if (raw instanceof IpcFailure) return raw.kind;
@@ -69,16 +79,15 @@ export function classifyError(raw: unknown): ErrorKind {
   return "unknown";
 }
 
-/** Vocabulary note (manifest 06 §3.2.5): "clipboard service" / "background
- *  service". Never "daemon". */
 const FRIENDLY: Record<ErrorKind, string> = {
   offline: "The background service is not running.",
   not_ready:
-    "The clipboard service is initialising. History will appear in a moment.",
+    "The clipboard service is initializing. This will only take a moment.",
   protocol_mismatch:
     "CopyPaste and the background service are on incompatible versions. Restart both to resolve.",
   not_found: "That item is no longer in your clipboard history.",
   invalid_request: "The background service rejected that request.",
+  unavailable: "This build of CopyPaste cannot do that yet.",
   internal: "The background service returned an error.",
   unknown: "The background service returned an error.",
 };
@@ -90,4 +99,10 @@ export function friendlyError(kind: ErrorKind): string {
 /** Convenience for the toast paths: classify and map in one step. */
 export function toFriendly(raw: unknown): string {
   return friendlyError(classifyError(raw));
+}
+
+/** True when the failure means "the bridge does not route this command yet",
+ *  which is a different screen from "the service is down". */
+export function isUnavailable(raw: unknown): boolean {
+  return raw !== null && raw !== undefined && classifyError(raw) === "unavailable";
 }

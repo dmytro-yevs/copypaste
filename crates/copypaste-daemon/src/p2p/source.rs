@@ -1,4 +1,4 @@
-//! The daemon's history, as a sync session sees it.
+//! The daemon's history, as a peer sync session sees it.
 //!
 //! Three rules the session depends on and cannot check for itself:
 //!
@@ -12,9 +12,9 @@
 //!   key derived from *this* device's secret — so content crosses the Noise
 //!   channel in the clear and is re-sealed on the other side.
 //! * **[`apply`] re-runs the merge.** The session decided from summaries, which
-//!   carry no origin; this is the only place both `origin_device_id`s exist, and
-//!   the only layer that sees a local write that landed while the session was in
-//!   flight. Skipping the re-check is how the two halves of a session disagree.
+//!   carry no origin; the re-check needs both `origin_device_id`s and the row as
+//!   it stands now. It lives in [`crate::merge`], with the cloud transport's,
+//!   because one comparator for every transport is manifest 05 INV-C2.
 //!
 //! [`summaries`]: SyncSource::summaries
 //! [`fetch`]: SyncSource::fetch
@@ -23,17 +23,12 @@
 use std::sync::Arc;
 
 use copypaste_p2p::protocol::{ItemSummary, SyncItem};
-use copypaste_p2p::sync::{merge_decision, MergeDecision, SyncError, SyncSource};
-use tracing::{debug, warn};
+use copypaste_p2p::sync::{SyncError, SyncSource};
+use tracing::warn;
 
-use crate::p2p::meta::IncomingVersion;
+use crate::merge::{apply_remote_version, open_version, RemoteVersion, MSG_STORE};
+use crate::meta::blocking;
 use crate::AppState;
-
-/// Fixed, pathless sentences. A `SyncError::Source` is logged by the peer and
-/// shown to a user, so it follows the same rule as an IPC error (`CLAUDE.md`
-/// rule 4).
-const MSG_METADATA: &str = "the history database could not be read";
-const MSG_ENCRYPT: &str = "the incoming item could not be encrypted";
 
 /// A [`SyncSource`] over the daemon's store.
 ///
@@ -52,30 +47,29 @@ impl StoreSource {
 
 impl SyncSource for StoreSource {
     fn device_id(&self) -> String {
-        self.state.p2p.meta.device_id().to_string()
+        self.state.meta.device_id().to_string()
     }
 
     fn device_name(&self) -> String {
-        self.state.p2p.meta.device_name().to_string()
+        self.state.meta.device_name().to_string()
     }
 
     fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError> {
         blocking(|| {
-            self.state.p2p.meta.summaries().map_err(|e| {
+            self.state.meta.summaries().map_err(|e| {
                 warn!(error = ?e, "could not read item summaries for a sync session");
-                SyncError::Source(MSG_METADATA.to_string())
+                SyncError::Source(MSG_STORE.to_string())
             })
         })
     }
 
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
         blocking(|| {
-            let rows = self.state.p2p.meta.fetch(ids).map_err(|e| {
+            let rows = self.state.meta.fetch(ids).map_err(|e| {
                 warn!(error = ?e, "could not read items for a sync session");
-                SyncError::Source(MSG_METADATA.to_string())
+                SyncError::Source(MSG_STORE.to_string())
             })?;
 
-            let key = self.state.keyring.item_key();
             let mut items = Vec::with_capacity(rows.len());
             for row in rows {
                 // A tombstone has no payload to open, and carries none on the
@@ -83,21 +77,9 @@ impl SyncSource for StoreSource {
                 let content = if row.deleted {
                     String::new()
                 } else {
-                    let (Some(ciphertext), Some(nonce)) =
-                        (row.content_ciphertext.as_ref(), row.nonce.as_ref())
-                    else {
-                        warn!(id = %row.item_id, "live item has no payload; not sending it");
-                        continue;
-                    };
-                    // The item id is the AAD, exactly as `server::to_wire` uses
-                    // it. One unreadable row must not fail the whole session —
-                    // the rest of the history is still worth syncing.
-                    match copypaste_core::decrypt(ciphertext, nonce, &key, &row.item_id) {
-                        Ok(plaintext) => String::from_utf8_lossy(&plaintext).into_owned(),
-                        Err(e) => {
-                            warn!(id = %row.item_id, error = ?e, "skipping an item that failed to decrypt");
-                            continue;
-                        }
+                    match open_version(&self.state, &row) {
+                        Some(content) => content,
+                        None => continue,
                     }
                 };
 
@@ -117,116 +99,40 @@ impl SyncSource for StoreSource {
 
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
         blocking(|| {
-            let meta = &self.state.p2p.meta;
-            let local = meta.local_version(&item.item_id).map_err(|e| {
-                warn!(error = ?e, "could not read the local version of an incoming item");
-                SyncError::Source(MSG_METADATA.to_string())
-            })?;
-
-            // The re-check. `plan` compared summaries, which have no origin and
-            // were taken before this session started writing; this comparison
-            // uses the true origin on both sides and the row as it stands now.
-            if let Some(local) = &local {
-                if merge_decision(
-                    &local.summary,
-                    &local.origin_device_id,
-                    &item.summary(),
-                    &item.origin_device_id,
-                ) == MergeDecision::KeepLocal
-                {
-                    debug!(id = %item.item_id, "local version wins; not applying");
-                    return Ok(false);
-                }
-            }
-
-            // Sensitivity is decided *here*, by this device's detector, not by
-            // whatever the sender thought. A tombstone has no content to judge,
-            // so it inherits the flag from the row it is deleting — otherwise
-            // deleting a flagged item would publish its hash to every peer.
-            let is_sensitive = if item.deleted {
-                local.as_ref().is_some_and(|l| l.is_sensitive)
-            } else {
-                self.state.detector.is_sensitive(&item.content)
-            };
-
-            let sealed = if item.deleted {
-                None
-            } else {
-                let key = self.state.keyring.item_key();
-                Some(
-                    copypaste_core::encrypt(item.content.as_bytes(), &key, &item.item_id).map_err(
-                        |e| {
-                            warn!(error = ?e, "could not seal an incoming item");
-                            SyncError::Source(MSG_ENCRYPT.to_string())
-                        },
-                    )?,
-                )
-            };
-            let (nonce, ciphertext) = match &sealed {
-                Some((nonce, ciphertext)) => (Some(nonce.as_slice()), Some(ciphertext.as_slice())),
-                None => (None, None),
-            };
-
-            let stored = meta
-                .apply(&IncomingVersion {
+            let created_at = item.created_at;
+            let applied = apply_remote_version(
+                &self.state,
+                &RemoteVersion {
                     item_id: &item.item_id,
-                    content_ciphertext: ciphertext,
-                    nonce,
+                    content: &item.content,
                     content_type: &item.content_type,
-                    content_hash: &item.content_hash,
                     created_at: item.created_at,
                     deleted: item.deleted,
-                    is_sensitive,
+                    // The peer protocol carries the sender's hash, and a
+                    // tombstone's hash is the deleted item's — so it is passed
+                    // through rather than recomputed from the empty content.
+                    content_hash: Some(&item.content_hash),
                     origin_device_id: &item.origin_device_id,
-                    search_text: if is_sensitive || item.deleted {
-                        None
-                    } else {
-                        Some(&item.content)
-                    },
-                })
-                .map_err(|e| {
-                    warn!(error = ?e, "could not store an incoming item");
-                    SyncError::Source(MSG_METADATA.to_string())
-                })?;
+                },
+            )
+            .map_err(|e| SyncError::Source(e.message().to_string()))?;
 
-            if stored {
-                debug!(id = %item.item_id, deleted = item.deleted, "applied a peer's version");
+            if applied {
+                // The item now exists here but carries the *sender's* stamp,
+                // which is routinely older than this device's cloud upload
+                // cursor. Without this it would never be forwarded to the
+                // account.
+                crate::cloud::note_version_written(&self.state, created_at);
             }
-            Ok(stored)
+            Ok(applied)
         })
-    }
-}
-
-/// Run a short blocking database call without stalling the reactor.
-///
-/// Every method above is SQLite plus an AEAD, and `SyncSource` is a synchronous
-/// trait called from inside an async session, so the work happens on whatever
-/// thread is driving the session. On the daemon's multi-threaded runtime
-/// `block_in_place` hands the other tasks to a different worker for the
-/// duration; on a current-thread runtime — which is what `#[tokio::test]`
-/// builds — it would panic, so there the call simply runs inline.
-fn blocking<T>(f: impl FnOnce() -> T) -> T {
-    use tokio::runtime::{Handle, RuntimeFlavor};
-    match Handle::try_current() {
-        Ok(handle) if matches!(handle.runtime_flavor(), RuntimeFlavor::MultiThread) => {
-            tokio::task::block_in_place(f)
-        }
-        _ => f(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capture;
-    use crate::p2p::tests::test_state;
-
-    fn add(state: &Arc<AppState>, content: &str) -> String {
-        capture::ingest(state, content, "text")
-            .expect("ingest")
-            .into_item()
-            .id
-    }
+    use crate::testutil::{add, test_state};
 
     #[test]
     fn a_locally_captured_item_is_advertised_with_this_device_as_its_origin() {
@@ -407,12 +313,5 @@ mod tests {
             .find(|s| s.item_id == id)
             .expect("the tombstone is still a version");
         assert!(summary.deleted);
-    }
-
-    #[test]
-    fn error_messages_contain_no_paths() {
-        for message in [MSG_METADATA, MSG_ENCRYPT] {
-            assert!(!message.contains('/'), "{message}");
-        }
     }
 }

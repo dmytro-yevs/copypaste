@@ -1,8 +1,5 @@
 //! The [`Store`] handle: what it takes to get a keyed, migrated, pooled
 //! connection, and nothing about what is then done with it.
-//!
-//! The queries live in [`super::items`], [`super::search`] and
-//! [`super::retention`], each adding its own `impl Store`.
 
 use std::path::Path;
 
@@ -53,12 +50,10 @@ impl Store {
         Ok(Self { pool })
     }
 
-    /// Opens a private in-memory database.
-    ///
-    /// The pool shares one in-memory database through a named shared-cache URI
-    /// (`SqliteConnectionManager::memory()` would give every pooled connection
-    /// its *own* empty database), and keeps one connection permanently idle so
-    /// the database is not dropped when the pool goes quiet.
+    /// Opens a private in-memory database. A named shared-cache URI, because
+    /// `SqliteConnectionManager::memory()` would give every pooled connection
+    /// its *own* empty database; one connection is held permanently idle so the
+    /// database is not dropped when the pool goes quiet.
     pub fn open_in_memory(db_key: &[u8; 32]) -> Result<Self, StoreError> {
         let uri = format!(
             "file:copypaste-{}?mode=memory&cache=shared",

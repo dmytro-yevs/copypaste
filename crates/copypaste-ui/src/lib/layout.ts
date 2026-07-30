@@ -1,60 +1,87 @@
 /**
- * Row geometry for the virtualiser — manifest 06 §3.1.3 and §5.2.
+ * Row geometry for the virtualiser, and the timing constants — manifest 06
+ * §3.1.3, §5.1, §5.2, §5.3.
  *
  * INV-5: **row heights are over-reserved, never estimated from the content.**
  * The rendered height of a preview depends on the pane width, which a pure
- * height function cannot know, so every text row reserves the full
- * `PREVIEW_LINES` cap whether or not the clip fills it. The "smarter"
- * character-count estimate was itself the bug (CopyPaste-g27b.30): it
- * under-reserved at narrow widths and rows overlapped site-wide.
+ * height function cannot know, so every text row reserves the full preview-line
+ * cap whether or not the clip fills it. The "smarter" character-count estimate
+ * was itself the bug (CopyPaste-g27b.30): it under-reserved at narrow widths
+ * and rows overlapped site-wide.
  *
  * The row renders inside a box of exactly this height with `overflow: hidden`,
- * so the reservation is an upper bound by construction, not by arithmetic.
+ * so the reservation is an upper bound by construction rather than by
+ * arithmetic.
+ *
+ * Every pixel below is derived from a design token, and the derivation is the
+ * load-bearing part: if `--pad-row-y` or `--lh-normal` changes in
+ * `design/tokens`, these numbers change with it or rows overlap.
  *
  * The density axis ("compact" / "comfortable" / "spacious") is not ported:
  * production froze it to "comfortable" and manifest §9.2 says collapse it.
  */
 
-/** Row vertical padding, both halves. Derived from `--pad-row-y: 9px`. */
-export const ROW_PAD_V = 18;
+/** Row vertical padding, both halves. 2 × `--pad-row-y` (10px). */
+export const ROW_PAD_V = 20;
 
-/** `--fs-base` 14px x `--lh-normal` 1.5. */
+/** `--fs-sm` 14px × `--lh-normal` 1.5. */
 export const TITLE_LINE_PX = 21;
 
-/** Meta line height, and its margin above the title. */
+/** `--fs-xs` 12px × `--lh-normal` 1.5, and the gap above it. */
 export const META_LINE_PX = 18;
-export const META_MARGIN_PX = 2;
+export const META_MARGIN_PX = 4;
 
-/** 21 + 2 + 18 + 18. Guarantees a strictly positive gap to the next row. */
+/** 21 + 4 + 18 + 20 = 63. Guarantees a strictly positive gap to the next row. */
 export const SINGLE_LINE_FLOOR =
   TITLE_LINE_PX + META_MARGIN_PX + META_LINE_PX + ROW_PAD_V;
 
-/** Preview lines a text row reserves. v1 exposed this as a 1-6 slider; v2 has
- *  no settings screen, so it is one constant that the height and the CSS
- *  line-clamp both read. */
-export const PREVIEW_LINES = 2;
+/** The bounds of the `previewLines` preference (Settings › List). */
+export const MIN_PREVIEW_LINES = 1;
+export const MAX_PREVIEW_LINES = 6;
+export const DEFAULT_PREVIEW_LINES = 2;
 
 /**
- * The reserved height of a row. Constant by design: every text row gets the
- * full cap (INV-5). It is a function rather than a bare constant so that a
- * second content kind — an image or file row, which manifest §3.1.3 sizes
- * differently — changes this one place and nothing else.
+ * The reserved height of a row at a given preview-line cap.
+ *
+ * Constant in the content by design: it is a function of the *setting*, never
+ * of the item (INV-5). Callers pass the live preference so that changing it
+ * re-measures every row at once — and shrinks total height below the current
+ * scroll offset, which is what INV-6's clamp exists for.
  */
-export function rowHeight(): number {
-  return SINGLE_LINE_FLOOR + (PREVIEW_LINES - 1) * TITLE_LINE_PX;
+export function rowHeight(previewLines: number): number {
+  const lines = Math.min(
+    MAX_PREVIEW_LINES,
+    Math.max(MIN_PREVIEW_LINES, Math.round(previewLines)),
+  );
+  return SINGLE_LINE_FLOOR + (lines - 1) * TITLE_LINE_PX;
 }
 
-export const ROW_HEIGHT = rowHeight();
-
 /** Manifest §5.2: 240px of overscan above and below the viewport. TanStack
- *  counts rows rather than pixels, so convert once, here. */
+ *  counts rows rather than pixels, so convert at the call site. */
 export const OVERSCAN_PX = 240;
-export const OVERSCAN_ROWS = Math.ceil(OVERSCAN_PX / ROW_HEIGHT);
+export function overscanRows(previewLines: number): number {
+  return Math.ceil(OVERSCAN_PX / rowHeight(previewLines));
+}
 
-/** Manifest §5.2 / §5.3. */
+/* ------------------------------------------------------------- constants --- */
+
+/** §5.2. The daemon clamps with its own maximum. */
 export const PAGE_SIZE = 200;
+/** §5.2: fire load-more when the scroller is within 300px of the bottom. */
+export const LOAD_MORE_THRESHOLD_PX = 300;
+/** §5.3. */
 export const SEARCH_LIMIT = 500;
 export const SEARCH_DEBOUNCE_MS = 250;
 export const UNDO_WINDOW_MS = 5000;
 export const COPY_FLASH_MS = 700;
 export const REVEAL_TIMEOUT_MS = 10_000;
+
+/** §5.1. 3000ms while healthy; 5000ms while offline or erroring — never
+ *  hammer a dead or initializing service. */
+export const POLL_ACTIVE_MS = 3000;
+export const POLL_BACKOFF_MS = 5000;
+/** §5.1: status polls faster so "offline" surfaces within one cycle. */
+export const STATUS_POLL_MS = 2000;
+/** §5.1: `list_peers` at 10s — an online dot refresh without user
+ *  interaction, decoupled from the status poll so it is ≤6 calls/min. */
+export const PEERS_POLL_MS = 10_000;

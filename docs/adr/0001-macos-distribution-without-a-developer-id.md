@@ -52,7 +52,7 @@ tempting violation:
 | Capability | What we do | What we must not do |
 |---|---|---|
 | Read the clipboard | Poll `NSPasteboard`, which needs no permission | Install a `CGEvent` tap to notice Cmd+C |
-| Global hotkey | Carbon `RegisterEventHotKey` — the one public global-hotkey API that needs no Accessibility, because the app is told about exactly one combination and never sees other input. **Which path `tauri-plugin-global-shortcut` actually takes is unverified; see ADR-0002.** | `NSEvent.addGlobalMonitorForEvents` or `CGEvent.tapCreate`, both of which require Accessibility |
+| Global hotkey | Carbon `RegisterEventHotKey` — the one public global-hotkey API that needs no Accessibility, because the app is told about exactly one combination and never sees other input. **Verified**: `tauri-plugin-global-shortcut` → `global-hotkey` 0.8.0 takes this path for every key with a Carbon scancode. See ADR-0002 for the file and line, and for the five media keys that are the exception. | `NSEvent.addGlobalMonitorForEvents` or `CGEvent.tapCreate`, both of which require Accessibility. `global-hotkey` reaches `CGEventTapCreate` for media keys only, which is why the app refuses to bind them |
 | Paste back | Put the item on the pasteboard; the user presses Cmd+V | Synthesise Cmd+V with `CGEventPost`, which requires Accessibility |
 
 Two costs we accept in exchange:
@@ -108,13 +108,78 @@ it lives in the cask rather than in instructions we ask the user to paste,
 because a README that tells people to run `xattr -rd` teaches a habit that is
 genuinely dangerous elsewhere.
 
-This path is not guaranteed to last. Homebrew has been steadily narrowing
-unsigned distribution, and a future release may close `postflight` as well. The
-fallback, if that happens, is a source-built formula: a locally compiled binary
-is never quarantined, so Gatekeeper is never involved and no attribute needs
-removing. The cost is that the user needs the Xcode command line tools and a
-long build — SQLCipher compiles from source — which is why it is the fallback
-and not the default.
+### Verified, 2026-07-30
+
+The paragraphs above were originally written from search results. They have
+since been checked against Homebrew's own source and issue tracker, because
+being wrong about this means users cannot launch the app at all. The findings,
+with what was checked:
+
+- **`postflight` still exists and still runs arbitrary Ruby.** `Cask::DSL`
+  registers it from `ARTIFACT_BLOCK_CLASSES`
+  (`Artifact::PreflightBlock`, `Artifact::PostflightBlock`) on current master.
+- **`system_command` is still available inside it**, as a public method on
+  `Cask::DSL::Base`, alongside the `appdir` and `staged_path` delegators the
+  snippet uses. Both names in the snippet resolve.
+- **The ordering is right.** Flight blocks run inside
+  `Cask::Installer#install_artifacts`, which happens after `stage` — so the
+  bundle is already at `#{appdir}` when `postflight` runs.
+- **A third-party tap runs no audit**, and `brew audit` is not invoked on
+  install. Nothing checks the cask against the notarisation rule.
+- **The `--no-quarantine` guidance is quoted correctly.** The sentence
+  attributed to Homebrew above is verbatim from a Homebrew maintainer on
+  discussion #6537. On the same thread, a second maintainer objected
+  specifically to the `sudo xattr -rd com.apple.quarantine /Applications/*`
+  form on the grounds that it trusts every app in the folder — which is the
+  same objection this ADR makes, arrived at independently.
+- **The homebrew/cask deadline is real and dated.** Casks failing Gatekeeper
+  checks are removed from the core tap on **2026-09-01**.
+
+One wording correction: `--no-quarantine` was **deprecated**, not deleted from
+the parser. The distinction does not matter — the flag no longer suppresses
+quarantine, and there is no replacement — but "removed" invites someone to go
+looking for a version where it still worked.
+
+### Two things this ADR did not say, and should
+
+**The snippet may not be sufficient.** v1 shipped this same cask and found that
+stripping the attribute was not enough on its own: the app still refused to
+launch, with `RBSRequestErrorDomain Code=5` / POSIX 163, shown to the user as
+"CopyPaste.app can't be opened." v1's fix was to re-seal the bundle in the same
+`postflight` with `codesign --force --sign -`.
+
+The likely cause is that v1 signed with `--options runtime`. The hardened
+runtime is a *precondition for notarisation*, so on a bundle we will never
+notarise it costs something and buys nothing. v2's build therefore drops it,
+which should remove the failure — but the ADR should not have implied the
+`xattr` call alone was known to be enough, because it was not. The cask keeps
+the re-seal until a real install shows it is redundant. Re-signing is harmless
+here for the reason the whole first half of this document exists: the app needs
+no TCC grant, so nothing depends on the code hash staying put.
+
+**A hardened runtime and an entitlements file are not wanted.** Stated
+explicitly because it is the natural thing to copy from any macOS signing
+guide, and because v1 did copy it.
+
+### Why this path may still close
+
+Homebrew has been steadily narrowing unsigned distribution, and there is now a
+visible direction of travel: the Cask Cookbook has gained `postflight_steps`
+and its siblings — a declarative mini-DSL "stored in the JSON API" that
+"avoid[s] loading cask Ruby for common operations" — and states that a phase
+"may define either its Ruby flight block or its matching steps block, not
+both". Arbitrary Ruby in a cask is now the discouraged form of something with a
+declarative replacement, which is usually how a feature ends.
+
+That mini-DSL includes a `run` operation, so the migration target, if flight
+blocks are ever restricted, is most likely `postflight_steps` rather than
+nothing. **Watch for it**; do not wait to be broken by it.
+
+The fallback beyond that is unchanged: a source-built formula. A locally
+compiled binary is never quarantined, so Gatekeeper is never involved and no
+attribute needs removing. The cost is that the user needs the Xcode command
+line tools and a long build — SQLCipher compiles from source — which is why it
+is the fallback and not the default.
 
 ## What would change this
 

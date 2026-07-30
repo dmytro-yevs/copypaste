@@ -1,0 +1,332 @@
+name: Release
+
+# Builds and publishes a macOS release: the .app in a DMG, the CLI and daemon
+# in a tarball, and the Homebrew cask and formula that point at both.
+#
+# ---------------------------------------------------------------------------
+# NOTHING IN THIS FILE HOLDS A SIGNING CREDENTIAL
+# ---------------------------------------------------------------------------
+# That is the entire premise of ADR-0001, not an accident of the current setup.
+# There is no APPLE_CERTIFICATE, no APPLE_ID, no APPLE_TEAM_ID, no notarisation
+# step and no keychain import. Signing is ad-hoc (`codesign --sign -`), which
+# needs no identity and no secret. If a future change adds one, ADR-0001 has to
+# change first — a Developer ID would make most of this workflow, and the
+# cask's postflight, unnecessary.
+#
+# The one optional secret is HOMEBREW_TAP_TOKEN, and it signs nothing: it is
+# contents:write on the tap repository so the workflow can publish the updated
+# cask. Without it the workflow still succeeds and attaches the cask and
+# formula to the release for a maintainer to copy across by hand.
+#
+# ---------------------------------------------------------------------------
+# UNVERIFIED
+# ---------------------------------------------------------------------------
+# This project is developed on Linux. Every macOS-specific step below —
+# codesign, hdiutil, PlistBuddy, the Tauri macOS bundler, and whether the
+# resulting bundle actually launches — was written from documentation and from
+# v1's scripts on archive/v0.4.1-pre-rewrite. None of it has been executed on a
+# Mac. Treat the first run as an experiment and read the log.
+#
+# ---------------------------------------------------------------------------
+# Why this is not cargo-dist
+# ---------------------------------------------------------------------------
+# CLAUDE.md rule 1 makes a maintained tool the default, so cargo-dist (now
+# "dist") was evaluated first. It does not package macOS .app bundles or DMGs.
+# axodotdev/cargo-dist#24, "macos .dmg/.app installer support?", has been open
+# since October 2022 and the maintainers' position on it is that it is "more
+# gui app specific ... out of scope for MVP". Its supported artefacts are
+# tarballs of plain binaries; its Homebrew installer generates a formula and
+# has no cask support, so it cannot express `app "CopyPaste.app"` or the
+# postflight ADR-0001 requires. It would therefore cover the CLI tarball and
+# formula and nothing else — the .app, the DMG, the cask and the quarantine
+# handling would still be hand-written, and the release would be split across
+# two systems that each want to own the GitHub Release.
+#
+# Verdict: not adopted, and the reason is capability rather than preference.
+# Worth revisiting if #24 is ever implemented, at which point the CLI half of
+# this workflow could be deleted outright.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, without the leading v (e.g. 2.0.0-alpha.1)"
+        required: true
+        type: string
+      publish:
+        description: "Create a GitHub Release and publish to the tap"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Resolve the version once, so the tag, the workspace manifest, the DMG
+  # filename, the cask and the formula cannot disagree with each other.
+  # ---------------------------------------------------------------------------
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: resolve
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            publish=true
+          else
+            version="${{ inputs.version }}"
+            publish="${{ inputs.publish }}"
+          fi
+          version="${version#v}"
+
+          # The workspace manifest is the single source of the version: no
+          # tauri.conf.json "version" key exists, so Tauri reads the Cargo
+          # package version, which comes from [workspace.package]. Nothing in
+          # this pipeline rewrites it — a mismatch is a mistake in preparing
+          # the release, and it is much cheaper to fail here than to publish a
+          # DMG whose Info.plist disagrees with its own filename.
+          ws="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml)"
+          if [[ "$ws" != "$version" ]]; then
+            echo "::error::version mismatch — requested '$version', Cargo.toml [workspace.package] says '$ws'"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "Building $version (publish=$publish)"
+
+  # ---------------------------------------------------------------------------
+  # Build on macOS. arm64 only: the release ships a single aarch64 slice, not a
+  # universal binary, matching `depends_on arch: :arm64` in the cask. Homebrew
+  # is winding down Intel support and this project has no Intel user to serve.
+  # ---------------------------------------------------------------------------
+  macos:
+    name: Build macOS (arm64)
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-14-release
+          # SQLCipher compiles from C on a cold cache and dominates the build.
+          # Saving on a release run keeps the next one usable.
+          save-if: "true"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - name: Confirm no signing identity is present
+        # A guard, not a formality. If a Developer ID ever appears in the
+        # runner keychain or the environment, the build would silently start
+        # producing something ADR-0001 does not describe, and the difference
+        # would not be visible in any artefact name.
+        run: |
+          set -euo pipefail
+          if [[ -n "${APPLE_SIGNING_IDENTITY:-}${APPLE_CERTIFICATE:-}${APPLE_ID:-}" ]]; then
+            echo "::error::an Apple signing credential is present in the environment; ADR-0001 says this pipeline has none"
+            exit 1
+          fi
+          echo "Signing identities available to this runner:"
+          security find-identity -v -p codesigning || true
+
+      - name: Build and sign CopyPaste.app
+        run: ./scripts/release/build-macos-app.sh "${{ needs.version.outputs.version }}" arm64
+
+      - name: Package DMG
+        run: ./scripts/release/make-dmg.sh "${{ needs.version.outputs.version }}" arm64
+
+      - name: Package CLI tarball
+        run: ./scripts/release/build-cli-tarball.sh "${{ needs.version.outputs.version }}" arm64
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          {
+            echo '## Artefacts'
+            echo
+            echo '```'
+            ( cd dist && shasum -a 256 ./*.dmg ./*.tar.gz )
+            echo '```'
+            echo
+            echo 'Ad-hoc signed, not notarised — see ADR-0001.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Generate the cask and the formula from the artefacts that were actually
+  # built, so the checksums come from the files being published rather than
+  # from a re-download.
+  # ---------------------------------------------------------------------------
+  packaging:
+    name: Generate cask and formula
+    needs: [version, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64
+          path: dist
+
+      - name: Stamp cask and formula
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+
+          dmg="dist/CopyPaste-v${version}-macos-arm64.dmg"
+          tgz="dist/copypaste-cli-v${version}-macos-arm64.tar.gz"
+          [[ -f "$dmg" ]] || { echo "::error::$dmg missing"; exit 1; }
+          [[ -f "$tgz" ]] || { echo "::error::$tgz missing"; exit 1; }
+
+          # Computed from the artefact, not read from the .sha256 sidecar.
+          # Trusting the sidecar would mean the cask and the file it verifies
+          # could both be wrong in the same way.
+          dmg_sha="$(sha256sum "$dmg" | cut -d' ' -f1)"
+          tgz_sha="$(sha256sum "$tgz" | cut -d' ' -f1)"
+
+          # And then check the sidecars agree, because a disagreement means
+          # something rewrote an artefact between jobs.
+          grep -q "$dmg_sha" "${dmg}.sha256" || { echo "::error::DMG checksum does not match its .sha256 sidecar"; exit 1; }
+          grep -q "$tgz_sha" "${tgz}.sha256" || { echo "::error::tarball checksum does not match its .sha256 sidecar"; exit 1; }
+
+          ./scripts/release/gen-cask.sh    "$version" "$dmg_sha" --out tap
+          ./scripts/release/gen-formula.sh "$version" "$tgz_sha" --out tap
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew
+          path: tap/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Publish.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish release
+    needs: [version, macos, packaging]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      # The only widened permission in this file, and only on this job.
+      contents: write
+    steps:
+      # Needed for packaging/release-notes.md. The artefacts land in dist/
+      # (already gitignored) and tap/ (not — worth adding, but .gitignore is a
+      # shared file and this job only ever runs on a throwaway checkout).
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew
+          path: tap
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # The notes live in packaging/release-notes.md rather than inline.
+          # A heredoc cannot be used here: its terminator has to sit at column
+          # zero, and column zero inside a YAML block scalar ends the block. A
+          # file also makes the text reviewable in a diff instead of buried in
+          # a workflow step.
+          [[ -f packaging/release-notes.md ]] || { echo "::error::packaging/release-notes.md missing"; exit 1; }
+
+          # --verify-tag: refuse to create a release for a tag that does not
+          # exist, so a typo in a manual dispatch cannot invent one.
+          gh release create "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --title "v${VERSION}" \
+            --notes-file packaging/release-notes.md \
+            --verify-tag \
+            $([[ "$VERSION" == *-* ]] && echo --prerelease) \
+            dist/*.dmg dist/*.dmg.sha256 \
+            dist/*.tar.gz dist/*.tar.gz.sha256 \
+            tap/Casks/copypaste.rb \
+            tap/Formula/copypaste-cli.rb
+
+      - name: Publish to the Homebrew tap
+        # Skipped entirely when the secret is absent, which is the default. The
+        # cask and formula are attached to the release above either way, so a
+        # maintainer can always copy them across by hand — the token buys
+        # convenience, not capability.
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TAP_TOKEN:-}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN is not set — skipping tap publication."
+            echo "The cask and formula are attached to the release; copy them into"
+            echo "the tap by hand, or run scripts/release/setup-tap.sh --help."
+            exit 0
+          fi
+
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/${{ github.repository_owner }}/homebrew-copypaste.git" \
+            tap-repo
+
+          mkdir -p tap-repo/Casks tap-repo/Formula
+          cp tap/Casks/copypaste.rb        tap-repo/Casks/copypaste.rb
+          cp tap/Formula/copypaste-cli.rb  tap-repo/Formula/copypaste-cli.rb
+
+          cd tap-repo
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks Formula
+
+          if git diff --cached --quiet; then
+            echo "Tap already up to date."
+            exit 0
+          fi
+
+          git commit -m "copypaste ${VERSION}"
+          git push origin HEAD:main

@@ -76,6 +76,28 @@ pub enum Method {
     /// Sync now with one peer, or with every known peer when `pairing_id` is
     /// absent. Returns per-peer counts.
     SyncNow { pairing_id: Option<String> },
+
+    // ---- cloud sync --------------------------------------------------------
+    /// Sign into the sync account and unlock the sync key.
+    ///
+    /// Three secrets in one call because they are one gesture: the account
+    /// credentials authenticate to the backend, and the passphrase derives the
+    /// key the backend must never be able to derive. All three cross a `0600`
+    /// socket and none is logged or echoed back.
+    CloudSignIn {
+        email: String,
+        password: String,
+        passphrase: String,
+    },
+    /// Forget the account, the tokens and the sync key on this device.
+    ///
+    /// Persistent, and it keeps the deployment's URL and anon key — those are
+    /// configuration, not credentials (manifest 04, `CopyPaste-crh3.100`).
+    CloudSignOut,
+    /// Whether cloud sync is configured, signed in, and when it last ran.
+    CloudStatus,
+    /// Run one push-then-pull round now instead of waiting for the poll.
+    CloudSyncNow,
 }
 
 /// One reply. `ok` distinguishes success from failure without inspecting the
@@ -123,7 +145,49 @@ pub enum ResponseData {
     Pairing(PairingData),
     Peers(Vec<PeerInfo>),
     Sync(Vec<SyncResult>),
+    CloudStatus(CloudStatusData),
+    CloudSync(CloudSyncData),
+    /// Must stay last: an empty struct variant matches any JSON object, so an
+    /// arm below it would never be reached by the untagged decoder.
     Empty {},
+}
+
+/// What `copypaste cloud status` reports.
+///
+/// No URL, no email domain guessing, no token, and no path: everything here is
+/// either a flag or something the user typed themselves.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudStatusData {
+    /// A deployment URL and anon key are configured on the daemon.
+    pub configured: bool,
+    /// A session is held for an account.
+    pub signed_in: bool,
+    /// The sync key is unlocked, so rows can actually be sealed and opened.
+    /// Distinct from `signed_in`: v1 could be signed in with no passphrase and
+    /// silently synced nothing.
+    pub key_ready: bool,
+    /// The signed-in account, as the user typed it.
+    pub email: Option<String>,
+    /// When the last round completed, in Unix milliseconds.
+    pub last_sync_ms: Option<i64>,
+    /// Why the last round failed. A fixed sentence — never a path or a token.
+    pub last_error: Option<String>,
+    /// The current adaptive idle interval, in seconds.
+    pub poll_interval_secs: u64,
+}
+
+/// What one cloud round did. Mirrors `copypaste_cloud::SyncStats`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct CloudSyncData {
+    pub uploaded: u32,
+    pub tombstoned: u32,
+    pub downloaded: u32,
+    pub applied: u32,
+    /// Withheld from upload because the detector flagged them. Never zero by
+    /// accident: this is the count the user can check the rule against.
+    pub skipped_sensitive: u32,
+    pub skipped_undecryptable: u32,
+    pub skipped_future: u32,
 }
 
 /// A freshly minted pairing, returned once and never retrievable again.
@@ -194,6 +258,11 @@ pub enum ErrorCode {
     InvalidRequest,
     ProtocolMismatch,
     NotReady,
+    /// Credentials were rejected, or the operation needs credentials the daemon
+    /// does not hold. Its own code because the recovery is a human action —
+    /// sign in, retype the passphrase — and never a retry (manifest 04's
+    /// `auth_failed`).
+    AuthFailed,
     Internal,
 }
 

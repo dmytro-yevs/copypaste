@@ -1,12 +1,8 @@
 //! The false-positive gates a regex match must survive before it counts.
 //!
-//! Every function here answers "the shape matched — is it actually a secret?",
-//! and every one of them exists because a v1 rule without it deleted user data
-//! or missed a real credential. They are pure and total: no allocation-free
-//! promises, no fast paths, no second copy of the same algorithm (§7.3).
-//!
-//! [`super::spec::Validator`] names which of these a rule runs;
-//! [`super::engine`] does the dispatch.
+//! Each answers "the shape matched — is it actually a secret?", and each exists
+//! because a v1 rule without it deleted user data or missed a real credential.
+//! No fast paths and no second copy of the same algorithm (§7.3).
 
 /// Characters in the §5.3 "special character" set. Note `$`, `#`, `%`, `/` and
 /// `=` are *strength* signals here, which is why the code-shape rejection below
@@ -19,11 +15,9 @@ const STRENGTH_SPECIALS: &str = "!@#$%^&*+/=";
 const CODE_SHAPED_CHARS: &[char] = &['(', ')', '\'', '"', '`', '<', '>'];
 
 /// Whole-value placeholder stopwords (gitleaks' allowlist model, §5.6 — v1 had
-/// *no* allowlist of any kind and called it its biggest structural gap).
-///
-/// Matched against the **entire** value, case-insensitively, never as a
-/// substring: a substring match could suppress a real credential that happens
-/// to contain one of these letter sequences.
+/// none and called that its biggest structural gap). Matched against the
+/// **entire** value, case-insensitively, never as a substring: a substring
+/// match could suppress a real credential containing one of these sequences.
 const VALUE_STOPWORDS: &[&str] = &[
     "changeme",
     "change_me",
@@ -50,30 +44,38 @@ const VALUE_STOPWORDS: &[&str] = &[
 ];
 
 /// Value-strength gate — the manifest's only post-match validator for keyword
-/// rules (§5.3), plus the two v2 additions §7.1 and §7.7 ask for.
+/// rules (§5.3), plus the v2 additions §7.1 and §7.7 ask for.
 ///
-/// The three manifest criteria, verbatim. A value is strong if **any** holds:
+/// A value is strong if **any** of the three manifest criteria holds:
 ///
-/// 1. `value.chars().count() >= 10` — **characters, not bytes**;
+/// 1. `value.chars().count() >= 10` — **characters, not bytes**. A 9-character
+///    CJK value (`私的秘密言葉確認鍵`) is 27 bytes, and a byte gate would call
+///    it strong; pinned by `multibyte_value_gated_on_chars_not_bytes`.
 /// 2. contains one of `! @ # $ % ^ & * + / =`;
 /// 3. contains at least one ASCII letter **and** at least one ASCII digit.
 ///
-/// > **The char-vs-byte gate.** A 9-character CJK value (`私的秘密言葉確認鍵`)
-/// > is 27 bytes. A byte-length gate would call it strong; the char gate
-/// > correctly calls it weak. Pinned by `multibyte_value_gated_on_chars_not_bytes`.
+/// The criteria are applied to the value with **balanced surrounding quotes
+/// stripped**, because `password="S3cr3tValue"` — the ordinary shape of a
+/// credential in `.env`, JSON and YAML — otherwise dies on the code-shape
+/// rejection below and is missed entirely. A missed secret reaches
+/// `clipboard_fts`, which is the one table not under the item AEAD, and is then
+/// syncable. Stripping is deliberately limited to a *balanced* pair, so
+/// `prompt('enter` keeps its unbalanced quote and stays rejected.
 ///
-/// Two rejections run *before* those criteria:
+/// Two rejections then run *before* the criteria:
 ///
 /// * **Code shape.** The benign corpus contains
-///   `const password = prompt('enter password:');`. Group 1 captures
+///   `const password = prompt('enter password:');`, where group 1 captures
 ///   `prompt('enter` — 13 characters, so criterion 1 calls it strong and v1
-///   auto-wiped it. That entry is one of the two FPs v1's 5 % budget silently
-///   absorbed (§7.7). A value containing `(`, `)`, `'`, `"`, `` ` ``, `<`, `>`,
-///   or opening with `$`/`${`/`{{` is source code or a template reference, not
-///   a literal secret. Biasing toward "not a secret" is the direction CLAUDE.md
-///   rule 4 and manifest I1 both require.
+///   auto-wiped it (one of the two FPs v1's 5 % budget absorbed, §7.7). A value
+///   containing `(`, `)`, `'`, `"`, `` ` ``, `<`, `>`, or opening with
+///   `$`/`${`/`{{` is code or a template reference, and biasing toward "not a
+///   secret" is what CLAUDE.md rule 4 and manifest I1 require. Neither the
+///   code-shape nor the stopword rejection is in §5.3; both are v2 additions,
+///   so where they contradict §5.3 the manifest wins.
 /// * **Stopwords** (§5.6).
 pub(super) fn value_is_strong(value: &str) -> bool {
+    let value = unquote(value);
     if value.starts_with('$') || value.contains("${") || value.contains("{{") {
         return false;
     }
@@ -90,15 +92,26 @@ pub(super) fn value_is_strong(value: &str) -> bool {
             && value.chars().any(|c| c.is_ascii_digit()))
 }
 
-/// Luhn checksum over a candidate digit run. Manifest §5.4.
+/// Strip one *balanced* pair of surrounding quotes, plus the trailing `,` or `;`
+/// that a JSON or config line leaves on the captured value.
 ///
-/// **One implementation** (§7.3): v1 shipped `luhn_valid` and
-/// `luhn_valid_strict` as byte-for-byte the same algorithm, justified by an
-/// allocation saving that did not exist — both allocated, both ran the same
-/// digit filter.
-///
-/// The `13 ..= 19` clamp is load-bearing: it rejects short and long numeric
-/// runs outright, independently of the checksum.
+/// Balanced only: an opening quote with no closing partner is the
+/// `prompt('enter` shape and must survive to be rejected as code.
+fn unquote(value: &str) -> &str {
+    let trimmed = value.trim_end_matches([',', ';']);
+    let mut chars = trimmed.chars();
+    match (chars.next(), chars.next_back()) {
+        (Some(first), Some(last)) if first == last && matches!(first, '"' | '\'' | '`') => {
+            chars.as_str()
+        }
+        _ => trimmed,
+    }
+}
+
+/// Luhn checksum over a candidate digit run (§5.4). **One implementation**
+/// (§7.3): v1 shipped `luhn_valid` and `luhn_valid_strict` as byte-for-byte the
+/// same algorithm. The `13 ..= 19` clamp is load-bearing — it rejects short and
+/// long numeric runs independently of the checksum.
 pub(super) fn luhn_valid(candidate: &str) -> bool {
     let digits: Vec<u32> = candidate
         .bytes()
@@ -128,11 +141,10 @@ pub(super) fn luhn_valid(candidate: &str) -> bool {
     sum.is_multiple_of(10)
 }
 
-/// SSN group structure, per §4.2: group 1 in 001–899, group 2 in 01–99,
-/// group 3 in 0001–9999, no all-zero group.
-///
-/// This only trims obvious non-SSNs; the rule stays below the auto-wipe floor
-/// regardless, because a *real* SSN is still the user's own data (§4.2).
+/// SSN group structure, per §4.2: group 1 in 001–899, group 2 in 01–99, group 3
+/// in 0001–9999, no all-zero group. Trims obvious non-SSNs only; the rule stays
+/// below the auto-wipe floor regardless, because a *real* SSN is still the
+/// user's own data (§4.2).
 pub(super) fn ssn_structure_plausible(matched: &str) -> bool {
     let groups: Vec<u32> = matched
         .split(|c: char| !c.is_ascii_digit())
@@ -157,14 +169,10 @@ pub(super) fn phone_is_formatted(matched: &str) -> bool {
             .any(|c| matches!(c, '(' | ')' | '-' | '.') || c.is_whitespace())
 }
 
-// ---------------------------------------------------------------------------
-// Tests — §5.3 the value-strength gate, §5.4 Luhn, §4.2 SSN, §7.7 phone shape
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sensitive::engine::test_support::{all_rules, detector, fired};
+    use crate::sensitive::engine::test_support::{all_rules, detector, fired, rep};
     use crate::sensitive::Severity;
 
     #[test]
@@ -270,5 +278,82 @@ mod tests {
         assert!(phone_is_formatted("+1 555 867 5309"));
         assert!(phone_is_formatted("555-867-5309"));
         assert!(!phone_is_formatted("1234567890"));
+    }
+
+    /// The security fix: a quoted value is the ordinary shape of a credential in
+    /// `.env`, JSON and YAML, and the code-shape gate was throwing every one of
+    /// them away. A missed secret reaches `clipboard_fts` and syncs.
+    #[test]
+    fn quoted_credentials_are_detected() {
+        let det = detector();
+        for text in [
+            r#"password="S3cr3tValue""#,
+            "password = 'S3cr3tValue'",
+            r#""password": "hunter2xyz""#,
+            r#"{"api_key": "abc123XYZlong", "region": "us-east-1"}"#,
+            r#"password="S3cr3tValue","#,
+            "db_password: `S3cr3tValue`",
+        ] {
+            assert!(det.is_sensitive(text), "missed a quoted credential: {text}");
+        }
+        // The dotenv form, which shares the same gate.
+        assert!(det.is_sensitive(r#"export MY_API_KEY="S3cr3tValue123""#));
+    }
+
+    /// The gate the quote-stripping must not undo (§7.7): `prompt('enter` has an
+    /// *unbalanced* quote, so it is still code and still rejected.
+    #[test]
+    fn unbalanced_quotes_stay_code_shaped() {
+        let det = detector();
+        assert!(!det.is_sensitive("const password = prompt('enter password:');"));
+        assert!(!value_is_strong("prompt('enter"));
+        assert!(!value_is_strong("getEnv();"));
+        assert!(!value_is_strong(r#""changeme""#), "stopword inside quotes");
+        assert!(!value_is_strong(r#""foo""#), "still too weak unquoted");
+    }
+
+    /// The AWS pair: v2 detected the public `AKIA…` id at 0.99 while the secret
+    /// sitting next to it in `~/.aws/credentials` matched no rule at all.
+    #[test]
+    fn aws_secret_access_key_is_detected_beside_its_id() {
+        let det = detector();
+        let line = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+        assert!(fired(&det, line, "aws_secret_access_key"));
+        assert_eq!(det.scan(line).unwrap().severity, Severity::HighConfidence);
+        // Quoted and JSON forms of the same thing.
+        assert!(det.is_sensitive(
+            r#""aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY""#
+        ));
+        // The context anchor is mandatory: a bare 40-char run is not a secret.
+        assert!(!fired(
+            &det,
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "aws_secret_access_key"
+        ));
+    }
+
+    #[test]
+    fn gitlab_pat_is_detected() {
+        let det = detector();
+        let token = format!("glpat-{}", rep('A', 20));
+        assert!(fired(&det, &token, "gitlab_pat"));
+        assert_eq!(
+            det.scan(&token).unwrap().severity,
+            Severity::HighConfidence
+        );
+        // \b anchor: glued into a longer identifier it is not a token.
+        assert!(!fired(&det, &format!("x{token}"), "gitlab_pat"));
+    }
+
+    /// `Authorization: Basic` carries base64(user:password), so it is detected
+    /// and kept out of the index — but it is inert, exactly like
+    /// `generic_bearer` (**P2 fb3e**), because it lives in curl examples too.
+    #[test]
+    fn http_basic_auth_is_detected_but_inert() {
+        let det = detector();
+        let header = "Authorization: Basic dXNlcjpwYXNzd29yZA==";
+        assert!(fired(&det, header, "http_basic_auth"));
+        assert!(det.is_sensitive(header));
+        assert_eq!(det.scan(header).unwrap().severity, Severity::Flag);
     }
 }

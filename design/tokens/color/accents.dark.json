@@ -1,77 +1,82 @@
 {
   "accents": {
-    "$description": "The accent axis (port-manifest §8.4), dark resolution. Six user-selectable accents; indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks; on Android they become CopyPasteAccent entries fed to the Material 3 ColorScheme.",
+    "$description": "The accent axis, dark resolution. Six user-selectable accents drawn straight from the Tailwind v4 palette: --accent is the -500 step, --accent-2 the -400. Indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks and feed shadcn's `primary` / `ring` / `sidebar-primary` slots, so choosing an accent re-tints every stock component with no per-component override.",
     "$type": "color",
     "indigo": {
-      "$description": "Default accent.",
+      "$description": "Default accent. indigo-500 / indigo-400.",
       "accent": {
-        "$value": "#6E5BFF"
+        "$value": "oklch(0.585 0.233 277.117)"
       },
       "accent-2": {
-        "$value": "#9C8FFF",
-        "$description": "Lighter accent for on-dark emphasis text (SAS digits, links)."
+        "$value": "oklch(0.673 0.182 276.935)",
+        "$description": "Lighter ramp step, for emphasis text and glyphs on dark surfaces."
       },
       "on-accent": {
-        "$value": "#FFFFFF",
+        "$value": "oklch(1 0 0)",
         "$description": "Foreground on a solid --accent fill."
       }
     },
     "blue": {
+      "$description": "blue-500 / blue-400.",
       "accent": {
-        "$value": "#3B82F6"
+        "$value": "oklch(0.623 0.214 259.815)"
       },
       "accent-2": {
-        "$value": "#7CB0FF"
+        "$value": "oklch(0.707 0.165 254.624)"
       },
       "on-accent": {
-        "$value": "#FFFFFF"
+        "$value": "oklch(1 0 0)"
       }
     },
     "teal": {
+      "$description": "teal-500 / teal-400.",
       "accent": {
-        "$value": "#13B8A6"
+        "$value": "oklch(0.704 0.14 182.503)"
       },
       "accent-2": {
-        "$value": "#5FE0D2"
+        "$value": "oklch(0.777 0.152 181.912)"
       },
       "on-accent": {
-        "$value": "#06302C",
-        "$description": "Dark ink: the teal fill is too light for white text at AA."
+        "$value": "oklch(0.21 0.04 182.503)",
+        "$description": "Dark ink: the teal fill is too light to carry white text at AA."
       }
     },
     "green": {
+      "$description": "green-500 / green-400.",
       "accent": {
-        "$value": "#46C56A"
+        "$value": "oklch(0.723 0.219 149.579)"
       },
       "accent-2": {
-        "$value": "#84E29A"
+        "$value": "oklch(0.792 0.209 151.711)"
       },
       "on-accent": {
-        "$value": "#062A12",
-        "$description": "Dark ink: the green fill is too light for white text at AA."
+        "$value": "oklch(0.21 0.05 149.579)",
+        "$description": "Dark ink: the green fill is too light to carry white text at AA."
       }
     },
     "amber": {
+      "$description": "amber-500 / amber-400.",
       "accent": {
-        "$value": "#F5A524"
+        "$value": "oklch(0.769 0.188 70.08)"
       },
       "accent-2": {
-        "$value": "#FFC56B"
+        "$value": "oklch(0.828 0.189 84.429)"
       },
       "on-accent": {
-        "$value": "#2A1B05",
-        "$description": "Dark ink: the amber fill is too light for white text at AA."
+        "$value": "oklch(0.21 0.04 70.08)",
+        "$description": "Dark ink: the amber fill is too light to carry white text at AA."
       }
     },
     "rose": {
+      "$description": "rose-500 / rose-400.",
       "accent": {
-        "$value": "#F43F7E"
+        "$value": "oklch(0.645 0.246 16.439)"
       },
       "accent-2": {
-        "$value": "#FF85AC"
+        "$value": "oklch(0.712 0.194 13.428)"
       },
       "on-accent": {
-        "$value": "#FFFFFF"
+        "$value": "oklch(1 0 0)"
       }
     }
   },
@@ -79,7 +84,7 @@
     "$type": "color",
     "accent": {
       "$value": "{accents.indigo.accent}",
-      "$description": "The active accent. Defaults to indigo; the desktop overrides it per [data-accent], Android per CopyPasteAccent."
+      "$description": "The active accent. Defaults to indigo; the [data-accent] blocks override it."
     },
     "accent-2": {
       "$value": "{accents.indigo.accent-2}",

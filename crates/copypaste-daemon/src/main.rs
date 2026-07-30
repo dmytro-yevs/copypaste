@@ -6,7 +6,11 @@
 //! * [`server`] — answers `copypaste_ipc::Request`s on a `0600` Unix socket,
 //! * [`clipboard`] — the platform pasteboard behind a trait,
 //! * [`p2p`] — peer sync: an inbound listener on its own TCP port, mDNS
-//!   discovery, and the five pairing/sync IPC operations.
+//!   discovery, and the five pairing/sync IPC operations,
+//! * [`cloud`] — cloud sync: the account, the adaptive poll loop, and the four
+//!   cloud IPC operations,
+//! * [`meta`] — the sync view of the history that both transports share, and
+//!   [`merge`], the one comparator they both apply.
 //!
 //! Everything they share lives in one [`AppState`] behind one `Arc`. v1 grew a
 //! 38-field context with 13 `Arc<Mutex<Option<T>>>` slots and 20 builder
@@ -21,8 +25,14 @@
 
 mod capture;
 mod clipboard;
+mod cloud;
+mod merge;
+mod meta;
 mod p2p;
 mod server;
+
+#[cfg(test)]
+mod testutil;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,7 +48,8 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::clipboard::ClipboardSource;
-use crate::p2p::meta::Meta;
+use crate::cloud::Cloud;
+use crate::meta::Meta;
 use crate::p2p::P2p;
 
 /// Reported by `status`. Single source: the crate version.
@@ -84,6 +95,39 @@ struct Args {
     /// device on every peer.
     #[arg(long, value_name = "NAME")]
     device_name: Option<String>,
+
+    /// Supabase project URL for cloud sync, e.g. `https://abc.supabase.co`.
+    ///
+    /// Falls back to `COPYPASTE_CLOUD_URL`. Without both this and the anon key
+    /// the daemon runs with cloud sync unconfigured, which is a supported
+    /// state: peer sync and local history do not depend on it.
+    #[arg(long, value_name = "URL")]
+    cloud_url: Option<String>,
+
+    /// Supabase publishable anon key. Falls back to `COPYPASTE_CLOUD_ANON_KEY`.
+    ///
+    /// Not a secret in the usual sense — row-level security is what restricts
+    /// access — so it is ordinary configuration rather than a credential.
+    #[arg(long, value_name = "KEY")]
+    cloud_anon_key: Option<String>,
+}
+
+/// Resolve the deployment from flags, then the environment.
+///
+/// Both halves are required: a URL with no key cannot authenticate and a key
+/// with no URL has nothing to talk to, so a half-configuration is reported as
+/// unconfigured rather than failing at the first request.
+fn cloud_config(args: &Args) -> Option<copypaste_cloud::CloudConfig> {
+    fn resolve(flag: Option<&String>, var: &str) -> Option<String> {
+        flag.cloned()
+            .or_else(|| std::env::var(var).ok())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    }
+    Some(copypaste_cloud::CloudConfig {
+        url: resolve(args.cloud_url.as_ref(), "COPYPASTE_CLOUD_URL")?,
+        anon_key: resolve(args.cloud_anon_key.as_ref(), "COPYPASTE_CLOUD_ANON_KEY")?,
+    })
 }
 
 /// Everything the daemon shares between the capture loop and the IPC server.
@@ -95,16 +139,25 @@ struct Args {
 pub struct AppState {
     pub store: Store,
     pub keyring: Keyring,
-    pub detector: Detector,
+    /// Behind an `Arc` because the cloud upload gate holds one too: the
+    /// `SensitiveGuard` the driver requires is a closure that outlives this
+    /// call, and a second `Detector` would be a second ruleset (`CLAUDE.md`
+    /// rule 1) that could disagree with the one capture uses.
+    pub detector: Arc<Detector>,
     /// `std::sync::Mutex`, not `tokio`'s: the guard is never held across an
     /// `.await`. Every caller takes it, does one pasteboard call, drops it — so
     /// a `copy` request cannot be blocked behind a capture tick for longer than
     /// a single pasteboard access.
     clipboard: Mutex<Box<dyn ClipboardSource>>,
-    /// Peer sync: the paired devices, discovery, this device's sync identity,
-    /// and the metadata a session reads. Always present — a daemon with no
-    /// peers still has an identity and still listens.
+    /// The sync view of the history, and this device's identity. Shared by both
+    /// transports — see [`meta`].
+    pub meta: Meta,
+    /// Peer sync: the paired devices and discovery. Always present — a daemon
+    /// with no peers still has an identity and still listens.
     pub p2p: P2p,
+    /// Cloud sync. Always present too, and unconfigured is an ordinary state:
+    /// the deployment may not be set, or nobody may be signed in.
+    pub cloud: Cloud,
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
@@ -114,9 +167,11 @@ impl AppState {
     pub fn new(
         store: Store,
         keyring: Keyring,
-        detector: Detector,
+        detector: Arc<Detector>,
         clipboard: Box<dyn ClipboardSource>,
+        meta: Meta,
         p2p: P2p,
+        cloud: Cloud,
     ) -> Self {
         let backend_name = clipboard.backend_name();
         Self {
@@ -124,7 +179,9 @@ impl AppState {
             keyring,
             detector,
             clipboard: Mutex::new(clipboard),
+            meta,
             p2p,
+            cloud,
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
@@ -196,7 +253,7 @@ async fn main() -> anyhow::Result<()> {
     // start capturing.
     let keyring = Keyring::load_or_create().context("unlock the keyring")?;
     let store = Store::open(&db_path, &keyring.db_key()).context("open the history database")?;
-    let detector = Detector::new().context("build the sensitive-content detector")?;
+    let detector = Arc::new(Detector::new().context("build the sensitive-content detector")?);
     let source = clipboard::new_source();
 
     // Peer sync. The metadata connection opens the database the store just
@@ -229,16 +286,28 @@ async fn main() -> anyhow::Result<()> {
     };
     let device_id = meta.device_id().to_string();
     let device_name = meta.device_name().to_string();
-    let p2p = P2p::new(meta, peers, discovery, args.port);
+    let p2p = P2p::new(peers, discovery, args.port);
 
-    let state = Arc::new(AppState::new(store, keyring, detector, source, p2p));
+    // Cloud sync. Unconfigured is a supported state, and so is configured but
+    // signed out: `Cloud::restore` reads back an account only if a previous run
+    // signed in, and reports nothing when it did not.
+    let config = cloud_config(&args);
+    let cloud_configured = config.is_some();
+    let cloud = Cloud::new(config);
+
+    let state = Arc::new(AppState::new(
+        store, keyring, detector, source, meta, p2p, cloud,
+    ));
     state.set_ready(true);
+    let cloud_signed_in = state.cloud.restore(&state);
     info!(
         version = DAEMON_VERSION,
         backend = state.backend_name(),
         %device_id,
         %device_name,
         peer_port = args.port,
+        cloud_configured,
+        cloud_signed_in,
         "daemon starting"
     );
 
@@ -262,6 +331,7 @@ async fn main() -> anyhow::Result<()> {
             shutdown_rx.clone(),
         ))
     });
+    let cloud_task = tokio::spawn(cloud::run(Arc::clone(&state), shutdown_rx.clone()));
     let server = tokio::spawn(server::run(listener, Arc::clone(&state), shutdown_rx));
 
     wait_for_shutdown().await?;
@@ -279,6 +349,9 @@ async fn main() -> anyhow::Result<()> {
         if let Err(e) = peers_task.await {
             warn!(error = ?e, "peer listener did not shut down cleanly");
         }
+    }
+    if let Err(e) = cloud_task.await {
+        warn!(error = ?e, "cloud sync loop did not shut down cleanly");
     }
     if let Err(e) = server.await {
         warn!(error = ?e, "ipc server did not shut down cleanly");

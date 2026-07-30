@@ -1,9 +1,5 @@
-//! What a rule *is*: the four fields every entry in [`super::rules::RULES`]
-//! carries, and the mapping from a rule to the [`Finding`] it produces.
-//!
-//! Split out from the table itself so that reading "what may a rule declare?"
-//! does not mean scrolling past forty regexes, and so the table file is pure
-//! data (see [`super::rules`]).
+//! What a rule *is*: the fields every entry in [`super::rules::RULES`] carries,
+//! and the mapping from a rule to the [`Finding`] it produces.
 
 use super::finding::{Finding, Severity, AUTOWIPE_CONFIDENCE_FLOOR};
 

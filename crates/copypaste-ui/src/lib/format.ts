@@ -1,9 +1,10 @@
 /**
  * Presentation helpers: relative age, previews, and content-kind detection.
  *
- * Nothing here ever handles the plaintext of a sensitive item — callers check
- * `is_sensitive` first and substitute a placeholder (INV-10). `previewOf` is
- * only ever reached for non-sensitive content.
+ * Nothing here ever sees the plaintext of a sensitive item: the bridge sends
+ * `content: null` for one (INV-10), so `previewOf` is only ever reached for
+ * content that exists, and `kindOf` decides `secret` from the flag rather than
+ * from the text.
  */
 import type { Item } from "./ipc";
 
@@ -49,7 +50,7 @@ export function absoluteTime(createdAt: number): string {
 /* -------------------------------------------------------------- preview --- */
 
 /** Collapse the runs of blank lines a copied document tends to carry, so the
- *  two reserved preview lines show two lines of actual content. */
+ *  reserved preview lines show that many lines of actual content. */
 export function previewOf(content: string): string {
   return content.replace(/\s*\n\s*\n\s*/g, "\n").trim();
 }
@@ -61,7 +62,8 @@ export function truncate(text: string, max: number): string {
 
 /* ----------------------------------------------------------------- kind --- */
 
-/** Manifest §8.7 closes the content-kind set; each maps onto a `--c-*` token. */
+/** The kind set is closed and ends in `unknown`; each maps onto a `--c-*`
+ *  token, and an unrecognised kind renders as `unknown` rather than blank. */
 export type Kind =
   | "secret"
   | "url"
@@ -71,7 +73,8 @@ export type Kind =
   | "code"
   | "color"
   | "num"
-  | "text";
+  | "text"
+  | "unknown";
 
 const RULES: ReadonlyArray<readonly [Kind, RegExp]> = [
   ["url", /^(https?|ftp):\/\/\S+$/i],
@@ -88,6 +91,7 @@ const RULES: ReadonlyArray<readonly [Kind, RegExp]> = [
  */
 export function kindOf(item: Item): Kind {
   if (item.is_sensitive) return "secret";
+  if (item.content === null) return "unknown";
 
   const declared = item.content_type.toLowerCase();
   if (declared.includes("json")) return "json";
@@ -124,6 +128,7 @@ export const KIND_TEXT_CLASS: Record<Kind, string> = {
   color: "text-c-color",
   num: "text-c-num",
   text: "text-c-text",
+  unknown: "text-c-unknown",
 };
 
 /** Kinds whose content reads better in the mono face (manifest §3.1.5). */

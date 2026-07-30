@@ -111,18 +111,25 @@ fn requires_ready(method: &Method) -> bool {
         | Method::PairAccept { .. }
         | Method::Unpair { .. }
         | Method::Peers
-        | Method::SyncNow { .. } => true,
+        | Method::SyncNow { .. }
+        // Cloud operations touch the same history and keep their cursors in
+        // the same database, so they need it open too. `CloudStatus` is the
+        // exception, for the same reason `Status` is: it is how a client finds
+        // out what state the daemon is in.
+        | Method::CloudSignIn { .. }
+        | Method::CloudSignOut
+        | Method::CloudSyncNow => true,
+        Method::CloudStatus => false,
     }
 }
 
 /// Route one request.
 ///
-/// Two kinds of work, and they belong on different threads. The peer
-/// operations are network I/O — a TCP connect, a Noise handshake, a session
-/// that can last as long as the peer takes — so they run on the reactor and
-/// `await` like any other socket work. Everything else is blocking (SQLite,
-/// AEAD, the pasteboard) and takes one `spawn_blocking` hop, exactly as it did
-/// before peers existed.
+/// Two kinds of work, and they belong on different threads. The peer and cloud
+/// operations are network I/O — a TCP connect, a Noise handshake, an HTTPS
+/// round trip — so they run on the reactor and `await` like any other socket
+/// work. Everything else is blocking (SQLite, AEAD, the pasteboard) and takes
+/// one `spawn_blocking` hop, exactly as it did before sync existed.
 async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
     let id = request.id;
     match request.method {
@@ -135,6 +142,14 @@ async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
         Method::SyncNow { pairing_id } => {
             crate::p2p::handlers::sync_now(state, id, pairing_id.as_deref()).await
         }
+        Method::CloudSignIn {
+            email,
+            password,
+            passphrase,
+        } => crate::cloud::handlers::sign_in(state, id, &email, &password, &passphrase).await,
+        Method::CloudSignOut => crate::cloud::handlers::sign_out(state, id).await,
+        Method::CloudStatus => crate::cloud::handlers::status(state, id).await,
+        Method::CloudSyncNow => crate::cloud::handlers::sync_now(state, id).await,
         // Not `_`: a method added to the enum lands here and then fails to
         // build inside `dispatch_store`, which is where it has to be handled.
         method => {
@@ -171,8 +186,12 @@ pub(super) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         | Method::PairAccept { .. }
         | Method::Unpair { .. }
         | Method::Peers
-        | Method::SyncNow { .. } => {
-            error!("a peer operation reached the blocking dispatcher");
+        | Method::SyncNow { .. }
+        | Method::CloudSignIn { .. }
+        | Method::CloudSignOut
+        | Method::CloudStatus
+        | Method::CloudSyncNow => {
+            error!("a network operation reached the blocking dispatcher");
             Response::err(id, ErrorCode::Internal, MSG_INTERNAL)
         }
     }
@@ -218,6 +237,14 @@ mod tests {
         }));
         assert!(requires_ready(&Method::Peers));
         assert!(requires_ready(&Method::SyncNow { pairing_id: None }));
+        assert!(!requires_ready(&Method::CloudStatus));
+        assert!(requires_ready(&Method::CloudSyncNow));
+        assert!(requires_ready(&Method::CloudSignOut));
+        assert!(requires_ready(&Method::CloudSignIn {
+            email: "a@example.com".into(),
+            password: "pw".into(),
+            passphrase: "a long passphrase".into(),
+        }));
         assert!(requires_ready(&Method::List {
             limit: 10,
             offset: 0

@@ -1,23 +1,15 @@
-//! Normalisation (manifest I3 / §5.1).
-//!
-//! Small on purpose, and separate on purpose: this runs once per scan, before
-//! any rule sees the text, and it is the only place in the module that can move
-//! a byte offset. Anything that ever returns spans has to read exactly this
-//! file to know what those offsets index into.
+//! Normalisation (manifest I3 / §5.1). Runs once per scan, before any rule
+//! sees the text, and is the only place in the module that can move a byte
+//! offset — anything that ever returns spans indexes into its output.
 
 use std::borrow::Cow;
 
 use unicode_normalization::UnicodeNormalization;
 
-/// NFKC-normalise before matching.
-///
-/// Without this, `Ａ` (U+FF21 FULLWIDTH LATIN CAPITAL A) and every other
-/// compatibility form renders as ASCII but bypasses every ASCII character
-/// class. All offsets, if this module ever returns any, belong to the
-/// normalised string.
-///
-/// NFKC is the identity on ASCII (§5.1), so ASCII input — the overwhelming
-/// majority of clipboard traffic — skips the pass and the allocation entirely.
+/// NFKC-normalise before matching. Without this, `Ａ` (U+FF21 FULLWIDTH LATIN
+/// CAPITAL A) and every other compatibility form renders as ASCII but bypasses
+/// every ASCII character class. NFKC is the identity on ASCII (§5.1), so ASCII
+/// input skips the pass and the allocation entirely.
 pub(super) fn normalise(text: &str) -> Cow<'_, str> {
     if text.is_ascii() {
         Cow::Borrowed(text)
@@ -25,10 +17,6 @@ pub(super) fn normalise(text: &str) -> Cow<'_, str> {
         Cow::Owned(text.nfkc().collect())
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests — §5.1 / I3
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

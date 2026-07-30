@@ -11,8 +11,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="$(mktemp -d)"
 export XDG_DATA_HOME="$DATA_DIR"
 
+# Prefer the pinned toolchain, fall back to whatever `cargo` resolves to.
+#
+# The obvious `command -v cargo +1.96` does not test what it looks like it
+# tests: bash's `command -v` takes several names and exits 0 if *any* of them
+# resolves, so `cargo` alone satisfies it and the pin is applied even on a
+# machine with no 1.96 installed — where every later invocation then fails with
+# a rustup error instead of falling back. Ask the toolchain itself.
 CARGO="cargo"
-command -v cargo +1.96 >/dev/null 2>&1 && CARGO="cargo +1.96"
+cargo +1.96 --version >/dev/null 2>&1 && CARGO="cargo +1.96"
 
 cleanup() {
     [[ -n "${DAEMON_PID:-}" ]] && kill "$DAEMON_PID" 2>/dev/null || true
