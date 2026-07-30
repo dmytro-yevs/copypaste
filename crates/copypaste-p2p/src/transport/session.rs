@@ -143,7 +143,7 @@ impl Session {
         if self.poisoned {
             return Err(TransportError::Malformed);
         }
-        let mut message: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::new());
+        let mut message = Reassembly::new();
         let mut started = false;
 
         loop {
@@ -189,12 +189,10 @@ impl Session {
             }
 
             let marker = self.plain[0];
-            let body = &self.plain[RECORD_HEADER_LEN..len];
-            if message.len() + body.len() > MAX_MESSAGE_BYTES {
+            if let Err(err) = message.push(&self.plain[RECORD_HEADER_LEN..len]) {
                 self.poisoned = true;
-                return Err(TransportError::TooLarge);
+                return Err(err);
             }
-            message.extend_from_slice(body);
             started = true;
 
             match marker {
@@ -207,7 +205,7 @@ impl Session {
             }
         }
 
-        serde_json::from_slice(&message)
+        serde_json::from_slice(message.as_slice())
             .map(Some)
             .map_err(|_| TransportError::Codec)
     }
@@ -287,6 +285,60 @@ impl fmt::Debug for Session {
             .field("peer_addr", &self.peer_addr)
             .field("poisoned", &self.poisoned)
             .finish_non_exhaustive()
+    }
+}
+
+/// The buffer one logical message is reassembled into.
+///
+/// Sized by our own limits, never by a length the peer chose. It starts at one
+/// Noise message's worth of plaintext, so the ordinary single-record message
+/// never allocates against peer input at all, and it will not grow past
+/// [`MAX_MESSAGE_BYTES`] — the same ceiling [`Session::send`] refuses at, rather
+/// than a second limit that could drift away from it.
+///
+/// Growth replaces the allocation *through* `Zeroizing`, so what a reallocation
+/// leaves behind is wiped and not merely freed: a `Vec` that grows on its own
+/// memcpies the plaintext it has accumulated into a new allocation and frees the
+/// old one intact, where nothing will ever reach it (security review F-14).
+/// That is the hazard `plain` and `cipher` avoid by never growing at all; this
+/// buffer cannot take that route, because its final size is not known until the
+/// last record arrives.
+struct Reassembly(Zeroizing<Vec<u8>>);
+
+impl Reassembly {
+    fn new() -> Self {
+        Self(Zeroizing::new(Vec::with_capacity(MAX_NOISE_PLAINTEXT)))
+    }
+
+    /// Append one record's payload.
+    ///
+    /// # Errors
+    ///
+    /// [`TransportError::TooLarge`] past [`MAX_MESSAGE_BYTES`], before anything
+    /// is copied or reserved, so a peer cannot spend this device's memory by
+    /// declaring a message it is not allowed to send.
+    fn push(&mut self, body: &[u8]) -> Result<(), TransportError> {
+        let wanted = self.0.len().saturating_add(body.len());
+        if wanted > MAX_MESSAGE_BYTES {
+            return Err(TransportError::TooLarge);
+        }
+        if wanted > self.0.capacity() {
+            let capacity = self
+                .0
+                .capacity()
+                .saturating_mul(2)
+                .clamp(wanted, MAX_MESSAGE_BYTES);
+            let mut grown = Zeroizing::new(Vec::with_capacity(capacity));
+            grown.extend_from_slice(&self.0);
+            // The old buffer is wiped here, on its way out.
+            self.0 = grown;
+        }
+        self.0.extend_from_slice(body);
+        Ok(())
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -463,6 +515,54 @@ mod tests {
             .await
             .expect("exactly at the limit must send");
         server.await.expect("server task");
+    }
+
+    /// Security review F-14. The buffer's size is decided by our constants, not
+    /// by how long a record the peer chose to send.
+    #[test]
+    fn reassembly_is_sized_by_our_own_limit_not_by_the_peer() {
+        let mut message = Reassembly::new();
+        assert_eq!(message.0.capacity(), MAX_NOISE_PLAINTEXT);
+
+        message.push(b"four").expect("push");
+        assert_eq!(
+            message.0.capacity(),
+            MAX_NOISE_PLAINTEXT,
+            "a peer's record length must not decide the allocation"
+        );
+        assert_eq!(message.as_slice(), b"four");
+    }
+
+    /// And it will not grow past the limit the sending half refuses at: the
+    /// refusal is explicit, and it happens before anything is reserved.
+    #[test]
+    fn reassembly_refuses_at_the_message_limit_without_reserving_for_it() {
+        let mut message = Reassembly::new();
+        let record = vec![0xABu8; MAX_RECORD_PAYLOAD];
+        while message.as_slice().len() + record.len() <= MAX_MESSAGE_BYTES {
+            message.push(&record).expect("under the limit");
+        }
+
+        let filled = message.as_slice().len();
+        let capacity = message.0.capacity();
+        assert!(matches!(
+            message.push(&record),
+            Err(TransportError::TooLarge)
+        ));
+        assert_eq!(
+            message.as_slice().len(),
+            filled,
+            "a refused record must not be copied in"
+        );
+        assert_eq!(
+            message.0.capacity(),
+            capacity,
+            "a refused record must not be reserved for"
+        );
+        assert!(
+            capacity <= MAX_MESSAGE_BYTES,
+            "the buffer outgrew the message limit: {capacity}"
+        );
     }
 
     #[tokio::test]

@@ -29,4 +29,4 @@ mod testutil;
 pub use error::TransportError;
 pub use handshake::{HANDSHAKE_TIMEOUT, NOISE_PARAMS};
 pub use session::{Session, MAX_MESSAGE_BYTES, MAX_NOISE_MESSAGE};
-pub use token::{PairingToken, TOKEN_LEN};
+pub use token::{PairingToken, PskCandidate, TOKEN_LEN};
