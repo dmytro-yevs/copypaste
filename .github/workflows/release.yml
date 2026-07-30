@@ -195,6 +195,19 @@ jobs:
       - name: Package CLI tarball
         run: ./scripts/release/build-cli-tarball.sh "${{ needs.version.outputs.version }}" arm64
 
+      - name: Verify nothing links outside the bundle
+        # SQLCipher is compiled from C in this build and libsqlite3-sys picks its
+        # crypto backend by the *absence* of OPENSSL_DIR — see the script header.
+        # Getting that wrong yields a DMG that mounts and launches on this runner
+        # and dies with a dyld error on every user's Mac. No other step here would
+        # notice: the pipeline has no install test.
+        run: |
+          set -euo pipefail
+          ./scripts/release/check-macos-linkage.sh \
+            dist/CopyPaste.app \
+            target/aarch64-apple-darwin/release/copypaste \
+            target/aarch64-apple-darwin/release/copypaste-daemon
+
       - name: Checksums
         run: |
           set -euo pipefail
@@ -310,6 +323,21 @@ jobs:
             echo "ANDROID_NDK_HOME=${ndk}"
             echo "ANDROID_SDK_ROOT=${ANDROID_HOME}"
           } >> "$GITHUB_ENV"
+
+      - name: Confirm the OpenSSL build toolchain is present
+        # New requirement as of ADR-0007. The NDK sysroot has no libcrypto, so
+        # SQLCipher's OpenSSL is compiled from source per ABI by openssl-src,
+        # which shells out to both of these. Asserted for the same reason the
+        # SDK components above are: absent, perl surfaces as a cc-rs failure
+        # several minutes into the Rust build, naming neither perl nor OpenSSL.
+        run: |
+          set -euo pipefail
+          for tool in perl make; do
+            command -v "$tool" >/dev/null 2>&1 \
+              || { echo "::error::$tool is required to build OpenSSL for Android (ADR-0007)"; exit 1; }
+          done
+          perl --version | sed -n '2p'
+          make --version | sed -n '1p'
 
       - name: Build the APK
         run: |
