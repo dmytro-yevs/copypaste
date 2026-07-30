@@ -342,15 +342,18 @@ async fn main() -> anyhow::Result<()> {
         Some(dir) => (dir.join("copypaste-v2.db"), dir.join("daemon.sock")),
         None => (copypaste_ipc::database_path(), copypaste_ipc::socket_path()),
     };
-    // The paired-device file lives beside the database, under whichever data
-    // directory is in force, so an isolated instance has isolated pairings too.
-    let peers_path = db_path
+    // One derivation of "the data directory", used by everything that lives
+    // beside the database: the paired-device file, so an isolated instance has
+    // isolated pairings too, and the device secret, so it cannot be left behind
+    // when `--data-dir` moves the history (security review F-11). A second
+    // derivation is how the secret ends up somewhere the next start does not
+    // look.
+    let data_dir = db_path
         .parent()
         .unwrap_or_else(|| std::path::Path::new("."))
-        .join(copypaste_p2p::peers::DEFAULT_FILE_NAME);
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).context("create the data directory")?;
-    }
+        .to_path_buf();
+    let peers_path = data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME);
+    std::fs::create_dir_all(&data_dir).context("create the data directory")?;
 
     if !args.foreground {
         warn!(
@@ -364,9 +367,27 @@ async fn main() -> anyhow::Result<()> {
     // opened with it, and neither the socket nor the capture loop exists until
     // both succeeded. A daemon that cannot store what it captures should not
     // start capturing.
-    let keyring = Keyring::load_or_create().context("unlock the keyring")?;
+    let keyring = Keyring::load_or_create(&data_dir).context("unlock the keyring")?;
     let store = Store::open(&db_path, &keyring.db_key()).context("open the history database")?;
     let detector = Arc::new(Detector::new().context("build the sensitive-content detector")?);
+
+    // The third enforcement layer for "sensitive items must never reach the
+    // search index" (CLAUDE.md rule 4). `is_sensitive` is decided once at
+    // capture, so a row taken before a detector rule existed keeps its
+    // plaintext searchable; this is the only thing that ever revisits it. It
+    // touches the index and never the history. Not fatal: a history that
+    // cannot be purged is still a history, and refusing to start would cost
+    // the user access to it over a background sweep.
+    match copypaste_core::purge_indexed_secrets(&store, &detector) {
+        Ok(report) if report.purged > 0 => tracing::info!(
+            purged = report.purged,
+            scanned = report.scanned,
+            "removed search-index rows the current ruleset calls sensitive"
+        ),
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, "the search-index purge did not finish"),
+    }
+
     let source = clipboard::new_source();
 
     // Peer sync. The metadata connection opens the database the store just
