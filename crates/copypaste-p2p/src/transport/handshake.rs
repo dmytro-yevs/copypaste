@@ -41,7 +41,7 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use zeroize::Zeroizing;
 
 use super::session::{codec, Session, MAX_NOISE_MESSAGE};
-use super::token::TOKEN_LEN;
+use super::token::{PskCandidate, TOKEN_LEN};
 use super::TransportError;
 
 /// The Noise handshake pattern, verbatim. Changing any component is a wire
@@ -115,12 +115,19 @@ impl Session {
     /// empty — nothing about which pairings this device holds leaks to the
     /// dialler.
     ///
+    /// The candidates are borrowed rather than copied, and
+    /// [`PskCandidate`](super::PskCandidate) wipes itself on drop: this runs
+    /// before the dialler has authenticated anything, so the whole key set must
+    /// not be left in freed heap by an attacker who simply opens sockets
+    /// (security review F-8). How many keys are tried is bounded by
+    /// [`crate::peers::MAX_PAIRINGS`] (F-13).
+    ///
     /// # Errors
     ///
     /// [`TransportError::Handshake`] if no candidate matched.
     pub async fn accept_any(
         stream: TcpStream,
-        candidates: &[(String, [u8; TOKEN_LEN])],
+        candidates: &[PskCandidate],
     ) -> Result<(Self, String), TransportError> {
         let peer_addr = stream.peer_addr().map_err(TransportError::Io)?;
         let _ = stream.set_nodelay(true);
@@ -129,9 +136,9 @@ impl Session {
             let first = next_handshake_frame(&mut framed).await?;
             let mut buf = Zeroizing::new(vec![0u8; MAX_NOISE_MESSAGE]);
 
-            for (pairing_id, psk) in candidates {
+            for candidate in candidates {
                 let Ok(mut hs) = Builder::new(noise_params()?)
-                    .psk(0, psk)
+                    .psk(0, &candidate.psk)
                     .and_then(|builder| builder.build_responder())
                 else {
                     continue;
@@ -149,8 +156,9 @@ impl Session {
                 let noise = hs
                     .into_transport_mode()
                     .map_err(|_| TransportError::Handshake)?;
+                let pairing_id = candidate.pairing_id.clone();
                 tracing::debug!(%peer_addr, %pairing_id, "inbound session established");
-                return Ok((Self::new(framed, noise, peer_addr), pairing_id.clone()));
+                return Ok((Self::new(framed, noise, peer_addr), pairing_id));
             }
             tracing::debug!(%peer_addr, "inbound handshake matched no known pairing");
             Err(TransportError::Handshake)
@@ -244,6 +252,14 @@ mod tests {
     use crate::transport::testutil::{loopback, Ping};
     use crate::transport::PairingToken;
 
+    /// A candidate for a pairing nobody is dialling with.
+    fn candidate(pairing_id: &str) -> PskCandidate {
+        PskCandidate {
+            pairing_id: pairing_id.to_string(),
+            psk: PairingToken::generate().psk(),
+        }
+    }
+
     #[test]
     fn noise_pattern_is_the_documented_one() {
         // The design rests on `psk0` (authentication + fail-closed) and `NN`
@@ -294,9 +310,12 @@ mod tests {
         let (listener, addr) = loopback().await;
         let wanted = PairingToken::generate();
         let candidates = vec![
-            ("decoy-a".to_string(), PairingToken::generate().psk()),
-            (wanted.pairing_id(), wanted.psk()),
-            ("decoy-b".to_string(), PairingToken::generate().psk()),
+            candidate("decoy-a"),
+            PskCandidate {
+                pairing_id: wanted.pairing_id(),
+                psk: wanted.psk(),
+            },
+            candidate("decoy-b"),
         ];
         let expected_id = wanted.pairing_id();
 
@@ -325,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn accept_any_rejects_an_unknown_pairing() {
         let (listener, addr) = loopback().await;
-        let candidates = vec![("known".to_string(), PairingToken::generate().psk())];
+        let candidates = vec![candidate("known")];
 
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("accept");
