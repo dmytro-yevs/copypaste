@@ -115,11 +115,13 @@ jobs:
           fi
           version="${version#v}"
 
-          # The workspace manifest is the single source of the version: no
-          # tauri.conf.json "version" key exists, so Tauri reads the Cargo
-          # package version, which comes from [workspace.package]. Nothing in
-          # this pipeline rewrites it — a mismatch is a mistake in preparing
-          # the release, and it is much cheaper to fail here than to publish a
+          # The workspace manifest is the single source of the version.
+          # tauri.conf.json points its "version" at crates/copypaste-ui/package.json,
+          # which check.sh holds equal to [workspace.package] — the Android
+          # bundler reads only tauri.conf.json and stamps versionName "1.0" when
+          # that key is absent, so "let Tauri read Cargo.toml" is true of the
+          # macOS bundler and false of the APK. Nothing in this pipeline
+          # rewrites either, and failing here is much cheaper than publishing a
           # DMG whose Info.plist disagrees with its own filename.
           ws="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml)"
           if [[ "$ws" != "$version" ]]; then
@@ -166,7 +168,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
 
@@ -264,7 +266,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
 
@@ -314,44 +316,52 @@ jobs:
           set -euo pipefail
           gen="crates/copypaste-ui/src-tauri/gen/android"
           if [[ ! -d "$gen" ]]; then
-            echo "::error::$gen does not exist. The Tauri Android project has not been"
-            echo "::error::scaffolded, or it landed elsewhere. Run 'tauri android init' and"
-            echo "::error::commit the result, or fix this path — do not skip the job."
+            echo "::error::$gen does not exist. The Tauri Android project is tracked source,"
+            echo "::error::not something this job regenerates — see its README. Restore it or"
+            echo "::error::fix this path; do not skip the job."
             exit 1
           fi
 
           cd crates/copypaste-ui
           npm ci
 
-          # Part of the scaffold is generated and git-ignored, and two pieces of
-          # it are load-bearing at configuration time: settings.gradle does
-          # `apply from: 'tauri.settings.gradle'` and app/build.gradle.kts does
-          # `apply(from = "tauri.build.gradle.kts")`. Neither is in the
-          # repository, so this branch is taken on every clean checkout — it is
-          # the normal path in CI, not a fallback.
-          # UNVERIFIED: whether `android build` alone would have regenerated it.
-          if [[ ! -f "src-tauri/gen/android/app/tauri.build.gradle.kts" ]]; then
-            echo "Generated Gradle files are absent; running 'tauri android init'."
-            npm run tauri -- android init --skip-targets-install
+          # `tauri android init` is deliberately NOT run here. It cannot produce
+          # what the first run of this job asked it for: tauri.settings.gradle
+          # and app/tauri.build.gradle.kts are not in the CLI's template at all.
+          # They are written by the *Rust* build — tauri-build's build script,
+          # gated on TAURI_ANDROID_PROJECT_PATH — which `tauri android build`
+          # runs itself, before Gradle, at "run an initial build to initialize
+          # plugins". So the ignored files appear exactly when Gradle needs
+          # them. Everything init would write is committed; see
+          # src-tauri/gen/android/README.md.
+          #
+          # What is asserted instead is the half Gradle reads at configuration
+          # time and the Kotlin that makes the APK worth shipping. An APK that
+          # builds, installs and captures nothing is the failure this guards.
+          for f in src-tauri/gen/android/settings.gradle \
+                   src-tauri/gen/android/build.gradle.kts \
+                   src-tauri/gen/android/gradlew \
+                   src-tauri/gen/android/app/build.gradle.kts \
+                   src-tauri/gen/android/buildSrc/src/main/java/com/copypaste/app/kotlin/BuildTask.kt \
+                   src-tauri/gen/android/app/src/main/AndroidManifest.xml \
+                   src-tauri/gen/android/app/src/main/aidl/android/content/IOnPrimaryClipChangedListener.aidl; do
+            [[ -f "$f" ]] || { echo "::error::$f is missing from the checkout"; exit 1; }
+          done
+          for k in CapturePlugin IntakeActivity CaptureTileService ShizukuClipboard \
+                   ClipListener CaptureService CaptureNotifications ClipQueue; do
+            f="src-tauri/gen/android/app/src/main/java/com/copypaste/app/${k}.kt"
+            [[ -f "$f" ]] || { echo "::error::$f is missing — the Android capture feature would build empty"; exit 1; }
+          done
 
-            for f in src-tauri/gen/android/tauri.settings.gradle \
-                     src-tauri/gen/android/app/tauri.build.gradle.kts; do
-              [[ -f "$f" ]] || {
-                echo "::error::'tauri android init' did not produce $f, which Gradle applies unconditionally"
-                exit 1
-              }
-            done
-
-            # `android init` regenerates the scaffold in place, and the
-            # committed half of gen/android is where the clipboard capture
-            # plugin lives. An overwrite would build, install and silently do
-            # nothing, so it fails here instead.
-            if ! git diff --quiet -- src-tauri/gen/android; then
-              echo "::error::'tauri android init' overwrote committed files under gen/android:"
-              git diff --name-only -- src-tauri/gen/android | sed 's/^/::error::  /'
-              exit 1
-            fi
-          fi
+          # Gradle re-enters the CLI through this line, in a subprocess, with
+          # src-tauri as its working directory. Baked in by init from however
+          # init itself was invoked, so it is the one committed file that can
+          # silently disagree with how this job starts the build.
+          grep -q 'val executable = """npm"""' \
+            src-tauri/gen/android/buildSrc/src/main/java/com/copypaste/app/kotlin/BuildTask.kt || {
+            echo "::error::BuildTask.kt does not invoke the CLI through npm, but this step does"
+            exit 1
+          }
 
           npm run tauri -- android build --apk
 

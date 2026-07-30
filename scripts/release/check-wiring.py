@@ -7,7 +7,7 @@
 # Everything here is a mistake that only a real run would otherwise report, one
 # round trip at a time: an artifact name that does not match its producer, an
 # output nothing declares, a job that reads a file no job it depends on wrote.
-import pathlib, re, sys, yaml
+import json, pathlib, re, sys, yaml
 
 WF = pathlib.Path(".github/workflows")
 docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
@@ -126,6 +126,52 @@ for wf, doc in docs.items():
                 refs.setdefault(a, set()).add(r)
 for a, rs in sorted(refs.items()):
     rec(len(rs) == 1, "{} is pinned to one ref everywhere".format(a), "refs in use: {}".format(sorted(rs)))
+
+# --- the Node a setup-node job actually gets ---------------------------------
+# npm treats an unmet `engines.node` as a warning unless engine-strict is set,
+# so a lockfile can outgrow the runners without anything failing — until the day
+# a dependency uses the syntax it asked for. @zxing/library 0.23.0 raised the
+# floor to 24 while every job pinned 22.
+def min_major(rng):
+    # Lowest major that can satisfy the range: the smallest lower bound across
+    # its `||` alternatives. Deliberately crude — it only has to be right for
+    # the ">= N" / "^N" shapes npm lockfiles actually contain.
+    lows = []
+    for alt in rng.split("||"):
+        m = re.search(r"(?:>=?|\^|~)?\s*(\d+)", alt)
+        if m:
+            lows.append(int(m.group(1)))
+    return min(lows) if lows else 0
+
+
+locks = {}
+for wf, doc in docs.items():
+    for jn, j in (doc.get("jobs") or {}).items():
+        for s in steps(j):
+            if not (s.get("uses") or "").startswith("actions/setup-node"):
+                continue
+            with_ = s.get("with") or {}
+            pinned = str(with_.get("node-version", ""))
+            m = re.match(r"(\d+)", pinned)
+            rec(bool(m), "{}: {} pins a Node major ({})".format(wf, jn, pinned or "<unset>"),
+                "setup-node without an explicit node-version follows whatever the runner ships")
+            if not m:
+                continue
+            major = int(m.group(1))
+            for lock in str(with_.get("cache-dependency-path", "")).split():
+                p = pathlib.Path(lock)
+                if not p.is_file():
+                    rec(False, "{}: {} caches an existing lockfile ({})".format(wf, jn, lock), "no such file")
+                    continue
+                if lock not in locks:
+                    pkgs = json.loads(p.read_text()).get("packages", {})
+                    need = [(k, (v.get("engines") or {}).get("node")) for k, v in pkgs.items()
+                            if (v.get("engines") or {}).get("node")]
+                    locks[lock] = max(((min_major(e), k) for k, e in need), default=(0, ""))
+                floor, who = locks[lock]
+                rec(major >= floor,
+                    "{}: {} runs Node {} for {}".format(wf, jn, major, lock),
+                    "{} declares engines.node needing >= {}".format(who, floor))
 
 # --- the toolchain a bare `cargo` actually resolves to ----------------------
 # dtolnay/rust-toolchain sets its toolchain with `rustup default`, and
