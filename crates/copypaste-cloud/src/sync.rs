@@ -16,6 +16,26 @@
 //! P2P transport already calls. This module hands a remote version down and is
 //! told whether it won. There is no second comparator to drift.
 //!
+//! # The ordering key is `created_at`, and it is a wall clock
+//!
+//! The manifest's order begins with `lamport_ts`. **v2 has no Lamport clock and
+//! is not getting one.** The order is `created_at` (Unix ms), then
+//! `content_hash`, then `origin_device_id` — three keys, deterministic and
+//! symmetric — which is exactly what `copypaste-p2p`'s `merge_decision` already
+//! implements. One order for both transports is the whole point of INV-C2, so
+//! the cloud path uses that one rather than introducing a second.
+//!
+//! What a Lamport stamp bought was monotonicity: it could not go backwards, so
+//! a device with a wrong clock could not outrank a newer write. A wall clock
+//! can. That is made safe here by refusing versions stamped implausibly far
+//! ahead — see [`MAX_FUTURE_SKEW_MS`], which mirrors the constant and the
+//! behaviour in `copypaste-p2p`. Without that guard one row stamped `i64::MAX`
+//! wins every future comparison for its `item_id` and censors that item on every
+//! device; with it, the damage a bad clock can do is bounded to winning ties it
+//! should have lost, which is the trade manifest 05 R-CLK-2 already accepts. No
+//! skew *correction* is attempted, only refusal, and refusal skips one version
+//! rather than failing the round or deleting anything.
+//!
 //! For the same reason there is no tombstone special case in this file beyond
 //! *carrying* the flag. A delete is an ordinary version with `deleted = true`
 //! and no content (manifest 05 §3.5, T-1/T-2), so delete-wins is whatever the
@@ -62,9 +82,6 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use backoff::backoff::Backoff;
-use backoff::ExponentialBackoff;
-
 use crate::auth::Session;
 use crate::crypto::{decrypt_row, encrypt_row, SyncKey};
 use crate::rest::CloudItem;
@@ -78,8 +95,9 @@ use crate::CloudConfig;
 ///
 /// Performance only: correctness comes from the keyset cursor, not from the
 /// page size. Larger pages mean fewer round trips on a catch-up; smaller ones
-/// mean a shorter tail if the connection drops mid-drain.
-const PULL_PAGE_LIMIT: usize = 100;
+/// mean a shorter tail if the connection drops mid-drain. `SupabaseRest`
+/// clamps this to its own `MAX_PAGE_LIMIT`, so asking for more is harmless.
+const PULL_PAGE_LIMIT: u32 = 100;
 
 /// Pages one [`CloudSync::pull`] will drain before returning.
 ///
@@ -93,21 +111,16 @@ const MAX_PAGES_PER_PULL: usize = 50;
 /// Rows per upsert request. Bounds request size without needing to measure it.
 const UPLOAD_BATCH: usize = 50;
 
-/// Attempts for a transient (5xx / network) failure, including the first.
-/// Manifest 05 §4.6.3.
-const MAX_TRANSIENT_ATTEMPTS: u32 = 4;
-
-/// Transient-retry schedule floor and ceiling. Manifest 05 §4.6.3.
-const TRANSIENT_INITIAL: Duration = Duration::from_secs(1);
-const TRANSIENT_MAX: Duration = Duration::from_secs(30);
+/// What to wait when a 429 arrives with no `Retry-After` header.
+const RETRY_AFTER_FALLBACK: Duration = Duration::from_secs(1);
 
 /// Ceiling applied to a server-supplied `Retry-After`.
 ///
 /// The header is honoured, but a server that asks for an hour does not get to
 /// pin the loop for an hour; manifest 05 §4.6.3 clamps it to the maximum
-/// backoff. The retry is single-shot regardless, so a server stuck on 429
-/// surfaces an error rather than blocking forever.
-const MAX_RETRY_AFTER: Duration = TRANSIENT_MAX;
+/// backoff, which is thirty seconds. The retry is single-shot regardless, so a
+/// server stuck on 429 surfaces an error rather than blocking forever.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
 /// Idle poll interval floor: the cadence right after something changed.
 pub const MIN_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -132,12 +145,16 @@ pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(300);
 /// holds the account password, but not the sync passphrase, *can write rows*.
 /// A day is far more skew than any real pair of devices shows.
 ///
-/// No correction is attempted, only refusal (manifest 05 R-CLK-2). The same
-/// rule and the same value exist in `copypaste-p2p`'s merge; the two crates
-/// have no dependency edge, and adding one for a single `i64` would be a worse
-/// trade than restating it. If a third transport appears, this constant should
-/// move to `copypaste-core` and both should import it.
-const MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
+/// No correction is attempted, only refusal, and refusal skips **one version**
+/// — it never fails the round and never deletes anything (manifest 05 R-CLK-2).
+///
+/// This deliberately mirrors `copypaste_p2p::sync::MAX_FUTURE_SKEW_MS`: same
+/// rule, same value, same response, because the two transports share an
+/// ordering and must therefore share what they consider a valid stamp. The
+/// crates have no dependency edge and adding one for a single `i64` would be a
+/// worse trade than restating it; if a third transport appears, this belongs in
+/// `copypaste-core` and both should import it from there.
+pub const MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // The local side
@@ -196,9 +213,16 @@ pub trait CloudSource: Send + Sync {
     /// Merge one remote version into the local history, returning whether
     /// anything changed.
     ///
-    /// The implementor owns the ordering decision, and it must be the *same*
-    /// comparator the P2P transport uses (manifest 05 INV-C2). Three
-    /// requirements come with that:
+    /// **The implementor owns the ordering decision, and it must be the same
+    /// comparator the P2P transport uses** — `copypaste_p2p::sync::merge_decision`,
+    /// ordering on `created_at`, then `content_hash`, then `origin_device_id`
+    /// (manifest 05 INV-C2). `created_at` is a wall clock, not a logical one:
+    /// v2 has no Lamport stamp, and what makes a wall clock safe as the primary
+    /// key is the refusal in [`CloudSync::pull`] of versions stamped further
+    /// ahead than [`MAX_FUTURE_SKEW_MS`]. Anything arriving here has already
+    /// passed that check and has already been clamped non-negative.
+    ///
+    /// Three requirements come with owning the decision:
     ///
     /// * **Equal on every ordering key ⇒ keep local, report `false`.** This is
     ///   what makes replay and self-echo free (INV-I1, INV-I2).
@@ -314,39 +338,39 @@ pub enum TransportFault {
 
 /// The REST surface this driver uses.
 ///
-/// `SupabaseRest` in `rest.rs` is the production implementation. The adapter
-/// between its error type and [`TransportFault`] belongs wherever `RestError`'s
-/// variants are visible — it is a `match` with one arm per status class:
-///
-/// ```ignore
-/// impl RestApi for SupabaseRest {
-///     async fn fetch_since(&self, token: &str, since_ms: i64, limit: usize)
-///         -> Result<Vec<CloudItem>, TransportFault>
-///     {
-///         SupabaseRest::fetch_since(self, token, since_ms, limit)
-///             .await
-///             .map_err(classify)
-///     }
-///     // …upsert, tombstone the same way.
-/// }
-/// ```
-///
-/// It is not written here because this module must not depend on the shape of a
-/// sibling's error enum; a seam that costs ten lines at the wiring point buys
-/// two files that can be written and changed independently.
+/// `SupabaseRest` is the production implementation — the adapter is at the
+/// bottom of this file. The trait exists so that the recovery rules above can
+/// be exercised against a fake with no HTTP anywhere; every 401, 429 and
+/// tombstone assertion in this module's tests would otherwise need a live
+/// backend or a stub server, and a rule that is only asserted end to end tends
+/// not to be asserted at all.
 pub trait RestApi: Send + Sync {
-    /// Rows with `created_at >= since_ms`, oldest first, at most `limit` of
+    /// Rows with `created_at >= since_ms`, **oldest first**, at most `limit` of
     /// them.
     ///
     /// Inclusive, for the reason on [`CloudSource::local_changes_since`]. The
     /// ordering must be total and tie-free — `(created_at, item_id)`, not
     /// `created_at` alone — or a burst sharing one millisecond is silently lost
     /// (manifest 05 INV-N1).
+    ///
+    /// **Oldest first is a hard requirement, not a preference.** The cursor is
+    /// a lower bound that moves forward, so a newest-first page cannot be
+    /// drained: taking the newest `limit` rows and advancing past them skips
+    /// everything older that has not been seen yet, and *not* advancing means
+    /// the same page comes back forever. That is exactly the shape of the
+    /// original watermark bug in manifest 05 §4.4 —
+    /// `order=wall_time.desc&limit=20` re-fetched the same newest twenty rows
+    /// on every tick and older history never downloaded at all. The fix that
+    /// manifest records is `order=…asc` with a compound keyset.
+    ///
+    /// [`CloudSync::pull`] sorts each page defensively and warns if one arrives
+    /// out of order, so a violation is loud rather than silent — but it cannot
+    /// repair it.
     fn fetch_since(
         &self,
         token: &str,
         since_ms: i64,
-        limit: usize,
+        limit: u32,
     ) -> impl Future<Output = Result<Vec<CloudItem>, TransportFault>> + Send;
 
     /// Upsert on `item_id`, so re-sending a row is a no-op rather than a
@@ -507,6 +531,14 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     session: Mutex<Session>,
     sensitive: SensitiveGuard,
     idle: Mutex<Duration>,
+    /// Scale applied to every retry sleep. `1.0` in production.
+    ///
+    /// The tests set it to zero so the recovery rules can be asserted without
+    /// wall-clock sleeps: the workspace does not enable tokio's `test-util`, so
+    /// the clock cannot be paused. The *durations* those rules compute are
+    /// asserted separately and directly, against [`rate_limit_delay`] and
+    /// [`transient_policy`], which are pure.
+    delay_scale: f64,
 }
 
 impl<R: RestApi, A: AuthApi> std::fmt::Debug for CloudSync<R, A> {
@@ -536,7 +568,15 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             session: Mutex::new(session),
             sensitive,
             idle: Mutex::new(MIN_POLL_INTERVAL),
+            delay_scale: 1.0,
         }
+    }
+
+    /// Retry immediately instead of sleeping. Tests only — see `delay_scale`.
+    #[cfg(test)]
+    fn without_retry_delays(mut self) -> Self {
+        self.delay_scale = 0.0;
+        self
     }
 
     /// The deployment this driver talks to.
@@ -544,13 +584,14 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         &self.config
     }
 
-    /// A copy of the current session, with whatever token the last refresh
-    /// installed. Persist it so a restart does not have to sign in again.
-    pub fn session(&self) -> Session
-    where
-        Session: Clone,
-    {
-        self.lock_session().clone()
+    /// Read the live session — the access token, and the refresh token as
+    /// rotated by the last refresh.
+    ///
+    /// A borrow rather than a clone, so that persisting the rotated refresh
+    /// token does not require [`Session`] to be `Clone` and does not leave a
+    /// second copy of a bearer lying around for the caller to forget about.
+    pub fn inspect_session<T>(&self, f: impl FnOnce(&Session) -> T) -> T {
+        f(&self.lock_session())
     }
 
     // -- push --------------------------------------------------------------
@@ -619,12 +660,12 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         }
 
         for batch in live.chunks(UPLOAD_BATCH) {
-            self.with_session(|token| self.rest.upsert(token, batch))
+            self.execute(|token| async move { self.rest.upsert(&token, batch).await })
                 .await?;
             stats.uploaded += batch.len();
         }
         for batch in dead.chunks(UPLOAD_BATCH) {
-            self.with_session(|token| self.rest.tombstone(token, batch))
+            self.execute(|token| async move { self.rest.tombstone(&token, batch).await })
                 .await?;
             stats.tombstoned += batch.len();
         }
@@ -658,21 +699,20 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         let mut stats = SyncStats::default();
 
         for _ in 0..MAX_PAGES_PER_PULL {
-            let rows = self
-                .with_session(|token| self.rest.fetch_since(token, cursor, PULL_PAGE_LIMIT))
+            let mut rows = self
+                .execute(|token| async move {
+                    self.rest.fetch_since(&token, cursor, PULL_PAGE_LIMIT).await
+                })
                 .await?;
             let page_len = rows.len();
             stats.downloaded += page_len;
+            sort_page(&mut rows);
 
             let now = now_ms();
             let mut advanced = cursor;
 
             for row in rows {
-                // Lower bound at the decode boundary, not at the use site: a
-                // negative stamp cast to unsigned becomes the largest possible
-                // value and wins every comparison forever (`CopyPaste-psx7`,
-                // manifest 05 R-CLK-1).
-                let created_at = row.created_at.max(0);
+                let created_at = clamp_stamp(row.created_at);
 
                 if created_at > now.saturating_add(MAX_FUTURE_SKEW_MS) {
                     // Refuse the version, and do *not* let the cursor follow it
@@ -732,7 +772,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             }
 
             // Short page: caught up.
-            if page_len < PULL_PAGE_LIMIT {
+            if page_len < PULL_PAGE_LIMIT as usize {
                 break;
             }
             // Full page that produced no progress: every row in it was
@@ -814,24 +854,30 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     ///   still rejects loops forever.
     /// * **429** — sleep for `Retry-After` (clamped), retry once. A second 429
     ///   is a hard error, so a server stuck on 429 cannot pin the caller.
-    /// * **5xx / network** — retry on an exponential schedule, at most
-    ///   [`MAX_TRANSIENT_ATTEMPTS`] attempts in total.
+    /// * **5xx / network** — surfaced, **not** retried here. Manifest 05 §4.6.3
+    ///   asks for a 1 s → 30 s ladder capped at four attempts, and `rest.rs`
+    ///   and `auth.rs` already implement exactly that, once, behind
+    ///   `transient_backoff()`. A transient fault reaching this function has
+    ///   already spent that budget; retrying it again would be a second
+    ///   scheduler for one condition — the shape of duplication `CLAUDE.md`
+    ///   rule 1 exists to prevent — and would turn four attempts into sixteen.
+    ///   The outer retry is the poll cadence.
     /// * **anything else** — give up. Retrying a 400 does not make it a 200.
-    async fn with_session<T, F, Fut>(&self, op: F) -> Result<T, SyncError>
+    ///
+    /// The loop therefore runs at most three times: the first attempt, one
+    /// post-refresh retry, and one post-`Retry-After` retry. It cannot spin.
+    async fn execute<T, F, Fut>(&self, op: F) -> Result<T, SyncError>
     where
-        F: Fn(&str) -> Fut,
+        F: Fn(String) -> Fut,
         Fut: Future<Output = Result<T, TransportFault>>,
     {
         let mut refreshed = false;
         let mut waited_on_429 = false;
-        let mut attempts: u32 = 0;
-        let mut transient = transient_policy();
 
         loop {
             let token = self.lock_session().access_token.clone();
-            attempts += 1;
 
-            match op(&token).await {
+            match op(token).await {
                 Ok(value) => return Ok(value),
 
                 Err(TransportFault::Unauthorized) if !refreshed => {
@@ -843,26 +889,16 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
                 Err(TransportFault::RateLimited { retry_after }) if !waited_on_429 => {
                     waited_on_429 = true;
-                    let delay = retry_after.unwrap_or(TRANSIENT_INITIAL).min(MAX_RETRY_AFTER);
+                    let delay = rate_limit_delay(retry_after);
                     tracing::debug!(
                         delay_ms = delay.as_millis(),
                         "backend asked us to slow down"
                     );
-                    tokio::time::sleep(delay).await;
+                    self.wait(delay).await;
                 }
                 Err(TransportFault::RateLimited { .. }) => return Err(SyncError::RateLimited),
 
-                Err(TransportFault::Transient(reason)) => {
-                    if attempts >= MAX_TRANSIENT_ATTEMPTS {
-                        return Err(SyncError::Transport(reason));
-                    }
-                    match transient.next_backoff() {
-                        Some(delay) => tokio::time::sleep(delay).await,
-                        None => return Err(SyncError::Transport(reason)),
-                    }
-                }
-
-                Err(TransportFault::Permanent(reason)) => {
+                Err(TransportFault::Transient(reason) | TransportFault::Permanent(reason)) => {
                     return Err(SyncError::Transport(reason))
                 }
             }
@@ -901,6 +937,15 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     // torn state by a panic, and refusing to sync from then on would be a worse
     // outcome than continuing.
 
+    /// Sleep for a scaled retry delay. Zero-length sleeps are skipped entirely
+    /// so a test does not pay a scheduler round trip per retry.
+    async fn wait(&self, delay: Duration) {
+        let scaled = delay.mul_f64(self.delay_scale);
+        if !scaled.is_zero() {
+            tokio::time::sleep(scaled).await;
+        }
+    }
+
     fn lock_session(&self) -> std::sync::MutexGuard<'_, Session> {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -910,14 +955,52 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     }
 }
 
-/// Transient-retry schedule: 1 s doubling to 30 s, with the crate's jitter.
-fn transient_policy() -> ExponentialBackoff {
-    ExponentialBackoff {
-        initial_interval: TRANSIENT_INITIAL,
-        max_interval: TRANSIENT_MAX,
-        max_elapsed_time: None,
-        ..ExponentialBackoff::default()
+/// How long to honour a 429 for.
+///
+/// The server's `Retry-After` if it sent one, clamped to [`MAX_RETRY_AFTER`];
+/// otherwise [`RETRY_AFTER_FALLBACK`], so a 429 without a header still slows
+/// down rather than hammering. Pure, so the clamp can be asserted without
+/// sleeping.
+fn rate_limit_delay(retry_after: Option<Duration>) -> Duration {
+    retry_after
+        .unwrap_or(RETRY_AFTER_FALLBACK)
+        .min(MAX_RETRY_AFTER)
+}
+
+/// Put a page in the order the cursor needs, and say so if it was not already.
+///
+/// The sort is cheap insurance against a page that is merely *unordered*.
+/// It is **not** a repair for a page that is ordered newest-first: a
+/// newest-first source returns the newest `limit` rows and there is no way,
+/// from this side, to reach the older ones behind them. The warning exists so
+/// that failure is visible in a log rather than showing up months later as
+/// "my old history never downloaded" — see [`RestApi::fetch_since`].
+fn sort_page(rows: &mut [CloudItem]) {
+    let descending = rows
+        .windows(2)
+        .any(|w| (w[1].created_at, &w[1].item_id) < (w[0].created_at, &w[0].item_id));
+    if descending {
+        tracing::warn!(
+            rows = rows.len(),
+            "a page arrived out of cursor order; a newest-first page cannot be drained \
+             and older rows behind it will not be fetched"
+        );
     }
+    rows.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.item_id.cmp(&b.item_id))
+    });
+}
+
+/// Clamp a wire timestamp's lower bound.
+///
+/// At the decode boundary, not at the use site: a validation that lives in one
+/// consumer is one a second consumer will silently skip (manifest 05 R-CLK-1).
+/// A negative stamp cast to unsigned becomes the largest possible value and
+/// wins every comparison forever (`CopyPaste-psx7`).
+fn clamp_stamp(raw: i64) -> i64 {
+    raw.max(0)
 }
 
 /// Wall clock in Unix milliseconds. A clock before the epoch yields 0 rather
@@ -927,6 +1010,101 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
         .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// The production transports
+// ---------------------------------------------------------------------------
+//
+// Two adapters, each a `match` from a sibling's error enum onto the four things
+// this driver knows how to do about a failure. All the behaviour is above; this
+// is the translation.
+
+/// `RestError` -> [`TransportFault`].
+///
+/// The interesting arm is the transient one. `SupabaseRest` retries `Network`
+/// and `Server` under the crate's single `backoff` policy *before* surfacing
+/// them, so by the time one arrives here the 1 s → 30 s × 4 budget that
+/// manifest 05 §4.6.3 asks for has already been spent. It is still classified
+/// as [`TransportFault::Transient`] — that is what it is, and it is what a log
+/// or a status UI wants to say — and [`CloudSync::execute`] deliberately does
+/// not retry it, so there is exactly one transient ladder in the crate.
+fn classify_rest(err: crate::rest::RestError) -> TransportFault {
+    use crate::rest::RestError as E;
+    match err {
+        E::Unauthorized => TransportFault::Unauthorized,
+        E::RateLimited { retry_after_secs } => TransportFault::RateLimited {
+            retry_after: retry_after_secs.map(Duration::from_secs),
+        },
+        E::Network(_) => TransportFault::Transient("could not reach the sync backend"),
+        E::Server { .. } => TransportFault::Transient("the sync backend faulted"),
+        // Refreshing the token cannot fix RLS refusing the row, a missing
+        // unique index behind the upsert's conflict target, a malformed
+        // response, or an item this client refused to send.
+        E::Forbidden => TransportFault::Permanent("the account may not touch these rows"),
+        E::Rejected { .. } => TransportFault::Permanent("the sync backend rejected the request"),
+        E::Malformed => TransportFault::Permanent("the sync backend returned an unexpected response"),
+        E::InvalidItem { reason } => TransportFault::Permanent(reason),
+    }
+}
+
+impl RestApi for crate::rest::SupabaseRest {
+    async fn fetch_since(
+        &self,
+        token: &str,
+        since_ms: i64,
+        limit: u32,
+    ) -> Result<Vec<CloudItem>, TransportFault> {
+        crate::rest::SupabaseRest::fetch_since(self, token, since_ms, limit)
+            .await
+            .map_err(classify_rest)
+    }
+
+    async fn upsert(&self, token: &str, items: &[CloudItem]) -> Result<(), TransportFault> {
+        crate::rest::SupabaseRest::upsert(self, token, items)
+            .await
+            .map(|_| ())
+            .map_err(classify_rest)
+    }
+
+    async fn tombstone(&self, token: &str, item_ids: &[String]) -> Result<(), TransportFault> {
+        crate::rest::SupabaseRest::tombstone(self, token, item_ids)
+            .await
+            .map(|_| ())
+            .map_err(classify_rest)
+    }
+}
+
+/// `AuthError` -> [`AuthFault`].
+///
+/// The two credential cases stay apart: GoTrue answers `invalid_grant` for
+/// both a bad password and a dead refresh token, and `auth.rs` has already
+/// disambiguated them by grant kind (manifest 05 §4.6.1). Collapsing them here
+/// would throw that away and tell a user to retype a password that was fine.
+fn classify_auth(err: crate::auth::AuthError) -> AuthFault {
+    use crate::auth::AuthError as E;
+    match err {
+        E::InvalidCredentials => AuthFault::InvalidCredentials,
+        // All four mean "this session cannot be revived by refreshing": the
+        // token is dead, the account is unconfirmed, or the service answered
+        // something a refresh cannot use. Sign-in is the recovery, and it is
+        // the caller's decision to make, never a silent downgrade (INV-N6).
+        E::SessionExpired | E::EmailConfirmationRequired => AuthFault::SessionExpired,
+        E::Rejected { .. } | E::Malformed => AuthFault::SessionExpired,
+        E::RateLimited { retry_after_secs } => AuthFault::RateLimited {
+            retry_after: retry_after_secs.map(Duration::from_secs),
+        },
+        E::Network(_) => AuthFault::Unavailable("could not reach the account service"),
+        E::Server { .. } => AuthFault::Unavailable("the account service faulted"),
+    }
+}
+
+impl AuthApi for crate::auth::SupabaseAuth {
+    async fn refresh(&self, refresh_token: &str) -> Result<Session, AuthFault> {
+        crate::auth::SupabaseAuth::refresh(self, refresh_token)
+            .await
+            .map_err(classify_auth)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -946,8 +1124,15 @@ mod tests {
     const ACCOUNT: &str = "acct-1";
     const DEVICE: &str = "device-a";
 
+    /// The fixture key, derived once per binary and rebuilt from bytes after
+    /// that. Argon2id is deliberately expensive; a hundred-row fixture that
+    /// re-derived per row would take minutes.
     fn key() -> SyncKey {
-        crate::crypto::derive_sync_key(PASS, ACCOUNT).unwrap()
+        static KEY: std::sync::OnceLock<[u8; crate::crypto::KEY_LEN]> =
+            std::sync::OnceLock::new();
+        SyncKey::from_bytes(
+            *KEY.get_or_init(|| *crate::crypto::derive_sync_key(PASS, ACCOUNT).unwrap().to_bytes()),
+        )
     }
 
     fn config() -> CloudConfig {
@@ -1054,9 +1239,19 @@ mod tests {
 
         fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
             let mut w = self.watermark.lock().unwrap();
+            // INV-N5, asserted for every test that pulls: the driver must never
+            // hand back a lower cursor than it was given.
             assert!(ms >= *w, "the watermark moved backwards: {} -> {ms}", *w);
             *w = ms;
             Ok(())
+        }
+    }
+
+    impl FakeSource {
+        /// Move the cursor without the monotonicity assertion, to set up a case
+        /// the driver itself would never produce.
+        fn rewind(&self, ms: i64) {
+            *self.watermark.lock().unwrap() = ms;
         }
     }
 
@@ -1134,7 +1329,7 @@ mod tests {
             &self,
             token: &str,
             since_ms: i64,
-            limit: usize,
+            limit: u32,
         ) -> Result<Vec<CloudItem>, TransportFault> {
             if let Some(fault) = self.next(token) {
                 return Err(fault);
@@ -1144,7 +1339,7 @@ mod tests {
                 .sorted_rows()
                 .into_iter()
                 .filter(|r| r.created_at >= since_ms)
-                .take(limit)
+                .take(limit as usize)
                 .collect())
         }
 
@@ -1212,6 +1407,7 @@ mod tests {
             session("token-1"),
             allow_everything(),
         )
+        .without_retry_delays()
     }
 
     /// A cloud row sealed with the test key, as the backend would hold it.
@@ -1250,6 +1446,33 @@ mod tests {
             b"hunter2 in the clear"
         );
         assert!(decrypt_row(&row.ciphertext, &row.nonce, &key(), "b").is_err());
+    }
+
+    #[tokio::test]
+    async fn the_nonce_and_ciphertext_are_not_transposed() {
+        // `encrypt_row` returns `(nonce, ciphertext)`; a `CloudItem` names them
+        // in the other order. Both are base64 `String`, so swapping them is a
+        // type-correct, silent bug that only shows up as "every synced item is
+        // undecryptable" on the *other* device. Assert the columns directly
+        // rather than trusting the call site.
+        let source = FakeSource::with_outgoing(vec![item("a", 1_000, "round trip")]);
+        let sync = driver(FakeRest::default(), FakeAuth::default());
+        sync.push(&source).await.unwrap();
+
+        let rows = sync.rest.rows.lock().unwrap();
+        let row = &rows["a"];
+
+        // The nonce column holds exactly 24 bytes; the ciphertext column holds
+        // the plaintext plus a 16-byte tag. Neither length is a coincidence, so
+        // a transposition fails here even for a 24-byte plaintext.
+        use base64::engine::general_purpose::STANDARD as B64;
+        use base64::Engine as _;
+        assert_eq!(B64.decode(&row.nonce).unwrap().len(), 24);
+        assert_eq!(B64.decode(&row.ciphertext).unwrap().len(), "round trip".len() + 16);
+        assert_eq!(
+            decrypt_row(&row.ciphertext, &row.nonce, &key(), "a").unwrap(),
+            b"round trip"
+        );
     }
 
     #[tokio::test]
@@ -1470,9 +1693,9 @@ mod tests {
             .lock()
             .unwrap()
             .insert("a".into(), cloud_row("a", 1_000, "back from the dead"));
-        // The watermark has already passed it, but even offered directly it
-        // must lose.
-        source.set_watermark(0).unwrap_or(());
+        // Re-offer it from the start: the ordering, not the cursor, is what has
+        // to keep the item dead.
+        source.rewind(0);
         sync.pull(&source).await.unwrap();
 
         assert!(source.get("a").unwrap().deleted, "the item was resurrected");
@@ -1535,24 +1758,41 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_negative_stamp_is_clamped_at_the_boundary() {
-        // CopyPaste-psx7: a negative value cast to unsigned wins every
-        // comparison forever. Clamped on arrival, not at the use site.
-        let mut row = cloud_row("a", -42, "hostile stamp");
-        row.created_at = -42;
-        let source = FakeSource::default();
-        let sync = driver(FakeRest::seeded(vec![row]), FakeAuth::default());
+    #[test]
+    fn a_page_is_put_into_cursor_order_before_it_is_applied() {
+        // Defensive: the transport is required to page oldest-first, and the
+        // cursor cannot drain a newest-first page. Sorting costs nothing and
+        // means an unordered page is merely slow rather than wrong.
+        let mut page = vec![
+            cloud_row("c", 3_000, "third"),
+            cloud_row("a", 1_000, "first"),
+            cloud_row("b2", 2_000, "second, later id"),
+            cloud_row("b1", 2_000, "second, earlier id"),
+        ];
+        sort_page(&mut page);
 
-        sync.pull(&source).await.unwrap();
-        assert_eq!(source.get("a").unwrap().created_at, 0);
+        let order: Vec<&str> = page.iter().map(|r| r.item_id.as_str()).collect();
+        // Compound key: `created_at` then `item_id`, so the ordering has no
+        // ties even for a burst inside one millisecond (INV-N1).
+        assert_eq!(order, ["a", "b1", "b2", "c"]);
+    }
+
+    #[test]
+    fn a_negative_stamp_is_clamped_at_the_boundary() {
+        // CopyPaste-psx7: a negative value cast to unsigned becomes the largest
+        // possible one and wins every comparison forever. Clamped on arrival,
+        // not at the use site, so every ingress path is covered.
+        assert_eq!(clamp_stamp(-42), 0);
+        assert_eq!(clamp_stamp(i64::MIN), 0);
+        assert_eq!(clamp_stamp(0), 0);
+        assert_eq!(clamp_stamp(1_700_000_000_000), 1_700_000_000_000);
     }
 
     #[tokio::test]
     async fn pull_drains_more_rows_than_one_page() {
         // AT-23/AT-24 in miniature: more rows than a page, all fetched, and the
         // cursor is inclusive so the boundary row is never dropped.
-        let rows: Vec<CloudItem> = (0..PULL_PAGE_LIMIT + 30)
+        let rows: Vec<CloudItem> = (0..PULL_PAGE_LIMIT as usize + 30)
             .map(|i| cloud_row(&format!("item-{i:04}"), 1_000 + i as i64, "x"))
             .collect();
         let source = FakeSource::default();
@@ -1560,7 +1800,7 @@ mod tests {
 
         let stats = sync.pull(&source).await.unwrap();
 
-        assert_eq!(stats.applied, PULL_PAGE_LIMIT + 30);
+        assert_eq!(stats.applied, PULL_PAGE_LIMIT as usize + 30);
         assert!(
             sync.rest.fetches.load(Ordering::SeqCst) >= 2,
             "a full page did not trigger a burst drain"
@@ -1668,10 +1908,29 @@ mod tests {
         assert!(sync.rest.rows.lock().unwrap().is_empty());
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn a_429_is_honoured_once_and_then_gives_up() {
-        // AT-39. `start_paused` makes the sleep instant while still asserting
-        // that we waited the amount the server asked for.
+    #[test]
+    fn a_retry_after_is_honoured_and_clamped() {
+        // AT-39, asserted on the value rather than on elapsed wall-clock time:
+        // the workspace does not enable tokio's `test-util`, so there is no
+        // paused clock, and a test that really slept for the server's hint
+        // would be a test that really sleeps.
+        assert_eq!(
+            rate_limit_delay(Some(Duration::from_secs(7))),
+            Duration::from_secs(7),
+            "Retry-After was not honoured"
+        );
+        // A server asking for an hour does not get to hold the loop for one.
+        assert_eq!(
+            rate_limit_delay(Some(Duration::from_secs(3_600))),
+            MAX_RETRY_AFTER
+        );
+        // No header: still slow down rather than retrying flat out.
+        assert_eq!(rate_limit_delay(None), RETRY_AFTER_FALLBACK);
+        assert_eq!(rate_limit_delay(Some(Duration::ZERO)), Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn a_429_is_retried_exactly_once() {
         let rest = FakeRest::scripted(vec![
             Reply::RateLimited(Some(Duration::from_secs(7))),
             Reply::Ok,
@@ -1679,15 +1938,10 @@ mod tests {
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "x")]);
         let sync = driver(rest, FakeAuth::default());
 
-        let started = tokio::time::Instant::now();
-        let stats = sync.push(&source).await.unwrap();
-        assert_eq!(stats.uploaded, 1);
-        assert!(
-            started.elapsed() >= Duration::from_secs(7),
-            "Retry-After was not honoured"
-        );
+        assert_eq!(sync.push(&source).await.unwrap().uploaded, 1);
 
-        // Twice in a row is an error, not a second wait.
+        // Twice in a row is an error, not a second wait: a server stuck on 429
+        // must not be able to pin the loop.
         let rest = FakeRest::scripted(vec![
             Reply::RateLimited(Some(Duration::from_secs(1))),
             Reply::RateLimited(Some(Duration::from_secs(1))),
@@ -1697,24 +1951,8 @@ mod tests {
         assert_eq!(sync.push(&source).await.unwrap_err(), SyncError::RateLimited);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn a_retry_after_is_clamped() {
-        // A server asking for an hour does not get to hold the loop for an
-        // hour.
-        let rest = FakeRest::scripted(vec![
-            Reply::RateLimited(Some(Duration::from_secs(3_600))),
-            Reply::Ok,
-        ]);
-        let source = FakeSource::with_outgoing(vec![item("a", 1_000, "x")]);
-        let sync = driver(rest, FakeAuth::default());
-
-        let started = tokio::time::Instant::now();
-        sync.push(&source).await.unwrap();
-        assert!(started.elapsed() <= MAX_RETRY_AFTER + Duration::from_secs(1));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn a_429_without_a_header_still_waits() {
+    #[tokio::test]
+    async fn a_429_without_a_header_still_recovers() {
         let rest = FakeRest::scripted(vec![Reply::RateLimited(None), Reply::Ok]);
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "x")]);
         let sync = driver(rest, FakeAuth::default());
@@ -1722,20 +1960,43 @@ mod tests {
         assert_eq!(sync.push(&source).await.unwrap().uploaded, 1);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn transient_failures_are_retried_within_a_budget() {
-        let rest = FakeRest::scripted(vec![Reply::Transient, Reply::Transient, Reply::Ok]);
+    #[tokio::test]
+    async fn a_transient_failure_does_not_start_a_second_retry_ladder() {
+        // The 1 s → 30 s × 4 ladder lives in `rest.rs` and `auth.rs`, once. A
+        // transient fault arriving here has already spent it, so the driver
+        // surfaces it instead of multiplying four attempts into sixteen. The
+        // poll cadence is the outer retry.
+        let rest = FakeRest::scripted(vec![Reply::Transient, Reply::Ok]);
         let source = FakeSource::with_outgoing(vec![item("a", 1_000, "x")]);
         let sync = driver(rest, FakeAuth::default());
-        assert_eq!(sync.push(&source).await.unwrap().uploaded, 1);
 
-        // Past the budget it gives up rather than retrying forever.
-        let rest = FakeRest::scripted(vec![Reply::Transient; 10]);
-        let sync = driver(rest, FakeAuth::default());
         assert!(matches!(
             sync.push(&source).await.unwrap_err(),
             SyncError::Transport(_)
         ));
+        assert_eq!(
+            sync.rest.tokens.lock().unwrap().len(),
+            1,
+            "the request was attempted more than once"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_recovery_path_can_spin() {
+        // The whole recovery loop is bounded at three attempts: the first, one
+        // post-refresh retry, and one post-Retry-After retry. Script every
+        // recoverable fault back to back and assert the count.
+        let rest = FakeRest::scripted(vec![
+            Reply::Unauthorized,
+            Reply::RateLimited(None),
+            Reply::Unauthorized,
+            Reply::Ok,
+        ]);
+        let source = FakeSource::with_outgoing(vec![item("a", 1_000, "x")]);
+        let sync = driver(rest, FakeAuth::default());
+
+        assert_eq!(sync.push(&source).await.unwrap_err(), SyncError::Unauthorized);
+        assert_eq!(sync.rest.tokens.lock().unwrap().len(), 3);
     }
 
     #[tokio::test]
@@ -1867,7 +2128,7 @@ mod tests {
             &self,
             token: &str,
             since_ms: i64,
-            limit: usize,
+            limit: u32,
         ) -> Result<Vec<CloudItem>, TransportFault> {
             self.0.fetch_since(token, since_ms, limit).await
         }
@@ -1916,9 +2177,10 @@ mod tests {
     fn the_tunables_are_the_documented_ones() {
         assert_eq!(MIN_POLL_INTERVAL, Duration::from_secs(5));
         assert_eq!(MAX_POLL_INTERVAL, Duration::from_secs(300));
-        assert_eq!(MAX_TRANSIENT_ATTEMPTS, 4);
-        assert_eq!(TRANSIENT_INITIAL, Duration::from_secs(1));
-        assert_eq!(TRANSIENT_MAX, Duration::from_secs(30));
+        assert_eq!(RETRY_AFTER_FALLBACK, Duration::from_secs(1));
+        assert_eq!(MAX_RETRY_AFTER, Duration::from_secs(30));
+        // Mirrors `copypaste_p2p::sync::MAX_FUTURE_SKEW_MS`; the two transports
+        // share an ordering, so they must share what counts as a valid stamp.
         assert_eq!(MAX_FUTURE_SKEW_MS, 24 * 60 * 60 * 1000);
     }
 }
