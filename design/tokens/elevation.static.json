@@ -1,0 +1,22 @@
+{
+  "elevation": {
+    "$description": "Shadows that do not vary by theme (port-manifest §8.5). CSS-only.",
+    "$type": "shadow",
+    "$extensions": {
+      "com.copypaste": {
+        "platforms": [
+          "css"
+        ]
+      }
+    },
+    "sh-knob": {
+      "$value": {
+        "color": "rgba(0,0,0,0.3)",
+        "offsetX": "0",
+        "offsetY": "1px",
+        "blur": "2px"
+      },
+      "$description": "Toggle knob drop shadow — identical in both themes because the knob is always white on a coloured track."
+    }
+  }
+}

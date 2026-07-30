@@ -1,0 +1,92 @@
+{
+  "accents": {
+    "$description": "The accent axis (port-manifest §8.4), light resolution. v1 expressed this as a partial override — :root[data-theme=\"light\"][data-accent=\"…\"] restated only --accent (and --on-accent for teal/green/amber). Here every accent is written out fully: this file is the cascade already resolved, so Compose and CSS read the same numbers instead of one of them re-deriving them.",
+    "$type": "color",
+    "indigo": {
+      "$description": "Default accent. Darkened for AA on a light background.",
+      "accent": {
+        "$value": "#5B49E0"
+      },
+      "accent-2": {
+        "$value": "#9C8FFF",
+        "$description": "Unchanged from dark — v1's light block does not override --accent-2."
+      },
+      "on-accent": {
+        "$value": "#FFFFFF"
+      }
+    },
+    "blue": {
+      "accent": {
+        "$value": "#2563EB"
+      },
+      "accent-2": {
+        "$value": "#7CB0FF"
+      },
+      "on-accent": {
+        "$value": "#FFFFFF"
+      }
+    },
+    "teal": {
+      "accent": {
+        "$value": "#0E9E8C"
+      },
+      "accent-2": {
+        "$value": "#5FE0D2"
+      },
+      "on-accent": {
+        "$value": "#FFFFFF",
+        "$description": "Overridden in light: the darkened teal takes white text."
+      }
+    },
+    "green": {
+      "accent": {
+        "$value": "#1FA85B"
+      },
+      "accent-2": {
+        "$value": "#84E29A"
+      },
+      "on-accent": {
+        "$value": "#FFFFFF",
+        "$description": "Overridden in light: the darkened green takes white text."
+      }
+    },
+    "amber": {
+      "accent": {
+        "$value": "#C77F1A"
+      },
+      "accent-2": {
+        "$value": "#FFC56B"
+      },
+      "on-accent": {
+        "$value": "#FFFFFF",
+        "$description": "Overridden in light: the darkened amber takes white text."
+      }
+    },
+    "rose": {
+      "accent": {
+        "$value": "#E11D6B"
+      },
+      "accent-2": {
+        "$value": "#FF85AC"
+      },
+      "on-accent": {
+        "$value": "#FFFFFF"
+      }
+    }
+  },
+  "color": {
+    "$type": "color",
+    "accent": {
+      "$value": "{accents.indigo.accent}",
+      "$description": "The active accent. Defaults to indigo."
+    },
+    "accent-2": {
+      "$value": "{accents.indigo.accent-2}",
+      "$description": "The active accent's lighter ramp step."
+    },
+    "on-accent": {
+      "$value": "{accents.indigo.on-accent}",
+      "$description": "Foreground on the active accent."
+    }
+  }
+}

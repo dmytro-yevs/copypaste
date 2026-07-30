@@ -1,0 +1,52 @@
+{
+  "radius": {
+    "$description": "Corner radii (port-manifest §8.5). Every value is per-component rather than a single ramp, because CopyPaste nests controls inside rows inside cards and a uniform radius reads wrong at 7px and at 13px simultaneously.",
+    "$type": "dimension",
+    "r-xs": {
+      "$value": "2px"
+    },
+    "r-chk": {
+      "$value": "5px",
+      "$description": "Selection checkbox."
+    },
+    "r-sm": {
+      "$value": "6px"
+    },
+    "r-chip": {
+      "$value": "7px",
+      "$description": "Chip / small tile."
+    },
+    "r-ctl": {
+      "$value": "8px",
+      "$description": "Buttons and segmented controls."
+    },
+    "r-input": {
+      "$value": "9px",
+      "$description": "Text fields."
+    },
+    "r-row": {
+      "$value": "10px",
+      "$description": "History row."
+    },
+    "r-window": {
+      "$value": "12px",
+      "$description": "Popup window corner."
+    },
+    "r-card": {
+      "$value": "13px",
+      "$description": "Card."
+    },
+    "r-empty-ic": {
+      "$value": "16px",
+      "$description": "Empty-state icon plate."
+    },
+    "r-pill": {
+      "$value": "999px",
+      "$description": "Fully rounded — pills, badges, dots."
+    },
+    "sel-bar-r": {
+      "$value": "3px",
+      "$description": "Radius of the accent bar on a selected row."
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "accents": {
+    "$description": "The accent axis (port-manifest §8.4), dark resolution. Six user-selectable accents; indigo is the default. On the desktop these become :root[data-accent=\"…\"] blocks; on Android they become CopyPasteAccent entries fed to the Material 3 ColorScheme.",
+    "$type": "color",
+    "indigo": {
+      "$description": "Default accent.",
+      "accent": {
+        "$value": "#6E5BFF"
+      },
+      "accent-2": {
+        "$value": "#9C8FFF",
+        "$description": "Lighter accent for on-dark emphasis text (SAS digits, links)."
+      },
+      "on-accent": {
+        "$value": "#FFFFFF",
+        "$description": "Foreground on a solid --accent fill."
+      }
+    },
+    "blue": {
+      "accent": {
+        "$value": "#3B82F6"
+      },
+      "accent-2": {
+        "$value": "#7CB0FF"
+      },
+      "on-accent": {
+        "$value": "#FFFFFF"
+      }
+    },
+    "teal": {
+      "accent": {
+        "$value": "#13B8A6"
+      },
+      "accent-2": {
+        "$value": "#5FE0D2"
+      },
+      "on-accent": {
+        "$value": "#06302C",
+        "$description": "Dark ink: the teal fill is too light for white text at AA."
+      }
+    },
+    "green": {
+      "accent": {
+        "$value": "#46C56A"
+      },
+      "accent-2": {
+        "$value": "#84E29A"
+      },
+      "on-accent": {
+        "$value": "#062A12",
+        "$description": "Dark ink: the green fill is too light for white text at AA."
+      }
+    },
+    "amber": {
+      "accent": {
+        "$value": "#F5A524"
+      },
+      "accent-2": {
+        "$value": "#FFC56B"
+      },
+      "on-accent": {
+        "$value": "#2A1B05",
+        "$description": "Dark ink: the amber fill is too light for white text at AA."
+      }
+    },
+    "rose": {
+      "accent": {
+        "$value": "#F43F7E"
+      },
+      "accent-2": {
+        "$value": "#FF85AC"
+      },
+      "on-accent": {
+        "$value": "#FFFFFF"
+      }
+    }
+  },
+  "color": {
+    "$type": "color",
+    "accent": {
+      "$value": "{accents.indigo.accent}",
+      "$description": "The active accent. Defaults to indigo; the desktop overrides it per [data-accent], Android per CopyPasteAccent."
+    },
+    "accent-2": {
+      "$value": "{accents.indigo.accent-2}",
+      "$description": "The active accent's lighter ramp step."
+    },
+    "on-accent": {
+      "$value": "{accents.indigo.on-accent}",
+      "$description": "Foreground on the active accent."
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "$description": "The translucency axis (port-manifest §8.6). Solid is the baseline and the fallback: the frosted values are applied additively inside an @supports (backdrop-filter) block so an engine without backdrop-filter gets the solid values with no separate rule, and prefers-reduced-transparency forces them back. Only chrome surfaces frost — sidebar, popup container, modal scrim, toast, tab bar. Content surfaces stay solid. CSS-only: Android has no equivalent axis, it uses opaque Material surfaces.",
+  "$type": "string",
+  "$extensions": { "com.copypaste": { "platforms": ["css"] } },
+
+  "translucency": {
+    "solid": {
+      "$description": "Default, and what [data-translucency=\"off\"] or an engine without backdrop-filter gets.",
+      "frost-filter": { "$value": "none" },
+      "chrome-bg": { "$value": "var(--panel)" },
+      "scrim-blur": { "$value": "none" }
+    },
+    "frosted": {
+      "$description": "Applied only under [data-translucency=\"on\"] AND @supports backdrop-filter.",
+      "frost-filter": { "$value": "saturate(180%) blur(20px)" },
+      "chrome-bg": { "$value": "color-mix(in srgb, var(--panel) 72%, transparent)" },
+      "scrim-blur": { "$value": "blur(2px)" }
+    }
+  }
+}

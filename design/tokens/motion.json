@@ -1,0 +1,45 @@
+{
+  "motion": {
+    "$description": "Motion (port-manifest §8.5). All three durations collapse to 0ms under prefers-reduced-motion; that override is emitted into the generated CSS from the reducedMotion extension below, so the accessibility rule lives with the token rather than in a stylesheet someone can forget to update.",
+    "dur-fast": {
+      "$type": "duration",
+      "$value": "120ms",
+      "$description": "Hover, press, colour transitions.",
+      "$extensions": {
+        "com.copypaste": {
+          "reducedMotion": "0ms"
+        }
+      }
+    },
+    "dur": {
+      "$type": "duration",
+      "$value": "200ms",
+      "$description": "Default transition: row collapse, opacity, layout.",
+      "$extensions": {
+        "com.copypaste": {
+          "reducedMotion": "0ms"
+        }
+      }
+    },
+    "dur-theme": {
+      "$type": "duration",
+      "$value": "300ms",
+      "$description": "Theme cross-fade.",
+      "$extensions": {
+        "com.copypaste": {
+          "reducedMotion": "0ms"
+        }
+      }
+    },
+    "ease": {
+      "$type": "cubicBezier",
+      "$value": [
+        0.2,
+        0.8,
+        0.2,
+        1
+      ],
+      "$description": "The single easing curve. Everything uses it."
+    }
+  }
+}

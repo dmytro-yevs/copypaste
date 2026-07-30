@@ -1,0 +1,67 @@
+{
+  "tw": {
+    "$description": "Semantic aliases for the desktop app: Tailwind v4 @theme keys, including every semantic slot stock shadcn/ui components resolve. Nothing here holds a value — every token is a pure alias onto a core token, which is what keeps this a mapping table and not a second palette. Add a slot here rather than overriding a shadcn component.",
+    "$type": "color",
+
+    "color-background": { "$value": "{color.bg}", "$description": "shadcn `background`." },
+    "color-foreground": { "$value": "{color.text}", "$description": "shadcn `foreground`." },
+
+    "color-card": { "$value": "{color.card}", "$description": "shadcn `card`." },
+    "color-card-foreground": { "$value": "{color.text}", "$description": "shadcn `card-foreground`." },
+
+    "color-popover": { "$value": "{color.elevated}", "$description": "shadcn `popover`. Popovers sit on --elevated, the same surface as fields and chips." },
+    "color-popover-foreground": { "$value": "{color.text}", "$description": "shadcn `popover-foreground`." },
+
+    "color-primary": { "$value": "{color.accent}", "$description": "shadcn `primary`. Follows [data-accent], so a stock <Button> re-tints with the user's accent for free." },
+    "color-primary-foreground": { "$value": "{color.on-accent}", "$description": "shadcn `primary-foreground`. Not always white — teal/green/amber use dark ink in dark theme." },
+
+    "color-secondary": { "$value": "{color.raised}", "$description": "shadcn `secondary`. shadcn's secondary button is borderless, so it maps to --raised (v1's .btn--secondary:hover and .seg button.on) rather than to the bordered --elevated." },
+    "color-secondary-foreground": { "$value": "{color.text}", "$description": "shadcn `secondary-foreground`." },
+
+    "color-muted": { "$value": "{color.elevated}", "$description": "shadcn `muted`. The inset surface v1 uses for fields, chips, kbd and count badges." },
+    "color-muted-foreground": { "$value": "{color.dim}", "$description": "shadcn `muted-foreground`." },
+
+    "color-accent": { "$value": "{color.hover}", "$description": "shadcn `accent` is the neutral hover/active surface for menu and list items, NOT the brand colour — that is `primary`. Mapping it to --hover keeps it aligned with the Material 3 state layer on Android." },
+    "color-accent-foreground": { "$value": "{color.text}", "$description": "shadcn `accent-foreground`." },
+
+    "color-destructive": { "$value": "{color.err}", "$description": "shadcn `destructive`." },
+    "color-destructive-foreground": { "$value": "{color.on-err}", "$description": "shadcn `destructive-foreground`. See tokens/color/static.json — v1 had no solid danger fill, so this ink is an addition." },
+
+    "color-border": { "$value": "{color.border}", "$description": "shadcn `border`." },
+    "color-input": { "$value": "{color.border}", "$description": "shadcn `input` is the field's border colour, not its fill; the fill is `muted`/`background`." },
+    "color-ring": { "$value": "{color.accent}", "$description": "shadcn `ring` — the focus ring. §4 requires the ring is never removed." },
+
+    "color-sidebar": { "$value": "{color.panel}", "$description": "shadcn `sidebar`. Chrome surface." },
+    "color-sidebar-foreground": { "$value": "{color.dim}", "$description": "shadcn `sidebar-foreground`. Sidebar items rest dim and go --text on hover." },
+    "color-sidebar-primary": { "$value": "{color.accent}", "$description": "shadcn `sidebar-primary`." },
+    "color-sidebar-primary-foreground": { "$value": "{color.on-accent}", "$description": "shadcn `sidebar-primary-foreground`." },
+    "color-sidebar-accent": { "$value": "{color.selected}", "$description": "shadcn `sidebar-accent` is the ACTIVE nav item, which in v1 (.sb__item.on) is the accent-tinted --selected — unlike the plain menu hover above." },
+    "color-sidebar-accent-foreground": { "$value": "{color.text}", "$description": "shadcn `sidebar-accent-foreground`." },
+    "color-sidebar-border": { "$value": "{color.divider}", "$description": "shadcn `sidebar-border`. The sidebar separates with a divider, not a control border." },
+    "color-sidebar-ring": { "$value": "{color.accent}", "$description": "shadcn `sidebar-ring`." },
+
+    "color-chart-1": { "$value": "{color.c-url}", "$description": "shadcn `chart-1`. The chart ramp reuses the content-kind hues so a sync/storage chart is legible next to the list it describes." },
+    "color-chart-2": { "$value": "{color.c-code}" },
+    "color-chart-3": { "$value": "{color.c-color}" },
+    "color-chart-4": { "$value": "{color.c-image}" },
+    "color-chart-5": { "$value": "{color.c-num}" },
+
+    "color-brand": { "$value": "{color.accent}", "$description": "NON-shadcn, ours. An unambiguous name for the brand accent, because shadcn has already spent the word `accent` on its hover surface. `bg-brand` and `bg-primary` are the same colour; prefer `brand` outside shadcn components." },
+    "color-on-brand": { "$value": "{color.on-accent}", "$description": "NON-shadcn, ours. Foreground on --color-brand." },
+    "color-brand-2": { "$value": "{color.accent-2}", "$description": "NON-shadcn, ours. The accent ramp's light step, for emphasis text on dark (SAS digits)." },
+
+    "color-selected": { "$value": "{color.selected}", "$description": "NON-shadcn, ours. The accent-tinted list-row selection fill (.row.sel). Exposed so it is a utility rather than an inline style." },
+    "color-pressed": { "$value": "{color.pressed}", "$description": "NON-shadcn, ours. The neutral pressed state layer." },
+
+    "font-sans": { "$type": "fontFamily", "$value": "{type.f-ui}", "$description": "Tailwind `font-sans`, which shadcn components inherit." },
+    "font-mono": { "$type": "fontFamily", "$value": "{type.f-mono}", "$description": "Tailwind `font-mono`." },
+
+    "radius": { "$type": "dimension", "$value": "{radius.r-ctl}", "$description": "shadcn's base radius variable. 8px — v1's control radius." },
+    "radius-sm": { "$type": "dimension", "$value": "{radius.r-sm}", "$description": "Overriding Tailwind's radius ramp is expected by shadcn, which derives all four steps from --radius." },
+    "radius-md": { "$type": "dimension", "$value": "{radius.r-ctl}", "$description": "`rounded-md` — the default on shadcn Button and Input. 8px, matching v1's .btn." },
+    "radius-lg": { "$type": "dimension", "$value": "{radius.r-row}", "$description": "10px, matching v1's .row." },
+    "radius-xl": { "$type": "dimension", "$value": "{radius.r-card}", "$description": "`rounded-xl` — the default on shadcn Card. 13px, matching v1's .card." },
+
+    "ease-cp": { "$type": "cubicBezier", "$value": "{motion.ease}", "$description": "Tailwind `ease-cp`. The single CopyPaste easing curve." }
+  }
+}

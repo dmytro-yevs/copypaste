@@ -1,0 +1,29 @@
+{
+  "z": {
+    "$description": "Stacking order (port-manifest §8.5). A closed, ordered set — new layers get a name here rather than an inline z-index.",
+    "$type": "number",
+    "glide": {
+      "$value": 0,
+      "$description": "The glide/ghost layer beneath rows."
+    },
+    "row": {
+      "$value": 1
+    },
+    "grouphead": {
+      "$value": 2,
+      "$description": "Sticky date group header."
+    },
+    "dropzone": {
+      "$value": 10
+    },
+    "scrim": {
+      "$value": 40
+    },
+    "toast": {
+      "$value": 60
+    },
+    "popover": {
+      "$value": 80
+    }
+  }
+}

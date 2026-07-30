@@ -1,0 +1,27 @@
+{
+  "layout": {
+    "$description": "Window and container geometry (port-manifest §8.5, cross-checked against §5.2). These are desktop window constraints; Android reads them only as max content widths.",
+    "$type": "dimension",
+    "main-min-w": {
+      "$value": "640px",
+      "$description": "Main window minimum width token. §5.2 records the shipped window as 980×640 with a 720×460 minimum — reconcile against tauri.conf.json when the desktop shell lands."
+    },
+    "main-min-h": {
+      "$value": "480px"
+    },
+    "popup-w": {
+      "$value": "400px",
+      "$description": "Quick-access popup width. §5.2 records the shipped logical size as 403×624; the extra 3px is window chrome."
+    },
+    "content-max-width": {
+      "$value": "640px",
+      "$description": "Reading measure cap for settings and detail panes."
+    },
+    "modal-w": {
+      "$value": "340px"
+    },
+    "modal-w-wide": {
+      "$value": "560px"
+    }
+  }
+}

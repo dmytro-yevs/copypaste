@@ -1,0 +1,42 @@
+{
+  "elevation": {
+    "$description": "Light theme shadow ramp (port-manifest §8.2). Same geometry as dark at materially lower opacity — a light surface needs a hint, not a hole. CSS-only.",
+    "$type": "shadow",
+    "$extensions": {
+      "com.copypaste": {
+        "platforms": [
+          "css"
+        ]
+      }
+    },
+    "sh1": {
+      "$value": {
+        "color": "rgba(20,22,30,0.06)",
+        "offsetX": "0",
+        "offsetY": "1px",
+        "blur": "2px"
+      },
+      "$description": "Resting card / row lift."
+    },
+    "sh2": {
+      "$value": {
+        "color": "rgba(20,22,30,0.12)",
+        "offsetX": "0",
+        "offsetY": "8px",
+        "blur": "24px",
+        "spread": "-8px"
+      },
+      "$description": "Popover, dropdown, toast. Note the -8px spread: light uses a tighter spread than dark's -6px."
+    },
+    "sh3": {
+      "$value": {
+        "color": "rgba(20,22,30,0.18)",
+        "offsetX": "0",
+        "offsetY": "24px",
+        "blur": "64px",
+        "spread": "-12px"
+      },
+      "$description": "Modal."
+    }
+  }
+}

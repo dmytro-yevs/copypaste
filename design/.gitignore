@@ -1,0 +1,5 @@
+node_modules/
+
+# dist/ is deliberately NOT ignored. The generated CSS, Tailwind theme and
+# Kotlin sources are committed so that building the desktop or Android app
+# needs no Node toolchain. See README.md.
