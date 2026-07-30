@@ -16,16 +16,35 @@ use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::AppState;
 
-/// Writes nowhere and reads nothing: these tests are about sync, not the
-/// pasteboard.
+/// Reads nothing, and records what is written to it.
+///
+/// The recording half is what lets a test assert the *absence* of a pasteboard
+/// write — which is the whole difference between `get` and `copy`.
 #[derive(Default)]
-pub struct FakeClipboard;
+pub struct FakeClipboard {
+    writes: WriteLog,
+}
+
+/// Everything written to a [`FakeClipboard`], shared with whoever made it.
+#[derive(Default, Clone)]
+pub struct WriteLog(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl WriteLog {
+    pub fn count(&self) -> usize {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+}
 
 impl ClipboardSource for FakeClipboard {
     fn poll(&mut self) -> Option<Capture> {
         None
     }
-    fn set_contents(&mut self, _text: &str) -> anyhow::Result<()> {
+    fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+        self.writes
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(text.to_string());
         Ok(())
     }
     fn backend_name(&self) -> &'static str {
@@ -43,6 +62,20 @@ pub fn test_state(name: &str) -> (Arc<AppState>, tempfile::TempDir) {
     test_state_with_cloud(name, Cloud::new(None))
 }
 
+/// A state plus the log of everything written to its clipboard.
+pub fn test_state_watching_clipboard(name: &str) -> (Arc<AppState>, tempfile::TempDir, WriteLog) {
+    let writes = WriteLog::default();
+    let (state, dir) = reopen_with(
+        tempfile::tempdir().expect("tempdir"),
+        Cloud::new(None),
+        name,
+        Box::new(FakeClipboard {
+            writes: writes.clone(),
+        }),
+    );
+    (state, dir, writes)
+}
+
 pub fn test_state_with_cloud(name: &str, cloud: Cloud) -> (Arc<AppState>, tempfile::TempDir) {
     reopen(tempfile::tempdir().expect("tempdir"), cloud, name)
 }
@@ -55,6 +88,15 @@ pub fn reopen(
     dir: tempfile::TempDir,
     cloud: Cloud,
     name: &str,
+) -> (Arc<AppState>, tempfile::TempDir) {
+    reopen_with(dir, cloud, name, Box::new(FakeClipboard::default()))
+}
+
+fn reopen_with(
+    dir: tempfile::TempDir,
+    cloud: Cloud,
+    name: &str,
+    clipboard: Box<dyn ClipboardSource>,
 ) -> (Arc<AppState>, tempfile::TempDir) {
     let db_path = dir.path().join("copypaste-v2.db");
 
@@ -73,7 +115,7 @@ pub fn reopen(
         store,
         keyring,
         Arc::new(Detector::new().expect("detector")),
-        Box::new(FakeClipboard),
+        clipboard,
         meta,
         P2p::new(peers, discovery, 0),
         cloud,

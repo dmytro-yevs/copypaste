@@ -1,0 +1,132 @@
+/**
+ * The History screen's states (manifest §3.1.11) and its count badge (AT-68).
+ *
+ * The one that matters most: when the service is not running the screen is an
+ * **offer to start it**, not an empty list. An empty list says "you have copied
+ * nothing", which is false, and it is the neighbour of the defect bdac.2
+ * records.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+
+import { HistoryView } from "@/components/history/HistoryView";
+import { historyCount } from "@/components/history/SearchBar";
+import { IpcFailure } from "@/lib/errors";
+import { items, status, withClient } from "@/test/harness";
+import { useUi } from "@/store/ui";
+
+const listItems = vi.fn();
+const searchItems = vi.fn();
+const getStatus = vi.fn();
+
+vi.mock("@/lib/ipc", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ipc")>();
+  return {
+    ...actual,
+    listItems: (...a: unknown[]) => listItems(...a),
+    searchItems: (...a: unknown[]) => searchItems(...a),
+    getStatus: () => getStatus(),
+  };
+});
+
+beforeEach(() => {
+  listItems.mockReset();
+  searchItems.mockReset();
+  getStatus.mockReset().mockResolvedValue(status());
+  useUi.setState({ query: "", activeId: null });
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("the service is not running", () => {
+  it("offers to start it instead of showing an empty list", async () => {
+    listItems.mockRejectedValue(new IpcFailure("offline"));
+    withClient(<HistoryView />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("The clipboard service isn't running"),
+      ).toBeTruthy(),
+    );
+
+    // The offer, not a shrug.
+    expect(screen.getByRole("button", { name: /start the service/i })).toBeTruthy();
+    // And emphatically not the empty state.
+    expect(screen.queryByText("Nothing copied yet")).toBeNull();
+  });
+
+  it("never names a path in what it shows", async () => {
+    listItems.mockRejectedValue(
+      "connection refused on /Users/dmitriy/Library/CopyPaste/daemon.sock",
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { container } = withClient(<HistoryView />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("The clipboard service isn't running"),
+      ).toBeTruthy(),
+    );
+    expect(container.innerHTML).not.toMatch(/\/Users\/|dmitriy|\.sock/);
+  });
+});
+
+describe("empty and filtered states", () => {
+  it("says nothing has been copied when the list is genuinely empty", async () => {
+    listItems.mockResolvedValue([]);
+    withClient(<HistoryView />);
+    await waitFor(() => expect(screen.getByText("Nothing copied yet")).toBeTruthy());
+  });
+
+  it("reports a search with no matches as a search result, not as empty", async () => {
+    listItems.mockResolvedValue([]);
+    searchItems.mockResolvedValue([]);
+    useUi.setState({ query: "needle" });
+    withClient(<HistoryView />);
+    await waitFor(() =>
+      expect(screen.getByText('No results for "needle"')).toBeTruthy(),
+    );
+  });
+
+  it("renders rows when there are some", async () => {
+    listItems.mockResolvedValue(items(3));
+    withClient(<HistoryView />);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+  });
+});
+
+describe("the count badge follows the filter (AT-68)", () => {
+  it("shows the service total when nothing is filtered", () => {
+    expect(historyCount(false, 3, 14)).toBe("14 items");
+  });
+
+  it("shows the visible count as soon as a filter is active", () => {
+    // 14 total and a query matching none must read "0 items", not "14 items"
+    // (CopyPaste-g27b.37).
+    expect(historyCount(true, 0, 14)).toBe("0 items");
+    expect(historyCount(true, 1, 14)).toBe("1 item");
+  });
+
+  it("falls back to what is on screen before the total arrives", () => {
+    expect(historyCount(false, 2, undefined)).toBe("2 items");
+  });
+});
+
+describe("clear all", () => {
+  it("is offered only when there is something to clear", async () => {
+    listItems.mockResolvedValue([]);
+    const { rerender } = withClient(<HistoryView />);
+    await waitFor(() => expect(screen.getByText("Nothing copied yet")).toBeTruthy());
+    expect(
+      screen.queryByRole("button", { name: /clear clipboard history/i }),
+    ).toBeNull();
+
+    listItems.mockResolvedValue(items(2));
+    rerender(<HistoryView />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /clear clipboard history/i }),
+      ).toBeTruthy(),
+    );
+  });
+});

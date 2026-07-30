@@ -9,8 +9,19 @@
 //! passphrase are used and dropped: the password goes to GoTrue and is never
 //! stored, and the passphrase derives the sync key and is never stored either,
 //! so what the daemon keeps is a key for this account rather than the means to
-//! re-derive one anywhere else. Nothing in this file logs any of the three, and
-//! the reply carries only the status a client could have asked for anyway.
+//! re-derive one anywhere else. Nothing in this file logs any of the three at
+//! any level, no error payload can carry one (every one is a `const` below, and
+//! `SyncError`'s payloads are `&'static str` by construction), and the reply
+//! carries only the status a client could have asked for anyway. None of the
+//! three ever reaches the store, so none can reach the search index.
+//!
+//! One residual, stated rather than hidden: the passphrase copy this module
+//! derives from is `Zeroizing`, but the request frame it arrived in is an
+//! ordinary `String` owned by the JSON codec, and that copy is dropped without
+//! being wiped. Closing it means a zeroizing decoder for one field of one
+//! method, which is not obviously worth what it costs — but it is the reason
+//! this is "the passphrase is not persisted" rather than "the passphrase is not
+//! in memory".
 
 use std::sync::Arc;
 
@@ -272,6 +283,29 @@ mod tests {
         assert_eq!(response.error_code, Some(ErrorCode::Internal));
         assert_eq!(response.error.as_deref(), Some(MSG_UNAVAILABLE));
         assert!(!state.cloud.signed_in());
+    }
+
+    /// The response to a failed sign-in must not echo any of the three secrets
+    /// back, in the message or anywhere else in the frame.
+    #[tokio::test]
+    async fn a_failed_sign_in_echoes_none_of_the_secrets() {
+        let (state, _dir) = test_state_with_cloud("alpha", Cloud::new(Some(config())));
+        let response = sign_in(
+            &state,
+            1,
+            "person@example.com",
+            "pAssw0rd-that-must-not-appear",
+            "passphrase-that-must-not-appear",
+        )
+        .await;
+
+        let frame = serde_json::to_string(&response).expect("serialisable");
+        for secret in [
+            "pAssw0rd-that-must-not-appear",
+            "passphrase-that-must-not-appear",
+        ] {
+            assert!(!frame.contains(secret), "a secret came back: {frame}");
+        }
     }
 
     #[test]

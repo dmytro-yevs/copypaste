@@ -109,6 +109,22 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
     }
 }
 
+/// One item, decrypted, with nothing else touched.
+///
+/// Deliberately not `copy`: reading an item must not publish it to the system
+/// pasteboard as a side effect. The two handlers share `to_wire` and differ in
+/// exactly that.
+pub(super) fn get(state: &AppState, id: u64, item_id: &str) -> Response {
+    match state.store.get(item_id) {
+        Ok(Some(row)) => match to_wire(state, row) {
+            Ok(item) => Response::ok(id, ResponseData::Item(item)),
+            Err(e) => decrypt_error(id, e),
+        },
+        Ok(None) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
+        Err(e) => storage_error(id, "get", e),
+    }
+}
+
 pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
     // Read first so an unknown id is `not_found` rather than a silent success:
     // a client that deleted nothing needs to know it deleted nothing.
@@ -241,6 +257,36 @@ mod tests {
     /// server's read-time layer, which is what protects a database written
     /// before the rule existed (CLAUDE.md rule 4 — "enforced at write time, at
     /// read time, and by a purge migration").
+    /// Reading must never have the side effect of copying: `get` returns the
+    /// content, and the clipboard is untouched by it.
+    #[test]
+    fn get_returns_an_item_without_touching_the_clipboard() {
+        let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("server");
+        let added = match add(&state, 1, "readable").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+
+        match get(&state, 2, &added.id).data {
+            Some(ResponseData::Item(item)) => assert_eq!(item.content, "readable"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            writes.count(),
+            0,
+            "reading an item published it to the pasteboard"
+        );
+
+        // ...and `copy` is the one that does write, so the assertion above is
+        // not passing for want of a working clipboard.
+        assert!(copy(&state, 3, &added.id).ok);
+        assert_eq!(writes.count(), 1);
+
+        // An unknown id is not_found, not an empty success.
+        let missing = get(&state, 4, "00000000-0000-0000-0000-000000000000");
+        assert_eq!(missing.error_code, Some(ErrorCode::NotFound));
+    }
+
     #[test]
     fn search_never_returns_a_sensitive_item() {
         let (state, _dir) = test_state("server");

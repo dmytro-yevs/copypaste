@@ -101,6 +101,7 @@ fn requires_ready(method: &Method) -> bool {
         Method::List { .. }
         | Method::Search { .. }
         | Method::Copy { .. }
+        | Method::Get { .. }
         | Method::Add { .. }
         | Method::Delete { .. }
         | Method::DeleteAll
@@ -172,6 +173,7 @@ pub(super) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::List { limit, offset } => items::list(state, id, limit, offset),
         Method::Search { query, limit } => items::search(state, id, &query, limit),
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
+        Method::Get { id: item_id } => items::get(state, id, &item_id),
         Method::Add { content } => items::add(state, id, &content),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
         Method::DeleteAll => items::delete_all(state, id),
@@ -254,6 +256,7 @@ mod tests {
             limit: 10
         }));
         assert!(requires_ready(&Method::Copy { id: "x".into() }));
+        assert!(requires_ready(&Method::Get { id: "x".into() }));
         assert!(requires_ready(&Method::Add {
             content: "x".into()
         }));

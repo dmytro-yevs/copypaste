@@ -40,7 +40,7 @@ as describing this code.
 
 | Platform | Store | State |
 |---|---|---|
-| macOS | Keychain, behind the `macos-keychain` cargo feature | Written, **never executed** |
+| macOS | Keychain, behind the `macos-keychain` cargo feature | Compiled and lint-clean on `macos-14` in CI; **never executed** |
 | Android | Android Keystore | Not built |
 | Linux | `0600` file under the data directory | Development fallback, **not a shipping posture** |
 
@@ -108,24 +108,64 @@ everywhere.
 
 ## Cloud sync
 
-**Not wired into the daemon.** The crate is built and tested against mocked
-HTTP; nothing calls it yet.
+**Wired into the daemon, and never once spoken to a real Supabase project.**
+Those are two separate facts and both matter.
 
-By design: rows are sealed client-side under an Argon2id key derived from a
-passphrase that never leaves the device, so the server holds ciphertext and
-metadata only. Row-level security is the second layer — a misconfigured policy
-would expose rows that remain unreadable.
+What is wired: the daemon holds a `CloudSync` driver, an adaptive poll loop
+(5 s after a change, doubling to 5 min while idle), and four IPC operations —
+`cloud sign-in`, `cloud sign-out`, `cloud status`, `cloud sync`. Rows are sealed
+client-side under an Argon2id key derived from a passphrase that never leaves
+the device, so the server holds ciphertext and metadata only. Row-level security
+is the second layer — a misconfigured policy would expose rows that remain
+unreadable.
+
+What the daemon stores, and where: the access token, the rotated refresh token
+and the derived sync key, in the SQLCipher database beside the ciphertext they
+protect, under the device key from the OS keystore. **Never** the account
+password and **never** the passphrase — so a stolen database yields a session
+that expires and a key for one account, not the means to re-derive it. Signing
+out clears all three; it keeps the deployment URL and anon key, which are
+configuration rather than credentials.
+
+Three secrets cross the IPC socket on sign-in (email, password, passphrase).
+The socket is `0600` and is the only authentication boundary. The CLI reads the
+two secrets from the environment or from stdin and has no flag for either,
+because process arguments are readable by every process running as the same
+user. The passphrase is zeroized once the key is derived; the request frame it
+arrived in is an ordinary `String` owned by the JSON codec and is not, which is
+a residual worth knowing about.
+
+What leaves the device is gated twice: the outbound query never lists a
+sensitive row, and the driver re-checks every item against the same detector
+before it is sealed (manifest 05 AT-56 — v1 had one enforcement point and it had
+a hole).
+
+Metadata the backend does see, and v1's relay did not: the account email,
+`origin_device_id`, content types, payload sizes and timestamps. Content stays
+end-to-end encrypted; the metadata surface is a genuine regression from v1's
+account-less relay, and sync now requires an account.
+
+The end-to-end exercise is `scripts/demo-cloud.sh`, which drives two real
+daemons against **a local stub** (`scripts/cloud-stub.py`) — not Supabase. It
+asserts that two devices converge, that a sensitive item never leaves its
+device, and that nothing but ciphertext reaches the backend. It cannot tell you
+that a real deployment accepts any of it.
 
 ## Unverified
 
 Written, never observed working. Treat these claims as unproven:
 
-- The **macOS Keychain** backend and the **NSPasteboard** capture path — never
-  compiled, because development happens on Linux.
+- The **macOS Keychain** backend and the **NSPasteboard** capture path. CI's
+  `macos-check` job compiles and lints them on `macos-14` with `--all-features`,
+  so "never compiled" is no longer true — but nothing *runs* them: no test
+  drives a pasteboard or a keychain entry.
 - **mDNS discovery** — the development container has no multicast; pairing is
   exercised only over explicit addresses.
-- **Cloud sync against a live Supabase project** — every test uses in-process
-  fakes.
+- **Cloud sync against a live Supabase project.** The unit tests use in-process
+  fakes and `scripts/demo-cloud.sh` uses a local stub that imitates GoTrue and
+  PostgREST. Nothing here has ever authenticated against Supabase, and no
+  deployment has ever had the schema and row-level-security policies in
+  `crates/copypaste-cloud/src/rest/mod.rs` applied to it.
 - The **app on either target**. The Tauri shell builds and launches on Linux,
   but WebKitGTK executes no JavaScript under headless Xvfb, so what it renders
   is covered only by jsdom unit tests. It has never been built for macOS or

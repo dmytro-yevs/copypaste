@@ -74,18 +74,8 @@ export function withClient(ui: ReactElement, client = testClient()) {
   return { client, ...render(ui, { wrapper }) };
 }
 
-/** jsdom gives every element a zero-sized box. A virtualised list needs a
- *  viewport, so tests that scroll say how big it is. */
-export function giveSize(
-  el: HTMLElement,
-  { clientHeight = 400, scrollHeight = 4000 } = {},
-) {
-  Object.defineProperty(el, "clientHeight", {
-    configurable: true,
-    value: clientHeight,
-  });
-  Object.defineProperty(el, "scrollHeight", {
-    configurable: true,
-    value: scrollHeight,
-  });
+/** Override the faked scroll extent for one element — used by the tests that
+ *  drive load-more, where the distance to the bottom is the assertion. */
+export function setScrollHeight(el: HTMLElement, scrollHeight: number) {
+  Object.defineProperty(el, "scrollHeight", { configurable: true, value: scrollHeight });
 }
