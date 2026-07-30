@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/copypaste-ipc",
+    "crates/copypaste-core",
+    "crates/copypaste-daemon",
+    "crates/copypaste-cli",
+]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2021"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dmytro-yevs/copypaste"
+
+# Library-first (CLAUDE.md rule 1). Every entry here is a wheel we are NOT
+# carving. v1 hand-rolled six of these.
+[workspace.dependencies]
+# crypto
+chacha20poly1305 = { version = "0.10", features = ["stream"] }
+hkdf = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+zeroize = { version = "1.7", features = ["derive"] }
+subtle = "2.5"
+# storage — rusqlite_migration replaces v1's hand-rolled user_version ladder
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup"] }
+rusqlite_migration = "1.2"
+serde_rusqlite = "0.35"
+r2d2 = "0.8"
+r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled-sqlcipher"] }
+# serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+# async
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures-util = "0.3"
+# retry/backoff — ONE implementation (v1 had six)
+backoff = { version = "0.4", features = ["tokio"] }
+# rate limiting — ONE implementation (v1 had three)
+governor = "0.6"
+# errors, logging, cli, misc
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+hex = "0.4"
+regex = "1.10"
+unicode-normalization = "0.1"
+directories = "5"
+tempfile = "3"
+comfy-table = "7"
+# macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }
+objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem"] }
+security-framework = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
