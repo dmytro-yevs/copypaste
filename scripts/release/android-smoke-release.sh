@@ -153,12 +153,13 @@ group "3. Native code is mapped"
 # needs ptrace access, which the shell user does not have without run-as. It is
 # attempted rather than assumed so that a device where it *is* readable gives
 # the same evidence the debug leg gets.
-maps_err=""
-if [[ -n "$pid_now" ]]; then
-    maps_err="$(sh_ cat "/proc/$pid_now/maps" > "$OUT/release-maps.txt" 2>&1 || true)"
-fi
+[[ -n "$pid_now" ]] && sh_ cat "/proc/$pid_now/maps" > "$OUT/release-maps.txt"
 lines=0
 [[ -s "$OUT/release-maps.txt" ]] && lines="$(wc -l < "$OUT/release-maps.txt")"
+# The refusal itself, not a line count. `sh_` folds stderr into the file, so on
+# a denial that file holds the reason and nothing else — which is the thing
+# worth printing.
+maps_err="$(head -c 120 "$OUT/release-maps.txt" 2>/dev/null | tr -d '\n')"
 
 if (( lines >= 20 )); then
     own_map_paths "$OUT/release-maps.txt" "$PKG" | sed 's/^/        /'
@@ -170,7 +171,7 @@ if (( lines >= 20 )); then
     fi
 else
     note "that libcopypaste_ui_lib is mapped, read from /proc" \
-         "maps is not readable without run-as and this build is not debuggable (${maps_err:-$lines lines}). What stands in its place: the process survived setup, which loads the library before super.onCreate, no UnsatisfiedLinkError appears above, and the WebView painted assets that only the Rust side serves"
+         "maps is not readable without run-as and this build is not debuggable — ${maps_err:-$lines lines}. What stands in its place: the process survived setup, which loads the library before super.onCreate, no UnsatisfiedLinkError appears above, and the WebView painted assets that only the Rust side serves"
 fi
 
 # ---------------------------------------------------------------------------
