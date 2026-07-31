@@ -165,12 +165,15 @@ describe("the sensitive-content sweep", () => {
     ).toBeTruthy();
   });
 
-  /** The honest half. The service raises no event when the sweep runs, so the
-   *  app cannot announce a deletion as it happens — and must not imply it can. */
-  it("admits that a deletion is not announced when it happens", async () => {
+  /** The other half, now that `EventData::swept` exists: an unrecoverable
+   *  delete has to say where it will be reported, and the note must not go on
+   *  claiming it is not. */
+  it("says where an automatic deletion is reported", async () => {
     getConfig.mockResolvedValue(applied({ sensitive_ttl_secs: 30 }));
     withUser(<ServiceTab />);
-    expect(await screen.findByText(/doesn't report when this runs/)).toBeTruthy();
+    expect(
+      await screen.findByText(/announced as it happens.*Diagnostics tab/s),
+    ).toBeTruthy();
   });
 
   /** Manifest 01 §4 and manifest 07 §6.2 both give 30 as the value; the control

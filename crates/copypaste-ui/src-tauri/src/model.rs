@@ -129,6 +129,13 @@ pub struct UiPage {
     /// Named exactly as the wire names it (`ItemPage::skipped_undecryptable`),
     /// so the frontend, the bridge and the daemon all say one thing.
     skipped_undecryptable: u32,
+    /// Where to resume, or `null` at the end of the list.
+    ///
+    /// The **only** end-of-list test the frontend may use. `items.length <
+    /// limit` is not one: `skipped_undecryptable` rows were read and dropped,
+    /// so a short page can still have a list behind it, and stopping there
+    /// would hide the rest of the history behind a few unreadable rows.
+    next_cursor: Option<String>,
 }
 
 impl From<crate::backend::Page> for UiPage {
@@ -136,6 +143,7 @@ impl From<crate::backend::Page> for UiPage {
         Self {
             items: ui_items(page.items),
             skipped_undecryptable: page.skipped_undecryptable,
+            next_cursor: page.next_cursor,
         }
     }
 }
@@ -147,6 +155,10 @@ impl UiPage {
 
     pub fn skipped_undecryptable(&self) -> u32 {
         self.skipped_undecryptable
+    }
+
+    pub fn next_cursor(&self) -> Option<&str> {
+        self.next_cursor.as_deref()
     }
 }
 
