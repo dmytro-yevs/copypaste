@@ -25,7 +25,7 @@
 //!   same-UID client that connects and never drains otherwise pins a permit and
 //!   the database mutex for as long as it likes.
 
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,12 +67,10 @@ pub(super) const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// means the client is not draining, and the daemon is holding a reply.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Create the socket directory, clear a stale socket, bind, and lock the socket
-/// down to `0600`.
+/// Create the socket directory, clear a stale socket, and bind.
 ///
-/// The socket is the only authentication boundary — there is no in-band auth
-/// (manifest 04 I14) — so the `chmod` is a hard error, while tightening the
-/// parent directory is warn-only (it may be a pre-existing shared data dir).
+/// Tightening the parent directory stays warn-only — it may be a pre-existing
+/// shared data dir — because [`bind_owner_only`] does not rely on it.
 pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("create the socket directory")?;
@@ -87,12 +85,53 @@ pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
     let _guard = BindLock::acquire(path)?;
 
     clear_stale_socket(path)?;
-    let listener = UnixListener::bind(path).context("bind the daemon socket")?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        .context("restrict the daemon socket to the owner")?;
+    let listener = bind_owner_only(path)?;
 
     info!("ipc socket listening");
     Ok(listener)
+}
+
+/// Bind the socket already restricted to `0600` (security review F-9).
+///
+/// `bind(2)` takes no mode, so a socket bound at its final path is
+/// `0777 & ~umask` until a `chmod` lands — 0755 under the usual umask, and
+/// `connect(2)` needs only write permission. The socket is the only
+/// authentication boundary (manifest 04 I14), so it is bound inside a `0700`
+/// staging directory and renamed into place: the rename is atomic, so the
+/// final path never exists at any other mode. Not `umask(2)`, which is
+/// process-wide and would apply to whatever other threads create meanwhile.
+fn bind_owner_only(path: &Path) -> anyhow::Result<UnixListener> {
+    let staging = staging_dir(path);
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&staging)
+        .context("create the socket staging directory")?;
+    // mkdir(2) subtracts the umask, so the directory is never wider than 0700
+    // but can land narrower than this process can traverse.
+    std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o700))
+        .context("restrict the socket staging directory to the owner")?;
+
+    let bound = bind_staged(&staging.join("s"), path);
+    let _ = std::fs::remove_dir_all(&staging);
+    bound
+}
+
+fn bind_staged(staged: &Path, path: &Path) -> anyhow::Result<UnixListener> {
+    let listener = UnixListener::bind(staged).context("bind the daemon socket")?;
+    std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o600))
+        .context("restrict the daemon socket to the owner")?;
+    std::fs::rename(staged, path).context("move the daemon socket into place")?;
+    Ok(listener)
+}
+
+/// A sibling of the socket, so the rename into place stays within one
+/// filesystem. Short names because `sun_path` is 104 bytes on macOS and the
+/// staged path has to fit as well.
+fn staging_dir(socket_path: &Path) -> PathBuf {
+    let mut name = socket_path.as_os_str().to_os_string();
+    name.push(".new");
+    PathBuf::from(name)
 }
 
 /// An exclusive `flock(2)` on `<socket>.lock`, held for the bind sequence.
@@ -334,7 +373,7 @@ mod tests {
     use super::*;
     use crate::testutil::test_state;
     use copypaste_ipc::{Method, Request, PROTOCOL_VERSION};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Barrier;
 
     fn request(id: u64, method: Method) -> Request {
@@ -430,6 +469,67 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "the socket is the only auth boundary");
     }
+
+    /// Security review F-9. The mode must hold from the instant the path
+    /// exists, not one `chmod` later: `bind(2)` takes no mode argument, so a
+    /// socket bound at its final path is `0777 & ~umask` until it is tightened
+    /// — 0755 under the usual umask, and `connect(2)` needs only write
+    /// permission. The socket is the only authentication boundary (manifest 04
+    /// I14), so that window is the whole of it.
+    ///
+    /// The parent is left deliberately traversable, because the guarantee must
+    /// not rest on it: tightening the parent is warn-only, and it may pre-exist
+    /// wider.
+    ///
+    /// An observer thread polls the path while `bind` runs. Rounds, because the
+    /// window is two syscalls wide and any one round can miss it.
+    #[tokio::test]
+    async fn the_socket_is_never_visible_wider_than_owner_only() {
+        const ROUNDS: usize = 200;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.path().join("daemon.sock");
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(AtomicUsize::new(NOTHING_SEEN));
+        let observer = {
+            let path = path.clone();
+            let stop = Arc::clone(&stop);
+            let seen = Arc::clone(&seen);
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    if let Ok(meta) = std::fs::symlink_metadata(&path) {
+                        let mode = meta.permissions().mode() as usize & 0o777;
+                        if mode != 0o600 {
+                            let _ = seen.compare_exchange(
+                                NOTHING_SEEN,
+                                mode,
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            );
+                        }
+                    }
+                }
+            })
+        };
+
+        for _ in 0..ROUNDS {
+            drop(bind(&path).expect("bind"));
+            std::fs::remove_file(&path).expect("clear the socket for the next round");
+        }
+
+        stop.store(true, Ordering::Relaxed);
+        observer.join().expect("no panic");
+
+        let observed = seen.load(Ordering::Relaxed);
+        assert_eq!(
+            observed, NOTHING_SEEN,
+            "the socket was reachable at {observed:o} before it was locked down"
+        );
+    }
+
+    const NOTHING_SEEN: usize = usize::MAX;
 
     /// Full round trip: a real socket, a real client, one connection, several
     /// pipelined requests.
