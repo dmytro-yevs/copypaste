@@ -14,8 +14,10 @@ name: CI
 on:
   push:
     branches: [main, v2-main]
+  # No branch filter, and no `paths`: this workflow carries the Rust layer and
+  # the macOS layer (docs/rewrite/testing-policy.md), and a pull request onto a
+  # stacked or release branch changes the same code.
   pull_request:
-    branches: [main, v2-main]
   workflow_dispatch:
 
 concurrency:
@@ -254,7 +256,9 @@ jobs:
         run: ./scripts/check-macos-types.sh --self-test
 
   # ---------------------------------------------------------------------------
-  # The only end-to-end proof the project has.
+  # The Rust layer end to end, on Linux against the fake clipboard source.
+  # Neither platform's shell, engine or pasteboard is involved; the layer that
+  # owns each of those is in docs/rewrite/testing-policy.md.
   # ---------------------------------------------------------------------------
 
   demo:
@@ -306,11 +310,12 @@ jobs:
         run: ./scripts/demo-p2p.sh
 
   # ---------------------------------------------------------------------------
-  # Frontend.
+  # Frontend, in jsdom. Layout, scrolling and virtualisation are the browser
+  # layer's (browser-webkitgtk.yml); every rect here is 0x0.
   # ---------------------------------------------------------------------------
 
   frontend:
-    name: npm build + test
+    name: npm build + test (jsdom)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -338,6 +343,10 @@ jobs:
   # macOS. The job that changes "never compiled" into "compiles", and then
   # "never executed" into "executed": the last four steps drive the real
   # NSPasteboard and the real Keychain rather than the fakes.
+  #
+  # It is the macOS layer for those two and for nothing else. The tray, the
+  # popover, the hotkey, launch at login and WKWebView are unexercised here and
+  # are marked NOT VERIFIED IN CI in docs/rewrite/testing-policy.md.
   # ---------------------------------------------------------------------------
 
   macos-check:

@@ -5,6 +5,10 @@ import { defineConfig } from "vitest/config";
 // must not overlap. This is a correctness constraint, not a tuning choice.
 export default defineConfig({
   test: {
+    // The layer this suite is, in every reporter line it prints: the caveats
+    // in docs/rewrite/testing-policy.md are worth nothing if CI output reads
+    // as platform coverage.
+    name: "browser (WebKitGTK, Linux)",
     include: ["tests/**/*.e2e.test.ts"],
     globalSetup: ["./src/harness/global-setup.ts"],
     fileParallelism: false,

@@ -1,9 +1,15 @@
-# e2e — the app in a real WebView
+# e2e — the shared frontend in a Linux browser engine
+
+This is the **browser layer** of [`docs/rewrite/testing-policy.md`](../docs/rewrite/testing-policy.md),
+run by `.github/workflows/browser-webkitgtk.yml`. It owns shared React
+behaviour — rendering, layout, navigation, forms and dialogs, empty and error
+states, keyboard navigation, focus, the accessibility tree, overflow — and it
+owns nothing native. The engine is WebKitGTK on Linux.
 
 `npm test` builds nothing. It expects `copypaste-ui`, `copypaste-daemon` and
 `copypaste` in `target/debug` (or `target/release`), and drives the app through
-`tauri-driver` → `WebKitWebDriver` → the real wry WebView, talking to a real
-daemon over a real Unix socket.
+`tauri-driver` → `WebKitWebDriver` → the wry WebView, talking to a real daemon
+over a real Unix socket.
 
 ```
 cargo build -p copypaste-ui -p copypaste-daemon -p copypaste-cli
@@ -15,12 +21,12 @@ cd e2e && npm ci && npm test
 
 | Layer | Exercised | **Not** exercised |
 |---|---|---|
-| `crates/copypaste-ui` `npm test` (jsdom) | component logic, hooks, reducers | layout, scrolling, virtualisation, the Tauri bridge — jsdom has no box model and every rect is 0×0 |
-| this suite | WebKit layout and paint, the virtualiser, keyboard and focus, `invoke` across the Tauri bridge, the daemon's IPC socket, the real SQLite store | macOS and Android. The engine here is WebKitGTK; macOS ships WKWebView and Android ships the system WebView. Tray, popover, global hotkey and launch-at-login are desktop-shell APIs this harness never touches |
+| `crates/copypaste-ui` `npm test` (jsdom) | component logic, hooks, reducers | layout, scrolling, virtualisation, anything crossing the Tauri bridge — jsdom has no box model and every rect is 0×0 |
+| this suite | WebKit layout and paint, the virtualiser, keyboard and focus, the accessibility tree, the daemon's IPC socket and the real SQLite store behind it | macOS and Android. The engine here is WebKitGTK; macOS ships WKWebView and Android ships the system WebView. A Tauri command runs here through `wry` on Linux, which the policy does not accept as verification of that command as shipped. Tray, popover, global hotkey and launch-at-login are desktop-shell APIs this harness never touches |
 
-A green run means the frontend, the bridge and the daemon agree on a Linux
-host. It is not evidence about either shipping platform, and CLAUDE.md rule 7
-means both still need their own verification.
+A green run means the shared frontend and the daemon agree on a Linux host. It
+is not evidence about either shipping platform; the layer that owns each native
+requirement, and the ones marked NOT VERIFIED IN CI, are in the policy.
 
 ## What is driven
 
@@ -35,11 +41,11 @@ time and each gets a fresh daemon and a fresh database.
 | `sensitive` · `error-strings` | a flagged item's plaintext is absent from `outerHTML`, and no user-facing string carries a filesystem path (INV-10/12) |
 | `bulk-actions` | per-row actions are **absent** in selection mode rather than hidden, and a bulk delete reaches the database |
 | `devices` | real pairing against a **second real daemon**: mint, reveal, a wrong code, the right one, unpair — plus the QR (INV-13) and the no-camera fallback |
-| `push` | a `copypaste://changed` event really crosses the bridge, the list updates inside the poll interval, and a dead daemon degrades to polling |
-| `service-lifecycle` | the offline screen offers to *start* the service, and pressing the button really does |
+| `push` | a `copypaste://changed` event crosses the Linux bridge, the list updates inside the poll interval, and a dead daemon degrades to polling |
+| `service-lifecycle` | the offline screen offers to *start* the service, and pressing the button starts a Linux `target/debug` daemon — launchd and Homebrew belong to the macOS layer |
 | `settings` | every tab lays out, a preference reaches layout and survives a reload, and Settings still works with the service down |
-| `export-import` | an export withholds and counts flagged items; an edited backup cannot import a credential marked clean |
-| `daemon-config` | `GetConfig`/`SetConfig` over the socket — **no WebView**, because no Tauri command routes them (see below) |
+| `export-import` | an export withholds and counts flagged items; an edited backup cannot import a credential marked clean — driven through the CLI, not through Settings (see below) |
+| `daemon-config` | `GetConfig`/`SetConfig` over the socket — **no WebView**, driven through the CLI (see below) |
 
 Two constraints are asserted from `src/harness/leaks.ts` rather than restated
 per file: a secret must be absent from `outerHTML` (a blur, a `display: none`
@@ -61,17 +67,20 @@ only then takes the write lock — so two connections that overlap read the same
 writes four fields from four clients per round, six rounds, and reports every
 field that did not survive.
 
-## Surfaces this cannot reach yet
+## Surfaces this suite does not reach
 
-- **Configuration.** The daemon has `GetConfig`/`SetConfig` with per-field
-  liveness and the CLI drives both, but no `#[tauri::command]` routes either, so
-  Settings cannot read or change a single daemon setting. `daemon-config`
-  exercises the contract through the CLI; when a command lands, those
-  assertions belong in `settings`.
-- **Export and import.** Same shape: `Method::Export` / `Method::Import` exist
-  and the CLI uses them; the app has no backup or restore anywhere.
+- **Configuration from the screen.** `commands/config.rs` routes
+  `GetConfig`/`SetConfig` and `ServiceTab` calls them, but `daemon-config`
+  asserts the contract through the CLI and `ServiceTab.test.tsx` mocks both
+  calls. The screen's path to the daemon is NOT VERIFIED IN CI; when it is
+  driven, those assertions belong in `settings`.
+- **Export, import, backup, restore from the screen.** Same shape:
+  `commands/transfer.rs` ships all four and `StorageTab` surfaces them, while
+  `export-import` goes through `copypaste export`. NOT VERIFIED IN CI.
 - Tray, popover, global hotkey, launch-at-login — desktop-shell APIs no
   WebDriver session touches.
+- Everything the policy assigns to the macOS or Android layer. Nothing here
+  substitutes for either.
 
 ## Requirements the host must satisfy
 

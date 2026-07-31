@@ -25,6 +25,11 @@ and hand-rolling needs a written reason.**
 Three columns. The middle one is the point: *unverified* means written, compiled
 and reviewed, and never observed doing its job on a platform we ship to.
 
+[`docs/rewrite/testing-policy.md`](docs/rewrite/testing-policy.md) is the
+authority for which layer establishes what. Every requirement has one
+authoritative layer, and one that no run reaches is marked NOT VERIFIED IN CI
+there rather than being credited to a layer that cannot see it.
+
 ### Works — covered by tests, and by the demo scripts where a script reaches
 
 | Area | Notes |
@@ -37,18 +42,18 @@ and reviewed, and never observed doing its job on a platform we ship to.
 | CLI | `crates/copypaste-cli/src/cli.rs` is the verb list — `copypaste --help` prints it. `--json` on any of them, for scripting |
 | Peer sync | Noise `NNpsk0` over TCP, pairing codes, LWW merge, delete-wins |
 | Cloud sync | Supabase auth, PostgREST, Realtime; rows sealed client-side under an Argon2id key and signed under a second key from the same passphrase, so the ordering metadata the backend pages on cannot be forged. Wired to the daemon and the CLI — but see below |
-| App | History, search, devices/pairing, settings, the Android capture ladder; menu-bar item, popover, global hotkey and launch-at-login via Tauri plugins. Every user-facing string is in one catalogue (`crates/copypaste-ui/src/i18n/`) |
+| App | History, search, devices/pairing, settings and the Android capture screens, driven in a browser engine. Every user-facing string is in one catalogue (`crates/copypaste-ui/src/i18n/`). The menu-bar item, popover, global hotkey and launch-at-login are written against Tauri plugins and belong to the row below |
 | Design tokens | One DTCG source compiled by Style Dictionary; shadcn/ui on Tailwind v4, zinc base in OKLCH, with contrast measured and gated (`design/README.md`) |
 
 ### Unverified
 
 | Thing | What is and is not established |
 |---|---|
-| macOS `NSPasteboard` capture, macOS Keychain device-secret store | CI's `macos-check` job compiles and lints them on `macos-14` and runs the portable half of the suite there. Nothing drives a real pasteboard or a real keychain entry. On Linux the daemon falls back to a `0600` file store — a development posture, not a shipping one. |
-| Android — the capture ladder, the Keystore device-secret store, the app itself | Never compiled. There is no NDK on any host here and `dl.google.com` is unreachable, so `cargo check --target aarch64-linux-android` stops at SQLCipher. Every claim about what Android permits is read out of AOSP source; [`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md) lists what a first device run would falsify, in the order to expect it. |
-| Cloud sync against Supabase | `scripts/demo-cloud.sh` drives two daemons through sign-in, convergence and sensitive-item refusal against a **local stub** (`scripts/cloud-stub.py`). Nothing has ever spoken to a real project, and no deployment has had `supabase/`'s schema and RLS policies applied. |
-| The app as a rendered view | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. WebKitGTK is neither WKWebView nor Android's WebView, so a green run is evidence about Linux only. |
-| Packaging and release | `.github/workflows/release.yml`, `scripts/release/`, `Casks/` and `packaging/` are written from documentation and v1's scripts. No step of it — `codesign`, `hdiutil`, the Tauri macOS bundler — has run on a Mac. |
+| The macOS shell — tray, popover, global hotkey, launch at login, notification and sound on copy, WKWebView | `macos-check` on `macos-14` runs the real `NSPasteboard` and the real Keychain on every push and pull request, and an empty run fails the job; those two are verified. Nothing anywhere registers a shortcut, posts a notification or renders a frame on WKWebView. |
+| Android beyond launch and storage | The nightly emulator run installs both APKs, and it establishes launch, a painted WebView, the Keystore secret surviving a restart, an unreadable SQLCipher file, R8 and signing. Rung 2 (the Shizuku shell-uid read), the background capture service, the Quick Settings tile and `FLAG_SECURE` are asserted only negatively or not at all; [`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md) lists what a first device run would falsify. |
+| Cloud sync against Supabase | `scripts/demo-cloud.sh` drives two daemons through sign-in, convergence and sensitive-item refusal against a **local stub** (`scripts/cloud-stub.py`), and no workflow runs it. Nothing has ever spoken to a real project, and no deployment has had `supabase/`'s schema and RLS policies applied. |
+| The app on a shipping engine | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. That is the browser layer: it establishes the shared React app's behaviour and nothing about WKWebView or the Android WebView. |
+| Packaging and release | `release.yml` builds, signs and smoke-installs the DMG on `macos-14`, but only on a tag — so `codesign`, `hdiutil` and the Tauri bundler never run on a pull request, and the smoke script's app-launch and Keychain-after-resign legs report rather than fail. `brew install --cask` as a user runs it is unexercised; `check.sh` round-trips the generators. |
 | mDNS discovery | This container has no multicast. Discovery is a convenience; an explicit `--addr` always works and is what the demo and the tests use. |
 
 ### Outstanding
@@ -104,7 +109,7 @@ names the live backend, so a demo cannot be mistaken for the real thing.
 (cd design && npm ci && npm run rebuild)   # tokens, then the contrast gate
 ```
 
-`e2e/README.md` covers the real-WebView suite and what the host needs for it.
+`e2e/README.md` covers the browser-layer suite and what the host needs for it.
 
 ## The specification
 
