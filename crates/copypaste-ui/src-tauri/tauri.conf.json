@@ -17,7 +17,8 @@
         "label": "main",
         "title": "CopyPaste",
         "visible": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "contentProtected": true
       }
     ],
     "security": {

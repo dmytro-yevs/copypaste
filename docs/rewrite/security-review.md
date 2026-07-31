@@ -53,6 +53,7 @@ extraction behind F-1 and F-2.
 | F-12 | Low | The "purge pass" three comments promise does not exist, and nothing ever re-evaluates `is_sensitive` — **closed for the index; the flag is deliberately still never rewritten** |
 | F-13 | Low | `accept_any` does one X25519 per stored pairing per unauthenticated connection; pairings are uncapped — **closed** |
 | F-14 | Low | Reassembly buffer reallocates inside `Zeroizing`, leaving peer plaintext in freed heap — **closed** |
+| F-15 | Medium | The window is capturable by any screen recorder, so the reveal gesture's ten-second exposure is recordable — **closed** |
 
 Claims verified **sound**: fail-closed crypto and AAD binding (V-1), sensitive
 items and the search index (V-2), sensitive items and both sync transports
@@ -460,6 +461,40 @@ un-wiped copies, up to the 32 MiB cap.
 **Fix.** Allocate once (`Vec::with_capacity(MAX_NOISE_PLAINTEXT)` up front, grown
 to `MAX_MESSAGE_BYTES` on the first `RECORD_MORE`), matching what `plain` and
 `cipher` already do.
+
+---
+
+### F-15 — Medium — Nothing kept the window out of a screen recording · **closed** (`contentProtected` in `tauri.conf.json`, `FLAG_SECURE` in `MainActivity.onCreate`, and a user-reachable opt-out behind both)
+
+**Files:** `crates/copypaste-ui/src-tauri/tauri.conf.json`,
+`src-tauri/src/shell/protection.rs`,
+`gen/android/app/src/main/java/com/copypaste/app/{MainActivity,ScreenProtectionPlugin}.kt`.
+
+Not found by this review — parity S11 and ui-parity §2.4 both had it, against
+INV-35's "on by default". Recorded here because of what it defeats rather than
+what it discloses: sensitive items are withheld from the list and revealed for
+ten seconds behind a confirmation (INV-10, INV-11), and a recorder makes that
+whole mechanism decorative. The history itself is the more ordinary half.
+
+Two mechanisms, because there is only one API and it does not reach both
+platforms. `WebviewWindow::set_content_protected` dispatches to tao's
+`Window::set_content_protection`, which is
+`#[cfg(any(target_os = "macos", target_os = "windows"))]` — `NSWindowSharingNone`
+on macOS, and **nothing at all** on Android. Android's half is therefore
+`FLAG_SECURE`, set in Kotlin, which additionally blanks the recents thumbnail.
+
+**Why on-by-default with an opt-out, and not conditional on a reveal.** Only the
+opt-out model needs no ordering guarantee: protection is applied at window
+creation on both platforms, so it is already on before any plaintext can render,
+and every failure path — a plugin that did not register, a window that will not
+answer, a preference that would not load — leaves it on. A model that protected
+only while something sensitive was on screen would have to win a race against a
+React render on every reveal, and would still leave the list unprotected, which
+is a clipboard history and therefore the secret.
+
+**What is not established.** Neither line has executed. `NSWindow.sharingType`
+and `FLAG_SECURE` are API readings against the tao and AOSP contracts, not
+observations.
 
 ---
 

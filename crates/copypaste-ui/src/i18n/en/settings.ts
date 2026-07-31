@@ -52,6 +52,15 @@ export const settings = {
       description:
         "Ask for confirmation before showing an item that looks like a password, key or token. Revealed items hide themselves again after 10 seconds, and whenever this window loses focus.",
     },
+    allowScreenshots: {
+      title: "Allow screenshots",
+      description:
+        "CopyPaste is hidden from screenshots, screen recordings and shared screens, and on a phone from the app switcher's preview too. Turn this on to let them through — for a demo, or a support call.",
+      /** Shown only while the protection is off, because that is when it is a
+       *  fact about the screen rather than a hypothetical. */
+      warning:
+        "Anything shown here can now be recorded, including a secret you reveal.",
+    },
   },
 
   shortcut: {

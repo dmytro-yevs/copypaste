@@ -85,6 +85,8 @@ pub struct EmbeddedBackend {
 
 struct Inner {
     store: Store,
+    /// Kept for the v0.4 probe in [`rows::status_of`], which states why (B-33).
+    data_dir: PathBuf,
     // `rows` and `peers` read these; a child module sees its parent's private
     // fields, so none of them has to be published to get there.
     //
@@ -159,6 +161,7 @@ impl EmbeddedBackend {
         Ok(Self {
             inner: Arc::new(Inner {
                 store,
+                data_dir: data_dir.to_path_buf(),
                 keyring: Arc::new(keyring),
                 detector: Arc::new(detector),
                 device_id: identity.device_id,

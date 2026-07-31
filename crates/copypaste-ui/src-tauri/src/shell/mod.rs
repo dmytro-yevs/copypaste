@@ -19,19 +19,20 @@
 //!
 //! # Android
 //!
-//! Everything except [`window`] is desktop-only: Android has no menu bar, no
-//! login items, and `tauri-plugin-global-shortcut` is itself
+//! Everything except [`window`] and [`protection`] is desktop-only: Android has
+//! no menu bar, no login items, and `tauri-plugin-global-shortcut` is itself
 //! `#![cfg(not(any(target_os = "android", target_os = "ios")))]`.
 //!
-//! [`window`] compiles everywhere because `crate::commands::service` exposes a
-//! `hide_window` verb and `crate::commands` may contain no `cfg` — the command
-//! surface has to be the same text on both platforms (ADR-0002). The one
-//! platform difference is inside `window::hide`, where it belongs.
+//! Those two compile everywhere because `crate::commands` may contain no `cfg`
+//! — the command surface has to be the same text on both platforms (ADR-0002).
+//! Each keeps its one platform difference inside itself, where it belongs:
+//! `window::hide`, and `protection`'s two mechanisms for one setting.
 
 #[cfg(not(target_os = "android"))]
 pub mod autostart;
 #[cfg(not(target_os = "android"))]
 pub mod hotkey;
+pub mod protection;
 #[cfg(not(target_os = "android"))]
 pub mod tray;
 pub mod window;
