@@ -184,6 +184,11 @@ impl ClipboardSource for FakeClipboard {
         Some(Capture::text(content))
     }
 
+    fn changed(&mut self) -> bool {
+        self.sync_watched_file();
+        !self.tracker.is_current(self.change_count)
+    }
+
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         let pre = self.change_count;
         // §3.3 step 2, from the count the write will land in — the fake's stand
@@ -274,6 +279,29 @@ mod tests {
         // The change was acknowledged, not re-offered.
         assert_eq!(cb.poll(), None);
         assert_eq!(cb.poll(), None);
+    }
+
+    /// The probe the capture loop skips work on. It must never answer "no" to
+    /// a pending self-write: only `poll` consumes the sentinel, and one left
+    /// armed suppresses whichever genuine copy lands on that count.
+    #[test]
+    fn changed_tracks_poll_and_reports_a_pending_self_write() {
+        let mut cb = fake();
+        // I-2: startup has not been observed yet, so the first tick happens
+        // whatever the clipboard holds. It settles after that one poll.
+        assert!(cb.changed());
+        cb.poll();
+        assert!(!cb.changed(), "an idle clipboard is quiet from then on");
+
+        cb.push_external("something");
+        assert!(cb.changed());
+        assert!(cb.poll().is_some());
+        assert!(!cb.changed(), "poll consumed it");
+
+        cb.set_contents("ours").unwrap();
+        assert!(cb.changed(), "a self-write must still reach poll");
+        assert!(cb.poll().is_none(), "and poll is what suppresses it");
+        assert!(!cb.changed());
     }
 
     /// T-8 — a self-write is suppressed. T-9 — the suppression is one-shot, so
