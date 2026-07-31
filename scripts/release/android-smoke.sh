@@ -125,20 +125,39 @@ else
     bad "no keystore or history failure in logcat" "$keystore1"
 fi
 
-maps=""
-[[ -n "$pid_now" ]] && maps="$(sh_ run-as "$PKG" cat "/proc/$pid_now/maps")"
-if [[ -n "$maps" ]]; then
-    grep -q 'libcopypaste_ui_lib.so' <<<"$maps" \
-        && ok "libcopypaste_ui_lib.so is mapped into the process" \
-        || bad "libcopypaste_ui_lib.so is mapped into the process" \
-               "System.loadLibrary resolved to nothing that stayed loaded"
-    grep -qi 'webview\|chromium\|trichrome' <<<"$maps" \
+app_processes > "$OUT/processes.txt" 2>/dev/null || true
+probe "processes named after the package" "$(tr '\n' '|' < "$OUT/processes.txt")"
+
+[[ -n "$pid_now" ]] && sh_ run-as "$PKG" cat "/proc/$pid_now/maps" > "$OUT/maps.txt"
+lines=0
+[[ -s "$OUT/maps.txt" ]] && lines="$(wc -l < "$OUT/maps.txt")"
+
+# Fewer than this is not a process's address space. Reading it through run-as
+# could fail partially rather than outright, and a truncated read that FAILs
+# would read as a missing library.
+if [[ "$lines" -lt 20 ]]; then
+    note "which code is mapped into the process" \
+         "/proc/$pid_now/maps came back with $lines lines through run-as: $(head -c 200 "$OUT/maps.txt" 2>/dev/null)"
+else
+    probe "maps rows, and those naming us" \
+          "$lines total, $(own_map_paths "$OUT/maps.txt" "$PKG" | wc -l) distinct paths"
+    own_map_paths "$OUT/maps.txt" "$PKG" | sed 's/^/        /'
+
+    native="$(own_code_maps "$OUT/maps.txt" "$PKG")"
+    if [[ -n "$native" ]]; then
+        ok "native code from this package is mapped executable"
+        head -n 3 <<<"$native" | sed 's/^/        /'
+    else
+        # The listing above is the whole diagnosis: it names every mapping we
+        # own, so a third spelling identifies itself instead of failing blind.
+        bad "native code from this package is mapped executable" \
+            "System.loadLibrary resolved to nothing that stayed loaded — see the paths listed above"
+    fi
+
+    grep -qi 'webview\|chromium\|trichrome' "$OUT/maps.txt" \
         && ok "a WebView implementation is mapped into the process" \
         || bad "a WebView implementation is mapped into the process" \
                "the activity is up but no WebView was ever instantiated"
-    printf '%s\n' "$maps" > "$OUT/maps.txt"
-else
-    note "the loaded libraries" "/proc/<pid>/maps was unreadable through run-as"
 fi
 
 window="$(sh_ dumpsys window)"

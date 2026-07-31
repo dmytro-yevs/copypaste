@@ -83,12 +83,66 @@ salt_of() { od -An -v -tx1 -N16 "$1" | tr -d ' \n'; }
 
 holds_text() { grep -aqF "$2" "$1"; }
 
+# Native code from our own package, as `/proc/<pid>/maps` actually spells it.
+#
+# Run 1 asserted the literal `libcopypaste_ui_lib.so` and failed while the
+# database, the keystore round-trip and the intake drain — all of them that
+# library running — passed. The name is a packaging decision, not a fact about
+# loading: AGP injects `extractNativeLibs="false"` for minSdk >= 23, and the
+# linker then maps the library out of the APK, so the pathname column is
+# `…/base.apk` and no `.so` appears anywhere.
+#
+# So the evidence asked for is an *executable* file-backed mapping belonging to
+# this package. Ahead-of-time dex is excluded: `base.odex` and friends live
+# under the same directory and are mapped executable too, and they are Java.
+own_code_maps() {   # <maps file> <package>
+    awk -v pkg="$2" '
+        {
+            path = ""
+            for (i = 6; i <= NF; i++) path = (path == "" ? $i : path " " $i)
+        }
+        path == "" || $2 !~ /x/ { next }
+        path ~ /\.(odex|vdex|art|dm)$/ || path ~ /\/oat\// { next }
+        index(path, pkg) || index(path, "libcopypaste") { print $2 "  " path }
+    ' "$1"
+}
+
+# Every distinct path in maps that names this package, executable or not, so a
+# mapping we did not predict names itself in the next run instead of failing
+# blind.
+own_map_paths() {   # <maps file> <package>
+    awk -v pkg="$2" '
+        {
+            path = ""
+            for (i = 6; i <= NF; i++) path = (path == "" ? $i : path " " $i)
+        }
+        path != "" && (index(path, pkg) || index(path, "libcopypaste")) { print $2 "  " path }
+    ' "$1" | sort -u
+}
+
 # ---------------------------------------------------------------------------
 # adb helpers
 # ---------------------------------------------------------------------------
 
 sh_() { adb shell "$@" 2>&1 | tr -d '\r'; }
-app_pid() { adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' | awk '{print $1}'; }
+
+# The app's own process, and not a WebView renderer.
+#
+# Chromium's sandboxed children are named after the package too, and `pidof`
+# prints every match in an order nothing documents — so taking its first token
+# was a coin toss over which process the next read describes. An exact name
+# match is not.
+app_pid() {
+    local pid
+    pid="$(adb shell ps -A -o PID,NAME 2>/dev/null | tr -d '\r' \
+           | awk -v p="$PKG" '$2 == p { print $1; exit }')"
+    [[ -n "$pid" ]] || pid="$(adb shell pidof "$PKG" 2>/dev/null | tr -d '\r' | awk '{print $1}')"
+    printf '%s' "$pid"
+}
+
+# Every process the device names after this package, for the record.
+app_processes() { adb shell ps -A -o PID,NAME 2>/dev/null | tr -d '\r' | grep -F "$PKG"; }
+
 has_pid() { [[ -n "$(app_pid)" ]]; }
 no_pid()  { [[ -z "$(app_pid)" ]]; }
 
@@ -170,6 +224,47 @@ self_test() {
     [[ -n "$(crash_report "$t/link.log")" ]] \
         && ok "a missing libcopypaste_ui_lib.so is reported" \
         || bad "a missing libcopypaste_ui_lib.so is reported"
+
+    group "self-test: native code in /proc/<pid>/maps"
+
+    # The two packagings, and the three things that must not be mistaken for
+    # either. Fixture lines are real `maps` rows: perms in column 2, pathname
+    # from column 6.
+    local pkg="com.copypaste.app"
+    printf '%s\n' \
+        '7f0000000000-7f0000100000 r-xp 00000000 fd:00 100  /data/app/~~ab==/com.copypaste.app-cd==/lib/x86_64/libcopypaste_ui_lib.so' \
+        > "$t/maps-extracted"
+    [[ -n "$(own_code_maps "$t/maps-extracted" "$pkg")" ]] \
+        && ok "an extracted .so counts as our native code" \
+        || bad "an extracted .so counts as our native code"
+
+    printf '%s\n' \
+        '7f0000000000-7f0000100000 r-xp 00a00000 fd:00 100  /data/app/~~ab==/com.copypaste.app-cd==/base.apk' \
+        > "$t/maps-inapk"
+    [[ -n "$(own_code_maps "$t/maps-inapk" "$pkg")" ]] \
+        && ok "an executable mapping of our own base.apk counts too" \
+        || bad "an executable mapping of our own base.apk counts too" \
+               "extractNativeLibs=false is the default; this is the spelling run 1 missed"
+
+    printf '%s\n' \
+        '7f0000000000-7f0000100000 r-xp 00000000 fd:00 101  /data/app/~~ab==/com.copypaste.app-cd==/oat/x86_64/base.odex' \
+        '7f0000200000-7f0000300000 r--p 00000000 fd:00 102  /data/app/~~ab==/com.copypaste.app-cd==/base.apk' \
+        > "$t/maps-dexonly"
+    [[ -z "$(own_code_maps "$t/maps-dexonly" "$pkg")" ]] \
+        && ok "ahead-of-time dex is not native code" \
+        || bad "ahead-of-time dex is not native code" "$(own_code_maps "$t/maps-dexonly" "$pkg")"
+
+    printf '%s\n' \
+        '7f0000000000-7f0000100000 r-xp 00000000 fd:00 103  /apex/com.android.webview/lib64/libwebviewchromium.so' \
+        > "$t/maps-webview"
+    [[ -z "$(own_code_maps "$t/maps-webview" "$pkg")" ]] \
+        && ok "another package's native code is not ours" \
+        || bad "another package's native code is not ours"
+
+    [[ "$(own_map_paths "$t/maps-dexonly" "$pkg" | wc -l)" -eq 2 ]] \
+        && ok "own_map_paths reports every path naming us, executable or not" \
+        || bad "own_map_paths reports every path naming us, executable or not" \
+               "$(own_map_paths "$t/maps-dexonly" "$pkg")"
 
     group "self-test: keystore detection"
 
