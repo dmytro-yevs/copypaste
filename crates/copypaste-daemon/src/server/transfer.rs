@@ -22,6 +22,10 @@ pub(super) fn export(state: &AppState, id: u64, limit: u32, include_sensitive: b
 
 pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Response {
     let settings = state.settings.get().clone();
+    // An import keeps each item's original `created_at` so a restored history
+    // keeps its order — which puts every one of them *below* the cloud upload
+    // floor on a device that has already synced. Taken before the items move.
+    let oldest = items.iter().map(|item| item.created_at).min();
     match copypaste_core::import(
         &state.store,
         &state.detector,
@@ -31,6 +35,13 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
     ) {
         Ok(result) => {
             if result.inserted > 0 {
+                // Without this the imported history is stored, listed, and
+                // never offered for upload again: the floor only ever moves
+                // forward. `delete`, `delete_all` and `restore` already do it;
+                // import was the writer that did not.
+                if let Some(oldest) = oldest {
+                    crate::cloud::note_version_written(state, oldest);
+                }
                 state.note_local_change();
             }
             Response::ok(id, ResponseData::Import(result))
@@ -130,6 +141,73 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "an imported credential reached the search index"
+        );
+    }
+
+    /// An imported history has to reach the account, and the only thing that
+    /// decides what push offers is the upload floor. Every imported stamp is
+    /// older than it on a device that has synced once, so an import that leaves
+    /// the floor alone is an item stored, listed, and silently never uploaded —
+    /// the floor only ever moves forward, so nothing later recovers it.
+    #[test]
+    fn an_import_pulls_the_cloud_upload_floor_back_to_the_oldest_item() {
+        let (state, _dir) = test_state("alpha");
+        let after_a_sync = copypaste_core::now_ms();
+        state
+            .meta
+            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, after_a_sync)
+            .unwrap();
+
+        let old = 1_700_000_000_000;
+        import_of(
+            &state,
+            vec![
+                ExportItem {
+                    content: "older".into(),
+                    content_type: "text".into(),
+                    created_at: old,
+                    pinned: false,
+                    is_sensitive: false,
+                },
+                ExportItem {
+                    content: "newer".into(),
+                    content_type: "text".into(),
+                    created_at: old + 60_000,
+                    pinned: false,
+                    is_sensitive: false,
+                },
+            ],
+        );
+
+        assert_eq!(
+            state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap(),
+            old
+        );
+        let offered = state.store.versions_since(old, 100).unwrap();
+        assert_eq!(offered.len(), 2, "the imported history was not offered");
+    }
+
+    /// An import that inserted nothing must not drag the floor back and make
+    /// the next round re-offer the whole history for no reason.
+    #[test]
+    fn an_import_of_items_already_present_leaves_the_floor_where_it_was() {
+        let (state, _dir) = test_state("alpha");
+        crate::testutil::add(&state, "already here");
+        let exported = export_of(&state, false);
+
+        let floor = copypaste_core::now_ms();
+        state
+            .meta
+            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, floor)
+            .unwrap();
+        match import_of(&state, exported.items).data {
+            Some(ResponseData::Import(result)) => assert_eq!(result.inserted, 0),
+            other => panic!("{other:?}"),
+        }
+
+        assert_eq!(
+            state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap(),
+            floor
         );
     }
 
