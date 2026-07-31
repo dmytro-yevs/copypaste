@@ -12,10 +12,13 @@
  */
 import { memo } from "react";
 import {
+  CloudOff,
   Copy,
+  Expand,
   Eye,
   EyeOff,
   LoaderCircle,
+  MonitorSmartphone,
   Pin,
   PinOff,
   ShieldAlert,
@@ -24,6 +27,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { wontSync } from "@/components/history/origin";
 import { t, useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import {
@@ -43,13 +47,18 @@ import type { Item } from "@/lib/ipc";
  * The clip is concatenated onto a catalogue prefix rather than interpolated
  * into a message — no template ever takes an item's content as a variable.
  */
-export function rowLabel(item: Item): string {
+export function rowLabel(item: Item, origin: string | null = null): string {
   const body = item.is_sensitive
     ? t("history.row.sensitiveName")
     : item.content === null
       ? t("history.row.empty")
       : previewOf(item.content);
-  return item.pinned ? `${t("history.row.pinnedPrefix")} ${body}` : body;
+  const named = item.pinned ? `${t("history.row.pinnedPrefix")} ${body}` : body;
+
+  const marks: string[] = [];
+  if (origin !== null) marks.push(`${t("history.row.fromPrefix")} ${origin}`);
+  if (wontSync(item)) marks.push(t("history.row.wontSync"));
+  return marks.length === 0 ? named : `${named} · ${marks.join(" · ")}`;
 }
 
 interface HistoryRowProps {
@@ -59,6 +68,9 @@ interface HistoryRowProps {
   revealedContent: string | null;
   revealPending: boolean;
   previewLines: number;
+  /** The device this clipping came from, or `null` when it earns no marker —
+   *  see `markedOrigins`. A string rather than a record, so the memo holds. */
+  origin: string | null;
   /** Selection mode is on, so the row shows a checkbox and a click toggles it
    *  instead of selecting the row (§3.1.5). */
   selecting: boolean;
@@ -70,6 +82,7 @@ interface HistoryRowProps {
   onDelete: (item: Item) => void;
   onReveal: (item: Item) => void;
   onHide: () => void;
+  onOpen: (item: Item) => void;
 }
 
 /** 36px under a mouse, 48px under a finger: `--sz-iconbtn` carries the
@@ -83,6 +96,7 @@ function HistoryRowImpl({
   revealedContent,
   revealPending,
   previewLines,
+  origin,
   selecting,
   checked,
   onToggleChecked,
@@ -92,12 +106,14 @@ function HistoryRowImpl({
   onDelete,
   onReveal,
   onHide,
+  onOpen,
 }: HistoryRowProps) {
   const { t: tr } = useTranslation();
   const kind = kindOf(item);
   const revealed = revealedContent !== null;
   const masked = item.is_sensitive && !revealed;
   const body = revealed ? revealedContent : item.content;
+  const stranded = wontSync(item);
   // Roving: 200 rows must not be 1000 tab stops.
   const tab = active ? 0 : -1;
 
@@ -127,7 +143,7 @@ function HistoryRowImpl({
           <Checkbox
             checked={checked}
             tabIndex={tab}
-            aria-label={`${tr("history.row.selectPrefix")} ${rowLabel(item)}`}
+            aria-label={`${tr("history.row.selectPrefix")} ${rowLabel(item, origin)}`}
             onCheckedChange={() => onToggleChecked(item)}
           />
         </span>
@@ -149,7 +165,7 @@ function HistoryRowImpl({
 
       <button
         type="button"
-        aria-label={rowLabel(item)}
+        aria-label={rowLabel(item, origin)}
         title={tr(
           selecting ? "history.row.selectingHint" : "history.row.hint",
         )}
@@ -203,6 +219,24 @@ function HistoryRowImpl({
               {tr("history.row.sensitiveBadge")}
             </span>
           )}
+          {origin !== null && (
+            <span className="flex min-w-0 items-center gap-0.5">
+              <MonitorSmartphone size={10} aria-hidden="true" className="shrink-0" />
+              <span className="truncate">{origin}</span>
+            </span>
+          )}
+          {/* Rendered here rather than beside the actions so that it survives
+              selection mode, where the actions are not rendered at all
+              (CopyPaste-f72f). */}
+          {stranded && (
+            <span
+              className="flex shrink-0 items-center gap-0.5 text-warn-strong"
+              title={tr("history.row.wontSync")}
+            >
+              <CloudOff size={10} aria-hidden="true" />
+              {tr("history.row.wontSyncBadge")}
+            </span>
+          )}
         </span>
       </button>
 
@@ -241,6 +275,16 @@ function HistoryRowImpl({
                 )}
               </Button>
             ))}
+          <Button
+            variant="ghost"
+            aria-label={tr("history.row.open")}
+            title={tr("history.row.open")}
+            tabIndex={tab}
+            className={ACTION}
+            onClick={() => onOpen(item)}
+          >
+            <Expand aria-hidden="true" />
+          </Button>
           <Button
             variant="ghost"
             aria-label={tr("history.row.copy")}

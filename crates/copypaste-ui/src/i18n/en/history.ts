@@ -72,6 +72,26 @@ export const history = {
     delete: "Delete item",
     pinnedBadge: "Pinned",
     sensitiveBadge: "· Sensitive",
+    open: "Show full contents",
+    /** Concatenated with a device name at the call site, for the reason
+     *  `pinnedPrefix` is a prefix. */
+    fromPrefix: "From",
+    wontSyncBadge: "Won't sync",
+    wontSync: "Too large to sync — this item stays on this device",
+  },
+
+  /**
+   * The title carries no clip text and neither does anything else here: a
+   * template that took an item's content as a variable would put the plaintext
+   * somewhere the sensitive-content rules do not reach (`catalogue.test.ts`).
+   */
+  detail: {
+    title: "Clipboard item",
+    contents: "Item contents",
+    empty: "This item has no text.",
+    reveal: "Reveal",
+    hide: "Hide again",
+    copy: "Copy",
   },
 
   empty: {

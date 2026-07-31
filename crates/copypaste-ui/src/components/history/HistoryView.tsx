@@ -1,53 +1,21 @@
-/**
- * State resolution follows manifest 06 §3.1.11, with one adjustment: an error
- * only replaces the list when there is nothing else to show. A background poll
- * that fails while 200 rows are on screen must not throw those rows away — the
- * banner and the status chip say the service went away, and the rows stay
- * readable.
- */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDebounceValue } from "usehooks-ts";
-import { Archive, CircleAlert, Inbox, KeyRound, Lock, Search, ShieldAlert } from "lucide-react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { buttonVariants } from "@/components/ui/button";
 import { CaptureStatus } from "@/components/capture/CaptureStatus";
-import { EmptyState } from "@/components/EmptyState";
 import { BulkBar } from "@/components/history/BulkBar";
-import { HistoryList } from "@/components/history/HistoryList";
+import { HistoryContentState } from "@/components/history/HistoryContentState";
+import { HistoryDetail } from "@/components/history/HistoryDetail";
+import { HistoryDialogs } from "@/components/history/HistoryDialogs";
 import { QuickHint } from "@/components/history/QuickHint";
+import { RevealNotice } from "@/components/history/RevealNotice";
 import { SearchBar } from "@/components/history/SearchBar";
 import { SkippedNotice } from "@/components/history/SkippedNotice";
-import { ServiceOffline } from "@/components/shell/ServiceOffline";
-import { useDeferredDelete } from "@/hooks/useDeferredDelete";
-import {
-  historyOf,
-  useBulkDelete,
-  useBulkPin,
-  useClearHistory,
-  useCopy,
-  useHistory,
-  usePin,
-  useStatus,
-} from "@/hooks/useHistory";
+import { markedOrigins, originLabel } from "@/components/history/origin";
+import { useCopy, usePin } from "@/hooks/useHistory";
+import { useHistoryController } from "@/hooks/useHistoryController";
+import { useHistorySelection } from "@/hooks/useHistorySelection";
 import { useReveal } from "@/hooks/useReveal";
-import { useSelection } from "@/hooks/useSelection";
-import { useTranslation } from "@/i18n";
-import { cn } from "@/lib/cn";
-import { type ErrorKind, classifyError, friendlyError, isRetryable } from "@/lib/errors";
 import { hideWindow } from "@/lib/ipc";
 import type { Item } from "@/lib/ipc";
-import { SEARCH_DEBOUNCE_MS } from "@/lib/layout";
-import { DEFAULT_VIEW, type ViewOptions, applyView, isDefaultView } from "@/lib/view";
 import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 
@@ -57,57 +25,43 @@ interface HistoryViewProps {
 }
 
 export function HistoryView({ pushLive = false }: HistoryViewProps) {
-  const { t } = useTranslation();
-  const rawQuery = useUi((s) => s.query);
-  const setRawQuery = useUi((s) => s.setQuery);
   const activeId = useUi((s) => s.activeId);
   const setActiveId = useUi((s) => s.setActiveId);
-
   const previewLines = usePrefs((s) => s.previewLines);
-  const warnBeforeReveal = usePrefs((s) => s.warnBeforeReveal);
-
-  // §5.3: the FTS query is debounced 250ms. `usehooks-ts` owns the timer —
-  // there is no reason for this repository to carry a fifth debounce.
-  const [query] = useDebounceValue(rawQuery, SEARCH_DEBOUNCE_MS);
 
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const [view, setView] = useState<ViewOptions>(DEFAULT_VIEW);
-  const history = useHistory(query, pushLive);
-  const status = useStatus();
+  const history = useHistoryController(pushLive);
+  const bulk = useHistorySelection(history.items);
+  const reveal = useReveal();
   const copy = useCopy();
   const pin = usePin();
-  const clearAll = useClearHistory();
-  const bulkPin = useBulkPin();
-  const bulkDelete = useBulkDelete();
-  const { pending, remove } = useDeferredDelete();
-  const reveal = useReveal();
 
-  const [confirmReveal, setConfirmReveal] = useState<Item | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
-  /**
-   * INV-2: when nothing is pending and the view is the default this returns
-   * the query's own array, so an idle poll that fetched byte-identical data
-   * produces the identical reference React Query's structural sharing handed
-   * us — no re-render, and the scroll anchor is never disturbed.
-   */
-  const page = historyOf(history.data);
-  const items = useMemo(() => {
-    const shown =
-      pending.size === 0
-        ? page.items
-        : page.items.filter((item) => !pending.has(item.id));
-    return applyView(shown, view);
-  }, [page.items, pending, view]);
+  const selection = bulk.selection;
+  const items = history.items;
 
-  const selection = useSelection(items);
+  // Resolved from the id on every render, never held: a poll can replace the
+  // array while the view is open, and an item deleted underneath the reader
+  // closes it rather than leaving a copy of a row that no longer exists.
+  const detail = useMemo(() => {
+    if (detailId === null) return null;
+    const item = items.find((candidate) => candidate.id === detailId);
+    return item
+      ? { item, origin: originLabel(item, markedOrigins(items)) }
+      : null;
+  }, [detailId, items]);
 
-  const errorKind: ErrorKind | null = history.error
-    ? classifyError(history.error)
-    : null;
+  const openDetail = useCallback(
+    (item: Item) => {
+      setActiveId(item.id);
+      setDetailId(item.id);
+    },
+    [setActiveId],
+  );
 
   // ⌘F / Ctrl+F focuses the field and selects what is in it (§3.1.4).
   useEffect(() => {
@@ -121,22 +75,6 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-
-  const loadMore = useCallback(() => {
-    if (history.hasNextPage && !history.isFetchingNextPage) {
-      void history.fetchNextPage();
-    }
-  }, [history]);
-
-  const onReveal = useCallback(
-    (item: Item) => {
-      // n9gp / PG-34: the warning is a preference, default on, and the reveal
-      // itself is one click away either way.
-      if (warnBeforeReveal) setConfirmReveal(item);
-      else void reveal.reveal(item.id);
-    },
-    [reveal, warnBeforeReveal],
-  );
 
   /**
    * ⌘1–⌘9: copy, then dismiss.
@@ -162,29 +100,26 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
     [copy],
   );
 
-  const searching = query.length > 0;
-  const filtered = searching || !isDefaultView(view);
-  const total = status.data?.item_count;
-  const busy = bulkPin.isPending || bulkDelete.isPending;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <SearchBar
-        value={rawQuery}
-        onChange={setRawQuery}
+        value={history.rawQuery}
+        onChange={history.setRawQuery}
         onEnterList={() => listRef.current?.focus()}
         inputRef={searchRef}
-        filtered={filtered}
+        filtered={history.filtered}
         visible={items.length}
-        total={total}
-        view={view}
-        onViewChange={setView}
+        total={history.total}
+        view={history.view}
+        onViewChange={history.setView}
         selecting={selection.selecting}
         onToggleSelecting={() =>
           selection.selecting ? selection.end() : selection.begin()
         }
         onClearAll={
-          items.length > 0 && !filtered ? () => setConfirmClear(true) : undefined
+          items.length > 0 && !history.filtered
+            ? () => setConfirmClear(true)
+            : undefined
         }
       />
 
@@ -192,14 +127,9 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         <BulkBar
           count={selection.items.length}
           allPinned={selection.allPinned}
-          busy={busy}
-          onTogglePin={() =>
-            bulkPin.mutate(
-              { items: selection.items, pinned: !selection.allPinned },
-              { onSettled: () => selection.end() },
-            )
-          }
-          onDelete={() => setConfirmBulkDelete(true)}
+          busy={bulk.busy}
+          onTogglePin={bulk.togglePin}
+          onDelete={bulk.requestDelete}
           onCancel={selection.end}
         />
       )}
@@ -208,210 +138,82 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
           not buried in a diagnostics screen. */}
       <CaptureStatus />
 
-      <SkippedNotice count={page.skipped} />
+      <SkippedNotice count={history.skipped} />
 
-      {history.isPending ? (
-        <EmptyState
-          busy
-          title={t("history.empty.loading.title")}
-          body={t("history.empty.loading.body")}
-        />
-      ) : items.length > 0 ? (
-        <HistoryList
-          items={items}
-          activeId={activeId}
-          onActiveIdChange={setActiveId}
-          revealedId={reveal.revealedId}
-          revealedContent={reveal.revealedContent}
-          revealPendingId={reveal.pendingId}
-          previewLines={previewLines}
-          searching={searching}
-          selection={selection}
-          hasMore={history.hasNextPage}
-          loadingMore={history.isFetchingNextPage}
-          onReveal={onReveal}
-          onHide={reveal.hide}
-          onCopy={copy.mutate}
-          onQuickCopy={quickCopy}
-          onTogglePin={pin.mutate}
-          onDelete={remove}
-          onLoadMore={loadMore}
-          listRef={listRef}
-        />
-      ) : errorKind === "legacy_database" ? (
-        // No action, deliberately. The recovery is a human decision made
-        // outside this app, and the only button that would fit here — erase
-        // and start over — does not exist yet (backlog B-11). Offering a
-        // **Try again** that can never succeed is the defect this replaces.
-        <EmptyState
-          icon={Archive}
-          title={t("history.empty.legacy.title")}
-          body={t("history.empty.legacy.body")}
-        />
-      ) : errorKind === "key_unusable" ? (
-        // Also no action, and for a harder reason: there is genuinely nothing
-        // to offer. Saying so is better than a control that pretends.
-        <EmptyState
-          icon={KeyRound}
-          title={t("history.empty.keyUnusable.title")}
-          body={t("history.empty.keyUnusable.body")}
-        />
-      ) : errorKind === "key_locked" ? (
-        // The one that *is* worth retrying, and the reason the two key-store
-        // failures are separate codes at all.
-        <EmptyState
-          icon={Lock}
-          title={t("history.empty.keyLocked.title")}
-          body={t("history.empty.keyLocked.body")}
-          action={{
-            label: t("common.tryAgain"),
-            onClick: () => void history.refetch(),
-          }}
-        />
-      ) : errorKind === "offline" ? (
-        <ServiceOffline />
-      ) : errorKind === "not_ready" ? (
-        <EmptyState
-          busy
-          title={t("history.empty.starting.title")}
-          body={friendlyError("not_ready")}
-        />
-      ) : errorKind !== null ? (
-        <EmptyState
-          icon={CircleAlert}
-          title={t("history.empty.failed.title")}
-          body={friendlyError(errorKind)}
-          action={
-            isRetryable(errorKind)
-              ? { label: t("common.tryAgain"), onClick: () => void history.refetch() }
-              : undefined
-          }
-        />
-      ) : filtered ? (
-        <EmptyState
-          icon={Search}
-          title={
-            searching
-              ? t("history.empty.noResults", { query })
-              : t("history.empty.noMatch")
-          }
-          body={t("history.empty.filteredBody")}
-          action={
-            history.hasNextPage
-              ? { label: t("history.empty.loadMore"), onClick: loadMore }
-              : undefined
-          }
-        />
-      ) : (
-        <EmptyState
-          icon={Inbox}
-          title={t("history.empty.none.title")}
-          body={t("history.empty.none.body")}
-        />
-      )}
+      <HistoryContentState
+        loading={history.loading}
+        errorKind={history.errorKind}
+        searching={history.searching}
+        filtered={history.filtered}
+        query={history.query}
+        hasMore={history.hasMore}
+        onLoadMore={history.loadMore}
+        onRetry={history.retry}
+        list={{
+          items,
+          activeId,
+          onActiveIdChange: setActiveId,
+          revealedId: reveal.revealedId,
+          revealedContent: reveal.revealedContent,
+          revealPendingId: reveal.pendingId,
+          previewLines,
+          searching: history.searching,
+          selection,
+          hasMore: history.hasMore,
+          loadingMore: history.loadingMore,
+          onReveal: reveal.request,
+          onHide: reveal.hide,
+          onCopy: copy.mutate,
+          onQuickCopy: quickCopy,
+          onTogglePin: pin.mutate,
+          onDelete: history.remove,
+          onOpen: openDetail,
+          onLoadMore: history.loadMore,
+          listRef,
+        }}
+      />
 
-      <QuickHint searching={searching} />
+      <QuickHint searching={history.searching} />
 
-      {/* A refused reveal is a state, not a failure — see useReveal. It is
-          rendered where the row is, dismissible, and never carries a raw
-          error. */}
-      {reveal.error && (
-        <div
-          role="alert"
-          className="flex shrink-0 items-start gap-s-2 border-t border-warn/20 bg-warn/15 px-s-3 py-s-2 text-xs text-warn-strong"
-        >
-          <ShieldAlert size={14} aria-hidden="true" className="mt-px shrink-0" />
-          <span className="min-w-0 flex-1">{reveal.error}</span>
-          <button
-            type="button"
-            onClick={reveal.hide}
-            className="shrink-0 underline underline-offset-2 outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
-          >
-            {t("common.dismiss")}
-          </button>
-        </div>
-      )}
+      <RevealNotice message={reveal.error} onDismiss={reveal.hide} />
 
-      {/* One confirm dialog at a time (INV-18): each is driven by its own piece
-          of state and opening any of them closes the row's own handlers. */}
-      <AlertDialog
-        open={confirmReveal !== null}
-        onOpenChange={(open) => !open && setConfirmReveal(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("history.reveal.confirm.title")}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("history.reveal.confirm.body")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (confirmReveal) void reveal.reveal(confirmReveal.id);
-                setConfirmReveal(null);
-              }}
-            >
-              {t("history.reveal.confirm.action")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <HistoryDetail
+        item={detail?.item ?? null}
+        origin={detail?.origin ?? null}
+        revealedContent={
+          detail && reveal.revealedId === detail.item.id
+            ? reveal.revealedContent
+            : null
+        }
+        revealPending={reveal.pendingId === detailId}
+        onReveal={reveal.request}
+        onHide={reveal.hide}
+        onCopy={copy.mutate}
+        onClose={() => setDetailId(null)}
+        onReturnFocus={() => listRef.current?.focus()}
+      />
 
-      {/* Bulk delete has no undo window, unlike the single-row delete
-          (§3.1.9), so this dialog is the only gate in front of it. */}
-      <AlertDialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("history.bulkDelete.title", { count: selection.items.length })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("history.bulkDelete.body")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              className={cn(buttonVariants({ variant: "destructive" }))}
-              onClick={() => {
-                bulkDelete.mutate(selection.items, {
-                  onSettled: () => selection.end(),
-                });
-                setConfirmBulkDelete(false);
-              }}
-            >
-              {t("history.bulkDelete.action")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("history.clear.title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("history.clear.body")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              className={cn(buttonVariants({ variant: "destructive" }))}
-              onClick={() => {
-                clearAll.mutate();
-                setConfirmClear(false);
-              }}
-            >
-              {t("history.clear.action")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <HistoryDialogs
+        reveal={{
+          open: reveal.confirming,
+          onCancel: reveal.cancel,
+          onConfirm: reveal.confirm,
+        }}
+        bulkDelete={{
+          open: bulk.confirmingDelete,
+          count: selection.items.length,
+          onCancel: bulk.cancelDelete,
+          onConfirm: bulk.confirmDelete,
+        }}
+        clear={{
+          open: confirmClear,
+          onCancel: () => setConfirmClear(false),
+          onConfirm: () => {
+            history.clearAll();
+            setConfirmClear(false);
+          },
+        }}
+      />
     </div>
   );
 }
