@@ -241,6 +241,18 @@ jobs:
         if: success() || failure()
         run: cargo +1.96 clippy -p copypaste-ui --features embedded-backend --all-targets --locked -- -D warnings
 
+      - name: macOS-only code, type-checked here
+        # The same argument as the step above, for the other platform. Nothing
+        # on this runner compiles `#[cfg(target_os = "macos")]` code, and the
+        # macos-14 job that does is the most expensive one in the workflow: a
+        # missing trait bound in a test module cost two rounds and a Mac runner
+        # before this existed, having passed every other check in the tree.
+        #
+        # `--self-test` perturbs the generated crate and asserts the check
+        # fails — otherwise this step is a green light that means nothing.
+        if: success() || failure()
+        run: ./scripts/check-macos-types.sh --self-test
+
   # ---------------------------------------------------------------------------
   # The only end-to-end proof the project has.
   # ---------------------------------------------------------------------------
