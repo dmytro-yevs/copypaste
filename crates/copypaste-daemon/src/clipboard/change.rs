@@ -121,6 +121,13 @@ impl ChangeTracker {
         }
     }
 
+    /// Whether this reading is the one already reported, so a caller can skip
+    /// the work `observe` would do. Says nothing about *what* a change is —
+    /// classifying it, and consuming the sentinel, stays in `observe`.
+    pub(super) fn is_current(&self, count: i64) -> bool {
+        count == self.cursor
+    }
+
     /// Classify a `changeCount` reading.
     ///
     /// Every branch that returns something other than `Fresh` has already

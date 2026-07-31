@@ -15,7 +15,7 @@
 //!   inside one.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
@@ -44,6 +44,8 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
         "clipboard capture started"
     );
 
+    let mut last_sweep = Instant::now();
+
     loop {
         let wait = Duration::from_millis(state.settings.get().poll_interval_ms);
         tokio::select! {
@@ -52,11 +54,28 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
             // of catch-up ticks — the clipboard has no backlog to drain, only a
             // current value — and the wait is recomputed each time round.
             _ = tokio::time::sleep(wait) => {
+                // The sweep used to ride every poll. It cannot any more — an
+                // unchanged clipboard no longer reaches `tick` — so it gets a
+                // cadence of its own, and none at all while it is switched off.
+                let sweep_due = state.settings.get().sensitive_ttl_secs > 0
+                    && last_sweep.elapsed() >= SWEEP_INTERVAL;
+
+                // Bound to a local so the clipboard guard is released before
+                // the handoff below rather than held across it.
+                let changed = state.clipboard().changed();
+                if !changed && !sweep_due {
+                    continue;
+                }
+                if sweep_due {
+                    last_sweep = Instant::now();
+                }
+
                 let state = Arc::clone(&state);
                 // The pasteboard read, the AEAD seal and the SQLite write are
                 // all blocking. Running them on a worker keeps the reactor free
-                // for the IPC server.
-                match tokio::task::spawn_blocking(move || tick(&state)).await {
+                // for the IPC server — and reaching it costs six thread wakeups,
+                // which is why an idle clipboard stops short of here.
+                match tokio::task::spawn_blocking(move || tick(&state, sweep_due)).await {
                     Ok(Ok(())) => {}
                     // Manifest 01 I-36: a failed tick is logged, never fatal.
                     Ok(Err(e)) => warn!(error = ?e, "capture tick failed"),
@@ -96,22 +115,22 @@ fn sweep_sensitive_items(state: &AppState) {
     }
 }
 
+/// How often the sensitive-item sweep runs while it is switched on. A TTL is
+/// measured in seconds at least, so it does not need the poll interval.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
+
 /// One poll. Returns `Ok(())` when there was nothing to capture.
-fn tick(state: &AppState) -> Result<(), IngestError> {
+fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     // The guard is taken for the pasteboard read alone and dropped before the
     // ingest, so an in-flight `copy` waits on one accessor call, not on a
     // database write.
     let capture = state.clipboard().poll();
-    let Some(capture) = capture else {
+    if sweep_due {
         sweep_sensitive_items(state);
+    }
+    let Some(capture) = capture else {
         return Ok(());
     };
-
-    // The auto-wipe sweep rides the poll loop rather than owning a timer:
-    // `sweep_sensitive` short-circuits on a cheap "is there anything wipeable"
-    // probe, and a TTL measured to the nearest poll interval is exactly as
-    // precise as the capture that started it.
-    sweep_sensitive_items(state);
 
     match ingest(state, &capture.content, &capture.content_type) {
         Ok(Ingested::Stored(item)) => {
@@ -211,6 +230,36 @@ mod tests {
         assert_eq!(event.swept, 1);
         assert_eq!(event.item_count, 0);
         assert!(!event.captured);
+    }
+
+    /// The sweep used to ride every poll. Now that an unchanged clipboard
+    /// never reaches `tick`, the loop decides when it is due — and a `tick`
+    /// that swept regardless would put the database back on every poll.
+    #[test]
+    fn only_a_due_tick_sweeps() {
+        let (state, _dir) = test_state("alpha");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &copypaste_ipc::ConfigPatch {
+                    sensitive_ttl_secs: Some(30),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let old = copypaste_core::now_ms() - 10 * 60 * 1000;
+        ingest_at(&state, "AKIAIOSFODNN7EXAMPLE", "text", old).unwrap();
+
+        tick(&state, false).unwrap();
+        assert_eq!(
+            state.store.count().unwrap(),
+            1,
+            "a tick that was not due swept"
+        );
+
+        tick(&state, true).unwrap();
+        assert_eq!(state.store.count().unwrap(), 0, "a due tick did not sweep");
     }
 
     /// A sweep that removed nothing must stay silent, or a client would post a

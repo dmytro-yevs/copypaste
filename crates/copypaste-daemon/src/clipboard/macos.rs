@@ -193,6 +193,13 @@ impl ClipboardSource for MacOsClipboard {
         })
     }
 
+    fn changed(&mut self) -> bool {
+        autoreleasepool(|_pool| {
+            let pb = unsafe { NSPasteboard::generalPasteboard() };
+            !self.tracker.is_current(unsafe { pb.changeCount() } as i64)
+        })
+    }
+
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         // I-17 again: the paste-back path needs the pool as much as the poll.
         autoreleasepool(|_pool| {

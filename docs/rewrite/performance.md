@@ -111,8 +111,31 @@ thread's own wake, and the completion waking the awaiting task again — the
 `tokio-rt-worker` threads carry 92% of the remainder, and `r2d2-worker-*`
 contributes a flat ~11/min regardless of interval.
 
-**At the shipped default of 500 ms that is ≈745 wakeups per minute, 12 per
+**At the shipped default of 500 ms that was ≈745 wakeups per minute, 12 per
 second, forever, on a clipboard nobody has touched.**
+
+### What was done about it
+
+The handoff was unconditional: every tick went to the blocking pool to ask a
+question whose answer was almost always "nothing changed". `ClipboardSource`
+now answers that on the async side (`changed()`, a bare `changeCount` read),
+and only a tick with something to do is handed off. The sensitive-item sweep
+used to ride the poll and so moved onto its own cadence, and does not run at
+all while `sensitive_ttl_secs` is `0`, which is the shipped default.
+
+Re-measured on the same harness, `NO_MDNS=1`, 500 ms, load 2.67:
+
+| | wakeups/min |
+|---|---|
+| before | 745 |
+| after | **258.7** |
+
+CPU at idle after the change is 1.2 CPU-s/hour; there is no comparable
+before-figure to put beside it, so none is quoted.
+
+≈2 wakeups per tick, against 6.1 before — a timer fire and the worker it wakes,
+which is the floor for a polled loop. `changed()` defaults to `true`, so a
+backend that cannot answer cheaply is polled exactly as before.
 
 The fixed floor of ~14/min is the two sync loops (`p2p::poll` at
 `NO_PEERS_INTERVAL` = 60 s, `cloud::poll` at `SIGNED_OUT_INTERVAL` = 60 s) plus

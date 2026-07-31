@@ -133,6 +133,21 @@ pub trait ClipboardSource: Send {
     /// Must return `None` when nothing changed — the caller polls on a timer.
     fn poll(&mut self) -> Option<Capture>;
 
+    /// Whether [`ClipboardSource::poll`] has anything to report, without
+    /// consuming it.
+    ///
+    /// The capture loop calls this on the async thread and only hands off to
+    /// the blocking pool when it answers `true`, which is what keeps an idle
+    /// clipboard from costing six thread wakeups every poll.
+    ///
+    /// Defaults to `true`: a backend that cannot answer cheaply must be polled,
+    /// never skipped. It must also answer `true` for a pending self-write —
+    /// only `poll` consumes the sentinel, and one left armed suppresses a later
+    /// genuine copy.
+    fn changed(&mut self) -> bool {
+        true
+    }
+
     /// Write text to the clipboard. Must suppress the resulting self-write so
     /// the next poll does not re-capture our own content.
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()>;
