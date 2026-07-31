@@ -1,11 +1,7 @@
 /**
- * The capture surfaces author no sentence about *state*.
- *
- * `CaptureSnapshot` arrives with a finished `headline` and `detail` — decided in
- * `capture::messages`, which is compiled and tested (ADR-0005) — and the view
- * renders them verbatim. Everything here is chrome the state machine has no
- * opinion about: section titles, the names of the setup steps, and the label on
- * whatever button the snapshot's `nextStep` chose.
+ * No sentence here describes capture *state*. `CaptureSnapshot` arrives with a
+ * finished `headline` and `detail` from `capture::messages`, which is compiled
+ * and tested (ADR-0005), and the view renders them verbatim.
  */
 export const capture = {
   title: "Background capture",

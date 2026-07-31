@@ -1,10 +1,7 @@
 /**
- * The only things the capture view decides for itself: a colour, a glyph, and
- * which of the four setup steps the snapshot is standing on.
- *
- * No sentence is derived here. `headline` and `detail` arrive finished from
- * `capture::messages`, and a second wording keyed off `health` is exactly the
- * drift that split v1's setup screen from its notification.
+ * No sentence is derived here: `headline` and `detail` arrive finished from
+ * `capture::messages`, and a second wording keyed off `health` is the drift
+ * that split v1's setup screen from its notification.
  */
 import type { CaptureHealth, CaptureNextStep, CaptureSnapshot } from "@/lib/ipc";
 

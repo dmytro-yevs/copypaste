@@ -5,7 +5,6 @@
  * QR's pixels (INV-13), and lives in component state no longer than the dialog.
  *
  * The code and the address travel together, so one scan is the whole pairing.
- * The format carries exactly what `pair_accept` takes and nothing else.
  */
 
 /** Identifies our payload, and its version. A scanner that meets some other

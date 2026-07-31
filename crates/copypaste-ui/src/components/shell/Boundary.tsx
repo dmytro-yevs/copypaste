@@ -1,5 +1,3 @@
-/** INV-20: sibling boundaries around navigation and the main pane, so a crash
- *  in a screen cannot take navigation down with it (CopyPaste-8ebg.12). */
 import type { ReactNode } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import { RotateCcw } from "lucide-react";
