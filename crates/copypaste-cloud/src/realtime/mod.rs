@@ -92,7 +92,11 @@ pub use event::{RealtimeError, RealtimeEvent};
 pub use subscription::RealtimeSubscription;
 
 /// The table we subscribe to. One table, one channel — see manifest 05 §4.1.
-pub(crate) const TABLE: &str = "clipboard_items";
+///
+/// [`crate::rest::TABLE`]'s value, not a second spelling of it: a subscription
+/// naming a table the REST client does not write would receive nothing, and
+/// nothing about that failure is visible — the poll simply carries everything.
+pub(crate) const TABLE: &str = crate::rest::TABLE;
 
 /// Phoenix topic. Supabase namespaces every channel under `realtime:`.
 pub(crate) const TOPIC: &str = "realtime:clipboard_items";
@@ -103,3 +107,15 @@ pub(crate) const TOPIC: &str = "realtime:clipboard_items";
 /// Also bounds the farewell in [`socket`]: a shutdown that cannot get its
 /// `phx_leave` out must not hold the caller either.
 pub(crate) const JOIN_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`TOPIC`] cannot be built from [`TABLE`] in a `const`, so it is the one
+    /// place the name is still written twice.
+    #[test]
+    fn the_topic_names_the_table_we_subscribe_to() {
+        assert_eq!(TOPIC, format!("realtime:{TABLE}"));
+    }
+}
