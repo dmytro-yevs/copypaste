@@ -1,6 +1,4 @@
 /**
- * Presentation helpers: relative age, previews, and content-kind detection.
- *
  * Nothing here ever sees the plaintext of a sensitive item: the bridge sends
  * `content: null` for one (INV-10), so `previewOf` is only ever reached for
  * content that exists, and `kindOf` decides `secret` from the flag rather than
@@ -15,8 +13,6 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
 
-/** `Intl` is the platform's date library; there is nothing here to hand-roll
- *  beyond choosing the unit. */
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const ABSOLUTE = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",

@@ -1,11 +1,9 @@
 /**
- * INV-17 — **only one alert banner is visible at a time.**
+ * INV-17 — **only one alert banner is visible at a time.** v1 de-conflicted
+ * four independent `role="alert"` mechanisms with a ternary chain, and when the
+ * chain was wrong they stacked (CopyPaste-8ebg.39).
  *
- * v1 had four independent `role="alert"` mechanisms and a ternary chain to
- * de-conflict them; when the chain was wrong they stacked (CopyPaste-8ebg.39).
- * Manifest §9.2 says model them as one ordered list with a severity instead,
- * which is this file: a pure function from conditions to at most one banner.
- * Losers are not discarded — the next call returns the highest-priority
+ * Losers are not discarded: the next call returns the highest-priority
  * condition that is still true, so a banner appears the moment the one above it
  * clears, without needing to be re-triggered (AT-25).
  *
@@ -27,20 +25,17 @@ export interface Banner {
   /** P0 conditions cannot be dismissed: the user cannot act on the app at all
    *  while they hold. */
   readonly dismissible: boolean;
-  /** A single recovery action, per the manifest's §3.4.2 rule that a banner
-   *  offers one way out. */
+  /** One way out, or none — never two (manifest §3.4.2). */
   readonly action?: "retry";
 }
 
 export interface BannerConditions {
   serviceOffline: boolean;
   /**
-   * Which unrecoverable condition the service is stuck in, when it is one.
-   *
-   * It belongs in the shell rather than only on the History screen because it
-   * is not a History problem: with no readable history, Devices and Settings
-   * fail too, and a user standing on either of those tabs would otherwise see
-   * three unexplained failures instead of one explained one.
+   * In the shell rather than on the History screen alone: with no readable
+   * history, Devices and Settings fail too, and a user standing on either of
+   * those would otherwise see three unexplained failures instead of one
+   * explained one.
    */
   historyUnreadable: "legacy_database" | "key_unusable" | null;
   /** The version the daemon reports, when it differs from ours. */
@@ -48,27 +43,21 @@ export interface BannerConditions {
   capturePaused: boolean;
   /**
    * A CopyPaste 0.4 history is on this device and this version has started a
-   * new one — `StatusData::legacy_history_present`.
-   *
-   * Nothing is broken, which is why it is last and why it is dismissible. It
-   * is here at all because the alternative is a user seeing an empty history
-   * after an upgrade and concluding it was thrown away; the banner is the only
-   * surface that reaches them wherever they are looking. CLAUDE.md rule 3's
-   * second obligation ends here.
+   * new one — `StatusData::legacy_history_present`. Nothing is broken, which is
+   * why it is last and why it is dismissible; without it an empty history after
+   * an upgrade reads as data thrown away (CLAUDE.md rule 3's second
+   * obligation).
    */
   legacyHistory: boolean;
   dismissed: readonly string[];
 }
 
 /**
- * `StatusData::legacy_history_present`, read defensively.
- *
- * The frontend's `StatusData` (`lib/ipc.ts`) does not declare the field — that
- * file is owned by another change in flight — while the bridge passes
- * `copypaste_ipc::StatusData` through verbatim (`model.rs`: `UiStatus =
- * StatusData`), so the value is on the object at runtime. Narrowed once, here,
- * rather than cast at the call site: this is the line to delete when the
- * interface catches up.
+ * The frontend's `StatusData` (`lib/ipc.ts`) does not declare the field, while
+ * the bridge passes `copypaste_ipc::StatusData` through verbatim (`model.rs`:
+ * `UiStatus = StatusData`), so the value is on the object at runtime. Narrowed
+ * once here rather than cast at each call site; delete it when the interface
+ * catches up.
  */
 export function legacyHistoryPresent(status: unknown): boolean {
   return (
@@ -99,9 +88,8 @@ export function pickBanner(conditions: BannerConditions): Banner | null {
         conditions.historyUnreadable === "legacy_database"
           ? t("shell.banner.legacyDatabase")
           : t("shell.banner.keyUnusable"),
-      // Not dismissible, for the same reason `service-offline` is not: nothing
-      // in the app works while it holds. **And no action** — the banner offers
-      // one way out or none, and there is no way out of either of these.
+      // And no action: there is no way out of either of these, and a banner
+      // offers one way out or none.
       dismissible: false,
     });
   }

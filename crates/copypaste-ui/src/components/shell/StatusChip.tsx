@@ -37,10 +37,9 @@ export function StatusChip() {
   if (status.error) {
     const kind = classifyError(status.error);
     state = kind === "offline" ? "offline" : kind === "not_ready" ? "starting" : "error";
-    // The remaining states take the sentence for their own kind rather than
-    // one "returned an error" for all of them: this chip is the only readout
-    // on the Devices and Settings tabs, and a v0.4 history and a transient
-    // fault are not the same news.
+    // A sentence per kind, not one "returned an error" for all of them: this
+    // chip is the only readout on the Devices and Settings tabs, and a v0.4
+    // history and a transient fault are not the same news.
     detail =
       state === "offline"
         ? t("shell.status.detail.offline")

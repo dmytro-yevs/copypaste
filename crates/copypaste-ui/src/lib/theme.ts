@@ -35,7 +35,6 @@ export function applyAppearance(prefs: {
 
 let subscribed = false;
 
-/** Calling this again is a no-op — that is what stops listeners accumulating. */
 export function subscribeSystemTheme(onChange: () => void): void {
   if (subscribed || typeof window === "undefined" || !window.matchMedia) return;
   subscribed = true;

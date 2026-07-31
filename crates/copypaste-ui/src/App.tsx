@@ -47,8 +47,7 @@ export default function App() {
   // Subscribed once, here — not per screen. Two subscribers would invalidate
   // the same queries twice for one change.
   const pushLive = usePush();
-  // Also once: it re-reads capture state on every resume, and navigates here
-  // when the loss notification asked for a re-arm.
+  // Also once, for the same reason.
   useCaptureSync();
 
   // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply

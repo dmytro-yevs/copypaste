@@ -6,12 +6,9 @@ import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 
 /**
- * A11Y-4 and INV-19 come from Radix, not from us: it portals to the body, sets
- * `role="dialog"` + `aria-modal`, moves focus inside on open, cycles Tab and
- * Shift+Tab within the panel, closes on Escape and on backdrop click, restores
- * focus to the trigger on close, and reference-counts the body scroll lock so
- * stacked dialogs unlock only when the last one closes. v1 hand-wrote all of
- * that (`useFocusTrap`, `lib/dialog/scrollLock.ts`) and shipped bugs in it.
+ * A11Y-4 and INV-19 come from Radix, not from us. v1 hand-wrote the focus trap
+ * and the scroll lock (`useFocusTrap`, `lib/dialog/scrollLock.ts`) and shipped
+ * bugs in both.
  */
 function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
