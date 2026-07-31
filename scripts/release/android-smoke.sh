@@ -22,6 +22,12 @@ INTAKE="$PKG/.IntakeActivity"
 SETTLE_SECS="${SETTLE_SECS:-25}"
 CAPTURE_WAIT_SECS="${CAPTURE_WAIT_SECS:-40}"
 
+# How long to keep asking the accessibility tree whether the UI is there. It
+# starts after the settle, so the wall-clock budget from `am start` is this plus
+# SETTLE_SECS. Deliberately generous for a first measurement — the probe reports
+# what it actually took, and the margin can be cut once there are numbers.
+PAINT_TIMEOUT="${PAINT_TIMEOUT:-90}"
+
 if [[ "${1:-}" == "--self-test" ]]; then
     self_test
     exit $?
@@ -79,6 +85,7 @@ fi
 group "1. It launches at all"
 # ---------------------------------------------------------------------------
 adb logcat -c || true
+launched_at="$SECONDS"
 start_out="$(sh_ am start -W -n "$MAIN")"
 printf '%s\n' "$start_out" | sed 's/^/        /'
 if grep -q '^Status: ok' <<<"$start_out" && ! grep -qi 'Error' <<<"$start_out"; then
@@ -160,6 +167,23 @@ else
                "the activity is up but no WebView was ever instantiated"
 fi
 
+# A screen that was never on and a UI that never painted are different
+# failures, so the screen is dealt with first and reported on its own.
+sh_ input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+sh_ wm dismiss-keyguard >/dev/null 2>&1 || true
+# Two spellings because one of them is a dumpsys format away from silently
+# reporting a dark screen and turning the paint assertion off.
+power="$(sh_ dumpsys power; sh_ dumpsys display)"
+wakefulness="$(grep -oE 'mWakefulness=[A-Za-z_]+|mScreenState=[A-Z]+|Display Power: state=[A-Z]+' <<<"$power" | sort -u | tr '\n' ' ')"
+awake=no
+grep -qE 'mWakefulness=Awake|mScreenState=ON|state=ON' <<<"$wakefulness" && awake=yes
+if [[ "$awake" == yes ]]; then
+    ok "the screen is awake"
+else
+    bad "the screen is awake" \
+        "KEYCODE_WAKEUP left it at '${wakefulness:-unreported}' — nothing below can tell a dark screen from a dead UI"
+fi
+
 window="$(sh_ dumpsys window)"
 focus="$(grep -E 'mCurrentFocus|mFocusedApp' <<<"$window" | head -n 4)"
 if grep -q "$PKG" <<<"$focus"; then
@@ -168,18 +192,54 @@ else
     bad "the focused window belongs to $PKG" "${focus:-dumpsys window reported no focus}"
 fi
 
+# The only assertion in this file about the React side rather than about Rust.
+#
+# Polled, not sampled: run 2 dumped once at 25s, found the WebView node empty,
+# and passed anyway because this was a probe. Chromium also builds its
+# accessibility tree only once a client asks, so the first dump after a launch
+# can be empty on a UI that is perfectly alive.
+painted_at=""
+kids=0; named=0; first=""; dumps=0
+poll_started="$SECONDS"
+while (( SECONDS - poll_started < PAINT_TIMEOUT )); do
+    if dump_hierarchy "$OUT/ui-launch1.xml"; then
+        dumps=$((dumps + 1))
+        read -r kids named first <<<"$(webview_content "$OUT/ui-launch1.xml")"
+        if (( named > 0 )); then painted_at=$((SECONDS - launched_at)); break; fi
+    fi
+    sleep 2
+done
+
 adb exec-out screencap -p > "$OUT/launch1.png" 2>/dev/null || true
-sh_ uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true
-adb pull /sdcard/ui.xml "$OUT/ui-launch1.xml" >/dev/null 2>&1 || true
+shot=0
+[[ -s "$OUT/launch1.png" ]] && shot="$(stat -c %s "$OUT/launch1.png")"
 if [[ -s "$OUT/ui-launch1.xml" ]]; then
-    nodes="$(grep -o 'class="[^"]*"' "$OUT/ui-launch1.xml" | sort | uniq -c | sort -rn | head -n 5 | tr '\n' ' ')"
+    nodes="$(grep -o 'class="[^"]*"' "$OUT/ui-launch1.xml" | sort | uniq -c | sort -rn | head -n 6 | tr '\n' ' ')"
     probe "the view hierarchy" "${nodes:-none}"
-else
-    probe "the view hierarchy" "uiautomator produced nothing"
 fi
-probe "a screenshot was captured" "$([[ -s "$OUT/launch1.png" ]] && echo "$(stat -c %s "$OUT/launch1.png") bytes, in the artifact" || echo 'no')"
-note "that the WebView painted the CopyPaste UI" \
-     "the screenshot and the hierarchy dump are in the artifact for a human to read; nothing here reads pixels"
+probe "the screenshot" "$shot bytes (run 1 painted at 36253, run 2 blank at 2195)"
+
+if [[ "$awake" != yes ]]; then
+    note "that the WebView painted the CopyPaste UI" \
+         "the screen was '${wakefulness:-unreported}', so an empty hierarchy says nothing about the UI"
+elif [[ -n "$painted_at" ]] && ! looks_like_error_page "$first"; then
+    ok "the WebView painted a UI with content"
+    # Printed on the way past, so the timeout has a measured margin rather than
+    # a guessed one, and a paint that slows down is visible before it fails.
+    probe "how long the UI took to paint" \
+          "${painted_at}s after am start, ${named} named nodes under the WebView, first: ${first}"
+elif [[ -n "$painted_at" ]]; then
+    bad "the WebView painted a UI with content" \
+        "it painted Chromium's error page in ${painted_at}s: ${first} — the app cannot load its own assets"
+elif (( dumps == 0 )); then
+    # A tool that never answered is not a UI that never painted, and calling it
+    # one would send the next round after the wrong thing.
+    note "that the WebView painted the CopyPaste UI" \
+         "uiautomator produced no dump in ${PAINT_TIMEOUT}s, so there was nothing to read; the screenshot is $shot bytes"
+else
+    bad "the WebView painted a UI with content" \
+        "$dumps dumps over ${PAINT_TIMEOUT}s and the WebView subtree held $kids nodes, $named named; screenshot $shot bytes (${first})"
+fi
 
 # ---------------------------------------------------------------------------
 group "4. The database opens"
