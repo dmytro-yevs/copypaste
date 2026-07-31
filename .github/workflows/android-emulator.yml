@@ -176,6 +176,13 @@ jobs:
           grep -q 'lib/x86_64/libcopypaste_ui_lib.so' <<<"$libs" \
             || { echo "::error::the APK carries no x86_64 libcopypaste_ui_lib.so"; grep -E 'lib/.*\.so' <<<"$libs"; exit 1; }
 
+          # Reported, not asserted: either value ships a working app. It is
+          # printed because it decides how the library appears in
+          # /proc/<pid>/maps — false means the linker maps it out of base.apk
+          # and no .so name is there to find, which is what failed run 1.
+          echo "extractNativeLibs: $("${tools}/aapt2" dump xmltree --file AndroidManifest.xml "$apk" \
+            | grep -i 'extractNativeLibs' || echo '<absent, so AGP left it at its default>')"
+
           mkdir -p dist
           cp "$apk" dist/copypaste-emulator-x86_64-debug.apk
           ls -l dist/
