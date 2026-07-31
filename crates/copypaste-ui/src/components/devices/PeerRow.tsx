@@ -14,8 +14,14 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { type PeerState, type SyncAttempt, peerState } from "@/components/devices/peerState";
-import { useTranslation } from "@/i18n";
+import {
+  type PeerHealth,
+  type PeerState,
+  peerState,
+  unsettledFailure,
+} from "@/components/devices/peerState";
+import { t as translate, useTranslation } from "@/i18n";
+import { type ErrorKind, friendlyError, isRetryable } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
 
@@ -40,9 +46,18 @@ function hasHint(state: PeerState): state is HintedState {
   return state !== "synced";
 }
 
+/** `errors.unknown` and `errors.internal` both render "The background service
+ *  returned an error", which names nothing the user can do; this screen has a
+ *  better sentence for the same situation. */
+function whyItFailed(kind: ErrorKind): string {
+  return kind === "unknown" || kind === "internal"
+    ? translate("devices.state.failing.hint")
+    : friendlyError(kind);
+}
+
 interface PeerRowProps {
   peer: PeerInfo;
-  attempt: SyncAttempt | undefined;
+  health: PeerHealth | undefined;
   syncing: boolean;
   unpairing: boolean;
   revoking: boolean;
@@ -53,7 +68,7 @@ interface PeerRowProps {
 
 export function PeerRow({
   peer,
-  attempt,
+  health,
   syncing,
   unpairing,
   revoking,
@@ -62,8 +77,9 @@ export function PeerRow({
   onRevoke,
 }: PeerRowProps) {
   const { t } = useTranslation();
-  const state = peerState(peer, attempt);
+  const state = peerState(peer, health);
   const { variant, icon: StateIcon } = BADGE[state];
+  const failure = unsettledFailure(peer, health);
 
   const synced =
     peer.last_seen_ms > 0
@@ -138,10 +154,41 @@ export function PeerRow({
         </Button>
       </div>
 
-      {hasHint(state) && (
-        <p className="text-xs text-muted-foreground">
-          {t(`devices.state.${state}.hint`)}
-        </p>
+      {failure ? (
+        <div className="flex flex-wrap items-center gap-s-2">
+          <p className="min-w-0 flex-1 text-xs text-err-strong">
+            {t("devices.peer.failedAt", { age: longAge(failure.at) })} ·{" "}
+            {whyItFailed(failure.kind)}
+          </p>
+          {isRetryable(failure.kind) && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={syncing}
+              aria-label={t("devices.peer.retryOne", { name: peer.name })}
+              onClick={() => onSync(peer)}
+            >
+              {t("common.tryAgain")}
+            </Button>
+          )}
+        </div>
+      ) : (
+        <>
+          {hasHint(state) && (
+            <p className="text-xs text-muted-foreground">
+              {t(`devices.state.${state}.hint`)}
+            </p>
+          )}
+          {health?.success && (
+            <p className="text-xs text-muted-foreground">
+              {t("devices.peer.lastRun", {
+                age: longAge(health.success.at),
+                sent: health.success.sent,
+                received: health.success.received,
+              })}
+            </p>
+          )}
+        </>
       )}
     </li>
   );
