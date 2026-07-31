@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTranslation } from "@/i18n";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { AppearanceTab } from "@/components/settings/AppearanceTab";
+import { DiagnosticsTab } from "@/components/settings/DiagnosticsTab";
 import { ListTab } from "@/components/settings/ListTab";
 import { ServiceTab } from "@/components/settings/ServiceTab";
 import { ShortcutTab } from "@/components/settings/ShortcutTab";
@@ -24,6 +25,7 @@ const TABS = [
   { value: "service", label: "settings.tabs.service", render: () => <ServiceTab /> },
   { value: "sync", label: "settings.tabs.sync", render: () => <SyncTab /> },
   { value: "storage", label: "settings.tabs.storage", render: () => <StorageTab /> },
+  { value: "diagnostics", label: "settings.tabs.diagnostics", render: () => <DiagnosticsTab /> },
   { value: "about", label: "settings.tabs.about", render: () => <AboutTab /> },
 ] as const;
 

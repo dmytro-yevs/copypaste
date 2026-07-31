@@ -147,10 +147,7 @@ pub trait ClipboardSource: Send {
     /// broken. The counter is on the port so a status response can surface it.
     /// Defaulted so a backend may omit it, never so it can be forgotten.
     ///
-    /// `allow(dead_code)`: the daemon is a binary, so until the status handler
-    /// reads this the compiler cannot see a caller. Delete the attribute — do
-    /// not delete the method — when `StatusResponse` carries it.
-    #[allow(dead_code)]
+    /// Read by `AppState::counters` onto [`copypaste_ipc::DiagnosticCounters`].
     fn rejected_too_large_count(&self) -> u64 {
         0
     }
@@ -160,8 +157,7 @@ pub trait ClipboardSource: Send {
     /// §3.1/§3.2: `changeCount` is lossy — a delta above 1 means intermediate
     /// values existed and are irrecoverable. This is the telemetry side-channel
     /// the manifest asks for; a burst is *never* modelled as a content value
-    /// (§6.1). Same `allow` rationale as above.
-    #[allow(dead_code)]
+    /// (§6.1). Surfaced the same way as the counter above.
     fn lost_intermediates_count(&self) -> u64 {
         0
     }

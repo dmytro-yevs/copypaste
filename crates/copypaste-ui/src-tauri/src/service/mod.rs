@@ -30,6 +30,7 @@ use serde::Serialize;
 
 use crate::backend::{Backend, BackendError, Result};
 
+pub mod diagnostics;
 pub mod locate;
 pub mod push;
 
