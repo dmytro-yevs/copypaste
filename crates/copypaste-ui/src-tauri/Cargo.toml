@@ -27,6 +27,12 @@ tauri-plugin-clipboard-manager = "2"
 # 4); and no capability entry is needed, because the ACL gates the JS bridge and
 # nothing here calls the plugin from JS.
 tauri-plugin-dialog = "2"
+# Posting to the notification centre needs an application bundle, which the
+# daemon does not have — so the capture notification is the app's job and the
+# daemon only reports `EventData::captured` (parity 18, backlog B-18). Driven
+# from Rust in `shell::notify`, so like the dialog plugin it is granted nothing
+# in `capabilities/`.
+tauri-plugin-notification = "2"
 tokio.workspace = true
 # The one retry implementation in the workspace (CLAUDE.md rule 1). Used for
 # the bounded wait after starting the background service.

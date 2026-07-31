@@ -114,6 +114,11 @@ fn emit_change<R: Runtime>(app: &AppHandle<R>, event: EventData) {
             swept: event.swept,
         },
     );
+    // Not forwarded to the WebView: the notification is posted natively, and a
+    // hidden window's React tree is not a surface that could post one anyway.
+    if event.captured {
+        crate::shell::notify::on_capture(app);
+    }
 }
 
 fn set_live<R: Runtime>(app: &AppHandle<R>, live: bool) {
