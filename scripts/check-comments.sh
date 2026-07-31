@@ -28,9 +28,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 MAX_BLOCK=${MAX_BLOCK:-12}
 MAX_HEADER=${MAX_HEADER:-20}
 MAX_RATIO=${MAX_RATIO:-30}
+# Below this many lines of code the ratio says nothing: seven doc lines on a
+# twenty-line file is 35% and is not the failure this rule is about. The block,
+# header and no-code rules still apply at every size.
+RATIO_FLOOR=${RATIO_FLOOR:-80}
 BASELINE=scripts/comment-budget.txt
 
-exec python3 - "$MAX_BLOCK" "$MAX_HEADER" "$MAX_RATIO" "$BASELINE" "$@" <<'PY'
+exec python3 - "$MAX_BLOCK" "$MAX_HEADER" "$MAX_RATIO" "$RATIO_FLOOR" "$BASELINE" "$@" <<'PY'
 import signal
 import subprocess
 import sys
@@ -39,13 +43,14 @@ import sys
 # gate reads as the check crashing rather than as the reader stopping early.
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-max_block, max_header, max_ratio, baseline_path = (
+max_block, max_header, max_ratio, ratio_floor, baseline_path = (
     int(sys.argv[1]),
     int(sys.argv[2]),
     int(sys.argv[3]),
-    sys.argv[4],
+    int(sys.argv[4]),
+    sys.argv[5],
 )
-only = sys.argv[5:]
+only = sys.argv[6:]
 
 COMMENT_STARTS = ("//", "/*", "*", "*/", "#!")
 
@@ -96,7 +101,7 @@ def faults(path):
     if header > max_header:
         out.append(f"a {header}-line module header (max {max_header})")
     ratio = round(100 * comments / (comments + code))
-    if ratio > max_ratio:
+    if code >= ratio_floor and ratio > max_ratio:
         out.append(f"{ratio}% comment (max {max_ratio}%)")
     return out
 
