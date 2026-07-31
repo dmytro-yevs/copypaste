@@ -23,6 +23,7 @@ import { PAGE_SIZE, SEARCH_LIMIT } from "@/lib/layout";
 const CRATES = path.resolve(process.cwd(), "..");
 
 const IPC_LIB = "copypaste-ipc/src/lib.rs";
+const IPC_LIMITS = "copypaste-ipc/src/limits.rs";
 const P2P_PEERS = "copypaste-p2p/src/peers/mod.rs";
 const PUSH = "copypaste-ui/src-tauri/src/service/push.rs";
 const INTAKE = "copypaste-ui/src-tauri/src/capture/intake.rs";
@@ -84,8 +85,8 @@ describe("event names the frontend listens for", () => {
  * Not a mirrored value — a bound. Both servers clamp silently, so a request
  * over the ceiling returns a short page that reads as "the history ends here".
  */
-test(`the page sizes asked for fit MAX_PAGE in ${IPC_LIB}`, () => {
-  const maxPage = number(IPC_LIB, "MAX_PAGE");
+test(`the page sizes asked for fit MAX_PAGE in ${IPC_LIMITS}`, () => {
+  const maxPage = number(IPC_LIMITS, "MAX_PAGE");
   expect(PAGE_SIZE).toBeLessThanOrEqual(maxPage);
   expect(SEARCH_LIMIT).toBeLessThanOrEqual(maxPage);
 });
