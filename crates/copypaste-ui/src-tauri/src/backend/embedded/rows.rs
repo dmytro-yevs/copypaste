@@ -12,7 +12,7 @@ use copypaste_ipc::{Item, PeerInfo};
 use super::Inner;
 use crate::backend::{BackendError, Page, Result};
 
-pub(super) use copypaste_ipc::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_PAGE};
+pub(super) use copypaste_ipc::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 
 const MSG_NO_ITEM: &str = "That item is no longer there.";
 
@@ -152,7 +152,6 @@ fn legacy_history_present(data_dir: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::backend::embedded::tests::backend;
     use crate::backend::Backend as _;
 
