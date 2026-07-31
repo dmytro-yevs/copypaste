@@ -6,21 +6,50 @@
  * Nothing here renders a path (INV-12), which is why the service is described
  * by version and backend rather than by where it lives.
  */
+import { useQuery } from "@tanstack/react-query";
+import { getVersion } from "@tauri-apps/api/app";
+import { ExternalLink } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { classifyError, friendlyError } from "@/lib/errors";
-import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
+import { CURRENT_PROTOCOL_VERSION, hasBridge } from "@/lib/ipc";
 import { usePrefs } from "@/store/prefs";
 import { Row } from "@/components/settings/Row";
 
 const REAL_BACKENDS = /pasteboard|nspasteboard|system/i;
 
+const REPO = "https://github.com/dmytro-yevs/copypaste";
+
+/**
+ * Release notes, not a changelog file: nothing in the tree generates one, and
+ * `release.yml` publishes notes to that page on every tag. No privacy link,
+ * because the only privacy document is about cloud sync, which this build has
+ * no account for.
+ *
+ * **Unverified:** no external opener is registered in `src-tauri`, so these do
+ * nothing on macOS or Android yet. `target="_blank"` is what keeps that a dead
+ * link rather than a navigation replacing the app with a web page.
+ */
+const LINKS = [
+  { key: "repository", href: REPO },
+  { key: "releases", href: `${REPO}/releases` },
+] as const;
+
 export function AboutTab() {
   const { t } = useTranslation();
   const status = useStatus();
   const resetPrefs = usePrefs((s) => s.reset);
+
+  const appVersion = useQuery({
+    queryKey: ["app-version"],
+    queryFn: getVersion,
+    enabled: hasBridge(),
+    staleTime: Infinity,
+    retry: false,
+  });
 
   const backendIsReal = status.data
     ? REAL_BACKENDS.test(status.data.clipboard_backend)
@@ -31,6 +60,17 @@ export function AboutTab() {
 
   return (
     <div className="flex flex-col">
+      <Row
+        title={t("settings.about.app.title")}
+        description={t("settings.about.app.description")}
+      >
+        <span className="text-sm tabular-nums text-muted-foreground">
+          {appVersion.data === undefined
+            ? t("common.unknown")
+            : t("settings.about.app.version", { version: appVersion.data })}
+        </span>
+      </Row>
+
       <Row title={t("settings.about.service.title")}>
         {status.error ? (
           <span className="text-sm text-err-strong">
@@ -102,6 +142,23 @@ export function AboutTab() {
             ? status.data.item_count.toLocaleString()
             : t("common.noValue")}
         </span>
+      </Row>
+
+      <Row title={t("settings.about.links.title")}>
+        <div className="flex flex-wrap items-center gap-s-3">
+          {LINKS.map(({ key, href }) => (
+            <a
+              key={key}
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded-sm text-sm text-muted-foreground underline underline-offset-2 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+            >
+              {t(`settings.about.links.${key}`)}
+              <ExternalLink size={12} aria-hidden="true" />
+            </a>
+          ))}
+        </div>
       </Row>
 
       <Row
