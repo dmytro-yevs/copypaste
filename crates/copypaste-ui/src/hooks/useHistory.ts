@@ -65,13 +65,15 @@ export function pollInterval(pushLive: boolean, failed: boolean): number {
 }
 
 /**
- * De-duplicated by id: a page offset is a position in a list a capture can
- * prepend to between two fetches, so one item can arrive on two pages (INV-4).
- * Module scope, because React Query memoises `select` on (data, selectFn) and
- * INV-2 needs the same object back when the data has not changed.
+ * De-duplicated by id: a cursor cannot hand the same row out twice, but a pin
+ * moves a row between sections mid-walk, so two held pages can still name it
+ * (INV-4). First occurrence wins, so the list does not jump under the scroll.
  *
- * Skipped counts sum across pages; reporting only the last page's would shrink
- * as the user scrolls.
+ * Module scope: React Query memoises `select` on (data, selectFn), and INV-2
+ * needs the same object back when the data has not changed.
+ *
+ * Skipped counts sum across pages; the last page's alone would shrink as the
+ * user scrolls.
  */
 function flatten(data: { pages: ItemPage[] }): History {
   const seen = new Set<string>();
@@ -89,10 +91,14 @@ function flatten(data: { pages: ItemPage[] }): History {
 }
 
 /**
- * Search is deliberately **not** paged: it runs against the whole database, so
- * a match at index 800 is found without loading 800 rows first (AT-73 /
- * CopyPaste-crh3.106). Sensitive items are never indexed, so a search
- * legitimately cannot return one.
+ * Paged by cursor, never by offset (B-1, `CopyPaste-8ebg.57`). A capture
+ * landing above the window shifts every offset below it, so page 2 repeats a
+ * row or skips one — and a clipping the user never saw is indistinguishable
+ * from one that was never captured (rule 4). A cursor names a position in the
+ * order, so anything inserted above it is not in the page after it.
+ *
+ * The page param is the previous page's `next_cursor`, opaque here. Search is
+ * not paged at all.
  */
 export function useHistory(query: string, pushLive = false) {
   const searching = query.length > 0;
@@ -101,16 +107,12 @@ export function useHistory(query: string, pushLive = false) {
     queryKey: historyKey(query),
     queryFn: ({ pageParam }) =>
       searching ? searchItems(query, SEARCH_LIMIT) : listItems(PAGE_SIZE, pageParam),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) => {
-      if (searching) return undefined;
-      // Against `items.length`, not the page's total: a page that dropped
-      // rows it could not decrypt is still a full page from the server, and
-      // treating it as short would stop paging early and hide the rest of the
-      // history behind a handful of corrupt rows.
-      if (lastPage.items.length < PAGE_SIZE) return undefined;
-      return allPages.reduce((total, page) => total + page.items.length, 0);
-    },
+    initialPageParam: null as string | null,
+    // `next_cursor`, and nothing derived from the page's length: rows counted
+    // in `skipped_undecryptable` were read and dropped, so a short page is not
+    // the end of the list, and stopping on one would hide the rest of the
+    // history behind a handful of corrupt rows.
+    getNextPageParam: (lastPage) => (searching ? undefined : lastPage.next_cursor ?? undefined),
     refetchInterval: (q) => pollInterval(pushLive, q.state.status === "error"),
     // Typing must not blank the list between keystrokes.
     placeholderData: keepPreviousData,

@@ -51,9 +51,9 @@ async fn run(cli: Cli) -> Result<(), CliError> {
     }
 
     let method = match &cli.command {
-        Command::List { limit, offset } => Method::List {
+        Command::List { limit, cursor } => Method::List {
             limit: *limit,
-            offset: *offset,
+            cursor: cursor.clone(),
         },
         Command::Search { query, limit } => Method::Search {
             query: query.clone(),
@@ -379,23 +379,31 @@ mod tests {
     #[test]
     fn list_has_sensible_defaults() {
         match parse(&["copypaste", "list"]).command {
-            Command::List { limit, offset } => {
+            Command::List { limit, cursor } => {
                 assert_eq!(limit, 50);
-                assert_eq!(offset, 0);
+                assert_eq!(cursor, None, "the first page is asked for by omission");
             }
             other => panic!("{other:?}"),
         }
     }
 
     #[test]
-    fn list_accepts_limit_and_offset() {
-        match parse(&["copypaste", "list", "--limit", "5", "--offset", "10"]).command {
-            Command::List { limit, offset } => {
+    fn list_accepts_a_limit_and_a_page_marker() {
+        match parse(&["copypaste", "list", "--limit", "5", "--cursor", "ab12"]).command {
+            Command::List { limit, cursor } => {
                 assert_eq!(limit, 5);
-                assert_eq!(offset, 10);
+                assert_eq!(cursor.as_deref(), Some("ab12"));
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// Offsets are gone from the surface, not merely unused: `--offset 10` on a
+    /// list that grows at the top skips rows, and accepting the flag would let a
+    /// script keep asking for that (B-1, `CopyPaste-8ebg.57`).
+    #[test]
+    fn list_no_longer_accepts_an_offset() {
+        assert!(Cli::try_parse_from(["copypaste", "list", "--offset", "10"]).is_err());
     }
 
     #[test]

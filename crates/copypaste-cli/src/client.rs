@@ -354,7 +354,7 @@ mod tests {
             &stub.path,
             Method::List {
                 limit: 1,
-                offset: 0,
+                cursor: None,
             },
         )
         .await
@@ -433,13 +433,13 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             method: Method::List {
                 limit: 50,
-                offset: 0,
+                cursor: None,
             },
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains(r#""method":"list""#), "{json}");
         assert!(
-            json.contains(r#""params":{"limit":50,"offset":0}"#),
+            json.contains(r#""params":{"limit":50,"cursor":null}"#),
             "{json}"
         );
         assert!(!json.contains('\n'), "a request must be one line: {json}");
@@ -477,6 +477,22 @@ mod tests {
         assert_eq!(page.items[0].content, "hi");
         assert!(page.items[0].pinned);
         assert_eq!(page.skipped_undecryptable, 3, "the skip count was dropped");
+        assert_eq!(
+            page.next_cursor, None,
+            "a page with no marker ends the list"
+        );
+    }
+
+    /// The marker is what `list --cursor` is given back, so it has to survive
+    /// the decode. A page that carries one and loses it here would end the walk
+    /// early and hide the rest of the history.
+    #[test]
+    fn a_page_marker_survives_the_decode() {
+        let line = r#"{"id":1,"ok":true,"data":{"items":[],
+            "skipped_undecryptable":0,"next_cursor":"7b22"}}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        let page = expect_page(into_data(response).unwrap()).unwrap();
+        assert_eq!(page.next_cursor.as_deref(), Some("7b22"));
     }
 
     #[test]

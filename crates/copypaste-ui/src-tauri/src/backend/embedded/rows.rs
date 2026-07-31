@@ -141,6 +141,10 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         // `copypaste_ipc::v1_data_dir` cannot address — so this build has no
         // way to look, and says so by saying no.
         legacy_history_present: false,
+        // All zero, and honestly so: this build has no capture loop to refuse
+        // or miss anything, and no startup purge. A count it cannot collect is
+        // reported as none rather than left out.
+        counters: copypaste_ipc::DiagnosticCounters::default(),
     })
 }
 

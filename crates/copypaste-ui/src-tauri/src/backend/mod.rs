@@ -77,6 +77,13 @@ pub type Result<T> = std::result::Result<T, BackendError>;
 pub struct Page {
     pub items: Vec<Item>,
     pub skipped_undecryptable: u32,
+    /// Where to resume, or `None` at the end of the list.
+    ///
+    /// The **only** end-of-list test. A short page is not one: rows this page
+    /// dropped are counted in `skipped_undecryptable`, and stopping on a short
+    /// page would hide the rest of the history behind a handful of rows that
+    /// will not open.
+    pub next_cursor: Option<String>,
 }
 
 impl From<copypaste_ipc::ItemPage> for Page {
@@ -84,6 +91,7 @@ impl From<copypaste_ipc::ItemPage> for Page {
         Self {
             items: page.items,
             skipped_undecryptable: page.skipped_undecryptable,
+            next_cursor: page.next_cursor,
         }
     }
 }
@@ -102,9 +110,20 @@ pub trait Backend: Send + Sync + 'static {
     // ---- history ---------------------------------------------------------
 
     /// Most recent items, newest first; pinned ahead of unpinned.
-    async fn list(&self, limit: u32, offset: u32) -> Result<Page>;
+    ///
+    /// Paged by cursor, never by offset: a clipboard manager inserts above the
+    /// window every time the user copies anything, so an offset taken for one
+    /// page no longer names the same boundary by the next
+    /// (`CopyPaste-8ebg.57`). `cursor` is [`Page::next_cursor`] from the
+    /// previous page, and `None` asks for the first.
+    async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page>;
 
     /// Full-text search. Sensitive items are never indexed and never returned.
+    ///
+    /// Not paged — [`Page::next_cursor`] is always `None`. It runs against the
+    /// whole database and returns the best `limit` matches; FTS5 `rank` is a
+    /// score rather than a stable order, so a cursor over it would promise a
+    /// stability nothing upholds.
     async fn search(&self, query: &str, limit: u32) -> Result<Page>;
 
     /// Add an item directly, bypassing clipboard capture.

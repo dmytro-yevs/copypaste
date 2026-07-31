@@ -6,15 +6,15 @@
 //! are network I/O and live in `crate::p2p::handlers` instead — the split
 //! between the two files is the split between the two thread pools.
 
-use copypaste_core::StoredItem;
+use copypaste_core::{ItemCursor, StoredItem};
 use copypaste_ipc::{
     ErrorCode, Item, ItemPage, Response, ResponseData, StatusData, PROTOCOL_VERSION,
 };
 use tracing::{error, warn};
 
 use super::messages::{
-    decrypt_error, storage_error, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT, MSG_NOT_FOUND,
-    MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
+    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT,
+    MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
 };
 use crate::capture::{self, IngestError};
 use crate::AppState;
@@ -55,14 +55,28 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             capture_running: state.capture_running(),
             clipboard_backend: state.backend_name().to_string(),
             legacy_history_present: state.legacy_history_present(),
+            counters: state.counters(),
         }),
     )
 }
 
-pub(super) fn list(state: &AppState, id: u64, limit: u32, offset: u32) -> Response {
+pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) -> Response {
     let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
-    match state.store.list(limit, offset) {
-        Ok(rows) => Response::ok(id, ResponseData::Page(decrypt_rows(state, rows))),
+    let after = match cursor.map(ItemCursor::parse).transpose() {
+        Ok(after) => after,
+        // Never "start from the top": a load-more that silently restarted would
+        // repeat the whole history, and the client cannot tell that from a list
+        // that really does begin again.
+        Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR),
+    };
+
+    match state.store.list_from(after.as_ref(), limit) {
+        Ok(page) => {
+            let next = page.next.map(|cursor| cursor.token());
+            let mut wire = decrypt_rows(state, page.items);
+            wire.next_cursor = next;
+            Response::ok(id, ResponseData::Page(wire))
+        }
         Err(e) => storage_error(id, "list", &e),
     }
 }
@@ -296,6 +310,11 @@ fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
     let mut page = ItemPage {
         items: Vec::with_capacity(rows.len()),
         skipped_undecryptable: 0,
+        // Set by `list` from the store's own page, never derived from what
+        // survived decryption: a page shortened by unreadable rows is still a
+        // full page of the list, and ending on it would hide the history behind
+        // them.
+        next_cursor: None,
     };
     // One query for the page's attribution rather than one per row: a page is
     // up to `MAX_PAGE` items and this runs on every list and every search.
@@ -331,7 +350,37 @@ mod tests {
     use super::*;
     use crate::server::dispatch::dispatch_store;
     use crate::testutil::test_state;
-    use copypaste_ipc::Method;
+    use copypaste_ipc::{content_type::TEXT, Method};
+
+    /// I-39 / §6.5: the two clipboard counters existed and nothing read them,
+    /// which is the same as not having them. This is the caller that made
+    /// deleting their `allow(dead_code)` correct.
+    #[test]
+    fn status_carries_the_counters_nothing_used_to_read() {
+        let (state, _dir) = test_state("counters");
+        state.note_sensitive_swept(2);
+        state.set_index_purged(7);
+
+        let counters = match status(&state, 1).data {
+            Some(ResponseData::Status(s)) => s.counters,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(counters.sensitive_swept, 2);
+        assert_eq!(counters.index_purged, 7);
+        // Reached the port rather than being defaulted at the wire: the fake
+        // backend answers 0 for both, and the point is that it was asked.
+        assert_eq!(counters.rejected_too_large, 0);
+        assert_eq!(counters.lost_intermediates, 0);
+    }
+
+    /// Rule 4. `status` is the one reply a support flow is built on, so a path
+    /// reaching it would be pasted into every issue.
+    #[test]
+    fn status_never_carries_a_path() {
+        let (state, _dir) = test_state("status-paths");
+        let json = serde_json::to_string(&status(&state, 1)).unwrap();
+        assert_eq!(json, copypaste_ipc::redact::scrub_paths(&json), "{json}");
+    }
 
     #[test]
     fn page_sizes_are_clamped() {
@@ -402,7 +451,7 @@ mod tests {
             2,
             Method::List {
                 limit: 50,
-                offset: 0,
+                cursor: None,
             },
         );
         match response.data {
@@ -426,6 +475,136 @@ mod tests {
                 "a sensitive item reached the search results"
             ),
             other => panic!("expected a page, got {other:?}"),
+        }
+    }
+
+    /// B-1 / `CopyPaste-8ebg.57`, at the wire: a capture landing above the
+    /// window between two pages must not make the second page repeat a row or
+    /// skip one. A clipboard manager inserts above the window every time the
+    /// user copies anything, so this is the ordinary case and not an edge one.
+    ///
+    /// The offset that page 2 *would* have used is asserted wrong in the same
+    /// test, so the difference is demonstrated rather than claimed.
+    #[test]
+    fn a_capture_between_two_pages_neither_repeats_nor_skips_a_row() {
+        let (state, _dir) = test_state("server");
+        // Stamped explicitly rather than by the clock: six captures inside one
+        // millisecond order by the `id` tiebreak, which is correct but makes
+        // "the new row lands above the window" a coin toss the assertion below
+        // needs to be certain of.
+        let now = copypaste_core::now_ms();
+        let original: Vec<String> = (0..6)
+            .map(|n| {
+                capture::ingest_at(&state, &format!("clip {n}"), TEXT, now - (10 - n) * 60_000)
+                    .expect("ingest")
+                    .into_item()
+                    .id
+            })
+            .collect();
+
+        let page = |cursor: Option<&str>| match list(&state, 2, 2, cursor).data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("{other:?}"),
+        };
+
+        let first = page(None);
+        let cursor = first.next_cursor.clone().expect("a full page resumes");
+
+        // The capture that lands mid-scroll — the ordinary case for a clipboard
+        // manager. Everything the user has not reached must still be reachable.
+        capture::ingest_at(&state, "arrived mid-scroll", TEXT, now).expect("ingest");
+
+        let mut seen: Vec<String> = first.items.iter().map(|i| i.id.clone()).collect();
+        let mut next = Some(cursor);
+        while let Some(cursor) = next {
+            let page = page(Some(&cursor));
+            seen.extend(page.items.iter().map(|i| i.id.clone()));
+            next = page.next_cursor;
+        }
+
+        for id in &original {
+            assert_eq!(
+                seen.iter().filter(|s| *s == id).count(),
+                1,
+                "an item was skipped or repeated across the pages"
+            );
+        }
+
+        // What offset pagination would have done instead: page 1 held two rows,
+        // so page 2 is `OFFSET 2` — and the new capture has pushed the row that
+        // was last on page 1 down into it.
+        let offset_page = state.store.list(2, 2).unwrap();
+        assert_eq!(
+            offset_page[0].id, first.items[1].id,
+            "offset would have repeated the last row of page 1"
+        );
+    }
+
+    /// A token this build did not write is refused, not silently treated as
+    /// "start again": a load-more that restarted would replay the whole history
+    /// and the client could not tell.
+    #[test]
+    fn a_forged_cursor_is_refused_rather_than_restarting_the_list() {
+        let (state, _dir) = test_state("server");
+        assert!(add(&state, 1, "one").ok);
+
+        for bad in ["", "not-hex!", "abcdef"] {
+            let response = list(&state, 2, 10, Some(bad));
+            assert_eq!(
+                response.error_code,
+                Some(ErrorCode::InvalidRequest),
+                "accepted {bad:?}"
+            );
+        }
+    }
+
+    /// A pin reorders the list under the reader. The cursor carries the sort
+    /// key by value, so the anchor moving to the pinned section neither strands
+    /// the reader nor duplicates the rows behind it.
+    #[test]
+    fn pinning_the_anchor_row_does_not_disturb_the_rest_of_the_walk() {
+        let (state, _dir) = test_state("server");
+        let now = copypaste_core::now_ms();
+        let ids: Vec<String> = (0..5)
+            .map(|n| {
+                capture::ingest_at(&state, &format!("clip {n}"), TEXT, now - (10 - n) * 60_000)
+                    .expect("ingest")
+                    .into_item()
+                    .id
+            })
+            .collect();
+
+        let first = match list(&state, 2, 2, None).data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("{other:?}"),
+        };
+        let anchor = first.items[1].id.clone();
+        assert!(pin(&state, 3, &anchor, true).ok);
+
+        let mut seen: Vec<String> = Vec::new();
+        let mut next = first.next_cursor;
+        while let Some(cursor) = next {
+            let page = match list(&state, 4, 2, Some(&cursor)).data {
+                Some(ResponseData::Page(page)) => page,
+                other => panic!("{other:?}"),
+            };
+            seen.extend(page.items.iter().map(|i| i.id.clone()));
+            next = page.next_cursor;
+        }
+
+        assert!(
+            !seen.contains(&anchor),
+            "the pinned anchor came back a second time"
+        );
+        for id in ids
+            .iter()
+            .filter(|id| **id != anchor && **id != first.items[0].id)
+        {
+            assert_eq!(
+                seen.iter().filter(|s| *s == id).count(),
+                1,
+                "a row was lost or repeated when the anchor was pinned"
+            );
         }
     }
 
@@ -472,7 +651,7 @@ mod tests {
             })
             .collect();
 
-        let listed = |state: &AppState| match list(state, 3, 10, 0).data {
+        let listed = |state: &AppState| match list(state, 3, 10, None).data {
             Some(ResponseData::Page(page)) => page
                 .items
                 .into_iter()
@@ -559,7 +738,7 @@ mod tests {
         }
 
         state.meta.record_device_name("device-b", "Phone").unwrap();
-        match list(&state, 3, 10, 0).data {
+        match list(&state, 3, 10, None).data {
             Some(ResponseData::Page(page)) => {
                 let theirs = page
                     .items

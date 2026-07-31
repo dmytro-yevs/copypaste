@@ -44,7 +44,7 @@ mod transfer;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use copypaste_core::{ingest, Detector, IngestError, Keyring, Store, StoredItem};
+use copypaste_core::{ingest, Detector, IngestError, ItemCursor, Keyring, Store, StoredItem};
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
     ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
@@ -63,6 +63,9 @@ const MSG_EMPTY: &str = "There was nothing to save.";
 const MSG_TOO_LARGE: &str = "That item is larger than the size limit you set.";
 const MSG_NOT_STORED: &str = "That item could not be saved.";
 const MSG_NO_ITEM: &str = "That item is no longer there.";
+/// Refused rather than restarted: a load-more that silently began again would
+/// replay the whole history and the caller could not tell.
+const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
 const MSG_NO_WATCH: &str = "Live updates aren't available in this build.";
 const MSG_NO_SETTINGS: &str =
@@ -200,14 +203,26 @@ impl EmbeddedBackend {
 }
 
 impl Backend for EmbeddedBackend {
-    async fn list(&self, limit: u32, offset: u32) -> Result<Page> {
+    async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
         let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
+        let after = match cursor.map(ItemCursor::parse).transpose() {
+            Ok(after) => after,
+            // Never "start from the top": a load-more that silently restarted
+            // would replay the whole history, and the caller cannot tell that
+            // from a list that really does begin again.
+            Err(_) => return Err(BackendError::Invalid(MSG_BAD_CURSOR)),
+        };
         self.blocking(move |inner| {
-            let rows = inner
+            let page = inner
                 .store
-                .list(limit, offset)
+                .list_from(after.as_ref(), limit)
                 .map_err(|_| BackendError::internal("history could not be read"))?;
-            Ok(inner.to_wire_page(rows))
+            let next = page.next.map(|cursor| cursor.token());
+            let mut wire = inner.to_wire_page(page.items);
+            // From the store's page, never from what survived decryption: rows
+            // that would not open still occupy the window.
+            wire.next_cursor = next;
+            Ok(wire)
         })
         .await
     }
@@ -525,13 +540,62 @@ mod tests {
     #[tokio::test]
     async fn an_empty_history_lists_and_searches_without_failing() {
         let (backend, _clip, _dir) = backend();
-        assert!(backend.list(50, 0).await.unwrap().items.is_empty());
+        assert!(backend.list(50, None).await.unwrap().items.is_empty());
         assert!(backend
             .search("anything", 20)
             .await
             .unwrap()
             .items
             .is_empty());
+    }
+
+    /// B-1 / `CopyPaste-8ebg.57` on the platform with no daemon behind it: an
+    /// item captured between two pages must not make the second page repeat a
+    /// row or skip one. Both backends answer the same command, so both have to
+    /// hold the same property.
+    #[tokio::test]
+    async fn a_capture_between_two_pages_neither_repeats_nor_skips_a_row() {
+        let (backend, _clip, _dir) = backend();
+        let mut original = Vec::new();
+        for n in 0..6 {
+            original.push(backend.add(&format!("clip {n}")).await.unwrap().id);
+        }
+
+        let first = backend.list(2, None).await.unwrap();
+        let mut next = first.next_cursor.clone();
+        assert!(next.is_some(), "a full page has to say where it stopped");
+
+        backend.add("arrived mid-scroll").await.unwrap();
+
+        let mut seen: Vec<String> = first.items.iter().map(|i| i.id.clone()).collect();
+        while let Some(cursor) = next {
+            let page = backend.list(2, Some(&cursor)).await.unwrap();
+            seen.extend(page.items.iter().map(|i| i.id.clone()));
+            next = page.next_cursor;
+        }
+
+        for id in &original {
+            assert_eq!(
+                seen.iter().filter(|s| *s == id).count(),
+                1,
+                "an item was skipped or repeated across the pages"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_forged_page_marker_is_refused_rather_than_restarting_the_list() {
+        let (backend, _clip, _dir) = backend();
+        backend.add("one").await.unwrap();
+        for bad in ["", "not-hex!", "abcdef"] {
+            assert!(
+                matches!(
+                    backend.list(10, Some(bad)).await.unwrap_err(),
+                    BackendError::Invalid(_)
+                ),
+                "accepted {bad:?}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -656,7 +720,7 @@ mod tests {
             "this device is in its own name registry"
         );
 
-        let listed = backend.list(50, 0).await.unwrap();
+        let listed = backend.list(50, None).await.unwrap();
         assert_eq!(listed.items[0].origin_device_id, item.origin_device_id);
     }
 
@@ -691,7 +755,7 @@ mod tests {
         let item = backend.add("a shared note").await.unwrap();
         assert_eq!(item.content, "a shared note");
 
-        assert_eq!(backend.list(50, 0).await.unwrap().items.len(), 1);
+        assert_eq!(backend.list(50, None).await.unwrap().items.len(), 1);
         assert_eq!(backend.search("shared", 20).await.unwrap().items.len(), 1);
         assert_eq!(
             backend.get(&item.id).await.unwrap().content,
@@ -707,7 +771,7 @@ mod tests {
         let (backend, _clip, _dir) = backend();
         backend.add("same").await.unwrap();
         backend.add("same").await.unwrap();
-        assert_eq!(backend.list(50, 0).await.unwrap().items.len(), 1);
+        assert_eq!(backend.list(50, None).await.unwrap().items.len(), 1);
     }
 
     /// CLAUDE.md rule 4, the write-time layer: a detected secret is stored but
@@ -738,7 +802,7 @@ mod tests {
             backend.add("   ").await.unwrap_err(),
             BackendError::Invalid(_)
         ));
-        assert!(backend.list(50, 0).await.unwrap().items.is_empty());
+        assert!(backend.list(50, None).await.unwrap().items.is_empty());
     }
 
     /// A settings screen here shows what this build actually runs on, and says

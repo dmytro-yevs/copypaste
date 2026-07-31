@@ -22,6 +22,12 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
             let page = client::expect_page(data)?;
             out(&(render::items_table(&page.items, now_ms(), "no items yet")));
             warn_unreadable(page.skipped_undecryptable);
+            // On stderr, so `copypaste list | …` is unchanged. Without it the
+            // marker is only reachable through `--json`, and a `--limit` that
+            // fills the page would look like the whole history.
+            if let Some(cursor) = &page.next_cursor {
+                eprintln!("there is more: copypaste list --cursor {cursor}");
+            }
         }
         Command::Search { .. } => {
             let page = client::expect_page(data)?;

@@ -193,8 +193,8 @@ describe("rows that could not be read (finding 17)", () => {
   });
 
   it("sums the count across loaded pages", async () => {
-    listItems.mockImplementation(async (_limit: number, offset: number) =>
-      offset === 0 ? page(items(2), 1) : page(items(1), 2),
+    listItems.mockImplementation(async (_limit: number, cursor: string | null) =>
+      cursor === null ? page(items(2), 1, "after-page-1") : page(items(1), 2),
     );
     withUser(<HistoryView />);
     await waitFor(() =>

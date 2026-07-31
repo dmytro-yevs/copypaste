@@ -1,17 +1,16 @@
 /**
- * The only place `invoke` is called. Command names track
+ * The command surface every screen imports. Command names track
  * `copypaste_ipc::Method`; field names are snake_case because that is what
  * serde emits.
  *
- * A command the bridge does not route, and an operation a build cannot perform
- * (`BackendError::Unsupported` — Android has no pairing), both classify as
- * `unavailable`. Screens render that as its own state: "this build cannot" and
- * "the service is down" are different things to be told, and only one of them
- * is worth retrying.
+ * `invoke` itself is reached only through [`call`] in `./ipcCall` — add a
+ * command here and it goes through the same gateway. The Android capture
+ * surface lives in `./ipcCapture` for size (CLAUDE.md rule 5) and is
+ * re-exported below, so `@/lib/ipc` remains the single import.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { call, hasBridge } from "./ipcCall";
 
-import { IpcFailure, classifyError } from "./errors";
+export { hasBridge };
 
 /**
  * **`content` is `null` for a sensitive item** — not an empty string, not a
@@ -38,6 +37,11 @@ export interface Item {
 export interface ItemPage {
   readonly items: readonly Item[];
   readonly skipped_undecryptable: number;
+  /** Opaque; pass it straight back to `listItems`. `null` ends the list, and it
+   *  is the **only** end-of-list test — a page shortened by
+   *  `skipped_undecryptable` rows still has the rest of the history behind
+   *  it. */
+  readonly next_cursor: string | null;
 }
 
 export interface StatusData {
@@ -83,31 +87,28 @@ export interface SyncResult {
  *  else raises the mismatch banner (INV-17) rather than degrading silently. */
 export const CURRENT_PROTOCOL_VERSION = 1;
 
-/** No bridge is indistinguishable to a user from a service that is down, so it
- *  maps onto the same state rather than a third one. */
-export function hasBridge(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-async function call<T>(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  if (!hasBridge()) throw new IpcFailure("offline");
-  try {
-    return await invoke<T>(command, args);
-  } catch (raw) {
-    // classifyError logs the raw value and returns a safe token (INV-12).
-    throw new IpcFailure(classifyError(raw));
-  }
-}
-
 /* --------------------------------------------------------------- history --- */
 
-export function listItems(limit: number, offset: number): Promise<ItemPage> {
-  return call<ItemPage>("list", { limit, offset });
+/**
+ * One page of history. `cursor` is the previous page's `next_cursor`; `null`
+ * asks for the first.
+ *
+ * **A position, not a row number.** The list grows at the top while it is read
+ * — that is what a clipboard manager is — so an offset taken for page 1 names a
+ * different boundary by page 2, and one row repeats while another is never seen
+ * (`CopyPaste-8ebg.57`). Never parse, build or persist a token; one the service
+ * did not issue is refused rather than restarting the list.
+ */
+export function listItems(
+  limit: number,
+  cursor: string | null,
+): Promise<ItemPage> {
+  return call<ItemPage>("list", { limit, cursor });
 }
 
+/** Not paged: it runs against the whole database and returns the best `limit`
+ *  matches (AT-73 / `CopyPaste-crh3.106`). FTS5 rank is a score, not an order
+ *  to seek on, so `next_cursor` is always `null` here. */
 export function searchItems(query: string, limit: number): Promise<ItemPage> {
   return call<ItemPage>("search", { query, limit });
 }
@@ -249,129 +250,27 @@ export function hideWindow(): Promise<void> {
 
 /* --------------------------------------------------------------- capture --- */
 
-/** The mechanism capturing right now — never the one that was asked for. */
-export type CaptureRung = "desktop" | "in_app" | "shizuku";
-
-export type NotGrantedReason =
-  | "unsupported"
-  | "not_installed"
-  | "not_running"
-  | "no_permission";
-
-export type NotWorkingReason = "awaiting_first_copy" | "read_refused" | "not_armed";
-
-/** `working` is reachable only through a read that happened without focus —
- *  a permission being present is not evidence (CopyPaste-qzhu). Nothing in this
- *  file may construct one. */
-export type CaptureHealth =
-  | { readonly state: "not_granted"; readonly reason: NotGrantedReason }
-  | { readonly state: "disabled" }
-  | { readonly state: "granted_not_working"; readonly reason: NotWorkingReason }
-  | { readonly state: "working" };
-
-export type CaptureNextStep =
-  | "none"
-  | "install_shizuku"
-  | "start_shizuku"
-  | "grant_permission"
-  | "arm";
-
-export type CaptureSource = "in_app" | "share" | "process_text" | "tile" | "background";
-
-export interface ShizukuProbe {
-  /** Wireless debugging can be paired on the phone itself from Android 11. */
-  readonly supported: boolean;
-  readonly installed: boolean;
-  /** False after every reboot until the user starts it again. */
-  readonly running: boolean;
-  readonly permission: boolean;
-  readonly toastSuppressed: boolean;
-  readonly rearmRequested: boolean;
-}
-
-/**
- * **`headline` and `detail` are finished sentences, not codes.** They are
- * authored and tested in `capture::messages` (ADR-0005) so that the setup
- * screen, the status strip and the loss notification cannot disagree about what
- * state this device is in. Rendering them verbatim is the contract; deriving
- * replacements from `health` here would be the drift that split them.
- */
-export interface CaptureSnapshot {
-  readonly rung: CaptureRung;
-  readonly health: CaptureHealth;
-  readonly shizuku: ShizukuProbe;
-  readonly nextStep: CaptureNextStep;
-  readonly headline: string;
-  readonly detail: string | null;
-  readonly lastReadOkAt: number | null;
-  readonly lastCaptureAt: number | null;
-  /** Copies that were taken from the platform and never stored. */
-  readonly droppedClips: number;
-  readonly toastSuppressed: boolean;
-  readonly toastAcknowledged: boolean;
-  /** The app was opened from the "background capture stopped" notification. */
-  readonly rearmRequested: boolean;
-}
-
-/** Carries no clipboard content: the list re-reads through `list`. */
-export interface CapturedPayload {
-  readonly id: string;
-  readonly source: CaptureSource;
-  readonly isSensitive: boolean;
-}
-
-export function captureState(): Promise<CaptureSnapshot> {
-  return call<CaptureSnapshot>("capture_state");
-}
-
-/** Re-asks the platform. Called on every resume, not only at startup: a grant
- *  can lapse while the app is in the background, and a reboot is the ordinary
- *  case rather than the exception. */
-export function captureRefresh(): Promise<CaptureSnapshot> {
-  return call<CaptureSnapshot>("capture_refresh");
-}
-
-/** One call for two steps: it asks for the permission when that is what is
- *  missing, and registers the listener when it is not. */
-export function captureArm(): Promise<CaptureSnapshot> {
-  return call<CaptureSnapshot>("capture_arm");
-}
-
-export function captureDisarm(): Promise<CaptureSnapshot> {
-  return call<CaptureSnapshot>("capture_disarm");
-}
-
-export function captureSetEnabled(enabled: boolean): Promise<CaptureSnapshot> {
-  return call<CaptureSnapshot>("capture_set_enabled", { enabled });
-}
-
-/** Rung 0: save whatever is on the clipboard right now. `null` means there was
- *  nothing to save, which is not a failure. */
-export function captureNow(source: CaptureSource): Promise<Item | null> {
-  return call<Item | null>("capture_now", { source });
-}
-
-/** The exact text `authorise_toast` gates on. Fetched rather than copied into
- *  the catalogue: a second copy is a second thing to keep true. */
-export function captureToastExplanation(): Promise<string> {
-  return call<string>("capture_toast_explanation");
-}
-
-/**
- * `acknowledged` may only be `true` when the user has read
- * `captureToastExplanation` and agreed to it. The gate is enforced in Rust so
- * it cannot be bypassed from here; passing `true` without having shown the text
- * would be lying to it. Turning suppression **off** is never gated.
- */
-export function captureSetToastSuppressed(
-  suppressed: boolean,
-  acknowledged: boolean,
-): Promise<CaptureSnapshot> {
-  return call<CaptureSnapshot>("capture_set_toast_suppressed", {
-    suppressed,
-    acknowledged,
-  });
-}
+export type {
+  CaptureHealth,
+  CaptureNextStep,
+  CaptureRung,
+  CaptureSnapshot,
+  CaptureSource,
+  CapturedPayload,
+  NotGrantedReason,
+  NotWorkingReason,
+  ShizukuProbe,
+} from "./ipcCapture";
+export {
+  captureArm,
+  captureDisarm,
+  captureNow,
+  captureRefresh,
+  captureSetEnabled,
+  captureSetToastSuppressed,
+  captureState,
+  captureToastExplanation,
+} from "./ipcCapture";
 
 /* ------------------------------------------------- the service's settings --- */
 

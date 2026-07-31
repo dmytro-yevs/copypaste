@@ -34,9 +34,13 @@ pub(crate) enum Command {
         /// How many items to show.
         #[arg(long, short = 'n', default_value_t = 50, value_parser = clap::value_parser!(u32).range(1..))]
         limit: u32,
-        /// How many items to skip.
-        #[arg(long, default_value_t = 0)]
-        offset: u32,
+        /// Continue from where a previous `list` stopped.
+        ///
+        /// A marker, not a row number: the history grows at the top while it is
+        /// being read, so skipping N rows would show one twice and another not
+        /// at all. `list` prints the marker for the next page when there is one.
+        #[arg(long)]
+        cursor: Option<String>,
     },
 
     /// Full-text search over clipboard history.
