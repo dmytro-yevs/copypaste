@@ -788,6 +788,28 @@ running as the backstop; only its *interval* changes.
 
 ### 4.9 Upload queue behaviour
 
+> **v2 divergence, decided 2026-07-31: there is no upload queue.** Push
+> re-derives what to send from local state on every round — `versions_since`
+> from a persisted upload floor — so the queue is not replaced by another
+> queue, it is replaced by a cursor. Most of the list below is then not a rule
+> to preserve but a hazard that no longer exists: nothing is enqueued, so
+> nothing can be dropped from a ring buffer, starved by newer work, or lost
+> between dequeue and push. An unreachable backend costs latency and nothing
+> else, because a failed round does not advance the floor
+> (`daemon/src/cloud/poll.rs`, `a_failed_round_leaves_the_upload_floor_where_it_was`).
+>
+> **The floor is a second source of truth about what needs uploading if
+> anything writes below it without saying so** (INV-C2). A version can land
+> under the floor three ways — a peer session carries the sender's stamp, a
+> delete keeps the item's stamp, and an import keeps the export's — and each
+> has to call `cloud::note_version_written`. Import was missed and its history
+> silently never uploaded; that is the failure mode this design has, and it is
+> a missing call rather than a lost queue entry.
+>
+> Two rules below survive unchanged and are still binding: the **startup
+> backlog sweep** and the **re-sweep on the key-absent → key-present edge**
+> (BUG C2) are both discharged by resetting the floor to `0` on every sign-in.
+
 (`cloud/push/loop_task.rs`.) Rules worth preserving:
 
 - **Bounded in-memory retry queue**; failed items are re-enqueued with their

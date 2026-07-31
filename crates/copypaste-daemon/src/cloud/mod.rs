@@ -39,15 +39,20 @@ pub use poll::run;
 /// The production instantiation of the driver.
 pub type Driver = CloudSync<SupabaseRest, SupabaseAuth>;
 
-// Persisted state. The first six are cleared by sign-out; the two cursors are
-// not, because they describe this device's position in an account it may sign
-// back into.
+// Persisted state. Everything in `CREDENTIAL_KEYS` is cleared by sign-out; the
+// two cursors are not, because they describe this device's position in an
+// account it may sign back into.
 const KEY_EMAIL: &str = "cloud_email";
 const KEY_USER_ID: &str = "cloud_user_id";
 const KEY_ACCESS: &str = "cloud_access_token";
 const KEY_REFRESH: &str = "cloud_refresh_token";
 const KEY_EXPIRES: &str = "cloud_expires_at_ms";
 const KEY_SYNC_KEY: &str = "cloud_sync_key";
+/// When a round last completed. Persisted so a restart cannot report `never`
+/// on an account that has been syncing for months — during an outage that is
+/// the only number saying how stale the account is, and "never" reads as "sync
+/// has never worked" rather than "nothing has got through since Tuesday".
+pub(crate) const KEY_LAST_SYNC: &str = "cloud_last_sync_ms";
 const CREDENTIAL_KEYS: &[&str] = &[
     KEY_EMAIL,
     KEY_USER_ID,
@@ -55,6 +60,7 @@ const CREDENTIAL_KEYS: &[&str] = &[
     KEY_REFRESH,
     KEY_EXPIRES,
     KEY_SYNC_KEY,
+    KEY_LAST_SYNC,
 ];
 
 /// The download cursor: everything this device has reconciled with the account.
@@ -197,6 +203,9 @@ impl Cloud {
         };
 
         self.install(state, config, email, user_id, key, session);
+        if let Ok(ms) = meta.state_ms(KEY_LAST_SYNC) {
+            self.last_sync_ms.store(ms, Ordering::Release);
+        }
         info!("restored a cloud sync account");
         true
     }
@@ -465,6 +474,41 @@ mod tests {
         assert!(!state2.cloud.restore(&state2));
         assert_eq!(state2.meta.state(KEY_REFRESH).unwrap(), None);
         assert_eq!(state2.meta.state(KEY_SYNC_KEY).unwrap(), None);
+    }
+
+    /// During an outage `last sync` is the only number that says how stale the
+    /// account is, so a restart must not reset it to "never" — which reads as
+    /// "sync has never worked" on an account that synced an hour ago.
+    #[test]
+    fn how_long_ago_the_last_round_completed_survives_a_restart() {
+        let (state, dir) = test_state_with_cloud("alpha", Cloud::new(Some(config())));
+        let key = derive_sync_key("correct horse battery staple", "user-1").unwrap();
+        state.cloud.install(
+            &state,
+            config(),
+            "a@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            session(),
+        );
+        state
+            .cloud
+            .persist(&state.meta, &hex::encode(key.to_bytes().as_slice()))
+            .unwrap();
+
+        let at = 1_700_000_000_000;
+        state.cloud.note_success(at);
+        state.meta.set_state_ms(KEY_LAST_SYNC, at).unwrap();
+
+        let (restarted, _dir) = crate::testutil::reopen(dir, Cloud::new(Some(config())), "alpha");
+        assert!(restarted.cloud.restore(&restarted));
+        assert_eq!(restarted.cloud.status().last_sync_ms, Some(at));
+
+        // And it is the *account's* number, not the device's: signing out has
+        // to take it with the rest of the account.
+        restarted.cloud.sign_out(&restarted.meta);
+        assert_eq!(restarted.meta.state(KEY_LAST_SYNC).unwrap(), None);
+        assert_eq!(restarted.cloud.status().last_sync_ms, None);
     }
 
     #[test]
