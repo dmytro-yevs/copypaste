@@ -51,7 +51,14 @@ impl Settings {
                 .map_err(
                     |e| warn!(error = %e, "stored settings are unreadable; using the defaults"),
                 )
-                .ok(),
+                .ok()
+                .filter(|stored| match stored.validate() {
+                    Ok(()) => true,
+                    Err(e) => {
+                        warn!(error = %e, "stored settings are out of bounds; using the defaults");
+                        false
+                    }
+                }),
             Ok(None) => None,
             Err(e) => {
                 warn!(error = ?e, "settings could not be read; using the defaults");
@@ -200,6 +207,26 @@ mod tests {
         state.meta.set_state(KEY_SETTINGS, "{not json")?;
         let settings = Settings::load(&state.meta);
         assert_eq!(*settings.get(), ConfigData::default());
+        Ok(())
+    }
+
+    /// A value that was in bounds when it was written and is not any more.
+    ///
+    /// Deserializing checks the shape, never the bounds, so without this a
+    /// `max_item_bytes` from before the ceiling was lowered to
+    /// `MAX_CONTENT_BYTES` would come back and go on storing items whose reply
+    /// no client can decode.
+    #[test]
+    fn a_stored_value_the_current_bounds_reject_falls_back_to_the_defaults(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (state, _dir) = test_state("alpha");
+        let stale = serde_json::to_string(&ConfigData {
+            max_item_bytes: copypaste_ipc::MAX_CONTENT_BYTES as u64 * 4,
+            ..ConfigData::default()
+        })?;
+        state.meta.set_state(KEY_SETTINGS, &stale)?;
+
+        assert_eq!(*Settings::load(&state.meta).get(), ConfigData::default());
         Ok(())
     }
 
