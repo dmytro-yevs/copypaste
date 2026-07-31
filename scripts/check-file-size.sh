@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Report source files over the CLAUDE.md rule 5 budget.
 #
-# Counts source lines only: everything before the first `#[cfg(test)]` module.
+# Counts source lines only: everything before the `#[cfg(test)]` module.
 # A file may be 500 lines of code and 900 of tests and still be within budget.
+#
+# "The module", not "the first `#[cfg(test)]`". `daemon/src/main.rs` declares
+# `#[cfg(test)] mod testutil;` at line 39 and its tests begin at 730, so cutting
+# at the first attribute reported a 729-line file as 38 and this check passed it
+# 229 lines over budget. A declaration ends in `;`; the module opens a block.
 #
 # Covers the frontend too. It did not until a review found `lib/ipc.ts` at 499
 # lines reading as a file at its limit when 154 of them are comment — the rule
@@ -19,10 +24,15 @@ over=0
 
 printf '%-52s %7s\n' "FILE" "SOURCE"
 while read -r f; do
-    total=$(wc -l < "$f")
-    tl=$(grep -n '^#\[cfg(test)\]' "$f" | head -1 | cut -d: -f1 || true)
-    src=${tl:+$((tl - 1))}
-    src=${src:-$total}
+    src=$(awk '
+        /^#\[cfg\(test\)\]/ { pending = NR; next }
+        pending && /^[[:space:]]*$/ { next }
+        pending {
+            if ($0 !~ /;[[:space:]]*$/) { print pending - 1; found = 1; exit }
+            pending = 0
+        }
+        END { if (!found) print NR }
+    ' "$f")
     if [ "$src" -gt "$TARGET" ]; then
         printf '%-52s %7s\n' "${f#crates/}" "$src"
         over=$((over + 1))
