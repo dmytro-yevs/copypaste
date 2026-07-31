@@ -43,8 +43,17 @@ CRASH_PATTERNS='FATAL EXCEPTION|E AndroidRuntime|UnsatisfiedLinkError|Fatal sign
 # A crash elsewhere on the emulator is not ours, so the block has to name us —
 # and libc truncates the process to 15 characters ("m.copypaste.app"), which is
 # why the token matched is `copypaste` rather than the package.
-crash_report() {
-    awk -v pat="$CRASH_PATTERNS" '
+# What a stripped or renamed symbol looks like from outside the app. The Tauri
+# plugin is resolved by reflection from a package and a class name, so R8
+# removing or renaming it surfaces here and nowhere else — and only on the
+# release build type, which is the one people install.
+R8_PATTERNS="ClassNotFoundException|NoSuchMethodException|NoSuchMethodError|NoSuchFieldException|Didn't find class|UnsatisfiedLinkError"
+
+crash_report() { log_blocks "$1" "$CRASH_PATTERNS"; }
+r8_report()    { log_blocks "$1" "$R8_PATTERNS"; }
+
+log_blocks() {
+    awk -v pat="$2" '
         $0 ~ pat && left == 0 { left = 14; block = $0 "\n"; hit = (tolower($0) ~ /copypaste/); next }
         left > 0 {
             block = block $0 "\n"
@@ -211,6 +220,88 @@ dump_hierarchy() {   # <local path>
     [[ -s "$1" ]]
 }
 
+# A screen that was never on and a UI that never painted are different
+# failures, so the screen is dealt with first and reported on its own. Sets
+# AWAKE, which [assert_painted] refuses to draw a conclusion without.
+AWAKE=no
+WAKEFULNESS=""
+wake_screen() {
+    sh_ input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+    sh_ wm dismiss-keyguard >/dev/null 2>&1 || true
+    # Two spellings because one of them is a dumpsys format away from silently
+    # reporting a dark screen and turning the paint assertion off.
+    local power
+    power="$(sh_ dumpsys power; sh_ dumpsys display)"
+    WAKEFULNESS="$(grep -oE 'mWakefulness=[A-Za-z_]+|mScreenState=[A-Z]+|Display Power: state=[A-Z]+' <<<"$power" \
+                   | sort -u | tr '\n' ' ')"
+    AWAKE=no
+    grep -qE 'mWakefulness=Awake|mScreenState=ON|state=ON' <<<"$WAKEFULNESS" && AWAKE=yes
+    if [[ "$AWAKE" == yes ]]; then
+        ok "the screen is awake"
+    else
+        bad "the screen is awake" \
+            "KEYCODE_WAKEUP left it at '${WAKEFULNESS:-unreported}' — nothing below can tell a dark screen from a dead UI"
+    fi
+}
+
+# The one assertion in this harness about the React side rather than about
+# Rust, and the one that catches an R8 run that stripped the plugin.
+#
+# Polled, not sampled: run 2 dumped once at 25s, found the WebView node empty,
+# and passed anyway because this was then a probe. Chromium also builds its
+# accessibility tree only once a client asks, so the first dump after a launch
+# can be empty on a UI that is perfectly alive. Measured paint times so far:
+# 33s and 38s after `am start`.
+assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
+    local timeout="$1" launched_at="$2" dump="$3" png="$4"
+    local painted_at="" kids=0 named=0 first="" dumps=0 shot=0 nodes poll_started="$SECONDS"
+
+    while (( SECONDS - poll_started < timeout )); do
+        if dump_hierarchy "$dump"; then
+            dumps=$((dumps + 1))
+            read -r kids named first <<<"$(webview_content "$dump")"
+            if (( named > 0 )); then painted_at=$((SECONDS - launched_at)); break; fi
+        fi
+        sleep 2
+    done
+
+    adb exec-out screencap -p > "$png" 2>/dev/null || true
+    [[ -s "$png" ]] && shot="$(stat -c %s "$png")"
+    if [[ -s "$dump" ]]; then
+        nodes="$(grep -o 'class="[^"]*"' "$dump" | sort | uniq -c | sort -rn | head -n 6 | tr '\n' ' ')"
+        probe "the view hierarchy" "${nodes:-none}"
+    fi
+    # Kept for a human to look at, and deliberately not read as evidence: run 4
+    # painted a full UI — 33 named nodes, "CopyPaste" among them — while
+    # screencap returned the same 2 KB it returns for a blank screen. Under
+    # `-gpu swiftshader_indirect -no-window` the captured framebuffer does not
+    # track what the WebView is showing. The accessibility tree does.
+    probe "the screenshot" "$shot bytes — size says nothing here, see the artifact"
+
+    if [[ "$AWAKE" != yes ]]; then
+        note "that the WebView painted the CopyPaste UI" \
+             "the screen was '${WAKEFULNESS:-unreported}', so an empty hierarchy says nothing about the UI"
+    elif [[ -n "$painted_at" ]] && ! looks_like_error_page "$first"; then
+        ok "the WebView painted a UI with content"
+        # Printed on the way past, so the timeout has a measured margin rather
+        # than a guessed one, and a paint that slows down is visible before it
+        # fails.
+        probe "how long the UI took to paint" \
+              "${painted_at}s after am start, ${named} named nodes under the WebView, first: ${first}"
+    elif [[ -n "$painted_at" ]]; then
+        bad "the WebView painted a UI with content" \
+            "it painted Chromium's error page in ${painted_at}s: ${first} — the app cannot load its own assets"
+    elif (( dumps == 0 )); then
+        # A tool that never answered is not a UI that never painted, and calling
+        # it one would send the next round after the wrong thing.
+        note "that the WebView painted the CopyPaste UI" \
+             "uiautomator produced no dump in ${timeout}s, so there was nothing to read; the screenshot is $shot bytes"
+    else
+        bad "the WebView painted a UI with content" \
+            "$dumps dumps over ${timeout}s and the WebView subtree held $kids nodes, $named named; screenshot $shot bytes (${first})"
+    fi
+}
+
 # Everything under the app's private directory, addressed the way run-as sees
 # it: run-as chdir's to the data directory, so these paths stay relative.
 app_files() { adb shell run-as "$PKG" find . -type f 2>/dev/null | tr -d '\r'; }
@@ -315,6 +406,23 @@ self_test() {
         && ok "own_map_paths reports every path naming us, executable or not" \
         || bad "own_map_paths reports every path naming us, executable or not" \
                "$(own_map_paths "$t/maps-dexonly" "$pkg")"
+
+    group "self-test: a stripped symbol"
+
+    printf 'E AndroidRuntime: java.lang.ClassNotFoundException: Didn'"'"'t find class "com.copypaste.app.CapturePlugin" on path: DexPathList\n' > "$t/r8.log"
+    [[ -n "$(r8_report "$t/r8.log")" ]] \
+        && ok "a missing CapturePlugin class is reported as R8's work" \
+        || bad "a missing CapturePlugin class is reported as R8's work"
+
+    printf 'W ClassNotFoundException: com.google.android.gms.SomeOptionalThing\n' > "$t/r8-theirs.log"
+    [[ -z "$(r8_report "$t/r8-theirs.log")" ]] \
+        && ok "another package's missing class is not our stripped symbol" \
+        || bad "another package's missing class is not our stripped symbol" "$(r8_report "$t/r8-theirs.log")"
+
+    printf 'I copypaste: everything resolved\n' > "$t/r8-clean.log"
+    [[ -z "$(r8_report "$t/r8-clean.log")" ]] \
+        && ok "an ordinary log holds no stripped symbol" \
+        || bad "an ordinary log holds no stripped symbol"
 
     group "self-test: the WebView painted"
 

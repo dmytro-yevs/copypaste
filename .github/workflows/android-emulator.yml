@@ -5,15 +5,24 @@ name: Android emulator
 # context hand-off — had ever executed. The release job proves the APK builds
 # and nothing else.
 #
-# What it does, in the order the value falls off:
+# Two legs, because no single APK can answer both halves.
 #
-#   1. the activity starts, the native library loads, a WebView mounts
+# The debug leg is debuggable, so `run-as` can read the app's private directory,
+# and that is what makes the interesting assertions possible:
+#
+#   1. the activity starts, the native library loads, a WebView paints
 #   2. a second launch reads back the device secret the first one minted
 #   3. the share-sheet and text-selection doorways reach SQLCipher
 #   4. the database is opened, and is not a readable SQLite file
 #
-# The assertions are in scripts/release/android-smoke.sh rather than in a `run:`
-# block here, so check.sh can parse them, shellcheck them, and run their
+# The release leg is the APK a person installs. R8 runs only on that build type,
+# `CapturePlugin` is resolved by reflection, and reflection is what a shrinker
+# cannot see — so the failure it exists to catch is an app that launches and
+# then does nothing. It gives up the database assertions with `run-as` and says
+# so; what it keeps is launch, paint, no stripped symbol, and the doorways.
+#
+# The assertions are in scripts/release/android-smoke*.sh rather than in `run:`
+# blocks here, so check.sh can parse them, shellcheck them, and run their
 # --self-test — which proves the detectors fail when they should.
 #
 # What this cannot do is exercise rung 2: Shizuku needs a wireless-debugging
@@ -258,5 +267,211 @@ jobs:
         with:
           name: android-emulator-evidence
           path: artifacts/android-smoke
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # The same build people install: release build type, so R8 runs.
+  #
+  # It has to be signed to install at all — Android refuses an unsigned APK and
+  # there is no ad-hoc equivalent. The key is generated here and thrown away,
+  # which is the fallback ADR-0006 already describes for the release job when no
+  # keystore secrets are set. Nothing about release signing is decided here and
+  # this APK is never published; it exists to be installed on an emulator once.
+  # ---------------------------------------------------------------------------
+  release-apk:
+    name: Build the release APK (x86_64, minified)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          targets: x86_64-linux-android
+
+      # A separate key from the debug leg's: the two compile different profiles
+      # of the same crates, and sharing one key would have them overwrite each
+      # other's save every night.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-emulator-release
+          save-if: "true"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install the pinned SDK components
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is unset — the runner image has no Android SDK}"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [[ -x "$sdkmanager" ]] || { echo "::error::$sdkmanager not found"; exit 1; }
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager" --install \
+            "ndk;${NDK_VERSION}" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+
+          ndk="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+          [[ -d "$ndk" ]] || { echo "::error::sdkmanager did not install ndk;${NDK_VERSION}"; exit 1; }
+          [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] \
+            || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
+          for t in zipalign apksigner aapt2; do
+            [[ -x "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/${t}" ]] \
+              || { echo "::error::${t} is missing from build-tools;${BUILD_TOOLS_VERSION}"; exit 1; }
+          done
+
+          for tool in perl make; do
+            command -v "$tool" >/dev/null 2>&1 \
+              || { echo "::error::$tool is required to build OpenSSL for Android (ADR-0007)"; exit 1; }
+          done
+
+          {
+            echo "NDK_HOME=${ndk}"
+            echo "ANDROID_NDK_HOME=${ndk}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_HOME}"
+          } >> "$GITHUB_ENV"
+
+      - name: Point the Android builds at the NDK's llvm-ar and llvm-ranlib
+        run: |
+          set -euo pipefail
+          ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
+
+      - name: Build the APK
+        run: |
+          set -euo pipefail
+          cd crates/copypaste-ui
+          npm ci
+          # No --debug: this is the build type R8 runs on, which is the whole
+          # reason this job exists.
+          npm run tauri -- android build --apk --target x86_64
+
+      - name: Prove R8 ran, then sign it so it can be installed
+        run: |
+          set -euo pipefail
+          gen="crates/copypaste-ui/src-tauri/gen/android/app/build"
+          outputs="$gen/outputs/apk"
+          [[ -d "$outputs" ]] || { echo "::error::the Gradle build produced no APK directory"; exit 1; }
+
+          unsigned="$(find "$outputs" -name '*release*.apk' -print -quit)"
+          if [[ -z "$unsigned" ]]; then
+            echo "::error::no release APK under $outputs. Found:"
+            find "$outputs" -name '*.apk' | sed 's/^/::error::  /'
+            exit 1
+          fi
+          echo "Built: $unsigned"
+
+          # R8 writes a mapping file and only when it runs. Asserted, because a
+          # release APK that was somehow not minified would make this whole leg
+          # a slower copy of the debug one.
+          mapping="$(find "$gen/outputs/mapping" -name 'mapping.txt' -print -quit 2>/dev/null || true)"
+          [[ -n "$mapping" ]] \
+            || { echo "::error::no R8 mapping.txt under $gen/outputs/mapping — minification did not run, so this leg would prove nothing"; exit 1; }
+          echo "R8 mapping: $mapping ($(wc -l < "$mapping") lines)"
+
+          tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          badging="$("${tools}/aapt2" dump badging "$unsigned")"
+          grep -q "application-debuggable" <<<"$badging" \
+            && { echo "::error::the release APK is debuggable; it is not the build people install"; exit 1; }
+
+          libs="$(unzip -l "$unsigned")"
+          grep -q 'lib/x86_64/libcopypaste_ui_lib.so' <<<"$libs" \
+            || { echo "::error::the APK carries no x86_64 libcopypaste_ui_lib.so"; grep -E 'lib/.*\.so' <<<"$libs"; exit 1; }
+
+          # ADR-0006's throwaway-key fallback, reused for a build that is never
+          # published. It exists because `adb install` refuses an unsigned APK.
+          mkdir -p dist
+          keystore="${RUNNER_TEMP}/emulator-test.jks"
+          pass="$(openssl rand -base64 24)"
+          keytool -genkeypair -v \
+            -keystore "$keystore" -storepass "$pass" \
+            -alias emulator-test -keypass "$pass" \
+            -keyalg RSA -keysize 4096 -validity 30 \
+            -dname "CN=CopyPaste Emulator Test, O=CopyPaste" >/dev/null
+
+          out="dist/copypaste-emulator-x86_64-release.apk"
+          "${tools}/zipalign" -p -f 4 "$unsigned" "${out}.aligned"
+          "${tools}/apksigner" sign \
+            --ks "$keystore" --ks-pass "pass:${pass}" \
+            --ks-key-alias emulator-test --key-pass "pass:${pass}" \
+            --out "$out" "${out}.aligned"
+          rm -f "${out}.aligned" "$keystore"
+          "${tools}/apksigner" verify "$out"
+
+          # Travels with the APK: an obfuscated stack trace in the emulator log
+          # is unreadable without it, and that is exactly the log this leg
+          # produces when it fails.
+          cp "$mapping" dist/r8-mapping.txt
+          ls -l dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apk
+          path: |
+            dist/copypaste-emulator-x86_64-release.apk
+            dist/r8-mapping.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # The narrower question, on the artefact that ships.
+  # ---------------------------------------------------------------------------
+  release-emulator:
+    name: Launch the shipped build
+    needs: release-apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-release-apk
+          path: dist
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          [[ -e /dev/kvm ]] || { echo "::error::/dev/kvm is absent — this runner cannot accelerate the emulator"; exit 1; }
+
+      - uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ inputs.api-level || '36' }}
+          target: ${{ inputs.target || 'google_apis' }}
+          arch: x86_64
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: ./scripts/release/android-smoke-release.sh
+        env:
+          APK: dist/copypaste-emulator-x86_64-release.apk
+          SMOKE_OUT: artifacts/android-smoke-release
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-release-evidence
+          path: |
+            artifacts/android-smoke-release
+            dist/r8-mapping.txt
           if-no-files-found: warn
           retention-days: 14

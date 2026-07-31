@@ -255,40 +255,52 @@ if emu:
     rec("schedule" in triggers and "workflow_dispatch" in triggers,
         "android-emulator.yml runs nightly and on demand", repr(sorted(triggers)))
 
-    ejob = ejobs.get("emulator") or {}
-    runners = [s for s in steps(ejob) if (s.get("uses") or "").startswith("reactivecircus/android-emulator-runner")]
-    rec(len(runners) == 1, "android-emulator.yml: exactly one emulator-runner step",
-        "found {} — AVD management is the action's job, not this file's".format(len(runners)))
-    for s in runners:
-        with_ = s.get("with") or {}
-        rec("android-smoke.sh" in str(with_.get("script", "")),
-            "the emulator runs scripts/release/android-smoke.sh",
-            "assertions belong in a script check.sh can parse and self-test, not in YAML: {!r}".format(with_.get("script")))
-        rec(not s.get("continue-on-error"), "the emulator step is allowed to fail the job",
-            "continue-on-error would make the whole run decorative")
-        rec(str(with_.get("arch")) == "x86_64", "the AVD is x86_64", repr(with_.get("arch")))
-        before = steps(ejob)[:steps(ejob).index(s)]
-        rec(any("99-kvm4all" in (p.get("run") or "") for p in before),
-            "KVM is enabled before the emulator starts",
-            "without the udev rule the AVD boots unaccelerated, which reads as a hang")
+    # Both legs, and the build flag that separates them. The debug leg must
+    # stay debuggable or it loses run-as and every filesystem assertion with
+    # it; the release leg must stay *not* debuggable or R8 never runs and it
+    # becomes a slower copy of the debug one.
+    for emulator_job, apk_job, script, debug in (
+        ("emulator", "apk", "android-smoke.sh", True),
+        ("release-emulator", "release-apk", "android-smoke-release.sh", False),
+    ):
+        ejob = ejobs.get(emulator_job) or {}
+        rec(bool(ejob), "android-emulator.yml has a {} job".format(emulator_job),
+            "jobs present: {}".format(sorted(ejobs)))
+        runners = [s for s in steps(ejob) if (s.get("uses") or "").startswith("reactivecircus/android-emulator-runner")]
+        rec(len(runners) == 1, "{}: exactly one emulator-runner step".format(emulator_job),
+            "found {} — AVD management is the action's job, not this file's".format(len(runners)))
+        for s in runners:
+            with_ = s.get("with") or {}
+            rec(script in str(with_.get("script", "")),
+                "{} runs scripts/release/{}".format(emulator_job, script),
+                "assertions belong in a script check.sh can parse and self-test, not in YAML: {!r}".format(with_.get("script")))
+            rec(not s.get("continue-on-error"), "{}: the emulator step can fail the job".format(emulator_job),
+                "continue-on-error would make the whole run decorative")
+            rec(str(with_.get("arch")) == "x86_64", "{}: the AVD is x86_64".format(emulator_job), repr(with_.get("arch")))
+            before = steps(ejob)[:steps(ejob).index(s)]
+            rec(any("99-kvm4all" in (p.get("run") or "") for p in before),
+                "{}: KVM is enabled before the emulator starts".format(emulator_job),
+                "without the udev rule the AVD boots unaccelerated, which reads as a hang")
 
-    # The invocation, not the prose around it: the comment above that line
-    # names both flags, so a check over the whole block would pass on a build
-    # that had dropped them.
-    build = [l.strip() for s in steps(ejobs.get("apk") or {})
-             for l in (s.get("run") or "").splitlines()
-             if "android build" in l and not l.strip().startswith("#")]
-    rec(any("--debug" in l for l in build), "the emulator APK is a debug build",
-        "run-as, and with it every filesystem assertion, needs a debuggable package: {}".format(build))
-    rec(any("--target x86_64" in l for l in build), "the emulator APK is built for the AVD's ABI",
-        "an APK with no x86_64 native library installs and then dies on load: {}".format(build))
+        # The invocation, not the prose around it: the comments there name the
+        # flags, so a check over the whole block would pass on a build that had
+        # dropped them.
+        build = [l.strip() for s in steps(ejobs.get(apk_job) or {})
+                 for l in (s.get("run") or "").splitlines()
+                 if "android build" in l and not l.strip().startswith("#")]
+        rec(bool(build), "{}: builds an APK".format(apk_job), "no `android build` line in it")
+        rec(any(("--debug" in l) == debug for l in build) and all(("--debug" in l) == debug for l in build),
+            "{}: builds {} APK".format(apk_job, "a debug" if debug else "the minified release"),
+            "--debug is {} here: {}".format("required" if debug else "what makes R8 not run", build))
+        rec(all("--target x86_64" in l for l in build), "{}: builds for the AVD's ABI".format(apk_job),
+            "an APK with no x86_64 native library installs and then dies on load: {}".format(build))
 
-smoke = pathlib.Path("scripts/release/android-smoke.sh")
-rec(smoke.is_file() and "--self-test" in smoke.read_text(),
-    "android-smoke.sh carries a --self-test",
-    "its detectors are the only part checkable without a device, so they have to be checkable")
-rec("android-smoke.sh --self-test" in pathlib.Path("scripts/release/check.sh").read_text(),
-    "check.sh runs android-smoke.sh --self-test",
-    "otherwise nothing ever proves the detectors report a crash when there is one")
-
+for name in ("android-smoke.sh", "android-smoke-release.sh"):
+    smoke = pathlib.Path("scripts/release") / name
+    rec(smoke.is_file() and "--self-test" in smoke.read_text(),
+        "{} carries a --self-test".format(name),
+        "its detectors are the only part checkable without a device, so they have to be checkable")
+    rec("{} --self-test".format(name) in pathlib.Path("scripts/release/check.sh").read_text(),
+        "check.sh runs {} --self-test".format(name),
+        "otherwise nothing ever proves the detectors report a failure when there is one")
 sys.exit(0)
