@@ -25,11 +25,15 @@ name: Android emulator
 # ---------------------------------------------------------------------------
 # Cost, and why this is not on push
 # ---------------------------------------------------------------------------
-# One run is roughly 40 minutes of runner time: an unoptimised Rust build with
-# OpenSSL from source for one ABI, then a boot and a few minutes of adb. On
-# every push that is an hour of CI per merge for a signal that changes daily at
-# most. So: nightly, plus dispatch. It is deliberately not a dependency of the
-# release workflow — put it there once it has passed on its own, not before.
+# Measured on run 1: 6.5 minutes to build the APK against a warm rust-cache,
+# 3.5 to boot the AVD and drive it. A cold cache adds the OpenSSL and SQLCipher
+# compile for the ABI, which is the bulk of a first run. So the standing cost is
+# ten minutes a night, not the forty this comment first guessed.
+#
+# Still not on push: the signal changes when the Android code or this job does,
+# which is not every merge, and a per-push emulator is how a nightly turns into
+# a queue. It is deliberately not a dependency of the release workflow — put it
+# there once it has passed on its own, not before.
 
 on:
   workflow_dispatch:
