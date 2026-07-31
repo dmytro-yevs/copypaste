@@ -143,7 +143,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_ordinary_request_is_refused_with_the_startup_code() {
-        let response = ask(r#"{"id":7,"method":"list","params":{"limit":50,"offset":0}}"#).await;
+        let response = ask(r#"{"id":7,"method":"list","params":{"limit":50}}"#).await;
         assert_eq!(response.id, 7);
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::LegacyDatabase));
