@@ -1,11 +1,10 @@
 /**
- * Capture state where the history is, not in a diagnostics screen — the android
- * doc's §5 rule 1, after v1 buried it and users found out that nothing had been
- * saved by going looking for something that was not there.
+ * Capture state where the history is, not in a diagnostics screen (§5 rule 1):
+ * v1 buried it, and users found out nothing had been saved by going looking for
+ * something that was not there.
  *
- * The dot is decorative and the sentence carries the state, so the strip still
- * says everything it says with colour removed (A11Y-10). The sentence itself is
- * the snapshot's, verbatim.
+ * The dot is decorative and the snapshot's sentence carries the state, so the
+ * strip survives colour being removed (A11Y-10).
  */
 import { Button } from "@/components/ui/button";
 import { useCaptureState } from "@/hooks/useCapture";

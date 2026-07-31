@@ -1,18 +1,12 @@
 /**
- * The rung 2 screen: what is capturing, what is not, and the single next thing
- * to tap.
+ * Two shapes of this screen are load-bearing:
  *
- * Two shapes of this screen are load-bearing rather than cosmetic:
- *
- * * **A restart is not a failure.** Shizuku stops on every reboot, so
- *   "start it again" is a recurring, ordinary state; it gets `role="status"`,
- *   the attention tone and a one-tap action, never the alert role or the error
- *   tone. Only a refused read — the one thing nothing here can fix — is an
- *   alert.
- * * **No button is offered that cannot work.** CopyPaste can neither install
+ * * A restart is not a failure. Shizuku stops on every reboot, so "start it
+ *   again" gets `role="status"` and the attention tone, never the alert role.
+ *   Only a refused read — the one thing nothing here can fix — is an alert.
+ * * No button is offered that cannot work. CopyPaste can neither install
  *   Shizuku nor start it, so those steps offer a re-check and let the
- *   snapshot's own sentence say what the user has to do. `next_step` already
- *   refuses to name an action for a refused read, and this screen keeps that.
+ *   snapshot's own sentence say what the user has to do.
  *
  * Rungs 1 and 3 have no state in the model and no representation here.
  */
@@ -70,9 +64,8 @@ export function CaptureSetup() {
     );
   }
 
-  // macOS answers with the one state it has and refuses every mutation, so the
-  // screen states it and offers nothing. This is the snapshot talking, not a
-  // platform branch in the view.
+  // The snapshot talking, not a platform branch in the view: macOS answers with
+  // the one state it has and refuses every mutation.
   const managed = snapshot.rung !== "desktop";
 
   return (
@@ -114,9 +107,8 @@ function StateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
 
   return (
     <section
-      // A11Y-5: only the state nothing can fix interrupts. A reboot asking for
-      // one tap is information, and announcing it assertively every restart
-      // would train the user to read a normal Tuesday as a fault.
+      // A11Y-5: only the state nothing can fix interrupts. Announcing a reboot
+      // assertively would train the user to read a normal Tuesday as a fault.
       role={tone === "fault" ? "alert" : "status"}
       data-tone={tone}
       className="flex flex-col gap-s-3 rounded-lg border border-border bg-card p-s-3"
@@ -162,8 +154,8 @@ function StateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
   );
 }
 
-/** Rung 0 has a doorway inside the app too, and it is the one surface that
- *  keeps working when everything below it lapses. */
+/** Rung 0: the one surface that keeps working when everything below it
+ *  lapses. */
 function AlwaysOn() {
   const { t } = useTranslation();
   const now = useCaptureNow();
@@ -205,9 +197,8 @@ function EnableRow({ enabled }: { enabled: boolean }) {
   );
 }
 
-/** A copy that was taken and never stored. Stated, because the user finding a
- *  hole in their history for themselves is the outcome this feature exists to
- *  prevent. */
+/** Stated, because the user finding a hole in their history for themselves is
+ *  the outcome this feature exists to prevent. */
 function Dropped({ count }: { count: number }) {
   const { t } = useTranslation();
   return (

@@ -1,12 +1,9 @@
 /**
- * The footer hint strip.
- *
- * It advertises ⌘1–⌘9, which is otherwise undiscoverable, and it states
- * permanently that **choosing an item does not paste it** — the user presses
- * ⌘V. The app synthesises no keystroke because that needs an Accessibility
- * grant an ad-hoc-signed app loses on every update (ADR-0001, consequence 1).
- * Without this line the app looks broken to anyone who expects the paste to
- * happen: they press ⌘3, the window vanishes, and nothing appears.
+ * Advertises ⌘1–⌘9, otherwise undiscoverable, and states permanently that
+ * choosing an item does not paste it — the app synthesises no keystroke,
+ * because that needs an Accessibility grant an ad-hoc-signed app loses on every
+ * update (ADR-0001). Without the line the app looks broken: ⌘3, the window
+ * vanishes, nothing appears.
  *
  * `pointer: coarse` hides it. There is no ⌘ on a phone.
  */

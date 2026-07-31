@@ -76,20 +76,13 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  /**
-   * ⌘1–⌘9: copy, then dismiss.
-   *
-   * Copy first and hide afterwards (INV-26). Hiding first swallows the failure
-   * — the toast would render into a window nobody can see — and leaves the
-   * user pressing ⌘V for something that never reached the clipboard.
-   */
+  /** Copy first, hide afterwards (INV-26): hiding first swallows the failure —
+   *  the toast renders into a window nobody can see — and leaves the user
+   *  pressing ⌘V for something that never reached the clipboard. */
   const quickCopy = useCallback(
     (item: Item) => {
       copy.mutate(item, {
         onSuccess: () => {
-          // INV-25: through the backend, never `window.hide()` from here. The
-          // app is an Accessory on macOS, so this hands activation back to
-          // whatever the user was in — which is where they press ⌘V.
           void hideWindow().catch(() => {
             // A build with no window to hide (the browser, a test) is not a
             // failed copy. The copy already happened.

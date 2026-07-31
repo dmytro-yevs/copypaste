@@ -27,20 +27,14 @@ export interface Prefs {
   accent: Accent;
   translucency: boolean;
   previewLines: number;
-  /**
-   * Ask before revealing a hidden sensitive item. Default on (n9gp).
-   *
-   * There is deliberately no "Mask sensitive data" toggle beside it: the bridge
-   * drops a sensitive item's plaintext before it crosses into the WebView, so
-   * nothing here *can* unmask one without asking. A toggle that cannot be
-   * honoured is worse than no toggle.
-   */
+  /** Default on (n9gp). There is deliberately no "Mask sensitive data" toggle
+   *  beside it: the bridge drops the plaintext before it crosses into the
+   *  WebView, so nothing here *can* unmask an item without asking, and a toggle
+   *  that cannot be honoured is worse than none. */
   warnBeforeReveal: boolean;
-  /**
-   * INV-35, inverted: the window is content-protected unless this is on. Off by
-   * default, and the default is also what the window is created with, so a
-   * preference that fails to load leaves the user protected.
-   */
+  /** INV-35, inverted: the window is content-protected unless this is on. The
+   *  default matches what the window is created with, so a preference that
+   *  fails to load leaves the user protected. */
   allowScreenshots: boolean;
 }
 
@@ -95,7 +89,6 @@ export function parsePrefs(raw: unknown): Prefs {
   return out;
 }
 
-/** Read prefs synchronously, tolerating every way storage can fail. */
 export function readPrefs(): Prefs {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -171,13 +164,9 @@ export const usePrefs = create<PrefsStore>()(
   ),
 );
 
-/**
- * **Wrap this in `useShallow`.** It returns a fresh object per call, and
- * zustand v5 reads the store through `useSyncExternalStore`, which compares
- * snapshots by reference — an unwrapped call is an infinite render loop that
- * unmounts the whole app, not a performance smell. It is the only selector
- * here that does not return a primitive.
- */
+/** **Wrap this in `useShallow`.** It returns a fresh object per call and
+ *  zustand v5 compares snapshots by reference, so an unwrapped call is an
+ *  infinite render loop that unmounts the app, not a performance smell. */
 export const selectAppearance = (s: PrefsStore) => ({
   theme: s.theme,
   accent: s.accent,

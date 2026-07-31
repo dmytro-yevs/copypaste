@@ -1,13 +1,10 @@
 /**
- * What is running, what has been thrown away, and one block to paste into an
- * issue. Not a log viewer — `service::diagnostics` carries that argument.
- *
  * No path (rule 4): nothing here renders a location, and every free-text field
- * is scrubbed in Rust before it arrives, so there is one redactor rather than
- * a second one here.
+ * is scrubbed in Rust before it arrives, so there is one redactor rather than a
+ * second one here.
  *
- * No clipping: every number below is a count, which is what makes a copy
- * button safe to offer at all.
+ * No clipping: every number below is a count, which is what makes a copy button
+ * safe to offer at all.
  */
 import { ClipboardCopy, RotateCw } from "lucide-react";
 
@@ -275,12 +272,9 @@ function CountRow({
   );
 }
 
-/**
- * The report is shown before it is copied. A user about to paste something into
- * a public issue is entitled to read it first, and showing it is also the only
- * honest way to make the "no clipping, nothing that names you" claim beside the
- * button.
- */
+/** The report is shown before it is copied: a user about to paste something
+ *  into a public issue is entitled to read it first, and showing it is the only
+ *  honest way to make the claim printed beside the button. */
 function ReportSection({
   report,
   onRefresh,

@@ -1,13 +1,12 @@
 /**
- * **The v2 pairing protocol is not v1's.** Manifest §3.3 describes a PAKE
- * handshake with a six-digit SAS and a daemon state machine; this daemon has
- * `PairCreate` / `PairAccept` and neither exists, so INV-16 and the SAS half of
- * §3.3 have nothing here to bind to. Reconciling the two is a daemon decision.
+ * The v2 pairing protocol is not v1's: manifest §3.3 describes a PAKE handshake
+ * with a six-digit SAS, this daemon has `PairCreate` / `PairAccept`, so INV-16
+ * and the SAS half of §3.3 have nothing here to bind to.
  *
- * What carries over is about the secret rather than the mechanism: the code is
- * a credential (hidden until revealed, never logged, never toasted, minted
- * once — CopyPaste-1jms.2), peer names are self-reported and must read as
- * unverified (INV-15), and no failure renders a raw error (INV-12).
+ * What carries over is the secret rather than the mechanism: the code is a
+ * credential (hidden until revealed, never logged, never toasted, minted once —
+ * CopyPaste-1jms.2), peer names are self-reported (INV-15), and no failure
+ * renders a raw error (INV-12).
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -44,11 +43,9 @@ export function usePeers() {
   });
 }
 
-/**
- * Only while the pairing dialog is open (`enabled`): a clipboard manager that
- * browses mDNS continuously announces its presence to every network its owner
- * joins. Nothing here is authenticated (INV-15).
- */
+/** Only while the pairing dialog is open: a clipboard manager that browses mDNS
+ *  continuously announces its presence to every network its owner joins.
+ *  Nothing here is authenticated (INV-15). */
 export function useDiscovered(enabled: boolean) {
   return useQuery<DiscoveredDevice[]>({
     queryKey: DISCOVERED_KEY,
@@ -61,8 +58,6 @@ export function useDiscovered(enabled: boolean) {
   });
 }
 
-/** Advertise and browse again. Multicast is unreliable exactly where people
- *  pair — a phone that just joined, a Mac that just woke. */
 export function useRescan() {
   const qc = useQueryClient();
   return useMutation<DiscoveredDevice[], unknown, void>({
@@ -112,13 +107,9 @@ export function useUnpair() {
   });
 }
 
-/**
- * The heavier half of the pair. `unpair` stops this device syncing and leaves
- * the pairing code working; this bars the pairing id for good, which is what a
- * device the user no longer has needs.
- *
- * The confirmation lives in the view, and reaching here *is* the confirmation.
- */
+/** `unpair` stops this device syncing and leaves the pairing code working; this
+ *  bars the pairing id for good. The confirmation lives in the view, and
+ *  reaching here *is* the confirmation. */
 export function useRevoke() {
   const qc = useQueryClient();
   return useMutation<void, unknown, PeerInfo>({

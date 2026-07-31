@@ -33,13 +33,9 @@ import type { Selection } from "@/hooks/useSelection";
 /** ⌘1–⌘9 only; there is no ⌘0 and no second row of ten. */
 export const QUICK_SLOTS = 9;
 
-/**
- * Which row a quick-copy digit means, or `null`.
- *
- * Inactive while a search is running (manifest §3.5.3): the digits address
- * positions in the history, and a filtered list renumbers them under the
- * user's fingers between keystrokes.
- */
+/** Inactive while a search is running (manifest §3.5.3): the digits address
+ *  positions in the history, and a filtered list renumbers them under the
+ *  user's fingers between keystrokes. */
 export function quickSlot(key: string, searching: boolean): number | null {
   if (searching) return null;
   const digit = Number.parseInt(key, 10);
@@ -161,9 +157,7 @@ export function HistoryList({
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (items.length === 0) return;
 
-    // ⌘1–⌘9: the fastest path in a clipboard manager — hotkey, glance, ⌘3.
-    // Checked before the switch because the digit keys carry no other meaning
-    // here and the modifier makes them unambiguous.
+    // Before the switch: with the modifier held the digits are unambiguous.
     if (event.metaKey || event.ctrlKey) {
       if (event.key.toLowerCase() === "a") {
         event.preventDefault();
@@ -319,10 +313,9 @@ export function HistoryList({
           })}
         </div>
 
-        {/* An explicit control, not only the near-bottom trigger. A filtered
-            list can be three rows long with a thousand unpaged matches behind
-            it, and three rows do not scroll — so scrolling alone would strand
-            the user on an empty result that is not empty. */}
+        {/* An explicit control, not only the near-bottom trigger: three rows do
+            not scroll, so a short filtered list with a thousand unpaged matches
+            behind it would strand the user. */}
         {hasMore && (
           <div className="flex justify-center py-s-3">
             <Button

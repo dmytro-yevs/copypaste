@@ -1,16 +1,12 @@
 /**
- * The background service's settings, and moving history in and out of a file.
+ * Two properties this file keeps:
  *
- * Two properties this file exists to keep:
+ * A write carries only the field it changed, so two open screens — or a screen
+ * and the CLI — cannot overwrite each other's unsaved work.
  *
- * **A write carries only the field it changed.** `setConfig` takes a patch, so
- * two open screens — or a screen and the CLI — cannot overwrite each other's
- * unsaved work. Nothing here ever sends the whole record back.
- *
- * **A rejected write leaves the cache on what the service kept.** The service
- * validates into a new record and stays on the old one when a value is out of
- * range, so on failure the query is invalidated rather than patched: the screen
- * re-reads the truth instead of showing the value that was refused.
+ * A rejected write leaves the cache on what the service kept: the service stays
+ * on the old record when a value is out of range, so failure invalidates rather
+ * than patches, and the screen never shows the value that was refused.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -46,13 +42,9 @@ export function useServiceConfig() {
   });
 }
 
-/**
- * Apply one patch.
- *
- * `restart_required` is passed to the caller rather than toasted: the fields it
- * names have to be marked at the control they belong to, and a toast is gone
- * before the user looks back at the row.
- */
+/** `restart_required` is passed to the caller rather than toasted: the fields
+ *  it names have to be marked at the control they belong to, and a toast is
+ *  gone before the user looks back at the row. */
 export function useSetServiceConfig() {
   const qc = useQueryClient();
   return useMutation<ConfigApplied, unknown, ConfigPatch>({
@@ -65,13 +57,9 @@ export function useSetServiceConfig() {
   });
 }
 
-/**
- * Restart the service so a `NeedsRestart` field takes effect.
- *
- * It refuses for a service this app did not start (ADR-0004), which is a real
- * answer rather than a failure to work around: the user started it another way
- * and is the one who can restart it.
- */
+/** Refuses for a service this app did not start (ADR-0004): that is an answer,
+ *  not a failure to work around — whoever started it another way is the one who
+ *  can restart it. */
 export function useRestartService() {
   const qc = useQueryClient();
   return useMutation<ServiceState, unknown, void>({
@@ -85,10 +73,7 @@ export function useRestartService() {
   });
 }
 
-/* -------------------------------------------------------------- transfer --- */
-
-/** Join the parts of a summary. A count of zero is dropped rather than
- *  rendered, but the zero case is still reported — "Exported 12 items" with no
+/** A count of zero is dropped rather than rendered: "Exported 12 items" with no
  *  trailing clause *is* the statement that nothing was left out. */
 function summarise(parts: readonly (string | null)[]): string {
   return parts.filter((part): part is string => part !== null).join(" · ");
@@ -111,13 +96,9 @@ function exportSummary(report: ExportReport): string {
   ]);
 }
 
-/**
- * `null` means the user closed the save panel, which is not a failure and gets
- * no toast at all.
- *
- * A withheld count raises the toast to a warning rather than adding a line to a
- * success: the whole point is that it must not read as "done".
- */
+/** `null` means the user closed the save panel, which is not a failure and gets
+ *  no toast. A withheld count raises the toast to a warning rather than adding
+ *  a line to a success: it must not read as "done". */
 export function useExportHistory() {
   return useMutation<ExportReport | null, unknown, boolean>({
     mutationFn: (includeSensitive) => exportHistory(includeSensitive),
@@ -174,13 +155,9 @@ export function useBackupDatabase() {
   });
 }
 
-/**
- * Replaces the whole database.
- *
- * Every cached query is dropped rather than invalidated: after a restore the
- * ids in the cache belong to a history that no longer exists, and an
- * invalidation would re-render the old rows until each refetch lands.
- */
+/** Every cached query is dropped rather than invalidated: after a restore the
+ *  ids in the cache belong to a history that no longer exists, and an
+ *  invalidation would re-render the old rows until each refetch lands. */
 export function useRestoreDatabase() {
   const qc = useQueryClient();
   return useMutation<boolean, unknown, void>({

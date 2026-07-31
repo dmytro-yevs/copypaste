@@ -1,16 +1,12 @@
 /**
- * One setting: a title, a sentence of explanation, and the control.
- *
  * A11Y-15: it wraps rather than truncating, so at the 720px minimum the control
  * drops below its label instead of being pushed off the pane.
  *
- * `badge` and `note` are separate slots because they say different kinds of
- * thing. A badge is a property of the *field* — "this one needs a restart" is
- * true whether or not it has been touched — and belongs beside the title where
- * it is read before the control is used. A note is the field's state right now,
- * and belongs under the description where it can be a whole sentence. Neither
- * is a footnote: a liveness rule at the bottom of a pane is a rule nobody reads
- * until after they have wondered why nothing happened.
+ * `badge` and `note` are separate slots: a badge is a property of the *field* —
+ * "this one needs a restart" is true whether or not it has been touched — and
+ * sits beside the title; a note is the field's state right now and sits under
+ * the description. Neither is a footnote at the bottom of the pane, which is
+ * read only after the user has wondered why nothing happened.
  */
 import type { ReactNode } from "react";
 

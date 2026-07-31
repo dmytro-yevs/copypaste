@@ -1,20 +1,14 @@
 /**
- * What this device is holding, and every way of moving it.
- *
  * Three of the four actions here are irreversible in some direction, so each
  * one that is asks first and says what it costs (CLAUDE.md rule 4):
  *
- * * **Export** is not destructive but it *leaks*: it writes every clip out as
- *   readable text. The dialog says so, and the opt-in for flagged items is
- *   inside it — which is the second ask the wire default exists to require.
- * * **Import** adds and never replaces. The dialog says that too, because
- *   "import" reads as "overwrite" and a user who expects to lose their history
- *   will not press it.
- * * **Restore** replaces everything, pinned items included, with nothing kept.
- *   It is the one confirmation whose action is worded "Replace".
+ * * Export is not destructive but it *leaks* — every clip as readable text —
+ *   and the opt-in for flagged items sits inside the dialog, the second ask.
+ * * Import adds and never replaces, and says so: "import" reads as "overwrite"
+ *   to a user who will not press it expecting to lose their history.
+ * * Restore replaces everything, pinned included, so its action says "Replace".
  *
- * Where the file goes is asked by the platform's own panel, in Rust. No path
- * enters this component, so none can reach the DOM (INV-12).
+ * No path enters this component, so none can reach the DOM (INV-12).
  */
 import { useState } from "react";
 import { Archive, Download, RotateCcw, Trash2, Upload } from "lucide-react";

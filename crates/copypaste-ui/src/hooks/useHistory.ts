@@ -1,10 +1,3 @@
-/**
- * The contracts React Query has to keep here: INV-2 (an idle poll must not
- * produce a new array identity), INV-3 (every mutation invalidates), INV-4 (a
- * poll must not replace the merged list with page 1), INV-27 (a hidden window
- * polls zero times) and INV-33 (last write wins). `useHistory.test.tsx`
- * verifies rather than assumes (§5.5).
- */
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -43,7 +36,6 @@ export const STATUS_KEY = ["status"] as const;
 
 export const historyKey = (query: string) => [...HISTORY_KEY, query] as const;
 
-/** What `useHistory` hands the view: the merged rows and what was unreadable. */
 export interface History {
   readonly items: readonly Item[];
   readonly skipped: number;
@@ -52,12 +44,11 @@ export interface History {
 const EMPTY: History = { items: [], skipped: 0 };
 
 /**
- * Never `false`. A subscription can die without either end noticing — the
- * daemon is killed, the socket is half-closed by a sleep/wake — and a window
- * that stopped polling on the strength of one `live` event shows yesterday's
- * clipboard until it is restarted. The backstop bounds how wrong the list can
- * get to half a minute rather than to forever, at 2 requests a minute against
- * poll-only's 20.
+ * Never `false`. A subscription can die without either end noticing — a killed
+ * daemon, a socket half-closed by sleep/wake — and a window that stopped
+ * polling on one `live` event shows yesterday's clipboard until it is
+ * restarted. The backstop bounds that to half a minute, at 2 requests a minute
+ * against poll-only's 20.
  */
 export function pollInterval(pushLive: boolean, failed: boolean): number {
   if (failed) return POLL_BACKOFF_MS;
@@ -90,16 +81,8 @@ function flatten(data: { pages: ItemPage[] }): History {
   return { items, skipped };
 }
 
-/**
- * Paged by cursor, never by offset (B-1, `CopyPaste-8ebg.57`). A capture
- * landing above the window shifts every offset below it, so page 2 repeats a
- * row or skips one — and a clipping the user never saw is indistinguishable
- * from one that was never captured (rule 4). A cursor names a position in the
- * order, so anything inserted above it is not in the page after it.
- *
- * The page param is the previous page's `next_cursor`, opaque here. Search is
- * not paged at all.
- */
+/** Paged by cursor, never by offset (B-1, `CopyPaste-8ebg.57`). Search is not
+ *  paged at all. */
 export function useHistory(query: string, pushLive = false) {
   const searching = query.length > 0;
 
@@ -109,10 +92,11 @@ export function useHistory(query: string, pushLive = false) {
       searching ? searchItems(query, SEARCH_LIMIT) : listItems(PAGE_SIZE, pageParam),
     initialPageParam: null as string | null,
     // `next_cursor`, and nothing derived from the page's length: rows counted
-    // in `skipped_undecryptable` were read and dropped, so a short page is not
-    // the end of the list, and stopping on one would hide the rest of the
-    // history behind a handful of corrupt rows.
+    // in `skipped_undecryptable` were read and dropped, so stopping on a short
+    // page hides the rest of the history behind a handful of corrupt rows.
     getNextPageParam: (lastPage) => (searching ? undefined : lastPage.next_cursor ?? undefined),
+    // INV-27: `refetchIntervalInBackground` stays unset, so a hidden window
+    // polls zero times.
     refetchInterval: (q) => pollInterval(pushLive, q.state.status === "error"),
     // Typing must not blank the list between keystrokes.
     placeholderData: keepPreviousData,
@@ -120,7 +104,6 @@ export function useHistory(query: string, pushLive = false) {
   });
 }
 
-/** The shape the view wants when the query has not resolved. */
 export function historyOf(data: History | undefined): History {
   return data ?? EMPTY;
 }
@@ -133,8 +116,6 @@ export function useStatus() {
       q.state.status === "error" ? POLL_BACKOFF_MS : STATUS_POLL_MS,
   });
 }
-
-/* ----------------------------------------------------------- mutations --- */
 
 /**
  * Not optimistic, and nothing here reorders locally: INV-31 (a pinned item
@@ -183,19 +164,15 @@ export function useClearHistory() {
   });
 }
 
-/* ---------------------------------------------------------------- bulk --- */
-
-/** What a bulk run did. Partial failure is reported as partial (§3.1.9). */
+/** Partial failure is reported as partial (§3.1.9). */
 export interface BulkOutcome {
   readonly done: number;
   readonly failed: number;
 }
 
-/**
- * Sequential, not `Promise.all`: every one of these is a write to one SQLite
- * connection behind one mutex, so concurrency buys nothing and a hundred
- * simultaneous requests is how a client trips the daemon's connection cap.
- */
+/** Sequential, not `Promise.all`: every one of these is a write to one SQLite
+ *  connection behind one mutex, so concurrency buys nothing and a hundred
+ *  simultaneous requests trips the daemon's connection cap. */
 async function runBulk<T>(
   targets: readonly T[],
   each: (target: T) => Promise<unknown>,
@@ -207,8 +184,8 @@ async function runBulk<T>(
       await each(target);
       done += 1;
     } catch {
-      // Swallowed deliberately: one failure must not abandon the rest of the
-      // selection, and the raw error must not reach the view (INV-12).
+      // One failure must not abandon the rest of the selection, and the raw
+      // error must not reach the view (INV-12).
       failed += 1;
     }
   }
@@ -260,12 +237,9 @@ export function useBulkDelete() {
   });
 }
 
-/**
- * Not optimistic, though §3.1.6 specifies an optimistic reorder with a revert:
- * while the bridge refuses the verb, an optimistic move would show the user a
- * new order and take it away, which reads as the app losing their change
- * rather than as a missing feature.
- */
+/** Not optimistic, though §3.1.6 specifies an optimistic reorder with a revert:
+ *  while the bridge refuses the verb, an optimistic move would show a new order
+ *  and take it away, which reads as the app losing the user's change. */
 export function useReorderPinned() {
   const qc = useQueryClient();
   return useMutation({

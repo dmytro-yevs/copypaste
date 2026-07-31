@@ -1,11 +1,6 @@
-/**
- * A setting with a closed set of values.
- *
- * A native `<select>` rather than a listbox built out of Radix: the platform
- * one is keyboard- and screen-reader-correct on both targets without a
- * roving-tabindex implementation to get wrong, and on Android it opens the
- * system picker, which is the control a phone user expects.
- */
+/** A native `<select>` rather than a Radix listbox: the platform one is
+ *  keyboard- and screen-reader-correct on both targets with no roving tabindex
+ *  to get wrong, and on Android it opens the system picker. */
 import { useTranslation } from "@/i18n";
 import { Row } from "@/components/settings/Row";
 import type { Choice } from "@/components/settings/serviceChoices";

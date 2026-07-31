@@ -39,10 +39,9 @@ export function useReveal() {
       setRevealed(null);
       // INV-12: a kind, never the raw text.
       const kind = classifyError(raw);
-      // `reveal_item` refuses on desktop deliberately: the bridge's first
-      // attempt routed it through `Copy`, which would have published the
-      // secret to the system pasteboard as a side effect of *looking* at it.
-      // The refusal is a normal state with its own sentence.
+      // `reveal_item` refuses on desktop deliberately: routing it through
+      // `Copy`, as the bridge's first attempt did, publishes the secret to the
+      // system pasteboard as a side effect of *looking* at it.
       setError(
         kind === "unavailable"
           ? t("history.reveal.unavailable")

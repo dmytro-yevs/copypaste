@@ -1,15 +1,13 @@
 /**
- * Test environment setup.
- *
  * jsdom has no layout engine: every element reports a zero-sized box and there
- * is no `ResizeObserver`. A virtualised list asks the browser how tall its
- * viewport is and renders nothing when the answer is zero, so without the fakes
- * below every list test would pass vacuously — which is worse than failing.
+ * is no `ResizeObserver`. A virtualised list asks how tall its viewport is and
+ * renders nothing when the answer is zero, so without the fakes below every
+ * list test would pass vacuously — which is worse than failing.
  *
- * This is the smallest fake that makes the geometry real enough to assert on:
- * a fixed 800px viewport, a `ResizeObserver` that never fires, and a
- * `getBoundingClientRect` consistent with both. Row *heights* are not faked —
- * they come from `rowHeight()`, which is the number under test (INV-5).
+ * The smallest fake that makes the geometry real: a fixed 800px viewport, a
+ * `ResizeObserver` that never fires, and a matching `getBoundingClientRect`.
+ * Row *heights* are not faked — they come from `rowHeight()`, the number under
+ * test (INV-5).
  */
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";

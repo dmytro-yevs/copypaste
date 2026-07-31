@@ -35,8 +35,6 @@ export interface HistoryController {
   readonly clearAll: () => void;
 }
 
-/** The screen's only route to `useHistory`, so a change to how pages are
- *  fetched lands here and nowhere else. */
 export function useHistoryController(pushLive: boolean): HistoryController {
   const rawQuery = useUi((s) => s.query);
   const setRawQuery = useUi((s) => s.setQuery);
@@ -51,12 +49,9 @@ export function useHistoryController(pushLive: boolean): HistoryController {
   const clear = useClearHistory();
   const { pending, remove } = useDeferredDelete();
 
-  /**
-   * INV-2: when nothing is pending and the view is the default this returns
-   * the query's own array, so an idle poll that fetched byte-identical data
-   * produces the identical reference React Query's structural sharing handed
-   * us — no re-render, and the scroll anchor is never disturbed.
-   */
+  /** INV-2: with nothing pending and the default view this returns the query's
+   *  own array, so an idle poll that fetched identical data produces the same
+   *  reference — no re-render, and the scroll anchor is not disturbed. */
   const page = historyOf(history.data);
   const items = useMemo(() => {
     const shown =

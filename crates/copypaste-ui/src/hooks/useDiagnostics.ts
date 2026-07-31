@@ -1,7 +1,3 @@
-/**
- * Reading the service's own account of itself, and announcing the one thing it
- * does that nobody asked for.
- */
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
@@ -19,11 +15,8 @@ export const DIAGNOSTICS_KEY = ["diagnostics"] as const;
  *  rather than a second declaration: `usePush` owns the shape. */
 type SweepPayload = ChangePayload & { readonly swept: number };
 
-/**
- * Polled, unlike every other settings query: the counters and the uptime are
- * the point, and a panel a user opened because something is wrong must not show
- * them the state from when they opened it.
- */
+/** Polled, unlike every other settings query: a panel opened because something
+ *  is wrong must not show the state from when it was opened. */
 const POLL_MS = 5_000;
 
 export function useDiagnostics() {
@@ -35,11 +28,8 @@ export function useDiagnostics() {
   });
 }
 
-/**
- * The report goes to the clipboard through the backend, like any other text the
- * WebView already holds — the clipboard plugin's `writeText` is withheld by
- * `capabilities/default.json`.
- */
+/** Through the backend: the clipboard plugin's `writeText` is withheld by
+ *  `capabilities/default.json`. */
 export function useCopyReport() {
   return useMutation<void, unknown, string>({
     mutationFn: (report) => copyText(report),
@@ -49,15 +39,12 @@ export function useCopyReport() {
 }
 
 /**
- * Announce an auto-deletion as it happens.
+ * The sweep is the only history change the user did not ask for: without a
+ * notice they find an item missing and have nothing to attribute it to. A
+ * count, never the rows — the event carries no content.
  *
- * The sweep is the only history change the user did not ask for, and until the
- * change event carried `swept` there was no way to tell them: they would find an
- * item missing and have nothing to attribute it to. A count, never the rows —
- * they are gone, and the event carries no content.
- *
- * A running total is on the panel regardless of whether this window was open,
- * because a notice nobody was there to see is not a record.
+ * The panel keeps a running total whether or not this window was open, because
+ * a notice nobody saw is not a record.
  */
 export function useSweepNotices() {
   const qc = useQueryClient();

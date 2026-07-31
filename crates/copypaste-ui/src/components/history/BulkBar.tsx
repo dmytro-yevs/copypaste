@@ -1,15 +1,14 @@
 /**
- * The bulk action bar (manifest §3.1.9).
+ * Manifest §3.1.9.
  *
- * * **Pin is one toggle, not two buttons.** Its label reflects whether *every*
- *   selected item is already pinned, so it always says what pressing it will
- *   do (CopyPaste-8ebg.55).
- * * **Bulk delete confirms.** There is no undo for it, unlike the single-row
- *   delete's five-second window, so the caller's dialog is the only gate.
+ * * Pin is one toggle, not two buttons: its label reflects whether *every*
+ *   selected item is already pinned, so it says what pressing it will do
+ *   (CopyPaste-8ebg.55).
+ * * Bulk delete has no undo, unlike the single-row delete's five-second
+ *   window, so the caller's dialog is the only gate.
  *
- * It sits above the list rather than floating over it: a floating bar covers
- * the rows the user is choosing between, and on a phone it lands exactly where
- * the thumb is.
+ * Above the list rather than floating over it: a floating bar covers the rows
+ * the user is choosing between, and on a phone it lands under the thumb.
  */
 import { Pin, PinOff, Trash2, X } from "lucide-react";
 
