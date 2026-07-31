@@ -13,12 +13,10 @@
 //!   transports read and write through is [`copypaste_core::StoreSource`],
 //!   built here by [`sync`].
 //!
-//! Everything they share lives in one [`AppState`] behind one `Arc`. v1 grew a
-//! 38-field context with 13 `Arc<Mutex<Option<T>>>` slots and 20 builder
-//! methods, which meant no reader could tell which fields were populated at any
-//! given moment; the `Option`s existed only because construction was spread
-//! across those builders. Here construction happens once, in `main`, and every
-//! field is always present.
+//! Everything they share lives in one [`AppState`], built once here — see
+//! [`state`]. `AppState` is re-exported so its 17 consumers keep naming it
+//! `crate::AppState`; `docs/rewrite/module-audit.md` records the surface split
+//! that re-export defers.
 //!
 //! Note the deliberate absence of `#![forbid(unsafe_code)]` at the crate root:
 //! `clipboard` talks to NSPasteboard through `objc2` and needs `unsafe`. The
@@ -26,6 +24,7 @@
 
 mod cadence;
 mod capture;
+mod cli;
 mod clipboard;
 mod cloud;
 mod dbfile;
@@ -34,404 +33,35 @@ mod notify;
 mod p2p;
 mod server;
 mod settings;
+mod startup;
+mod state;
 mod sync;
 
 #[cfg(test)]
 mod testutil;
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
 use copypaste_core::{Detector, Keyring, Store};
-use copypaste_ipc::{DiagnosticCounters, EventData, EventKind};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
-use tokio::sync::{broadcast, watch};
 use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
 
-use crate::clipboard::ClipboardSource;
+use crate::cli::{cloud_config, Args};
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::settings::Settings;
+use crate::startup::{
+    halt_or_fail, init_tracing, legacy_history_present, relocate, remove_socket, wait_for_shutdown,
+};
+
+pub use crate::state::AppState;
 
 /// Reported by `status`. Single source: the crate version.
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[derive(Debug, Parser)]
-#[command(
-    name = "copypaste-daemon",
-    version,
-    about = "CopyPaste clipboard daemon"
-)]
-struct Args {
-    /// Directory holding the database and the IPC socket.
-    ///
-    /// Defaults to the platform application-data directory resolved by
-    /// `copypaste_ipc`. Overriding it runs an instance that is fully isolated
-    /// from the user's real history — that is what the tests and `--data-dir`
-    /// demos rely on.
-    #[arg(long, value_name = "DIR")]
-    data_dir: Option<PathBuf>,
-
-    /// Stay attached to the terminal.
-    ///
-    /// The daemon never forks: backgrounding is the service manager's job
-    /// (launchd on macOS). The flag exists so a service definition can state
-    /// its intent, and it suppresses the notice printed when it is absent.
-    #[arg(long)]
-    foreground: bool,
-
-    /// TCP port the peer listener binds.
-    ///
-    /// Fixed by default so an explicit address is short to type. Overriding it
-    /// is what lets two daemons run on one host, which is how the peer-sync
-    /// demo works; the pairing this daemon mints reports whichever port is in
-    /// use, so the other device does not have to be told separately.
-    #[arg(long, default_value_t = copypaste_p2p::DEFAULT_PORT)]
-    port: u16,
-
-    /// What peers call this device.
-    ///
-    /// Cosmetic and peer-visible. Stored on first run and kept afterwards, so
-    /// passing it once is enough and a hostname change does not rename the
-    /// device on every peer.
-    #[arg(long, value_name = "NAME")]
-    device_name: Option<String>,
-
-    /// Supabase project URL for cloud sync, e.g. `https://abc.supabase.co`.
-    ///
-    /// Falls back to `COPYPASTE_CLOUD_URL`. Without both this and the anon key
-    /// the daemon runs with cloud sync unconfigured, which is a supported
-    /// state: peer sync and local history do not depend on it.
-    #[arg(long, value_name = "URL")]
-    cloud_url: Option<String>,
-
-    /// Supabase publishable anon key. Falls back to `COPYPASTE_CLOUD_ANON_KEY`.
-    ///
-    /// Not a secret in the usual sense — row-level security is what restricts
-    /// access — so it is ordinary configuration rather than a credential.
-    #[arg(long, value_name = "KEY")]
-    cloud_anon_key: Option<String>,
-}
-
-/// Resolve the deployment from flags, then the environment.
-///
-/// Both halves are required: a URL with no key cannot authenticate and a key
-/// with no URL has nothing to talk to, so a half-configuration is reported as
-/// unconfigured rather than failing at the first request.
-fn cloud_config(args: &Args) -> Option<copypaste_cloud::CloudConfig> {
-    fn resolve(flag: Option<&String>, var: &str) -> Option<String> {
-        flag.cloned()
-            .or_else(|| std::env::var(var).ok())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-    }
-    Some(copypaste_cloud::CloudConfig {
-        url: resolve(args.cloud_url.as_ref(), "COPYPASTE_CLOUD_URL")?,
-        anon_key: resolve(args.cloud_anon_key.as_ref(), "COPYPASTE_CLOUD_ANON_KEY")?,
-    })
-}
-
-/// Everything the daemon shares between the capture loop and the IPC server.
-///
-/// Held as `Arc<AppState>`; no field is optional and none is rebuilt after
-/// construction. The only interior mutability is the clipboard handle (the
-/// platform source needs `&mut` and is used from both halves) and two flags
-/// that `status` reports.
-pub struct AppState {
-    pub store: Store,
-    /// Behind an `Arc` because `copypaste_core::StoreSource` holds one for as
-    /// long as the peer listener runs, and the device secret is not `Clone` on
-    /// purpose.
-    pub keyring: Arc<Keyring>,
-    /// Behind an `Arc` because the cloud upload gate holds one too: the
-    /// `SensitiveGuard` the driver requires is a closure that outlives this
-    /// call, and a second `Detector` would be a second ruleset (`CLAUDE.md`
-    /// rule 1) that could disagree with the one capture uses.
-    pub detector: Arc<Detector>,
-    /// `std::sync::Mutex`, not `tokio`'s: the guard is never held across an
-    /// `.await`. Every caller takes it, does one pasteboard call, drops it — so
-    /// a `copy` request cannot be blocked behind a capture tick for longer than
-    /// a single pasteboard access.
-    clipboard: Mutex<Box<dyn ClipboardSource>>,
-    /// The sync view of the history, and this device's identity. Shared by both
-    /// transports — see [`meta`].
-    pub meta: Meta,
-    /// Peer sync: the paired devices and discovery. Always present — a daemon
-    /// with no peers still has an identity and still listens.
-    pub p2p: P2p,
-    /// Cloud sync. Always present too, and unconfigured is an ordinary state:
-    /// the deployment may not be set, or nobody may be signed in.
-    pub cloud: Cloud,
-    /// The live settings. Every consumer reads it at the moment it acts, which
-    /// is what makes a change take effect without a restart.
-    pub settings: Settings,
-    /// Where the history database is, for `backup` and `restore`. Never put in
-    /// a client-visible string: it discloses the local username.
-    db_path: PathBuf,
-    /// Push channel for [`copypaste_ipc::Method::Watch`] subscribers.
-    ///
-    /// `broadcast` rather than a list of senders: a subscriber that stops
-    /// draining lags and is told so, instead of applying backpressure to the
-    /// capture loop. A dropped event is safe — an event says only *that*
-    /// something changed, and the client re-reads.
-    events: broadcast::Sender<EventData>,
-    /// The shutdown signal every long-running task selects on.
-    ///
-    /// It lives here rather than in `main` because
-    /// [`copypaste_ipc::Method::Shutdown`] has to reach it: an app that did not
-    /// start this daemon cannot signal the process, and ADR-0004's
-    /// protocol-mismatch state has nothing to offer without it. `main` holds no
-    /// second sender — it calls [`AppState::request_shutdown`] on SIGTERM like
-    /// everything else, so there is one teardown path rather than two.
-    shutdown: watch::Sender<bool>,
-    backend_name: &'static str,
-    ready: AtomicBool,
-    capture_running: AtomicBool,
-    /// A CopyPaste 0.4 history was found on this device at startup.
-    ///
-    /// A flag rather than a constructor argument for the same reason the two
-    /// above are: it is decided outside construction and read by `status`,
-    /// and threading it through `AppState::new` would touch every caller for
-    /// a value none of them has an opinion about.
-    legacy_history: AtomicBool,
-    /// Cumulative counts for [`AppState::counters`]. The clipboard's own two
-    /// live on the port and are read through the mutex; these are the ones
-    /// nothing else owns.
-    sensitive_swept: AtomicU64,
-    index_purged: AtomicU64,
-    started_at: Instant,
-}
-
-/// How many change events are buffered per subscriber before it is told it
-/// lagged. Small on purpose: the recovery for a lag is one extra re-read.
-const EVENT_BUFFER: usize = 32;
-
-impl AppState {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        store: Store,
-        keyring: Arc<Keyring>,
-        detector: Arc<Detector>,
-        clipboard: Box<dyn ClipboardSource>,
-        meta: Meta,
-        p2p: P2p,
-        cloud: Cloud,
-        settings: Settings,
-        db_path: PathBuf,
-    ) -> Self {
-        let backend_name = clipboard.backend_name();
-        Self {
-            store,
-            keyring,
-            detector,
-            clipboard: Mutex::new(clipboard),
-            meta,
-            p2p,
-            cloud,
-            settings,
-            db_path,
-            events: broadcast::channel(EVENT_BUFFER).0,
-            shutdown: watch::channel(false).0,
-            backend_name,
-            ready: AtomicBool::new(false),
-            capture_running: AtomicBool::new(false),
-            legacy_history: AtomicBool::new(false),
-            sensitive_swept: AtomicU64::new(0),
-            index_purged: AtomicU64::new(0),
-            started_at: Instant::now(),
-        }
-    }
-
-    /// A receiver every long-running task selects on.
-    pub fn shutdown_rx(&self) -> watch::Receiver<bool> {
-        self.shutdown.subscribe()
-    }
-
-    /// Begin an orderly shutdown. Idempotent, and safe from any thread.
-    ///
-    /// Every task finishes the unit of work it is in before observing this, so
-    /// a capture already past the clipboard read still reaches the database.
-    pub fn request_shutdown(&self) {
-        // Fails only if every receiver has been dropped, which means the tasks
-        // this would have stopped are already gone.
-        let _ = self.shutdown.send(true);
-    }
-
-    pub fn db_path(&self) -> &std::path::Path {
-        &self.db_path
-    }
-
-    /// A stream of change events, for a `watch` subscriber.
-    pub fn subscribe(&self) -> broadcast::Receiver<EventData> {
-        self.events.subscribe()
-    }
-
-    /// History changed *on this device* — a capture, an `add`, a delete, a pin,
-    /// an import, a restore.
-    ///
-    /// Three consumers, and the split from [`AppState::note_remote_change`] is
-    /// what keeps them from feeding each other: both wake the watchers, but only
-    /// a local change pulls the two sync loops to their floor. A round that
-    /// applied a peer's row would otherwise reset the cadence, provoke an
-    /// immediate empty round on the other device, and ring back.
-    pub fn note_local_change(&self) {
-        self.publish(EventKind::Items, false, 0);
-        self.p2p.wake();
-        self.cloud.wake();
-    }
-
-    /// The auto-wipe sweep deleted `count` detected secrets.
-    ///
-    /// A local change like any other to the sync loops, but the only one the
-    /// user did not ask for, so the count travels with it — see
-    /// [`copypaste_ipc::EventData::swept`].
-    pub fn note_sensitive_swept(&self, count: u32) {
-        self.sensitive_swept
-            .fetch_add(u64::from(count), Ordering::Relaxed);
-        self.publish(EventKind::Items, false, count);
-        self.p2p.wake();
-        self.cloud.wake();
-    }
-
-    /// The user copied something and it was stored.
-    ///
-    /// [`AppState::note_local_change`] plus the one bit that distinguishes a
-    /// capture from a delete, a pin or an import: a client cannot post the
-    /// "copied" notification or play the sound on an event that only says
-    /// "history changed", because it would fire on every one of those too.
-    ///
-    /// The daemon does not consult `notify_on_copy` here. The event states what
-    /// happened; the setting says what to do about it, and the surface that
-    /// owns the notification is the one that reads it — see
-    /// [`copypaste_ipc::EventData::captured`].
-    pub fn note_capture(&self) {
-        self.publish(EventKind::Items, true, 0);
-        self.p2p.wake();
-        self.cloud.wake();
-    }
-
-    /// History changed because a peer or the cloud delivered something.
-    pub fn note_remote_change(&self) {
-        self.publish(EventKind::Items, false, 0);
-    }
-
-    pub fn note_peers_changed(&self) {
-        self.publish(EventKind::Peers, false, 0);
-    }
-
-    fn publish(&self, event: EventKind, captured: bool, swept: u32) {
-        // `send` fails only when nobody is listening, which is the ordinary
-        // case: the CLI does not subscribe and the app may not be running.
-        let _ = self.events.send(EventData {
-            event,
-            item_count: self.store.count().unwrap_or(0),
-            captured,
-            swept,
-        });
-    }
-
-    /// Lock recovery rather than propagation: a poisoned clipboard mutex means
-    /// a previous pasteboard call panicked, not that the handle is unusable.
-    /// Refusing every later `copy` would be a worse outcome than retrying.
-    pub fn clipboard(&self) -> MutexGuard<'_, Box<dyn ClipboardSource>> {
-        self.clipboard
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    pub fn backend_name(&self) -> &'static str {
-        self.backend_name
-    }
-
-    pub fn is_ready(&self) -> bool {
-        self.ready.load(Ordering::Acquire)
-    }
-
-    pub fn set_ready(&self, ready: bool) {
-        self.ready.store(ready, Ordering::Release);
-    }
-
-    pub fn capture_running(&self) -> bool {
-        self.capture_running.load(Ordering::Acquire)
-    }
-
-    pub fn set_capture_running(&self, running: bool) {
-        self.capture_running.store(running, Ordering::Release);
-    }
-
-    pub fn legacy_history_present(&self) -> bool {
-        self.legacy_history.load(Ordering::Acquire)
-    }
-
-    pub fn set_legacy_history_present(&self, present: bool) {
-        self.legacy_history.store(present, Ordering::Release);
-    }
-
-    /// Recorded once, by the startup purge, before this state exists — so it is
-    /// set rather than passed, like the two flags above.
-    pub fn set_index_purged(&self, purged: u64) {
-        self.index_purged.store(purged, Ordering::Release);
-    }
-
-    /// What has been refused, missed or deleted since this process started.
-    ///
-    /// Assembled here rather than in the status handler because two of the five
-    /// are behind the clipboard mutex: a caller that read them itself would take
-    /// that lock a second time for the same reply.
-    pub fn counters(&self) -> DiagnosticCounters {
-        let (rejected_too_large, lost_intermediates) = {
-            let clipboard = self.clipboard();
-            (
-                clipboard.rejected_too_large_count(),
-                clipboard.lost_intermediates_count(),
-            )
-        };
-        DiagnosticCounters {
-            rejected_too_large,
-            lost_intermediates,
-            sensitive_swept: self.sensitive_swept.load(Ordering::Relaxed),
-            index_purged: self.index_purged.load(Ordering::Acquire),
-            uptime_secs: self.started_at.elapsed().as_secs(),
-        }
-    }
-}
-
-/// Whether a CopyPaste 0.4 history is on this device.
-///
-/// **Read-only, and never fatal.** `v1_database_in` opens nothing with a key
-/// and writes nothing, and a user who has one still wants v2 to run — they want
-/// to be told, not blocked (CLAUDE.md rule 3: the old file stays exactly as it
-/// was, so a downgrade finds it intact).
-///
-/// Two directories, because there are two ways to meet one. Where v0.4.x put it
-/// is the upgrade case and the only one that matters on macOS, where the two
-/// resolvers disagree. `data_dir` is the `--data-dir` case, and on Linux it is
-/// the same directory — which is exactly why v2's *filename* is different.
-fn legacy_history_present(data_dir: &std::path::Path) -> bool {
-    std::iter::once(data_dir.to_path_buf())
-        .chain(copypaste_ipc::v1_data_dir())
-        .any(|dir| copypaste_core::v1_database_in(&dir))
-}
-
-/// `canonical`'s filename, under `dir`. What `--data-dir` relocates.
-///
-/// The names come from `copypaste_ipc` rather than literals here: a second
-/// definition is a second thing to keep in step, and the v2 database name is
-/// what stops a v0.4 file being taken for ours (CLAUDE.md rule 3). The fallback
-/// is unreachable — both resolvers end in a filename — and keeps the real path
-/// rather than opening a directory.
-fn relocate(canonical: &std::path::Path, dir: &std::path::Path) -> PathBuf {
-    canonical
-        .file_name()
-        .map_or_else(|| canonical.to_path_buf(), |name| dir.join(name))
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -661,143 +291,4 @@ async fn main() -> anyhow::Result<()> {
 
     remove_socket(&socket_path);
     Ok(())
-}
-
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .init();
-}
-
-/// A startup failure that has a fixed sentence holds the socket instead of
-/// exiting, so the app hears the condition rather than inferring a crash.
-///
-/// Every other failure exits exactly as before: there is nothing a client could
-/// be told that is more use than the exit status and the log line.
-async fn halt_or_fail<E>(socket_path: &std::path::Path, error: E, doing: &str) -> anyhow::Result<()>
-where
-    E: crate::server::messages::Refusal + std::error::Error + Send + Sync + 'static,
-{
-    let Some(refusal) = error.refusal() else {
-        return Err(anyhow::Error::new(error).context(doing.to_string()));
-    };
-    warn!(error = %error, doing, "cannot serve a history; holding the socket to say why");
-
-    let stop = watch::channel(false).0;
-    let served = tokio::spawn(server::serve_halted(
-        server::bind(socket_path)?,
-        refusal,
-        stop.clone(),
-    ));
-    wait_for_shutdown(stop.subscribe()).await?;
-    let _ = stop.send(true);
-    if let Err(e) = served.await {
-        warn!(error = ?e, "the halted ipc server did not shut down cleanly");
-    }
-    remove_socket(socket_path);
-    Ok(())
-}
-
-fn remove_socket(socket_path: &std::path::Path) {
-    match std::fs::remove_file(socket_path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => warn!(error = %e, "could not remove the socket on shutdown"),
-    }
-}
-
-/// Resolves on SIGINT, SIGTERM, or a client's `shutdown` request.
-///
-/// launchd sends SIGTERM; a terminal sends SIGINT; the app sends the IPC verb,
-/// because it cannot signal a process it did not start. All three must unwind
-/// the same way — an aborted process leaves the socket file behind and the next
-/// start has to treat it as stale.
-async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::Result<()> {
-    use tokio::signal::unix::{signal, SignalKind};
-
-    let mut sigterm = signal(SignalKind::terminate()).context("install the SIGTERM handler")?;
-    let mut sigint = signal(SignalKind::interrupt()).context("install the SIGINT handler")?;
-    tokio::select! {
-        _ = sigterm.recv() => info!("received SIGTERM"),
-        _ = sigint.recv() => info!("received SIGINT"),
-        _ = requested.wait_for(|stopping| *stopping) => info!("shutdown was requested over ipc"),
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::Path;
-
-    /// A plaintext v0.4.x history, which is what a user who never upgraded past
-    /// the pre-encryption builds still has. An *encrypted* one cannot be staged
-    /// — v2 cannot derive v1's key — and `copypaste_core::storage::legacy`
-    /// already covers that half.
-    fn stage_v1(dir: &Path) {
-        let conn = rusqlite::Connection::open(dir.join("clipboard.db")).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE clipboard_items (
-                 id          TEXT PRIMARY KEY NOT NULL,
-                 item_id     TEXT,
-                 lamport_ts  INTEGER NOT NULL DEFAULT 0,
-                 wall_time   INTEGER NOT NULL DEFAULT 0
-             );",
-        )
-        .unwrap();
-        conn.pragma_update(None, "user_version", 12).unwrap();
-    }
-
-    /// CLAUDE.md rule 3's second obligation. The identification in
-    /// `copypaste-core` was correct and never *asked*: `Store::open` only ever
-    /// sees `copypaste-v2.db`, so the question that matters — is an old history
-    /// sitting here — had no caller at all (post-merge review, finding 2).
-    #[test]
-    fn a_v0_4_history_beside_the_new_one_is_found() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(!legacy_history_present(dir.path()));
-        stage_v1(dir.path());
-        assert!(legacy_history_present(dir.path()));
-    }
-
-    /// The probe must leave the disk as it found it: a user who downgrades has
-    /// to find their history intact, and a created journal or a replayed WAL is
-    /// a change to a file this build promised not to touch.
-    #[test]
-    fn finding_one_changes_nothing_on_disk() {
-        let dir = tempfile::tempdir().unwrap();
-        stage_v1(dir.path());
-
-        let before = snapshot(dir.path());
-        assert!(legacy_history_present(dir.path()));
-        assert_eq!(snapshot(dir.path()), before);
-    }
-
-    /// A v2 database is not an old one, whatever else is in the directory — the
-    /// distinction the whole probe exists to keep.
-    #[test]
-    fn a_v2_database_alone_is_not_a_v0_4_history() {
-        let dir = tempfile::tempdir().unwrap();
-        let key = copypaste_core::Keyring::from_secret(&[3u8; 32]).db_key();
-        let _store = Store::open(&dir.path().join("copypaste-v2.db"), &key).unwrap();
-        assert!(!legacy_history_present(dir.path()));
-    }
-
-    /// Name plus length for everything in the directory, sorted.
-    fn snapshot(dir: &Path) -> Vec<(String, u64)> {
-        let mut entries: Vec<(String, u64)> = std::fs::read_dir(dir)
-            .unwrap()
-            .map(|entry| {
-                let entry = entry.unwrap();
-                (
-                    entry.file_name().to_string_lossy().into_owned(),
-                    entry.metadata().unwrap().len(),
-                )
-            })
-            .collect();
-        entries.sort();
-        entries
-    }
 }
