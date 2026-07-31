@@ -323,15 +323,22 @@ jobs:
       - run: npm test
 
   # ---------------------------------------------------------------------------
-  # macOS. This is the job that changes "never compiled" into "compiles".
+  # macOS. The job that changes "never compiled" into "compiles", and then
+  # "never executed" into "executed": the last four steps drive the real
+  # NSPasteboard and the real Keychain rather than the fakes.
   # ---------------------------------------------------------------------------
 
   macos-check:
-    name: macOS check (arm64)
+    name: macOS check + platform (arm64)
     # macos-14 and later are Apple Silicon. Pinned rather than `macos-latest`
     # so the compiler and SDK under test do not move without a commit — and so
-    # it matches the runner in release.yml.
+    # it matches the runner in release.yml. macOS 15 also adds a user prompt on
+    # programmatic pasteboard reads, which would make the pasteboard steps
+    # below hang or fail on a runner with nobody to answer it.
     runs-on: macos-14
+    # A macOS runner bills at ten times a Linux one, and the platform steps
+    # start processes.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
@@ -344,11 +351,9 @@ jobs:
         with:
           shared-key: macos-14-1.96
 
-      # `--all-features` reaches the `macos-keychain` feature, so this is what
-      # type-checks the NSPasteboard backend and the Keychain device-secret
-      # store. It does not execute either: no test drives a real pasteboard or
-      # a real keychain entry, which is why README and SECURITY.md still list
-      # both as unverified.
+      # `--all-features` and `--all-targets` are what type-check the NSPasteboard
+      # backend, the Keychain device-secret store, and the `#[ignore]`d tests
+      # below — none of which any other job in this workflow can even parse.
       - name: cargo clippy (macOS paths)
         run: cargo +1.96 clippy --workspace --all-targets --all-features --locked -- -D warnings
 
@@ -356,4 +361,115 @@ jobs:
         # Kept separate from the Linux test job because a macOS runner is an
         # order of magnitude more expensive; if this becomes the bottleneck,
         # narrow it to `-p copypaste-core -p copypaste-daemon`.
+        if: success() || failure()
         run: cargo +1.96 test --workspace --locked
+
+      - name: What this runner can reach
+        # Reports, never fails. Whether a headless runner has a pasteboard
+        # server and an unlocked keychain is the thing nobody here knows, and
+        # when a step below fails this is the log that says why.
+        if: success() || failure()
+        run: |
+          set +e
+          echo "::group::session"
+          echo "user: $(whoami)"
+          echo "session: $(launchctl managername 2>/dev/null || echo unknown)"
+          sw_vers
+          echo "::endgroup::"
+          echo "::group::pasteboard"
+          probe="copypaste-probe-$RANDOM"
+          printf '%s' "$probe" | pbcopy
+          echo "pbcopy exit=$?"
+          echo "pbpaste round trip: $([ "$(pbpaste)" = "$probe" ] && echo yes || echo no)"
+          echo "::endgroup::"
+          echo "::group::keychains"
+          security list-keychains
+          security default-keychain
+          echo "::endgroup::"
+          exit 0
+
+      - name: A throwaway keychain to test against
+        # The Keychain tests refuse to run against a login keychain, because
+        # they delete the device-secret item and that is somebody's history.
+        # This creates a keychain that is nobody's, and makes it the one
+        # SecItemAdd resolves.
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          # No auto-lock: a keychain that relocks mid-job would surface as
+          # errSecInteractionNotAllowed and read like our bug.
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+
+          # `security_framework`'s passwords API names no keychain, so
+          # SecItemAdd and SecItemCopyMatching resolve the default one and the
+          # user search list. Both are user-domain preferences, so they persist
+          # across steps. The existing list is kept: dropping the login
+          # keychain would take the runner's own credentials with it.
+          existing="$(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $existing
+          security default-keychain -d user -s "$keychain"
+          security list-keychains -d user
+
+          # Whether a keychain item can be written and read back with no window
+          # server and nobody to answer a prompt is the open question this job
+          # exists to settle. Settle it here, with the CLI, so that a failure
+          # names the environment rather than the code.
+          security add-generic-password -s copypaste-ci-probe -a probe -w "hunter2" "$keychain"
+          found="$(security find-generic-password -s copypaste-ci-probe -a probe -w "$keychain")"
+          if [[ "$found" != "hunter2" ]]; then
+            echo "::error::a non-interactive keychain round trip is not possible on this runner"
+            exit 1
+          fi
+          security delete-generic-password -s copypaste-ci-probe -a probe "$keychain" >/dev/null
+          echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
+
+      - name: NSPasteboard, for real (port manifest 01)
+        # `--ignored` is the whole point: these are the tests that cannot run
+        # anywhere else. `--test-threads=1` because the general pasteboard is a
+        # process-global singleton, `--nocapture` so a test that skips itself
+        # says so in this log.
+        #
+        # An empty run is a failure, not a pass. Both of these steps are green
+        # when they execute nothing, which is the exact shape of "we thought
+        # macOS was covered" that this job exists to end.
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          out="$(cargo +1.96 test -p copypaste-daemon --locked -- --ignored --nocapture --test-threads=1 2>&1)"
+          printf '%s\n' "$out"
+          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
+            echo "::error::no pasteboard test ran"
+            exit 1
+          fi
+
+      - name: The Keychain, for real (port manifest 02)
+        if: success() || failure()
+        run: |
+          set -euo pipefail
+          if [[ -z "${COPYPASTE_KEYCHAIN_TEST:-}" ]]; then
+            echo "::error::no throwaway keychain, so these tests would skip themselves and pass"
+            exit 1
+          fi
+          out="$(cargo +1.96 test -p copypaste-core --locked -- --ignored --nocapture --test-threads=1 2>&1)"
+          printf '%s\n' "$out"
+          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
+            echo "::error::no keychain test ran"
+            exit 1
+          fi
+          if grep -q 'SKIPPED' <<<"$out"; then
+            echo "::error::a keychain test skipped itself; see the SKIPPED line above"
+            exit 1
+          fi
+
+      - name: Put the keychain search list back
+        if: always()
+        run: |
+          set +e
+          security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db"
+          security delete-keychain "$RUNNER_TEMP/copypaste-ci.keychain-db"
+          exit 0
