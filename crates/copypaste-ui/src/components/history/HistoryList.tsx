@@ -10,6 +10,7 @@ import {
   type UIEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -26,6 +27,7 @@ import {
   rowHeight,
 } from "@/lib/layout";
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
+import { markedOrigins, originLabel } from "@/components/history/origin";
 import type { Selection } from "@/hooks/useSelection";
 
 /** ⌘1–⌘9 only; there is no ⌘0 and no second row of ten. */
@@ -64,6 +66,7 @@ interface HistoryListProps {
   onQuickCopy: (item: Item) => void;
   onTogglePin: (item: Item) => void;
   onDelete: (item: Item) => void;
+  onOpen: (item: Item) => void;
   onLoadMore: () => void;
   listRef: RefObject<HTMLDivElement | null>;
 }
@@ -86,6 +89,7 @@ export function HistoryList({
   onQuickCopy,
   onTogglePin,
   onDelete,
+  onOpen,
   onLoadMore,
   listRef,
 }: HistoryListProps) {
@@ -94,6 +98,10 @@ export function HistoryList({
   const [flashId, setFlashId] = useState<string | null>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
+
+  const marked = useMemo(() => markedOrigins(items), [items]);
+  const markedRef = useRef(marked);
+  markedRef.current = marked;
 
   // INV-5: the reservation is a function of the *setting*, never of the item.
   const estimateSize = useCallback(() => rowHeight(previewLines), [previewLines]);
@@ -119,7 +127,7 @@ export function HistoryList({
   // re-announce a selection that did not change (INV-9).
   useEffect(() => {
     const item = itemsRef.current.find((candidate) => candidate.id === activeId);
-    setAnnouncement(item ? rowLabel(item) : "");
+    setAnnouncement(item ? rowLabel(item, originLabel(item, markedRef.current)) : "");
   }, [activeId]);
 
   useEffect(() => {
@@ -189,6 +197,14 @@ export function HistoryList({
       case "ArrowUp":
         event.preventDefault();
         select(index < 0 ? items.length - 1 : Math.max(index - 1, 0));
+        break;
+      case "ArrowRight":
+        // The only keyboard route into the detail view that does not require
+        // tabbing through the row's other actions first.
+        if (item) {
+          event.preventDefault();
+          onOpen(item);
+        }
         break;
       case "Home":
         event.preventDefault();
@@ -286,6 +302,7 @@ export function HistoryList({
                   }
                   revealPending={item.id === revealPendingId}
                   previewLines={previewLines}
+                  origin={originLabel(item, marked)}
                   selecting={selection.selecting}
                   checked={selection.selected.has(item.id)}
                   onToggleChecked={(clicked) => selection.toggle(clicked.id)}
@@ -295,6 +312,7 @@ export function HistoryList({
                   onDelete={onDelete}
                   onReveal={onReveal}
                   onHide={onHide}
+                  onOpen={onOpen}
                 />
               </div>
             );

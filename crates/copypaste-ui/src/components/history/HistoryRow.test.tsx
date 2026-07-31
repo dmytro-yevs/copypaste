@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
 import { item } from "@/test/harness";
+import type { Item } from "@/lib/ipc";
 
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
 const noop = () => {};
@@ -25,12 +26,14 @@ const props = {
   revealedContent: null,
   revealPending: false,
   previewLines: 2,
+  origin: null,
   onSelect: noop,
   onCopy: noop,
   onTogglePin: noop,
   onDelete: noop,
   onReveal: noop,
   onHide: noop,
+  onOpen: noop,
 };
 
 describe("a sensitive item", () => {
@@ -120,6 +123,43 @@ describe("an ordinary item", () => {
 
   it("marks a pinned item in its accessible name", () => {
     expect(rowLabel(item({ pinned: true, content: "x" }))).toBe("Pinned. x");
+  });
+});
+
+/**
+ * B-15 / B-26. Both markers are drawn inside the row body rather than beside
+ * the actions, which is what keeps the sync warning visible in selection mode
+ * (CopyPaste-f72f) — v1 unmounted the whole action cluster there and took the
+ * warning with it.
+ */
+describe("what the row says about where an item came from", () => {
+  it("says nothing at all for an item this history cannot place elsewhere", () => {
+    const { container } = render(<HistoryRow {...props} item={item()} />);
+    expect(container.textContent).not.toMatch(/from|won't sync/i);
+  });
+
+  it("names the device when the item earns a marker", () => {
+    render(<HistoryRow {...props} item={item()} origin="Kitchen Mac" />);
+    expect(screen.getByText("Kitchen Mac")).toBeTruthy();
+    expect(rowLabel(item({ content: "x" }), "Kitchen Mac")).toBe(
+      "x · From Kitchen Mac",
+    );
+  });
+
+  it("says an item will never leave this device, in its name too", () => {
+    const stranded = { ...item({ content: "x" }), too_large_to_sync: true } as Item;
+    render(<HistoryRow {...props} item={stranded} />);
+    expect(screen.getByText("Won't sync")).toBeTruthy();
+    expect(rowLabel(stranded)).toBe(
+      "x · Too large to sync — this item stays on this device",
+    );
+  });
+
+  it("keeps the sync warning while selecting, when the actions are gone", () => {
+    const stranded = { ...item(), too_large_to_sync: true } as Item;
+    render(<HistoryRow {...props} item={stranded} selecting />);
+    expect(screen.queryByRole("button", { name: "Delete item" })).toBeNull();
+    expect(screen.getByText("Won't sync")).toBeTruthy();
   });
 });
 

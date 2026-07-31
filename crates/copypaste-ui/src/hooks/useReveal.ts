@@ -9,7 +9,8 @@ import { useCallback, useEffect, useState } from "react";
 import { t } from "@/i18n";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { REVEAL_TIMEOUT_MS } from "@/lib/layout";
-import { revealItem } from "@/lib/ipc";
+import { type Item, revealItem } from "@/lib/ipc";
+import { usePrefs } from "@/store/prefs";
 
 interface Revealed {
   readonly id: string;
@@ -17,9 +18,11 @@ interface Revealed {
 }
 
 export function useReveal() {
+  const warnFirst = usePrefs((s) => s.warnBeforeReveal);
   const [revealed, setRevealed] = useState<Revealed | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const hide = useCallback(() => {
     setRevealed(null);
@@ -63,12 +66,31 @@ export function useReveal() {
     };
   }, [revealed]);
 
+  // n9gp / PG-34: the warning is a preference, default on, and the reveal
+  // itself is one click away either way.
+  const request = useCallback(
+    (item: Item) => {
+      if (warnFirst) setConfirming(item.id);
+      else void reveal(item.id);
+    },
+    [reveal, warnFirst],
+  );
+
+  const confirm = useCallback(() => {
+    if (confirming !== null) void reveal(confirming);
+    setConfirming(null);
+  }, [confirming, reveal]);
+
   return {
     revealedId: revealed?.id ?? null,
     revealedContent: revealed?.content ?? null,
     pendingId,
     error,
-    reveal,
+    /** Ask for an item, through the confirmation when the preference is on. */
+    request,
+    confirming: confirming !== null,
+    confirm,
+    cancel: useCallback(() => setConfirming(null), []),
     hide,
   };
 }
