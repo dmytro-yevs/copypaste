@@ -106,12 +106,14 @@ except Exception as e:
     print("0 0 unparsable:", str(e)[:60])
     sys.exit(0)
 
-web = next((n for n in root.iter("node") if n.get("class") == "android.webkit.WebView"), None)
-if web is None:
+webs = [n for n in root.iter("node") if n.get("class") == "android.webkit.WebView"]
+if not webs:
     print("0 0 no WebView node in the dump")
     sys.exit(0)
 
-kids = list(web.iter("node"))[1:]
+# Every WebView node, not the first: run 3's dump held two, and which of them
+# carries the document is not something to depend on.
+kids = [k for w in webs for k in list(w.iter("node"))[1:]]
 names = [t for n in kids for t in ((n.get("text") or "").strip(), (n.get("content-desc") or "").strip()) if t]
 print(len(kids), len(names), (names[0] if names else "")[:60])
 PY
@@ -344,6 +346,13 @@ self_test() {
     [[ "$kids" -eq 1 && "$named" -eq 0 ]] \
         && ok "an unnamed subtree is not a painted UI" \
         || bad "an unnamed subtree is not a painted UI" "got '$kids $named'"
+
+    printf '%s%s<node class="android.webkit.WebView"/><node class="android.webkit.WebView"><node class="android.widget.TextView" text="CopyPaste"/></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-two-webviews.xml"
+    read -r kids named first <<<"$(webview_content "$t/paint-two-webviews.xml")"
+    [[ "$kids" -eq 1 && "$named" -eq 1 && "$first" == "CopyPaste" ]] \
+        && ok "content under the second of two WebView nodes still counts" \
+        || bad "content under the second of two WebView nodes still counts" "got '$kids $named $first'"
 
     printf '%s%s<node class="android.widget.TextView" text="Not a WebView"/>%s' \
         "$head" "$shell_open" "$shell_close" > "$t/paint-nowebview.xml"

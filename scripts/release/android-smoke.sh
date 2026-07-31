@@ -217,7 +217,12 @@ if [[ -s "$OUT/ui-launch1.xml" ]]; then
     nodes="$(grep -o 'class="[^"]*"' "$OUT/ui-launch1.xml" | sort | uniq -c | sort -rn | head -n 6 | tr '\n' ' ')"
     probe "the view hierarchy" "${nodes:-none}"
 fi
-probe "the screenshot" "$shot bytes (run 1 painted at 36253, run 2 blank at 2195)"
+# Kept for a human to look at, and deliberately not read as evidence: run 3
+# painted a full UI — 17 named nodes, "CopyPaste" among them — while screencap
+# returned the same 2 KB it returns for a blank screen. Under
+# `-gpu swiftshader_indirect -no-window` the captured framebuffer does not
+# track what the WebView is showing. The accessibility tree does.
+probe "the screenshot" "$shot bytes — size says nothing here, see the artifact"
 
 if [[ "$awake" != yes ]]; then
     note "that the WebView painted the CopyPaste UI" \
