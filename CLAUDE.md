@@ -116,26 +116,26 @@ longer be in the tree.
 
 ## 5. File-size budget
 
-**Target ≤500 source lines per file. Above that, split it.**
+**Target ≤500 source lines per file. Above that, split it.** Tests do not
+count. `scripts/check-file-size.sh` enforces it.
 
-Test modules do not count toward the budget — a file may be 500 lines of code
-and 900 of tests and still be fine.
+The only exemption is one genuinely indivisible responsibility, most often a
+data table, and claiming it takes a line in the module header naming what you
+considered extracting. "It's cohesive" is not an argument: every god file feels
+cohesive to whoever wrote it.
 
-The only exemption is a file that is one genuinely indivisible responsibility,
-most often a data table. Claiming it requires a line in the module header naming
-what you considered extracting and why doing so would make the code worse.
-"It's cohesive" is not an argument on its own: every god file feels cohesive to
-whoever wrote it.
+v1 reached ~25 production files over 1000 lines — `daemon/p2p/mod.rs` at 2415,
+`ipc.rs` at ~12,500. Edits carried a blast radius across unrelated concerns and
+cohesive logic stayed buried instead of being reused, which is one of the ways
+the duplication in rule 1 accumulated.
 
-v1 reached ~25 production files over 1000 lines, with the worst mixing many
-responsibilities — `daemon/p2p/mod.rs` at 2415, `ipc.rs` at ~12,500 before it
-was broken up. The cost is not aesthetic. Edits carry a blast radius across
-unrelated concerns, tests get coarse, and cohesive logic stays buried instead of
-being reused — which is one of the ways the duplication in rule 1 accumulated.
+**A line count is only a proxy.** Five files behind a `mod.rs` that re-exports
+all of them is the same god module with more filenames. What decides it is the
+public surface and who depends on it, and no script measures that.
 
-Splitting is behaviour-preserving refactoring. Move a responsibility, keep the
-public surface identical by re-exporting from a thin `mod.rs`, move each test
-with the code it exercises, and compile and test after every extraction.
+Splitting is behaviour-preserving: move a responsibility, keep the public
+surface identical, move each test with the code it exercises, compile and test
+after every extraction.
 
 ## 6. A feature is not done until it has a UI
 
@@ -148,15 +148,13 @@ tests, and the feature was called done while the only way to pair two devices
 was to type a command into a terminal. For a clipboard manager on macOS and
 Android, that is not a shipped feature; it is a feature with no users.
 
-Deferring the interface is expensive in a specific way: the shape of the UI is
-what exposes the awkward parts of an API, and finding them a month later means
-changing a contract that other code now depends on. Pairing is again the
-example — a screen has to show a code, a QR, a progress state, a failure, and a
-list of known devices, and none of those needs was visible while the work was
-only a CLI verb.
+The UI is also what exposes the awkward parts of an API, and finding them a
+month later means changing a contract other code depends on. A pairing screen
+has to show a code, a QR, a progress state, a failure and a list of known
+devices; none of those needs was visible while the work was one CLI verb.
 
-The CLI does not satisfy this rule. It is a tool for scripting and for tests,
-not the product surface.
+The CLI does not satisfy this rule. It is for scripting and tests, not the
+product surface.
 
 ## 7. Scope
 
@@ -195,34 +193,20 @@ Not worth writing:
 This applies everywhere, not just to Rust: components, documents, commit
 messages, ADRs. An ADR records a decision and its consequences, not an essay.
 
-The volume itself is the risk. Long prose rots faster than code because
-nothing compiles it — `copypaste-cloud/src/sync/mod.rs` carried an
-eighty-line header whose central claim, the merge ordering, had gone stale in
-two places while the code stayed correct. A comment that is wrong is worse
-than one that is missing.
+Long prose rots faster than code because nothing compiles it.
+`copypaste-cloud/src/sync/mod.rs` carried an eighty-line header whose central
+claim, the merge ordering, had gone stale in two places while the code stayed
+correct. A comment that is wrong is worse than one that is missing.
 
 ### The budgets
 
 **No comment block over 12 lines. No module header over 20. No file more
-than 30% comment.** Tests excluded, as with rule 5.
+than 30% comment.** Tests excluded, as with rule 5. A file that is all comment
+and no code fails at any size — that is the `mod.rs` layout table banned above.
 
-`scripts/check-comments.sh` enforces all three, from `.githooks/pre-commit`
-and from CI.
-
-The numbers exist because the prose above did not bind. This rule named the
-eighty-line header as its own worst case and the tree still reached
-`copypaste-cloud/src/rest/mod.rs` — **152 comment lines above four lines of
-code** — with 160 of 279 files over 30% and 42 headers over 25 lines. Stating
-a preference and citing an example is what a linter is for.
-
-`scripts/comment-budget.txt` records the files that were already over.
-**It can only shrink.** Fix a file, delete its line; the check reports a line
-that is no longer needed and fails until it goes. Adding a line is not a way
-to land a long comment — a file over budget that is not already in the
-baseline fails, and the message says so.
-
-A file that is all comment and no code fails outright, at any size. That is
-the `mod.rs` layout table this rule already bans.
+`scripts/check-comments.sh` enforces this from `.githooks/pre-commit` and CI,
+against a baseline in `scripts/comment-budget.txt` that can only shrink. The
+check explains itself; it is not restated here.
 
 The budgets are not a licence to strip. Cutting a comment that records a
 defect someone paid for is the more expensive mistake, and it is the one to
@@ -235,15 +219,12 @@ budget turns into a regression.
 **Every commit on `main` compiles, passes its tests, and contains what its
 message says.** No exceptions for work in progress.
 
-This rule exists because of a measured failure in this repository, not a
-hypothetical. During one day of parallel agent work `main` received: commits
-labelled "in flight"; a tree that did not compile; `e2e/node_modules`, staged
-by a `git add -A` that ran while an agent was installing; and three commits
-that swept in other agents' half-finished changes under a message describing
-only one agent's work. One of those had to be corrected by a later commit.
-
-Every one of those came from the same habit — staging everything while
-somebody else was writing.
+Measured, not hypothetical. In one day of parallel agent work `main` received
+commits labelled "in flight", a tree that did not compile, `e2e/node_modules`
+staged by a `git add -A` that ran while an agent was installing, and three
+commits that swept in other agents' half-finished changes under a message
+describing one agent's work. All of them came from the same habit: staging
+everything while somebody else was writing.
 
 ### The rules
 
@@ -256,6 +237,13 @@ somebody else was writing.
    This is not hypothetical: `cdd9d1ff` said "fix the macOS clipboard backend"
    and also carried a `git mv` another agent had staged, which broke the build
    on `main`.
+
+   **A pathspec does not protect a file two agents are editing.** It commits
+   that file's whole working-tree content, including the lines somebody else
+   just added. `9d610fc7` named four paths and still carried a check another
+   agent had written for a script that was not yet tracked, so `main` went red
+   under a message that did not mention it. Read `git diff HEAD -- <paths>`
+   before every commit and confirm every hunk is yours.
 2. **Verify before committing, not after.** Build, tests, and whatever
    end-to-end checks exist. A red tree goes to a scratch branch, never here.
    `.githooks/pre-commit` enforces the one part of this that is mechanical:
@@ -271,9 +259,9 @@ somebody else was writing.
 
 ### Snapshotting without disturbing anyone
 
-Losing an agent's work to a reclaimed container is a real risk, and the fix is
-not to commit it early. Build the snapshot as an object and move a scratch
-branch to it — this touches neither the working tree nor the index:
+Losing work to a reclaimed container is a real risk, and the fix is not to
+commit it early. Build the snapshot as an object and move a scratch branch to
+it, touching neither the working tree nor the index:
 
 ```sh
 git add -A
@@ -322,11 +310,10 @@ context in the pull request.
 
 ### One commit, one logical change
 
-Do not batch several agents' work, or several subsystems, into one commit.
-This is where the length came from: the three longest messages in this
-repository each described three or four subsystems, because a wide `git add`
-had made a wide commit inevitable. Rule 9's ban on `git add -A` and this rule
-are the same rule seen from two ends.
+Do not batch several agents' work, or several subsystems, into one commit. This
+is where the length came from: the three longest messages here each described
+three or four subsystems, because a wide `git add` had made a wide commit
+inevitable. Rule 9 and this rule are the same rule from two ends.
 
 ### Enforced, not merely written
 
@@ -337,7 +324,3 @@ Enable the hook once per clone:
 git config core.hooksPath .githooks
 git config commit.template .gitmessage
 ```
-
-Rule 8 already said "this applies to commit messages" and gave no number, so
-it bound nothing: twelve consecutive commits averaged 25 body lines against
-what is now a 12-line budget. A rule with no check is a preference.
