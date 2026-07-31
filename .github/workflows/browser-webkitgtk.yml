@@ -1,10 +1,15 @@
-name: E2E (real WebView)
+name: Browser (WebKitGTK, Linux)
 
-# Drives the built Tauri app through tauri-driver + WebKitWebDriver against a
-# real daemon. This is the only job in the repository that executes the
-# frontend in a browser engine; `npm test` in the frontend job is jsdom, which
-# has no layout and therefore cannot see a virtualiser, a scroll clamp or a
-# collapsed row.
+# The browser layer of docs/rewrite/testing-policy.md. It drives the built app
+# through tauri-driver -> WebKitWebDriver against a real daemon, and it is the
+# only job that executes the frontend in a browser engine at all; `npm test` in
+# the frontend job is jsdom, which has no layout and therefore cannot see a
+# virtualiser, a scroll clamp or a collapsed row.
+#
+# The engine is WebKitGTK on Linux. It is neither WKWebView nor the Android
+# WebView, so nothing here is evidence about a shipping platform, a Tauri
+# command as shipped, or any native surface. The policy names the layer that
+# owns each of those.
 #
 # It runs under Xvfb with no GPU and no software-rendering flags. WebKitGTK
 # 2.52 executes JavaScript and computes layout in that configuration; the EGL
@@ -15,12 +20,13 @@ name: E2E (real WebView)
 on:
   push:
     branches: [main, v2-main]
+  # No branch filter: this layer owns shared React behaviour, and a pull
+  # request onto a stacked or release branch changes the same code.
   pull_request:
-    branches: [main, v2-main]
   workflow_dispatch:
 
 concurrency:
-  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  group: browser-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -38,8 +44,8 @@ env:
   RUSTUP_TOOLCHAIN: "1.96"
 
 jobs:
-  e2e:
-    name: tauri-driver + WebKitGTK
+  browser:
+    name: shared frontend in WebKitGTK
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -98,7 +104,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-logs
+          name: browser-webkitgtk-logs
           path: /tmp/cp-e2e/**
           if-no-files-found: ignore
           retention-days: 7

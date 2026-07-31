@@ -249,9 +249,20 @@ rec(emu is not None, "android-emulator.yml exists",
 if emu:
     ejobs = emu.get("jobs") or {}
     triggers = emu.get(True) or emu.get("on") or {}
-    rec(not ({"push", "pull_request"} & set(triggers)),
-        "android-emulator.yml does not run on push or pull_request",
-        "ten minutes of runner time a run, measured; nightly and on demand is the decision")
+    # Reversed deliberately. It used to assert the opposite — ten minutes of
+    # runner time was judged too much per merge — but this is Android's only
+    # authoritative layer (docs/rewrite/testing-policy.md), and a layer that
+    # never gates a merge cannot catch the merge that breaks it. Paths keep the
+    # cost off the changes that cannot reach Android.
+    rec({"push", "pull_request"} <= set(triggers),
+        "android-emulator.yml gates pushes and pull requests",
+        "Android's authoritative layer has to run before the merge it would fail")
+    for event in ("push", "pull_request"):
+        paths = (triggers.get(event) or {}).get("paths") or []
+        rec(any(p.startswith("crates/copypaste-ui/src/") for p in paths)
+            and any(p.startswith("crates/copypaste-ipc") for p in paths),
+            f"android-emulator.yml {event} filter covers the shared frontend and the wire contract",
+            "a path filter that omits them hides cross-platform breakage")
     rec("schedule" in triggers and "workflow_dispatch" in triggers,
         "android-emulator.yml runs nightly and on demand", repr(sorted(triggers)))
 
