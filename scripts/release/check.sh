@@ -298,6 +298,9 @@ fi
 # unencrypted database and a leaked canary when one is there, so the job cannot
 # quietly become a test that passes without proving anything.
 check "android-smoke.sh --self-test" ./scripts/release/android-smoke.sh --self-test
+# The release leg is a second entry point onto the same detectors. Running its
+# --self-test too is what catches the entry point itself being broken.
+check "android-smoke-release.sh --self-test" ./scripts/release/android-smoke-release.sh --self-test
 
 # Comment lines are excluded: the workflow explains at length why it does not
 # do this, and the explanation is not the thing being checked for.
