@@ -186,8 +186,9 @@ impl ClipboardSource for FakeClipboard {
 
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         let pre = self.change_count;
-        // §3.3 step 2: pre-stamp before touching the clipboard.
-        self.tracker.sentinel.arm(pre);
+        // §3.3 step 2, from the count the write will land in — the fake's stand
+        // in for what `clearContents` returns.
+        self.tracker.sentinel.arm(pre + SELF_WRITE_DELTA);
 
         if let Some(watched) = self.watched.as_mut() {
             if let Err(err) = std::fs::write(&watched.path, text.as_bytes()) {
@@ -207,9 +208,11 @@ impl ClipboardSource for FakeClipboard {
         }
 
         self.contents = Some(text.to_string());
+        // Models the OS rather than the sentinel: the count the write lands in
+        // is what `clearContents` returned. A fake that derived this from the
+        // sentinel's own arithmetic would agree with any belief, which is why
+        // no test here could falsify the delta (manifest 01 §3.3).
         self.change_count = pre + SELF_WRITE_DELTA;
-        // §3.3 step 4: conditional post-stamp.
-        self.tracker.sentinel.confirm(pre, self.change_count);
         Ok(())
     }
 

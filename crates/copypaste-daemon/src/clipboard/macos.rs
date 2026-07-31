@@ -199,16 +199,13 @@ impl ClipboardSource for MacOsClipboard {
             let pb = unsafe { NSPasteboard::generalPasteboard() };
             let pre = unsafe { pb.changeCount() } as i64;
 
-            // §3.3 step 2: pre-stamp `pre + 2` BEFORE touching the
-            // pasteboard. Stamping afterwards leaves a window in which a
-            // poll records the item we just pasted as a fresh capture.
-            self.tracker.sentinel.arm(pre);
-
             let value = NSString::from_str(text);
             let ok = UTIS.with(|utis| unsafe {
-                // clearContents (+1) then setString:forType: (+1) = the
-                // expected delta of 2.
-                let _ = pb.clearContents();
+                // §3.3 step 2, armed from the count `clearContents` returns
+                // rather than a predicted one, and before `setString` makes the
+                // content visible. A poll landing between the two sees an empty
+                // pasteboard, which yields nothing and keeps polling.
+                self.tracker.sentinel.arm(pb.clearContents() as i64);
                 pb.setString_forType(&value, &utis.text)
             });
             if !ok {
@@ -218,12 +215,11 @@ impl ClipboardSource for MacOsClipboard {
                 return Err(anyhow::anyhow!("the pasteboard rejected the write"));
             }
 
-            // §3.3 step 4 (CopyPaste-8yzf): conditional post-stamp. If a
-            // third-party app wrote between our `setString` and this read,
-            // `actual > pre + 2`, and storing it would suppress *their*
-            // content as if it were ours.
+            // CopyPaste-8yzf: a third-party write landing in the middle leaves
+            // the armed count below the current one, where it can never match.
+            // There is nothing to repair — reported, not corrected, because
+            // correcting it is what would suppress their content as ours.
             let actual = unsafe { pb.changeCount() } as i64;
-            self.tracker.sentinel.confirm(pre, actual);
             if actual != pre + SELF_WRITE_DELTA {
                 debug!(
                     expected = pre + SELF_WRITE_DELTA,

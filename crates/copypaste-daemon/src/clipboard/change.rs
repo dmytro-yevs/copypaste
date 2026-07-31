@@ -16,9 +16,10 @@ use std::sync::Arc;
 
 /// `changeCount` delta at which a burst is reported (§4).
 ///
-/// 1 = a normal copy, 2 = a paste-back pair (`clearContents` + `set…:forType:`),
-/// so >= 3 is a genuine burst. This is a *telemetry* threshold only: crossing it
-/// never changes what is captured (§3.2).
+/// Kept at 3 although a paste-back is now known to move the count by 1 rather
+/// than 2, so 2 no longer names anything in particular. It is a *telemetry*
+/// threshold only — crossing it never changes what is captured (§3.2) — and
+/// lowering it would report a burst for two ordinary copies in one poll window.
 const BURST_THRESHOLD: i64 = 3;
 
 /// "No pending self-write", and the initial change-count cursor (§4).
@@ -28,9 +29,19 @@ const BURST_THRESHOLD: i64 = 3;
 /// poll after startup cannot be mistaken for a burst.
 const COUNT_NONE: i64 = -1;
 
-/// A self-write moves `changeCount` by exactly this much (§4): `clearContents`
-/// (+1) then `set…:forType:` (+1).
-pub(super) const SELF_WRITE_DELTA: i64 = 2;
+/// A self-write moves `changeCount` by exactly this much (§4).
+///
+/// **Measured, not predicted.** The manifest recovered 2 from v1 —
+/// `clearContents` (+1) then `set…:forType:` (+1) — and macos-14 moves by 1:
+/// the write lands in the generation `clearContents` opened. Arming the
+/// sentinel at `pre + 2` therefore missed our own paste-back, which came back
+/// as a fresh capture, and left the cell armed one count ahead where the next
+/// genuine copy was silently swallowed (run 30632553103).
+///
+/// Nothing in the write path predicts this any more — [`SelfWriteSentinel::arm`]
+/// takes the count `clearContents` returns. It survives as the fake's model of
+/// the OS and as the burst arithmetic below.
+pub(super) const SELF_WRITE_DELTA: i64 = 1;
 
 /// What a `changeCount` observation means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,26 +71,17 @@ impl SelfWriteSentinel {
         Self(Arc::new(AtomicI64::new(COUNT_NONE)))
     }
 
-    /// Step 2 — pre-stamp `pre + 2` *before* touching the pasteboard.
+    /// Step 2 — arm at the count the write will carry, before the content is
+    /// visible. The caller passes what `clearContents` returned.
     ///
-    /// v1 stamped after the write; a poll landing in that window recorded the
-    /// item we had just pasted as a brand-new capture (Fix-4 / "DUP-ON-COPY").
-    pub(super) fn arm(&self, pre: i64) {
-        self.0.store(pre + SELF_WRITE_DELTA, Ordering::Release);
-    }
-
-    /// Step 4 — post-stamp, but only if the write landed exactly where we
-    /// predicted.
-    ///
-    /// CopyPaste-8yzf: if a third-party app wrote between our `set…` and this
-    /// read, `actual > pre + 2`. Storing `actual` unconditionally would stamp
-    /// *their* change count and make the monitor suppress *their* content as if
-    /// it were ours — silently dropping a genuine user copy. So the mismatch
-    /// branch leaves the pre-stamped expectation alone.
-    pub(super) fn confirm(&self, pre: i64, actual: i64) {
-        if actual == pre + SELF_WRITE_DELTA {
-            self.0.store(actual, Ordering::Release);
-        }
+    /// * v1 stamped after the write, and a poll in that window recorded the item
+    ///   we had just pasted as a capture (Fix-4 / "DUP-ON-COPY").
+    /// * An armed count *above* the write swallows whichever genuine copy lands
+    ///   there. One at or below it can never match again — `consume_if` compares
+    ///   for equality and `changeCount` only rises — so it is inert. That
+    ///   asymmetry is why this takes an observed count, not `pre + delta`.
+    pub(super) fn arm(&self, count: i64) {
+        self.0.store(count, Ordering::Release);
     }
 
     /// Step 5 — any write failure resets the cell.
@@ -242,33 +244,55 @@ mod tests {
         let mut t = ChangeTracker::new();
         t.observe(10);
 
-        let pre = 10;
-        t.sentinel.arm(pre); // step 2
-        t.sentinel.confirm(pre, pre + SELF_WRITE_DELTA); // step 4
+        let landed = 10 + SELF_WRITE_DELTA;
+        t.sentinel.arm(landed); // step 2
 
-        assert_eq!(t.observe(12), Change::SelfWrite);
-        assert_eq!(t.observe(12), Change::Unchanged, "cursor advanced (I-3)");
-        assert!(matches!(t.observe(13), Change::Fresh { .. }));
+        assert_eq!(t.observe(landed), Change::SelfWrite);
+        assert_eq!(
+            t.observe(landed),
+            Change::Unchanged,
+            "cursor advanced (I-3)"
+        );
+        assert!(matches!(t.observe(landed + 1), Change::Fresh { .. }));
     }
 
-    /// T-11 / CopyPaste-8yzf — a third-party app writing between our `set…` and
-    /// our post-write read must not have its content suppressed as if it were
-    /// ours.
+    /// T-11 / CopyPaste-8yzf — a third-party app writing during ours must not
+    /// have its content suppressed as if it were ours.
+    ///
+    /// The armed count is the one *our* write landed in, so every later change
+    /// is someone else's and cannot match. Repairing the cell to the observed
+    /// count is what would drop their copy, which is why nothing does.
     #[test]
     fn third_party_write_during_ours_is_still_captured() {
         let mut t = ChangeTracker::new();
         t.observe(10);
 
-        let pre = 10;
-        t.sentinel.arm(pre);
-        // The post-write count is pre+3: someone else wrote in between.
-        t.sentinel.confirm(pre, pre + 3);
+        let ours = 10 + SELF_WRITE_DELTA;
+        t.sentinel.arm(ours);
 
-        // Our own write is still suppressed …
-        assert_eq!(t.observe(12), Change::SelfWrite);
-        // … and theirs is captured. An unconditional post-stamp would have
-        // stored 13 here and silently dropped a genuine user copy.
-        assert!(matches!(t.observe(13), Change::Fresh { .. }));
+        assert_eq!(t.observe(ours), Change::SelfWrite);
+        assert!(matches!(t.observe(ours + 1), Change::Fresh { .. }));
+        assert!(matches!(t.observe(ours + 2), Change::Fresh { .. }));
+    }
+
+    /// The asymmetry [`SelfWriteSentinel::arm`] is built on: a cell armed above
+    /// the write swallows the genuine copy that lands there, and that is the
+    /// defect run 30632553103 found. One armed at or below it is inert.
+    #[test]
+    fn an_arm_above_the_write_would_swallow_a_genuine_copy() {
+        let mut t = ChangeTracker::new();
+        t.observe(10);
+
+        t.sentinel.arm(12); // what `pre + 2` used to store
+        assert!(
+            matches!(t.observe(11), Change::Fresh { .. }),
+            "our own paste-back came back as a capture"
+        );
+        assert_eq!(
+            t.observe(12),
+            Change::SelfWrite,
+            "and the next genuine copy was swallowed"
+        );
     }
 
     /// T-12 — a failed write clears the sentinel, so it cannot suppress some
@@ -292,12 +316,12 @@ mod tests {
         let mut t = ChangeTracker::new();
         t.observe(10);
 
+        let landed = 10 + SELF_WRITE_DELTA;
         let elsewhere = t.sentinel.clone();
-        elsewhere.arm(10);
-        elsewhere.confirm(10, 12);
+        elsewhere.arm(landed);
 
-        assert_eq!(t.observe(12), Change::SelfWrite);
+        assert_eq!(t.observe(landed), Change::SelfWrite);
         // Consumed once, by whoever polls first.
-        assert!(!elsewhere.consume_if(12));
+        assert!(!elsewhere.consume_if(landed));
     }
 }
