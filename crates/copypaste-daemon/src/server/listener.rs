@@ -480,7 +480,7 @@ mod tests {
                 3,
                 Method::List {
                     limit: 10,
-                    offset: 0,
+                    cursor: None,
                 },
             ))
             .await;
@@ -643,7 +643,7 @@ mod tests {
                 1,
                 Method::List {
                     limit: 10,
-                    offset: 0,
+                    cursor: None,
                 },
             ))
             .await;

@@ -201,7 +201,7 @@ async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
 pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
     match method {
         Method::Status => items::status(state, id),
-        Method::List { limit, offset } => items::list(state, id, limit, offset),
+        Method::List { limit, cursor } => items::list(state, id, limit, cursor.as_deref()),
         Method::Search { query, limit } => items::search(state, id, &query, limit),
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
         Method::Get { id: item_id } => items::get(state, id, &item_id),
@@ -298,7 +298,7 @@ mod tests {
         }));
         assert!(requires_ready(&Method::List {
             limit: 10,
-            offset: 0
+            cursor: None
         }));
         assert!(requires_ready(&Method::Search {
             query: "x".into(),

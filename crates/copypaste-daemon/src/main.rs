@@ -40,13 +40,14 @@ mod sync;
 mod testutil;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use anyhow::Context;
 use clap::Parser;
 use copypaste_core::{Detector, Keyring, Store};
-use copypaste_ipc::{EventData, EventKind};
+use copypaste_ipc::{DiagnosticCounters, EventData, EventKind};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 use tokio::sync::{broadcast, watch};
@@ -200,6 +201,12 @@ pub struct AppState {
     /// and threading it through `AppState::new` would touch every caller for
     /// a value none of them has an opinion about.
     legacy_history: AtomicBool,
+    /// Cumulative counts for [`AppState::counters`]. The clipboard's own two
+    /// live on the port and are read through the mutex; these are the ones
+    /// nothing else owns.
+    sensitive_swept: AtomicU64,
+    index_purged: AtomicU64,
+    started_at: Instant,
 }
 
 /// How many change events are buffered per subscriber before it is told it
@@ -236,6 +243,9 @@ impl AppState {
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
             legacy_history: AtomicBool::new(false),
+            sensitive_swept: AtomicU64::new(0),
+            index_purged: AtomicU64::new(0),
+            started_at: Instant::now(),
         }
     }
 
@@ -283,6 +293,8 @@ impl AppState {
     /// user did not ask for, so the count travels with it — see
     /// [`copypaste_ipc::EventData::swept`].
     pub fn note_sensitive_swept(&self, count: u32) {
+        self.sensitive_swept
+            .fetch_add(u64::from(count), Ordering::Relaxed);
         self.publish(EventKind::Items, false, count);
         self.p2p.wake();
         self.cloud.wake();
@@ -360,6 +372,34 @@ impl AppState {
 
     pub fn set_legacy_history_present(&self, present: bool) {
         self.legacy_history.store(present, Ordering::Release);
+    }
+
+    /// Recorded once, by the startup purge, before this state exists — so it is
+    /// set rather than passed, like the two flags above.
+    pub fn set_index_purged(&self, purged: u64) {
+        self.index_purged.store(purged, Ordering::Release);
+    }
+
+    /// What has been refused, missed or deleted since this process started.
+    ///
+    /// Assembled here rather than in the status handler because two of the five
+    /// are behind the clipboard mutex: a caller that read them itself would take
+    /// that lock a second time for the same reply.
+    pub fn counters(&self) -> DiagnosticCounters {
+        let (rejected_too_large, lost_intermediates) = {
+            let clipboard = self.clipboard();
+            (
+                clipboard.rejected_too_large_count(),
+                clipboard.lost_intermediates_count(),
+            )
+        };
+        DiagnosticCounters {
+            rejected_too_large,
+            lost_intermediates,
+            sensitive_swept: self.sensitive_swept.load(Ordering::Relaxed),
+            index_purged: self.index_purged.load(Ordering::Acquire),
+            uptime_secs: self.started_at.elapsed().as_secs(),
+        }
     }
 }
 
@@ -447,12 +487,16 @@ async fn main() -> anyhow::Result<()> {
     // touches the index and never the history. Not fatal: a history that
     // cannot be purged is still a history, and refusing to start would cost
     // the user access to it over a background sweep.
+    let mut index_purged = 0u64;
     match copypaste_core::purge_indexed_secrets(&store, &detector) {
-        Ok(report) if report.purged > 0 => tracing::info!(
-            purged = report.purged,
-            scanned = report.scanned,
-            "removed search-index rows the current ruleset calls sensitive"
-        ),
+        Ok(report) if report.purged > 0 => {
+            index_purged = report.purged;
+            tracing::info!(
+                purged = report.purged,
+                scanned = report.scanned,
+                "removed search-index rows the current ruleset calls sensitive"
+            )
+        }
         Ok(_) => {}
         Err(e) => tracing::warn!(error = %e, "the search-index purge did not finish"),
     }
@@ -519,6 +563,7 @@ async fn main() -> anyhow::Result<()> {
         db_path.clone(),
     ));
     state.set_legacy_history_present(legacy_history);
+    state.set_index_purged(index_purged);
     state.set_ready(true);
     let cloud_signed_in = state.cloud.restore(&state);
     info!(
