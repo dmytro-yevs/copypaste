@@ -1,16 +1,10 @@
 /**
- * Settings: the tabs, and the two preferences that leave the screen.
+ * Settings: the tabs, and the preferences that leave the screen.
  *
- * What this can exercise is bounded by what the app can reach. The daemon has
- * `GetConfig`/`SetConfig` and the CLI drives them (`daemon-config.e2e.test.ts`
- * covers that contract), but no Tauri command routes either one, so there is no
- * configuration round trip to drive from here. The screen's honesty about that
- * is asserted instead — a badge that says the service owns retention, rather
- * than a control that pretends to set it.
- *
- * The preferences that *are* the app's own do get a full round trip, because
- * they are the ones with a layout consequence: preview lines is the input to
- * INV-5's row reservation, and appearance has to survive a reload (INV-22).
+ * The app's own preferences are round-tripped because they have a layout
+ * consequence — preview lines feeds INV-5's row reservation, and appearance has
+ * to survive a reload (INV-22). The daemon's are round-tripped through the
+ * daemon, since the screen writing them is the only thing that can be wrong.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -25,13 +19,25 @@ import {
   waitForText,
 } from "../src/harness/ui.js";
 
-const TABS = ["Appearance", "List", "Shortcut", "Sync", "Storage", "About"];
+const TABS = [
+  "Appearance",
+  "List",
+  "Shortcut",
+  "Service",
+  "Sync",
+  "Storage",
+  "Diagnostics",
+  "About",
+];
 
 /** `rowHeight(n)` from `lib/layout.ts`, duplicated deliberately: a test that
  *  imported the function could not catch it changing. */
 const ROW_HEIGHT = { 1: 63, 2: 84 } as const;
 
 let app: App;
+
+const config = () =>
+  app.daemon.json<{ config: { retention_days: number } }>(["config", "show"]);
 
 beforeAll(async () => {
   app = await startApp({ seed: ["a settings fixture", "another one"] });
@@ -129,12 +135,23 @@ describe("the tabs", () => {
   });
 });
 
-describe("what the screen refuses to invent", () => {
-  test("retention is reported as the service's, not offered as a control", async () => {
+describe("the service's own settings", () => {
+  test("a value chosen on the screen reaches the daemon", async () => {
+    await openTab("Service");
+    const select = await app.browser.$('select[aria-label="Drop items older than"]');
+    await select.waitForDisplayed({ timeout: 10_000 });
+    await select.selectByAttribute("value", "30");
+
+    // Read it back out of the daemon, not out of the control that wrote it.
+    await app.browser.waitUntil(
+      async () => (await config()).config.retention_days === 30,
+      { timeout: 10_000, interval: 250, timeoutMsg: "the daemon never took the value" },
+    );
+  });
+
+  test("storage reports what the service holds", async () => {
     await openTab("Storage");
-    const text = await visibleText(app.browser);
-    expect(text).toContain("Set by the service");
-    expect(text).toContain("Items stored");
+    expect(await visibleText(app.browser)).toContain("Items stored");
   });
 });
 
