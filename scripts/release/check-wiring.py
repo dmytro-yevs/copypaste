@@ -251,7 +251,7 @@ if emu:
     triggers = emu.get(True) or emu.get("on") or {}
     rec(not ({"push", "pull_request"} & set(triggers)),
         "android-emulator.yml does not run on push or pull_request",
-        "a run is ~40 minutes of runner time; nightly and on demand is the decision")
+        "ten minutes of runner time a run, measured; nightly and on demand is the decision")
     rec("schedule" in triggers and "workflow_dispatch" in triggers,
         "android-emulator.yml runs nightly and on demand", repr(sorted(triggers)))
 

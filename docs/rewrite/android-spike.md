@@ -1,51 +1,68 @@
 # The Android device spike
 
-**Status:** open · the APK builds; nothing in it has been observed running
+**Status:** open · rung 0 runs on an emulator; rung 2 is still only read, not
+observed
 **Blocking:** the rung 2 recommendation in
 [android-clipboard-access.md](android-clipboard-access.md) §4 rests on a claim
 derived from AOSP source and never observed.
 
-The Kotlin compiles: the release workflow's `android` job produced a signed
-28 MB universal APK. That is the whole of what is known. No line of Kotlin, of
-`crypto/keystore/android.rs` or of `capture/android.rs` has executed.
+## What the emulator settled
 
-## Before the phone
+`.github/workflows/android-emulator.yml` builds a debuggable x86_64 APK and
+runs `scripts/release/android-smoke.sh` against a booted API 36 AVD. Two runs
+in, on Android 16, x86_64, `google_apis`:
 
-1. `.github/workflows/android-emulator.yml` — dispatch it. It builds a
-   debuggable x86_64 APK and runs `scripts/release/android-smoke.sh` against a
-   booted AVD. Half the list below is answerable there, without a device.
-2. On a workstation: SDK platform 36 with build-tools, NDK r27, then
-   `cargo tauri android build --debug --apk`. The APK lands under
-   `gen/android/app/build/outputs/apk/`.
+* The app launches. `System.loadLibrary("copypaste_ui_lib")` resolves, the
+  activity reaches focus, and a WebView is instantiated in-process.
+* **ADR-0003's keystore round-trip holds.** First launch mints and writes
+  `shared_prefs/copypaste-device-secret.xml`; after `force-stop` the second
+  launch reopens the same database — same page-1 salt — with the blob
+  byte-identical. A re-minted secret could not have opened that file.
+* SQLCipher over vendored OpenSSL works on Android. `copypaste-v2.db` is not a
+  readable SQLite file, and a captured canary is nowhere in it or anywhere else
+  under the app's data directory.
+* Both rung 0 doorways work end to end: `ACTION_SEND` and `ACTION_PROCESS_TEXT`
+  reach `ClipQueue`, the intake drain and `ingest`, and the store changes.
+* With Shizuku absent, nothing claims otherwise — no foreground service, no
+  ongoing notification.
 
-## What the emulator answers, and what it cannot
+What it did **not** settle, and why:
 
-Item 1 is settled — the Kotlin compiles. Of the rest, the emulator reaches only
-what needs no Shizuku: that the activity starts and `libcopypaste_ui_lib.so`
-loads, that a second launch reads back the device secret the first one minted
-(the one observation ADR-0003 asks for), that the share-sheet and
-text-selection doorways reach SQLCipher, and that the database is not a
-readable SQLite file.
+* **Whether the UI paints.** Run 1's hierarchy dump held the rendered tree — six
+  buttons, four text views — and a 36 KB screenshot. Run 2, same code, held a
+  bare `android.webkit.WebView` node and a 2 KB screenshot: at 25 seconds the
+  WebView had not painted. So a bare assertion here would be flaky; it needs to
+  wait for content, and until it does this stays a probe with both artefacts
+  attached.
+* **The Quick Settings tile.** `cmd statusbar add-tile` and `click-tile` print
+  nothing on this image and `cmd clipboard` does not exist on it — there is no
+  way to put text on the clipboard from the shell, so the tile's read has
+  nothing to read. Unproven, and the job says so.
+* **Rung 2 itself, and R8.** Shizuku needs a pairing done by hand. The APK is
+  the debug one because every filesystem assertion goes through `run-as`, so
+  the minified release build's plugin reflection is untested.
 
-Items 2 to 7 stay open and stay open on purpose. Shizuku needs a
-wireless-debugging pairing performed by hand, so rung 2 cannot be granted on a
-stock emulator and faking it would prove nothing. What the job asserts instead
-is the honest consequence: with rung 2 unavailable, no foreground service runs
-and no notification claims background capture. Item 6 — an OEM battery manager
-killing the service — is not reproducible on an emulator at all.
+Everything unobservable is printed under `NOT ASSERTED` rather than skipped, and
+`check.sh` runs the smoke test's `--self-test` so its detectors are known to
+fail when they should.
 
-The job prints everything it could not observe under `NOT ASSERTED` rather than
-skipping it, and `scripts/release/check.sh` runs the smoke test's `--self-test`
-so its detectors are known to fail when they should.
+### One trap this cost a run
 
-## On the phone, in likelihood order
+`extractNativeLibs` is `false` — AGP's default at minSdk 24 — so the library is
+mapped straight out of `base.apk` and the string `libcopypaste_ui_lib.so`
+appears nowhere in `/proc/<pid>/maps`. Asserting that file name failed while the
+library was demonstrably running. The evidence is an *executable* mapping owned
+by the package (`r-xp … /base.apk`), and anything else reading maps should
+expect the same.
 
-Each of these would falsify something currently written as true.
+## On a phone, not an emulator
 
-1. ~~**The Kotlin does not compile.**~~ Settled: the release job's APK
-   contains it. The AIDL package placement is still only known to *build* —
-   whether a system binder accepts the stub's interface descriptor is item 3's
-   question.
+Each of these would falsify something currently written as true. Items 2 to 8
+are all rung 2 or hardware, which is why none of them moved.
+
+1. ~~**The Kotlin does not compile.**~~ Settled: it builds, installs, and runs.
+   The AIDL package placement is still only known to *build* — whether a system
+   binder accepts the stub's interface descriptor is item 3's question.
 2. **`Shizuku.newProcess` is not reachable by reflection** in the version of
    the API library resolved. Only the toast-suppression opt-in depends on it;
    everything else fails independently.
