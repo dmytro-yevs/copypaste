@@ -62,10 +62,18 @@ def measure(path):
     except (OSError, UnicodeDecodeError):
         return None
 
+    # The test *module*, not the first `#[cfg(test)]`: a `#[cfg(test)] mod
+    # testutil;` declaration ends in `;` and the file continues past it. Cutting
+    # at the attribute reported `daemon/src/main.rs` as 38 lines when it is 729.
+    pending = None
     for i, line in enumerate(lines):
         if line.startswith("#[cfg(test)]"):
-            lines = lines[:i]
-            break
+            pending = i
+        elif pending is not None and line.strip():
+            if not line.rstrip().endswith(";"):
+                lines = lines[:pending]
+                break
+            pending = None
 
     comments = code = run = longest = header = 0
     in_header = True
