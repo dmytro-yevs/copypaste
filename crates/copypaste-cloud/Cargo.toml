@@ -29,6 +29,10 @@ zeroize.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
+# Test-only, and deliberately not a real dependency: `tests/constant_parity.rs`
+# is the only thing that reads it, so the skew ceiling the two transports share
+# cannot drift without a build failure, and no shipped binary gains an edge.
+copypaste-p2p = { path = "../copypaste-p2p" }
 tempfile.workspace = true
 # `start_paused` for deterministic retry tests without real sleeping.
 tokio = { workspace = true, features = ["test-util"] }
