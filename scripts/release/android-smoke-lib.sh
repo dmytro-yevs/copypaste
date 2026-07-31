@@ -83,6 +83,46 @@ salt_of() { od -An -v -tx1 -N16 "$1" | tr -d ' \n'; }
 
 holds_text() { grep -aqF "$2" "$1"; }
 
+# What the WebView is actually showing, read out of the accessibility tree.
+#
+# Chromium exposes the DOM as *children* of the `android.webkit.WebView` node,
+# so "the UI painted" is a question about that subtree and not about the node
+# itself: run 2 had the node with nothing under it and a 2 KB screenshot, while
+# run 1 had eleven Views, six Buttons and four TextViews under it.
+#
+# Named descendants rather than a node count, because an empty document still
+# exposes a bare View or two. And Chromium's own error page is text-bearing —
+# a failed asset load would otherwise read as a painted UI — so its wording is
+# reported here and refused by the caller.
+#
+# Prints: <descendants> <named> <first named string>
+webview_content() {   # <uiautomator dump>
+    python3 - "$1" <<'PY'
+import sys, xml.etree.ElementTree as ET
+
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except Exception as e:
+    print("0 0 unparsable:", str(e)[:60])
+    sys.exit(0)
+
+web = next((n for n in root.iter("node") if n.get("class") == "android.webkit.WebView"), None)
+if web is None:
+    print("0 0 no WebView node in the dump")
+    sys.exit(0)
+
+kids = list(web.iter("node"))[1:]
+names = [t for n in kids for t in ((n.get("text") or "").strip(), (n.get("content-desc") or "").strip()) if t]
+print(len(kids), len(names), (names[0] if names else "")[:60])
+PY
+}
+
+# Chromium's error page, which is text-bearing and would otherwise satisfy any
+# "the UI painted" predicate. A Tauri app that cannot load its own assets shows
+# exactly this.
+WEBVIEW_ERRORS='ERR_|net::|Webpage not available|This site can.t be reached'
+looks_like_error_page() { grep -aqE "$WEBVIEW_ERRORS" <<<"$1"; }
+
 # Native code from our own package, as `/proc/<pid>/maps` actually spells it.
 #
 # Run 1 asserted the literal `libcopypaste_ui_lib.so` and failed while the
@@ -160,6 +200,14 @@ wait_for() {
 }
 
 dump_logcat() { adb logcat -d -b all > "$OUT/$1.log" 2>&1 || true; }
+
+# uiautomator refuses while the screen is animating ("could not get idle
+# state"), which is ordinary during a launch — the caller retries.
+dump_hierarchy() {   # <local path>
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
+    adb pull /sdcard/ui.xml "$1" >/dev/null 2>&1 || return 1
+    [[ -s "$1" ]]
+}
 
 # Everything under the app's private directory, addressed the way run-as sees
 # it: run-as chdir's to the data directory, so these paths stay relative.
@@ -265,6 +313,60 @@ self_test() {
         && ok "own_map_paths reports every path naming us, executable or not" \
         || bad "own_map_paths reports every path naming us, executable or not" \
                "$(own_map_paths "$t/maps-dexonly" "$pkg")"
+
+    group "self-test: the WebView painted"
+
+    # Shaped after the two runs' hierarchy dumps: run 1 exposed the DOM as
+    # named children of the WebView node, run 2 exposed the same chrome with
+    # the WebView node a leaf.
+    local head='<?xml version="1.0" encoding="UTF-8" standalone="yes" ?><hierarchy rotation="0">'
+    local shell_open='<node class="android.widget.FrameLayout" package="com.copypaste.app"><node class="android.widget.LinearLayout">'
+    local shell_close='</node></node></hierarchy>'
+
+    printf '%s%s<node class="android.webkit.WebView"><node class="android.view.View" text="" content-desc=""/><node class="android.widget.TextView" text="Clipboard history" content-desc=""/><node class="android.widget.Button" text="" content-desc="Search"/></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-run1.xml"
+    read -r kids named first <<<"$(webview_content "$t/paint-run1.xml")"
+    [[ "$kids" -eq 3 && "$named" -eq 2 && "$first" == "Clipboard history" ]] \
+        && ok "a painted WebView reports its named descendants" \
+        || bad "a painted WebView reports its named descendants" "got '$kids $named $first'"
+
+    printf '%s%s<node class="android.webkit.WebView"/>%s' "$head" "$shell_open" "$shell_close" > "$t/paint-run2.xml"
+    read -r kids named _ <<<"$(webview_content "$t/paint-run2.xml")"
+    [[ "$kids" -eq 0 && "$named" -eq 0 ]] \
+        && ok "run 2's empty WebView is not a painted UI" \
+        || bad "run 2's empty WebView is not a painted UI" "got '$kids $named'"
+
+    # An empty document still exposes a View or two, which is why the predicate
+    # counts named nodes and not nodes.
+    printf '%s%s<node class="android.webkit.WebView"><node class="android.view.View" text="" content-desc=""/></node>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-empty.xml"
+    read -r kids named _ <<<"$(webview_content "$t/paint-empty.xml")"
+    [[ "$kids" -eq 1 && "$named" -eq 0 ]] \
+        && ok "an unnamed subtree is not a painted UI" \
+        || bad "an unnamed subtree is not a painted UI" "got '$kids $named'"
+
+    printf '%s%s<node class="android.widget.TextView" text="Not a WebView"/>%s' \
+        "$head" "$shell_open" "$shell_close" > "$t/paint-nowebview.xml"
+    read -r kids named first <<<"$(webview_content "$t/paint-nowebview.xml")"
+    [[ "$kids" -eq 0 && "$named" -eq 0 ]] \
+        && ok "text outside the WebView does not count" \
+        || bad "text outside the WebView does not count" "got '$kids $named $first'"
+
+    printf 'not xml at all' > "$t/paint-broken.xml"
+    read -r kids named _ <<<"$(webview_content "$t/paint-broken.xml")"
+    [[ "$kids" -eq 0 ]] \
+        && ok "an unparsable dump is not a painted UI" \
+        || bad "an unparsable dump is not a painted UI" "got '$kids $named'"
+
+    looks_like_error_page "Webpage not available" \
+        && ok "Chromium's error page is refused" \
+        || bad "Chromium's error page is refused"
+    looks_like_error_page "net::ERR_FILE_NOT_FOUND" \
+        && ok "a net:: error string is refused" \
+        || bad "a net:: error string is refused"
+    looks_like_error_page "Clipboard history" \
+        && bad "ordinary UI text is not an error page" \
+        || ok "ordinary UI text is not an error page"
 
     group "self-test: keystore detection"
 
