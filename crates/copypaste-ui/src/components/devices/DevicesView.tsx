@@ -39,9 +39,9 @@ import { PeerRow } from "@/components/devices/PeerRow";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
 import {
   MAX_PAIRINGS,
-  type SyncAttempts,
+  type PeerHealthMap,
   atPairingCap,
-  noteAttempts,
+  noteSync,
 } from "@/components/devices/peerState";
 import { ServiceOffline } from "@/components/shell/ServiceOffline";
 import { usePeers, useRevoke, useSyncNow, useUnpair } from "@/hooks/useDevices";
@@ -61,7 +61,7 @@ export function DevicesView() {
   const [accepting, setAccepting] = useState(false);
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
-  const [attempts, setAttempts] = useState<SyncAttempts>({});
+  const [health, setHealth] = useState<PeerHealthMap>({});
 
   const errorKind = peers.error ? classifyError(peers.error) : null;
   const list = peers.data ?? [];
@@ -70,7 +70,7 @@ export function DevicesView() {
   const runSync = (pairingId: string | undefined) =>
     sync.mutate(pairingId, {
       onSuccess: (results) =>
-        setAttempts((previous) => noteAttempts(previous, results)),
+        setHealth((previous) => noteSync(previous, results)),
     });
 
   if (errorKind === "offline") return <ServiceOffline />;
@@ -173,7 +173,7 @@ export function DevicesView() {
                 <PeerRow
                   key={peer.pairing_id}
                   peer={peer}
-                  attempt={attempts[peer.pairing_id]}
+                  health={health[peer.pairing_id]}
                   syncing={sync.isPending}
                   unpairing={
                     unpair.isPending &&

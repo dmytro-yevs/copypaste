@@ -8,7 +8,8 @@
  *    handing out a code here is never dialled from here.
  *  - `online` is an mDNS record: `false` means "not seen", not "unreachable".
  */
-import type { PeerInfo } from "@/lib/ipc";
+import { type ErrorKind, classifyError } from "@/lib/errors";
+import type { PeerInfo, SyncResult } from "@/lib/ipc";
 
 /**
  * `copypaste_p2p::peers::MAX_PAIRINGS`, which is not on the wire.
@@ -38,43 +39,81 @@ export const PEER_STATES = [
 export type PeerState = (typeof PEER_STATES)[number];
 
 /**
- * The outcome of a sync this screen started, remembered until a later session
- * with that peer succeeds.
+ * What a run this screen started did with one peer.
  *
- * Scoped to what the window observed: the daemon syncs on its own cadence and
- * does not record per-peer failures anywhere the wire can carry, so this is
- * the only honest evidence of a handshake that is failing.
+ * `PeerInfo` carries a last-*success* time and nothing else about the outcome:
+ * the daemon syncs on its own cadence and records no per-peer result the wire
+ * can carry. So a run started here is the only evidence of a handshake that is
+ * failing, and `sent`/`received` the only evidence one is moving anything.
  */
-export interface SyncAttempt {
+export interface SyncSuccess {
   readonly at: number;
-  readonly failed: boolean;
+  readonly sent: number;
+  readonly received: number;
 }
 
-export type SyncAttempts = Readonly<Record<string, SyncAttempt>>;
+/** A kind, never the daemon's sentence: a per-peer error can name the socket
+ *  path, which spells out the local username (INV-12). */
+export interface SyncFailure {
+  readonly at: number;
+  readonly kind: ErrorKind;
+}
+
+/** Both halves are kept, because a row has to say when syncing last *worked*
+ *  as well as when it last broke, and one slot answers only whichever came
+ *  last. */
+export interface PeerHealth {
+  readonly success?: SyncSuccess;
+  readonly failure?: SyncFailure;
+}
+
+export type PeerHealthMap = Readonly<Record<string, PeerHealth>>;
+
+/**
+ * The recorded failure, unless something later settled it.
+ *
+ * `last_seen_ms` settles one as much as a later run does: the daemon keeps
+ * syncing on its own cadence, so a failure held past a successful session would
+ * sit on the row for ever with nothing left to fix.
+ */
+export function unsettledFailure(
+  peer: PeerInfo,
+  health: PeerHealth | undefined,
+): SyncFailure | undefined {
+  const failure = health?.failure;
+  if (!failure) return undefined;
+  const settled = Math.max(peer.last_seen_ms, health?.success?.at ?? 0);
+  return failure.at > settled ? failure : undefined;
+}
 
 export function peerState(
   peer: PeerInfo,
-  attempt: SyncAttempt | undefined,
+  health: PeerHealth | undefined,
   now: number = Date.now(),
 ): PeerState {
   if (peer.last_seen_ms <= 0) return "waiting";
-  // A session that succeeded after the failed attempt settles it; the daemon
-  // syncs on its own cadence, so a stale failure would outlive its cause.
-  if (attempt?.failed && attempt.at > peer.last_seen_ms) return "failing";
+  if (unsettledFailure(peer, health)) return "failing";
   if (peer.last_addr === null) return "inbound";
   if (!peer.online) return "away";
   return now - peer.last_seen_ms > STALE_AFTER_MS ? "stalled" : "synced";
 }
 
 /** Record what one `sync_now` run said, per peer. */
-export function noteAttempts(
-  previous: SyncAttempts,
-  results: ReadonlyArray<{ pairing_id: string; error: string | null }>,
+export function noteSync(
+  previous: PeerHealthMap,
+  results: readonly SyncResult[],
   at: number = Date.now(),
-): SyncAttempts {
+): PeerHealthMap {
   const next = { ...previous };
   for (const result of results) {
-    next[result.pairing_id] = { at, failed: result.error !== null };
+    const before = previous[result.pairing_id];
+    next[result.pairing_id] =
+      result.error === null
+        ? {
+            ...before,
+            success: { at, sent: result.sent, received: result.received },
+          }
+        : { ...before, failure: { at, kind: classifyError(result.error) } };
   }
   return next;
 }

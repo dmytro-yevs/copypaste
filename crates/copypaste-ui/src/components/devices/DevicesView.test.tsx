@@ -21,6 +21,7 @@ import { peer, withUser } from "@/test/harness";
 const listPeers = vi.fn();
 const unpair = vi.fn();
 const revokeDevice = vi.fn();
+const syncNow = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -29,6 +30,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     listPeers: () => listPeers(),
     unpair: (pairingId: string) => unpair(pairingId),
     revokeDevice: (pairingId: string) => revokeDevice(pairingId),
+    syncNow: (pairingId?: string) => syncNow(pairingId),
   };
 });
 
@@ -38,6 +40,7 @@ beforeEach(() => {
   listPeers.mockReset().mockResolvedValue([PHONE]);
   unpair.mockReset().mockResolvedValue(undefined);
   revokeDevice.mockReset().mockResolvedValue(undefined);
+  syncNow.mockReset().mockResolvedValue([]);
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -190,5 +193,114 @@ describe("what the row says about sync", () => {
     expect(await screen.findByText("Incoming only")).toBeTruthy();
     expect(screen.getByText("Away")).toBeTruthy();
     expect(screen.getByText(/only that device can start a sync/i)).toBeTruthy();
+  });
+});
+
+/**
+ * `peers()` answers with a last-*success* time and nothing else about the
+ * outcome, so a device that has stopped syncing and one that is merely idle
+ * read identically until a run started here says otherwise. These are about
+ * what the row does with that one piece of evidence.
+ */
+describe("whether syncing is working with one device", () => {
+  async function syncOne() {
+    const { user } = withUser(<DevicesView />);
+    await user.click(
+      await screen.findByRole("button", { name: /sync with lost phone now/i }),
+    );
+    return user;
+  }
+
+  it("says what the run moved, not only that it happened", async () => {
+    syncNow.mockResolvedValue([
+      { pairing_id: "pair-9", name: "Lost Phone", sent: 3, received: 2, error: null },
+    ]);
+    await syncOne();
+
+    expect(await screen.findByText(/sent 3, received 2/i)).toBeTruthy();
+  });
+
+  /**
+   * INV-12: the per-peer error is the daemon's own text and can name the socket
+   * path, which spells out the local username. The row gets the classified
+   * sentence, and the next step it names, instead.
+   */
+  it("names why the sync failed without rendering what the daemon said", async () => {
+    syncNow.mockResolvedValue([
+      {
+        pairing_id: "pair-9",
+        name: "Lost Phone",
+        sent: 0,
+        received: 0,
+        error: "peer /Users/someone/.copypaste/daemon.sock stopped responding",
+      },
+    ]);
+    await syncOne();
+
+    expect(await screen.findByText(/can't be reached/i)).toBeTruthy();
+    expect(screen.getByText("Sync failed")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/Users|\.sock/);
+  });
+
+  /** A failure the same request cannot answer differently must not offer to
+   *  repeat it; the sentence carries the action instead. */
+  it("offers a retry only where retrying could go differently", async () => {
+    syncNow.mockResolvedValue([
+      {
+        pairing_id: "pair-9",
+        name: "Lost Phone",
+        sent: 0,
+        received: 0,
+        error: "the peer stopped responding",
+      },
+    ]);
+    const user = await syncOne();
+    const retry = await screen.findByRole("button", {
+      name: /try syncing with lost phone again/i,
+    });
+
+    syncNow.mockResolvedValue([
+      {
+        pairing_id: "pair-9",
+        name: "Lost Phone",
+        sent: 0,
+        received: 0,
+        error: "no such paired device",
+      },
+    ]);
+    await user.click(retry);
+
+    await waitFor(() =>
+      expect(screen.getByText(/no longer paired with this one/i)).toBeTruthy(),
+    );
+    expect(
+      screen.queryByRole("button", { name: /try syncing with lost phone again/i }),
+    ).toBeNull();
+  });
+
+  /** The daemon keeps syncing on its own cadence, so a failure this window
+   *  watched must not outlive the session that fixed it. */
+  it("drops the failure once a later run works", async () => {
+    syncNow.mockResolvedValue([
+      {
+        pairing_id: "pair-9",
+        name: "Lost Phone",
+        sent: 0,
+        received: 0,
+        error: "the peer stopped responding",
+      },
+    ]);
+    const user = await syncOne();
+    expect(await screen.findByText("Sync failed")).toBeTruthy();
+
+    syncNow.mockResolvedValue([
+      { pairing_id: "pair-9", name: "Lost Phone", sent: 1, received: 0, error: null },
+    ]);
+    await user.click(
+      screen.getByRole("button", { name: /try syncing with lost phone again/i }),
+    );
+
+    await waitFor(() => expect(screen.queryByText("Sync failed")).toBeNull());
+    expect(screen.getByText(/sent 1, received 0/i)).toBeTruthy();
   });
 });

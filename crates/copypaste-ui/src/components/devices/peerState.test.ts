@@ -12,12 +12,25 @@ import {
   MAX_PAIRINGS,
   STALE_AFTER_MS,
   atPairingCap,
-  noteAttempts,
+  noteSync,
   peerState,
+  unsettledFailure,
 } from "@/components/devices/peerState";
+import type { SyncResult } from "@/lib/ipc";
 import { peer } from "@/test/harness";
 
 const NOW = 1_800_000_000_000;
+
+function result(over: Partial<SyncResult> = {}): SyncResult {
+  return {
+    pairing_id: "pair-1",
+    name: "Kitchen Mac",
+    sent: 0,
+    received: 0,
+    error: null,
+    ...over,
+  };
+}
 
 describe("what a paired device is doing", () => {
   /** `last_seen_ms === 0` is the store's "never contacted", and it outranks
@@ -73,7 +86,7 @@ describe("a failure this screen watched happen", () => {
   it("outranks the structural states, because it is evidence", () => {
     const state = peerState(
       peer({ last_addr: null, last_seen_ms: NOW - 1000 }),
-      { at: NOW, failed: true },
+      { failure: { at: NOW, kind: "peer_unreachable" } },
       NOW,
     );
     expect(state).toBe("failing");
@@ -85,22 +98,69 @@ describe("a failure this screen watched happen", () => {
    * already settled would therefore sit on the row for ever.
    */
   it("is settled by a session that succeeded after it", () => {
-    expect(
-      peerState(peer({ last_seen_ms: NOW }), { at: NOW - 1000, failed: true }, NOW),
-    ).toBe("synced");
+    const health = { failure: { at: NOW - 1000, kind: "peer_failed" } } as const;
+    expect(peerState(peer({ last_seen_ms: NOW }), health, NOW)).toBe("synced");
+    expect(unsettledFailure(peer({ last_seen_ms: NOW }), health)).toBeUndefined();
   });
 
-  it("is not recorded for a run that succeeded", () => {
-    const attempts = noteAttempts(
+  /** A run started here settles it as much as the daemon's own cadence does:
+   *  `last_seen_ms` only moves on the daemon's next poll. */
+  it("is settled by a later run of its own that worked", () => {
+    const stale = peer({ last_seen_ms: NOW - 60_000 });
+    const health = {
+      failure: { at: NOW - 1000, kind: "peer_unreachable" },
+      success: { at: NOW, sent: 2, received: 0 },
+    } as const;
+    expect(unsettledFailure(stale, health)).toBeUndefined();
+    expect(peerState(stale, health, NOW)).toBe("synced");
+  });
+});
+
+describe("what one run recorded, per peer", () => {
+  /**
+   * Both halves survive the round. Keeping only the latest outcome answers
+   * "did the last run work" and loses "is this device syncing at all", which
+   * is the question the row exists to answer.
+   */
+  it("keeps the last success and the last failure apart", () => {
+    const first = noteSync({}, [result({ sent: 3, received: 1 })], NOW - 5000);
+    const second = noteSync(
+      first,
+      [result({ error: "the peer stopped responding" })],
+      NOW,
+    );
+
+    expect(second["pair-1"]).toEqual({
+      success: { at: NOW - 5000, sent: 3, received: 1 },
+      failure: { at: NOW, kind: "peer_unreachable" },
+    });
+  });
+
+  /** INV-12: the daemon's per-peer text can name the socket path, so only a
+   *  kind is kept — the raw string never reaches a component. */
+  it("stores a kind, never the daemon's sentence", () => {
+    const health = noteSync(
+      {},
+      [result({ error: "no such paired device /Users/someone/.copypaste.sock" })],
+      NOW,
+    );
+    expect(health["pair-1"]?.failure).toEqual({ at: NOW, kind: "peer_not_found" });
+    expect(JSON.stringify(health)).not.toMatch(/Users/);
+  });
+
+  it("records each peer of a partial run on its own terms", () => {
+    const health = noteSync(
       {},
       [
-        { pairing_id: "pair-1", error: null },
-        { pairing_id: "pair-2", error: "whatever the daemon said" },
+        result({ pairing_id: "pair-1", received: 4 }),
+        result({ pairing_id: "pair-2", error: "whatever the daemon said" }),
       ],
       NOW,
     );
-    expect(attempts["pair-1"]).toEqual({ at: NOW, failed: false });
-    expect(attempts["pair-2"]).toEqual({ at: NOW, failed: true });
+    expect(health["pair-1"]?.failure).toBeUndefined();
+    expect(health["pair-1"]?.success).toEqual({ at: NOW, sent: 0, received: 4 });
+    expect(health["pair-2"]?.success).toBeUndefined();
+    expect(health["pair-2"]?.failure?.at).toBe(NOW);
   });
 });
 
