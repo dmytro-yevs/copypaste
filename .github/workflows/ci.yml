@@ -437,11 +437,24 @@ jobs:
         # An empty run is a failure, not a pass. Both of these steps are green
         # when they execute nothing, which is the exact shape of "we thought
         # macOS was covered" that this job exists to end.
+        #
+        # `set +e` around the capture, and the output printed before anything
+        # is decided. The first version of this step captured under `set -e`,
+        # so a non-zero cargo killed it at the assignment and the log showed
+        # the exit code and not one line of the compiler error — in the one job
+        # whose entire purpose is to report what a real Mac says.
         if: success() || failure()
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          set +e
           out="$(cargo +1.96 test -p copypaste-daemon --locked -- --ignored --nocapture --test-threads=1 2>&1)"
+          status=$?
+          set -e
           printf '%s\n' "$out"
+          if [[ "$status" -ne 0 ]]; then
+            echo "::error::the pasteboard tests exited $status"
+            exit "$status"
+          fi
           if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
             echo "::error::no pasteboard test ran"
             exit 1
@@ -450,13 +463,20 @@ jobs:
       - name: The Keychain, for real (port manifest 02)
         if: success() || failure()
         run: |
-          set -euo pipefail
+          set -uo pipefail
           if [[ -z "${COPYPASTE_KEYCHAIN_TEST:-}" ]]; then
             echo "::error::no throwaway keychain, so these tests would skip themselves and pass"
             exit 1
           fi
+          set +e
           out="$(cargo +1.96 test -p copypaste-core --locked -- --ignored --nocapture --test-threads=1 2>&1)"
+          status=$?
+          set -e
           printf '%s\n' "$out"
+          if [[ "$status" -ne 0 ]]; then
+            echo "::error::the keychain tests exited $status"
+            exit "$status"
+          fi
           if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
             echo "::error::no keychain test ran"
             exit 1
