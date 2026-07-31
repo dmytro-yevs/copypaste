@@ -68,7 +68,13 @@ fi
 
 # Signing material lives beside the app's own data so `zap` can remove it, and
 # so there is exactly one directory to delete when starting over.
-DATA_DIR="${HOME}/Library/Application Support/CopyPaste"
+#
+# `com.copypaste.CopyPaste` is `copypaste_ipc::data_dir()` on macOS. The
+# unprefixed `CopyPaste` next to it is where v0.4.x kept `clipboard.db`, which
+# CLAUDE.md rule 3 promises to leave untouched — writing a keychain into it
+# breaks that promise, and the cask's `zap` then deleted the user's v0.4 history
+# and none of v2's.
+DATA_DIR="${HOME}/Library/Application Support/com.copypaste.CopyPaste"
 SUPPORT="${DATA_DIR}/signing"
 KEYCHAIN_STEM="${SUPPORT}/copypaste-signing.keychain"
 PASSFILE="${SUPPORT}/keychain-password"

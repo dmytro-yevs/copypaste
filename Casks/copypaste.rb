@@ -135,15 +135,19 @@ cask "copypaste" do
     end
   end
 
-  # The signing keychain and its password live under
-  # ~/Library/Application Support/CopyPaste/signing, so this already removes
-  # them. That is the right semantics for `zap` — remove every trace — and it is
-  # worth knowing that it is not free: a later reinstall generates a new
-  # certificate, macOS sees a different app, and any permission has to be
-  # granted again. `brew uninstall` alone leaves the certificate in place, which
-  # is what makes uninstall-then-reinstall keep a grant.
+  # `com.copypaste.CopyPaste` is this app's data directory, and `signing/` under
+  # it is selfsign.sh's keychain — so this removes both, which is what `zap`
+  # means. It is not free: a later reinstall generates a new certificate, macOS
+  # sees a different app, and any permission has to be granted again. `brew
+  # uninstall` leaves the certificate, which is what makes uninstall-then-
+  # reinstall keep a grant.
+  #
+  # It must NOT name `~/Library/Application Support/CopyPaste`. That is v0.4.x's
+  # directory, holding a `clipboard.db` this version never opens and CLAUDE.md
+  # rule 3 promises to leave intact for anyone who downgrades. Zapping it
+  # deleted the one history v2 cannot restore and none of v2's own.
   zap trash: [
-    "~/Library/Application Support/CopyPaste",
+    "~/Library/Application Support/com.copypaste.CopyPaste",
     "~/Library/Caches/CopyPaste",
     "~/Library/Logs/CopyPaste",
   ]
