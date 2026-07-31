@@ -53,14 +53,28 @@ pub struct RemoteVersion<'a> {
     pub content_type: &'a str,
     pub created_at: i64,
     pub deleted: bool,
-    /// The sender's hash, when the transport carries one.
+    /// The sender's hash, **read only for a tombstone**.
     ///
-    /// The peer protocol does; the cloud row deliberately does **not** — a hash
-    /// of the plaintext sitting next to the ciphertext would let the backend
-    /// confirm a guess at clipboard content, which is the whole property the
-    /// client-side encryption exists to hold. `None` is recomputed below from
-    /// the content with the store's own hash function, so the two transports
-    /// still compare the same value for the same bytes.
+    /// A live version's hash is recomputed from `content` here whatever this
+    /// says, so no transport can choose merge key 2 for a version it also
+    /// supplies the content of. The peer session already drops a live item
+    /// whose content does not hash to what it claimed; this makes the property
+    /// hold for a caller that is not that session, which is where B-2 could
+    /// come back.
+    ///
+    /// A tombstone is the one thing that cannot be recomputed: it carries the
+    /// hash of the item it deletes and no content to hash (manifest 05 T-4).
+    /// Taking it on trust is bounded rather than merely tolerated — a forged
+    /// value either deletes exactly what an honest one would, or deletes less,
+    /// never more, and the direction is what matters under rule 4.
+    /// `a_forged_tombstone_hash_can_only_delete_less_than_an_honest_one` pins
+    /// it.
+    ///
+    /// The cloud row deliberately carries no hash at all — one sitting next to
+    /// the ciphertext would let the backend confirm a guess at clipboard
+    /// content, which is the property the client-side encryption exists to
+    /// hold — so it arrives as `None` and a tombstone's is inherited from the
+    /// local row instead.
     pub content_hash: Option<&'a str>,
     /// The device that produced *this version*, preserved across hops.
     pub origin_device_id: &'a str,
@@ -133,11 +147,15 @@ pub fn apply_remote_version(
     // makes the delete tie its own live version on keys 1 and 2 and win on key
     // 3 (`deleted`). Inventing a different hash there would decide the delete
     // on the wrong key.
+    //
+    // A live version's hash is never taken from the sender (B-2 / security
+    // review F-3): it is merge key 2 and it is the dedup key, and the content
+    // that would prove it is right here. See `RemoteVersion::content_hash`.
     let computed;
     let content_hash: &str = match incoming.content_hash {
-        Some(hash) => hash,
+        Some(hash) if incoming.deleted => hash,
         None if incoming.deleted => local.as_ref().map_or("", |l| l.content_hash.as_str()),
-        None => {
+        _ => {
             computed = crate::storage::compute_content_hash(incoming.content.as_bytes());
             &computed
         }
@@ -277,6 +295,88 @@ mod tests {
         });
         assert_eq!(cloud, peer);
         assert!(!cloud, "a tie must keep the local copy (INV-I1)");
+    }
+
+    /// B-2 / security review F-3. A peer that names merge key 2 freely can pick
+    /// a hash colliding with an item the receiver already holds, and dedup then
+    /// refuses the insert — a chosen clipping silently never lands. The peer
+    /// session drops a live item whose content does not hash to what it claimed;
+    /// this is the layer below it, so a *caller* that is not that session cannot
+    /// reintroduce the gap.
+    #[test]
+    fn a_live_versions_hash_is_recomputed_and_never_taken_from_the_sender() {
+        let f = fixture();
+        assert!(f.apply(&RemoteVersion {
+            content_hash: Some("0000000000000000000000000000000000000000000000000000000000000000"),
+            ..version("a", "the real content", 1_000)
+        }));
+
+        let stored = f.store.version("a").unwrap().unwrap();
+        assert_eq!(
+            stored.content_hash,
+            crate::storage::compute_content_hash(b"the real content"),
+            "the sender's hash was stored, so it chose merge key 2 and the dedup key"
+        );
+    }
+
+    /// The loss B-2 names, end to end against a real store: `idx_items_dedup` is
+    /// unique over `(content_hash, created_at / 60000)`, and `Store::upsert`
+    /// answers a violation with `Ok(false)` — no error, no row. A peer that
+    /// could name the hash could therefore aim one at a bucket the receiver
+    /// already occupies and a chosen clipping would silently never land.
+    #[test]
+    fn a_hash_aimed_at_a_bucket_we_already_hold_cannot_suppress_the_item() {
+        let f = fixture();
+        assert!(f.apply(&version("already-here", "the decoy", 1_000)));
+        let occupied = f.store.version("already-here").unwrap().unwrap();
+
+        // Same minute bucket, different item, and the collision is exactly what
+        // the sender is asking for.
+        assert!(f.apply(&RemoteVersion {
+            content_hash: Some(&occupied.content_hash),
+            ..version("targeted", "the clipping the peer wants suppressed", 1_500)
+        }));
+
+        assert!(
+            f.store.get("targeted").unwrap().is_some(),
+            "a chosen item was suppressed by a hash the sender picked"
+        );
+        assert!(f.store.get("already-here").unwrap().is_some());
+    }
+
+    /// The one hash still taken on trust, and the bound on what it buys.
+    ///
+    /// A tombstone has no content to hash, so it cannot be recomputed. What
+    /// makes that safe is the direction of the effect: a forged hash either
+    /// deletes exactly what an honest one would (`>` the local hash, or equal,
+    /// where key 3 `deleted` decides) or deletes *less* (`<`, where key 2 keeps
+    /// the local copy). It can never destroy something an honest tombstone
+    /// would have left alone, which is the only direction rule 4 cares about.
+    #[test]
+    fn a_forged_tombstone_hash_can_only_delete_less_than_an_honest_one() {
+        let outcome = |forged: &str| {
+            let f = fixture();
+            f.apply(&version("a", "doomed", 1_000));
+            assert_ne!(forged, f.store.version("a").unwrap().unwrap().content_hash);
+            // The same instant as the version it deletes: the only tie key 2
+            // can break, and the whole of the attacker's room.
+            f.apply(&RemoteVersion {
+                content: "",
+                deleted: true,
+                content_hash: Some(forged),
+                ..version("a", "", 1_000)
+            });
+            f.store.get("a").unwrap().is_none()
+        };
+
+        assert!(
+            outcome("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+            "a hash above the local one deletes, exactly as an honest one does"
+        );
+        assert!(
+            !outcome("0000000000000000000000000000000000000000000000000000000000000000"),
+            "a hash below it must only ever delete less, never more"
+        );
     }
 
     /// `CopyPaste-ojhe` / INV-N2: a delete that ties its own live version on

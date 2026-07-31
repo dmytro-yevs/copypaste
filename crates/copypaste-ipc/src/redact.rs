@@ -16,19 +16,36 @@
 
 /// Replace anything path-shaped in `message` with `<path>`, preserving
 /// whitespace so the rest of the sentence still reads normally.
+///
+/// A path may contain a space, and the one that matters does:
+/// `~/Library/Application Support/CopyPaste/daemon.sock`. Redacting one token
+/// at a time left `Support/CopyPaste/daemon.sock` on screen — the username was
+/// gone only because it happens to sit before the space. So once a token is
+/// path-shaped, following tokens carrying a `/` are absorbed into the same
+/// redaction.
 pub fn scrub_paths(message: &str) -> String {
-    message
-        .split_inclusive(char::is_whitespace)
-        .map(|token| {
-            let trimmed = token.trim_end();
-            let trailing = &token[trimmed.len()..];
-            if looks_like_path(trimmed) {
-                format!("<path>{trailing}")
-            } else {
-                token.to_string()
-            }
-        })
-        .collect()
+    let tokens: Vec<&str> = message.split_inclusive(char::is_whitespace).collect();
+    let mut out = String::with_capacity(message.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let trimmed = tokens[i].trim_end();
+        if !looks_like_path(trimmed) {
+            out.push_str(tokens[i]);
+            i += 1;
+            continue;
+        }
+        // Absorb the continuation, then keep the whitespace that ended it so
+        // the sentence still reads normally.
+        let mut last = i;
+        while last + 1 < tokens.len() && tokens[last + 1].trim_end().contains('/') {
+            last += 1;
+        }
+        let token = tokens[last];
+        out.push_str("<path>");
+        out.push_str(&token[token.trim_end().len()..]);
+        i = last + 1;
+    }
+    out
 }
 
 /// Whether a whitespace-delimited token looks like a filesystem path.
@@ -105,10 +122,28 @@ mod tests {
     }
 
     #[test]
+    fn a_path_with_a_space_is_redacted_whole() {
+        assert_eq!(
+            scrub_paths("could not bind ~/Library/Application Support/CopyPaste/daemon.sock here"),
+            "could not bind <path> here"
+        );
+        // The word after a path is kept, so the sentence survives.
+        assert_eq!(
+            scrub_paths("opened /home/x/db for writing"),
+            "opened <path> for writing"
+        );
+    }
+
+    #[test]
     fn no_username_survives_a_realistic_socket_error() {
         let leaked = "connection refused (os error 111) on \
                       /Users/dmytro/Library/Application Support/CopyPaste/daemon.sock";
         let out = scrub_paths(leaked);
         assert!(!out.contains("dmytro"), "username leaked through: {out}");
+        assert!(
+            !out.contains("CopyPaste"),
+            "path tail leaked through: {out}"
+        );
+        assert!(!out.contains(".sock"), "path tail leaked through: {out}");
     }
 }
