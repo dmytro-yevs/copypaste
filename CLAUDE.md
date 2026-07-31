@@ -201,6 +201,35 @@ eighty-line header whose central claim, the merge ordering, had gone stale in
 two places while the code stayed correct. A comment that is wrong is worse
 than one that is missing.
 
+### The budgets
+
+**No comment block over 12 lines. No module header over 20. No file more
+than 30% comment.** Tests excluded, as with rule 5.
+
+`scripts/check-comments.sh` enforces all three, from `.githooks/pre-commit`
+and from CI.
+
+The numbers exist because the prose above did not bind. This rule named the
+eighty-line header as its own worst case and the tree still reached
+`copypaste-cloud/src/rest/mod.rs` — **152 comment lines above four lines of
+code** — with 160 of 279 files over 30% and 42 headers over 25 lines. Stating
+a preference and citing an example is what a linter is for.
+
+`scripts/comment-budget.txt` records the files that were already over.
+**It can only shrink.** Fix a file, delete its line; the check reports a line
+that is no longer needed and fails until it goes. Adding a line is not a way
+to land a long comment — a file over budget that is not already in the
+baseline fails, and the message says so.
+
+A file that is all comment and no code fails outright, at any size. That is
+the `mod.rs` layout table this rule already bans.
+
+The budgets are not a licence to strip. Cutting a comment that records a
+defect someone paid for is the more expensive mistake, and it is the one to
+expect once a number exists. When a comment is mostly narration wrapped
+around a real reason, **rewrite it to the reason** — deleting both is how a
+budget turns into a regression.
+
 ## 9. What may reach `main`
 
 **Every commit on `main` compiles, passes its tests, and contains what its

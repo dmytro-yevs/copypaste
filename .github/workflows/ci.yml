@@ -82,6 +82,20 @@ jobs:
           done
           exit "$status"
 
+  comments:
+    name: comment budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # A gate. CLAUDE.md rule 8 carried no number for months and bound
+      # nothing: the rule cited an eighty-line header as its own worst case
+      # while the tree grew a file with 152 comment lines above four of code.
+      # scripts/comment-budget.txt holds the pre-existing debt and can only
+      # shrink; a file over budget that is not in it fails here.
+      - name: check-comments.sh
+        run: ./scripts/check-comments.sh
+
   file-size:
     name: file-size budget
     runs-on: ubuntu-latest
