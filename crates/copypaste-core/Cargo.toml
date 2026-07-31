@@ -88,3 +88,25 @@ android-keystore-typecheck = ["dep:keyring-core", "dep:android-native-keyring-st
 
 [dev-dependencies]
 tempfile.workspace = true
+# Benchmark harness (CLAUDE.md rule 1 — the alternative was a hand-rolled timing
+# loop, which is the wheel this rule is about). `default-features = false` drops
+# `plotters` and `rayon`: the report those draw is not worth ~30 transitive
+# crates in a dev tree, and the numbers land in `docs/rewrite/performance.md`
+# rather than in an HTML report. Cost as configured: 12 dev-only crates, no
+# effect on any shipped binary.
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+# `harness = false` on all three: criterion parses its own arguments, and the
+# libtest harness would eat them. It also keeps benches out of `cargo test`,
+# which is the point — a bench must never run in the normal test path.
+[[bench]]
+name = "capture"
+harness = false
+
+[[bench]]
+name = "history"
+harness = false
+
+[[bench]]
+name = "detect"
+harness = false
