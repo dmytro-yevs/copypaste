@@ -208,6 +208,17 @@ jobs:
             target/aarch64-apple-darwin/release/copypaste \
             target/aarch64-apple-darwin/release/copypaste-daemon
 
+      - name: Install the DMG and run it
+        # The first thing in this pipeline that opens what it built. It mounts
+        # the image, copies the app to /Applications, quarantines it the way a
+        # download is quarantined, runs the cask's postflight, and then starts
+        # the daemon from inside the bundle and copies something with pbcopy.
+        # The legs that need a window server are reported rather than enforced;
+        # the script's header says which is which.
+        run: |
+          set -euo pipefail
+          ./scripts/release/smoke-macos-dmg.sh "${{ needs.version.outputs.version }}" arm64
+
       - name: Checksums
         run: |
           set -euo pipefail
