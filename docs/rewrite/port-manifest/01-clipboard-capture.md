@@ -304,6 +304,16 @@ Each entry: **Rule** / **Why** / **Bug id** / **v1 site**.
   6. The poller, on seeing `changeCount == cell` (and `cell >= 0`), advances the
      cursor, records nothing, and **consumes** the sentinel by resetting it to `-1`.
   Use acquire/release ordering on this cell.
+- **The `+2` is wrong on macOS 14, measured.** `clearContents` +
+  `setString:forType:` moves `changeCount` by **1**, not 2 (CI run
+  30632553103, macOS 14.8.7: `Observed 15 -> 16`). The delta is a *prediction*
+  the pre-stamp needs, so predicting 2 leaves the sentinel armed at a count
+  that never arrives: our own paste-back is captured as a fresh item — the
+  duplicate-on-copy bug this protocol exists to prevent — and the stale
+  sentinel then suppresses whichever genuine copy next lands on `pre + 2`.
+  Both halves of §3.3 fail from one wrong constant. The protocol is otherwise
+  as described; only the number is wrong, and `clearContents` returns the
+  change count it produced, so the writer need not predict one at all.
 - **Why (step 2, pre-stamp).** The original code stamped the change count
   *after* the write. A poll landing in the window between the write and the
   stamp saw an incremented `changeCount` with an unset sentinel, and recorded the
@@ -636,7 +646,7 @@ Three separate hard-won rules, all on the same subsystem:
 | Paste-file staging max age | **10 min** | Files are not deleted immediately after paste because the receiving app may read the URL asynchronously. `ipc/pasteboard.rs:311` |
 | Self-write sentinel "none" | **-1** | Must be outside the valid `changeCount` domain (non-negative). `monitor.rs:104` |
 | Change-count cursor initial | **-1** | Same reason; also suppresses the first-poll burst signal. `monitor.rs:100`, `:433` |
-| Expected self-write delta | **+2** | `clearContents` (+1) then `set…:forType:` (+1). `handlers_items_paste.rs:212` |
+| Expected self-write delta | v1: **+2**; measured on macOS 14.8.7: **+1** | v1's value, from `handlers_items_paste.rs:212`, is contradicted by the first run that ever measured it (§3.3). Wrong in either direction it breaks self-write suppression *and* eats a later genuine copy |
 
 ---
 
@@ -1045,10 +1055,17 @@ daemon from inside the bundle and asserts that a `pbcopy` reaches the history.
 
 ### 7.1 Covered by something that runs
 
+First run: CI 30632553103, `macos-14` (macOS 14.8.7, session `Aqua`). Five of
+the six pasteboard tests passed on the first attempt. The sixth found a live
+defect and has since been split in two, so that "what the OS does" and "what
+our protocol does with it" carry separate verdicts — both rows below fail until
+the constant is fixed.
+
 | Rules | What is driven |
 |---|---|
 | I-1, I-2, T-4, T-21 | A write by another process moves `changeCount`; the poll returns the exact UTF-8; a second poll returns nothing; a first poll is not a burst |
-| §3.3, §4, T-8, T-9 | `clearContents` + `setString:forType:` is **observed** to move `changeCount` by exactly 2, and the sentinel suppresses that one change and no other |
+| §4 | **FAILS.** The self-write delta is measured on the real pasteboard: it is **1**, not the 2 the sentinel is armed with |
+| §3.3, T-8, T-9 | **FAILS, as a consequence.** Our own paste-back comes back as a capture, and the sentinel left armed at an unreachable count then eats the next genuine copy |
 | §3.2, T-5, T-6 | Three fast writes: the survivor is returned, the losses are counted, capture resumes |
 | I-5, §3.4, T-14, T-15, T-16 | All three `org.nspasteboard.*` markers, written *alongside* real text, drop the change and advance the cursor |
 | I-18, I-39, T-30, T-33 | `cap + 1` bytes rejected and counted on the readable counter, `cap` bytes accepted |

@@ -937,6 +937,13 @@ job existed nothing had watched `crypto/keystore/macos.rs` store or retrieve
 anything, and the backend it replaced — a `0600` file — was what every shipped
 binary actually used.
 
+**All four passed on the first run** (CI 30632553103, `macos-14`, macOS
+14.8.7), against a throwaway keychain created, unlocked and made default by the
+job. So: `SecItemAdd`/`SecItemCopyMatching` work non-interactively on a
+headless runner, `-25300` is the status the framework really returns for a
+missing entry, and the Keychain — not the file store — is what answers a
+macOS build.
+
 `.github/workflows/ci.yml`'s `macos-check` job creates a throwaway keychain,
 unlocks it, makes it the default, and runs
 `cargo test -p copypaste-core -- --ignored`. **Every assertion names which

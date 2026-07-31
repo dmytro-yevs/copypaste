@@ -349,14 +349,17 @@ mod tests {
         );
     }
 
-    /// §3.3 and the `+2` of §4, which is the constant the whole self-write
-    /// protocol is built on. If `clearContents` and `setString:forType:` do not
-    /// move `changeCount` by exactly two, the sentinel is armed at a count that
-    /// never arrives and every paste-back is re-captured as a fresh copy
-    /// (Fix-4, "DUP-ON-COPY"). T-8, T-9.
+    /// §4's self-write delta, which is a *prediction*: the sentinel is armed
+    /// at `pre + SELF_WRITE_DELTA` before the write, so a wrong number arms it
+    /// at a change count that never arrives.
+    ///
+    /// Split from the suppression test below deliberately. This one says what
+    /// the OS does; that one says what our protocol does with it. Running them
+    /// together let the first assertion mask the second, and the second is the
+    /// one that names the user-visible bug.
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn our_own_write_moves_the_count_by_two_and_is_suppressed_once() {
+    fn a_self_write_moves_the_count_by_the_predicted_delta() {
         let _lock = serialised();
         let mut clipboard = MacOsClipboard::new();
         write_text("something copied earlier");
@@ -370,20 +373,44 @@ mod tests {
         assert_eq!(
             actual - pre,
             SELF_WRITE_DELTA,
-            "§4: clearContents (+1) then setString:forType: (+1). \
-             Observed {pre} -> {actual}"
+            "§4 predicts clearContents (+1) then setString:forType: (+1). \
+             Observed {pre} -> {actual}: the sentinel is armed at {} and the \
+             write lands on {actual}, so nothing is ever suppressed",
+            pre + SELF_WRITE_DELTA
         );
+    }
 
-        assert!(
-            clipboard.poll().is_none(),
-            "our own write must not come back as a capture"
-        );
+    /// T-8, T-9 and the Fix-4 / "DUP-ON-COPY" pair, asserted as behaviour
+    /// rather than as arithmetic: whatever the delta turns out to be, our own
+    /// write must not come back, and the next genuine copy must.
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn our_own_write_is_suppressed_and_the_next_genuine_copy_is_not() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+        write_text("something copied earlier");
+        let _ = clipboard.poll();
+
+        clipboard
+            .set_contents("pasted by us")
+            .expect("the write failed");
+        if let Some(capture) = clipboard.poll() {
+            panic!(
+                "T-8: our own paste-back came back as a capture ({:?}) — this is \
+                 the duplicate-on-copy bug, and the sentinel is now armed at a \
+                 count no write of ours will reach",
+                capture.content
+            );
+        }
 
         write_text("a genuine copy");
         assert_eq!(
             clipboard
                 .poll()
-                .expect("T-9: suppression is one-shot")
+                .expect(
+                    "T-9: a genuine copy was swallowed — a sentinel that was never \
+                     consumed suppresses whichever real copy lands on it"
+                )
                 .content,
             "a genuine copy"
         );
