@@ -404,6 +404,12 @@ export const settings = {
   },
 
   about: {
+    app: {
+      title: "This app",
+      description:
+        "The build you are looking at. The background service below updates separately and can be a different version.",
+      version: "CopyPaste {{version}}",
+    },
     service: {
       title: "Background service",
       connecting: "Connecting…",
@@ -430,6 +436,11 @@ export const settings = {
     items: {
       title: "Items stored",
       description: "Everything the service is holding for this device.",
+    },
+    links: {
+      title: "Links",
+      repository: "Source code",
+      releases: "Release notes",
     },
     reset: {
       title: "Reset preferences",

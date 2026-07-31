@@ -5,6 +5,7 @@
  */
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useEventListener } from "usehooks-ts";
 
 import { BannerBar } from "@/components/shell/Banners";
 import { Boundary } from "@/components/shell/Boundary";
@@ -19,7 +20,11 @@ import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
 import { legacyHistoryPresent } from "@/lib/banners";
 import { classifyError } from "@/lib/errors";
-import { CURRENT_PROTOCOL_VERSION, setAllowScreenshots } from "@/lib/ipc";
+import {
+  CURRENT_PROTOCOL_VERSION,
+  hideWindow,
+  setAllowScreenshots,
+} from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
 import { selectAppearance, usePrefs } from "@/store/prefs";
 import { useShallow } from "zustand/react/shallow";
@@ -38,17 +43,15 @@ const SCREENS = {
 export default function App() {
   const { t } = useTranslation();
   const view = useUi((s) => s.view);
-  // `useShallow` is load-bearing: `selectAppearance` returns a fresh object,
-  // and zustand v5 compares snapshots by reference, so an unwrapped call is a
-  // render loop that unmounts the app — 55 renders in 2.5s, measured.
+  // `useShallow` is load-bearing: without it this is a render loop that
+  // unmounts the app — 55 renders in 2.5s, measured.
   const appearance = usePrefs(useShallow(selectAppearance));
   const allowScreenshots = usePrefs((s) => s.allowScreenshots);
   const status = useStatus();
   const qc = useQueryClient();
-  // Subscribed once, here — not per screen. Two subscribers would invalidate
-  // the same queries twice for one change.
+  // Both subscribed once, here, not per screen: two subscribers invalidate the
+  // same queries twice for one change.
   const pushLive = usePush();
-  // Also once, for the same reason.
   useCaptureSync();
 
   // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply
@@ -58,13 +61,22 @@ export default function App() {
     subscribeSystemTheme(() => applyAppearance(usePrefs.getState()));
   }, [appearance]);
 
-  // INV-35. The window is already protected — `contentProtected` on the desktop,
-  // `FLAG_SECURE` on Android — so this only ever *relaxes* it, and only when the
-  // user has said so. Nothing waits on it, and a failure leaves the window
-  // protected, which is why revealing a secret needs no ordering against it.
+  // INV-35. The window is already protected, so this only ever *relaxes* it and
+  // a failure leaves the user protected — which is why revealing a secret needs
+  // no ordering against it.
   useEffect(() => {
     void setAllowScreenshots(allowScreenshots).catch(() => {});
   }, [allowScreenshots]);
+
+  // B-20: for a popover summoned by a hotkey, Escape *is* the dismissal.
+  // `defaultPrevented` is the whole test for "something nearer the key already
+  // used it" — Radix's dismissable layer and the search field both set it.
+  useEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    // INV-25: through the backend, never `window.hide()`. A build with no
+    // window to hide — the browser, a test — is not a failure.
+    void hideWindow().catch(() => {});
+  });
 
   const statusKind = status.error ? classifyError(status.error) : null;
   const screen = SCREENS[view];
