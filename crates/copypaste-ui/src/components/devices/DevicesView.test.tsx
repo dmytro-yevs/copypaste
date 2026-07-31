@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
 import { DevicesView } from "@/components/devices/DevicesView";
+import { MAX_PAIRINGS } from "@/components/devices/peerState";
 import { peer, withUser } from "@/test/harness";
 
 const listPeers = vi.fn();
@@ -110,5 +111,84 @@ describe("cutting a device off", () => {
         "disabled",
       ),
     ).toBe(true);
+  });
+});
+
+describe("the pairing cap", () => {
+  /**
+   * The store refuses a seventeenth pairing rather than evicting one, and names
+   * "unpair one first" as the remedy. Finding that out by minting a code and
+   * typing it into a phone is the failure this is here to prevent.
+   */
+  it("says the list is full before the user spends a code", async () => {
+    listPeers.mockResolvedValue(
+      Array.from({ length: MAX_PAIRINGS }, (_, i) =>
+        peer({ pairing_id: `pair-${i}`, name: `Device ${i}` }),
+      ),
+    );
+    withUser(<DevicesView />);
+
+    expect(await screen.findByText(/the most it can hold/i)).toBeTruthy();
+    for (const name of [/pair a new device/i, /add a device/i]) {
+      const button = screen.getByRole("button", { name });
+      expect((button as HTMLButtonElement).disabled, String(name)).toBe(true);
+    }
+  });
+
+  it("shows the count, and both ways in, below the cap", async () => {
+    listPeers.mockResolvedValue([PHONE]);
+    withUser(<DevicesView />);
+
+    expect(await screen.findByText(/1 device paired · 16 maximum/i)).toBeTruthy();
+    for (const name of [/pair a new device/i, /add a device/i]) {
+      expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    }
+  });
+});
+
+describe("what the row says about sync", () => {
+  /**
+   * `last_seen_ms` is the end of the last successful session, and `0` means
+   * there has never been one. Feeding that zero to a relative formatter read
+   * "Last seen 56 years ago" — a pairing minted a minute ago described as
+   * half a century stale.
+   */
+  it("says never rather than dating an uncontacted pairing to 1970", async () => {
+    listPeers.mockResolvedValue([
+      peer({ name: "New Phone", last_seen_ms: 0, last_addr: null, online: false }),
+    ]);
+    withUser(<DevicesView />);
+
+    expect(await screen.findByText(/never synced/i)).toBeTruthy();
+    expect(screen.queryByText(/years ago/i)).toBeNull();
+    // And the remedy, which is on the *other* device.
+    expect(screen.getByText(/enter it on the other device/i)).toBeTruthy();
+  });
+
+  /** A device this one holds no address for is not the same as one that is
+   *  merely asleep, and the row has to give the different remedy. */
+  it("tells a peer this device cannot dial apart from one that is away", async () => {
+    listPeers.mockResolvedValue([
+      peer({
+        pairing_id: "pair-in",
+        name: "Inbound Mac",
+        last_addr: null,
+        last_seen_ms: Date.now(),
+        online: true,
+      }),
+      peer({
+        pairing_id: "pair-away",
+        name: "Sleeping Mac",
+        last_seen_ms: Date.now(),
+        online: false,
+      }),
+    ]);
+    withUser(<DevicesView />);
+
+    expect(await screen.findByText("Incoming only")).toBeTruthy();
+    expect(screen.getByText("Away")).toBeTruthy();
+    expect(screen.getByText(/only that device can start a sync/i)).toBeTruthy();
   });
 });

@@ -13,17 +13,13 @@
  *    half.
  *  - Every load state is *visible*: a spinner, not a classless empty element
  *    (CopyPaste-8ebg.29, bdac.2).
+ *
+ * **There is no "revoked" row.** A revoked pairing leaves the list in exactly
+ * the state an unpaired one does, so rendering the two differently would mean
+ * inventing a distinction the wire cannot make.
  */
 import { useState } from "react";
-import {
-  KeyRound,
-  Laptop,
-  Link2,
-  LoaderCircle,
-  RefreshCw,
-  ShieldOff,
-  Unlink,
-} from "lucide-react";
+import { KeyRound, Laptop, Link2, RefreshCw } from "lucide-react";
 
 import {
   AlertDialog,
@@ -35,18 +31,23 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
 import { PairAcceptDialog } from "@/components/devices/PairAcceptDialog";
 import { PairCreateDialog } from "@/components/devices/PairCreateDialog";
+import { PeerRow } from "@/components/devices/PeerRow";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
+import {
+  MAX_PAIRINGS,
+  type SyncAttempts,
+  atPairingCap,
+  noteAttempts,
+} from "@/components/devices/peerState";
 import { ServiceOffline } from "@/components/shell/ServiceOffline";
 import { usePeers, useRevoke, useSyncNow, useUnpair } from "@/hooks/useDevices";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
-import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
 
 export function DevicesView() {
@@ -60,9 +61,17 @@ export function DevicesView() {
   const [accepting, setAccepting] = useState(false);
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
+  const [attempts, setAttempts] = useState<SyncAttempts>({});
 
   const errorKind = peers.error ? classifyError(peers.error) : null;
   const list = peers.data ?? [];
+  const full = atPairingCap(list.length);
+
+  const runSync = (pairingId: string | undefined) =>
+    sync.mutate(pairingId, {
+      onSuccess: (results) =>
+        setAttempts((previous) => noteAttempts(previous, results)),
+    });
 
   if (errorKind === "offline") return <ServiceOffline />;
 
@@ -81,11 +90,22 @@ export function DevicesView() {
       <header className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-panel px-s-3 py-s-2">
         <h1 className="mr-auto text-sm font-semibold">{t("devices.title")}</h1>
 
-        <Button size="sm" onClick={() => setCreating(true)}>
+        <Button
+          size="sm"
+          disabled={full}
+          title={full ? t("devices.cap.hint") : undefined}
+          onClick={() => setCreating(true)}
+        >
           <KeyRound aria-hidden="true" />
           {t("devices.actions.pairNew")}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setAccepting(true)}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={full}
+          title={full ? t("devices.cap.hint") : undefined}
+          onClick={() => setAccepting(true)}
+        >
           <Link2 aria-hidden="true" />
           {t("devices.actions.add")}
         </Button>
@@ -93,7 +113,7 @@ export function DevicesView() {
           size="sm"
           variant="ghost"
           disabled={sync.isPending || list.length === 0}
-          onClick={() => sync.mutate(undefined)}
+          onClick={() => runSync(undefined)}
           title={t("devices.actions.syncAllHint")}
         >
           <RefreshCw
@@ -134,83 +154,42 @@ export function DevicesView() {
             }}
           />
         ) : (
-          <ul className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-2">
-            {list.map((peer) => (
-              <li
-                key={peer.pairing_id}
-                className="flex flex-wrap items-center gap-s-3 rounded-xl border border-border bg-card px-s-3 py-s-3"
-              >
-                <span
-                  aria-hidden="true"
-                  className="flex size-[var(--sz-tile)] shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-                >
-                  <Laptop size={18} />
-                </span>
+          <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-2">
+            {full ? (
+              <p className="rounded-md border border-warn/20 bg-warn/15 px-s-3 py-s-2 text-xs text-warn-strong">
+                {t("devices.cap.full", { max: MAX_PAIRINGS })}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {t("devices.cap.count", {
+                  count: list.length,
+                  max: MAX_PAIRINGS,
+                })}
+              </p>
+            )}
 
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span
-                    className="truncate text-sm font-medium"
-                    title={t("devices.peer.nameHint")}
-                  >
-                    {peer.name}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {t("devices.peer.lastSeen", {
-                      age: longAge(peer.last_seen_ms),
-                    })}
-                    {peer.last_addr ? ` · ${peer.last_addr}` : ""}
-                  </span>
-                </div>
-
-                <Badge variant={peer.online ? "ok" : "secondary"}>
-                  {t(peer.online ? "devices.peer.online" : "devices.peer.offline")}
-                </Badge>
-
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={t("devices.peer.syncOne", { name: peer.name })}
-                  title={t("devices.peer.syncOneHint")}
-                  disabled={sync.isPending}
-                  onClick={() => sync.mutate(peer.pairing_id)}
-                >
-                  <RefreshCw aria-hidden="true" />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={t("devices.peer.unpairOne", { name: peer.name })}
-                  title={t("devices.peer.unpairHint")}
-                  className="hover:text-err-strong"
-                  disabled={unpair.isPending}
-                  onClick={() => setConfirmUnpair(peer)}
-                >
-                  {unpair.isPending &&
-                  unpair.variables?.pairing_id === peer.pairing_id ? (
-                    <LoaderCircle aria-hidden="true" className="animate-spin" />
-                  ) : (
-                    <Unlink aria-hidden="true" />
-                  )}
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={t("devices.peer.revokeOne", { name: peer.name })}
-                  title={t("devices.peer.revokeHint")}
-                  className="hover:text-err-strong"
-                  disabled={revoke.isPending}
-                  onClick={() => setConfirmRevoke(peer)}
-                >
-                  {revoke.isPending &&
-                  revoke.variables?.pairing_id === peer.pairing_id ? (
-                    <LoaderCircle aria-hidden="true" className="animate-spin" />
-                  ) : (
-                    <ShieldOff aria-hidden="true" />
-                  )}
-                </Button>
-              </li>
-            ))}
-          </ul>
+            <ul className="flex flex-col gap-s-2">
+              {list.map((peer) => (
+                <PeerRow
+                  key={peer.pairing_id}
+                  peer={peer}
+                  attempt={attempts[peer.pairing_id]}
+                  syncing={sync.isPending}
+                  unpairing={
+                    unpair.isPending &&
+                    unpair.variables?.pairing_id === peer.pairing_id
+                  }
+                  revoking={
+                    revoke.isPending &&
+                    revoke.variables?.pairing_id === peer.pairing_id
+                  }
+                  onSync={(target) => runSync(target.pairing_id)}
+                  onUnpair={setConfirmUnpair}
+                  onRevoke={setConfirmRevoke}
+                />
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 

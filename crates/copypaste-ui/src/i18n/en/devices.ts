@@ -26,14 +26,62 @@ export const devices = {
     body: "Pair your phone or another Mac to sync your clipboard — end-to-end encrypted, directly between your devices.",
   },
 
+  /** The cap is a refusal, never an eviction, so the only remedy is one the
+   *  user carries out. Saying so before the code is minted is the difference
+   *  between a sentence and a failed pairing. */
+  cap: {
+    count_one: "{{count}} device paired · {{max}} maximum",
+    count_other: "{{count}} devices paired · {{max}} maximum",
+    full: "This device is paired with {{max}} others, the most it can hold. Unpair or revoke one before pairing another.",
+    hint: "Unpair a device first",
+  },
+
+  /**
+   * What a device is doing, in the terms the daemon can actually answer.
+   *
+   * Six states rather than a dot, because the remedies differ: a code nobody
+   * has used, a device this one holds no address for, and a device sitting on
+   * the network not syncing are three different problems that a green/grey
+   * badge reported identically.
+   *
+   * Every `label` is a word, not only a colour (manifest 06, A11Y).
+   */
+  state: {
+    synced: { label: "In sync" },
+    away: {
+      label: "Away",
+      hint: "Not on this network right now. It catches up the next time both devices are on the same network.",
+    },
+    stalled: {
+      label: "Not syncing",
+      hint: "It's on this network, but nothing has synced for a while. Try Sync now — if that fails, check the other device is awake and CopyPaste is running on it.",
+    },
+    inbound: {
+      label: "Incoming only",
+      hint: "This device has no address for it, so only that device can start a sync. One successful Sync now while it's on this network settles that for good.",
+    },
+    waiting: {
+      label: "Not connected yet",
+      hint: "The pairing code hasn't been used. Enter it on the other device — a code stops working a few minutes after it's created, so generate a new one if it has been longer.",
+    },
+    failing: {
+      label: "Sync failed",
+      hint: "The last sync with this device didn't finish. Check it's awake and on this network, then try again.",
+    },
+  },
+
   /** INV-15: `{{name}}` is what the other device called itself, never a
    *  verified identity — `nameHint` is what says so. */
   peer: {
     thisDevice: "this device",
     nameHint: "Name reported by the device itself — not verified",
-    lastSeen: "Last seen {{age}}",
-    online: "On the network",
-    offline: "Not seen",
+    /** `last_seen_ms` is written at the end of a successful session, so it is
+     *  a last-*synced* time. Rendering the `0` an uncontacted pairing carries
+     *  through a relative formatter read "Last seen 56 years ago". */
+    lastSynced: "Last synced {{age}}",
+    neverSynced: "Never synced",
+    online: "On this network",
+    offline: "Not seen on this network",
     syncOne: "Sync with {{name}} now",
     syncOneHint: "Sync with this device now",
     unpairOne: "Unpair {{name}}",
