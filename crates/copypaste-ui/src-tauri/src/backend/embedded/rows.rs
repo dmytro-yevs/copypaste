@@ -1,8 +1,8 @@
-//! Stored rows into wire items, and the page bounds both platforms share.
+//! Stored rows into wire items.
 //!
 //! Separated from the command surface in `super` so that "what a row becomes"
-//! is one small thing to read: the AAD binding, the count of what would not
-//! open, and the two clamps are the whole file.
+//! is one small thing to read: the AAD binding and the count of what would not
+//! open are the whole file.
 
 use std::collections::HashMap;
 
@@ -12,13 +12,7 @@ use copypaste_ipc::{Item, PeerInfo};
 use super::Inner;
 use crate::backend::{BackendError, Page, Result};
 
-/// Server-side clamp on a caller-supplied page size (manifest 04 §3.3).
-/// Identical to the daemon's, because it is the same contract seen from the
-/// other side — a frontend asking for ten million rows must get the same
-/// answer on both platforms.
-pub(super) const MAX_PAGE: u32 = 1_000;
-pub(super) const DEFAULT_LIST_PAGE: u32 = 50;
-pub(super) const DEFAULT_SEARCH_PAGE: u32 = 20;
+pub(super) use copypaste_ipc::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_PAGE};
 
 const MSG_NO_ITEM: &str = "That item is no longer there.";
 
@@ -102,14 +96,6 @@ impl Inner {
     }
 }
 
-pub(super) fn clamp_page(limit: u32, default: u32) -> u32 {
-    if limit == 0 {
-        default
-    } else {
-        limit.min(MAX_PAGE)
-    }
-}
-
 pub(super) fn peer_info(peer: &copypaste_p2p::Peer, online: bool) -> PeerInfo {
     PeerInfo {
         pairing_id: peer.pairing_id.clone(),
@@ -169,13 +155,6 @@ mod tests {
     use super::*;
     use crate::backend::embedded::tests::backend;
     use crate::backend::Backend as _;
-
-    #[test]
-    fn page_sizes_are_clamped_exactly_as_the_daemon_clamps_them() {
-        assert_eq!(clamp_page(0, DEFAULT_LIST_PAGE), DEFAULT_LIST_PAGE);
-        assert_eq!(clamp_page(10, DEFAULT_LIST_PAGE), 10);
-        assert_eq!(clamp_page(u32::MAX, DEFAULT_LIST_PAGE), MAX_PAGE);
-    }
 
     /// v2's own directory holds `copypaste-v2.db`, a keyring and a peer file,
     /// and none of them is a v0.4 history. The negative has to hold first: a

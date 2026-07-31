@@ -66,12 +66,10 @@ const MAX_PAGES_PER_PULL: usize = 50;
 /// No correction is attempted, only refusal, and refusal skips **one version**
 /// — it never fails the round and never deletes anything (manifest 05 R-CLK-2).
 ///
-/// This deliberately mirrors `copypaste_p2p::sync::MAX_FUTURE_SKEW_MS`: same
-/// rule, same value, same response, because the two transports share an
-/// ordering and must therefore share what they consider a valid stamp. The
-/// crates have no dependency edge and adding one for a single `i64` would be a
-/// worse trade than restating it; if a third transport appears, this belongs in
-/// `copypaste-core` and both should import it from there.
+/// Must equal `copypaste_p2p::sync::MAX_FUTURE_SKEW_MS`: the two transports
+/// share an ordering, so they must share what counts as a valid stamp. There is
+/// no dependency edge to import it across, so `tests/constant_parity.rs` fails
+/// the build instead if they diverge.
 pub const MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
