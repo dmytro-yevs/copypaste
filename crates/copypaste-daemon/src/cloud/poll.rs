@@ -14,7 +14,7 @@ use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::cloud::source::StoreSource;
-use crate::cloud::KEY_UPLOAD_FLOOR;
+use crate::cloud::{KEY_LAST_SYNC, KEY_UPLOAD_FLOOR};
 
 use crate::AppState;
 
@@ -75,7 +75,11 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
 
     match &outcome {
         Ok(stats) => {
-            state.cloud.note_success(copypaste_core::now_ms());
+            let at_ms = copypaste_core::now_ms();
+            state.cloud.note_success(at_ms);
+            if let Err(e) = state.meta.set_state_ms(KEY_LAST_SYNC, at_ms) {
+                warn!(error = ?e, "could not record when the round completed");
+            }
             if let Err(e) = state
                 .meta
                 .set_state_ms(KEY_UPLOAD_FLOOR, source.next_floor(started_ms))
@@ -150,6 +154,64 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         assert!(sync_round(&state).await.is_none());
         assert_eq!(state.cloud.status().last_sync_ms, None);
+    }
+
+    /// Manifest 05 AT-33 (`CopyPaste-1t38`), which v1 needed an in-memory retry
+    /// queue for and v2 gets from the floor: a round against an unreachable
+    /// backend must leave the cursor exactly where it was, so the next round
+    /// re-derives the same work from local state. There is no queue to lose.
+    #[tokio::test]
+    async fn a_failed_round_leaves_the_upload_floor_where_it_was() {
+        use copypaste_cloud::crypto::derive_sync_key;
+        use copypaste_cloud::sync::CloudSource;
+        use copypaste_cloud::CloudConfig;
+
+        // A URL that resolves nowhere: the round must fail at the transport
+        // rather than hang.
+        let config = CloudConfig {
+            url: "http://127.0.0.1:1".into(),
+            anon_key: "anon".into(),
+        };
+        let (state, _dir) = crate::testutil::test_state_with_cloud(
+            "alpha",
+            crate::cloud::Cloud::new(Some(config.clone())),
+        );
+        state.cloud.install(
+            &state,
+            config,
+            "a@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            copypaste_cloud::auth::Session {
+                access_token: "access-1".into(),
+                refresh_token: "refresh-1".into(),
+                user_id: "user-1".into(),
+                expires_at_ms: i64::MAX,
+            },
+        );
+
+        crate::testutil::add(&state, "captured while the backend was down");
+        let floor = state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap();
+
+        assert!(matches!(sync_round(&state).await, Some(Err(_))));
+
+        assert_eq!(state.meta.state_ms(KEY_UPLOAD_FLOOR).unwrap(), floor);
+        assert_eq!(
+            StoreSource::new(Arc::clone(&state))
+                .local_changes_since(floor)
+                .unwrap()
+                .len(),
+            1,
+            "the change stopped being offered after one failed round"
+        );
+        // And the user can tell, which is the other half: an upload that
+        // silently never happens is the failure this guards.
+        let status = state.cloud.status();
+        assert_eq!(
+            status.last_error.as_deref(),
+            Some("the sync backend could not be reached")
+        );
+        assert_eq!(status.last_sync_ms, None);
     }
 
     #[tokio::test]
