@@ -93,13 +93,15 @@ mod macos;
 #[cfg(not(target_os = "macos"))]
 pub use fake::FakeClipboard;
 
-/// Read gate for text, in bytes (§4, "Max text (default)" = 10 MiB).
+/// Read gate for text, in bytes.
 ///
-/// Kept under the 16 MiB wire-frame cap so anything storable is transportable.
-/// Configuration is not wired yet; when it is, §3.10 applies — this gate and the
-/// storage layer's gate must be driven by the *same* user-configured value and
-/// hot-reload together.
-const MAX_TEXT_BYTES: usize = 10 * 1024 * 1024;
+/// §4 gives 10 MiB and gives its reason as "kept under the wire-frame cap so a
+/// storable item is always transportable" — the number was v1's *default*
+/// `max_item_bytes`, and the reason is the rule. Both now come from one place:
+/// this is the ceiling `max_item_bytes` may be set to, so reading further can
+/// only ever end in a rejection. §3.10 still applies — this gate and the
+/// storage layer's gate move together.
+const MAX_TEXT_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,5 +174,33 @@ pub fn new_source() -> Box<dyn ClipboardSource> {
     #[cfg(not(target_os = "macos"))]
     {
         Box::new(FakeClipboard::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MAX_TEXT_BYTES;
+    use copypaste_ipc::{ConfigData, ConfigPatch};
+
+    /// §3.10, from the other end: the read gate and the storable maximum were
+    /// separate numbers, and the gate was the larger. Everything it let through
+    /// above `max_item_bytes`' ceiling was read off the pasteboard, copied into
+    /// the heap, and then refused by ingest — or, worse, stored under a config
+    /// no client could read back.
+    #[test]
+    fn a_capture_at_the_read_gate_is_a_size_a_user_may_store() {
+        let at_the_gate = ConfigPatch {
+            max_item_bytes: Some(MAX_TEXT_BYTES as u64),
+            ..Default::default()
+        }
+        .apply(&ConfigData::default())
+        .expect("the config ceiling must admit everything the read gate passes");
+        assert_eq!(at_the_gate.max_item_bytes, MAX_TEXT_BYTES as u64);
+    }
+
+    /// And nothing it passes can outgrow a reply frame.
+    #[test]
+    fn the_read_gate_stays_inside_the_wire_contract() {
+        const { assert!(MAX_TEXT_BYTES <= copypaste_ipc::MAX_CONTENT_BYTES) };
     }
 }

@@ -16,6 +16,7 @@
 pub mod config;
 pub mod content_type;
 pub mod error;
+pub mod limits;
 pub mod paths;
 pub mod payload;
 pub mod redact;
@@ -24,6 +25,10 @@ pub use paths::{data_dir, database_path, socket_path, v1_data_dir};
 
 pub use config::{ConfigData, ConfigError, ConfigPatch, Liveness};
 pub use error::ErrorCode;
+pub use limits::{
+    clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES,
+    MAX_PAGE, MAX_PAGE_CONTENT_BYTES,
+};
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
     DiscoveredDevice, ExportData, ExportItem, ImportData, Item, ItemPage, PairingData, PeerInfo,
@@ -34,9 +39,6 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
 pub const PROTOCOL_VERSION: u32 = 1;
-
-/// Frames larger than this are rejected before allocation.
-pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
