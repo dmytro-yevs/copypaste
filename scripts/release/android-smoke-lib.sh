@@ -55,6 +55,18 @@ crash_report() {
     ' "$1"
 }
 
+# Our own keystore and history failures, and nothing else's.
+#
+# The word "Keystore" alone is not a signal: a stock emulator logs `Fido:
+# [FidoV2EnrollmentController] Attempting to enroll Autofill Keystore keys` and
+# `BiometricService: ... cannot participate in Keystore operations` on every
+# boot. Matching it failed run 1 twice while the round-trip it guards passed.
+KEYSTORE_FAILURES='could not open history|could not open the keystore|KeystoreEntryUnusable|KeystoreUnavailable|device secret'
+
+keystore_report() {
+    grep -aE "$KEYSTORE_FAILURES" "$1" | head -n 5
+}
+
 # A history database that opens without SQLCipher is the failure ADR-0007 is
 # about: it would be readable clipboard plaintext at rest.
 looks_encrypted() {
@@ -158,6 +170,18 @@ self_test() {
     [[ -n "$(crash_report "$t/link.log")" ]] \
         && ok "a missing libcopypaste_ui_lib.so is reported" \
         || bad "a missing libcopypaste_ui_lib.so is reported"
+
+    group "self-test: keystore detection"
+
+    printf 'I Fido    : [FidoV2EnrollmentController] Attempting to enroll Autofill Keystore keys\nD BiometricService: Sensor ID(0) cannot participate in Keystore operations\n' > "$t/android-keystore.log"
+    [[ -z "$(keystore_report "$t/android-keystore.log")" ]] \
+        && ok "Android's own Keystore chatter is not our failure" \
+        || bad "Android's own Keystore chatter is not our failure" "$(keystore_report "$t/android-keystore.log")"
+
+    printf 'E copypaste: could not open the keystore: KeystoreUnavailable\n' > "$t/ours-keystore.log"
+    [[ -n "$(keystore_report "$t/ours-keystore.log")" ]] \
+        && ok "our own keystore failure is reported" \
+        || bad "our own keystore failure is reported"
 
     group "self-test: database detection"
 

@@ -118,11 +118,11 @@ else
     bad "no crash block naming this app in logcat" "$(head -n 20 <<<"$crashes")"
 fi
 
-if grep -aqE 'could not open history|could not open the keystore|KeystoreEntryUnusable|KeystoreUnavailable' "$OUT/launch1.log"; then
-    bad "no keystore or history failure in logcat" \
-        "$(grep -aE 'could not open history|could not open the keystore|Keystore' "$OUT/launch1.log" | head -n 5)"
-else
+keystore1="$(keystore_report "$OUT/launch1.log")"
+if [[ -z "$keystore1" ]]; then
     ok "no keystore or history failure in logcat"
+else
+    bad "no keystore or history failure in logcat" "$keystore1"
 fi
 
 maps=""
@@ -240,10 +240,10 @@ crashes2="$(crash_report "$OUT/launch2.log")"
     && ok "no crash block on the second launch" \
     || bad "no crash block on the second launch" "$(head -n 20 <<<"$crashes2")"
 
-grep -aqE 'could not open history|could not open the keystore|Keystore' "$OUT/launch2.log" \
-    && bad "no keystore or history failure on the second launch" \
-           "$(grep -aE 'could not open history|could not open the keystore|Keystore' "$OUT/launch2.log" | head -n 5)" \
-    || ok "no keystore or history failure on the second launch"
+keystore2="$(keystore_report "$OUT/launch2.log")"
+[[ -z "$keystore2" ]] \
+    && ok "no keystore or history failure on the second launch" \
+    || bad "no keystore or history failure on the second launch" "$keystore2"
 
 # The proof ADR-0003 asks for. A second launch that minted a fresh secret would
 # either fail to open this file or replace it; an unchanged page-1 salt says
