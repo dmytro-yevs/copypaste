@@ -26,14 +26,15 @@ in, on Android 16, x86_64, `google_apis`:
 * With Shizuku absent, nothing claims otherwise — no foreground service, no
   ongoing notification.
 
+* **The UI paints, and it is now asserted.** The React side reaches the
+  WebView: 33 named accessibility nodes under it, the first reading
+  "CopyPaste". It arrives late — 33 and 38 seconds after `am start` across two
+  runs — which is why run 2, sampling once at 25, found an empty WebView and
+  passed anyway. The check polls to a 90-second budget and reports the time it
+  actually took, so the margin stays measured.
+
 What it did **not** settle, and why:
 
-* **Whether the UI paints.** Run 1's hierarchy dump held the rendered tree — six
-  buttons, four text views — and a 36 KB screenshot. Run 2, same code, held a
-  bare `android.webkit.WebView` node and a 2 KB screenshot: at 25 seconds the
-  WebView had not painted. So a bare assertion here would be flaky; it needs to
-  wait for content, and until it does this stays a probe with both artefacts
-  attached.
 * **The Quick Settings tile.** `cmd statusbar add-tile` and `click-tile` print
   nothing on this image and `cmd clipboard` does not exist on it — there is no
   way to put text on the clipboard from the shell, so the tile's read has
@@ -46,7 +47,7 @@ Everything unobservable is printed under `NOT ASSERTED` rather than skipped, and
 `check.sh` runs the smoke test's `--self-test` so its detectors are known to
 fail when they should.
 
-### One trap this cost a run
+### Two traps, each of which cost a run
 
 `extractNativeLibs` is `false` — AGP's default at minSdk 24 — so the library is
 mapped straight out of `base.apk` and the string `libcopypaste_ui_lib.so`
@@ -54,6 +55,10 @@ appears nowhere in `/proc/<pid>/maps`. Asserting that file name failed while the
 library was demonstrably running. The evidence is an *executable* mapping owned
 by the package (`r-xp … /base.apk`), and anything else reading maps should
 expect the same.
+
+`screencap` is not evidence here. Under `-gpu swiftshader_indirect -no-window`
+it returned the same 2 KB image for a fully painted UI as for a blank one. The
+accessibility tree is the signal; the screenshot is for a human to look at.
 
 ## On a phone, not an emulator
 
