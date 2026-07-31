@@ -182,7 +182,9 @@ const POLL_INTERVAL_MS: (u64, u64) = (100, 60_000);
 const HISTORY_LIMIT: (u32, u32) = (10, 1_000_000);
 const RETENTION_DAYS: (u32, u32) = (0, 3_650);
 const DEDUP_WINDOW_SECS: (u32, u32) = (0, 86_400);
-const MAX_ITEM_BYTES: (u64, u64) = (1_024, 64 * 1024 * 1024);
+/// The ceiling is not a free choice: an item a user is allowed to store has to
+/// fit one IPC frame, or it is captured, stored, and unreadable ever after.
+const MAX_ITEM_BYTES: (u64, u64) = (1_024, crate::MAX_CONTENT_BYTES as u64);
 const SENSITIVE_TTL_SECS: (u64, u64) = (0, 86_400);
 /// A bundle id is `com.example.app`; the cap is generous and exists so the list
 /// cannot be used to grow the config file without limit.
@@ -308,7 +310,40 @@ impl ConfigPatch {
     }
 }
 
+impl From<&ConfigData> for ConfigPatch {
+    fn from(c: &ConfigData) -> Self {
+        Self {
+            poll_interval_ms: Some(c.poll_interval_ms),
+            history_limit: Some(c.history_limit),
+            retention_days: Some(c.retention_days),
+            dedup_window_secs: Some(c.dedup_window_secs),
+            max_item_bytes: Some(c.max_item_bytes),
+            sensitive_ttl_secs: Some(c.sensitive_ttl_secs),
+            excluded_app_bundle_ids: Some(c.excluded_app_bundle_ids.clone()),
+            lan_visibility: Some(c.lan_visibility),
+            sync_enabled: Some(c.sync_enabled),
+            notify_on_copy: Some(c.notify_on_copy),
+            sound_on_copy: Some(c.sound_on_copy),
+        }
+    }
+}
+
 impl ConfigData {
+    /// Whether every field is within the bounds this build enforces.
+    ///
+    /// Deserializing does not check them, so a file written when a bound was
+    /// wider survives an upgrade that narrowed it — which is how a
+    /// `max_item_bytes` above [`crate::MAX_CONTENT_BYTES`] would come back and
+    /// store items no client can read. Runs the same checks as
+    /// [`ConfigPatch::apply`] rather than a second copy of the bounds.
+    ///
+    /// # Errors
+    ///
+    /// The first field that is out of range.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        ConfigPatch::from(self).apply(&Self::default()).map(|_| ())
+    }
+
     /// Which fields take effect without a restart. Exhaustive by hand because
     /// the answer is a property of the *daemon*, not of the type.
     #[must_use]

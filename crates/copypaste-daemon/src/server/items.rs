@@ -8,7 +8,8 @@
 
 use copypaste_core::{ItemCursor, StoredItem};
 use copypaste_ipc::{
-    ErrorCode, Item, ItemPage, Response, ResponseData, StatusData, PROTOCOL_VERSION,
+    clamp_page, ErrorCode, Item, ItemPage, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
+    DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
 };
 use tracing::{error, warn};
 
@@ -19,13 +20,6 @@ use super::messages::{
 use crate::capture::{self, IngestError};
 use crate::AppState;
 
-/// Server-side clamp on any caller-supplied page size (manifest 04 §3.3,
-/// `MAX_PAGE`). A client asking for 10 million rows gets 1 000.
-const MAX_PAGE: u32 = 1_000;
-/// Applied when `list` is called with `limit = 0`.
-const DEFAULT_LIST_PAGE: u32 = 50;
-/// Applied when `search` is called with `limit = 0`.
-const DEFAULT_SEARCH_PAGE: u32 = 20;
 /// Ceiling on one `reorder_pinned` request.
 ///
 /// The frame cap already bounds the bytes; this bounds the *work*, so one
@@ -70,15 +64,27 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
         Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR),
     };
 
-    match state.store.list_from(after.as_ref(), limit) {
-        Ok(page) => {
-            let next = page.next.map(|cursor| cursor.token());
-            let mut wire = decrypt_rows(state, page.items);
-            wire.next_cursor = next;
-            Response::ok(id, ResponseData::Page(wire))
-        }
-        Err(e) => storage_error(id, "list", &e),
-    }
+    let page = match state.store.list_from(after.as_ref(), limit) {
+        Ok(page) => page,
+        Err(e) => return storage_error(id, "list", &e),
+    };
+
+    // A page whose bytes overrun the frame arrives as a decode error, taking
+    // every item beside it down. Re-ask for the count that fits so the cursor
+    // comes from the store rather than being invented here.
+    let page = match within_budget(&page.items) {
+        kept if kept < page.items.len() => match state.store.list_from(after.as_ref(), kept as u32)
+        {
+            Ok(page) => page,
+            Err(e) => return storage_error(id, "list", &e),
+        },
+        _ => page,
+    };
+
+    let next = page.next.map(|cursor| cursor.token());
+    let mut wire = decrypt_rows(state, page.items);
+    wire.next_cursor = next;
+    Response::ok(id, ResponseData::Page(wire))
 }
 
 pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Response {
@@ -89,7 +95,11 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
             // The store already keeps them out of the index at write time; this
             // is the second of the three layers the rule demands, and it is
             // what protects a database written before the rule existed.
-            let rows: Vec<StoredItem> = rows.into_iter().filter(|row| !row.is_sensitive).collect();
+            let mut rows: Vec<StoredItem> =
+                rows.into_iter().filter(|row| !row.is_sensitive).collect();
+            // Search carries no cursor, so matches past the budget are dropped
+            // rather than deferred. An undeliverable frame would drop all of them.
+            rows.truncate(within_budget(&rows));
             Response::ok(id, ResponseData::Page(decrypt_rows(state, rows)))
         }
         Err(e) => storage_error(id, "search", &e),
@@ -337,12 +347,21 @@ fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
     page
 }
 
-fn clamp_page(limit: u32, default: u32) -> u32 {
-    if limit == 0 {
-        default
-    } else {
-        limit.min(MAX_PAGE)
+/// How many of `rows`, in order, fit [`MAX_PAGE_CONTENT_BYTES`].
+///
+/// Never zero while there are rows: an item at the ceiling has to be a page of
+/// its own or the list stops there for good. Ciphertext is the measure because
+/// it is what is in hand before decrypting, and it only ever exceeds the
+/// plaintext it stands for.
+fn within_budget(rows: &[StoredItem]) -> usize {
+    let mut bytes = 0usize;
+    for (n, row) in rows.iter().enumerate() {
+        bytes = bytes.saturating_add(row.content_ciphertext.len());
+        if bytes > MAX_PAGE_CONTENT_BYTES {
+            return n.max(1);
+        }
     }
+    rows.len()
 }
 
 #[cfg(test)]
@@ -351,6 +370,40 @@ mod tests {
     use crate::server::dispatch::dispatch_store;
     use crate::testutil::test_state;
     use copypaste_ipc::{content_type::TEXT, Method};
+
+    fn row_of(bytes: usize) -> StoredItem {
+        StoredItem {
+            id: String::new(),
+            content_ciphertext: vec![0; bytes],
+            nonce: Vec::new(),
+            content_type: TEXT.to_string(),
+            content_hash: String::new(),
+            created_at: 0,
+            pinned: false,
+            is_sensitive: false,
+            deleted: false,
+            origin_device_id: String::new(),
+        }
+    }
+
+    /// `MAX_PAGE` bounds a page's count and nothing about its size, so a page
+    /// of large items serialised past the frame cap and reached the client as a
+    /// decode error that took every item beside it down.
+    #[test]
+    fn a_page_stops_at_the_byte_budget_not_only_the_row_count() {
+        let half = MAX_PAGE_CONTENT_BYTES / 2 + 1;
+        let three = [row_of(half), row_of(half), row_of(half)];
+        assert_eq!(within_budget(&three), 1);
+        assert_eq!(within_budget(&[row_of(8), row_of(8)]), 2);
+    }
+
+    /// An item at the ceiling has to be a page of its own: returning zero would
+    /// hand back an empty page with a cursor that never advances, and the list
+    /// would stop there for good.
+    #[test]
+    fn one_item_over_the_budget_is_still_served() {
+        assert_eq!(within_budget(&[row_of(MAX_PAGE_CONTENT_BYTES * 2)]), 1);
+    }
 
     /// I-39 / §6.5: the two clipboard counters existed and nothing read them,
     /// which is the same as not having them. This is the caller that made
@@ -380,13 +433,6 @@ mod tests {
         let (state, _dir) = test_state("status-paths");
         let json = serde_json::to_string(&status(&state, 1)).unwrap();
         assert_eq!(json, copypaste_ipc::redact::scrub_paths(&json), "{json}");
-    }
-
-    #[test]
-    fn page_sizes_are_clamped() {
-        assert_eq!(clamp_page(0, DEFAULT_LIST_PAGE), DEFAULT_LIST_PAGE);
-        assert_eq!(clamp_page(10, DEFAULT_LIST_PAGE), 10);
-        assert_eq!(clamp_page(u32::MAX, DEFAULT_LIST_PAGE), MAX_PAGE);
     }
 
     /// A sensitive item is stored, is visible in `list`, and is never returned

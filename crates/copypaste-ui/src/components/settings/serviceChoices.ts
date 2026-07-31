@@ -103,12 +103,12 @@ export const DEDUP_WINDOW_SECS: readonly Choice[] = [
   minutes(300),
 ];
 
+/** Stops at 4 MiB because `copypaste_ipc::MAX_CONTENT_BYTES` is the ceiling the
+ *  daemon accepts — a larger choice here is a control that only ever errors. */
 export const MAX_ITEM_BYTES: readonly Choice[] = [
   kilobytes(256),
   megabytes(1),
   megabytes(4),
-  megabytes(16),
-  megabytes(64),
 ];
 
 /**
