@@ -420,6 +420,19 @@ fn legacy_history_present(data_dir: &std::path::Path) -> bool {
         .any(|dir| copypaste_core::v1_database_in(&dir))
 }
 
+/// `canonical`'s filename, under `dir`. What `--data-dir` relocates.
+///
+/// The names come from `copypaste_ipc` rather than literals here: a second
+/// definition is a second thing to keep in step, and the v2 database name is
+/// what stops a v0.4 file being taken for ours (CLAUDE.md rule 3). The fallback
+/// is unreachable — both resolvers end in a filename — and keeps the real path
+/// rather than opening a directory.
+fn relocate(canonical: &std::path::Path, dir: &std::path::Path) -> PathBuf {
+    canonical
+        .file_name()
+        .map_or_else(|| canonical.to_path_buf(), |name| dir.join(name))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
@@ -428,7 +441,10 @@ async fn main() -> anyhow::Result<()> {
     // `--data-dir` moves both the database and the socket, so an isolated
     // instance cannot answer for — or be answered by — the real one.
     let (db_path, socket_path) = match &args.data_dir {
-        Some(dir) => (dir.join("copypaste-v2.db"), dir.join("daemon.sock")),
+        Some(dir) => (
+            relocate(&copypaste_ipc::database_path(), dir),
+            relocate(&copypaste_ipc::socket_path(), dir),
+        ),
         None => (copypaste_ipc::database_path(), copypaste_ipc::socket_path()),
     };
     // One derivation of "the data directory", used by everything that lives
