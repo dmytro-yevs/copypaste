@@ -83,7 +83,12 @@ pub fn run() {
     // plugin and publishes the `SelectedCapture` the commands are written
     // against; on the desktop the equivalent is managed below.
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(capture::android::init());
+    let builder = builder
+        .plugin(capture::android::init())
+        // `set_content_protected` is a no-op on Android (tao gates it to macOS
+        // and Windows), so INV-35's Android half is `FLAG_SECURE` and needs a
+        // Kotlin call to reach it.
+        .plugin(shell::protection::android::plugin());
 
     builder
         .setup(|app| {
@@ -175,6 +180,7 @@ pub fn run() {
             commands::service::start_service,
             commands::service::restart_service,
             commands::service::hide_window,
+            commands::protection::set_allow_screenshots,
             // the service's own settings
             commands::config::get_config,
             commands::config::set_config,

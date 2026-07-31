@@ -36,6 +36,12 @@ export interface Prefs {
    * honoured is worse than no toggle.
    */
   warnBeforeReveal: boolean;
+  /**
+   * INV-35, inverted: the window is content-protected unless this is on. Off by
+   * default, and the default is also what the window is created with, so a
+   * preference that fails to load leaves the user protected.
+   */
+  allowScreenshots: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -44,6 +50,7 @@ export const DEFAULT_PREFS: Prefs = {
   translucency: false,
   previewLines: DEFAULT_PREVIEW_LINES,
   warnBeforeReveal: true,
+  allowScreenshots: false,
 };
 
 /**
@@ -57,6 +64,7 @@ const FIELD = {
   translucency: z.boolean(),
   previewLines: z.number().int().min(MIN_PREVIEW_LINES).max(MAX_PREVIEW_LINES),
   warnBeforeReveal: z.boolean(),
+  allowScreenshots: z.boolean(),
 } as const;
 
 /** Never throws. Unknown keys are dropped by construction: the result is built

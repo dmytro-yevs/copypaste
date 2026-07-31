@@ -17,6 +17,7 @@ export function ListTab() {
   const { t } = useTranslation();
   const previewLines = usePrefs((s) => s.previewLines);
   const warnBeforeReveal = usePrefs((s) => s.warnBeforeReveal);
+  const allowScreenshots = usePrefs((s) => s.allowScreenshots);
   const set = usePrefs((s) => s.set);
 
   return (
@@ -47,13 +48,40 @@ export function ListTab() {
         description={t("settings.list.warnBeforeReveal.description")}
       >
         <div className="flex items-center gap-s-2">
+          {/* A11Y-9: the visible label reads "On"/"Off", which names the state
+              and not the setting, so the accessible name has to come from here. */}
           <Switch
             id="warn-before-reveal"
+            aria-label={t("settings.list.warnBeforeReveal.title")}
             checked={warnBeforeReveal}
             onCheckedChange={(value) => set("warnBeforeReveal", value)}
           />
           <Label htmlFor="warn-before-reveal">
             {t(warnBeforeReveal ? "common.on" : "common.off")}
+          </Label>
+        </div>
+      </Row>
+
+      <Row
+        title={t("settings.list.allowScreenshots.title")}
+        description={t("settings.list.allowScreenshots.description")}
+        note={
+          allowScreenshots ? (
+            <span className="text-xs text-warn-strong">
+              {t("settings.list.allowScreenshots.warning")}
+            </span>
+          ) : undefined
+        }
+      >
+        <div className="flex items-center gap-s-2">
+          <Switch
+            id="allow-screenshots"
+            aria-label={t("settings.list.allowScreenshots.title")}
+            checked={allowScreenshots}
+            onCheckedChange={(value) => set("allowScreenshots", value)}
+          />
+          <Label htmlFor="allow-screenshots">
+            {t(allowScreenshots ? "common.on" : "common.off")}
           </Label>
         </div>
       </Row>

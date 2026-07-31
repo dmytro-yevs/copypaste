@@ -248,6 +248,15 @@ export function hideWindow(): Promise<void> {
   return call<void>("hide_window");
 }
 
+/**
+ * INV-35. The window is created protected on both platforms, so this only ever
+ * carries the user's opt-out across — which is why a rejection is something a
+ * caller can log and drop rather than recover from.
+ */
+export function setAllowScreenshots(allow: boolean): Promise<void> {
+  return call<void>("set_allow_screenshots", { allow });
+}
+
 /* --------------------------------------------------------------- capture --- */
 
 export type {

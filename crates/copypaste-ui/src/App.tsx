@@ -19,7 +19,7 @@ import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
 import { legacyHistoryPresent } from "@/lib/banners";
 import { classifyError } from "@/lib/errors";
-import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
+import { CURRENT_PROTOCOL_VERSION, setAllowScreenshots } from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
 import { selectAppearance, usePrefs } from "@/store/prefs";
 import { useShallow } from "zustand/react/shallow";
@@ -42,6 +42,7 @@ export default function App() {
   // and zustand v5 compares snapshots by reference, so an unwrapped call is a
   // render loop that unmounts the app — 55 renders in 2.5s, measured.
   const appearance = usePrefs(useShallow(selectAppearance));
+  const allowScreenshots = usePrefs((s) => s.allowScreenshots);
   const status = useStatus();
   const qc = useQueryClient();
   // Subscribed once, here — not per screen. Two subscribers would invalidate
@@ -56,6 +57,14 @@ export default function App() {
     applyAppearance(appearance);
     subscribeSystemTheme(() => applyAppearance(usePrefs.getState()));
   }, [appearance]);
+
+  // INV-35. The window is already protected — `contentProtected` on the desktop,
+  // `FLAG_SECURE` on Android — so this only ever *relaxes* it, and only when the
+  // user has said so. Nothing waits on it, and a failure leaves the window
+  // protected, which is why revealing a secret needs no ordering against it.
+  useEffect(() => {
+    void setAllowScreenshots(allowScreenshots).catch(() => {});
+  }, [allowScreenshots]);
 
   const statusKind = status.error ? classifyError(status.error) : null;
   const screen = SCREENS[view];

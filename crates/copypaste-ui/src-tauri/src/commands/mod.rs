@@ -25,6 +25,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod history;
 pub mod peers;
+pub mod protection;
 pub mod service;
 pub mod status;
 pub mod transfer;

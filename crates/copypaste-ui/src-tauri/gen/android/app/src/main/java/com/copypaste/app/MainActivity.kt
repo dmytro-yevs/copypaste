@@ -2,6 +2,7 @@ package com.copypaste.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
@@ -10,6 +11,10 @@ class MainActivity : TauriActivity() {
     // opens the history database, and opening it needs the device secret out
     // of the Android Keystore, which cannot be found until this has run.
     KeystoreContext.initialize(applicationContext)
+    // INV-35, before anything is drawn. The frontend clears this later if the
+    // user has turned "Allow screenshots" on; starting protected is what makes
+    // a preference that never loads fail in the safe direction.
+    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
   }
