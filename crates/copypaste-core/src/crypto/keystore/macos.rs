@@ -203,7 +203,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         set_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT, b"short").unwrap();
 
-        let err = load(dir.path()).expect_err("a five-byte secret is not usable");
+        // `expect_err` would need `Lookup: Debug`, and `Lookup::Found` holds
+        // the device secret — deriving it puts 32 bytes of key material one
+        // `{:?}` away from a log.
+        let Err(err) = load(dir.path()) else {
+            panic!("a five-byte secret is not usable");
+        };
         assert!(
             matches!(err, CryptoError::KeystoreEntryUnusable(_)),
             "expected KeystoreEntryUnusable, got {err:?}"
@@ -237,8 +242,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(like_the_real_database(dir.path()), b"SQLCipher").unwrap();
 
-        let err = load_or_create_secret(dir.path())
-            .expect_err("minting beside an existing history must be refused");
+        // Destructured rather than `expect_err` for the reason above: the `Ok`
+        // this must not take is a freshly minted device secret, and
+        // `expect_err` prints it.
+        let Err(err) = load_or_create_secret(dir.path()) else {
+            panic!("minting beside an existing history must be refused");
+        };
         assert!(
             matches!(err, CryptoError::KeystoreUnavailable(_)),
             "expected KeystoreUnavailable, got {err:?}"
