@@ -1,14 +1,13 @@
 /**
- * INV-10: a sensitive item's plaintext is *absent*, not blurred — the bridge
- * sends `content: null`, and the accessible name is a fixed string (AT-13).
+ * INV-10: a sensitive item's plaintext is *absent*, not blurred, and the
+ * accessible name is a fixed string (AT-13).
  *
- * **Click selects, double-click copies.** A single click that overwrites the
- * system clipboard is a destructive default. The actions are always visible
- * because Android has no hover, so a hover-revealed control does not exist
- * there.
+ * Click selects, double-click copies: a single click that overwrites the system
+ * clipboard is a destructive default. Actions stay visible because Android has
+ * no hover.
  *
- * The body button and the action buttons are siblings, never nested: a control
- * inside a control is the `nested-interactive` violation INV-8 is about.
+ * The body button and the action buttons are siblings, never nested — nesting
+ * is the `nested-interactive` violation INV-8 is about.
  */
 import { memo } from "react";
 import {
@@ -44,8 +43,8 @@ import type { Item } from "@/lib/ipc";
  * No relative age: the live region mirrors this on every selection change, and
  * an age that ticks would re-announce a selection that did not change.
  *
- * The clip is concatenated onto a catalogue prefix rather than interpolated
- * into a message — no template ever takes an item's content as a variable.
+ * The clip is concatenated onto a catalogue prefix, never interpolated into a
+ * message — no template takes an item's content as a variable.
  */
 export function rowLabel(item: Item, origin: string | null = null): string {
   const body = item.is_sensitive
@@ -68,11 +67,9 @@ interface HistoryRowProps {
   revealedContent: string | null;
   revealPending: boolean;
   previewLines: number;
-  /** The device this clipping came from, or `null` when it earns no marker —
-   *  see `markedOrigins`. A string rather than a record, so the memo holds. */
+  /** A string rather than a record, so the memo holds. `null` when the clipping
+   *  earns no marker — see `markedOrigins`. */
   origin: string | null;
-  /** Selection mode is on, so the row shows a checkbox and a click toggles it
-   *  instead of selecting the row (§3.1.5). */
   selecting: boolean;
   checked: boolean;
   onToggleChecked: (item: Item) => void;
@@ -131,8 +128,7 @@ function HistoryRowImpl({
       )}
     >
       {selecting ? (
-        // Wrapped in a full tap target: `--sz-iconbtn` is 36px under a mouse
-        // and 48px under a finger, so the checkbox itself stays 16px of ink
+        // Wrapped in a full tap target so the checkbox stays 16px of ink
         // without the touch target shrinking to match.
         <span
           className={cn(
@@ -178,7 +174,6 @@ function HistoryRowImpl({
         className="flex min-w-0 flex-1 flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
         {masked ? (
-          // The withheld slot stands in for content that was never delivered.
           // Not a blur: a blur says the content is present behind a filter,
           // which for a screenshot or a shoulder is both a lie and a leak.
           <span className="flex items-center gap-2 rounded-sm border border-withheld-border bg-withheld px-2 py-0.5 text-sm text-withheld-fg">
@@ -240,11 +235,10 @@ function HistoryRowImpl({
         </span>
       </button>
 
-      {/* Not rendered in selection mode — not merely hidden with a class. The
-          bulk bar duplicates these, a Delete button beside a checkbox is one
-          misclick from destroying the wrong thing (§3.1.5), and a
+      {/* Not rendered in selection mode, not merely hidden with a class: a
           `display: none` button is still in the accessibility tree and still a
-          tab stop. */}
+          tab stop, and a Delete beside a checkbox is one misclick from
+          destroying the wrong thing (§3.1.5). */}
       {!selecting && (
         <div className="flex shrink-0 items-center gap-0.5">
           {item.is_sensitive &&

@@ -78,10 +78,9 @@ export function useDeferredDelete() {
         setTimeout(() => void commit(item.id), UNDO_WINDOW_MS),
       );
       toast(t("history.toast.deleted"), {
-        // A sensitive item has no content on this side of the bridge at all
-        // (INV-10), so there is nothing to leak into a toast; anything else is
-        // truncated to 40 characters (§3.1.8) and passed as a value, never
-        // through a message template.
+        // A sensitive item has no content on this side of the bridge (INV-10),
+        // so there is nothing to leak into a toast; anything else is truncated
+        // to 40 characters (§3.1.8) and passed as a value, never as a template.
         description:
           item.content === null
             ? t("history.toast.deletedSensitive")

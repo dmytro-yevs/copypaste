@@ -1,10 +1,6 @@
-/**
- * Rung 2's four steps, and which one the device is standing on.
- *
- * Every step states where it stands in words — "Done", "Next", "Not done yet" —
- * beside the glyph, because a checklist whose only difference is a tick colour
- * is not readable to everyone (A11Y-10).
- */
+/** Every step states where it stands in words — "Done", "Next", "Not done yet"
+ *  — beside the glyph: a checklist whose only difference is a tick colour is
+ *  not readable to everyone (A11Y-10). */
 import { Check, Circle, Dot } from "lucide-react";
 
 import { useTranslation } from "@/i18n";

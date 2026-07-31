@@ -5,15 +5,9 @@
  */
 import type { CaptureHealth, CaptureNextStep, CaptureSnapshot } from "@/lib/ipc";
 
-/**
- * Presentation weight, not severity.
- *
- * `attention` rather than `fault` for the two states a reboot produces: Shizuku
- * stops on every restart and re-arming is a routine part of using it, so
- * painting it as a failure would teach the user to read a normal Tuesday as
- * something broken. `fault` is reserved for the one state nothing can fix — a
- * read that was refused.
- */
+/** Presentation weight, not severity. The states a reboot produces are
+ *  `attention`, not `fault`: Shizuku stops on every restart and re-arming is
+ *  routine. `fault` is reserved for a read that was refused. */
 export type CaptureTone = "ok" | "info" | "attention" | "fault" | "off";
 
 export function toneOf(health: CaptureHealth): CaptureTone {
@@ -46,8 +40,6 @@ export const TONE_DOT: Record<CaptureTone, string> = {
   off: "bg-mute",
 };
 
-/* ---------------------------------------------------------------- ladder --- */
-
 /** Rung 2's four steps. Rungs 1 and 3 are not built and have no state in the
  *  model, so there is nothing here that could imply they exist. */
 export const LADDER_STEPS = ["install", "start", "permission", "armed"] as const;
@@ -67,11 +59,9 @@ export interface LadderRung {
   readonly current: boolean;
 }
 
-/**
- * Every `done` comes from a field the platform actually reported. `armed` is
- * the one derivation: the snapshot carries no `armed` flag, and `not_armed` is
- * precisely the health the model reports when the listener is not registered.
- */
+/** Every `done` comes from a field the platform reported. `armed` is the one
+ *  derivation: the snapshot carries no `armed` flag, and `not_armed` is the
+ *  health the model reports when the listener is not registered. */
 export function ladderOf(snapshot: CaptureSnapshot): readonly LadderRung[] {
   const { shizuku, health, nextStep } = snapshot;
   const current = STEP_FOR[nextStep];
@@ -93,16 +83,8 @@ export function ladderOf(snapshot: CaptureSnapshot): readonly LadderRung[] {
   }));
 }
 
-/* --------------------------------------------------------------- actions --- */
-
-/**
- * What the one button does.
- *
- * `recheck` is not a downgrade of the step: CopyPaste can neither install
- * Shizuku nor start it, so a button carrying either of those names would be a
- * button that does nothing. The model already refuses to offer one for
- * `read_refused` for the same reason.
- */
+/** `recheck` is not a downgrade of the step: CopyPaste can neither install
+ *  Shizuku nor start it, so a button carrying either name would do nothing. */
 export type CapturePrimary = "arm" | "permission" | "recheck" | "none";
 
 export function primaryOf(nextStep: CaptureNextStep): CapturePrimary {

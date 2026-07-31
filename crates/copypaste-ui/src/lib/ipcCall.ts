@@ -1,6 +1,5 @@
 /**
- * The only place `invoke` is called. Its own module so the surfaces split out
- * of `./ipc` for size share one gateway.
+ * The only place `invoke` is called.
  *
  * A command the bridge does not route and an operation a build cannot perform
  * (`Unsupported` — Android has no pairing) both classify as `unavailable`:

@@ -1,10 +1,8 @@
 import type { Item } from "@/lib/ipc";
 
-/**
- * Two things the bridge sends that `Item` does not declare yet (backlog B-15,
- * B-26). They are read through this file rather than at each call site so that
- * declaring them properly in `lib/ipc.ts` is a deletion here and nothing else.
- */
+/** Fields the bridge sends that `Item` does not declare yet (B-15, B-26), read
+ *  here rather than at each call site so declaring them in `lib/ipc.ts` is a
+ *  deletion and nothing else. */
 interface Wire {
   readonly origin_device_id?: string;
   readonly origin_device_name?: string | null;
@@ -23,14 +21,10 @@ export function wontSync(item: Item): boolean {
 const NONE: ReadonlySet<string> = new Set();
 
 /**
- * Which origin devices earn a marker on a row.
- *
  * The bridge sends the origin of every item and no id for *this* device, so a
- * row cannot be compared against the local one (backlog B-15's remaining
- * half). A history with a single origin is therefore left unmarked: every
- * clipping in it came from wherever the others did, and a label on all of them
- * says nothing. A second origin is what makes "which device" a question, and
- * from then on each row answers it.
+ * row cannot be compared against the local one (B-15's remaining half). A
+ * single-origin history is therefore left unmarked: a label on every row says
+ * nothing. A second origin is what makes "which device" a question.
  */
 export function markedOrigins(items: readonly Item[]): ReadonlySet<string> {
   const ids = new Set<string>();
@@ -41,15 +35,9 @@ export function markedOrigins(items: readonly Item[]): ReadonlySet<string> {
   return ids.size > 1 ? ids : NONE;
 }
 
-/**
- * What to call the device a clipping came from, or `null` when it earns no
- * marker.
- *
- * The name is peer-supplied and cosmetic; the id is the identity. An item that
- * reached this device through an account from a device that was never paired
- * here has an id and no name, and a short form of the id is the honest answer
- * — claiming it is local would be a guess.
- */
+/** The name is peer-supplied and cosmetic; the id is the identity. An item that
+ *  arrived through an account from a device never paired here has an id and no
+ *  name, and a short form of the id is the honest answer. */
 export function originLabel(
   item: Item,
   marked: ReadonlySet<string>,

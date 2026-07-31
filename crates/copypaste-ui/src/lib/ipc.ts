@@ -1,23 +1,14 @@
 /**
- * The command surface every screen imports. Command names track
- * `copypaste_ipc::Method`; field names are snake_case because that is what
- * serde emits.
- *
- * `invoke` itself is reached only through [`call`] in `./ipcCall` — add a
- * command here and it goes through the same gateway. The Android capture
- * surface lives in `./ipcCapture` for size (CLAUDE.md rule 5) and is
- * re-exported below, so `@/lib/ipc` remains the single import.
+ * Command names track `copypaste_ipc::Method`; field names are snake_case
+ * because that is what serde emits.
  */
 import { call, hasBridge } from "./ipcCall";
 
 export { hasBridge };
 
-/**
- * **`content` is `null` for a sensitive item** — not an empty string, not a
- * mask. The bridge drops the plaintext before serialising, so INV-10 is
- * enforced by the type rather than by each component remembering to hide
- * something. `revealItem` is the one route back.
- */
+/** INV-10: `content` is `null` for a sensitive item, never a mask. The bridge
+ *  drops the plaintext before serialising, so the type enforces it rather than
+ *  each component remembering to. `revealItem` is the one route back. */
 export interface Item {
   readonly id: string;
   readonly content: string | null;
@@ -29,18 +20,14 @@ export interface Item {
   readonly is_sensitive: boolean;
 }
 
-/**
- * `skipped_undecryptable` is not an error: it is the difference between a short
- * page and a small history, and without it the user sees fewer items and no
- * reason (finding 17).
- */
+/** `skipped_undecryptable` is not an error: it is the difference between a
+ *  short page and a small history (finding 17). */
 export interface ItemPage {
   readonly items: readonly Item[];
   readonly skipped_undecryptable: number;
-  /** Opaque; pass it straight back to `listItems`. `null` ends the list, and it
-   *  is the **only** end-of-list test — a page shortened by
-   *  `skipped_undecryptable` rows still has the rest of the history behind
-   *  it. */
+  /** Opaque; pass it straight back to `listItems`. `null` is the **only**
+   *  end-of-list test — a page shortened by `skipped_undecryptable` rows still
+   *  has the rest of the history behind it. */
   readonly next_cursor: string | null;
 }
 
@@ -53,11 +40,9 @@ export interface StatusData {
   readonly clipboard_backend: string;
 }
 
-/**
- * Returned once by `pair_create` and never retrievable again. `code` is the
- * Noise pre-shared key in transferable form: anyone holding it can pair, so it
- * is hidden until revealed, never logged, and never toasted.
- */
+/** `code` is the Noise pre-shared key in transferable form: anyone holding it
+ *  can pair, so it is hidden until revealed, never logged, never toasted, and
+ *  never retrievable again after this one response. */
 export interface PairingData {
   readonly code: string;
   readonly pairing_id: string;
@@ -87,18 +72,10 @@ export interface SyncResult {
  *  else raises the mismatch banner (INV-17) rather than degrading silently. */
 export const CURRENT_PROTOCOL_VERSION = 1;
 
-/* --------------------------------------------------------------- history --- */
-
-/**
- * One page of history. `cursor` is the previous page's `next_cursor`; `null`
- * asks for the first.
- *
- * **A position, not a row number.** The list grows at the top while it is read
- * — that is what a clipboard manager is — so an offset taken for page 1 names a
- * different boundary by page 2, and one row repeats while another is never seen
- * (`CopyPaste-8ebg.57`). Never parse, build or persist a token; one the service
- * did not issue is refused rather than restarting the list.
- */
+/** `cursor` is a position, not a row number: the list grows at the top while it
+ *  is read, so an offset taken for page 1 names a different boundary by page 2
+ *  and a row repeats or is never seen (`CopyPaste-8ebg.57`). Never parse, build
+ *  or persist a token. */
 export function listItems(
   limit: number,
   cursor: string | null,
@@ -106,9 +83,9 @@ export function listItems(
   return call<ItemPage>("list", { limit, cursor });
 }
 
-/** Not paged: it runs against the whole database and returns the best `limit`
- *  matches (AT-73 / `CopyPaste-crh3.106`). FTS5 rank is a score, not an order
- *  to seek on, so `next_cursor` is always `null` here. */
+/** Not paged: FTS5 rank is a score, not an order to seek on, so this returns
+ *  the best `limit` matches and `next_cursor` is always `null`
+ *  (AT-73 / `CopyPaste-crh3.106`). */
 export function searchItems(query: string, limit: number): Promise<ItemPage> {
   return call<ItemPage>("search", { query, limit });
 }
@@ -151,8 +128,6 @@ export function getStatus(): Promise<StatusData> {
   return call<StatusData>("status");
 }
 
-/* --------------------------------------------------------------- devices --- */
-
 export function listPeers(): Promise<PeerInfo[]> {
   return call<PeerInfo[]>("peers");
 }
@@ -161,7 +136,6 @@ export function pairCreate(name: string): Promise<PairingData> {
   return call<PairingData>("pair_create", { name });
 }
 
-/** Returns the peer list after pairing, so the screen needs no re-list. */
 export function pairAccept(code: string, addr: string): Promise<PeerInfo[]> {
   return call<PeerInfo[]>("pair_accept", { code, addr });
 }
@@ -176,10 +150,10 @@ export function revokeDevice(pairingId: string): Promise<void> {
   return call<void>("revoke", { pairingId });
 }
 
-/** Text the screen already shows, onto the system clipboard. Not the clipboard
- *  plugin: `capabilities/default.json` withholds `allow-write-text`, so its
- *  `writeText` rejects here. `copyItem` stays the route for an item — it takes
- *  an id, so a clipping's plaintext never enters the WebView. */
+/** Text the screen already shows. Not the clipboard plugin:
+ *  `capabilities/default.json` withholds `allow-write-text`. `copyItem` stays
+ *  the route for an item — it takes an id, so a clipping's plaintext never
+ *  enters the WebView. */
 export function copyText(text: string): Promise<void> {
   return call<void>("copy_text", { text });
 }
@@ -188,11 +162,9 @@ export function syncNow(pairingId?: string): Promise<SyncResult[]> {
   return call<SyncResult[]>("sync_now", { pairingId: pairingId ?? null });
 }
 
-/**
- * A device seen on the LAN. **Nothing here is verified** — name, address and
- * pairing id are what an unauthenticated mDNS record claimed, and only the
- * Noise handshake proves any of it (INV-15).
- */
+/** INV-15: nothing here is verified. Name, address and pairing id are what an
+ *  unauthenticated mDNS record claimed; only the Noise handshake proves any of
+ *  it. */
 export interface DiscoveredDevice {
   readonly pairing_id: string;
   readonly name: string;
@@ -206,17 +178,14 @@ export function listDiscovered(): Promise<DiscoveredDevice[]> {
   return call<DiscoveredDevice[]>("discovered");
 }
 
-/** Advertise and browse again. Multicast is unreliable exactly where people
- *  pair, so "nothing found" needs a retry that is not "quit the app". */
+/** Multicast is unreliable exactly where people pair, so "nothing found" needs
+ *  a retry that is not "quit the app". */
 export function rescanDiscovered(): Promise<DiscoveredDevice[]> {
   return call<DiscoveredDevice[]>("rescan");
 }
 
-/* --------------------------------------------------------------- service --- */
-
-/** A tagged union rather than a boolean because four situations need four
- *  answers (ADR-0004): nothing to start, something to start, running, and
- *  running on a version this app did not ship with. */
+/** Four situations need four answers (ADR-0004): nothing to start, something to
+ *  start, running, and running on a version this app did not ship with. */
 export type ServiceState =
   | { readonly state: "running"; readonly version: string; readonly matches_app: boolean; readonly ours: boolean }
   | { readonly state: "unhealthy" }
@@ -238,26 +207,19 @@ export function restartService(): Promise<ServiceState> {
   return call<ServiceState>("restart_service");
 }
 
-/**
- * INV-25: through the backend, never `window.hide()`. On macOS the app is an
- * `Accessory`, so hiding hands activation back to whatever the user was in —
- * which is where they press ⌘V, since the app never synthesises a paste
- * (ADR-0001).
- */
+/** INV-25: through the backend, never `window.hide()`. On macOS the app is an
+ *  `Accessory`, so hiding hands activation back to whatever the user was in —
+ *  which is where they press ⌘V, since the app never synthesises a paste
+ *  (ADR-0001). */
 export function hideWindow(): Promise<void> {
   return call<void>("hide_window");
 }
 
-/**
- * INV-35. The window is created protected on both platforms, so this only ever
- * carries the user's opt-out across — which is why a rejection is something a
- * caller can log and drop rather than recover from.
- */
+/** INV-35. The window is created protected on both platforms, so this only
+ *  carries the user's opt-out across; a rejection can be logged and dropped. */
 export function setAllowScreenshots(allow: boolean): Promise<void> {
   return call<void>("set_allow_screenshots", { allow });
 }
-
-/* --------------------------------------------------------------- capture --- */
 
 export type {
   CaptureHealth,
@@ -281,23 +243,15 @@ export {
   captureToastExplanation,
 } from "./ipcCapture";
 
-/* ------------------------------------------------- the service's settings --- */
-
-/**
- * `copypaste_ipc::ConfigData`. These are the *service's* settings — what it
- * captures, keeps and advertises — as opposed to the appearance and list
- * preferences, which never leave the WebView.
- *
- * `excluded_app_bundle_ids` is carried so the shape matches the wire, and is
- * deliberately not offered as a control: the service stores and returns it but
- * does not yet enforce it, and a switch that does nothing is worse than none.
- */
+/** `copypaste_ipc::ConfigData`. `excluded_app_bundle_ids` is carried so the
+ *  shape matches the wire and is deliberately offered as no control: the
+ *  service stores it but does not yet enforce it, and a switch that does
+ *  nothing is worse than none. */
 export interface ConfigData {
   readonly poll_interval_ms: number;
   readonly history_limit: number;
   /** `0` disables age-based eviction. */
   readonly retention_days: number;
-  /** Two identical captures inside this window are one item. */
   readonly dedup_window_secs: number;
   readonly max_item_bytes: number;
   /** `0` is **off**, not "delete immediately" (`CopyPaste-8ebg.1`). */
@@ -309,18 +263,15 @@ export interface ConfigData {
   readonly sound_on_copy: boolean;
 }
 
-/** Every field optional: a patch names only what changed, so two screens
- *  editing different settings cannot overwrite each other (the reason
- *  `SetConfig` is not a whole record). */
+/** A patch names only what changed, so two screens editing different settings
+ *  cannot overwrite each other. */
 export type ConfigPatch = Partial<{
   -readonly [K in Exclude<keyof ConfigData, "excluded_app_bundle_ids">]: ConfigData[K];
 }>;
 
-/**
- * `restart_required` names the fields the service has kept but not yet acted
- * on. It comes back from the write rather than being derived here, so the app
- * and the service cannot disagree about which those are.
- */
+/** `restart_required` names the fields the service kept but has not yet acted
+ *  on. It comes back from the write rather than being derived here, so the two
+ *  cannot disagree about which those are. */
 export interface ConfigApplied {
   readonly config: ConfigData;
   readonly restart_required: readonly string[];
@@ -334,13 +285,9 @@ export function setConfig(patch: ConfigPatch): Promise<ConfigApplied> {
   return call<ConfigApplied>("set_config", { patch });
 }
 
-/* -------------------------------------------------------------- transfer --- */
-
-/**
- * **The three skip counts are always present, including when they are zero.**
- * An export withholds every flagged item unless it was asked twice, and a user
- * who is not told the number believes they exported everything.
- */
+/** The three skip counts are always present, including when zero: an export
+ *  withholds every flagged item unless it was asked twice, and a user who is
+ *  not told the number believes they exported everything. */
 export interface ExportReport {
   readonly exported: number;
   readonly skipped_sensitive: number;
@@ -355,21 +302,16 @@ export interface ImportReport {
   readonly skipped: number;
 }
 
-/**
- * Where the file goes is asked and answered in Rust, by the platform's own
- * panel. No path is passed in and none comes back — that is INV-12 held by the
- * shape of the command rather than by remembering.
- *
- * `null` means the user closed the panel, which is not a failure.
- */
+/** INV-12 held by the shape of the command: the platform's own panel asks and
+ *  answers in Rust, so no path is passed in and none comes back. `null` means
+ *  the user closed the panel, which is not a failure. */
 export function exportHistory(
   includeSensitive: boolean,
 ): Promise<ExportReport | null> {
   return call<ExportReport | null>("export_history", { includeSensitive });
 }
 
-/** Overwrites nothing: every item goes through the same ingest a copy does, so
- *  duplicates collapse and the detector runs again. */
+/** Overwrites nothing: every item goes through the same ingest a copy does. */
 export function importHistory(): Promise<ImportReport | null> {
   return call<ImportReport | null>("import_history");
 }
@@ -383,8 +325,6 @@ export function backupDatabase(): Promise<number | null> {
 export function restoreDatabase(): Promise<boolean> {
   return call<boolean>("restore_database");
 }
-
-/* -------------------------------------------------------------- shortcut --- */
 
 /** Not routed yet. The default must come from the backend rather than a TS
  *  constant, or the two drift (CopyPaste-sqw0); `DEFAULT_SHORTCUT` in

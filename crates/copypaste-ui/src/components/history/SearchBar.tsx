@@ -6,10 +6,9 @@
  * The shortcut hint lives in `title`: a permanently visible one crowded the
  * header and read as disabled text (CopyPaste-7w060.6).
  *
- * The filter and sort controls are native `<select>`s because the platform
- * already renders one as a picker on a phone and a menu on a desktop, with
- * keyboard behaviour, type-ahead and screen reader support a popup we assembled
- * would not match. The class list restyles only the closed state.
+ * The filter and sort controls are native `<select>`s: the platform renders one
+ * as a picker on a phone and a menu on a desktop, with keyboard, type-ahead and
+ * screen reader behaviour a popup we assembled would not match.
  */
 import type { RefObject } from "react";
 import { ListChecks, Search, Trash2, X } from "lucide-react";
