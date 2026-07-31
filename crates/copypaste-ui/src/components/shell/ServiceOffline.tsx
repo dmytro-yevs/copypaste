@@ -1,11 +1,7 @@
 /**
  * A screen with an offer, not an empty list: an empty list says "you have
- * copied nothing" when the truth is "nothing is listening" (bdac.2).
- *
- * The four states ADR-0004 enumerates each get their own copy because the
- * recovery differs: `stopped` offers Start, `not_installed` has nothing to
- * start, `running` on another version offers Restart and only if this app
- * started it, `unhealthy` is wait-or-restart.
+ * copied nothing" when the truth is "nothing is listening" (bdac.2). Each of
+ * ADR-0004's states gets its own copy because the recovery differs.
  *
  * No filesystem path appears in any branch (INV-12), and none of these
  * sentences names a command.
@@ -58,9 +54,9 @@ export function ServiceOffline() {
 
   const state = service.data;
 
-  // A version mismatch is the upgrade case: the app was replaced and an older
-  // service is still holding the socket. Restart is the fix, and ADR-0004
-  // explains why it can only complete for a service this app started.
+  // The upgrade case: the app was replaced and an older service is still
+  // holding the socket. ADR-0004 says why a restart can only complete for a
+  // service this app started.
   if (state?.state === "running" && !state.matches_app) {
     return (
       <EmptyState

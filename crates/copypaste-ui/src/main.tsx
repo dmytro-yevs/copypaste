@@ -50,9 +50,8 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />
-      {/* Manifest §3.7: one app-level stack, bottom-right — centring bled into
-          the sidebar footer at narrow widths — pausing on hover and on focus
-          within, and below any open dialog in the z-order. */}
+      {/* One app-level stack. Bottom-right, not centred: centring bled into the
+          sidebar footer at narrow widths (manifest §3.7). */}
       <Toaster
         position="bottom-right"
         closeButton
