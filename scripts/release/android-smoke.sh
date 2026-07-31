@@ -1,0 +1,385 @@
+#!/usr/bin/env bash
+# android-smoke.sh — what one booted emulator can prove about the APK.
+#
+# Runs inside reactivecircus/android-emulator-runner with a single device
+# attached and $APK pointing at a *debuggable* APK: every filesystem assertion
+# below goes through `run-as`, which the platform allows only for those.
+#
+# The verdict vocabulary, the detectors and their fixtures are in
+# android-smoke-lib.sh; `--self-test` runs those and needs no device.
+set -uo pipefail
+
+# shellcheck source=scripts/release/android-smoke-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
+
+APK="${APK:-}"
+MAIN="$PKG/.MainActivity"
+INTAKE="$PKG/.IntakeActivity"
+
+# How long a debug build may take to reach a steady state on an emulator.
+# Generous on purpose: the Rust half is unoptimised here, and a flaky timeout
+# reads as a product failure.
+SETTLE_SECS="${SETTLE_SECS:-25}"
+CAPTURE_WAIT_SECS="${CAPTURE_WAIT_SECS:-40}"
+
+if [[ "${1:-}" == "--self-test" ]]; then
+    self_test
+    exit $?
+fi
+
+mkdir -p "$OUT"
+
+# ---------------------------------------------------------------------------
+group "Preflight"
+# ---------------------------------------------------------------------------
+command -v adb >/dev/null 2>&1 || { echo "  FATAL adb is not on PATH"; exit 1; }
+adb wait-for-device
+devices="$(adb devices | grep -cE '\sdevice$')"
+[[ "$devices" == "1" ]] || { echo "  FATAL expected one device, adb reports $devices"; adb devices; exit 1; }
+
+sdk="$(sh_ getprop ro.build.version.sdk)"
+abi="$(sh_ getprop ro.product.cpu.abi)"
+printf '  device: API %s, %s, %s\n' "$sdk" "$abi" "$(sh_ getprop ro.build.fingerprint)"
+
+[[ -f "$APK" ]] || { echo "  FATAL APK not found at '${APK:-<unset>}'"; exit 1; }
+printf '  apk: %s (%s bytes)\n' "$APK" "$(stat -c %s "$APK")"
+
+apk_libs="$(unzip -l "$APK")"
+if grep -q "lib/${abi}/libcopypaste_ui_lib.so" <<<"$apk_libs"; then
+    ok "the APK carries libcopypaste_ui_lib.so for $abi"
+else
+    bad "the APK carries libcopypaste_ui_lib.so for $abi" \
+        "$(grep -E 'lib/.*\.so' <<<"$apk_libs" || echo 'no native libraries in the APK at all')"
+    summary; exit 1
+fi
+
+# ---------------------------------------------------------------------------
+group "Install"
+# ---------------------------------------------------------------------------
+adb uninstall "$PKG" >/dev/null 2>&1 || true
+# -g grants the runtime permissions the app declares, so POST_NOTIFICATIONS
+# does not put a system dialog in front of the WebView we are about to inspect.
+if install_out="$(adb install -r -g "$APK" 2>&1)"; then
+    ok "adb install"
+else
+    bad "adb install" "$install_out"
+    summary; exit 1
+fi
+
+runas_id="$(sh_ run-as "$PKG" id)"
+if grep -q uid <<<"$runas_id"; then
+    ok "run-as reaches the app's private directory"
+else
+    bad "run-as reaches the app's private directory" \
+        "the APK is not debuggable; every filesystem assertion below needs it: ${runas_id}"
+    summary; exit 1
+fi
+
+# ---------------------------------------------------------------------------
+group "1. It launches at all"
+# ---------------------------------------------------------------------------
+adb logcat -c || true
+start_out="$(sh_ am start -W -n "$MAIN")"
+printf '%s\n' "$start_out" | sed 's/^/        /'
+if grep -q '^Status: ok' <<<"$start_out" && ! grep -qi 'Error' <<<"$start_out"; then
+    ok "am start reports the activity started"
+else
+    bad "am start reports the activity started" "see the block above"
+fi
+
+wait_for 60 has_pid || true
+pid1="$(app_pid)"
+if [[ -n "$pid1" ]]; then
+    ok "the app process exists (pid $pid1)"
+else
+    bad "the app process exists" "nothing named $PKG was running 60s after am start"
+    dump_logcat launch1
+    summary; exit 1
+fi
+
+sleep "$SETTLE_SECS"
+pid_now="$(app_pid)"
+dump_logcat launch1
+
+# The whole of `setup` runs in this window: the keystore, SQLCipher, the
+# backend. Every one of them is fatal to the process, so survival is the
+# assertion and the log is the diagnosis.
+if [[ "$pid_now" == "$pid1" ]]; then
+    ok "the process survived ${SETTLE_SECS}s (setup did not abort)"
+else
+    bad "the process survived ${SETTLE_SECS}s (setup did not abort)" \
+        "pid was $pid1, is now '${pid_now:-gone}'"
+fi
+
+crashes="$(crash_report "$OUT/launch1.log")"
+if [[ -z "$crashes" ]]; then
+    ok "no crash block naming this app in logcat"
+else
+    bad "no crash block naming this app in logcat" "$(head -n 20 <<<"$crashes")"
+fi
+
+if grep -aqE 'could not open history|could not open the keystore|KeystoreEntryUnusable|KeystoreUnavailable' "$OUT/launch1.log"; then
+    bad "no keystore or history failure in logcat" \
+        "$(grep -aE 'could not open history|could not open the keystore|Keystore' "$OUT/launch1.log" | head -n 5)"
+else
+    ok "no keystore or history failure in logcat"
+fi
+
+maps=""
+[[ -n "$pid_now" ]] && maps="$(sh_ run-as "$PKG" cat "/proc/$pid_now/maps")"
+if [[ -n "$maps" ]]; then
+    grep -q 'libcopypaste_ui_lib.so' <<<"$maps" \
+        && ok "libcopypaste_ui_lib.so is mapped into the process" \
+        || bad "libcopypaste_ui_lib.so is mapped into the process" \
+               "System.loadLibrary resolved to nothing that stayed loaded"
+    grep -qi 'webview\|chromium\|trichrome' <<<"$maps" \
+        && ok "a WebView implementation is mapped into the process" \
+        || bad "a WebView implementation is mapped into the process" \
+               "the activity is up but no WebView was ever instantiated"
+    printf '%s\n' "$maps" > "$OUT/maps.txt"
+else
+    note "the loaded libraries" "/proc/<pid>/maps was unreadable through run-as"
+fi
+
+window="$(sh_ dumpsys window)"
+focus="$(grep -E 'mCurrentFocus|mFocusedApp' <<<"$window" | head -n 4)"
+if grep -q "$PKG" <<<"$focus"; then
+    ok "the focused window belongs to $PKG"
+else
+    bad "the focused window belongs to $PKG" "${focus:-dumpsys window reported no focus}"
+fi
+
+adb exec-out screencap -p > "$OUT/launch1.png" 2>/dev/null || true
+sh_ uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || true
+adb pull /sdcard/ui.xml "$OUT/ui-launch1.xml" >/dev/null 2>&1 || true
+if [[ -s "$OUT/ui-launch1.xml" ]]; then
+    nodes="$(grep -o 'class="[^"]*"' "$OUT/ui-launch1.xml" | sort | uniq -c | sort -rn | head -n 5 | tr '\n' ' ')"
+    probe "the view hierarchy" "${nodes:-none}"
+else
+    probe "the view hierarchy" "uiautomator produced nothing"
+fi
+probe "a screenshot was captured" "$([[ -s "$OUT/launch1.png" ]] && echo "$(stat -c %s "$OUT/launch1.png") bytes, in the artifact" || echo 'no')"
+note "that the WebView painted the CopyPaste UI" \
+     "the screenshot and the hierarchy dump are in the artifact for a human to read; nothing here reads pixels"
+
+# ---------------------------------------------------------------------------
+group "4. The database opens"
+# ---------------------------------------------------------------------------
+app_files > "$OUT/files-launch1.txt"
+DB_REL="$(grep -E 'copypaste-v2\.db$' "$OUT/files-launch1.txt" | head -n 1)"
+if [[ -n "$DB_REL" ]]; then
+    ok "copypaste-v2.db exists in the app's private directory"
+    printf '        %s\n' "$DB_REL"
+else
+    bad "copypaste-v2.db exists in the app's private directory" \
+        "files present: $(tr '\n' ' ' < "$OUT/files-launch1.txt" | head -c 400)"
+fi
+
+if [[ -n "$DB_REL" ]]; then
+    db_fingerprint launch1 | sed 's/^/        /'
+    if [[ -s "$OUT/launch1-copypaste-v2.db" ]]; then
+        looks_encrypted "$OUT/launch1-copypaste-v2.db" \
+            && ok "the database is not a readable SQLite file (SQLCipher is on)" \
+            || bad "the database is not a readable SQLite file (SQLCipher is on)" \
+                   "it starts with the plain SQLite magic — clipboard plaintext at rest"
+        salt1="$(salt_of "$OUT/launch1-copypaste-v2.db")"
+        printf '        page-1 salt: %s\n' "$salt1"
+    else
+        bad "the database could be read back through run-as" "cat produced nothing"
+        salt1=""
+    fi
+else
+    salt1=""
+fi
+
+# ---------------------------------------------------------------------------
+group "2. The keystore round-trips (second launch)"
+# ---------------------------------------------------------------------------
+prefs="$(grep -E 'shared_prefs/' "$OUT/files-launch1.txt" | tr '\n' ' ')"
+prefs_hash_1=""
+if [[ -n "$prefs" ]]; then
+    probe "shared_prefs after the first launch" "$prefs"
+    for f in $prefs; do
+        pull_file "$f" "$OUT/prefs1-$(basename "$f")" \
+            && prefs_hash_1+="$(sha256sum < "$OUT/prefs1-$(basename "$f")" | cut -d' ' -f1) "
+    done
+else
+    note "that the wrapped secret is a SharedPreferences blob" \
+         "no shared_prefs file was written; ADR-0003 describes one, so either the store keeps it elsewhere or nothing was minted"
+fi
+
+sh_ am force-stop "$PKG"
+if wait_for 20 no_pid; then
+    ok "force-stop ended the first process"
+else
+    bad "force-stop ended the first process" "pid $(app_pid) is still running"
+fi
+
+adb logcat -c || true
+start2="$(sh_ am start -W -n "$MAIN")"
+wait_for 60 has_pid || true
+pid2="$(app_pid)"
+sleep "$SETTLE_SECS"
+dump_logcat launch2
+
+if [[ -n "$pid2" && "$pid2" != "$pid1" ]]; then
+    ok "the second launch is a new process (pid $pid2)"
+else
+    bad "the second launch is a new process" "pid1=$pid1 pid2=${pid2:-gone}; $start2"
+fi
+
+if [[ -n "$(app_pid)" ]]; then
+    ok "the second process survived ${SETTLE_SECS}s"
+else
+    bad "the second process survived ${SETTLE_SECS}s" \
+        "a re-minted device secret cannot open the existing database, and that is fatal to setup"
+fi
+
+crashes2="$(crash_report "$OUT/launch2.log")"
+[[ -z "$crashes2" ]] \
+    && ok "no crash block on the second launch" \
+    || bad "no crash block on the second launch" "$(head -n 20 <<<"$crashes2")"
+
+grep -aqE 'could not open history|could not open the keystore|Keystore' "$OUT/launch2.log" \
+    && bad "no keystore or history failure on the second launch" \
+           "$(grep -aE 'could not open history|could not open the keystore|Keystore' "$OUT/launch2.log" | head -n 5)" \
+    || ok "no keystore or history failure on the second launch"
+
+# The proof ADR-0003 asks for. A second launch that minted a fresh secret would
+# either fail to open this file or replace it; an unchanged page-1 salt says
+# the same database was reopened with a key that still works.
+if [[ -n "$DB_REL" && -n "$salt1" ]]; then
+    db_fingerprint launch2 | sed 's/^/        /'
+    salt2="$(salt_of "$OUT/launch2-copypaste-v2.db" 2>/dev/null || true)"
+    if [[ -n "$salt2" && "$salt2" == "$salt1" ]]; then
+        ok "the second launch reopened the same database (salt unchanged)"
+    else
+        bad "the second launch reopened the same database (salt unchanged)" \
+            "salt was $salt1, is now ${salt2:-<database gone>} — the device secret did not survive"
+    fi
+else
+    note "the keystore round-trip" "there was no first-launch database to compare against"
+fi
+
+if [[ -n "$prefs_hash_1" ]]; then
+    prefs_hash_2=""
+    for f in $prefs; do
+        pull_file "$f" "$OUT/prefs2-$(basename "$f")" \
+            && prefs_hash_2+="$(sha256sum < "$OUT/prefs2-$(basename "$f")" | cut -d' ' -f1) "
+    done
+    [[ "$prefs_hash_1" == "$prefs_hash_2" ]] \
+        && ok "the wrapped secret was read, not rewritten" \
+        || bad "the wrapped secret was read, not rewritten" \
+               "the shared_prefs blob changed between launches, which is what minting a second secret looks like"
+fi
+
+# ---------------------------------------------------------------------------
+group "3. A doorway captures"
+# ---------------------------------------------------------------------------
+CANARY_SEND="CopyPasteCanarySend$(date +%s)$RANDOM"
+CANARY_PROC="CopyPasteCanaryProc$(date +%s)$RANDOM"
+
+before="$(db_fingerprint before-capture)"
+sleep 6
+quiet="$(db_fingerprint quiescence)"
+[[ "$before" == "$quiet" ]] \
+    && probe "the store is quiescent before the capture" "yes — a change after this is the capture" \
+    || probe "the store is quiescent before the capture" "no, it changes on its own; the assertion below is necessary but not sufficient"
+
+adb logcat -c || true
+send_out="$(sh_ am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT "$CANARY_SEND" -n "$INTAKE")"
+grep -q 'Error' <<<"$send_out" \
+    && bad "the share-sheet doorway accepted an ACTION_SEND" "$send_out" \
+    || ok "the share-sheet doorway accepted an ACTION_SEND"
+
+proc_out="$(sh_ am start -a android.intent.action.PROCESS_TEXT -t text/plain --es android.intent.extra.PROCESS_TEXT "$CANARY_PROC" -n "$INTAKE")"
+grep -q 'Error' <<<"$proc_out" \
+    && bad "the text-selection doorway accepted an ACTION_PROCESS_TEXT" "$proc_out" \
+    || ok "the text-selection doorway accepted an ACTION_PROCESS_TEXT"
+
+changed=0
+for _ in $(seq 1 $((CAPTURE_WAIT_SECS / 5))); do
+    sleep 5
+    if [[ "$(db_fingerprint after-capture)" != "$before" ]]; then changed=1; break; fi
+done
+dump_logcat capture
+
+crashes3="$(crash_report "$OUT/capture.log")"
+[[ -z "$crashes3" ]] \
+    && ok "no crash block while capturing" \
+    || bad "no crash block while capturing" "$(head -n 20 <<<"$crashes3")"
+
+[[ -n "$(app_pid)" ]] \
+    && ok "the app is still running after both doorways" \
+    || bad "the app is still running after both doorways"
+
+if [[ $changed -eq 1 ]]; then
+    ok "the history store changed within ${CAPTURE_WAIT_SECS}s of the capture intents"
+else
+    bad "the history store changed within ${CAPTURE_WAIT_SECS}s of the capture intents" \
+        "Kotlin took the clip and nothing reached SQLCipher: ClipQueue, the intake drain, or ingest"
+fi
+
+# Only meaningful if something was stored. Asserting "the plaintext is not in
+# the database" over a database nothing was written to is the shape of a test
+# that passes without proving anything.
+if [[ $changed -eq 1 ]]; then
+    plain=""
+    for f in "$OUT"/after-capture-*; do
+        [[ -f "$f" ]] || continue
+        holds_text "$f" "$CANARY_SEND" && plain+="$(basename "$f") "
+    done
+    [[ -z "$plain" ]] \
+        && ok "the captured text is not readable in the database files" \
+        || bad "the captured text is not readable in the database files" \
+               "found in: $plain — the store is holding clipboard plaintext"
+else
+    note "that the stored text is unreadable at rest" \
+         "nothing reached the database, so there was nothing to look for"
+fi
+
+leaks="$(sh_ run-as "$PKG" grep -rl "$CANARY_SEND" . 2>/dev/null)"
+probe "the canary anywhere else under the app's data directory" "${leaks:-nowhere}"
+
+# ---------------------------------------------------------------------------
+group "Rung 2 reports unavailable rather than claiming to work (ADR-0005)"
+# ---------------------------------------------------------------------------
+shizuku="$(sh_ pm list packages | grep -i shizuku)"
+[[ -z "$shizuku" ]] \
+    && ok "Shizuku is absent, as it must be on a stock emulator" \
+    || bad "Shizuku is absent, as it must be on a stock emulator" "$shizuku"
+note "rung 2 itself — the shell-uid clipboard read" \
+     "Shizuku needs a manual wireless-debugging pairing and cannot be granted here; docs/rewrite/android-spike.md items 2-7 stay open"
+
+services="$(sh_ dumpsys activity services "$PKG")"
+printf '%s\n' "$services" > "$OUT/services.txt"
+grep -q 'CaptureService' <<<"$services" \
+    && bad "no foreground capture service is running" \
+           "CaptureService is up, but nothing granted rung 2 — the app is claiming to capture in the background" \
+    || ok "no foreground capture service is running"
+
+notifs="$(sh_ dumpsys notification --noredact 2>/dev/null || sh_ dumpsys notification)"
+printf '%s\n' "$notifs" > "$OUT/notifications.txt"
+grep -q 'Capturing from every app' <<<"$notifs" \
+    && bad "no notification claims background capture" "the ongoing capture notification is posted with rung 2 unavailable" \
+    || ok "no notification claims background capture"
+
+# ---------------------------------------------------------------------------
+group "Probes for the next round"
+# ---------------------------------------------------------------------------
+tile_add="$(sh_ cmd statusbar add-tile "$PKG/.CaptureTileService")"
+tile_click="$(sh_ cmd statusbar click-tile "$PKG/.CaptureTileService")"
+probe "the Quick Settings tile" "add: ${tile_add:-<no output>} / click: ${tile_click:-<no output>}"
+probe "adb can set the primary clip" "$(sh_ cmd clipboard set-primary-clip --text CopyPasteTileProbe 2>&1 | head -n 1)"
+sleep 8
+probe "the store changed after the tile probe" \
+      "$([[ "$(db_fingerprint after-tile)" != "$(cat "$OUT/dbset-after-capture.txt" 2>/dev/null)" ]] && echo yes || echo no)"
+
+note "R8 and the release build type" \
+     "this APK is the debug one, because run-as needs it; the minified release APK's Tauri plugin reflection is not exercised here"
+note "OEM battery managers killing the foreground service" \
+     "spike item 6 needs a real phone left idle; an emulator will not reproduce it"
+
+dump_logcat final
+summary
+[[ $FAIL -eq 0 ]]

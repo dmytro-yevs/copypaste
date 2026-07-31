@@ -1,33 +1,51 @@
 # The Android device spike
 
-**Status:** open · everything below is untested code
+**Status:** open · the APK builds; nothing in it has been observed running
 **Blocking:** the rung 2 recommendation in
 [android-clipboard-access.md](android-clipboard-access.md) §4 rests on a claim
 derived from AOSP source and never observed.
 
-Nothing in `crates/copypaste-ui/src-tauri/gen/android/` has been compiled. This
-host has no Android SDK, `dl.google.com` is unreachable from it, and
-`cargo check --target aarch64-linux-android` stops at SQLCipher for want of an
-NDK `clang`. So the first run on a real machine will find several things at
-once, and this is the order to expect them in.
+The Kotlin compiles: the release workflow's `android` job produced a signed
+28 MB universal APK. That is the whole of what is known. No line of Kotlin, of
+`crypto/keystore/android.rs` or of `capture/android.rs` has executed.
 
 ## Before the phone
 
-1. Install the Android SDK (platform 36, build-tools) and NDK r26+, then
-   `cargo tauri android build --debug --apk`.
-   The APK lands under `gen/android/app/build/outputs/apk/`.
-2. Expect the first failures to be build failures, not behaviour: the Gradle
-   project was generated against a stubbed SDK path and its Kotlin has never
-   been through a compiler.
+1. `.github/workflows/android-emulator.yml` — dispatch it. It builds a
+   debuggable x86_64 APK and runs `scripts/release/android-smoke.sh` against a
+   booted AVD. Half the list below is answerable there, without a device.
+2. On a workstation: SDK platform 36 with build-tools, NDK r27, then
+   `cargo tauri android build --debug --apk`. The APK lands under
+   `gen/android/app/build/outputs/apk/`.
+
+## What the emulator answers, and what it cannot
+
+Item 1 is settled — the Kotlin compiles. Of the rest, the emulator reaches only
+what needs no Shizuku: that the activity starts and `libcopypaste_ui_lib.so`
+loads, that a second launch reads back the device secret the first one minted
+(the one observation ADR-0003 asks for), that the share-sheet and
+text-selection doorways reach SQLCipher, and that the database is not a
+readable SQLite file.
+
+Items 2 to 7 stay open and stay open on purpose. Shizuku needs a
+wireless-debugging pairing performed by hand, so rung 2 cannot be granted on a
+stock emulator and faking it would prove nothing. What the job asserts instead
+is the honest consequence: with rung 2 unavailable, no foreground service runs
+and no notification claims background capture. Item 6 — an OEM battery manager
+killing the service — is not reproducible on an emulator at all.
+
+The job prints everything it could not observe under `NOT ASSERTED` rather than
+skipping it, and `scripts/release/check.sh` runs the smoke test's `--self-test`
+so its detectors are known to fail when they should.
 
 ## On the phone, in likelihood order
 
 Each of these would falsify something currently written as true.
 
-1. **The Kotlin does not compile.** Most likely in `ShizukuClipboard`'s
-   reflection or in the `IOnPrimaryClipChangedListener` AIDL package placement
-   (`android.content` must match AOSP's, since the stub is passed to a system
-   binder that checks the interface descriptor).
+1. ~~**The Kotlin does not compile.**~~ Settled: the release job's APK
+   contains it. The AIDL package placement is still only known to *build* —
+   whether a system binder accepts the stub's interface descriptor is item 3's
+   question.
 2. **`Shizuku.newProcess` is not reachable by reflection** in the version of
    the API library resolved. Only the toast-suppression opt-in depends on it;
    everything else fails independently.

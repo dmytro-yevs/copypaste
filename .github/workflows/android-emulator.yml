@@ -1,0 +1,251 @@
+name: Android emulator
+
+# Runs the Android app. Until this file existed, no line of Kotlin and no line
+# of the Android-only Rust — the keystore backend, the capture plugin, the JNI
+# context hand-off — had ever executed. The release job proves the APK builds
+# and nothing else.
+#
+# What it does, in the order the value falls off:
+#
+#   1. the activity starts, the native library loads, a WebView mounts
+#   2. a second launch reads back the device secret the first one minted
+#   3. the share-sheet and text-selection doorways reach SQLCipher
+#   4. the database is opened, and is not a readable SQLite file
+#
+# The assertions are in scripts/release/android-smoke.sh rather than in a `run:`
+# block here, so check.sh can parse them, shellcheck them, and run their
+# --self-test — which proves the detectors fail when they should.
+#
+# What this cannot do is exercise rung 2: Shizuku needs a wireless-debugging
+# pairing performed by hand and cannot be granted on a stock emulator. The
+# script asserts the honest consequence instead — no foreground service, no
+# notification claiming background capture — and prints the rest of
+# docs/rewrite/android-spike.md as NOT ASSERTED.
+#
+# ---------------------------------------------------------------------------
+# Cost, and why this is not on push
+# ---------------------------------------------------------------------------
+# One run is roughly 40 minutes of runner time: an unoptimised Rust build with
+# OpenSSL from source for one ABI, then a boot and a few minutes of adb. On
+# every push that is an hour of CI per merge for a signal that changes daily at
+# most. So: nightly, plus dispatch. It is deliberately not a dependency of the
+# release workflow — put it there once it has passed on its own, not before.
+
+on:
+  workflow_dispatch:
+    inputs:
+      api-level:
+        description: "Emulator API level"
+        required: false
+        default: "36"
+      target:
+        description: "System image target (google_apis; API 36 has no AOSP image)"
+        required: false
+        default: "google_apis"
+  schedule:
+    # 04:17 UTC. Off the hour because everything else in the world is on it.
+    - cron: "17 4 * * *"
+
+concurrency:
+  group: android-emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Same pins as the release job, and for the same reasons: rust-toolchain.toml
+  # outranks `rustup default`, and an NDK that floats is a build that changes
+  # under you.
+  RUSTUP_TOOLCHAIN: "1.96"
+  NDK_VERSION: "27.2.12479018"
+  ANDROID_PLATFORM: "android-36"
+  BUILD_TOOLS_VERSION: "36.0.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # A debug APK, x86_64 only.
+  #
+  # Debug rather than release because every filesystem assertion in the smoke
+  # test goes through `run-as`, which the platform allows only for a debuggable
+  # package — and without it "the database opens" and "the keystore round-trips"
+  # cannot be observed at all. The cost is stated rather than hidden: R8 runs
+  # only on the release build type, so the minified APK's Tauri plugin
+  # reflection is not exercised here, and the smoke test says so in its summary.
+  #
+  # x86_64 only because that is the emulator's ABI. It also cuts the Rust and
+  # OpenSSL work to a quarter of the release job's.
+  # ---------------------------------------------------------------------------
+  apk:
+    name: Build the debug APK (x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96"
+          targets: x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android-emulator
+          save-if: "true"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install the pinned SDK components
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is unset — the runner image has no Android SDK}"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [[ -x "$sdkmanager" ]] || { echo "::error::$sdkmanager not found"; exit 1; }
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$sdkmanager" --install \
+            "ndk;${NDK_VERSION}" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS_VERSION}"
+
+          # Asserted rather than assumed: sdkmanager has exited 0 after printing
+          # `Warning: Failed to find package …`, which would surface four steps
+          # later as a linker error naming none of this.
+          ndk="${ANDROID_HOME}/ndk/${NDK_VERSION}"
+          [[ -d "$ndk" ]] || { echo "::error::sdkmanager did not install ndk;${NDK_VERSION}"; exit 1; }
+          [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] \
+            || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
+          [[ -x "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/aapt2" ]] \
+            || { echo "::error::build-tools;${BUILD_TOOLS_VERSION} did not install"; exit 1; }
+
+          for tool in perl make; do
+            command -v "$tool" >/dev/null 2>&1 \
+              || { echo "::error::$tool is required to build OpenSSL for Android (ADR-0007)"; exit 1; }
+          done
+
+          {
+            echo "NDK_HOME=${ndk}"
+            echo "ANDROID_NDK_HOME=${ndk}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_HOME}"
+          } >> "$GITHUB_ENV"
+
+      - name: Point the Android builds at the NDK's llvm-ar and llvm-ranlib
+        run: |
+          set -euo pipefail
+          ./scripts/release/android-ndk-env.sh "$NDK_HOME" | tee -a "$GITHUB_ENV"
+
+      - name: Build the APK
+        run: |
+          set -euo pipefail
+          cd crates/copypaste-ui
+          npm ci
+          # --debug for run-as, --target x86_64 for the emulator's ABI. Nothing
+          # here regenerates the Gradle project; see the release job for why.
+          npm run tauri -- android build --debug --apk --target x86_64
+
+      - name: Locate it and check what it claims
+        run: |
+          set -euo pipefail
+          outputs="crates/copypaste-ui/src-tauri/gen/android/app/build/outputs/apk"
+          [[ -d "$outputs" ]] || { echo "::error::the Gradle build produced no APK directory"; exit 1; }
+
+          apk="$(find "$outputs" -name '*debug*.apk' -print -quit)"
+          if [[ -z "$apk" ]]; then
+            echo "::error::no debug APK under $outputs. Found:"
+            find "$outputs" -name '*.apk' | sed 's/^/::error::  /'
+            exit 1
+          fi
+
+          # The smoke test needs both of these and can only report their absence
+          # from the far side of an emulator boot, so they are checked here.
+          tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
+          badging="$("${tools}/aapt2" dump badging "$apk")"
+          grep -q "application-debuggable" <<<"$badging" \
+            || { echo "::error::the APK is not debuggable; run-as would refuse and every filesystem assertion would be lost"; exit 1; }
+
+          libs="$(unzip -l "$apk")"
+          grep -q 'lib/x86_64/libcopypaste_ui_lib.so' <<<"$libs" \
+            || { echo "::error::the APK carries no x86_64 libcopypaste_ui_lib.so"; grep -E 'lib/.*\.so' <<<"$libs"; exit 1; }
+
+          mkdir -p dist
+          cp "$apk" dist/copypaste-emulator-x86_64-debug.apk
+          ls -l dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: dist/copypaste-emulator-x86_64-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Boot an AVD and run it.
+  #
+  # reactivecircus/android-emulator-runner rather than avdmanager and a pile of
+  # YAML (CLAUDE.md rule 1): it creates the AVD, waits for boot properly, and
+  # kills the emulator on the way out. All this job adds is KVM, which GitHub's
+  # Linux runners expose but do not make world-writable.
+  # ---------------------------------------------------------------------------
+  emulator:
+    name: Launch, capture, and read back
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-debug-apk
+          path: dist
+
+      # avdmanager is a Java program. The runner image ships a JDK and sets
+      # JAVA_HOME, but which one is a property of the image; pinning it here
+      # costs seconds and removes a way for this job to break without us.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          # Without acceleration the AVD still boots and takes twenty minutes to
+          # do it, which reads as a hang rather than as a missing device.
+          [[ -e /dev/kvm ]] || { echo "::error::/dev/kvm is absent — this runner cannot accelerate the emulator"; exit 1; }
+
+      - uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ inputs.api-level || '36' }}
+          target: ${{ inputs.target || 'google_apis' }}
+          arch: x86_64
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: ./scripts/release/android-smoke.sh
+        env:
+          APK: dist/copypaste-emulator-x86_64-debug.apk
+          SMOKE_OUT: artifacts/android-smoke
+
+      # Always: a failed assertion is exactly when the logcat, the screenshot
+      # and the pulled database are worth having.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-emulator-evidence
+          path: artifacts/android-smoke
+          if-no-files-found: warn
+          retention-days: 14

@@ -223,17 +223,72 @@ rec(bool(installed) and listed == installed,
     "android-ndk-env.sh covers every Android target the job installs",
     "script has {}, the toolchain step installs {}".format(sorted(listed), sorted(installed)))
 
-# --- release.yml shell discipline ------------------------------------------
-for jn, j in (docs["release.yml"].get("jobs") or {}).items():
-    for i, s in enumerate(steps(j)):
-        body = s.get("run")
-        # A one-command step gains nothing: GitHub already runs `bash -e`. The
-        # rule is for multi-line blocks, where -u and -o pipefail are the ones
-        # that matter.
-        if not body or len(body.strip().splitlines()) < 2:
-            continue
-        rec(body.lstrip().startswith("set -euo pipefail"),
-            "release.yml: {} step {} opens with set -euo pipefail".format(jn, i),
-            "opens with: {}".format(body.lstrip().splitlines()[0][:60]))
+# --- shell discipline in the workflows nothing has ever run -----------------
+for wf in ("release.yml", "android-emulator.yml"):
+    for jn, j in ((docs.get(wf) or {}).get("jobs") or {}).items():
+        for i, s in enumerate(steps(j)):
+            body = s.get("run")
+            # A one-command step gains nothing: GitHub already runs `bash -e`.
+            # The rule is for multi-line blocks, where -u and -o pipefail are
+            # the ones that matter.
+            if not body or len(body.strip().splitlines()) < 2:
+                continue
+            rec(body.lstrip().startswith("set -euo pipefail"),
+                "{}: {} step {} opens with set -euo pipefail".format(wf, jn, i),
+                "opens with: {}".format(body.lstrip().splitlines()[0][:60]))
+
+# --- the emulator smoke test ------------------------------------------------
+# Nothing here can boot an emulator. What it can do is keep that job from
+# becoming one that passes without proving anything: the assertions have to
+# live in the script check.sh already parses, shellchecks and self-tests; the
+# action has to be allowed to fail the job; and the APK it is handed has to be
+# the shape the script's run-as assertions need.
+emu = docs.get("android-emulator.yml")
+rec(emu is not None, "android-emulator.yml exists",
+    "it is the only thing in this repository that runs a line of Kotlin")
+if emu:
+    ejobs = emu.get("jobs") or {}
+    triggers = emu.get(True) or emu.get("on") or {}
+    rec(not ({"push", "pull_request"} & set(triggers)),
+        "android-emulator.yml does not run on push or pull_request",
+        "a run is ~40 minutes of runner time; nightly and on demand is the decision")
+    rec("schedule" in triggers and "workflow_dispatch" in triggers,
+        "android-emulator.yml runs nightly and on demand", repr(sorted(triggers)))
+
+    ejob = ejobs.get("emulator") or {}
+    runners = [s for s in steps(ejob) if (s.get("uses") or "").startswith("reactivecircus/android-emulator-runner")]
+    rec(len(runners) == 1, "android-emulator.yml: exactly one emulator-runner step",
+        "found {} — AVD management is the action's job, not this file's".format(len(runners)))
+    for s in runners:
+        with_ = s.get("with") or {}
+        rec("android-smoke.sh" in str(with_.get("script", "")),
+            "the emulator runs scripts/release/android-smoke.sh",
+            "assertions belong in a script check.sh can parse and self-test, not in YAML: {!r}".format(with_.get("script")))
+        rec(not s.get("continue-on-error"), "the emulator step is allowed to fail the job",
+            "continue-on-error would make the whole run decorative")
+        rec(str(with_.get("arch")) == "x86_64", "the AVD is x86_64", repr(with_.get("arch")))
+        before = steps(ejob)[:steps(ejob).index(s)]
+        rec(any("99-kvm4all" in (p.get("run") or "") for p in before),
+            "KVM is enabled before the emulator starts",
+            "without the udev rule the AVD boots unaccelerated, which reads as a hang")
+
+    # The invocation, not the prose around it: the comment above that line
+    # names both flags, so a check over the whole block would pass on a build
+    # that had dropped them.
+    build = [l.strip() for s in steps(ejobs.get("apk") or {})
+             for l in (s.get("run") or "").splitlines()
+             if "android build" in l and not l.strip().startswith("#")]
+    rec(any("--debug" in l for l in build), "the emulator APK is a debug build",
+        "run-as, and with it every filesystem assertion, needs a debuggable package: {}".format(build))
+    rec(any("--target x86_64" in l for l in build), "the emulator APK is built for the AVD's ABI",
+        "an APK with no x86_64 native library installs and then dies on load: {}".format(build))
+
+smoke = pathlib.Path("scripts/release/android-smoke.sh")
+rec(smoke.is_file() and "--self-test" in smoke.read_text(),
+    "android-smoke.sh carries a --self-test",
+    "its detectors are the only part checkable without a device, so they have to be checkable")
+rec("android-smoke.sh --self-test" in pathlib.Path("scripts/release/check.sh").read_text(),
+    "check.sh runs android-smoke.sh --self-test",
+    "otherwise nothing ever proves the detectors report a crash when there is one")
 
 sys.exit(0)
