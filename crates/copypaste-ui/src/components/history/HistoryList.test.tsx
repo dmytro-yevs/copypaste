@@ -55,6 +55,7 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
     onQuickCopy,
     onTogglePin: vi.fn(),
     onDelete,
+    onOpen: vi.fn(),
     onLoadMore: vi.fn(),
     listRef,
     searching: false,
@@ -173,6 +174,13 @@ describe("keyboard (AT-10)", () => {
     });
     fireEvent.keyDown(listRef.current!, { key: "Enter" });
     expect(onCopy).toHaveBeenCalledWith(data[0]);
+  });
+
+  it("opens the detail view for the selected row on ArrowRight", () => {
+    const onOpen = vi.fn();
+    const { listRef, data } = setup(3, { activeId: "row-1", onOpen });
+    fireEvent.keyDown(listRef.current!, { key: "ArrowRight" });
+    expect(onOpen).toHaveBeenCalledWith(data[1]);
   });
 
   it("clears the selection on Escape", () => {
