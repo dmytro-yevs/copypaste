@@ -40,9 +40,17 @@ export function items(count: number, over: Partial<Item> = {}): Item[] {
 
 /** The wire shape `list` and `search` answer with. `skipped_undecryptable` is
  *  always present, including when it is zero — a count that only appears when
- *  it is non-zero is one nobody knows to look for. */
-export function page(items: readonly Item[], skipped = 0): ItemPage {
-  return { items, skipped_undecryptable: skipped };
+ *  it is non-zero is one nobody knows to look for.
+ *
+ *  `nextCursor` defaults to `null`, which is the end of the list: a test that
+ *  wants a second page has to say so, exactly as the service does. Page length
+ *  no longer implies one. */
+export function page(
+  items: readonly Item[],
+  skipped = 0,
+  nextCursor: string | null = null,
+): ItemPage {
+  return { items, skipped_undecryptable: skipped, next_cursor: nextCursor };
 }
 
 export function status(over: Partial<StatusData> = {}): StatusData {

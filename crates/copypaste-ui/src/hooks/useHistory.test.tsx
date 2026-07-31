@@ -14,7 +14,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { HISTORY_KEY, useHistory } from "@/hooks/useHistory";
 import { IpcFailure } from "@/lib/errors";
 import { PAGE_SIZE } from "@/lib/layout";
-import { items, page, testClient } from "@/test/harness";
+import { item, items, page, testClient } from "@/test/harness";
 
 const listItems = vi.fn();
 const searchItems = vi.fn();
@@ -84,8 +84,8 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
       ...entry,
       id: `p2-${entry.id}`,
     }));
-    listItems.mockImplementation(async (_limit: number, offset: number) =>
-      offset === 0 ? page(page1) : page(page2),
+    listItems.mockImplementation(async (_limit: number, cursor: string | null) =>
+      cursor === null ? page(page1, 0, "after-page-1") : page(page2),
     );
 
     const { client, Wrapper } = wrapper();
@@ -101,12 +101,69 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
     await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE * 2));
   });
 
-  it("de-duplicates by id, because a capture can shift the page offsets", async () => {
+  /**
+   * B-1 / `CopyPaste-8ebg.57`, the reason the cursor exists. Rows are captured
+   * *between* the two fetches — the ordinary case for a clipboard manager — and
+   * the second page must neither repeat a row the user has already seen nor
+   * skip one they have not. A skipped row is data loss from the user's side
+   * even though it is still on disk (CLAUDE.md rule 4).
+   *
+   * The service is modelled as a real keyset walk over a list that grows at the
+   * top: the cursor names a position, so rows prepended after it was issued are
+   * simply not behind it. The same model paged by offset is asserted to fail,
+   * so the difference is demonstrated rather than claimed.
+   */
+  it("neither repeats nor skips a row when captures arrive between two pages", async () => {
+    const original = items(PAGE_SIZE * 2).map((entry, index) => ({
+      ...entry,
+      id: `row-${index}`,
+    }));
+    // Two captures land above the window after page 1 has been read.
+    let list = original;
+    const arrivals = ["fresh-a", "fresh-b"].map((id) => ({ ...item(), id }));
+
+    listItems.mockImplementation(async (limit: number, cursor: string | null) => {
+      const start = cursor === null ? 0 : list.findIndex((e) => e.id === cursor) + 1;
+      const slice = list.slice(start, start + limit);
+      const last = slice.at(-1);
+      const more = last !== undefined && list.indexOf(last) < list.length - 1;
+      if (cursor === null) list = [...arrivals, ...original];
+      return page(slice, 0, more ? (last?.id ?? null) : null);
+    });
+
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE));
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.hasNextPage).toBe(false));
+
+    const seen = result.current.data?.items.map((e) => e.id) ?? [];
+    expect(new Set(seen).size).toBe(seen.length);
+    for (const entry of original) {
+      expect(seen.filter((id) => id === entry.id)).toHaveLength(1);
+    }
+
+    // What offset paging would have produced from the same service: page 2 is
+    // `slice(PAGE_SIZE, PAGE_SIZE * 2)` of a list two rows longer, so the last
+    // two rows of page 1 come back a second time and two rows at the end are
+    // never reached.
+    const offsetPage2 = list.slice(PAGE_SIZE, PAGE_SIZE * 2).map((e) => e.id);
+    const offsetSeen = [...original.slice(0, PAGE_SIZE).map((e) => e.id), ...offsetPage2];
+    expect(new Set(offsetSeen).size).toBeLessThan(offsetSeen.length);
+  });
+
+  /**
+   * The cursor cannot hand the same row out twice, but a pin can: it moves a
+   * row from the unpinned section into the pinned one between two fetches, so
+   * a page already held and a page fetched afterwards can both name it.
+   */
+  it("de-duplicates by id, because a pin reorders the list under the reader", async () => {
     const page1 = items(PAGE_SIZE);
-    // Page 2 overlaps page 1 — what happens when something is prepended
-    // between the two fetches.
-    listItems.mockImplementation(async (_limit: number, offset: number) =>
-      offset === 0 ? page(page1) : page([...page1.slice(-2), ...items(3)]),
+    listItems.mockImplementation(async (_limit: number, cursor: string | null) =>
+      cursor === null
+        ? page(page1, 0, "after-page-1")
+        : page([...page1.slice(-2), ...items(3)]),
     );
 
     const { Wrapper } = wrapper();
@@ -121,12 +178,41 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
     );
   });
 
-  it("stops paging when a short page comes back", async () => {
+  it("stops paging when the service issues no next cursor", async () => {
     listItems.mockImplementation(async () => page(items(3)));
     const { Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
     await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
     expect(result.current.hasNextPage).toBe(false);
+  });
+
+  /**
+   * A full page is not the end of the list and a short one is not either: rows
+   * counted in `skipped_undecryptable` were read and dropped, so length says
+   * nothing. Only the cursor does — stopping on a short page would hide the
+   * rest of the history behind a handful of corrupt rows.
+   */
+  it("keeps paging past a page shortened by rows that would not open", async () => {
+    listItems.mockImplementation(async (_limit: number, cursor: string | null) =>
+      cursor === null ? page(items(2), 3, "keep-going") : page(items(1), 0),
+    );
+
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
+    expect(result.current.hasNextPage).toBe(true);
+
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.skipped).toBe(3));
+    expect(result.current.hasNextPage).toBe(false);
+  });
+
+  it("asks for the first page with no cursor at all", async () => {
+    listItems.mockImplementation(async () => page(items(1)));
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(1));
+    expect(listItems).toHaveBeenCalledWith(PAGE_SIZE, null);
   });
 });
 

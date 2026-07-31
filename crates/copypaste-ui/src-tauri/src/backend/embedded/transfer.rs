@@ -67,7 +67,7 @@ mod tests {
         backend.clear().await.unwrap();
         assert_eq!(backend.import(data.items).await.unwrap().inserted, 1);
         assert_eq!(
-            backend.list(50, 0).await.unwrap().items[0].content,
+            backend.list(50, None).await.unwrap().items[0].content,
             "a shared note"
         );
     }
@@ -102,7 +102,7 @@ mod tests {
             .await
             .unwrap();
 
-        let listed = backend.list(50, 0).await.unwrap();
+        let listed = backend.list(50, None).await.unwrap();
         assert!(listed.items[0].is_sensitive, "the detector did not re-run");
         assert!(backend
             .search("AKIAIOSFODNN7EXAMPLE", 20)

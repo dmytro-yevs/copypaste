@@ -204,8 +204,14 @@ fn expect_count(data: Option<ResponseData>) -> Result<u64> {
 }
 
 impl Backend for DaemonBackend {
-    async fn list(&self, limit: u32, offset: u32) -> Result<Page> {
-        expect_page(self.call(Method::List { limit, offset }).await?)
+    async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
+        expect_page(
+            self.call(Method::List {
+                limit,
+                cursor: cursor.map(str::to_string),
+            })
+            .await?,
+        )
     }
 
     async fn search(&self, query: &str, limit: u32) -> Result<Page> {

@@ -16,6 +16,18 @@ use serde::{Deserialize, Serialize};
 pub struct ItemPage {
     pub items: Vec<Item>,
     pub skipped_undecryptable: u32,
+    /// Where to resume, or `None` at the end of the list.
+    ///
+    /// Pass it back as [`crate::Method::List`]'s `cursor`. **The only correct
+    /// end-of-list test**: a short page is not one, because
+    /// `skipped_undecryptable` rows were read and dropped, and stopping on a
+    /// short page would hide the rest of the history behind a handful of
+    /// corrupt rows.
+    ///
+    /// Always `None` from `Search`, which is not paged — see
+    /// [`crate::Method::Search`].
+    #[serde(default)]
+    pub next_cursor: Option<String>,
 }
 
 /// One item in an export, and the unit an import consumes.
@@ -187,6 +199,35 @@ pub struct SyncResult {
     pub error: Option<String>,
 }
 
+/// What the daemon has refused, missed or deleted since it started.
+///
+/// Every one of these was already counted somewhere and readable nowhere, which
+/// is the whole reason the struct exists: an oversized copy that was dropped and
+/// a daemon that has stopped capturing look identical to a user, and the
+/// difference was only ever in the daemon's own stderr.
+///
+/// **Counts, and nothing else.** No ids, no timestamps of individual events, no
+/// text. A diagnostics report built from this cannot carry clipboard content
+/// because there is none here to carry (CLAUDE.md rule 4).
+///
+/// Cumulative since the process started and never reset, so `uptime_secs` is
+/// the only thing they can honestly be read against.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnosticCounters {
+    /// Clipboard changes dropped for exceeding the read gate.
+    pub rejected_too_large: u64,
+    /// Clipboard values that were overwritten before the poll could observe
+    /// them. `changeCount` is lossy; a delta above 1 is irrecoverable.
+    pub lost_intermediates: u64,
+    /// Detected secrets the auto-wipe sweep deleted. The only deletions the
+    /// user did not ask for.
+    pub sensitive_swept: u64,
+    /// Search-index rows the startup purge removed because the current ruleset
+    /// calls them sensitive.
+    pub index_purged: u64,
+    pub uptime_secs: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusData {
     pub version: String,
@@ -218,6 +259,18 @@ pub struct StatusData {
     /// that has it — an unknown field is ignored, a missing one is not.
     #[serde(default)]
     pub legacy_history_present: bool,
+
+    /// What has been refused, missed or deleted since the daemon started.
+    ///
+    /// On `status` rather than behind a method of its own because every one of
+    /// these numbers is only meaningful beside the flags above it: "3 copies
+    /// refused" reads differently against a running capture loop than against a
+    /// stopped one, and a client that had to make two calls could show them
+    /// disagreeing.
+    ///
+    /// `#[serde(default)]` for the same reason as the field above.
+    #[serde(default)]
+    pub counters: DiagnosticCounters,
 }
 
 /// An item as seen by clients. Content is plaintext here: it is decrypted by
