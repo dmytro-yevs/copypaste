@@ -30,3 +30,20 @@ bad=$(printf '%s\n' "$staged" | sort -u | grep -Fx -f "$tmp" || true)
     printf 'Run: rustfmt --edition 2021 <file> && git add <file>\n' >&2
     exit 1
 }
+
+# Reject a staged file that is over a rule 8 comment budget.
+#
+# Scoped to the staged set for the same reason as rustfmt above: several agents
+# edit this tree at once and a whole-tree verdict would block commits that are
+# fine. `scripts/comment-budget.txt` carries the pre-existing debt.
+staged_src=$(git diff --cached --name-only --diff-filter=ACMR \
+             -- 'crates/*.rs' 'crates/*.ts' 'crates/*.tsx')
+if [ -n "$staged_src" ]; then
+    # shellcheck disable=SC2086
+    ./scripts/check-comments.sh $staged_src >/dev/null 2>&1 || {
+        printf 'Comment budget (CLAUDE.md rule 8):\n' >&2
+        # shellcheck disable=SC2086
+        ./scripts/check-comments.sh $staged_src >&2
+        exit 1
+    }
+fi
