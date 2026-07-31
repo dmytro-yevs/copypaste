@@ -32,17 +32,21 @@ name: Android emulator
 # docs/rewrite/android-spike.md as NOT ASSERTED.
 #
 # ---------------------------------------------------------------------------
-# Cost, and why this is not on push
+# Cost, and when this runs
 # ---------------------------------------------------------------------------
 # Measured on run 1: 6.5 minutes to build the APK against a warm rust-cache,
 # 3.5 to boot the AVD and drive it. A cold cache adds the OpenSSL and SQLCipher
-# compile for the ABI, which is the bulk of a first run. So the standing cost is
-# ten minutes a night, not the forty this comment first guessed.
+# compile for the ABI, which is the bulk of a first run.
 #
-# Still not on push: the signal changes when the Android code or this job does,
-# which is not every merge, and a per-push emulator is how a nightly turns into
-# a queue. It is deliberately not a dependency of the release workflow — put it
-# there once it has passed on its own, not before.
+# This is Android's authoritative layer (docs/rewrite/testing-policy.md), so it
+# has to gate the merges that can break Android: the shared React app, the Rust
+# core, copypaste-ipc, the Tauri bridge and the Android tree itself. The paths
+# below are that list. Everything else — a daemon-only change, a document, the
+# macOS shell — still gets the nightly and nothing more, which is what keeps the
+# ten minutes off most merges.
+#
+# It is deliberately not a dependency of the release workflow — put it there
+# once it has passed on its own, not before.
 
 on:
   workflow_dispatch:
@@ -58,9 +62,50 @@ on:
   schedule:
     # 04:17 UTC. Off the hour because everything else in the world is on it.
     - cron: "17 4 * * *"
+  # GitHub's workflow parser rejects YAML anchors, so the two lists are written
+  # out twice and have to be kept identical by hand.
+  push:
+    branches: [main, v2-main]
+    paths:
+      - "crates/copypaste-ui/src/**"
+      - "crates/copypaste-ui/src-tauri/**"
+      - "crates/copypaste-ui/package.json"
+      - "crates/copypaste-ui/package-lock.json"
+      - "crates/copypaste-ui/index.html"
+      - "crates/copypaste-ui/vite.config.ts"
+      - "crates/copypaste-core/**"
+      - "crates/copypaste-ipc/**"
+      - "crates/copypaste-p2p/**"
+      - "design/**"
+      - "scripts/release/android-*.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/android-emulator.yml"
+  pull_request:
+    paths:
+      - "crates/copypaste-ui/src/**"
+      - "crates/copypaste-ui/src-tauri/**"
+      - "crates/copypaste-ui/package.json"
+      - "crates/copypaste-ui/package-lock.json"
+      - "crates/copypaste-ui/index.html"
+      - "crates/copypaste-ui/vite.config.ts"
+      - "crates/copypaste-core/**"
+      - "crates/copypaste-ipc/**"
+      - "crates/copypaste-p2p/**"
+      - "design/**"
+      - "scripts/release/android-*.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/android-emulator.yml"
 
 concurrency:
-  group: android-emulator-${{ github.ref }}
+  # The event is in the group because the nightly and a manual dispatch share
+  # the default branch's ref, and a cancelled run reports as cancelled rather
+  # than failed — so one silently erasing the other's Android signal is
+  # invisible.
+  group: android-emulator-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
