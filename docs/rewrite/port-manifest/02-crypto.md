@@ -929,6 +929,53 @@ string is literally `"keychain_locked"` — the UI consumes it);
 Keep the pattern of extracting a **pure classifier** so the decision logic is
 testable without an interactive Keychain.
 
+### 5.10 What an interactive Keychain now covers
+
+§5.9's hermetic classifier is not enough on its own: it pins what the code does
+with an OSStatus, never that the OSStatus is the one macOS returns. Until this
+job existed nothing had watched `crypto/keystore/macos.rs` store or retrieve
+anything, and the backend it replaced — a `0600` file — was what every shipped
+binary actually used.
+
+`.github/workflows/ci.yml`'s `macos-check` job creates a throwaway keychain,
+unlocks it, makes it the default, and runs
+`cargo test -p copypaste-core -- --ignored`. **Every assertion names which
+backend answered**, because a test satisfied by bytes coming back is satisfied
+by the file store (CLAUDE.md rule 4).
+
+| Rule | What is driven |
+|---|---|
+| I-10 | The minted secret is readable under the frozen `com.copypaste.daemon` / `device-secret-key` pair by an independent query, and the data directory is left empty — so the Keychain answered, not `device_secret.key` |
+| I-20 | With no entry, `load` returns `Absent` — which is what checks `ERR_SEC_ITEM_NOT_FOUND` against what the framework really returns. Get it wrong and every fresh Mac refuses to start |
+| I-20 | A wrong-length entry is `KeystoreEntryUnusable`, is not minted over, and is left byte-identical |
+| F-11 | A history sitting beside no entry is refused rather than re-keyed, and nothing is written to the Keychain |
+
+**Not covered, and two of these are gaps in the code rather than in the tests:**
+
+- **§3.8's write attributes are not set.** `set_generic_password` sends class,
+  service, account and data — no `kSecAttrAccessControl`, no
+  `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, no explicit
+  `kSecAttrSynchronizable = false`. The item therefore takes the default
+  accessibility and is eligible for inclusion in a backup, which is the
+  property §3.8 records as load-bearing.
+- **I-22 has no equivalent.** `Keyring::load_or_create` runs inline in
+  `main`, with no timeout and no dedicated thread. On a machine where the read
+  raises a GUI prompt the daemon blocks at startup instead of degrading.
+- **A prompting Keychain is untested by construction.** The runner is headless,
+  so a read that would prompt returns `errSecInteractionNotAllowed` instead.
+  That is the fail-closed direction, and it means these tests say nothing about
+  what a user sees when the ACL no longer matches — which is the next item.
+- **The ad-hoc-signature question.** §3.8 records that v1 chose the file store
+  unless the binary carried a stable Team Identifier, because an ad-hoc
+  signature's designated requirement is its `cdhash` and the ACL therefore
+  breaks on every rebuild. v2 uses the Keychain unconditionally and ADR-0001
+  signs ad-hoc. `scripts/release/smoke-macos-dmg.sh` re-signs the installed
+  daemon and starts it again to find out what that combination does; the result
+  is reported, not asserted, because the answer is a design decision rather
+  than a regression.
+- **I-21 (rotate-backup) and the rotation sweep** do not exist in v2 and are
+  reference-only under CLAUDE.md rule 3.
+
 ## 6. Known-unjustified complexity we should NOT port
 
 ### 6.1 Dead key-derivation surface (drop outright — zero migration cost)

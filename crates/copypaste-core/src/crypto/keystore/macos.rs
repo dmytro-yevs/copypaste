@@ -52,3 +52,200 @@ pub(super) fn create(_data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
     .map_err(|_| CryptoError::KeystoreUnavailable("could not write to the keychain"))?;
     Ok(secret)
 }
+
+// ---------------------------------------------------------------------------
+// Tests — against the real Keychain
+// ---------------------------------------------------------------------------
+//
+// Every assertion names *which backend answered*: a test satisfied by a value
+// coming back is satisfied by the `0600` file this backend exists to replace,
+// which is what shipped unnoticed for a year.
+//
+// Two guards, because the item under test is the real device secret and
+// deleting it leaves an installed history unopenable. `#[ignore]` keeps them
+// out of `cargo test`; `disposable_keychain` refuses a login keychain even
+// when they are asked for by name.
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+    use std::sync::{Mutex, MutexGuard};
+
+    use security_framework::passwords::{
+        delete_generic_password, get_generic_password, set_generic_password,
+    };
+
+    use super::super::{load_or_create_secret, SECRET_FILE_NAME};
+    use super::*;
+
+    /// Set only where the Keychain is disposable. CI creates a throwaway
+    /// keychain, makes it the default and sets this; a developer's Mac has
+    /// neither.
+    const ENV_ARMED: &str = "COPYPASTE_KEYCHAIN_TEST";
+
+    static KEYCHAIN: Mutex<()> = Mutex::new(());
+
+    fn serialised() -> MutexGuard<'static, ()> {
+        KEYCHAIN.lock().unwrap_or_else(|held| held.into_inner())
+    }
+
+    /// Whether it is safe to write to this machine's default keychain.
+    ///
+    /// Prints its reason rather than passing quietly: a skipped test that says
+    /// nothing is indistinguishable from one that never ran.
+    fn disposable_keychain() -> bool {
+        if std::env::var_os(ENV_ARMED).is_none() {
+            eprintln!(
+                "SKIPPED: {ENV_ARMED} is unset. These tests create and delete the real \
+                 device-secret Keychain item, which would leave any CopyPaste install on \
+                 this machine unable to open its history."
+            );
+            return false;
+        }
+
+        let default = Command::new("security")
+            .arg("default-keychain")
+            .output()
+            .expect("the security tool must be present on macOS");
+        let default = String::from_utf8_lossy(&default.stdout).into_owned();
+        assert!(
+            !default.contains("login.keychain"),
+            "{ENV_ARMED} is set but the default keychain is the login keychain. \
+             Refusing: this would destroy a real device secret."
+        );
+        true
+    }
+
+    /// No entry, whatever was there before.
+    fn clear_entry() {
+        match delete_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT) {
+            Ok(()) => {}
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
+            Err(e) => panic!("could not clear the test Keychain entry: {}", e.code()),
+        }
+    }
+
+    fn like_the_real_database(dir: &Path) -> std::path::PathBuf {
+        let name = copypaste_ipc::database_path();
+        dir.join(name.file_name().expect("the database path has a filename"))
+    }
+
+    /// The whole point: a first run puts the secret in the Keychain, a second
+    /// run reads that same secret back, and no file is written anywhere.
+    #[test]
+    #[ignore = "writes to the real macOS Keychain"]
+    fn the_keychain_holds_the_secret_and_no_file_is_written() {
+        let _lock = serialised();
+        if !disposable_keychain() {
+            return;
+        }
+        clear_entry();
+        let dir = tempfile::tempdir().unwrap();
+
+        let minted = load_or_create_secret(dir.path()).expect("a first run must mint a secret");
+
+        // Which backend answered. The file backend would have left its 32 bytes
+        // in the data directory; the Keychain leaves it empty and answers under
+        // the frozen service/account pair (manifest 02, I-10).
+        assert!(
+            !dir.path().join(SECRET_FILE_NAME).exists(),
+            "the file backend answered: {SECRET_FILE_NAME} was written"
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "the data directory should be untouched by a Keychain-backed secret"
+        );
+        let stored = get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT)
+            .expect("the secret must be readable straight out of the Keychain");
+        assert_eq!(stored.as_slice(), minted.as_slice());
+
+        let reopened = load_or_create_secret(dir.path()).expect("a second run must read it back");
+        assert_eq!(*reopened, *minted, "a second run minted a different secret");
+
+        clear_entry();
+    }
+
+    /// Manifest 02, I-20. `errSecItemNotFound` is the only status that
+    /// authorises minting, and this is the only place the constant can be
+    /// checked against what the framework actually returns. Get it wrong and
+    /// every fresh Mac reports the Keychain as unavailable and never starts.
+    #[test]
+    #[ignore = "writes to the real macOS Keychain"]
+    fn an_absent_entry_reads_as_absent_rather_than_as_a_failure() {
+        let _lock = serialised();
+        if !disposable_keychain() {
+            return;
+        }
+        clear_entry();
+        let dir = tempfile::tempdir().unwrap();
+
+        match load(dir.path()) {
+            Ok(Lookup::Absent) => {}
+            Ok(Lookup::Found(_)) => panic!("an entry was found after being deleted"),
+            Err(e) => panic!(
+                "an absent entry must not be an error — ERR_SEC_ITEM_NOT_FOUND \
+                 ({ERR_SEC_ITEM_NOT_FOUND}) does not match what the framework returns: {e:?}"
+            ),
+        }
+    }
+
+    /// I-20 from the other side: an entry that is there but unusable must fail
+    /// closed. Minting over it would re-key a live history.
+    #[test]
+    #[ignore = "writes to the real macOS Keychain"]
+    fn a_wrong_length_entry_is_unusable_and_is_never_replaced() {
+        let _lock = serialised();
+        if !disposable_keychain() {
+            return;
+        }
+        clear_entry();
+        let dir = tempfile::tempdir().unwrap();
+        set_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT, b"short").unwrap();
+
+        let err = load(dir.path()).expect_err("a five-byte secret is not usable");
+        assert!(
+            matches!(err, CryptoError::KeystoreEntryUnusable(_)),
+            "expected KeystoreEntryUnusable, got {err:?}"
+        );
+        assert!(
+            load_or_create_secret(dir.path()).is_err(),
+            "an unusable entry must not be minted over"
+        );
+        assert_eq!(
+            get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT).unwrap(),
+            b"short".to_vec(),
+            "the stored entry was overwritten"
+        );
+
+        clear_entry();
+    }
+
+    /// Security review F-11, on the backend it was written for. The file
+    /// backend's copy of this test runs on Linux; this one is the case that
+    /// actually ships — a Keychain secret does not travel with `--data-dir`,
+    /// so "no entry" beside an existing history means the wrong place, not a
+    /// first run.
+    #[test]
+    #[ignore = "writes to the real macOS Keychain"]
+    fn a_history_without_its_secret_is_refused_rather_than_re_keyed() {
+        let _lock = serialised();
+        if !disposable_keychain() {
+            return;
+        }
+        clear_entry();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(like_the_real_database(dir.path()), b"SQLCipher").unwrap();
+
+        let err = load_or_create_secret(dir.path())
+            .expect_err("minting beside an existing history must be refused");
+        assert!(
+            matches!(err, CryptoError::KeystoreUnavailable(_)),
+            "expected KeystoreUnavailable, got {err:?}"
+        );
+        assert!(
+            get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT).is_err(),
+            "a secret was minted into the Keychain anyway"
+        );
+    }
+}

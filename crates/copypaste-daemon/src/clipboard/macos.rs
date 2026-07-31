@@ -1,14 +1,11 @@
 //! The real backend: `NSPasteboard`.
 //!
-//! **Unverified on this host.** CopyPaste develops on Linux; nothing in this
-//! file has been compiled or run. The logic is written against manifest 01 and
-//! the shared [`ChangeTracker`] it uses *is* tested — that is the whole reason
-//! change detection lives in [`super::change`] rather than here.
-//!
-//! Binding-level assumptions to confirm on a mac (the *logic* is manifest, the
-//! *spelling* is not): `NSPasteboard::generalPasteboard`, `changeCount`,
-//! `clearContents`, `availableTypeFromArray`, `dataForType`, `setString_forType`,
-//! `NSArray::from_vec`, `NSData::length`/`bytes`.
+//! CopyPaste develops on Linux, so this file neither compiles nor runs on the
+//! host it is written on. The logic is manifest 01; the Cocoa spelling is not,
+//! and the tests at the bottom are what settles it — they drive the real
+//! general pasteboard on macOS CI, which is where `changeCount`, the `+2` of a
+//! self-write, the opt-out markers and the size gate stop being API reading.
+//! Anything they do not touch still is.
 //!
 //! # macOS 16 will make this read a user-visible event
 //!
@@ -247,5 +244,265 @@ impl ClipboardSource for MacOsClipboard {
 
     fn lost_intermediates_count(&self) -> u64 {
         self.tracker.lost_intermediates
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests — the half of manifest 01 that only a Mac can answer
+// ---------------------------------------------------------------------------
+//
+// `super::change` made the state machine testable anywhere. What stayed
+// untestable is this file: whether `changeCount` moves at all without a window
+// server, whether `clearContents` + `setString:forType:` is really the +2 of
+// §4, and whether `availableTypeFromArray` sees the markers a password manager
+// writes. Each is an assumption about the bindings, and each one wrong breaks a
+// rule the manifest records a production bug for.
+//
+// `#[ignore]`: the general pasteboard is the machine's own clipboard, so a run
+// replaces whatever was copied. Serialised for the reason §5 gives — it is a
+// process-global singleton — by a mutex here as well as `--test-threads=1` in
+// CI, so a plain `cargo test -- --ignored` is not silently racy.
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Mutex, MutexGuard};
+
+    use objc2_foundation::NSData;
+
+    use super::*;
+
+    static PASTEBOARD: Mutex<()> = Mutex::new(());
+
+    fn serialised() -> MutexGuard<'static, ()> {
+        PASTEBOARD.lock().unwrap_or_else(|held| held.into_inner())
+    }
+
+    fn change_count() -> i64 {
+        autoreleasepool(|_| unsafe { NSPasteboard::generalPasteboard().changeCount() as i64 })
+    }
+
+    /// What another application does: `clearContents` and then one `setData`
+    /// per representation it offers.
+    fn write_types(reps: &[(&str, &[u8])]) {
+        autoreleasepool(|_| unsafe {
+            let pb = NSPasteboard::generalPasteboard();
+            let _ = pb.clearContents();
+            for &(uti, bytes) in reps {
+                let data = NSData::with_bytes(bytes);
+                let _ = pb.setData_forType(Some(&data), &NSString::from_str(uti));
+            }
+        });
+    }
+
+    /// Whether the pasteboard offers a UTI — the same question the poll asks,
+    /// so a test can assert its own precondition instead of trusting the
+    /// return value of `setData:forType:`.
+    fn offers(uti: &str) -> bool {
+        autoreleasepool(|_| unsafe {
+            let types = NSArray::from_vec(vec![NSString::from_str(uti)]);
+            NSPasteboard::generalPasteboard()
+                .availableTypeFromArray(&types)
+                .is_some()
+        })
+    }
+
+    fn write_text(text: &str) {
+        write_types(&[(UTI_TEXT, text.as_bytes())]);
+        assert!(offers(UTI_TEXT), "the pasteboard refused a test write");
+    }
+
+    fn clear() {
+        autoreleasepool(|_| unsafe {
+            let _ = NSPasteboard::generalPasteboard().clearContents();
+        });
+    }
+
+    /// T-21, T-4, I-1, I-2. Also the first question of all: does `changeCount`
+    /// move on a headless runner?
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn a_change_by_another_app_is_captured_exactly_once() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+
+        let before = change_count();
+        write_text("copypaste — a check ✓");
+        let after = change_count();
+        assert!(
+            after > before,
+            "changeCount did not move for a write ({before} -> {after}); \
+             nothing in this backend can work if it does not"
+        );
+
+        let capture = clipboard.poll().expect("the write must be captured");
+        assert_eq!(capture.content, "copypaste — a check ✓");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
+        assert_eq!(
+            clipboard.lost_intermediates_count(),
+            0,
+            "I-2: a first poll at an arbitrary change count is not a burst"
+        );
+
+        assert!(
+            clipboard.poll().is_none(),
+            "T-4: an unchanged pasteboard must yield nothing"
+        );
+    }
+
+    /// §3.3 and the `+2` of §4, which is the constant the whole self-write
+    /// protocol is built on. If `clearContents` and `setString:forType:` do not
+    /// move `changeCount` by exactly two, the sentinel is armed at a count that
+    /// never arrives and every paste-back is re-captured as a fresh copy
+    /// (Fix-4, "DUP-ON-COPY"). T-8, T-9.
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn our_own_write_moves_the_count_by_two_and_is_suppressed_once() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+        write_text("something copied earlier");
+        let _ = clipboard.poll();
+
+        let pre = change_count();
+        clipboard
+            .set_contents("pasted by us")
+            .expect("the write failed");
+        let actual = change_count();
+        assert_eq!(
+            actual - pre,
+            SELF_WRITE_DELTA,
+            "§4: clearContents (+1) then setString:forType: (+1). \
+             Observed {pre} -> {actual}"
+        );
+
+        assert!(
+            clipboard.poll().is_none(),
+            "our own write must not come back as a capture"
+        );
+
+        write_text("a genuine copy");
+        assert_eq!(
+            clipboard
+                .poll()
+                .expect("T-9: suppression is one-shot")
+                .content,
+            "a genuine copy"
+        );
+    }
+
+    /// §3.2, the manifest's highest-value rule: a burst must never be returned
+    /// *instead of* the surviving value. T-5, T-6.
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn a_burst_reports_its_losses_and_still_returns_the_survivor() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+        write_text("seed");
+        let _ = clipboard.poll();
+
+        write_text("one");
+        write_text("two");
+        write_text("latest");
+
+        let capture = clipboard
+            .poll()
+            .expect("§3.2: the surviving clipboard value must still be captured");
+        assert_eq!(capture.content, "latest");
+        let lost = clipboard.lost_intermediates_count();
+        assert!(lost > 0, "the burst must be reported as telemetry");
+
+        write_text("after-burst");
+        assert_eq!(
+            clipboard
+                .poll()
+                .expect("T-6: normal capture resumes")
+                .content,
+            "after-burst"
+        );
+        assert_eq!(clipboard.lost_intermediates_count(), lost);
+    }
+
+    /// I-5, §3.4, T-14, T-15, T-16. The marker is written *alongside* ordinary
+    /// text, which is the shape a password manager produces and the case that
+    /// must still be dropped entirely.
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn every_opt_out_marker_drops_the_change_and_advances_the_cursor() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+
+        for marker in UTI_MARKERS {
+            // Empty content, which is how the convention is written in the
+            // wild; presence of the type is the whole signal.
+            write_types(&[(UTI_TEXT, b"a master password"), (marker, b"")]);
+            assert!(
+                offers(marker),
+                "{marker} could not be put on the pasteboard"
+            );
+            assert!(
+                clipboard.poll().is_none(),
+                "{marker} did not suppress the change"
+            );
+            assert!(
+                clipboard.poll().is_none(),
+                "I-3: {marker} left the change to be re-offered forever"
+            );
+        }
+
+        write_text("an ordinary copy");
+        assert_eq!(
+            clipboard
+                .poll()
+                .expect("a marked change must not wedge the poll")
+                .content,
+            "an ordinary copy"
+        );
+    }
+
+    /// I-18, I-39, T-30, T-33. §6.5 is the reason the counter is asserted and
+    /// not just the rejection: v1 wired a counter that nothing read and that
+    /// the image path bypassed, so an oversized item vanished in silence.
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn text_over_the_cap_is_rejected_and_counted_and_the_boundary_is_kept() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+
+        let oversized = vec![b'a'; MAX_TEXT_BYTES + 1];
+        write_types(&[(UTI_TEXT, &oversized)]);
+        assert!(offers(UTI_TEXT), "the oversized write never landed");
+        assert!(clipboard.poll().is_none(), "T-30: over the cap by one byte");
+        assert_eq!(
+            clipboard.rejected_too_large_count(),
+            1,
+            "I-39: a rejection must be counted, not only logged"
+        );
+
+        let at_the_cap = vec![b'a'; MAX_TEXT_BYTES];
+        write_types(&[(UTI_TEXT, &at_the_cap)]);
+        assert!(offers(UTI_TEXT), "the boundary write never landed");
+        let capture = clipboard.poll().expect("T-33: len == cap is accepted");
+        assert_eq!(capture.content.len(), MAX_TEXT_BYTES);
+        assert_eq!(clipboard.rejected_too_large_count(), 1);
+    }
+
+    /// An empty pasteboard is a change like any other: nothing to capture, and
+    /// the cursor still moves (I-3).
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn a_cleared_pasteboard_yields_nothing_and_keeps_polling() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+        write_text("before the clear");
+        let _ = clipboard.poll();
+
+        clear();
+        assert!(clipboard.poll().is_none());
+        assert!(clipboard.poll().is_none());
+
+        write_text("after the clear");
+        assert_eq!(
+            clipboard.poll().expect("capture must resume").content,
+            "after the clear"
+        );
     }
 }

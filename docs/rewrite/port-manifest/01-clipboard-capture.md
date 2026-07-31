@@ -1026,3 +1026,55 @@ real, fast, platform-independent tests instead of comments. This is the single
 highest-leverage structural change available in this subsystem: roughly two
 thirds of the invariants in §2 are currently untestable, which is precisely why
 several of them regressed at least once.
+
+---
+
+## 7. What is executed, and where
+
+§6.7's fix landed: `clipboard/change.rs` is the change-count cursor and the
+self-write sentinel as pure state, run by both backends and tested by an
+ordinary `cargo test` on any host. What that cannot reach is the Cocoa half —
+`changeCount`, `availableTypeFromArray`, `setString:forType:` — which no Linux
+host compiles, let alone runs.
+
+`.github/workflows/ci.yml`'s `macos-check` job runs it, on `macos-14`:
+`cargo test -p copypaste-daemon -- --ignored --test-threads=1` drives the real
+general pasteboard from `clipboard/macos.rs`. The release pipeline adds the
+other end — `scripts/release/smoke-macos-dmg.sh` installs the DMG, starts the
+daemon from inside the bundle and asserts that a `pbcopy` reaches the history.
+
+### 7.1 Covered by something that runs
+
+| Rules | What is driven |
+|---|---|
+| I-1, I-2, T-4, T-21 | A write by another process moves `changeCount`; the poll returns the exact UTF-8; a second poll returns nothing; a first poll is not a burst |
+| §3.3, §4, T-8, T-9 | `clearContents` + `setString:forType:` is **observed** to move `changeCount` by exactly 2, and the sentinel suppresses that one change and no other |
+| §3.2, T-5, T-6 | Three fast writes: the survivor is returned, the losses are counted, capture resumes |
+| I-5, §3.4, T-14, T-15, T-16 | All three `org.nspasteboard.*` markers, written *alongside* real text, drop the change and advance the cursor |
+| I-18, I-39, T-30, T-33 | `cap + 1` bytes rejected and counted on the readable counter, `cap` bytes accepted |
+| I-3 | Every drop path this backend has — marker, self-write, empty pasteboard — is polled twice and never re-offers |
+| Status | `status` from the installed bundle reports `clipboard_backend = nspasteboard`, so a green run cannot be the fake |
+
+### 7.2 Not covered, and why
+
+- **Image, file and rich-text capture** — I-11..I-16, §3.5, §3.6, §3.7, §3.8,
+  T-17..T-29, T-60..T-71. Not implemented; `Capture::content` is a `String`.
+- **Frontmost attribution and the exclusion gate** — I-7, I-8, §3.9,
+  T-45..T-58. Not implemented.
+- **T-10, the poll racing the write.** No seam: `set_contents` performs
+  `clearContents` and `setString:forType:` inside one call, so a test cannot
+  interleave a poll between them. The pre-stamp that makes T-10 pass is
+  asserted in `change.rs` instead, which is the ordering rule but not the race.
+- **T-13, the shared sentinel.** Nothing to test at this level, and it holds
+  structurally: `ClipboardSource::set_contents` is the only write path in the
+  workspace, so sync auto-apply cannot grow a second protocol without adding a
+  second writer.
+- **Resource rules** — I-17 (autorelease drain), I-20 (executor), I-21
+  (zombies), T-79..T-81. The pool is entered on every poll but nothing measures
+  memory, thread blocking or the process table.
+- **Hot reload** — §3.10, §3.21, T-34, T-77, T-78. The read gate is a constant;
+  configuration is not wired to it yet.
+- **macOS 15+.** The runner is pinned to `macos-14` deliberately: later
+  versions raise a user prompt on programmatic pasteboard reads, which a
+  headless runner has nobody to answer. Nothing here says what CopyPaste does
+  on a version that prompts.
