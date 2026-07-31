@@ -36,6 +36,10 @@ pub(super) const MSG_WATCHERS_FULL: &str = "too many clients are already watchin
 pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured size limit";
 pub(super) const MSG_REORDER_TOO_MANY: &str =
     "too many items in one reorder; a pinned list is never this long";
+/// Refused rather than restarted from the top: a load-more that silently began
+/// again would repeat the whole history, and a client cannot tell that from a
+/// list that really does.
+pub(super) const MSG_BAD_CURSOR: &str = "that page marker is not one this service issued";
 pub(super) const MSG_IMPORT_EMPTY: &str = "there is nothing to import";
 pub(super) const MSG_IMPORT_TOO_MANY: &str =
     "too many items in one import; split the file into smaller batches";
@@ -147,6 +151,7 @@ mod tests {
         MSG_WATCHERS_FULL,
         MSG_TOO_BIG,
         MSG_REORDER_TOO_MANY,
+        MSG_BAD_CURSOR,
         MSG_IMPORT_EMPTY,
         MSG_IMPORT_TOO_MANY,
         MSG_BAD_PATH,
