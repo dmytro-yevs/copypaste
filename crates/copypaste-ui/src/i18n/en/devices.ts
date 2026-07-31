@@ -64,6 +64,8 @@ export const devices = {
       label: "Not connected yet",
       hint: "The pairing code hasn't been used. Enter it on the other device — a code stops working a few minutes after it's created, so generate a new one if it has been longer.",
     },
+    /** `hint` is the fallback for the two error kinds whose own sentence says
+     *  only "the background service returned an error". */
     failing: {
       label: "Sync failed",
       hint: "The last sync with this device didn't finish. Check it's awake and on this network, then try again.",
@@ -80,6 +82,13 @@ export const devices = {
      *  through a relative formatter read "Last seen 56 years ago". */
     lastSynced: "Last synced {{age}}",
     neverSynced: "Never synced",
+    /** `lastSynced` comes from the daemon's own cadence; these two are the runs
+     *  this screen started, which is the only place a per-peer outcome exists.
+     *  `sent`/`received` are what separates a sync that worked from one that
+     *  merely completed. */
+    lastRun: "Last sync from here {{age}} · sent {{sent}}, received {{received}}",
+    failedAt: "Sync failed {{age}}",
+    retryOne: "Try syncing with {{name}} again",
     online: "On this network",
     offline: "Not seen on this network",
     syncOne: "Sync with {{name}} now",
