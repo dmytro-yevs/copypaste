@@ -31,8 +31,13 @@ MAX_RATIO=${MAX_RATIO:-30}
 BASELINE=scripts/comment-budget.txt
 
 exec python3 - "$MAX_BLOCK" "$MAX_HEADER" "$MAX_RATIO" "$BASELINE" "$@" <<'PY'
+import signal
 import subprocess
 import sys
+
+# Without this, piping the report into `head` ends in a traceback, which in a
+# gate reads as the check crashing rather than as the reader stopping early.
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 max_block, max_header, max_ratio, baseline_path = (
     int(sys.argv[1]),

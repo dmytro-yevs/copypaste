@@ -3,9 +3,9 @@
 # This list can only shrink. Fix a file, delete its line. Adding one is
 # not a way to land a long comment — the check tells you so and fails.
 #
-# The shape of the debt at the time of writing: 152 comment lines above
-# 4 lines of code in copypaste-cloud/src/rest/mod.rs, and 42 module
-# headers over 25 lines.
+# Derived from a clean export of HEAD, never from the working tree:
+# the first attempt was measured against a tree carrying other agents'
+# uncommitted comments and recorded a file that was never over.
 
 crates/copypaste-cli/src/cli.rs
 crates/copypaste-cli/src/cloud.rs
@@ -176,7 +176,6 @@ crates/copypaste-ui/src/components/settings/Row.tsx
 crates/copypaste-ui/src/components/settings/ServiceTab.tsx
 crates/copypaste-ui/src/components/settings/StorageTab.tsx
 crates/copypaste-ui/src/components/settings/serviceChoices.ts
-crates/copypaste-ui/src/hooks/useHistory.ts
 crates/copypaste-ui/src/hooks/usePush.ts
 crates/copypaste-ui/src/hooks/useServiceConfig.ts
 crates/copypaste-ui/src/lib/banners.ts
