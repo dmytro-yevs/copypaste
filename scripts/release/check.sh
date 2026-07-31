@@ -84,6 +84,28 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+group "Install-time tooling stays out of the v0.4 directory"
+# ---------------------------------------------------------------------------
+# `~/Library/Application Support/CopyPaste` is v0.4.x's, holding a database this
+# version never opens and CLAUDE.md rule 3 promises to leave intact. The cask
+# once zapped it — deleting the one history v2 cannot restore, and none of v2's.
+# No Rust names that path outside `v1_data_dir`, so nothing else catches this.
+for f in Casks/copypaste.rb packaging/macos/selfsign.sh; do
+    if grep -qE 'Application Support/CopyPaste([/"]|$)' "$f"; then
+        bad "$f names only the v2 data directory" \
+            "it names ~/Library/Application Support/CopyPaste — v0.4.x's, read-only by contract"
+    else
+        ok "$f names only the v2 data directory"
+    fi
+done
+if grep -q 'Application Support/com.copypaste.CopyPaste' Casks/copypaste.rb; then
+    ok "the cask zaps the v2 data directory"
+else
+    bad "the cask zaps the v2 data directory" \
+        "zap removes no CopyPaste data at all"
+fi
+
+# ---------------------------------------------------------------------------
 group "Seeded values fail closed"
 # ---------------------------------------------------------------------------
 # An unreleased checkout must not be able to install anything: version 0.0.0 has
@@ -271,6 +293,12 @@ else
     bad "BuildTask.kt re-enters the CLI the same way the release job does" \
         "expected npm + [run, --, tauri, android, android-studio-script]"
 fi
+# The emulator job's assertions, on fixtures. This is the whole reason they
+# live in a script: --self-test proves each detector reports a crash, an
+# unencrypted database and a leaked canary when one is there, so the job cannot
+# quietly become a test that passes without proving anything.
+check "android-smoke.sh --self-test" ./scripts/release/android-smoke.sh --self-test
+
 # Comment lines are excluded: the workflow explains at length why it does not
 # do this, and the explanation is not the thing being checked for.
 if grep -v '^[[:space:]]*#' .github/workflows/release.yml | grep -q "android init"; then

@@ -253,7 +253,9 @@ A stable certificate fixes both, and v1 fixed neither.
   certificate, then signs inner binaries and the bundle.
 - **The certificate** is RSA-2048, self-signed, `codeSigning` EKU, ten years,
   in a dedicated keychain under
-  `~/Library/Application Support/CopyPaste/signing`.
+  `~/Library/Application Support/com.copypaste.CopyPaste/signing` — the app's
+  own data directory. Not the unprefixed `CopyPaste` beside it: that is
+  v0.4.x's, and CLAUDE.md rule 3 makes it read-only.
 
 ### The open question, and how much of it is now answered
 
@@ -328,7 +330,7 @@ brew install --cask <tap>/copypaste
 codesign -d --requirements - -v /Applications/CopyPaste.app
 #   self-signed  -> identifier "com.copypaste.app" and certificate root = H"..."
 #   ad-hoc       -> cdhash H"..."      (the script fell back; read its output)
-security find-identity -v ~/Library/Application\ Support/CopyPaste/signing/*.keychain-db
+security find-identity -v ~/Library/Application\ Support/com.copypaste.CopyPaste/signing/*.keychain-db
 
 # 3. Grant Accessibility by hand:
 #    System Settings -> Privacy & Security -> Accessibility -> +CopyPaste.
