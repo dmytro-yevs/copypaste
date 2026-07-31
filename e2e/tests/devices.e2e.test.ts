@@ -39,6 +39,7 @@ interface PeerInfo {
   pairing_id: string;
   name: string;
   online: boolean;
+  last_seen_ms: number;
 }
 
 let app: App;
@@ -240,7 +241,9 @@ describe("adding a device", () => {
       (peer) => peer.online,
     )!;
     await waitForText(app.browser, paired.name, 30_000);
-    await waitForText(app.browser, "Last seen");
+    // `last_seen_ms` is a last-*synced* time, and a pairing that has not synced
+    // renders "Never synced" rather than an age off the epoch.
+    await waitForText(app.browser, paired.last_seen_ms > 0 ? "Last synced" : "Never synced");
 
     const hint = await app.browser.$(
       '[title="Name reported by the device itself — not verified"]',
