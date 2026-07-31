@@ -20,9 +20,9 @@
  * run: v1 shipped 30 seconds beside a tab that showed the value, v2 carried the
  * number without the interface, and a silent irreversible delete is CLAUDE.md
  * rule 4's worst outcome. This is that interface. It states what turning it on
- * costs at the control, and states plainly that the service reports nothing
- * when the sweep fires — which is the half that is still missing, and needs an
- * event the wire does not carry yet.
+ * costs, at the control; `EventData::swept` and the Diagnostics tab are the
+ * other half, so the note names where the deletions are reported rather than
+ * admitting they are not.
  */
 import { useState } from "react";
 import { RotateCw } from "lucide-react";
@@ -33,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ChoiceRow } from "@/components/settings/ChoiceRow";
 import { Row } from "@/components/settings/Row";
+import { Section } from "@/components/settings/Section";
 import {
   DEDUP_WINDOW_SECS,
   HISTORY_LIMIT,
@@ -93,138 +94,149 @@ export function ServiceTab() {
   const sweeping = data.sensitive_ttl_secs > 0;
 
   return (
-    <div className="flex flex-col">
-      <ChoiceRow
-        title={t("settings.service.poll.title")}
-        description={t("settings.service.poll.description")}
-        choices={POLL_INTERVAL_MS}
-        value={data.poll_interval_ms}
-        disabled={busy}
-        onChange={(poll_interval_ms) => apply({ poll_interval_ms })}
-      />
+    <div className="flex flex-col gap-s-4">
+      <Section
+        title={t("settings.service.groups.capture.title")}
+        description={t("settings.service.groups.capture.description")}
+      >
+        <ChoiceRow
+          title={t("settings.service.poll.title")}
+          description={t("settings.service.poll.description")}
+          choices={POLL_INTERVAL_MS}
+          value={data.poll_interval_ms}
+          disabled={busy}
+          onChange={(poll_interval_ms) => apply({ poll_interval_ms })}
+        />
 
-      <ChoiceRow
-        title={t("settings.service.historyLimit.title")}
-        description={t("settings.service.historyLimit.description")}
-        choices={HISTORY_LIMIT}
-        value={data.history_limit}
-        disabled={busy}
-        onChange={(history_limit) => apply({ history_limit })}
-      />
+        <ChoiceRow
+          title={t("settings.service.dedup.title")}
+          description={t("settings.service.dedup.description")}
+          choices={DEDUP_WINDOW_SECS}
+          value={data.dedup_window_secs}
+          disabled={busy}
+          onChange={(dedup_window_secs) => apply({ dedup_window_secs })}
+        />
 
-      <ChoiceRow
-        title={t("settings.service.retention.title")}
-        description={t("settings.service.retention.description")}
-        choices={RETENTION_DAYS}
-        value={data.retention_days}
-        disabled={busy}
-        onChange={(retention_days) => apply({ retention_days })}
-      />
+        <ChoiceRow
+          title={t("settings.service.maxItem.title")}
+          description={t("settings.service.maxItem.description")}
+          choices={MAX_ITEM_BYTES}
+          value={data.max_item_bytes}
+          disabled={busy}
+          onChange={(max_item_bytes) => apply({ max_item_bytes })}
+        />
+      </Section>
 
-      <ChoiceRow
-        title={t("settings.service.dedup.title")}
-        description={t("settings.service.dedup.description")}
-        choices={DEDUP_WINDOW_SECS}
-        value={data.dedup_window_secs}
-        disabled={busy}
-        onChange={(dedup_window_secs) => apply({ dedup_window_secs })}
-      />
+      <Section title={t("settings.service.groups.keeping.title")}>
+        <ChoiceRow
+          title={t("settings.service.historyLimit.title")}
+          description={t("settings.service.historyLimit.description")}
+          choices={HISTORY_LIMIT}
+          value={data.history_limit}
+          disabled={busy}
+          onChange={(history_limit) => apply({ history_limit })}
+        />
 
-      <ChoiceRow
-        title={t("settings.service.maxItem.title")}
-        description={t("settings.service.maxItem.description")}
-        choices={MAX_ITEM_BYTES}
-        value={data.max_item_bytes}
-        disabled={busy}
-        onChange={(max_item_bytes) => apply({ max_item_bytes })}
-      />
+        <ChoiceRow
+          title={t("settings.service.retention.title")}
+          description={t("settings.service.retention.description")}
+          choices={RETENTION_DAYS}
+          value={data.retention_days}
+          disabled={busy}
+          onChange={(retention_days) => apply({ retention_days })}
+        />
 
-      <ChoiceRow
-        title={t("settings.service.sensitive.title")}
-        description={t("settings.service.sensitive.description")}
-        note={
-          <span
-            className={
-              sweeping
-                ? "text-xs text-warn-strong"
-                : "text-xs text-muted-foreground"
-            }
-          >
-            {sweeping
-              ? `${t("settings.service.sensitive.warning")} ${t("settings.service.sensitive.unannounced")}`
-              : t("settings.service.sensitive.off")}
-          </span>
-        }
-        choices={SENSITIVE_TTL_SECS}
-        value={data.sensitive_ttl_secs}
-        disabled={busy}
-        onChange={(sensitive_ttl_secs) => apply({ sensitive_ttl_secs })}
-      />
-
-      <SwitchRow
-        title={t("settings.service.notify.title")}
-        description={t("settings.service.notify.description")}
-        id="notify-on-copy"
-        checked={data.notify_on_copy}
-        disabled={busy}
-        onChange={(notify_on_copy) => apply({ notify_on_copy })}
-      />
-
-      <SwitchRow
-        title={t("settings.service.sound.title")}
-        description={t("settings.service.sound.description")}
-        id="sound-on-copy"
-        checked={data.sound_on_copy}
-        disabled={busy}
-        onChange={(sound_on_copy) => apply({ sound_on_copy })}
-      />
-
-      <SwitchRow
-        title={t("settings.service.syncEnabled.title")}
-        description={t("settings.service.syncEnabled.description")}
-        id="sync-enabled"
-        checked={data.sync_enabled}
-        disabled={busy}
-        onChange={(sync_enabled) => apply({ sync_enabled })}
-      />
-
-      <SwitchRow
-        title={t("settings.service.lan.title")}
-        description={t("settings.service.lan.description")}
-        id={NEEDS_RESTART}
-        checked={data.lan_visibility}
-        disabled={busy}
-        onChange={(lan_visibility) => apply({ lan_visibility })}
-        badge={
-          <Badge variant="info">
-            {t("settings.service.liveness.needsRestart")}
-          </Badge>
-        }
-        note={
-          pending ? (
-            <span className="flex flex-wrap items-center gap-s-2 text-xs text-warn-strong">
-              {t("settings.service.liveness.pending")}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={restart.isPending}
-                onClick={() => restart.mutate()}
-              >
-                <RotateCw aria-hidden="true" />
-                {t(
-                  restart.isPending
-                    ? "settings.service.liveness.restarting"
-                    : "settings.service.liveness.restart",
-                )}
-              </Button>
+        <ChoiceRow
+          title={t("settings.service.sensitive.title")}
+          description={t("settings.service.sensitive.description")}
+          note={
+            <span
+              className={
+                sweeping
+                  ? "text-xs text-warn-strong"
+                  : "text-xs text-muted-foreground"
+              }
+            >
+              {sweeping
+                ? `${t("settings.service.sensitive.warning")} ${t("settings.service.sensitive.announced")}`
+                : t("settings.service.sensitive.off")}
             </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              {t("settings.service.liveness.needsRestartWhy")}
-            </span>
-          )
-        }
-      />
+          }
+          choices={SENSITIVE_TTL_SECS}
+          value={data.sensitive_ttl_secs}
+          disabled={busy}
+          onChange={(sensitive_ttl_secs) => apply({ sensitive_ttl_secs })}
+        />
+      </Section>
+
+      <Section title={t("settings.service.groups.telling.title")}>
+        <SwitchRow
+          title={t("settings.service.notify.title")}
+          description={t("settings.service.notify.description")}
+          id="notify-on-copy"
+          checked={data.notify_on_copy}
+          disabled={busy}
+          onChange={(notify_on_copy) => apply({ notify_on_copy })}
+        />
+
+        <SwitchRow
+          title={t("settings.service.sound.title")}
+          description={t("settings.service.sound.description")}
+          id="sound-on-copy"
+          checked={data.sound_on_copy}
+          disabled={busy}
+          onChange={(sound_on_copy) => apply({ sound_on_copy })}
+        />
+      </Section>
+
+      <Section title={t("settings.service.groups.network.title")}>
+        <SwitchRow
+          title={t("settings.service.syncEnabled.title")}
+          description={t("settings.service.syncEnabled.description")}
+          id="sync-enabled"
+          checked={data.sync_enabled}
+          disabled={busy}
+          onChange={(sync_enabled) => apply({ sync_enabled })}
+        />
+
+        <SwitchRow
+          title={t("settings.service.lan.title")}
+          description={t("settings.service.lan.description")}
+          id={NEEDS_RESTART}
+          checked={data.lan_visibility}
+          disabled={busy}
+          onChange={(lan_visibility) => apply({ lan_visibility })}
+          badge={
+            <Badge variant="info">
+              {t("settings.service.liveness.needsRestart")}
+            </Badge>
+          }
+          note={
+            pending ? (
+              <span className="flex flex-wrap items-center gap-s-2 text-xs text-warn-strong">
+                {t("settings.service.liveness.pending")}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={restart.isPending}
+                  onClick={() => restart.mutate()}
+                >
+                  <RotateCw aria-hidden="true" />
+                  {t(
+                    restart.isPending
+                      ? "settings.service.liveness.restarting"
+                      : "settings.service.liveness.restart",
+                  )}
+                </Button>
+              </span>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {t("settings.service.liveness.needsRestartWhy")}
+              </span>
+            )
+          }
+        />
+      </Section>
     </div>
   );
 }

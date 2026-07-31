@@ -160,6 +160,7 @@ pub fn run() {
             commands::history::reorder_pinned,
             // state
             commands::status::status,
+            commands::diagnostics::diagnostics,
             // clipboard capture, and the Android ladder
             commands::capture::capture_state,
             commands::capture::capture_refresh,

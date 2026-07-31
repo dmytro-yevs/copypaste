@@ -23,10 +23,20 @@ type Result<T> = std::result::Result<T, BackendError>;
 /// Most recent items, newest first; pinned ahead of unpinned.
 ///
 /// Returns a page rather than a bare array so the count of rows that would not
-/// decrypt travels with them (parity finding 17).
+/// decrypt travels with them (parity finding 17) and so the marker for the next
+/// page does.
+///
+/// `cursor` is the previous page's `next_cursor`, and `None` asks for the
+/// first. Not an offset: the list grows at the top while it is being read, so a
+/// row number taken for one page names a different boundary by the next, and
+/// the second page repeats a row or skips one (B-1, `CopyPaste-8ebg.57`).
 #[tauri::command]
-pub async fn list(backend: State<'_, SelectedBackend>, limit: u32, offset: u32) -> Result<UiPage> {
-    Ok(backend.list(limit, offset).await?.into())
+pub async fn list(
+    backend: State<'_, SelectedBackend>,
+    limit: u32,
+    cursor: Option<String>,
+) -> Result<UiPage> {
+    Ok(backend.list(limit, cursor.as_deref()).await?.into())
 }
 
 /// Full-text search. Sensitive items are never indexed and never returned, so

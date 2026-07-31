@@ -285,6 +285,7 @@ mod tests {
             capture_running: true,
             clipboard_backend: backend.into(),
             legacy_history_present: false,
+            counters: copypaste_ipc::DiagnosticCounters::default(),
         }
     }
 

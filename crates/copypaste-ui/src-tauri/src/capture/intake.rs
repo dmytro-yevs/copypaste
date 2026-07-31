@@ -249,6 +249,8 @@ async fn announce<R: Runtime>(
         ChangePayload {
             topic: EventKind::Items,
             item_count,
+            // A capture, never a sweep: this build has no auto-wipe loop.
+            swept: 0,
         },
     );
 }

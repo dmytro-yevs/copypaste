@@ -9,6 +9,7 @@ export const settings = {
     service: "Service",
     sync: "Sync",
     storage: "Storage",
+    diagnostics: "Diagnostics",
     about: "About",
   },
 
@@ -105,6 +106,25 @@ export const settings = {
       "This build can't change the background service's settings — it has no service to change them on, and runs on the defaults shown here.",
     loading: "Reading the service's settings…",
 
+    /** Nine settings covering four unrelated things read as one long list, and
+     *  a user looking for any one of them read all nine. */
+    groups: {
+      capture: {
+        title: "What gets captured",
+        description:
+          "Anything refused here is never saved, and the counts are on the Diagnostics tab.",
+      },
+      keeping: {
+        title: "What gets kept",
+      },
+      telling: {
+        title: "What you're told",
+      },
+      network: {
+        title: "Other devices",
+      },
+    },
+
     /** Shown at the field, not in a footnote: `lan_visibility` is the one
      *  setting `ConfigData::field_liveness` marks as read once at start. */
     liveness: {
@@ -120,7 +140,7 @@ export const settings = {
     poll: {
       title: "Check the clipboard every",
       description:
-        "How often the service looks for something new. Checking less often uses less power and can miss a copy you immediately replace.",
+        "How often the service looks for something new. Checking less often uses less power; anything you copy and replace faster than this is missed, and counted on the Diagnostics tab.",
     },
     historyLimit: {
       title: "Keep at most",
@@ -130,17 +150,17 @@ export const settings = {
     retention: {
       title: "Drop items older than",
       description:
-        "Items past this age are deleted whether or not history is full. Pinned items are kept.",
+        "Items past this age are deleted whether or not history is full. Pinned items are kept. Never means age alone never deletes anything — the limit above still does.",
     },
     dedup: {
       title: "Treat a repeat as the same item for",
       description:
-        "Copying the same thing twice inside this window keeps one entry and moves it back to the top.",
+        "Copying the same thing twice inside this window keeps one entry and moves it back to the top. Off keeps every copy as its own entry, so copying one thing repeatedly fills the history with it.",
     },
     maxItem: {
       title: "Ignore copies larger than",
       description:
-        "Anything bigger is not captured at all. Raising this stores more; lowering it skips the large pastes that a clipboard manager is least useful for.",
+        "Anything bigger is not captured at all, and you are not told at the time — the Diagnostics tab counts them. For scale: a page of text is a few kilobytes, and a megabyte is a long document.",
     },
 
     sensitive: {
@@ -151,10 +171,11 @@ export const settings = {
        *  the control rather than in a manual. */
       warning:
         "While this is on, anything the detector flags is deleted without asking, and a wrongly flagged item goes with it. Nothing that is deleted can be brought back.",
-      /** The honest half: the service reports no event when the sweep runs, so
-       *  the app cannot announce a deletion as it happens. */
-      unannounced:
-        "The service doesn't report when this runs, so a deletion shows up only as an item that is no longer in the list.",
+      /** Was "the service doesn't report when this runs". It does now — the
+       *  change event carries the count — so the warning names where the
+       *  running total is instead of admitting there isn't one. */
+      announced:
+        "Each deletion is announced as it happens, and the running total is on the Diagnostics tab.",
       off: "Off — flagged items are kept until you delete them.",
     },
 
@@ -274,6 +295,103 @@ export const settings = {
         "Deletes every unpinned item on this device. Pinned items are kept, and paired devices keep their own copies.",
       action: "Clear history",
     },
+  },
+
+  diagnostics: {
+    loading: "Reading the service…",
+    unavailable:
+      "This build has nothing to diagnose — it runs everything in the app, with no background service to report on.",
+    refresh: "Refresh",
+
+    running: {
+      title: "What is running",
+      service: {
+        title: "Background service",
+        running: "Running",
+        stopped: "Stopped",
+        notInstalled: "Not installed",
+        unhealthy: "Answering, but unreadable",
+        version: "CopyPaste {{version}}",
+        mismatch: "A different version from this app.",
+        adopted: "Started outside this app, so this app can't restart it.",
+      },
+      capture: {
+        title: "Clipboard capture",
+        running: "Running",
+        stopped: "Stopped",
+        description:
+          "Whether the service is watching the clipboard. Stopped means nothing new is being saved.",
+      },
+      backend: {
+        title: "Clipboard backend",
+        description:
+          "Which clipboard the service reads. A test backend means this build is not touching your real one.",
+      },
+      protocol: {
+        title: "App and service agree",
+        yes: "Yes",
+        no: "No",
+        description:
+          "They have to speak the same version of the same protocol. When they don't, most things stop working at once.",
+      },
+      started: {
+        title: "Started",
+        description:
+          "How long ago the service last started. Every count below is measured from then.",
+        unknown: "Not running",
+      },
+    },
+
+    dropped: {
+      title: "What has been dropped or refused",
+      description:
+        "None of these was an error the service could show you at the time. They are counted from the moment it started and reset when it restarts.",
+      tooLarge: {
+        title: "Copies refused for being too large",
+        description:
+          "Over the size limit on the Service tab, so they were never saved. Raising that limit is what changes this.",
+      },
+      missed: {
+        title: "Copies replaced before they could be read",
+        description:
+          "Something was copied and then replaced faster than the service checks. Checking more often on the Service tab reduces it; it can never reach zero.",
+      },
+      swept: {
+        title: "Detected secrets deleted automatically",
+        description:
+          "Removed by the auto-delete setting on the Service tab. Deletions are permanent, and this is the only record that they happened.",
+      },
+      purged: {
+        title: "Search entries removed at startup",
+        description:
+          "Entries for items the current rules read as a secret. The items themselves were kept; only their searchability was removed.",
+      },
+      legacy: {
+        title: "A CopyPaste 0.4 history is on this device",
+        description:
+          "This version cannot read it and has not opened or changed it. Going back to 0.4 finds it exactly as it was.",
+        present: "Present",
+      },
+    },
+
+    report: {
+      title: "Report",
+      description:
+        "Everything above, as one block to paste into a bug report. It is generated by the service, shown here exactly as it will be copied.",
+      /** Rule 4, stated where the user decides whether to paste it: this is the
+       *  promise the panel is making, so it goes beside the button. */
+      safety:
+        "It carries no clipping and nothing that names you — no folders, no account names, nothing you have copied.",
+      copy: "Copy report",
+      copied: "Report copied",
+      empty: "Nothing to report yet.",
+    },
+
+    /** The sweep now announces itself. Before the service carried the count on
+     *  its change event, an auto-deletion could only be noticed as an item that
+     *  had gone missing. */
+    swept_one: "{{count}} detected secret was deleted automatically",
+    swept_other: "{{count}} detected secrets were deleted automatically",
   },
 
   about: {

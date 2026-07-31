@@ -22,6 +22,7 @@
 pub mod capture;
 pub mod clipboard;
 pub mod config;
+pub mod diagnostics;
 pub mod history;
 pub mod peers;
 pub mod service;
