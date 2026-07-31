@@ -86,7 +86,7 @@ fn refused() -> BackendError {
 }
 
 impl Backend for FakeBackend {
-    async fn list(&self, _limit: u32, _offset: u32) -> Result<Page> {
+    async fn list(&self, _limit: u32, _cursor: Option<&str>) -> Result<Page> {
         Ok(self.page.lock().unwrap().clone())
     }
 
@@ -151,6 +151,7 @@ impl Backend for FakeBackend {
                 capture_running: true,
                 clipboard_backend: "fake".into(),
                 legacy_history_present: false,
+                counters: copypaste_ipc::DiagnosticCounters::default(),
             }),
         }
     }

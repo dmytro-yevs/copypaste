@@ -25,8 +25,9 @@ pub use paths::{data_dir, database_path, socket_path, v1_data_dir};
 pub use config::{ConfigData, ConfigError, ConfigPatch, Liveness};
 pub use error::ErrorCode;
 pub use payload::{
-    BackupData, CloudStatusData, CloudSyncData, DiscoveredData, DiscoveredDevice, ExportData,
-    ExportItem, ImportData, Item, ItemPage, PairingData, PeerInfo, StatusData, SyncResult,
+    BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
+    DiscoveredDevice, ExportData, ExportItem, ImportData, Item, ItemPage, PairingData, PeerInfo,
+    StatusData, SyncResult,
 };
 
 use serde::{Deserialize, Serialize};
@@ -62,11 +63,34 @@ pub enum Method {
     /// Liveness plus daemon state.
     Status,
     /// Most recent items, newest first. Pinned items sort ahead of unpinned.
+    ///
+    /// Paged by cursor, never by offset. A clipboard manager inserts above the
+    /// window every time the user copies anything, so an offset taken for page
+    /// 1 no longer names the same boundary by the time page 2 is asked for: the
+    /// second page repeats a row or skips one, and a row the user never saw is
+    /// indistinguishable from one that was never captured
+    /// (`CopyPaste-8ebg.57`, CLAUDE.md rule 4).
+    ///
+    /// `cursor` is [`ItemPage::next_cursor`] from the previous page, and
+    /// `None`/absent asks for the first. It is opaque — a position in the list
+    /// order, not an id — and a client must pass it back unread. One this
+    /// daemon did not write is refused with [`ErrorCode::InvalidRequest`]
+    /// rather than being treated as "start from the top", which would make a
+    /// load-more silently repeat the whole history.
     List {
         limit: u32,
-        offset: u32,
+        #[serde(default)]
+        cursor: Option<String>,
     },
     /// Full-text search. Sensitive items are never indexed and never returned.
+    ///
+    /// **Not paged, and deliberately so.** It runs against the whole database
+    /// and returns the best `limit` matches, so a hit at row 800 is found
+    /// without reading 800 rows first (AT-73 / `CopyPaste-crh3.106`). Cursors
+    /// need a total order to seek on and FTS5 `rank` is not one — it is a
+    /// score that every write can change — so a cursor over it would promise a
+    /// stability nothing upholds. [`ItemPage::next_cursor`] is therefore always
+    /// `None` here.
     Search {
         query: String,
         limit: u32,
@@ -456,5 +480,6 @@ mod tests {
                         "capture_running":true,"clipboard_backend":"fake"}"#;
         let status: StatusData = serde_json::from_str(older).unwrap();
         assert!(!status.legacy_history_present);
+        assert_eq!(status.counters, DiagnosticCounters::default());
     }
 }
