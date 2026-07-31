@@ -1,11 +1,3 @@
-/**
- * The Android capture surface: which rung is running, whether it is actually
- * working, and the four gestures that change that.
- *
- * Split from `./ipc` for size (CLAUDE.md rule 5) and re-exported from it, so
- * `@/lib/ipc` stays the one import every screen uses. `call` comes from
- * `./ipcCall`, which is still the only place `invoke` is reached.
- */
 import type { Item } from "./ipc";
 import { call } from "./ipcCall";
 
@@ -49,13 +41,10 @@ export interface ShizukuProbe {
   readonly rearmRequested: boolean;
 }
 
-/**
- * **`headline` and `detail` are finished sentences, not codes.** They are
- * authored and tested in `capture::messages` (ADR-0005) so that the setup
- * screen, the status strip and the loss notification cannot disagree about what
- * state this device is in. Rendering them verbatim is the contract; deriving
- * replacements from `health` here would be the drift that split them.
- */
+/** `headline` and `detail` are finished sentences authored and tested in
+ *  `capture::messages` (ADR-0005). Render them verbatim: deriving replacements
+ *  from `health` here is what let the setup screen, the status strip and the
+ *  loss notification disagree about the state of the device. */
 export interface CaptureSnapshot {
   readonly rung: CaptureRung;
   readonly health: CaptureHealth;
@@ -84,9 +73,8 @@ export function captureState(): Promise<CaptureSnapshot> {
   return call<CaptureSnapshot>("capture_state");
 }
 
-/** Re-asks the platform. Called on every resume, not only at startup: a grant
- *  can lapse while the app is in the background, and a reboot is the ordinary
- *  case rather than the exception. */
+/** Called on every resume, not only at startup: a grant can lapse while the app
+ *  is backgrounded, and a reboot is the ordinary case. */
 export function captureRefresh(): Promise<CaptureSnapshot> {
   return call<CaptureSnapshot>("capture_refresh");
 }
@@ -117,12 +105,10 @@ export function captureToastExplanation(): Promise<string> {
   return call<string>("capture_toast_explanation");
 }
 
-/**
- * `acknowledged` may only be `true` when the user has read
- * `captureToastExplanation` and agreed to it. The gate is enforced in Rust so
- * it cannot be bypassed from here; passing `true` without having shown the text
- * would be lying to it. Turning suppression **off** is never gated.
- */
+/** `acknowledged` may only be `true` when the user has read
+ *  `captureToastExplanation` and agreed to it — passing `true` without having
+ *  shown the text lies to a gate Rust enforces. Turning suppression **off** is
+ *  never gated. */
 export function captureSetToastSuppressed(
   suppressed: boolean,
   acknowledged: boolean,

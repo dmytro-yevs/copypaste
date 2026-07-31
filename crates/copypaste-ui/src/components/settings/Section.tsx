@@ -1,11 +1,6 @@
-/**
- * A titled group of [`Row`]s.
- *
- * A settings pane long enough to scroll needs somewhere for the eye to stop.
- * The Service tab is the case: nine rows covering what is captured, what is
- * kept, what is announced and what the network sees, in one undifferentiated
- * list, so a user looking for one of them read all nine.
- */
+/** A settings pane long enough to scroll needs somewhere for the eye to stop:
+ *  the Service tab's nine rows in one undifferentiated list meant a user
+ *  looking for one of them read all nine. */
 import type { ReactNode } from "react";
 
 interface SectionProps {

@@ -1,8 +1,5 @@
-/**
- * Everything below runs in jsdom, which has no layout: where a test needs a box
- * to have a size it says so explicitly rather than pretending jsdom measured
- * one.
- */
+/** jsdom has no layout: where a test needs a box to have a size it says so
+ *  explicitly rather than pretending jsdom measured one. */
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
@@ -38,13 +35,9 @@ export function items(count: number, over: Partial<Item> = {}): Item[] {
   );
 }
 
-/** The wire shape `list` and `search` answer with. `skipped_undecryptable` is
- *  always present, including when it is zero — a count that only appears when
- *  it is non-zero is one nobody knows to look for.
- *
- *  `nextCursor` defaults to `null`, which is the end of the list: a test that
- *  wants a second page has to say so, exactly as the service does. Page length
- *  no longer implies one. */
+/** `skipped_undecryptable` is always present, including when zero. `nextCursor`
+ *  defaults to `null`, the end of the list: a test that wants a second page has
+ *  to say so, exactly as the service does — page length does not imply one. */
 export function page(
   items: readonly Item[],
   skipped = 0,
@@ -87,14 +80,10 @@ export function probe(over: Partial<ShizukuProbe> = {}): ShizukuProbe {
   };
 }
 
-/**
- * A capture snapshot as the bridge sends one.
- *
- * `headline` and `detail` are the sentences `capture::messages` actually
- * produces, quoted rather than invented, so a test asserts on what a phone
- * would show. A test that needs a different state supplies both — the view is
- * not allowed to derive them, so neither is the fixture.
- */
+/** `headline` and `detail` are quoted from what `capture::messages` produces,
+ *  never invented, so a test asserts on what a phone would show. A test needing
+ *  a different state supplies both: the view may not derive them, so neither
+ *  may the fixture. */
 export function captureSnapshot(
   over: Partial<CaptureSnapshot> = {},
 ): CaptureSnapshot {

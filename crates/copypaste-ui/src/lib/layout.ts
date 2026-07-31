@@ -1,13 +1,10 @@
 /**
- * Row geometry and the tuned constants (manifest §5.1–§5.3).
+ * INV-5: row heights are over-reserved, never estimated from the content. The
+ * rendered height depends on pane width, which a pure height function cannot
+ * know; the "smarter" character-count estimate under-reserved at narrow widths
+ * and overlapped rows site-wide (CopyPaste-g27b.30).
  *
- * INV-5: **row heights are over-reserved, never estimated from the content.**
- * The rendered height depends on pane width, which a pure height function
- * cannot know; the "smarter" character-count estimate under-reserved at narrow
- * widths and overlapped rows site-wide (CopyPaste-g27b.30). The row clips to
- * the reserved box, so the bound holds by construction.
- *
- * The pixel values are derived from design tokens. If `--pad-row-y` or
+ * The pixel values below are derived from design tokens. If `--pad-row-y` or
  * `--lh-normal` changes, these change with it or rows overlap.
  */
 
@@ -45,8 +42,6 @@ export const OVERSCAN_PX = 240;
 export function overscanRows(previewLines: number): number {
   return Math.ceil(OVERSCAN_PX / rowHeight(previewLines));
 }
-
-/* ------------------------------------------------------------- constants --- */
 
 /** The daemon clamps with its own maximum. */
 export const PAGE_SIZE = 200;

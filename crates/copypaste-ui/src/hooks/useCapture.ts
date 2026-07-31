@@ -1,12 +1,11 @@
 /**
- * One cache entry for capture state, written from three places: the query, the
- * push event, and every mutation's own return value. All three carry the whole
- * snapshot, so none of them has to guess what the others changed.
+ * One cache entry for capture state, written by the query, the push event and
+ * every mutation. All three carry the whole snapshot, so none has to guess what
+ * the others changed.
  *
- * The refresh on resume is a requirement rather than a nicety — v1 shipped a
- * cached permission state that never re-read after a trip to system Settings,
- * and on Android the grant genuinely disappears while the app is in the
- * background.
+ * The refresh on resume is a requirement: on Android the grant disappears while
+ * the app is backgrounded, and v1 shipped a cached permission state that never
+ * re-read after a trip to system Settings.
  */
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -36,12 +35,9 @@ export const EVENT_CAPTURE_STATE = "copypaste://capture-state";
 /** Must match `capture::intake::EVENT_CAPTURED`. */
 export const EVENT_CAPTURED = "copypaste://captured";
 
-/**
- * Not polled. Every change to capture state is pushed — arming, binder death, a
- * background read landing — and a timer would only add traffic to a value that
- * announces itself. `useCaptureSync` re-reads on resume, which is the one
- * moment a push can have been missed.
- */
+/** Not polled: every change to capture state is pushed — arming, binder death,
+ *  a background read landing. `useCaptureSync` re-reads on resume, the one
+ *  moment a push can have been missed. */
 export function useCaptureState() {
   return useQuery<CaptureSnapshot>({
     queryKey: CAPTURE_KEY,
@@ -50,10 +46,8 @@ export function useCaptureState() {
   });
 }
 
-/**
- * Mounted once, at the app root. A second subscriber would double every
- * invalidation, which is why `usePush` is mounted the same way.
- */
+/** Mounted once, at the app root: a second subscriber doubles every
+ *  invalidation. */
 export function useCaptureSync() {
   const qc = useQueryClient();
   const setView = useUi((s) => s.setView);
@@ -110,11 +104,8 @@ export function useCaptureSync() {
   }, [rearm, setView]);
 }
 
-/**
- * Every capture command answers with the new snapshot, so one mutation covers
- * all of them and the cache is written from the value the backend just
- * computed rather than from what the caller hoped it would be.
- */
+/** Every capture command answers with the new snapshot, so the cache is written
+ *  from what the backend computed rather than from what the caller hoped. */
 export function useCaptureMutation() {
   const qc = useQueryClient();
   return useMutation<CaptureSnapshot, unknown, () => Promise<CaptureSnapshot>>({
@@ -145,9 +136,8 @@ export function useCaptureNow() {
   });
 }
 
-/** Fetched only while the consent dialog is open: there is no reason to hold
- *  the text otherwise, and its arrival is what makes the confirm button
- *  legitimate. */
+/** Fetched only while the consent dialog is open: its arrival is what makes the
+ *  confirm button legitimate. */
 export function useToastExplanation(enabled: boolean) {
   return useQuery<string>({
     queryKey: TOAST_EXPLANATION_KEY,

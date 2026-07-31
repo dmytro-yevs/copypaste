@@ -1,26 +1,17 @@
 /**
- * The diagnostics channel: what is running, what has been dropped, and the
- * block a user can paste into an issue.
- *
- * Its own module rather than a section of `lib/ipc.ts` because it has a rule
- * that file does not: **nothing here may be re-authored in TypeScript.**
- * `report` arrives already redacted by `copypaste_ipc::redact::scrub_paths` —
- * the one redactor — and building it, extending it or reformatting it on this
- * side would put a second one here (CLAUDE.md rule 1, and rule 4's no-paths
- * obligation). It is rendered verbatim or not at all.
+ * Nothing here may be re-authored in TypeScript. `report` arrives redacted by
+ * `copypaste_ipc::redact::scrub_paths` — the one redactor — and building,
+ * extending or reformatting it on this side would put a second one here
+ * (CLAUDE.md rule 1, and rule 4's no-paths obligation).
  */
 import { invoke } from "@tauri-apps/api/core";
 
 import { IpcFailure, classifyError } from "@/lib/errors";
 import { hasBridge, type ServiceState } from "@/lib/ipc";
 
-/**
- * Cumulative since the service started, and never reset — so `uptime_secs` is
- * the only thing they can honestly be read against.
- *
- * Counts only. There is no field a clipping could travel in, which is what
- * makes "no clip content in diagnostics" structural rather than a habit.
- */
+/** Cumulative since the service started and never reset, so `uptime_secs` is
+ *  the only thing they can honestly be read against. Counts only: there is no
+ *  field a clipping could travel in. */
 export interface DiagnosticCounters {
   /** Copies dropped for being over the size limit. */
   readonly rejected_too_large: number;

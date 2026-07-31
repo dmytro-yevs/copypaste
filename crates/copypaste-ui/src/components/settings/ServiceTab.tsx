@@ -1,28 +1,12 @@
 /**
- * The background service's own settings — the ones that decide what it
- * captures, keeps and announces.
+ * Liveness is shown at the field it belongs to, never as a note at the bottom
+ * of the pane: that is read after the user has already concluded the switch did
+ * nothing.
  *
- * Until this existed, Settings showed appearance and list preferences, which
- * are the WebView's own, while every value that governs the service was
- * reachable only from the CLI (CLAUDE.md rule 6).
- *
- * # Liveness is shown at the field
- *
- * `ConfigData::field_liveness` marks exactly one field `NeedsRestart`, and the
- * service reports it back from the write. It is rendered as a badge beside that
- * field's own title and, once changed, as a sentence with the restart in it —
- * not as a note at the bottom of the pane, which is read after the user has
- * already concluded the switch did nothing.
- *
- * # The auto-delete control is the reason the default is off
- *
- * `sensitive_ttl_secs` ships at `0` because v2 had nowhere to say the sweep had
- * run: v1 shipped 30 seconds beside a tab that showed the value, v2 carried the
- * number without the interface, and a silent irreversible delete is CLAUDE.md
- * rule 4's worst outcome. This is that interface. It states what turning it on
- * costs, at the control; `EventData::swept` and the Diagnostics tab are the
- * other half, so the note names where the deletions are reported rather than
- * admitting they are not.
+ * `sensitive_ttl_secs` ships at `0` because a silent irreversible delete is
+ * CLAUDE.md rule 4's worst outcome — v1 shipped 30 seconds beside a tab that
+ * showed the sweep had run, v2 carried the number without the interface. This
+ * is that interface, and the note names where the deletions are reported.
  */
 import { useState } from "react";
 import { RotateCw } from "lucide-react";
