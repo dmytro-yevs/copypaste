@@ -105,3 +105,36 @@ describe("reading what zustand persisted", () => {
     expect(readPrefs().theme).toBe("dark");
   });
 });
+
+/**
+ * INV-35. The window is created content-protected and the only thing that
+ * relaxes it is this preference, so every way it can fail to load has to land
+ * on "not allowed".
+ */
+describe("the screenshot preference fails towards protected (INV-35)", () => {
+  it("is off by default", () => {
+    expect(DEFAULT_PREFS.allowScreenshots).toBe(false);
+  });
+
+  it("is off when the stored value is not a boolean", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(parsePrefs({ allowScreenshots: "yes" }).allowScreenshots).toBe(false);
+    expect(parsePrefs({ allowScreenshots: 1 }).allowScreenshots).toBe(false);
+  });
+
+  it("is off when storage could not be read at all", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    expect(readPrefs().allowScreenshots).toBe(false);
+  });
+
+  it("is on only when the user actually stored that", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ state: { allowScreenshots: true }, version: 0 }),
+    );
+    expect(readPrefs().allowScreenshots).toBe(true);
+  });
+});
