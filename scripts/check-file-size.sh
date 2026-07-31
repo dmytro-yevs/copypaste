@@ -4,6 +4,11 @@
 # Counts source lines only: everything before the first `#[cfg(test)]` module.
 # A file may be 500 lines of code and 900 of tests and still be within budget.
 #
+# Covers the frontend too. It did not until a review found `lib/ipc.ts` at 499
+# lines reading as a file at its limit when 154 of them are comment — the rule
+# had never been measured outside Rust, so "it passes" said nothing about it.
+# `.test.` and `.spec.` files are excluded the way Rust test modules are.
+#
 # Advisory, not a gate. v1 rejected a hard CI line-count check because it
 # forces artificial splits; the number is here to make the backlog visible.
 set -euo pipefail
@@ -22,7 +27,14 @@ while read -r f; do
         printf '%-52s %7s\n' "${f#crates/}" "$src"
         over=$((over + 1))
     fi
-done < <(find crates -name '*.rs' -not -path '*/target/*' | sort)
+done < <(find crates \( -name '*.rs' -o -name '*.ts' -o -name '*.tsx' \) \
+             -not -path '*/target/*' \
+             -not -path '*/node_modules/*' \
+             -not -path '*/gen/*' \
+             -not -path '*/dist/*' \
+             -not -name '*.test.*' \
+             -not -name '*.spec.*' \
+             -not -name '*.d.ts' | sort)
 
 echo
 if [ "$over" -eq 0 ]; then
