@@ -29,6 +29,11 @@ pub const DEDUP_WINDOW_MS: i64 = 60_000;
 /// agree about where a bucket starts.
 const DEDUP_BUCKET_MS: i64 = DEDUP_WINDOW_MS;
 
+const BYTE_CAP_TOTAL_SQL: &str =
+    "SELECT COALESCE(SUM(LENGTH(COALESCE(content_ciphertext, X''))), 0) \
+    FROM clipboard_items INDEXED BY idx_items_unpinned_bytes \
+    WHERE deleted = 0 AND pinned = 0";
+
 impl Store {
     /// Most recent live item with this content hash at or after `since_ms`.
     ///
@@ -106,12 +111,7 @@ impl Store {
     pub fn evict_over_byte_cap(&self, max_bytes: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        let total: i64 = tx.query_row(
-            "SELECT COALESCE(SUM(LENGTH(COALESCE(content_ciphertext, X''))), 0) \
-               FROM clipboard_items WHERE deleted = 0 AND pinned = 0",
-            [],
-            |r| r.get(0),
-        )?;
+        let total: i64 = tx.query_row(BYTE_CAP_TOTAL_SQL, [], |r| r.get(0))?;
         let total = total.max(0) as u64;
         if total <= max_bytes {
             return Ok(0);
@@ -530,6 +530,25 @@ mod tests {
         assert_eq!(s.evict_over_byte_cap(1).unwrap(), 0);
         assert!(s.get(&pinned.id).unwrap().is_some());
         assert!(s.get(&newest.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn byte_cap_gate_uses_the_unpinned_bytes_index() {
+        let s = store();
+        s.insert(item("payload", T0)).unwrap();
+        let conn = s.conn().unwrap();
+        let plan = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {BYTE_CAP_TOTAL_SQL}"))
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|detail| detail.contains("idx_items_unpinned_bytes")),
+            "byte quota gate must use its expression index, got {plan:?}"
+        );
     }
 
     #[test]
