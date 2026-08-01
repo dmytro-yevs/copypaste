@@ -2,6 +2,8 @@
 //! decision (manifest I2). The floor below is the only thing that turns a
 //! confidence number into permission to delete user data.
 
+use std::ops::Range;
+
 /// Manifest §4.1. Nothing may sit *exactly* on the floor: `ip_with_port` did,
 /// and RFC1918 addresses in docker-compose snippets were silently auto-wiped
 /// (`CopyPaste-8ys1`). Pinned by `no_rule_sits_exactly_on_the_floor`.
@@ -9,13 +11,13 @@ pub(super) const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.70;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
-    /// Flag and keep out of the index, but never auto-delete.
+    /// Detected and maskable, but inert for whole-item classification and wipe.
     Flag,
     /// Above the auto-wipe floor.
     HighConfidence,
 }
 
-/// The highest-confidence rule that matched.
+/// Metadata for the highest-confidence rule that matched.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Finding {
     /// Stable rule id, e.g. `aws_access_key`. The label belongs to the rule
@@ -26,4 +28,45 @@ pub struct Finding {
     pub category: String,
     pub confidence: f32,
     pub severity: Severity,
+}
+
+/// One validated match. `start` and `end` are UTF-8 byte offsets into the
+/// NFKC-normalised string scanned by [`super::Detector::scan_all`], not
+/// necessarily into the caller's original input (manifest I3).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedFinding {
+    pub rule: String,
+    pub category: String,
+    pub confidence: f32,
+    pub severity: Severity,
+    pub start: usize,
+    pub end: usize,
+}
+
+impl SpannedFinding {
+    pub(super) fn new(finding: Finding, start: usize, end: usize) -> Self {
+        Self {
+            rule: finding.rule,
+            category: finding.category,
+            confidence: finding.confidence,
+            severity: finding.severity,
+            start,
+            end,
+        }
+    }
+
+    /// The same normalised UTF-8 byte offsets as `start` and `end`.
+    #[must_use]
+    pub fn byte_range(&self) -> Range<usize> {
+        self.start..self.end
+    }
+
+    pub(super) fn without_span(self) -> Finding {
+        Finding {
+            rule: self.rule,
+            category: self.category,
+            confidence: self.confidence,
+            severity: self.severity,
+        }
+    }
 }

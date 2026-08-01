@@ -1,12 +1,11 @@
-//! The compiled ruleset and the two verdicts callers may ask for:
-//! [`super::rules::RULES`] compiled behind a `RegexSet` prefilter, each hit put
-//! through its [`super::validators`] gate, survivors ranked into a
-//! [`Finding`](super::finding::Finding).
+//! One compiled ruleset feeds span detection, compatibility labelling,
+//! redaction, and the high-confidence whole-item gate.
 
 use regex::{Regex, RegexSet, RegexSetBuilder};
 
-use super::finding::{Finding, Severity};
+use super::finding::{Finding, Severity, SpannedFinding};
 use super::normalise::normalise;
+use super::redact::redact_findings;
 use super::rules::RULES;
 use super::spec::{RuleSpec, Validator};
 use super::validators::{luhn_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong};
@@ -74,33 +73,44 @@ impl Detector {
         Ok(Self { set, rules })
     }
 
-    /// Highest-confidence match, or None.
-    pub fn scan(&self, text: &str) -> Option<Finding> {
+    /// All validated matches in NFKC-normalised UTF-8 byte order.
+    ///
+    /// Offsets in every [`SpannedFinding`] index the normalised string, not
+    /// necessarily `text`. At the same start offset, longer matches sort first,
+    /// followed by confidence and stable rule id.
+    pub fn scan_all(&self, text: &str) -> Vec<SpannedFinding> {
         let normalised = normalise(text);
-        let mut best: Option<(&RuleSpec, usize)> = None;
-        for idx in self.set.matches(&normalised) {
-            let rule = &self.rules[idx];
-            let Some(len) = rule.hit(&normalised) else {
-                continue;
-            };
-            let better = match best {
-                None => true,
-                Some((spec, best_len)) => (rule.spec.confidence, len) > (spec.confidence, best_len),
-            };
-            if better {
-                best = Some((rule.spec, len));
-            }
-        }
-        best.map(|(spec, _)| spec.finding())
+        self.scan_normalised(&normalised)
     }
 
-    /// True when the text must be kept out of the search index: any validated
-    /// match at any confidence, including the inert band — an email address is
-    /// not worth deleting but is not worth writing to a plaintext FTS table
-    /// either (manifest I4).
-    ///
-    /// **Not** the auto-wipe gate; deletion needs
-    /// `scan(..).severity == Severity::HighConfidence`.
+    /// Highest-confidence match, or None. Ties prefer the longer match, then
+    /// the stable rule id and earlier byte position.
+    pub fn scan(&self, text: &str) -> Option<Finding> {
+        let normalised = normalise(text);
+        self.scan_normalised(&normalised)
+            .into_iter()
+            .max_by(compare_rank)
+            .map(SpannedFinding::without_span)
+    }
+
+    fn scan_normalised(&self, text: &str) -> Vec<SpannedFinding> {
+        let mut findings = Vec::new();
+        for idx in self.set.matches(text) {
+            let rule = &self.rules[idx];
+            for (start, end) in rule.spans(text) {
+                findings.push(SpannedFinding::new(rule.spec.finding(), start, end));
+            }
+        }
+        findings.sort_by(|a, b| {
+            a.start
+                .cmp(&b.start)
+                .then_with(|| b.end.cmp(&a.end))
+                .then_with(|| b.confidence.total_cmp(&a.confidence))
+                .then_with(|| a.rule.cmp(&b.rule))
+        });
+        findings
+    }
+
     /// True when this text may be deleted automatically: the highest-confidence
     /// match sits above the auto-wipe floor.
     ///
@@ -109,17 +119,36 @@ impl Detector {
     /// with [`Detector::is_sensitive`] three separate times (`AB-6a`, `PG-23`,
     /// `PG-3`) and destroyed unrecoverable user data each time.
     pub fn may_auto_wipe(&self, text: &str) -> bool {
-        self.scan(text)
-            .is_some_and(|finding| finding.severity == Severity::HighConfidence)
+        self.scan_all(text)
+            .iter()
+            .any(|finding| finding.severity == Severity::HighConfidence)
     }
 
+    /// True when any validated finding exists, including the inert band.
+    /// Never use this compatibility predicate for whole-item classification.
     pub fn is_sensitive(&self, text: &str) -> bool {
-        let normalised = normalise(text);
-        self.set
-            .matches(&normalised)
-            .into_iter()
-            .any(|idx| self.rules[idx].hit(&normalised).is_some())
+        !self.scan_all(text).is_empty()
     }
+
+    /// Redact every validated match. When matches exist, surrounding text is
+    /// NFKC-normalised because the match offsets belong to that representation.
+    pub fn redact(&self, text: &str) -> String {
+        let normalised = normalise(text);
+        let findings = self.scan_normalised(&normalised);
+        if findings.is_empty() {
+            text.to_owned()
+        } else {
+            redact_findings(&normalised, &findings)
+        }
+    }
+}
+
+fn compare_rank(a: &SpannedFinding, b: &SpannedFinding) -> std::cmp::Ordering {
+    a.confidence
+        .total_cmp(&b.confidence)
+        .then_with(|| (a.end - a.start).cmp(&(b.end - b.start)))
+        .then_with(|| b.rule.cmp(&a.rule))
+        .then_with(|| b.start.cmp(&a.start))
 }
 
 /// One table entry, compiled.
@@ -129,10 +158,11 @@ struct Rule {
 }
 
 impl Rule {
-    /// Length of the first match that passes this rule's validator. No separate
-    /// fast path: v1's `RegexSet` shortcut skipped the value-strength validator
-    /// and needed a bespoke `generic_password_kv` case to compensate (§5.3).
-    fn hit(&self, text: &str) -> Option<usize> {
+    /// Every match that passes this rule's validator. No separate fast path:
+    /// v1's `RegexSet` shortcut skipped the value-strength validator and needed
+    /// a bespoke `generic_password_kv` case to compensate (§5.3).
+    fn spans(&self, text: &str) -> Vec<(usize, usize)> {
+        let mut spans = Vec::new();
         for caps in self.regex.captures_iter(text) {
             let Some(whole) = caps.get(0) else { continue };
             let ok = match self.spec.validator {
@@ -145,10 +175,10 @@ impl Rule {
                 Validator::PhoneShape => phone_is_formatted(whole.as_str()),
             };
             if ok {
-                return Some(whole.len());
+                spans.push((whole.start(), whole.end()));
             }
         }
-        None
+        spans
     }
 }
 
@@ -156,7 +186,6 @@ impl Rule {
 /// because [`all_rules`] needs `Detector`'s private fields.
 #[cfg(test)]
 pub(super) mod test_support {
-    use super::super::normalise::normalise;
     use super::Detector;
 
     pub(in crate::sensitive) fn detector() -> Detector {
@@ -167,12 +196,14 @@ pub(super) mod test_support {
     /// verdict function and one label function (§7.4 — v1 shipped four
     /// overlapping "is it sensitive?" entry points, three of them dead).
     pub(in crate::sensitive) fn all_rules(det: &Detector, text: &str) -> Vec<&'static str> {
-        let normalised = normalise(text);
-        det.set
-            .matches(&normalised)
-            .into_iter()
-            .filter(|&i| det.rules[i].hit(&normalised).is_some())
-            .map(|i| det.rules[i].spec.name)
+        det.scan_all(text)
+            .iter()
+            .filter_map(|finding| {
+                det.rules
+                    .iter()
+                    .find(|rule| rule.spec.name == finding.rule)
+                    .map(|rule| rule.spec.name)
+            })
             .collect()
     }
 
@@ -602,6 +633,93 @@ mod tests {
         assert!(names.contains(&"email"));
         assert!(names.contains(&"terraform_cloud_token"));
         assert_eq!(det.scan(&text).unwrap().rule, "terraform_cloud_token");
+    }
+
+    #[test]
+    fn scan_all_returns_every_validated_match_in_text_order() {
+        let det = detector();
+        let text = "first@example.com then AKIAIOSFODNN7EXAMPLE then second@example.com";
+        let findings = det.scan_all(text);
+
+        assert_eq!(
+            findings
+                .iter()
+                .map(|finding| finding.rule.as_str())
+                .collect::<Vec<_>>(),
+            ["email", "aws_access_key", "email"]
+        );
+        assert_eq!(
+            findings
+                .iter()
+                .map(|finding| &text[finding.byte_range()])
+                .collect::<Vec<_>>(),
+            [
+                "first@example.com",
+                "AKIAIOSFODNN7EXAMPLE",
+                "second@example.com"
+            ]
+        );
+        assert_eq!(findings[0].severity, Severity::Flag);
+        assert_eq!(findings[1].severity, Severity::HighConfidence);
+    }
+
+    #[test]
+    fn scan_all_keeps_low_findings_when_a_high_match_is_embedded() {
+        let det = detector();
+        let text = "mail alice@example.com token AKIAIOSFODNN7EXAMPLE";
+        let findings = det.scan_all(text);
+
+        assert_eq!(findings.len(), 2);
+        assert!(findings.iter().any(|finding| finding.rule == "email"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "aws_access_key"));
+        assert!(det.may_auto_wipe(text));
+        assert!(!det.may_auto_wipe("mail alice@example.com"));
+    }
+
+    #[test]
+    fn scan_all_iterates_past_invalid_candidates_for_the_same_rule() {
+        let det = detector();
+        let text = "password=short password=hunter2 password=abcdefghij";
+        let findings: Vec<_> = det
+            .scan_all(text)
+            .into_iter()
+            .filter(|finding| finding.rule == "generic_password_kv")
+            .collect();
+
+        assert_eq!(findings.len(), 2);
+        assert_eq!(&text[findings[0].byte_range()], "password=hunter2");
+        assert_eq!(&text[findings[1].byte_range()], "password=abcdefghij");
+    }
+
+    #[test]
+    fn scan_all_offsets_index_the_nfkc_normalised_string() {
+        let det = detector();
+        let input = "\u{FF21}\u{FF2B}\u{FF29}\u{FF21}IOSFODNN7EXAMPLE";
+        let normalised = normalise(input);
+        let findings = det.scan_all(input);
+
+        assert_eq!(normalised, "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].byte_range(), 0..normalised.len());
+        assert_eq!(&normalised[findings[0].byte_range()], normalised);
+    }
+
+    #[test]
+    fn luhn_valid_card_is_a_spanned_high_confidence_finding() {
+        let det = detector();
+        let text = "please charge 4111-1111-1111-1111 today";
+        let finding = det
+            .scan_all(text)
+            .into_iter()
+            .find(|finding| finding.rule == "credit_card")
+            .unwrap();
+
+        assert_eq!(&text[finding.byte_range()], "4111-1111-1111-1111");
+        assert_eq!(finding.category, "financial");
+        assert_eq!(finding.confidence, 0.99);
+        assert_eq!(finding.severity, Severity::HighConfidence);
     }
 
     #[test]
