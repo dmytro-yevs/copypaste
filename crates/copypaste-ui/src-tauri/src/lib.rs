@@ -101,13 +101,6 @@ pub fn run() {
             #[cfg(not(target_os = "android"))]
             app.manage(capture::desktop::DesktopCapture::default());
 
-            // A menu-bar app, not a windowed one: no Dock icon, no app menu,
-            // and the popover does not steal the active application. Without
-            // this the tray icon and a Dock icon both appear, which is two
-            // entry points to one window.
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
             #[cfg(not(target_os = "android"))]
             {
                 let handle = app.handle();

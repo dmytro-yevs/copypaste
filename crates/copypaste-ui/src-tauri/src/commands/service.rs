@@ -52,9 +52,9 @@ pub async fn restart_service(
 /// Hide the invoking window from the frontend, through the backend's hide path.
 ///
 /// INV-25: the frontend must never reach for the window itself. On macOS the
-/// app is an `Accessory`, so hiding hands activation back to whatever the user
-/// was in — which is the whole point of the quick-copy flow, since the app
-/// never synthesises a paste (ADR-0001) and the user presses ⌘V themselves.
+/// Quick Paste hide path hands activation back to whatever the user was in —
+/// which is the whole point of the quick-copy flow, since the app never
+/// synthesises a paste (ADR-0001) and the user presses ⌘V themselves.
 ///
 /// Deliberately infallible: a hide that could fail would leave the caller
 /// deciding what to do about a window it must not touch.
