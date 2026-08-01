@@ -111,6 +111,7 @@ fn requires_ready(method: &Method) -> bool {
         Method::List { .. }
         | Method::Search { .. }
         | Method::Copy { .. }
+        | Method::CopyPlainText { .. }
         | Method::Get { .. }
         | Method::Add { .. }
         | Method::Delete { .. }
@@ -204,6 +205,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::List { limit, cursor } => items::list(state, id, limit, cursor.as_deref()),
         Method::Search { query, limit } => items::search(state, id, &query, limit),
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
+        Method::CopyPlainText { id: item_id } => items::copy_plain_text(state, id, &item_id),
         Method::Get { id: item_id } => items::get(state, id, &item_id),
         Method::Add { content } => items::add(state, id, &content),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
@@ -305,6 +307,7 @@ mod tests {
             limit: 10
         }));
         assert!(requires_ready(&Method::Copy { id: "x".into() }));
+        assert!(requires_ready(&Method::CopyPlainText { id: "x".into() }));
         assert!(requires_ready(&Method::Get { id: "x".into() }));
         assert!(requires_ready(&Method::Add {
             content: "x".into()

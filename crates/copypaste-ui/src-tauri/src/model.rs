@@ -126,6 +126,8 @@ pub fn ui_items(items: Vec<Item>) -> Vec<UiItem> {
 #[derive(Debug, Clone, Serialize)]
 pub struct UiPage {
     items: Vec<UiItem>,
+    /// The full number of live history items, before this page's cap.
+    total: u64,
     /// Named exactly as the wire names it (`ItemPage::skipped_undecryptable`),
     /// so the frontend, the bridge and the daemon all say one thing.
     skipped_undecryptable: u32,
@@ -140,15 +142,20 @@ pub struct UiPage {
 
 impl From<crate::backend::Page> for UiPage {
     fn from(page: crate::backend::Page) -> Self {
-        Self {
-            items: ui_items(page.items),
-            skipped_undecryptable: page.skipped_undecryptable,
-            next_cursor: page.next_cursor,
-        }
+        let total = page.items.len() as u64;
+        Self::with_total(page, total)
     }
 }
 
 impl UiPage {
+    pub fn with_total(page: crate::backend::Page, total: u64) -> Self {
+        Self {
+            items: ui_items(page.items),
+            total,
+            skipped_undecryptable: page.skipped_undecryptable,
+            next_cursor: page.next_cursor,
+        }
+    }
     pub fn items(&self) -> &[UiItem] {
         &self.items
     }
@@ -248,6 +255,19 @@ mod tests {
         let json = serde_json::to_string(&items).unwrap();
         assert!(json.contains("public"));
         assert!(!json.contains("secret"), "{json}");
+    }
+
+    #[test]
+    fn a_page_keeps_its_total_when_the_visible_rows_are_capped() {
+        let page = UiPage::with_total(
+            crate::backend::Page {
+                items: vec![wire("public", false)],
+                ..Default::default()
+            },
+            214,
+        );
+        let json = serde_json::to_string(&page).unwrap();
+        assert!(json.contains("\"total\":214"), "{json}");
     }
 
     /// The id must survive, because every other operation on a sensitive item

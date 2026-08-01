@@ -124,6 +124,10 @@ impl Backend for FakeBackend {
         Err(refused())
     }
 
+    async fn copy_as_plain_text(&self, _id: &str) -> Result<Item> {
+        Err(refused())
+    }
+
     async fn delete(&self, _id: &str) -> Result<()> {
         Err(refused())
     }
