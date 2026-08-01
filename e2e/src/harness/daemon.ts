@@ -105,7 +105,14 @@ export async function startDaemon(): Promise<Daemon> {
           `${result.stderr || result.stdout}`,
       );
     }
-    return (JSON.parse(result.stdout) as { data: T }).data;
+    const response = JSON.parse(result.stdout) as {
+      data: Record<string, T>;
+    };
+    const payloads = Object.values(response.data);
+    if (payloads.length !== 1) {
+      throw new Error("the CLI returned an invalid typed payload");
+    }
+    return payloads[0]!;
   }
 
   async function add(content: string): Promise<void> {
