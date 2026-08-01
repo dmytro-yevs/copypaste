@@ -93,6 +93,29 @@ pub fn merge_decision_by_summary(local: &ItemSummary, remote: &ItemSummary) -> M
     )
 }
 
+/// Whether a P2P-only pin version should replace the local state. This is a
+/// separate total order because cloud does not carry pin fields and must never
+/// be asked to resolve them through the content version stamp.
+pub fn pin_state_wins(local: &ItemSummary, remote: &ItemSummary) -> bool {
+    (
+        remote.pin_updated_at,
+        remote.origin_device_id.as_str(),
+        remote.pinned,
+    )
+        .cmp(&(
+            local.pin_updated_at,
+            local.origin_device_id.as_str(),
+            local.pinned,
+        ))
+        .then_with(|| match (remote.pin_order, local.pin_order) {
+            (Some(remote), Some(local)) => remote.total_cmp(&local),
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => std::cmp::Ordering::Equal,
+        })
+        .is_gt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +312,22 @@ mod tests {
             merge_decision(&live, "b", &dead, "a"),
             MergeDecision::TakeRemote
         );
+    }
+
+    #[test]
+    fn equal_pin_stamps_break_on_origin_before_pin_value() {
+        let mut lower_origin = summary("i", 100, "h", false);
+        lower_origin.origin_device_id = "device-a".into();
+        lower_origin.pinned = true;
+        lower_origin.pin_order = Some(4.0);
+        lower_origin.pin_updated_at = 50;
+
+        let mut higher_origin = lower_origin.clone();
+        higher_origin.origin_device_id = "device-b".into();
+        higher_origin.pinned = false;
+        higher_origin.pin_order = None;
+
+        assert!(pin_state_wins(&lower_origin, &higher_origin));
+        assert!(!pin_state_wins(&higher_origin, &lower_origin));
     }
 }

@@ -35,6 +35,9 @@ pub enum SyncError {
     /// Bounding this is what stops a peer from holding the session open forever.
     #[error("peer sent more than it was asked for")]
     PeerOverran,
+
+    #[error("peer sent more summary pages than one session permits")]
+    TooManySummaryPages,
 }
 
 #[cfg(test)]

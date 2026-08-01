@@ -11,8 +11,8 @@ use std::sync::Mutex;
 use tokio::sync::mpsc;
 
 use super::{
-    merge_decision, run_initiator, run_responder, MergeDecision, SyncChannel, SyncError,
-    SyncOutcome, SyncSource,
+    merge_decision, pin_state_wins, run_initiator, run_responder, MergeDecision, SyncChannel,
+    SyncError, SyncOutcome, SyncSource,
 };
 use crate::protocol::{content_hash, ItemSummary, SyncItem, SyncMessage};
 
@@ -25,6 +25,7 @@ pub(super) fn summary(id: &str, created_at: i64, hash: &str, deleted: bool) -> I
         origin_device_id: "test-device".into(),
         pinned: false,
         pin_order: None,
+        pin_updated_at: 0,
     }
 }
 
@@ -41,6 +42,7 @@ pub(crate) fn item(id: &str, created_at: i64, content: &str, origin: &str) -> Sy
         origin_device_id: origin.into(),
         pinned: false,
         pin_order: None,
+        pin_updated_at: 0,
     }
 }
 
@@ -55,6 +57,7 @@ pub(super) fn tombstone(id: &str, created_at: i64, hash: &str, origin: &str) -> 
         origin_device_id: origin.into(),
         pinned: false,
         pin_order: None,
+        pin_updated_at: 0,
     }
 }
 
@@ -147,8 +150,24 @@ impl SyncSource for TestSource {
                 &incoming.origin_device_id,
             );
             if decision == MergeDecision::KeepLocal {
+                if !incoming.deleted && pin_state_wins(&local.summary(), &incoming.summary()) {
+                    let mut merged = local.clone();
+                    merged.pinned = incoming.pinned;
+                    merged.pin_order = incoming.pin_order;
+                    merged.pin_updated_at = incoming.pin_updated_at;
+                    items.insert(incoming.item_id.clone(), merged);
+                    return Ok(true);
+                }
                 return Ok(false);
             }
+            let mut merged = incoming;
+            if !merged.deleted && !pin_state_wins(&local.summary(), &merged.summary()) {
+                merged.pinned = local.pinned;
+                merged.pin_order = local.pin_order;
+                merged.pin_updated_at = local.pin_updated_at;
+            }
+            items.insert(merged.item_id.clone(), merged);
+            return Ok(true);
         }
         items.insert(incoming.item_id.clone(), incoming);
         Ok(true)

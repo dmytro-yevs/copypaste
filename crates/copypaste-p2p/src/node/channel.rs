@@ -165,6 +165,7 @@ mod tests {
                 origin_device_id: "device-a".into(),
                 pinned: true,
                 pin_order: Some(7.0),
+                pin_updated_at: 2,
             }],
         })
         .await
@@ -175,6 +176,7 @@ mod tests {
         };
         assert!(items[0].pinned);
         assert_eq!(items[0].pin_order, Some(7.0));
+        assert_eq!(items[0].pin_updated_at, 2);
     }
 
     /// The case the sync author warned about: the far half aborts without a
@@ -230,6 +232,7 @@ mod tests {
             origin_device_id: "d".into(),
             pinned: false,
             pin_order: None,
+            pin_updated_at: 0,
         })
         .take(crate::protocol::MAX_ITEMS_PER_MESSAGE + 1)
         .collect();
