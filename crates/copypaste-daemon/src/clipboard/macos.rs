@@ -815,7 +815,7 @@ mod tests {
     #[ignore = "drives the real NSPasteboard"]
     fn image_pre_read_uses_the_image_limit_and_keeps_its_boundary() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
         let settings = copypaste_ipc::ConfigData {
             max_image_size_bytes: copypaste_ipc::MIN_IMAGE_SIZE_BYTES,
             ..Default::default()
