@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
-pub use copypaste_core::{ingest_into, IngestError, Ingested};
+pub use copypaste_core::{IngestError, Ingested};
 
 use crate::AppState;
 
@@ -124,7 +124,14 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     // The guard is taken for the pasteboard read alone and dropped before the
     // ingest, so an in-flight `copy` waits on one accessor call, not on a
     // database write.
-    let capture = state.clipboard().poll();
+    let settings = state.settings.get().clone();
+    let capture = state
+        .clipboard()
+        .poll_with_policy(crate::clipboard::CapturePolicy {
+            private_mode: settings.private_mode,
+            excluded_app_bundle_ids: &settings.excluded_app_bundle_ids,
+            max_item_bytes: settings.max_item_bytes,
+        });
     if sweep_due {
         sweep_sensitive_items(state);
     }
@@ -132,7 +139,12 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
         return Ok(());
     };
 
-    match ingest(state, &capture.content, &capture.content_type) {
+    match ingest_at(
+        state,
+        &capture.content,
+        &capture.content_type,
+        copypaste_core::now_ms(),
+    ) {
         Ok(Ingested::Stored(item)) => {
             debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
             // Wakes the watchers and pulls both sync loops to their floor, so a
@@ -186,7 +198,7 @@ pub fn ingest_at(
     // reader substitutes this device's id (`copypaste_core::origin_or`). The
     // alternative — stamping the id on every row — costs a column of repeated
     // UUIDs and an extra argument on a path that has no opinion about sync.
-    ingest_into(
+    copypaste_core::ingest_into(
         &state.store,
         &state.detector,
         &state.keyring,
@@ -281,5 +293,27 @@ mod tests {
         let mut events = state.subscribe();
         state.note_local_change();
         assert_eq!(events.try_recv().expect("an event").swept, 0);
+    }
+
+    #[test]
+    fn detected_sensitive_capture_never_reaches_fts_or_sync() {
+        let (state, _dir) = test_state("sensitive-capture");
+        let stored = ingest(
+            &state,
+            "AKIAIOSFODNN7EXAMPLE",
+            copypaste_ipc::content_type::TEXT,
+        )
+        .unwrap()
+        .into_item();
+        assert!(stored.is_sensitive);
+        assert!(state.store.search("generated", 10).unwrap().is_empty());
+        assert!(
+            state
+                .store
+                .versions_since(i64::MIN, 100)
+                .unwrap()
+                .is_empty(),
+            "sensitive rows never enter sync"
+        );
     }
 }

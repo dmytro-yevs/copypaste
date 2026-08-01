@@ -13,6 +13,7 @@
 export const tray = {
   show: "Show CopyPaste",
   openAtLogin: "Open at Login",
+  privateMode: "Private Mode",
   quit: "Quit CopyPaste",
 
   recent: "Recent clippings",

@@ -123,6 +123,7 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         // status line that history is growing when it is not.
         capture_running: false,
         clipboard_backend: super::BACKEND_NAME.to_string(),
+        private_mode: false,
         legacy_history_present: legacy_history_present(&inner.data_dir),
         // All zero, and honestly so: this build has no capture loop to refuse
         // or miss anything, and no startup purge. A count it cannot collect is

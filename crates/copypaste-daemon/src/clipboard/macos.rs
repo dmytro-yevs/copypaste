@@ -34,18 +34,25 @@
 #![allow(unused_unsafe)]
 
 use objc2::rc::{autoreleasepool, Retained};
-use objc2_app_kit::NSPasteboard;
+use std::time::{Duration, Instant};
+
+use base64::Engine as _;
+use objc2_app_kit::{NSPasteboard, NSWorkspace};
 use objc2_foundation::{NSArray, NSString};
 use tracing::{debug, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{Capture, ClipboardSource, MAX_TEXT_BYTES};
+use super::{is_password_manager_app, Capture, CapturePolicy, ClipboardSource, MAX_TEXT_BYTES};
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
 /// statics: the values are frozen by the OS and by nspasteboard.org, and
 /// this way the module does not depend on which binding revision exports
 /// which constant.
 const UTI_TEXT: &str = "public.utf8-plain-text";
+const UTI_PNG: &str = "public.png";
+const UTI_TIFF: &str = "public.tiff";
+const UTI_FILE_URL: &str = "public.file-url";
+const UTI_FILENAMES: &str = "NSFilenamesPboardType";
 /// §3.4 — the three `org.nspasteboard.*` opt-out markers, probed as a set.
 /// `ConcealedType` is how 1Password, Bitwarden, KeePassXC and friends say
 /// "this is a secret, do not persist it". Ignoring these writes users'
@@ -66,13 +73,20 @@ const UTI_MARKERS: [&str; 3] = [
 /// binding revision is in the tree.
 struct Utis {
     text: Retained<NSString>,
+    png: Retained<NSString>,
+    tiff: Retained<NSString>,
+    file_url: Retained<NSString>,
+    filenames: Retained<NSString>,
     text_probe: Retained<NSArray<NSString>>,
+    image_probe: Retained<NSArray<NSString>>,
     markers: Retained<NSArray<NSString>>,
 }
 
 impl Utis {
     fn new() -> Self {
         let text = NSString::from_str(UTI_TEXT);
+        let png = NSString::from_str(UTI_PNG);
+        let tiff = NSString::from_str(UTI_TIFF);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
@@ -82,6 +96,11 @@ impl Utis {
             text_probe: NSArray::from_vec(vec![text.clone()]),
             markers: NSArray::from_vec(markers),
             text,
+            image_probe: NSArray::from_vec(vec![png.clone(), tiff.clone()]),
+            png,
+            tiff,
+            file_url: NSString::from_str(UTI_FILE_URL),
+            filenames: NSString::from_str(UTI_FILENAMES),
         }
     }
 }
@@ -98,6 +117,7 @@ thread_local! {
 pub struct MacOsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
+    frontmost: Option<(Instant, Option<String>)>,
 }
 
 impl MacOsClipboard {
@@ -105,12 +125,21 @@ impl MacOsClipboard {
         Self {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
+            frontmost: None,
         }
     }
 }
 
 impl ClipboardSource for MacOsClipboard {
     fn poll(&mut self) -> Option<Capture> {
+        self.poll_with_policy(CapturePolicy {
+            private_mode: false,
+            excluded_app_bundle_ids: &[],
+            max_item_bytes: MAX_TEXT_BYTES as u64,
+        })
+    }
+
+    fn poll_with_policy(&mut self, policy: CapturePolicy<'_>) -> Option<Capture> {
         // I-17: one autorelease pool around the entire Cocoa interaction.
         // Without it, autoreleased NSString/NSData accumulate on the async
         // worker thread and reserved memory grows without bound.
@@ -157,25 +186,74 @@ impl ClipboardSource for MacOsClipboard {
                 return None;
             }
 
-            // I-11: text is the highest-priority representation. Image and
-            // file capture are not implemented yet; when they are, they go
-            // below this branch, and image *presence* must be probed
-            // without materialising the bytes (I-12).
-            let data = UTIS.with(|utis| unsafe {
-                pb.availableTypeFromArray(&utis.text_probe)?;
-                pb.dataForType(&utis.text)
+            // Private mode must be a capture gate, not merely an ingest choice:
+            // acknowledge the change without reading either attribution or data.
+            if policy.private_mode {
+                return None;
+            }
+
+            // Resolve attribution before choosing a representation. A non-empty
+            // exclusion list fails closed when it cannot be resolved; with an
+            // empty list the same `None` is safe because content detection
+            // remains active. The 750 ms cache bounds stale exclusion decisions.
+            let app_bundle_id = self.frontmost_bundle_id();
+            if app_bundle_id
+                .as_deref()
+                .is_some_and(is_password_manager_app)
+                || (!policy.excluded_app_bundle_ids.is_empty()
+                    && app_bundle_id.as_ref().is_none_or(|id| {
+                        policy
+                            .excluded_app_bundle_ids
+                            .iter()
+                            .any(|excluded| excluded == id)
+                    }))
+            {
+                return None;
+            }
+
+            // I-11..I-14: exactly one representation per change. Rich text
+            // and HTML are deliberately unsupported by the binding manifest;
+            // they never outrank a real image or file.
+            let selected = UTIS.with(|utis| unsafe {
+                if pb.availableTypeFromArray(&utis.text_probe).is_some() {
+                    return pb
+                        .dataForType(&utis.text)
+                        .map(|data| (data, copypaste_ipc::content_type::TEXT, false));
+                }
+                // I-12: probe *presence* before any image bytes are asked for.
+                if pb.availableTypeFromArray(&utis.image_probe).is_some() {
+                    if let Some(data) = pb.dataForType(&utis.png) {
+                        return Some((data, copypaste_ipc::content_type::IMAGE_PNG, false));
+                    }
+                    if let Some(data) = pb.dataForType(&utis.tiff) {
+                        return Some((data, copypaste_ipc::content_type::IMAGE_TIFF, false));
+                    }
+                }
+                if let Some(data) = pb.dataForType(&utis.file_url) {
+                    return Some((data, copypaste_ipc::content_type::FILE, true));
+                }
+                pb.dataForType(&utis.filenames)
+                    .map(|data| (data, copypaste_ipc::content_type::FILE, false))
             })?;
+            let (data, content_type, was_file_url) = selected;
 
             // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
             // multi-GiB item is a multi-GiB allocation. Check first.
             let len = unsafe { data.length() };
-            if len > MAX_TEXT_BYTES {
+            let encoded_len = match content_type {
+                copypaste_ipc::content_type::IMAGE_PNG
+                | copypaste_ipc::content_type::IMAGE_TIFF => len.saturating_add(2) / 3 * 4,
+                _ => len,
+            };
+            let cap = usize::try_from(policy.max_item_bytes)
+                .unwrap_or(MAX_TEXT_BYTES)
+                .min(MAX_TEXT_BYTES);
+            if encoded_len > cap {
                 self.rejected_too_large += 1;
                 // I-39 / §6.5: counted, not silently dropped.
                 warn!(
-                    bytes = len,
-                    cap = MAX_TEXT_BYTES,
-                    "pasteboard text exceeds the size cap; dropped"
+                    bytes = encoded_len,
+                    cap, "pasteboard representation exceeds the size cap; dropped"
                 );
                 return None;
             }
@@ -185,11 +263,37 @@ impl ClipboardSource for MacOsClipboard {
             // is a third-party app's bug. §3.6's precedent is lossy
             // conversion rather than dropping the user's copy, and I-37
             // forbids panicking on a malformed payload.
-            let content = String::from_utf8_lossy(&bytes).into_owned();
+            let content = match content_type {
+                copypaste_ipc::content_type::IMAGE_PNG
+                | copypaste_ipc::content_type::IMAGE_TIFF => {
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                }
+                copypaste_ipc::content_type::FILE => {
+                    let resolved = file_reference(&bytes);
+                    // A malformed public.file-url must not make a valid legacy
+                    // finder payload disappear; the legacy value is consulted
+                    // only after the higher-priority URL could not be resolved.
+                    if was_file_url {
+                        resolved.or_else(|| {
+                            UTIS.with(|utis| unsafe {
+                                pb.dataForType(&utis.filenames)
+                                    .and_then(|legacy| file_reference(&legacy.bytes()))
+                            })
+                        })?
+                    } else {
+                        resolved?
+                    }
+                }
+                _ => String::from_utf8_lossy(&bytes).into_owned(),
+            };
             if content.is_empty() {
                 return None;
             }
-            Some(Capture::text(content))
+            Some(Capture {
+                content,
+                content_type: content_type.to_string(),
+                app_bundle_id,
+            })
         })
     }
 
@@ -248,6 +352,54 @@ impl ClipboardSource for MacOsClipboard {
     fn lost_intermediates_count(&self) -> u64 {
         self.tracker.lost_intermediates
     }
+}
+
+impl MacOsClipboard {
+    fn frontmost_bundle_id(&mut self) -> Option<String> {
+        if let Some((seen, bundle_id)) = &self.frontmost {
+            if seen.elapsed() < Duration::from_millis(750) {
+                return bundle_id.clone();
+            }
+        }
+        let bundle_id = unsafe {
+            NSWorkspace::sharedWorkspace()
+                .frontmostApplication()
+                .and_then(|app| app.bundleIdentifier())
+                .map(|id| id.to_string())
+        };
+        self.frontmost = Some((Instant::now(), bundle_id.clone()));
+        bundle_id
+    }
+}
+
+fn file_reference(bytes: &[u8]) -> Option<String> {
+    let value = String::from_utf8_lossy(bytes);
+    if let Ok(url) = url::Url::parse(&value) {
+        if url.scheme() == "file" {
+            let path = url.to_file_path().ok()?;
+            return path
+                .is_absolute()
+                .then(|| path.to_string_lossy().into_owned());
+        }
+    }
+    // A broken `%HH` sequence is intentionally not fatal. `Url` rejects it,
+    // while the manifest preserves it literally and still accepts an absolute
+    // path. This also keeps malformed third-party strings out of a panic path.
+    if let Some(path) = value.strip_prefix("file://") {
+        if std::path::Path::new(path).is_absolute() {
+            return Some(path.to_string());
+        }
+    }
+    // Finder's legacy type is a binary property list containing POSIX paths.
+    // It is untrusted third-party input: accept only its first absolute string,
+    // never a lossy conversion of arbitrary bytes.
+    plist::Value::from_reader(std::io::Cursor::new(bytes))
+        .ok()?
+        .as_array()?
+        .first()?
+        .as_string()
+        .filter(|path| std::path::Path::new(path).is_absolute())
+        .map(str::to_owned)
 }
 
 // ---------------------------------------------------------------------------

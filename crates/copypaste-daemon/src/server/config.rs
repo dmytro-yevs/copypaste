@@ -6,7 +6,9 @@
 //! of fields that will not take effect until a restart, which a Settings screen
 //! needs at the moment of the change rather than afterwards.
 
-use copypaste_ipc::{ConfigApplied, ConfigData, ConfigPatch, ErrorCode, Response, ResponseData};
+use copypaste_ipc::{
+    ConfigApplied, ConfigData, ConfigPatch, ErrorCode, PrivateModeData, Response, ResponseData,
+};
 
 use crate::settings::SettingsError;
 use crate::AppState;
@@ -42,6 +44,38 @@ pub(super) fn set(state: &AppState, id: u64, patch: &ConfigPatch) -> Response {
             Response::err(id, ErrorCode::InvalidRequest, e.to_string())
         }
         Err(e @ SettingsError::Store) => Response::err(id, ErrorCode::Internal, e.to_string()),
+    }
+}
+
+pub(super) fn private_mode(state: &AppState, id: u64) -> Response {
+    Response::ok(
+        id,
+        ResponseData::PrivateMode(PrivateModeData {
+            private_mode: state.settings.get().private_mode,
+        }),
+    )
+}
+
+pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Response {
+    match state.settings.apply(
+        &state.meta,
+        &ConfigPatch {
+            private_mode: Some(enabled),
+            ..Default::default()
+        },
+    ) {
+        Ok(config) => Response::ok(
+            id,
+            ResponseData::PrivateMode(PrivateModeData {
+                private_mode: config.private_mode,
+            }),
+        ),
+        Err(e @ SettingsError::Invalid(_)) => {
+            Response::err(id, ErrorCode::InvalidRequest, e.to_string())
+        }
+        Err(SettingsError::Store) => {
+            Response::err(id, ErrorCode::Internal, "the settings could not be saved")
+        }
     }
 }
 
@@ -124,5 +158,25 @@ mod tests {
             state.settings.get().poll_interval_ms,
             ConfigData::default().poll_interval_ms
         );
+    }
+
+    #[test]
+    fn private_mode_is_persistent_and_has_a_narrow_ipc_surface() {
+        let (state, dir) = test_state("private-mode");
+        let response = call(&state, Method::SetPrivateMode { enabled: true });
+        let enabled = match response.data {
+            Some(ResponseData::PrivateMode(mode)) => mode.private_mode,
+            other => panic!("{other:?}"),
+        };
+        assert!(enabled);
+        drop(state);
+
+        let (restarted, _dir) =
+            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "private-mode");
+        let response = call(&restarted, Method::GetPrivateMode);
+        match response.data {
+            Some(ResponseData::PrivateMode(mode)) => assert!(mode.private_mode),
+            other => panic!("{other:?}"),
+        }
     }
 }
