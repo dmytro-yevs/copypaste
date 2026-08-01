@@ -63,11 +63,19 @@ mod format;
 /// materialising its plaintext.
 #[derive(Debug, Clone, Copy)]
 pub struct CapturePolicy<'a> {
-    pub private_mode: bool,
-    pub excluded_app_bundle_ids: &'a [String],
-    /// The live storage cap. Backends reject before copying more than this
-    /// many bytes (or more than this many encoded bytes for a binary payload).
-    pub max_item_bytes: u64,
+    pub settings: &'a copypaste_ipc::ConfigData,
+}
+
+impl<'a> CapturePolicy<'a> {
+    pub fn new(settings: &'a copypaste_ipc::ConfigData) -> Self {
+        Self { settings }
+    }
+
+    /// The shared IPC selector applies both the content-specific live setting
+    /// and the current storage/transport hard bound.
+    pub fn limit_bytes(self, content_type: &str) -> u64 {
+        self.settings.capture_limit_bytes(content_type)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -76,15 +84,8 @@ mod macos;
 #[cfg(not(target_os = "macos"))]
 pub use fake::FakeClipboard;
 
-/// Absolute read gate, in bytes.
-///
-/// §4 gives 10 MiB and gives its reason as "kept under the wire-frame cap so a
-/// storable item is always transportable" — the number was v1's *default*
-/// `max_item_bytes`, and the reason is the rule. Both now come from one place:
-/// this is the ceiling `max_item_bytes` may be set to, so reading further can
-/// only ever end in a rejection. §3.10 still applies — this gate and the
-/// storage layer's gate move together.
-const MAX_TEXT_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
+/// Current storage and transport hard bound, in bytes.
+const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
 /// Credential stores mark a capture sensitive even when its text does not
 /// match a detector rule. Users may still explicitly exclude an app entirely.
@@ -236,29 +237,44 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
 
 #[cfg(test)]
 mod tests {
-    use super::{is_password_manager_app, MAX_TEXT_BYTES};
-    use copypaste_ipc::{ConfigData, ConfigPatch};
+    use super::{is_password_manager_app, CapturePolicy, MAX_CAPTURE_BYTES};
+    use copypaste_ipc::ConfigData;
 
-    /// §3.10, from the other end: the read gate and the storable maximum were
-    /// separate numbers, and the gate was the larger. Everything it let through
-    /// above `max_item_bytes`' ceiling was read off the pasteboard, copied into
-    /// the heap, and then refused by ingest — or, worse, stored under a config
-    /// no client could read back.
     #[test]
-    fn a_capture_at_the_read_gate_is_a_size_a_user_may_store() {
-        let at_the_gate = ConfigPatch {
-            max_item_bytes: Some(MAX_TEXT_BYTES as u64),
+    fn policy_selects_each_payload_cap_before_applying_the_hard_bound() {
+        let settings = ConfigData {
+            max_text_size_bytes: 64 * 1024,
+            max_image_size_bytes: 2 * 1024 * 1024,
+            max_file_size_bytes: 3 * 1024 * 1024,
             ..Default::default()
-        }
-        .apply(&ConfigData::default())
-        .expect("the config ceiling must admit everything the read gate passes");
-        assert_eq!(at_the_gate.max_item_bytes, MAX_TEXT_BYTES as u64);
+        };
+        let policy = CapturePolicy::new(&settings);
+        assert_eq!(
+            policy.limit_bytes(copypaste_ipc::content_type::TEXT),
+            64 * 1024
+        );
+        assert_eq!(
+            policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG),
+            2 * 1024 * 1024
+        );
+        assert_eq!(
+            policy.limit_bytes(copypaste_ipc::content_type::FILE),
+            3 * 1024 * 1024
+        );
     }
 
     /// And nothing it passes can outgrow a reply frame.
     #[test]
     fn the_read_gate_stays_inside_the_wire_contract() {
-        const { assert!(MAX_TEXT_BYTES <= copypaste_ipc::MAX_CONTENT_BYTES) };
+        let settings = ConfigData::default();
+        let policy = CapturePolicy::new(&settings);
+        for content_type in [
+            copypaste_ipc::content_type::TEXT,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            copypaste_ipc::content_type::FILE,
+        ] {
+            assert_eq!(policy.limit_bytes(content_type), MAX_CAPTURE_BYTES as u64);
+        }
     }
 
     #[test]

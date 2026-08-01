@@ -130,11 +130,7 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     let settings = state.settings.get().clone();
     let capture = state
         .clipboard()
-        .poll_with_policy(crate::clipboard::CapturePolicy {
-            private_mode: settings.private_mode,
-            excluded_app_bundle_ids: &settings.excluded_app_bundle_ids,
-            max_item_bytes: settings.max_item_bytes,
-        });
+        .poll_with_policy(crate::clipboard::CapturePolicy::new(&settings));
     if sweep_due {
         sweep_sensitive_items(state);
     }
@@ -184,7 +180,7 @@ fn ingest_capture(
     let binary = match (capture.binary_content, capture.file_path) {
         (Some(bytes), None) => Some((bytes, capture.file_metadata)),
         (None, Some(path)) => Some((
-            read_file_at_most(&path, settings.max_item_bytes)?,
+            read_file_at_most(&path, settings.capture_limit_bytes(&capture.content_type))?,
             capture.file_metadata,
         )),
         (None, None) => None,
@@ -275,6 +271,20 @@ pub fn ingest_at(
 mod tests {
     use super::*;
     use crate::testutil::test_state;
+
+    #[test]
+    fn file_materialization_accepts_the_boundary_and_rejects_one_byte_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("payload");
+        std::fs::write(&path, b"four").unwrap();
+        assert_eq!(read_file_at_most(&path, 4).unwrap(), b"four");
+
+        std::fs::write(&path, b"five!").unwrap();
+        assert!(matches!(
+            read_file_at_most(&path, 4),
+            Err(IngestError::TooLarge)
+        ));
+    }
 
     /// The auto-wipe is the only thing in the daemon that deletes an item the
     /// user never asked it to, and until the count rode the event there was no
