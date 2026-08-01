@@ -174,11 +174,7 @@ pub trait CloudSource: Send + Sync {
         self.watermark()
     }
 
-    /// The tie-break half of the upload cursor.
-    ///
-    /// Unlike the download cursor this is only advanced after a complete
-    /// round, but it needs the same pair to drain a timestamp bucket larger
-    /// than the per-round offer limit.
+    /// The tie-break half of [`upload_floor`](Self::upload_floor).
     fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
         Ok(None)
     }
