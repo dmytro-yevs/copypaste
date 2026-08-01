@@ -1,23 +1,14 @@
-//! The main window and the Quick Paste popover.
+//! Main and Quick Paste window lifecycle.
 //!
-//! A menu-bar clipboard manager is a popover, not a document window: it appears
-//! on a gesture under the icon that summoned it, takes focus, and goes away when
-//! the user looks elsewhere. Each of these is a defect if it is missing.
+//! Native close and focus-loss events must use the same backend hide path as
+//! commands. Otherwise close exits instead of leaving Quit to the tray (INV-36),
+//! and a direct Quick Paste hide skips prior-app focus recovery, retains popup
+//! data, or processes the trailing blur twice (INV-25, V-12, AT-44). Showing is
+//! positioned before display and focused afterward because a hidden macOS
+//! window ignores focus and moving an already-visible window causes a jump.
 //!
-//! * **Closing hides.** The window is the app's only surface, so closing it
-//!   must not quit — quitting is a tray decision (manifest 06, INV-36).
-//! * **Losing focus hides.** A popover that stays up after you click elsewhere
-//!   is a window, and an always-on-top window that will not go away is worse
-//!   than no popover at all.
-//! * **Showing focuses.** A window shown without focus swallows the first
-//!   keystroke, which for a search-first UI is the whole interaction.
-//! * **Showing positions.** See [`anchor`].
-//!
-//! # Android
-//!
-//! This module compiles everywhere; `tray`, `hotkey` and `autostart` do not.
-//! [`hide_window`] is a deliberate no-op there — the app *is* its window on a phone,
-//! and hiding it would leave the user at the launcher with no way back.
+//! Android compiles this shared module, but [`hide_window`] is a no-op there:
+//! hiding the sole activity strands the user at the launcher.
 
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl,
