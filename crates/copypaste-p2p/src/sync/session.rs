@@ -162,9 +162,12 @@ async fn recv_summary_page<C: SyncChannel>(
     }
 }
 
-fn summary_pages<S: SyncSource>(
-    source: &S,
-) -> Result<(HashMap<String, ItemSummary>, Vec<Vec<ItemSummary>>), SyncError> {
+struct PreparedSummaries {
+    advertised: HashMap<String, ItemSummary>,
+    pages: Vec<Vec<ItemSummary>>,
+}
+
+fn summary_pages<S: SyncSource>(source: &S) -> Result<PreparedSummaries, SyncError> {
     let items = source.summaries()?;
     if items.len() > MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION {
         return Err(SyncError::TooManySummaryPages);
@@ -181,7 +184,7 @@ fn summary_pages<S: SyncSource>(
     if pages.is_empty() {
         pages.push(Vec::new());
     }
-    Ok((advertised, pages))
+    Ok(PreparedSummaries { advertised, pages })
 }
 
 /// Exchanges every summary page in lock-step. The old implementation sent just
@@ -193,7 +196,7 @@ async fn exchange_summaries_initiator<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
 ) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let (advertised, pages) = summary_pages(source)?;
+    let PreparedSummaries { advertised, pages } = summary_pages(source)?;
     let mut remote = Vec::new();
     let mut page = 0;
     loop {
@@ -219,7 +222,7 @@ async fn exchange_summaries_responder<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
 ) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let (advertised, pages) = summary_pages(source)?;
+    let PreparedSummaries { advertised, pages } = summary_pages(source)?;
     let mut remote = Vec::new();
     let mut page = 0;
     loop {
@@ -263,10 +266,10 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
     wanted: &HashMap<String, ItemSummary>,
     stats: &mut SyncStats,
 ) -> Result<(), SyncError> {
-    // A peer that never sends `Done` must not hold the session open. It needs at
-    // most one message per batch; two spare covers an empty tail batch and the
-    // `Done` itself.
-    let mut budget = wanted.len().div_ceil(MAX_ITEMS_PER_MESSAGE) + 2;
+    // The byte cap can force every requested item into its own `Items` message.
+    // One extra frame lets an invalid item be dropped before `Done`; anything
+    // beyond one frame per requested id plus that allowance cannot be useful.
+    let mut budget = wanted.len().saturating_add(2);
     let mut applied: HashSet<String> = HashSet::new();
 
     loop {
@@ -1005,29 +1008,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_large_item_gets_a_message_to_itself() {
-        // Two items that cannot share a message: proof the byte budget splits
-        // batches, not just the item count.
+    async fn large_text_items_split_without_overrunning_the_receiver() {
         let big = "x".repeat(MAX_ITEM_BYTES_PER_MESSAGE / 2 + 1);
         let a = TestSource::new(
             "dev-a",
             vec![
                 item("big1", 100, &big, "dev-a"),
                 item("big2", 200, &big, "dev-a"),
+                item("big3", 300, &big, "dev-a"),
             ],
         );
         let b = TestSource::new("dev-b", vec![]);
 
         let (oa, ob) = session(&a, &b).await;
-        assert_eq!(oa.stats.sent, 2);
-        assert_eq!(ob.stats.received, 2);
+        assert_eq!(oa.stats.sent, 3);
+        assert_eq!(ob.stats.received, 3);
         assert_eq!(a.snapshot(), b.snapshot());
     }
 
     #[tokio::test]
-    async fn large_binary_items_are_split_before_they_are_sent() {
+    async fn large_binary_items_split_without_overrunning_the_receiver() {
         let bytes = vec![7; MAX_ITEM_BYTES_PER_MESSAGE / 2 + 1];
-        let items: Vec<_> = ["binary-a", "binary-b"]
+        let items: Vec<_> = ["binary-a", "binary-b", "binary-c"]
             .into_iter()
             .map(|id| SyncItem {
                 item_id: id.into(),
@@ -1044,36 +1046,13 @@ mod tests {
                 pin_updated_at: 0,
             })
             .collect();
-        let advertised = items
-            .iter()
-            .map(|item| (item.item_id.clone(), item.summary()))
-            .collect();
-        let requested = items.iter().map(|item| item.item_id.clone()).collect();
-        let source = TestSource::new("dev-a", items);
-        let mut channel = ScriptChannel::new(vec![]);
-        let mut stats = SyncStats::default();
+        let a = TestSource::new("dev-a", items);
+        let b = TestSource::new("dev-b", vec![]);
 
-        serve_items(&mut channel, &source, &advertised, requested, &mut stats)
-            .await
-            .unwrap();
-
-        let batches: Vec<_> = channel
-            .sent
-            .iter()
-            .filter_map(|message| match message {
-                SyncMessage::Items { items } => Some(items),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(batches.len(), 2);
-        assert!(batches.iter().all(|batch| batch.len() == 1));
-        assert!(batches.iter().all(|batch| {
-            batch
-                .iter()
-                .map(|item| item.content.len() + item.binary_content.len())
-                .sum::<usize>()
-                <= MAX_ITEM_BYTES_PER_MESSAGE
-        }));
+        let (oa, ob) = session(&a, &b).await;
+        assert_eq!(oa.stats.sent, 3);
+        assert_eq!(ob.stats.received, 3);
+        assert_eq!(a.snapshot(), b.snapshot());
     }
 
     #[tokio::test]
