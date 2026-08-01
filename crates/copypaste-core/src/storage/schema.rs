@@ -28,6 +28,9 @@ CREATE TABLE clipboard_items (
     pinned             INTEGER NOT NULL DEFAULT 0,
     -- REAL so a reorder can insert between two neighbours without renumbering.
     pin_order          REAL,
+    -- A separate version for P2P-only pin state. Pinning must not restamp the
+    -- content version, because cloud does not carry pin metadata.
+    pin_updated_at     INTEGER NOT NULL DEFAULT 0,
     -- Milliseconds since the Unix epoch. Every timestamp in this schema is ms.
     created_at         INTEGER NOT NULL,
     deleted            INTEGER NOT NULL DEFAULT 0,

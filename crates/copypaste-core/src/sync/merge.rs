@@ -7,7 +7,7 @@
 //! `origin_device_id`s and the current local row exist at once.
 
 use copypaste_p2p::protocol::ItemSummary;
-use copypaste_p2p::sync::{merge_decision, MergeDecision};
+use copypaste_p2p::sync::{merge_decision, pin_state_wins, MergeDecision};
 use tracing::{debug, warn};
 
 use super::{MSG_ENCRYPT, MSG_STORE};
@@ -86,6 +86,21 @@ pub enum MergeError {
     Encrypt,
 }
 
+/// The independent outcomes of a P2P merge. Pin state is intentionally
+/// separate from content because the cloud transport does not carry it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct P2pApply {
+    pub content: bool,
+    pub pin: bool,
+}
+
+impl P2pApply {
+    #[must_use]
+    pub fn any(self) -> bool {
+        self.content || self.pin
+    }
+}
+
 impl MergeError {
     #[must_use]
     pub fn message(self) -> &'static str {
@@ -113,9 +128,9 @@ pub fn apply_remote_version(
 }
 
 /// P2P's version of [`apply_remote_version`]. Pin state is authenticated by
-/// the Noise record that carried the item, so a winning P2P version replaces it
-/// wholesale; cloud calls the public function above and keeps it local.
-pub fn apply_remote_p2p_version(
+/// the Noise record that carried the item, so a winning P2P pin version
+/// replaces pin state without restamping content for cloud.
+pub fn apply_remote_p2p_version_with_pin_stamp(
     store: &Store,
     keyring: &Keyring,
     detector: &Detector,
@@ -123,15 +138,57 @@ pub fn apply_remote_p2p_version(
     incoming: &RemoteVersion<'_>,
     pinned: bool,
     pin_order: Option<f64>,
-) -> Result<bool, MergeError> {
-    apply_remote_version_with_pin_state(
+    pin_updated_at: i64,
+) -> Result<P2pApply, MergeError> {
+    let local = store.version(incoming.item_id).map_err(|e| {
+        warn!(error = ?e, "could not read the local version of an incoming item");
+        MergeError::Store
+    })?;
+    let remote_pin_wins = !incoming.deleted
+        && local.as_ref().is_none_or(|local| {
+            pin_state_wins(
+                &ItemSummary {
+                    item_id: local.id.clone(),
+                    created_at: local.created_at,
+                    deleted: local.deleted,
+                    content_hash: local.content_hash.clone(),
+                    origin_device_id: origin_or(&local.origin_device_id, here).to_string(),
+                    pinned: local.pinned,
+                    pin_order: local.pin_order,
+                    pin_updated_at: local.pin_updated_at,
+                },
+                &ItemSummary {
+                    item_id: incoming.item_id.to_string(),
+                    created_at: incoming.created_at,
+                    deleted: incoming.deleted,
+                    content_hash: String::new(),
+                    origin_device_id: incoming.origin_device_id.to_string(),
+                    pinned,
+                    pin_order,
+                    pin_updated_at,
+                },
+            )
+        });
+
+    let content = apply_remote_version_with_pin_state(
         store,
         keyring,
         detector,
         here,
         incoming,
-        Some((pinned, pin_order)),
-    )
+        Some((pinned, pin_order, pin_updated_at, remote_pin_wins)),
+    )?;
+    let pin = if !content && remote_pin_wins {
+        store
+            .apply_pin_state(incoming.item_id, pinned, pin_order, pin_updated_at)
+            .map_err(|e| {
+                warn!(error = ?e, "could not store incoming P2P pin state");
+                MergeError::Store
+            })?
+    } else {
+        false
+    };
+    Ok(P2pApply { content, pin })
 }
 
 fn apply_remote_version_with_pin_state(
@@ -140,7 +197,7 @@ fn apply_remote_version_with_pin_state(
     detector: &Detector,
     here: &str,
     incoming: &RemoteVersion<'_>,
-    pin_state: Option<(bool, Option<f64>)>,
+    pin_state: Option<(bool, Option<f64>, i64, bool)>,
 ) -> Result<bool, MergeError> {
     let local = store.version(incoming.item_id).map_err(|e| {
         warn!(error = ?e, "could not read the local version of an incoming item");
@@ -174,6 +231,7 @@ fn apply_remote_version_with_pin_state(
         origin_device_id: incoming.origin_device_id.to_string(),
         pinned: pin_state.is_some_and(|state| state.0),
         pin_order: pin_state.and_then(|state| state.1),
+        pin_updated_at: pin_state.map_or(0, |state| state.2),
     };
 
     if let Some(local) = &local {
@@ -185,6 +243,7 @@ fn apply_remote_version_with_pin_state(
             origin_device_id: origin_or(&local.origin_device_id, here).to_string(),
             pinned: local.pinned,
             pin_order: local.pin_order,
+            pin_updated_at: local.pin_updated_at,
         };
         if merge_decision(
             &mine,
@@ -221,11 +280,15 @@ fn apply_remote_version_with_pin_state(
     };
     // The P2P wire always supplies both fields. Cloud deliberately does not
     // carry pin state, so its `None` preserves the receiver's local choice.
-    let (pinned, pin_order) = match pin_state {
-        Some(pin_state) => pin_state,
-        None => local
-            .as_ref()
-            .map_or((false, None), |item| (item.pinned, item.pin_order)),
+    let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
+        (false, None, 0)
+    } else {
+        match pin_state {
+            Some((pinned, pin_order, pin_updated_at, true)) => (pinned, pin_order, pin_updated_at),
+            Some((_, _, _, false)) | None => local.as_ref().map_or((false, None, 0), |item| {
+                (item.pinned, item.pin_order, item.pin_updated_at)
+            }),
+        }
     };
 
     let stored = store
@@ -241,6 +304,7 @@ fn apply_remote_version_with_pin_state(
             origin_device_id: incoming.origin_device_id,
             pinned,
             pin_order,
+            pin_updated_at,
             search_text: if is_sensitive || incoming.deleted {
                 None
             } else {
@@ -261,7 +325,7 @@ fn apply_remote_version_with_pin_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sync::testkit::{fixture, version, Fixture};
+    use crate::sync::testkit::{fixture, fixture_named, version, Fixture};
 
     impl Fixture {
         fn apply(&self, incoming: &RemoteVersion<'_>) -> bool {
@@ -281,7 +345,7 @@ mod tests {
             pinned: bool,
             pin_order: Option<f64>,
         ) -> bool {
-            apply_remote_p2p_version(
+            apply_remote_p2p_version_with_pin_stamp(
                 &self.store,
                 &self.keyring,
                 &self.detector,
@@ -289,8 +353,10 @@ mod tests {
                 incoming,
                 pinned,
                 pin_order,
+                incoming.created_at,
             )
             .expect("merge")
+            .any()
         }
     }
 
@@ -471,6 +537,51 @@ mod tests {
         let row = f.store.version("keeper").unwrap().unwrap();
         assert!(!row.pinned);
         assert_eq!(row.pin_order, None);
+    }
+
+    #[test]
+    fn a_newer_p2p_pin_does_not_replace_older_content() {
+        let f = fixture_named("beta");
+        let local = RemoteVersion {
+            item_id: "shared",
+            content: "new content",
+            content_type: "text",
+            created_at: 200,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "device-a",
+        };
+        assert!(f.apply(&local));
+
+        let stale = RemoteVersion {
+            item_id: "shared",
+            content: "stale content",
+            content_type: "text",
+            created_at: 100,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "device-b",
+        };
+        let outcome = apply_remote_p2p_version_with_pin_stamp(
+            &f.store,
+            &f.keyring,
+            &f.detector,
+            &f.here,
+            &stale,
+            true,
+            Some(1.0),
+            300,
+        )
+        .unwrap();
+        assert!(!outcome.content);
+        assert!(outcome.pin);
+        let stored = f.store.version("shared").unwrap().unwrap();
+        assert_eq!(
+            open_version(&f.keyring, &stored).as_deref(),
+            Some("new content")
+        );
+        assert!(stored.pinned);
+        assert_eq!(stored.pin_updated_at, 300);
     }
 
     /// Cloud omits pin state deliberately, so the shared merge preserves the

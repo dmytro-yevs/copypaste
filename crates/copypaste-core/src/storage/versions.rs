@@ -35,6 +35,7 @@ pub struct Version {
     pub deleted: bool,
     pub pinned: bool,
     pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
     /// Empty means "captured on this device" — see [`origin_or`].
     pub origin_device_id: String,
 }
@@ -54,6 +55,7 @@ pub struct IncomingItem<'a> {
     /// P2P pin state. `None` is the explicit unpinned order.
     pub pinned: bool,
     pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
     /// Plaintext for the search index. Ignored when the item is sensitive or a
     /// tombstone — the write-time layer of "sensitive items are never indexed".
     pub search_text: Option<&'a str>,
@@ -77,6 +79,29 @@ pub fn origin_or<'a>(stored: &'a str, here: &'a str) -> &'a str {
 }
 
 impl Store {
+    /// Apply a P2P pin-state version without touching the content version.
+    ///
+    /// Cloud rows deliberately have no pin metadata. Keeping this write
+    /// separate prevents a local pin from re-uploading older content.
+    pub fn apply_pin_state(
+        &self,
+        id: &str,
+        pinned: bool,
+        pin_order: Option<f64>,
+        pin_updated_at: i64,
+    ) -> Result<bool, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let written = tx.execute(
+            "UPDATE clipboard_items \
+                SET pinned = ?2, pin_order = ?3, pin_updated_at = ?4 \
+              WHERE id = ?1 AND deleted = 0",
+            params![id, pinned, pin_order, pin_updated_at],
+        )?;
+        tx.commit()?;
+        Ok(written != 0)
+    }
+
     /// Everything eligible to sync, newest first, tombstones included.
     ///
     /// **Sensitive items are excluded here and nowhere else matters more.**
@@ -84,7 +109,7 @@ impl Store {
     pub fn summaries(&self, limit: i64) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(
-            "SELECT id, created_at, content_hash, deleted, origin_device_id, pinned, pin_order \
+            "SELECT id, created_at, content_hash, deleted, origin_device_id, pinned, pin_order, pin_updated_at \
                FROM clipboard_items \
               WHERE is_sensitive = 0 \
               ORDER BY created_at DESC, id DESC LIMIT ?1",
@@ -98,6 +123,7 @@ impl Store {
                 origin_device_id: row.get(4)?,
                 pinned: row.get(5)?,
                 pin_order: row.get(6)?,
+                pin_updated_at: row.get(7)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -199,12 +225,17 @@ impl Store {
     pub fn upsert(&self, incoming: &IncomingItem<'_>) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
+        let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
+            (false, None, 0)
+        } else {
+            (incoming.pinned, incoming.pin_order, incoming.pin_updated_at)
+        };
 
         let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted, origin_device_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  nonce              = excluded.nonce, \
@@ -215,7 +246,8 @@ impl Store {
                  deleted            = excluded.deleted, \
                  origin_device_id   = excluded.origin_device_id, \
                  pinned             = excluded.pinned, \
-                 pin_order          = excluded.pin_order",
+                 pin_order          = excluded.pin_order, \
+                 pin_updated_at     = excluded.pin_updated_at",
             params![
                 incoming.id,
                 incoming.content_ciphertext,
@@ -223,8 +255,9 @@ impl Store {
                 incoming.content_type,
                 incoming.content_hash,
                 incoming.is_sensitive,
-                incoming.pinned,
-                incoming.pin_order,
+                pinned,
+                pin_order,
+                pin_updated_at,
                 incoming.created_at,
                 incoming.deleted,
                 incoming.origin_device_id,
@@ -280,6 +313,7 @@ mod tests {
             origin_device_id: "device-a",
             pinned: false,
             pin_order: None,
+            pin_updated_at: 0,
             search_text: Some("remote text"),
         }
     }
@@ -424,6 +458,25 @@ mod tests {
         let row = s.get(&kept.id).unwrap().unwrap();
         assert!(!row.pinned);
         assert_eq!(row.pin_order, None);
+    }
+
+    #[test]
+    fn tombstones_clear_pin_metadata_even_if_the_caller_supplies_it() {
+        let s = store();
+        let doomed = s.insert(item("doomed", T0)).unwrap();
+        s.upsert(&IncomingItem {
+            deleted: true,
+            pinned: true,
+            pin_order: Some(99.0),
+            pin_updated_at: T0 + 1,
+            ..incoming(&doomed.id, "gone", T0 + 1)
+        })
+        .unwrap();
+        let row = s.version(&doomed.id).unwrap().unwrap();
+        assert!(row.deleted);
+        assert!(!row.pinned);
+        assert_eq!(row.pin_order, None);
+        assert_eq!(row.pin_updated_at, 0);
     }
 
     #[test]

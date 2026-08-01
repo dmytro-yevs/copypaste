@@ -21,7 +21,7 @@ impl Store {
         let tx = write_tx(&mut conn)?;
         let previous_stamp: Option<i64> = tx
             .query_row(
-                "SELECT created_at FROM clipboard_items WHERE id = ?1 AND deleted = 0",
+                "SELECT pin_updated_at FROM clipboard_items WHERE id = ?1 AND deleted = 0",
                 [id],
                 |r| r.get(0),
             )
@@ -29,15 +29,14 @@ impl Store {
         let Some(previous_stamp) = previous_stamp else {
             return Ok(false);
         };
-        // Pin, unpin and reorder are versions, not just local presentation
-        // changes. This gives P2P LWW a fresh stamp to carry even when the
-        // clipboard content itself did not change.
+        // Pin state is a P2P-only version. Cloud does not carry pin metadata,
+        // so touching the content stamp here could upload stale content.
         let version_stamp = previous_stamp.saturating_add(1).max(crate::now_ms());
         if pinned {
             tx.execute(
                 "UPDATE clipboard_items \
                     SET pinned = 1, \
-                        created_at = ?2, \
+                        pin_updated_at = ?2, \
                         pin_order = (SELECT COALESCE(MAX(pin_order), 0) + 1 \
                                        FROM clipboard_items \
                                       WHERE pinned = 1 AND deleted = 0) \
@@ -46,7 +45,7 @@ impl Store {
             )?;
         } else {
             tx.execute(
-                "UPDATE clipboard_items SET pinned = 0, pin_order = NULL, created_at = ?2 \
+                "UPDATE clipboard_items SET pinned = 0, pin_order = NULL, pin_updated_at = ?2 \
                   WHERE id = ?1 AND deleted = 0",
                 params![id, version_stamp],
             )?;
@@ -82,7 +81,7 @@ impl Store {
         // the transaction so the unnamed tail cannot move underneath us.
         let current: Vec<(String, i64)> = {
             let mut stmt = tx.prepare(
-                "SELECT id, created_at FROM clipboard_items \
+                "SELECT id, pin_updated_at FROM clipboard_items \
                   WHERE pinned = 1 AND deleted = 0 \
                   ORDER BY pin_order ASC, created_at DESC, id DESC",
             )?;
@@ -116,7 +115,7 @@ impl Store {
         let mut renumbered = 0u64;
         {
             let mut stmt = tx.prepare(
-                "UPDATE clipboard_items SET pin_order = ?2, created_at = ?3 \
+                "UPDATE clipboard_items SET pin_order = ?2, pin_updated_at = ?3 \
                   WHERE id = ?1 AND pinned = 1 AND deleted = 0",
             )?;
             for (index, (id, previous_stamp)) in ordered.iter().enumerate() {
@@ -228,5 +227,25 @@ mod tests {
         let order = pinned_order(&s);
         assert_eq!(order.last().unwrap(), &latecomer);
         assert_eq!(order.len(), 4);
+    }
+
+    #[test]
+    fn pin_actions_do_not_restamp_the_cloud_content_version() {
+        let s = store();
+        let first = s.insert(item("first", T0)).unwrap().id;
+        let second_stamp = T0 + 60_000;
+        let second = s.insert(item("second", second_stamp)).unwrap().id;
+
+        assert!(s.set_pinned(&first, true).unwrap());
+        assert!(s.set_pinned(&second, true).unwrap());
+        s.reorder_pinned(&[second.clone(), first.clone()]).unwrap();
+        assert!(s.set_pinned(&first, false).unwrap());
+
+        let first = s.version(&first).unwrap().unwrap();
+        let second = s.version(&second).unwrap().unwrap();
+        assert_eq!(first.created_at, T0);
+        assert_eq!(second.created_at, second_stamp);
+        assert!(first.pin_updated_at > 0);
+        assert!(second.pin_updated_at > 0);
     }
 }
