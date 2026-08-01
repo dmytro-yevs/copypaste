@@ -34,7 +34,6 @@ ruflo-setup-log.md
 # rewrite exists to undo went unchallenged for a year. The governing rules
 # belong in version control.
 GEMINI.md
-AGENTS.md
 .agents/
 .codex/
 .mcp.json
