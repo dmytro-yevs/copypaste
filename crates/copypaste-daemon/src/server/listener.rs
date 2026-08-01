@@ -40,7 +40,7 @@ use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
-use super::dispatch::dispatch_line;
+use super::dispatch::{dispatch_request, parse_and_gate};
 use super::messages::{MSG_TOO_LARGE, MSG_WATCHERS_FULL};
 use crate::AppState;
 
@@ -283,10 +283,22 @@ async fn handle_connection(
             break;
         }
 
+        let request = match parse_and_gate(&state, &line) {
+            Ok(request) => request,
+            Err(rejection) => {
+                let close_connection = rejection.was_watch;
+                if send(&mut writer, &rejection.response).await.is_err() || close_connection {
+                    break;
+                }
+                continue;
+            }
+        };
+
         // `watch` turns the connection into a stream, so it is taken here
         // rather than in the dispatcher: from this point the loop above no
         // longer owns the read half's deadline.
-        if let Some(id) = subscribe_id(&line) {
+        if matches!(&request.method, Method::Watch) {
+            let id = request.id;
             let Ok(_permit) = Arc::clone(&watchers).try_acquire_owned() else {
                 let full = Response::err(id, ErrorCode::Internal, MSG_WATCHERS_FULL);
                 let _ = send(&mut writer, &full).await;
@@ -307,23 +319,12 @@ async fn handle_connection(
             break;
         }
 
-        let response = dispatch_line(&state, &line).await;
+        let response = dispatch_request(&state, request).await;
 
         if send(&mut writer, &response).await.is_err() {
             break;
         }
     }
-}
-
-/// The request id when this line is a `watch` subscription, else `None`.
-///
-/// Parsed here rather than dispatched because the answer changes what the
-/// connection *is*. A malformed line is left alone: the ordinary dispatcher
-/// already knows how to reject one, and duplicating that judgement is how two
-/// parsers disagree.
-fn subscribe_id(line: &str) -> Option<u64> {
-    let request: copypaste_ipc::Request = serde_json::from_str(line).ok()?;
-    matches!(request.method, Method::Watch).then_some(request.id)
 }
 
 /// The request id when this line asks the daemon to stop, else `None`.
@@ -664,6 +665,100 @@ mod tests {
         let _ = server.await;
     }
 
+    #[tokio::test]
+    async fn watch_rejects_unsupported_protocol_versions_and_closes() {
+        let (state, dir) = test_state("watch-version");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        for (id, protocol_version) in [(20, 0), (21, PROTOCOL_VERSION + 1)] {
+            let stream = UnixStream::connect(&path).await.expect("connect");
+            let mut client = Client::new(stream);
+            let response = client
+                .call(Request {
+                    id,
+                    protocol_version,
+                    method: Method::Watch,
+                })
+                .await;
+
+            assert_eq!(response.id, id);
+            assert!(!response.ok);
+            assert_eq!(response.error_code, Some(ErrorCode::ProtocolMismatch));
+            assert_connection_closed(&mut client).await;
+        }
+
+        shutdown_tx.send(true).unwrap();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn watch_rejects_a_not_ready_daemon_and_closes() {
+        let (state, dir) = test_state("watch-readiness");
+        state.set_ready(false);
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let mut client = Client::new(stream);
+        let response = client.call(request(22, Method::Watch)).await;
+
+        assert_eq!(response.id, 22);
+        assert!(!response.ok);
+        assert_eq!(response.error_code, Some(ErrorCode::NotReady));
+        assert_connection_closed(&mut client).await;
+
+        shutdown_tx.send(true).unwrap();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn malformed_watch_is_rejected_without_changing_the_connection() {
+        let (state, dir) = test_state("watch-malformed");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let mut client = Client::new(stream);
+        let response = client
+            .call_raw(r#"{"id":23,"protocol_version":"wrong","method":"watch"}"#)
+            .await;
+        assert_eq!(response.id, 23);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+
+        let response = client.call(request(24, Method::Status)).await;
+        assert!(response.ok, "the malformed line must not start a stream");
+        assert_eq!(response.id, 24);
+
+        shutdown_tx.send(true).unwrap();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn watch_acknowledges_a_successful_subscription() {
+        let (state, dir) = test_state("watch-ack");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let ack = Client::new(stream).call(request(25, Method::Watch)).await;
+
+        assert!(ack.ok, "{:?}", ack.error);
+        assert_eq!(ack.id, 25);
+        assert!(matches!(ack.data, Some(ResponseData::Empty {})));
+
+        shutdown_tx.send(true).unwrap();
+        let _ = server.await;
+    }
+
     /// A subscriber gets an ack, then a frame per change, on the same
     /// connection and in the same envelope.
     #[tokio::test]
@@ -702,6 +797,77 @@ mod tests {
 
         shutdown_tx.send(true).unwrap();
         let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn a_watcher_continues_after_lagging() {
+        let (events_tx, events) = tokio::sync::broadcast::channel(1);
+        events_tx
+            .send(copypaste_ipc::EventData {
+                event: copypaste_ipc::EventKind::Items,
+                item_count: 1,
+                captured: false,
+                swept: 0,
+            })
+            .unwrap();
+        events_tx
+            .send(copypaste_ipc::EventData {
+                event: copypaste_ipc::EventKind::Items,
+                item_count: 2,
+                captured: true,
+                swept: 0,
+            })
+            .unwrap();
+
+        let (server_stream, client_stream) = UnixStream::pair().expect("socket pair");
+        let (reader, mut writer) = server_stream.into_split();
+        let mut reader = FramedRead::new(reader, LinesCodec::new());
+        let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let pump = tokio::spawn(async move {
+            crate::server::watch::pump(events, 26, &mut reader, &mut writer, &mut shutdown_rx)
+                .await;
+        });
+
+        let mut client = Client::new(client_stream);
+        let frame = tokio::time::timeout(Duration::from_secs(5), client.next_frame())
+            .await
+            .expect("the retained event must follow the lag");
+        assert_eq!(frame.id, 26);
+        match frame.data {
+            Some(ResponseData::Event(event)) => {
+                assert_eq!(event.item_count, 2);
+                assert!(event.captured);
+            }
+            other => panic!("expected an event, got {other:?}"),
+        }
+
+        drop(client);
+        drop(events_tx);
+        tokio::time::timeout(Duration::from_secs(5), pump)
+            .await
+            .expect("the watcher must stop")
+            .expect("the pump must not panic");
+    }
+
+    #[tokio::test]
+    async fn a_watcher_stops_when_the_client_disconnects() {
+        let (events_tx, events) = tokio::sync::broadcast::channel(1);
+        let (server_stream, client_stream) = UnixStream::pair().expect("socket pair");
+        let (reader, mut writer) = server_stream.into_split();
+        let mut reader = FramedRead::new(reader, LinesCodec::new());
+        let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        drop(client_stream);
+
+        let pump = tokio::spawn(async move {
+            crate::server::watch::pump(events, 27, &mut reader, &mut writer, &mut shutdown_rx)
+                .await;
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), pump)
+            .await
+            .expect("the disconnect must stop the watcher")
+            .expect("the pump must not panic");
+        drop(events_tx);
     }
 
     /// The order is the whole point: the acknowledgement is written *before*
@@ -853,5 +1019,15 @@ mod tests {
                 .expect("a valid frame");
             serde_json::from_str(&reply).expect("a Response")
         }
+    }
+
+    async fn assert_connection_closed(client: &mut Client) {
+        let next = tokio::time::timeout(Duration::from_secs(5), client.lines.next())
+            .await
+            .expect("the rejected watch must not remain open");
+        assert!(
+            matches!(next, None | Some(Err(_))),
+            "the rejected watch produced another frame: {next:?}"
+        );
     }
 }
