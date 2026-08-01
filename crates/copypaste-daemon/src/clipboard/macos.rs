@@ -340,19 +340,41 @@ impl ClipboardSource for MacOsClipboard {
         })
     }
 
-    fn set_binary_contents(&mut self, content_type: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    fn set_binary_contents(
+        &mut self,
+        item_id: &str,
+        content_type: &str,
+        bytes: &[u8],
+        metadata: Option<&copypaste_core::FileMetadata>,
+    ) -> anyhow::Result<()> {
         let uti = match content_type {
             copypaste_ipc::content_type::IMAGE_PNG => UTI_PNG,
             copypaste_ipc::content_type::IMAGE_TIFF => UTI_TIFF,
+            copypaste_ipc::content_type::FILE => UTI_FILE_URL,
             _ => {
                 return Err(anyhow::anyhow!(
                     "the pasteboard cannot write this binary content type"
                 ))
             }
         };
+        let file_url = if content_type == copypaste_ipc::content_type::FILE {
+            let metadata =
+                metadata.ok_or_else(|| anyhow::anyhow!("file metadata is unavailable"))?;
+            let root = copypaste_ipc::data_dir().join("paste-files");
+            let path = super::file_materialize::materialize(&root, item_id, bytes, metadata)?;
+            Some(
+                url::Url::from_file_path(path)
+                    .map_err(|_| anyhow::anyhow!("could not materialize file paste"))?,
+            )
+        } else {
+            None
+        };
         autoreleasepool(|_pool| {
             let pb = unsafe { NSPasteboard::generalPasteboard() };
             let pre = unsafe { pb.changeCount() } as i64;
+            let bytes = file_url
+                .as_ref()
+                .map_or(bytes, |url| url.as_str().as_bytes());
             let data = unsafe {
                 NSData::dataWithBytes_length(bytes.as_ptr().cast_mut().cast(), bytes.len())
             };

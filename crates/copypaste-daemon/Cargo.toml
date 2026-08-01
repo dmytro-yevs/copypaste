@@ -46,6 +46,7 @@ if-addrs = "0.15"
 gethostname = "1"
 base64.workspace = true
 url.workspace = true
+tempfile.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
@@ -55,4 +56,3 @@ security-framework.workspace = true
 plist.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
