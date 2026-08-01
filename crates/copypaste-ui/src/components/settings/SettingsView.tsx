@@ -21,7 +21,7 @@ import { ShortcutTab } from "@/components/settings/ShortcutTab";
 import { StorageTab } from "@/components/settings/StorageTab";
 import { SyncTab } from "@/components/settings/SyncTab";
 import { cn } from "@/lib/cn";
-import { isAndroidPlatform } from "@/lib/platform";
+import { isAndroid } from "@/lib/platform";
 
 const TABS = [
   { value: "appearance", label: "settings.tabs.appearance", icon: Palette, render: () => <AppearanceTab /> },
@@ -64,11 +64,14 @@ function TabButton({ tab, desktop }: { tab: SettingsTab; desktop: boolean }) {
 
 export function SettingsView() {
   const { t } = useTranslation();
-  const android = isAndroidPlatform();
+  const android = isAndroid();
   // The embedded Android backend has no persistent service configuration or
   // backup/restore. Do not offer controls that can only refuse later.
   const tabs = android
-    ? TABS.filter((tab) => tab.value !== "service" && tab.value !== "storage")
+    ? TABS.filter(
+        (tab) =>
+          tab.value !== "shortcut" && tab.value !== "service" && tab.value !== "storage",
+      )
     : TABS;
 
   return (

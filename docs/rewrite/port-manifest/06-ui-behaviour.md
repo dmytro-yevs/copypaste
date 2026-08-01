@@ -625,6 +625,14 @@ Never "daemon" (bdac.34/36). American spelling ("initializing") in newer strings
 
 ### 3.3 Pairing — QR modal and SAS modal
 
+> **Current product decision (ADR-0007).** The v2 backend currently persists a
+> pairing before it can bind either device's decision to a SAS and has no safe
+> abort state machine. Until that API exists, Pair/Add-device controls are not
+> rendered on any platform. The Devices view still manages known devices. The
+> QR/SAS requirements below are the re-entry contract and must all be met before
+> the controls return; a blurred QR, local-only SAS, or clipboard copy of the
+> long-lived credential is not an acceptable partial implementation.
+
 #### 3.3.1 QR pairing modal
 
 *Old: `DevicesView/index.tsx` + `hooks/useQrCode.ts`.*
@@ -730,7 +738,8 @@ and discovered lists (a freshly paired device must move sections).
 
 #### 3.4.1 Shape
 
-Seven tabs: `general`, `display`, `sync`, `shortcuts` (macOS-only), `storage`,
+Seven tabs: `general`, `display`, `sync`, `shortcuts` (desktop-only; never
+rendered on Android), `storage`,
 `about`, `logs`. Panes are `role="tabpanel"` with `id="tabpanel-<id>"` /
 `aria-labelledby="tab-<id>"`. The tab row **wraps** at the app's 720 px minimum
 width — it previously overflowed behind a hidden scrollbar and "Logs" was
