@@ -29,6 +29,10 @@ afterEach(() => vi.restoreAllMocks());
 describe("desktop shortcut settings", () => {
   it("reads both native values and persists a physical-key capture", async () => {
     const { user } = withUser(<ShortcutTab />);
+    await waitFor(() => {
+      expect(getShortcut).toHaveBeenCalledOnce();
+      expect(getDefaultShortcut).toHaveBeenCalledOnce();
+    });
     const capture = await screen.findByRole("button", {
       name: /current shortcut: cmdorctrl\+shift\+p/i,
     });
