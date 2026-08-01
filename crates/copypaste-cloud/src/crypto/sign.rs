@@ -22,7 +22,7 @@
 //! Every column a client writes, in this order:
 //!
 //! ```text
-//! item_id | content_type | origin_device_id | created_at | deleted | nonce | ciphertext
+//! item_id | content_type | payload_metadata | origin_device_id | created_at | deleted | nonce | ciphertext
 //! ```
 //!
 //! * `created_at`, `deleted` and `origin_device_id` are what the comparator
@@ -101,7 +101,7 @@ const SIGNATURE_PREFIX: &[u8] = b"copypaste/v2/cloud-row-sig|";
 
 /// Signing-input schema version. A bump makes every previously-signed row fail
 /// verification — the same fail-closed hinge the AAD has, for the same reason.
-const SIGNATURE_SCHEMA_VERSION: u32 = 1;
+const SIGNATURE_SCHEMA_VERSION: u32 = 2;
 
 /// The fields a row signature covers. See the module docs for why each is here.
 ///
@@ -114,6 +114,7 @@ pub struct RowMetadata<'a> {
     pub ciphertext: &'a str,
     pub nonce: &'a str,
     pub content_type: &'a str,
+    pub payload_metadata: Option<&'a str>,
     pub created_at: i64,
     pub deleted: bool,
     pub origin_device_id: &'a str,
@@ -181,9 +182,13 @@ fn signing_key(key: &SyncKey) -> Zeroizing<[u8; KEY_LEN]> {
 fn signing_input(meta: &RowMetadata<'_>) -> Vec<u8> {
     let deleted = if meta.deleted { "1" } else { "0" };
     let created_at = meta.created_at.to_string();
-    let fields: [&[u8]; 7] = [
+    let metadata_marker = meta.payload_metadata.map_or("0", |_| "1");
+    let metadata = meta.payload_metadata.unwrap_or("");
+    let fields: [&[u8]; 9] = [
         meta.item_id.as_bytes(),
         meta.content_type.as_bytes(),
+        metadata_marker.as_bytes(),
+        metadata.as_bytes(),
         meta.origin_device_id.as_bytes(),
         created_at.as_bytes(),
         deleted.as_bytes(),
@@ -222,6 +227,7 @@ mod tests {
             ciphertext: "c2VhbGVk",
             nonce: "bm9uY2U=",
             content_type: "text",
+            payload_metadata: None,
             created_at: 1_700_000_000_000,
             deleted: false,
             origin_device_id: "device-a",
@@ -303,6 +309,13 @@ mod tests {
                 "content_type",
                 RowMetadata {
                     content_type: "image",
+                    ..meta()
+                },
+            ),
+            (
+                "payload_metadata",
+                RowMetadata {
+                    payload_metadata: Some("{\"filename\":\"report.pdf\"}"),
                     ..meta()
                 },
             ),
@@ -412,13 +425,14 @@ mod tests {
             ciphertext: "Y3Q=",
             nonce: "bm8=",
             content_type: "text",
+            payload_metadata: None,
             created_at: 7,
             deleted: true,
             origin_device_id: "dev",
         });
         assert_eq!(
             input,
-            b"copypaste/v2/cloud-row-sig|1|2:a1|4:text|3:dev|1:7|1:1|4:bm8=|4:Y3Q=".to_vec()
+            b"copypaste/v2/cloud-row-sig|2|2:a1|4:text|1:0|0:|3:dev|1:7|1:1|4:bm8=|4:Y3Q=".to_vec()
         );
     }
 
@@ -458,7 +472,7 @@ mod tests {
         // version byte: it must not verify.
         let mut hmac = keyed(&k);
         let mut input = signing_input(&meta());
-        input[SIGNATURE_PREFIX.len()] = b'2';
+        input[SIGNATURE_PREFIX.len()] = b'1';
         hmac.update(&input);
         let v2 = B64.encode(hmac.finalize().into_bytes());
 

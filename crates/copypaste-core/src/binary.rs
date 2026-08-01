@@ -45,6 +45,20 @@ impl FileMetadata {
             mime_type,
         })
     }
+
+    /// Parse metadata received from an authenticated transport. `Deserialize`
+    /// alone is not sufficient: it bypasses the constructor's basename rule.
+    #[must_use]
+    pub fn from_json(value: &str) -> Option<Self> {
+        serde_json::from_str::<Self>(value)
+            .ok()
+            .filter(|metadata| metadata.is_valid())
+    }
+
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        Self::new(self.filename.clone(), self.mime_type.clone()).is_some()
+    }
 }
 
 /// A deterministic logical id for a binary value.  The UUID spelling preserves
@@ -170,5 +184,13 @@ mod tests {
         let first = HEADER_BYTES;
         sealed[first] ^= 1;
         assert!(open(&sealed, &key, &id).is_err());
+    }
+
+    #[test]
+    fn transport_metadata_rejects_a_path_even_after_deserializing() {
+        assert!(FileMetadata::from_json(
+            r#"{"filename":"../private.txt","mime_type":"text/plain"}"#
+        )
+        .is_none());
     }
 }
