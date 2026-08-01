@@ -27,6 +27,7 @@ sha2.workspace = true
 rand.workspace = true
 zeroize.workspace = true
 hex.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 # Test-only, and deliberately not a real dependency: `tests/constant_parity.rs`
@@ -36,3 +37,4 @@ copypaste-p2p = { path = "../copypaste-p2p" }
 tempfile.workspace = true
 # `start_paused` for deterministic retry tests without real sleeping.
 tokio = { workspace = true, features = ["test-util"] }
+wiremock = "=0.6.5"
