@@ -23,8 +23,21 @@ class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A sticky restart has no Rust runtime or in-memory hand-off queue.
+        // Re-registering the shell listener here would collect plaintext that
+        // cannot reach ingest, while the foreground notification claims the
+        // opposite. Clear the remembered request and say capture stopped.
+        val armed = CaptureState.armed(this)
+        if (intent == null || armed == null || !ShizukuClipboard.isListening()) {
+            CaptureState.clear(this)
+            ShizukuClipboard.disarm()
+            armed?.let { CaptureNotifications.postLost(this, it.lostTitle, it.lostBody) }
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
         // The FGS notification is the user's visible evidence that a listener
-        // is alive. Never arm (or restore) an invisible service on Android 13+.
+        // is alive. Never run an invisible service on Android 13+.
         if (!CaptureNotifications.canPost(this)) {
             CaptureState.clear(this)
             ShizukuClipboard.disarm()
@@ -34,36 +47,16 @@ class CaptureService : Service() {
         CaptureNotifications.ensureChannels(this)
         val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Capturing from every app."
         startForeground(CaptureNotifications.ONGOING_ID, CaptureNotifications.ongoing(this, text))
-
-        // START_STICKY can recreate this service with a null intent after the
-        // app process was reclaimed. The old binder callback died with that
-        // process, so restore only the user's persisted, explicit arm.
-        if (!ShizukuClipboard.isListening()) {
-            val armed = CaptureState.armed(this)
-            if (armed != null) {
-                val restored = ShizukuClipboard.arm {
-                    CaptureState.clear(this)
-                    CaptureNotifications.postLost(this, armed.lostTitle, armed.lostBody)
-                    stopSelf()
-                }
-                if (!restored) {
-                    // Shizuku normally stops at reboot. Keeping the state set
-                    // here would falsely claim a listener will come back.
-                    CaptureState.clear(this)
-                    stopSelf(startId)
-                    return START_NOT_STICKY
-                }
-            }
-        }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        // The callback belongs to this process, not the service object. Remove
-        // it whenever Android tears the service down so it cannot outlive the
-        // foreground notification. The persisted intent, if any, is retained
-        // for START_STICKY's next service instance.
+        // The callback belongs to this process, not the service object. An
+        // unexpected teardown cannot leave a persisted green state behind.
+        val armed = CaptureState.armed(this)
+        CaptureState.clear(this)
         ShizukuClipboard.disarm()
+        armed?.let { CaptureNotifications.postLost(this, it.lostTitle, it.lostBody) }
         super.onDestroy()
     }
 
