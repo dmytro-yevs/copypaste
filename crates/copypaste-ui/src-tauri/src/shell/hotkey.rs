@@ -225,7 +225,10 @@ mod tests {
         let shortcut = validate(crate::shell::shortcut::DEFAULT_SHORTCUT).unwrap();
         assert!(is_permission_free(shortcut.key));
         assert_eq!(shortcut.key, Code::KeyV);
+        #[cfg(target_os = "macos")]
         assert!(shortcut.mods.contains(Modifiers::SUPER));
+        #[cfg(not(target_os = "macos"))]
+        assert!(shortcut.mods.contains(Modifiers::CONTROL));
         assert!(shortcut.mods.contains(Modifiers::SHIFT));
     }
 
