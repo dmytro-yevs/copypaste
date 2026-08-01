@@ -22,17 +22,28 @@ pub(super) fn get(state: &AppState, id: u64) -> Response {
 }
 
 pub(super) fn set(state: &AppState, id: u64, patch: &ConfigPatch) -> Response {
+    let before = state.settings.get().clone();
     match state.settings.apply(&state.meta, patch) {
-        Ok(config) => Response::ok(
-            id,
-            ResponseData::Config(ConfigApplied {
-                config,
-                restart_required: ConfigData::restart_required_by(patch)
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-            }),
-        ),
+        Ok(config) => {
+            if config.storage_quota_bytes < before.storage_quota_bytes
+                || config.history_limit < before.history_limit
+                || (config.retention_days > 0
+                    && (before.retention_days == 0
+                        || config.retention_days < before.retention_days))
+            {
+                copypaste_core::ingest::enforce_retention(&state.store, &config);
+            }
+            Response::ok(
+                id,
+                ResponseData::Config(ConfigApplied {
+                    config,
+                    restart_required: ConfigData::restart_required_by(patch)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                }),
+            )
+        }
         // `ConfigError`'s text names a field and a bound and can contain no
         // path — the type is built that way, and `copypaste_ipc::config` has a
         // test pinning it — so it is safe to pass through verbatim. That is
@@ -107,6 +118,26 @@ mod tests {
             state.settings.get().storage_quota_bytes,
             copypaste_ipc::MIN_STORAGE_QUOTA_BYTES
         );
+    }
+
+    #[test]
+    fn lowering_a_live_retention_limit_sweeps_existing_history() {
+        let (state, _dir) = test_state("alpha");
+        for n in 0..51 {
+            crate::testutil::add(&state, &format!("history item {n}"));
+        }
+
+        let result = applied(call(
+            &state,
+            Method::SetConfig {
+                patch: ConfigPatch {
+                    history_limit: Some(50),
+                    ..Default::default()
+                },
+            },
+        ));
+        assert_eq!(result.config.history_limit, 50);
+        assert_eq!(state.store.count().unwrap(), 50);
     }
 
     /// The one field that cannot be applied live must say so at the moment it
