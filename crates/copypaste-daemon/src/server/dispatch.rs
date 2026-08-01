@@ -15,47 +15,48 @@ use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
 use super::{config, dbadmin, items, transfer};
 use crate::AppState;
 
-/// Parse one request line, run the gates, dispatch.
-pub(crate) fn dispatch_line(
-    state: &Arc<AppState>,
-    line: &str,
-) -> impl std::future::Future<Output = Response> {
-    let parsed = parse_and_gate(state, line);
-    let state = Arc::clone(state);
-    async move {
-        match parsed {
-            Err(rejection) => *rejection,
-            Ok(request) => dispatch(&state, request).await,
-        }
-    }
+/// A pre-handler rejection and whether the rejected request was a subscription.
+pub(super) struct GateRejection {
+    pub(super) response: Box<Response>,
+    pub(super) was_watch: bool,
 }
 
 /// Everything that can reject a request before a handler sees it.
 ///
 /// The rejection is boxed: a `Response` carries a whole payload variant, and an
 /// error type that large would be paid for on the success path too.
-fn parse_and_gate(state: &AppState, line: &str) -> Result<Request, Box<Response>> {
+pub(super) fn parse_and_gate(state: &AppState, line: &str) -> Result<Request, GateRejection> {
     let request: Request = match serde_json::from_str(line) {
         Ok(request) => request,
         Err(e) => {
             debug!(error = %e, "could not parse a request");
-            return Err(Box::new(Response::err(
-                recover_id(line),
-                ErrorCode::InvalidRequest,
-                MSG_MALFORMED,
-            )));
+            return Err(GateRejection {
+                response: Box::new(Response::err(
+                    recover_id(line),
+                    ErrorCode::InvalidRequest,
+                    MSG_MALFORMED,
+                )),
+                was_watch: false,
+            });
         }
     };
 
     if let Some(rejection) = protocol_gate(&request) {
-        return Err(Box::new(rejection));
+        return Err(GateRejection {
+            response: Box::new(rejection),
+            was_watch: matches!(request.method, Method::Watch),
+        });
     }
     if requires_ready(&request.method) && !state.is_ready() {
-        return Err(Box::new(Response::err(
-            request.id,
-            ErrorCode::NotReady,
-            MSG_NOT_READY,
-        )));
+        let was_watch = matches!(request.method, Method::Watch);
+        return Err(GateRejection {
+            response: Box::new(Response::err(
+                request.id,
+                ErrorCode::NotReady,
+                MSG_NOT_READY,
+            )),
+            was_watch,
+        });
     }
 
     Ok(request)
@@ -151,7 +152,8 @@ fn requires_ready(method: &Method) -> bool {
         //
         // `Shutdown` would be exempt anyway: a daemon whose database will not
         // open is exactly the one a user needs to be able to stop.
-        Method::Watch | Method::Shutdown => false,
+        Method::Watch => true,
+        Method::Shutdown => false,
     }
 }
 
@@ -162,7 +164,7 @@ fn requires_ready(method: &Method) -> bool {
 /// round trip — so they run on the reactor and `await` like any other socket
 /// work. Everything else is blocking (SQLite, AEAD, the pasteboard) and takes
 /// one `spawn_blocking` hop, exactly as it did before sync existed.
-async fn dispatch(state: &Arc<AppState>, request: Request) -> Response {
+pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) -> Response {
     let id = request.id;
     match request.method {
         Method::PairCreate { name } => crate::p2p::handlers::pair_create(state, id, &name).await,
@@ -325,6 +327,7 @@ mod tests {
         assert!(requires_ready(&Method::ReorderPinned { ids: Vec::new() }));
         // The one a user reaches for when nothing else answers.
         assert!(!requires_ready(&Method::Shutdown));
+        assert!(requires_ready(&Method::Watch));
         assert!(requires_ready(&Method::Export {
             limit: 0,
             include_sensitive: false
