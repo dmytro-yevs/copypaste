@@ -126,6 +126,35 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
     sensitive_floor: bool,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_context(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        sensitive_floor,
+        None,
+        settings,
+    )
+}
+
+/// Ingest a locally captured value with provenance supplied by the platform.
+///
+/// The app-origin classification is a floor: a known credential store must
+/// keep its value out of FTS even when the content detector finds no pattern.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_context(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
     }
@@ -183,6 +212,7 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
             Some(content.to_string())
         },
         created_at,
+        app_bundle_id: app_bundle_id.map(str::to_owned),
     })?;
 
     // Best-effort, and deliberately after the insert: the item is already

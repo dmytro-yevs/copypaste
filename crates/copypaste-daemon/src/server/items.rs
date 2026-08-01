@@ -384,6 +384,7 @@ mod tests {
             is_sensitive: false,
             deleted: false,
             origin_device_id: String::new(),
+            app_bundle_id: None,
         }
     }
 

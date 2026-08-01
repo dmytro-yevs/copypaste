@@ -21,7 +21,7 @@ use std::time::SystemTime;
 use tracing::{debug, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{is_password_manager_app, Capture, CapturePolicy, ClipboardSource, MAX_TEXT_BYTES};
+use super::{Capture, CapturePolicy, ClipboardSource, MAX_TEXT_BYTES};
 
 /// Environment variable naming a file the [`FakeClipboard`] watches.
 const FAKE_CLIPBOARD_ENV: &str = "COPYPASTE_FAKE_CLIPBOARD";
@@ -194,9 +194,6 @@ impl ClipboardSource for FakeClipboard {
         // cursor was advanced above, but before any content is cloned.
         let app_bundle_id = self.frontmost_app.clone();
         if policy.private_mode
-            || app_bundle_id
-                .as_deref()
-                .is_some_and(is_password_manager_app)
             || (!policy.excluded_app_bundle_ids.is_empty()
                 && app_bundle_id.as_ref().is_none_or(|id| {
                     policy
@@ -526,12 +523,15 @@ mod tests {
     }
 
     #[test]
-    fn password_manager_apps_are_skipped_without_an_exclusion_setting() {
+    fn password_manager_copies_keep_their_origin_for_sensitive_ingest() {
         let mut cb = fake();
         cb.set_frontmost_app(Some("com.1password.1password"));
         cb.push_external("generated-password");
-        assert!(cb.poll().is_none());
-        assert!(cb.poll().is_none(), "password-manager copy was replayed");
+        let capture = cb.poll().expect("the sensitive floor is applied by ingest");
+        assert_eq!(
+            capture.app_bundle_id.as_deref(),
+            Some("com.1password.1password")
+        );
     }
 
     #[test]

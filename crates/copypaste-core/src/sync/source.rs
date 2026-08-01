@@ -230,6 +230,7 @@ mod tests {
                     Some(content.to_string())
                 },
                 created_at,
+                app_bundle_id: None,
             })
             .expect("insert")
             .id
@@ -435,6 +436,7 @@ mod tests {
                 is_sensitive: false,
                 search_text: None,
                 created_at: 1_000,
+                app_bundle_id: None,
             })
             .unwrap();
         add(&f, "readable", "readable", 2_000);

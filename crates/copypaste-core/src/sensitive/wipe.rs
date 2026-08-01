@@ -145,6 +145,7 @@ mod tests {
                     Some(text.to_string())
                 },
                 created_at,
+                app_bundle_id: None,
             })
             .expect("insert")
             .id
