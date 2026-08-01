@@ -19,7 +19,7 @@ use crate::backend::{BackendError, Result};
 
 use super::model::{
     AndroidArmResult, AndroidProbeResult, CaptureModel, CaptureSnapshot, CaptureSource, Clip,
-    ReadOutcome, LOST_BODY, LOST_TITLE,
+    ReadOutcome, ShizukuProbe, LOST_BODY, LOST_TITLE,
 };
 use super::CaptureControl;
 
