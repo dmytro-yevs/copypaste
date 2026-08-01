@@ -929,7 +929,6 @@ dependencies = [
  "chacha20poly1305",
  "copypaste-clock",
  "copypaste-ipc",
- "copypaste-macos-keychain",
  "copypaste-p2p",
  "criterion",
  "hex",
@@ -1004,15 +1003,6 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "ts-rs",
-]
-
-[[package]]
-name = "copypaste-macos-keychain"
-version = "2.0.0-alpha.2"
-dependencies = [
- "core-foundation",
- "security-framework",
- "security-framework-sys",
 ]
 
 [[package]]
