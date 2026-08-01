@@ -540,6 +540,7 @@ mod tests {
             sent: 3,
             received: 2,
             error: error.map(str::to_string),
+            error_code: None,
         }
     }
 

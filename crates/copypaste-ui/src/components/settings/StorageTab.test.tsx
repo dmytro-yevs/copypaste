@@ -72,7 +72,13 @@ beforeEach(() => {
   getStatus.mockReset().mockResolvedValue(status());
   exportHistory.mockReset().mockResolvedValue(report());
   prepareImportHistory.mockReset().mockResolvedValue(preview());
-  applyImportHistory.mockReset().mockResolvedValue({ inserted: 3, skipped: 1 });
+  applyImportHistory.mockReset().mockResolvedValue({
+    inserted: 3,
+    skipped: 1,
+    skipped_duplicate: 1,
+    skipped_empty: 0,
+    skipped_too_large: 0,
+  });
   cancelImportHistory.mockReset().mockResolvedValue(undefined);
   backupDatabase.mockReset().mockResolvedValue(2_500_000);
   restoreDatabase.mockReset().mockResolvedValue(true);

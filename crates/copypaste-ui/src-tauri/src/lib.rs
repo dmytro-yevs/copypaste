@@ -50,6 +50,8 @@ pub mod commands;
 pub mod model;
 pub mod service;
 pub mod shell;
+#[cfg(feature = "typescript")]
+pub mod typescript;
 
 use backend::SelectedBackend;
 use service::Supervisor;

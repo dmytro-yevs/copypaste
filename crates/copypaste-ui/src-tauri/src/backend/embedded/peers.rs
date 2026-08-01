@@ -31,7 +31,7 @@ use copypaste_p2p::{Node, NodeError};
 use tokio::sync::watch;
 
 use super::rows::peer_info;
-use super::{Inner, MSG_NO_PEER};
+use super::Inner;
 use crate::backend::{BackendError, Result};
 
 /// The node, plus the handle that stops its listener.
@@ -198,6 +198,7 @@ impl PeerNode {
                     sent: u32::try_from(outcome.stats.sent).unwrap_or(u32::MAX),
                     received: u32::try_from(outcome.stats.received).unwrap_or(u32::MAX),
                     error: None,
+                    error_code: None,
                 }
             }
             Err(e) => SyncResult {
@@ -206,6 +207,7 @@ impl PeerNode {
                 sent: 0,
                 received: 0,
                 error: Some(e.to_string()),
+                error_code: Some(node_error_code(&e)),
             },
         }
     }
@@ -274,16 +276,25 @@ fn remember(inner: &Arc<Inner>, outcome: &SyncOutcome) {
 
 /// The one mapping from the node's failures onto this backend's taxonomy.
 ///
-/// The node owns the sentences, so what a user reads does not depend on which
-/// platform asked.
+/// The node error variant selects the stable code; its sentence remains only
+/// as scrubbed internal context and never crosses the Tauri boundary.
 fn failed(error: NodeError) -> BackendError {
+    BackendError::from_code(
+        Some(node_error_code(&error)),
+        None,
+        Some(&error.to_string()),
+    )
+}
+
+fn node_error_code(error: &NodeError) -> copypaste_ipc::ErrorCode {
+    use copypaste_ipc::ErrorCode;
+
     match error {
-        NodeError::NoPeer => BackendError::NotFound(MSG_NO_PEER),
-        // `BackendError` serialises as its `Display`, so what a user reads is
-        // the node's own sentence either way — the same words the daemon
-        // backend renders for the same failure, which is the point of the node
-        // owning them. `internal` scrubs, which costs nothing on text that has
-        // no path in it.
-        e => BackendError::internal(&e.to_string()),
+        NodeError::BadCode | NodeError::Handshake => ErrorCode::PairingCode,
+        NodeError::BadAddress => ErrorCode::PairingAddress,
+        NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
+        NodeError::TooManyPairings => ErrorCode::PairingLimit,
+        NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
+        NodeError::NoPeer => ErrorCode::PeerNotFound,
     }
 }

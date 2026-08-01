@@ -33,8 +33,9 @@
 //!
 //! # Errors
 //!
-//! Every method returns [`BackendError`], whose `Display` is the exact sentence
-//! shown to the user. Two properties hold by construction:
+//! Every method returns [`BackendError`]. Its internal `Display` stays useful
+//! for logs, while Tauri serialises only a stable code and retry flag. Two
+//! properties hold by construction:
 //!
 //! * **No filesystem path ever reaches one.** The socket path discloses the
 //!   local username (CLAUDE.md rule 4). Anything that originates outside this
@@ -56,7 +57,7 @@ pub mod error;
 #[cfg(test)]
 pub mod testing;
 
-pub use error::BackendError;
+pub use error::{BackendError, UiError};
 
 /// Shorthand for what every backend method returns.
 pub type Result<T> = std::result::Result<T, BackendError>;

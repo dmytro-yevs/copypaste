@@ -1,4 +1,4 @@
-//! The one error type both backends return, and the two rules it enforces.
+//! The one error type both backends return, and its WebView boundary.
 //!
 //! # Rule 1 — no filesystem path reaches a user
 //!
@@ -7,21 +7,57 @@
 //! arrives from outside this crate is passed through
 //! [`copypaste_ipc::redact::scrub_paths`] — the module every client shares,
 //! never a second copy of it — on the way in, at
-//! [`BackendError::from_daemon`] and [`BackendError::internal`].
+//! [`BackendError::from_daemon`] and [`BackendError::internal`]. Internal text
+//! remains useful in logs but is never part of the serialised [`UiError`].
 //!
 //! The variants that this crate writes itself hold `&'static str`, so there is
 //! no way to interpolate a path into one even by accident. That is the same
 //! trick `copypaste_core::CryptoError` uses, and it is why those two variants
 //! are not simply `String`.
 //!
-//! # Rule 2 — the message is the whole message
+//! # Rule 2 — the UI owns the message
 //!
-//! `Display` is the exact sentence the user sees; the frontend renders it
-//! verbatim and adds nothing. So each string has to be a complete, actionable
-//! sentence rather than a fragment to be prefixed with "Error: ".
+//! Tauri receives only `{ code, retryable }`. The frontend maps `code` to
+//! localised actionable copy, so neither a daemon sentence nor a path can be
+//! rendered by accident. A valid future snake_case code is preserved and
+//! falls back to the frontend's unknown-code copy.
 
 use copypaste_ipc::redact::scrub_paths;
 use copypaste_ipc::ErrorCode;
+
+/// The complete and deliberately small Tauri error contract.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct UiError {
+    pub code: String,
+    pub retryable: bool,
+}
+
+impl UiError {
+    fn new(code: impl Into<String>, retryable: bool) -> Self {
+        Self {
+            code: code.into(),
+            retryable,
+        }
+    }
+
+    pub(crate) fn from_error_code(code: Option<ErrorCode>) -> Self {
+        match code {
+            Some(code) => Self::new(code.as_str(), code.retryable()),
+            None => Self::new("unknown", true),
+        }
+    }
+
+    fn from_unknown_code(code: &str) -> Self {
+        let safe = !code.is_empty()
+            && code.len() <= 64
+            && code
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+        Self::new(if safe { code } else { "unknown" }, true)
+    }
+}
 
 /// A failure fit to show a user.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -40,8 +76,8 @@ pub enum BackendError {
     Unreachable,
 
     /// The daemon answered, and said no.
-    #[error("{0}")]
-    Daemon(String),
+    #[error("{message}")]
+    Daemon { message: String, ui: UiError },
 
     /// The backend is still coming up.
     #[error("CopyPaste is still starting up. Try again in a moment.")]
@@ -83,7 +119,17 @@ impl BackendError {
     /// not possible: there is no other public constructor that takes a
     /// `String`.
     pub fn from_daemon(message: &str) -> Self {
-        Self::Daemon(scrub_paths(message))
+        Self::Daemon {
+            message: scrub_paths(message),
+            ui: UiError::from_error_code(None),
+        }
+    }
+
+    fn from_unknown_code(code: &str, message: &str) -> Self {
+        Self::Daemon {
+            message: scrub_paths(message),
+            ui: UiError::from_unknown_code(code),
+        }
     }
 
     /// Build an internal failure from text this crate did not author.
@@ -108,11 +154,21 @@ impl BackendError {
     /// chose: `NotFound` used to swallow "no such paired device" and answer
     /// "That item is no longer there.", which told a user unpairing a vanished
     /// device that their clipboard item had gone (post-merge review, finding 4).
-    pub fn from_code(code: Option<ErrorCode>, message: Option<&str>) -> Self {
+    pub fn from_code(
+        code: Option<ErrorCode>,
+        raw_code: Option<&str>,
+        message: Option<&str>,
+    ) -> Self {
         let passthrough = || {
-            Self::from_daemon(
-                message.unwrap_or("The daemon reported a failure but gave no reason."),
-            )
+            let message = message.unwrap_or("The daemon reported a failure but gave no reason.");
+            match (code, raw_code) {
+                (Some(code), _) => Self::Daemon {
+                    message: scrub_paths(message),
+                    ui: UiError::from_error_code(Some(code)),
+                },
+                (None, Some(raw)) => Self::from_unknown_code(raw, message),
+                (None, None) => Self::from_daemon(message),
+            }
         };
         let Some(code) = code else {
             return passthrough();
@@ -147,17 +203,31 @@ impl BackendError {
              the app and the daemon may be different versions."
         ))
     }
+
+    #[must_use]
+    pub fn ui_error(&self) -> UiError {
+        match self {
+            Self::Unreachable => UiError::new("offline", true),
+            Self::Daemon { ui, .. } => ui.clone(),
+            Self::NotReady => UiError::from_error_code(Some(ErrorCode::NotReady)),
+            Self::ProtocolMismatch => {
+                UiError::from_error_code(Some(ErrorCode::ProtocolMismatch))
+            }
+            Self::NotFound(_) => UiError::from_error_code(Some(ErrorCode::NotFound)),
+            Self::Invalid(_) => UiError::from_error_code(Some(ErrorCode::InvalidRequest)),
+            Self::Internal(_) => UiError::from_error_code(Some(ErrorCode::Internal)),
+            Self::Unsupported(_) => UiError::new("unavailable", false),
+        }
+    }
 }
 
-/// Tauri renders a command failure by serialising it, so the wire form has to
-/// be the sentence itself rather than a struct the frontend would have to know
-/// how to read.
+/// No internal message is serialised across the Tauri boundary.
 impl serde::Serialize for BackendError {
     fn serialize<S: serde::Serializer>(
         &self,
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
+        self.ui_error().serialize(serializer)
     }
 }
 
@@ -220,21 +290,21 @@ mod tests {
     #[test]
     fn codes_map_to_variants_and_the_string_is_ignored() {
         assert!(matches!(
-            BackendError::from_code(Some(ErrorCode::NotReady), Some("anything at all")),
+            BackendError::from_code(Some(ErrorCode::NotReady), None, Some("anything at all")),
             BackendError::NotReady
         ));
         assert!(matches!(
-            BackendError::from_code(Some(ErrorCode::ProtocolMismatch), None),
+            BackendError::from_code(Some(ErrorCode::ProtocolMismatch), None, None),
             BackendError::ProtocolMismatch
         ));
         assert!(matches!(
-            BackendError::from_code(Some(ErrorCode::NotFound), Some("gone")),
+            BackendError::from_code(Some(ErrorCode::NotFound), None, Some("gone")),
             BackendError::NotFound(_)
         ));
         // An untagged failure still becomes an error rather than a success.
         assert!(matches!(
-            BackendError::from_code(None, Some("unknown method")),
-            BackendError::Daemon(_)
+            BackendError::from_code(None, None, Some("unknown method")),
+            BackendError::Daemon { .. }
         ));
     }
 
@@ -265,7 +335,7 @@ mod tests {
             ),
             (ErrorCode::PeerNotFound, "no such paired device"),
         ] {
-            let shown = BackendError::from_code(Some(code), Some(sentence)).to_string();
+            let shown = BackendError::from_code(Some(code), None, Some(sentence)).to_string();
             assert_eq!(shown, sentence, "{code:?}");
             assert!(!shown.contains("clipboard"), "{code:?}: {shown}");
         }
@@ -275,20 +345,57 @@ mod tests {
     /// so its fixed sentence is finally the true one.
     #[test]
     fn a_missing_item_and_a_missing_device_do_not_render_alike() {
-        let item = BackendError::from_code(Some(ErrorCode::NotFound), Some("item not found"));
-        let device =
-            BackendError::from_code(Some(ErrorCode::PeerNotFound), Some("no such paired device"));
+        let item =
+            BackendError::from_code(Some(ErrorCode::NotFound), None, Some("item not found"));
+        let device = BackendError::from_code(
+            Some(ErrorCode::PeerNotFound),
+            None,
+            Some("no such paired device"),
+        );
         assert_ne!(item.to_string(), device.to_string());
         assert!(item.to_string().contains("item"), "{item}");
         assert!(device.to_string().contains("device"), "{device}");
     }
 
     #[test]
-    fn serialises_as_the_sentence_itself() {
+    fn serialises_as_the_minimal_structured_error() {
         let json = serde_json::to_string(&BackendError::NotReady).unwrap();
+        assert_eq!(json, r#"{"code":"not_ready","retryable":true}"#);
+    }
+
+    #[test]
+    fn serialised_internal_error_discloses_no_message_path_or_username() {
+        let json = serde_json::to_string(&BackendError::internal(
+            "open /Users/alice/Library/Application Support/CopyPaste/history.db failed",
+        ))
+        .unwrap();
+        assert_eq!(json, r#"{"code":"internal","retryable":true}"#);
+        assert!(!json.contains("alice"), "{json}");
+        assert!(!json.contains("history.db"), "{json}");
+    }
+
+    #[test]
+    fn safe_future_code_survives_without_its_internal_message() {
+        let error = BackendError::from_code(
+            None,
+            Some("future_state_2"),
+            Some("failed under /home/bob/private"),
+        );
+        let json = serde_json::to_string(&error).unwrap();
+        assert_eq!(json, r#"{"code":"future_state_2","retryable":true}"#);
+        assert!(!json.contains("bob"), "{json}");
+    }
+
+    #[test]
+    fn path_like_unknown_code_is_not_forwarded() {
+        let error = BackendError::from_code(
+            None,
+            Some("ENOENT:/Users/alice/.copypaste.sock"),
+            Some("untrusted"),
+        );
         assert_eq!(
-            json,
-            "\"CopyPaste is still starting up. Try again in a moment.\""
+            serde_json::to_string(&error).unwrap(),
+            r#"{"code":"unknown","retryable":true}"#
         );
     }
 }

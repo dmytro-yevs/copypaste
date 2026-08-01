@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 /// screen say so at the moment of the change rather than leaving the user to
 /// discover it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ConfigApplied {
     pub config: ConfigData,
     pub restart_required: Vec<String>,

@@ -281,7 +281,7 @@ describe("Quick Paste", () => {
   });
 
   it("offers Restart only when the clipboard service is offline", async () => {
-    listItems.mockRejectedValue(new IpcFailure("offline"));
+    listItems.mockRejectedValue(new IpcFailure("offline", true));
     const { user } = withUser(<QuickPasteApp />);
 
     expect(await screen.findByText("Clipboard service offline")).not.toBeNull();
@@ -290,7 +290,7 @@ describe("Quick Paste", () => {
   });
 
   it("shows startup without a misleading recovery action", async () => {
-    listItems.mockRejectedValue(new IpcFailure("not_ready"));
+    listItems.mockRejectedValue(new IpcFailure("not_ready", true));
     withUser(<QuickPasteApp />);
 
     expect(await screen.findByText("Starting up…")).not.toBeNull();

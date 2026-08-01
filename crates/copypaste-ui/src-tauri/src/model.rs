@@ -44,10 +44,14 @@
 use copypaste_ipc::{DiscoveredDevice, Item, PeerInfo, StatusData, SyncResult};
 use serde::Serialize;
 
+use crate::backend::UiError;
+
 /// One history item, as the WebView is allowed to see it.
 ///
 /// Constructed only by `From<Item>`; see the module docs for why that matters.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(rename = "Item", export_to = "ipc.ts"))]
 pub struct UiItem {
     id: String,
     /// `None` for a sensitive item — not an empty string, and not a mask. The
@@ -124,6 +128,11 @@ pub fn ui_items(items: Vec<Item>) -> Vec<UiItem> {
 /// rows that did open are still the user's data — so the frontend renders it as
 /// a state rather than a failure.
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(rename = "ItemPage", export_to = "ipc.ts")
+)]
 pub struct UiPage {
     items: Vec<UiItem>,
     /// The full number of live history items, before this page's cap.
@@ -175,8 +184,36 @@ pub type UiStatus = StatusData;
 /// A known peer, verbatim from the wire type.
 pub type UiPeer = PeerInfo;
 
-/// One peer's sync outcome, verbatim from the wire type.
-pub type UiSyncResult = SyncResult;
+/// One peer's sync outcome with only a structured, display-safe error.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(rename = "SyncResult", export_to = "ipc.ts")
+)]
+pub struct UiSyncResult {
+    pairing_id: String,
+    name: String,
+    sent: u32,
+    received: u32,
+    error: Option<UiError>,
+}
+
+impl From<SyncResult> for UiSyncResult {
+    fn from(result: SyncResult) -> Self {
+        let error = result
+            .error
+            .as_ref()
+            .map(|_| UiError::from_error_code(result.error_code));
+        Self {
+            pairing_id: result.pairing_id,
+            name: result.name,
+            sent: result.sent,
+            received: result.received,
+            error,
+        }
+    }
+}
 
 /// A device seen on the LAN, verbatim from the wire type.
 ///
@@ -267,5 +304,43 @@ mod tests {
         let item = UiItem::from(wire("secret", true));
         assert_eq!(item.id(), "item-1");
         assert!(item.is_sensitive());
+    }
+
+    #[test]
+    fn a_sync_failure_crosses_only_as_code_and_retry_policy() {
+        let result = UiSyncResult::from(SyncResult {
+            pairing_id: "peer-1".into(),
+            name: "Phone".into(),
+            sent: 0,
+            received: 0,
+            error: Some("timed out at /Users/alice/.copypaste.sock".into()),
+            error_code: Some(copypaste_ipc::ErrorCode::PeerUnreachable),
+        });
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(
+            json.contains(r#""error":{"code":"peer_unreachable","retryable":true}"#),
+            "{json}"
+        );
+        assert!(!json.contains("alice"), "{json}");
+        assert!(!json.contains("sock"), "{json}");
+        assert!(!json.contains("timed out"), "{json}");
+    }
+
+    #[test]
+    fn an_old_daemon_sync_failure_stays_forward_compatible() {
+        let result = UiSyncResult::from(SyncResult {
+            pairing_id: "peer-1".into(),
+            name: "Phone".into(),
+            sent: 0,
+            received: 0,
+            error: Some("some future failure".into()),
+            error_code: None,
+        });
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(
+            json.contains(r#""error":{"code":"unknown","retryable":true}"#),
+            "{json}"
+        );
+        assert!(!json.contains("future failure"), "{json}");
     }
 }

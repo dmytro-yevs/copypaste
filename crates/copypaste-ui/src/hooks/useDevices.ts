@@ -114,8 +114,8 @@ export function useSyncNow() {
           t("devices.toast.synced", { count: results.length, sent, received }),
         );
       } else {
-        // The per-peer error may name a path: report the count, not the text
-        // (INV-12).
+        // Per-peer errors are structured; the toast reports aggregate work and
+        // each row localizes its own code (INV-12).
         toast.warning(
           t("devices.toast.syncedPartial", {
             done: results.length - failed.length,

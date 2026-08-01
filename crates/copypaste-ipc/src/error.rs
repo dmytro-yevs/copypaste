@@ -6,6 +6,8 @@
 //! contract, and the sentence is free to be reworded or translated.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// No such **item**.
@@ -78,6 +80,28 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// The stable spelling placed on every JSON and Tauri boundary.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not_found",
+            Self::InvalidRequest => "invalid_request",
+            Self::ProtocolMismatch => "protocol_mismatch",
+            Self::NotReady => "not_ready",
+            Self::AuthFailed => "auth_failed",
+            Self::LegacyDatabase => "legacy_database",
+            Self::KeyLocked => "key_locked",
+            Self::KeyUnusable => "key_unusable",
+            Self::PairingCode => "pairing_code",
+            Self::PairingAddress => "pairing_address",
+            Self::PeerUnreachable => "peer_unreachable",
+            Self::PairingLimit => "pairing_limit",
+            Self::PeerFailed => "peer_failed",
+            Self::PeerNotFound => "peer_not_found",
+            Self::Internal => "internal",
+        }
+    }
+
     /// Map a wire string to a code this build understands.
     pub fn parse(raw: &str) -> Option<Self> {
         match raw {
@@ -159,6 +183,7 @@ mod tests {
             (ErrorCode::Internal, "\"internal\""),
         ] {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+            assert_eq!(code.as_str(), wire.trim_matches('"'));
             assert_eq!(ErrorCode::parse(wire.trim_matches('"')), Some(code));
         }
     }

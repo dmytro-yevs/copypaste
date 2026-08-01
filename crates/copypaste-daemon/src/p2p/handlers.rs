@@ -208,6 +208,7 @@ pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
                 sent: u32::try_from(outcome.stats.sent).unwrap_or(u32::MAX),
                 received: u32::try_from(outcome.stats.received).unwrap_or(u32::MAX),
                 error: None,
+                error_code: None,
             }
         }
         Err(e) => SyncResult {
@@ -216,6 +217,7 @@ pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
             sent: 0,
             received: 0,
             error: Some(e.to_string()),
+            error_code: Some(node_error_code(&e)),
         },
     }
 }
@@ -229,15 +231,18 @@ pub(super) async fn sync_one(state: &Arc<AppState>, peer: &Peer) -> SyncResult {
 /// list indistinguishable, and sent `NoPeer` out under the code every client
 /// renders as a missing clipboard item (post-merge review, finding 4).
 fn failed(id: u64, error: NodeError) -> Response {
-    let code = match error {
+    Response::err(id, node_error_code(&error), error.to_string())
+}
+
+fn node_error_code(error: &NodeError) -> ErrorCode {
+    match error {
         NodeError::BadCode | NodeError::Handshake => ErrorCode::PairingCode,
         NodeError::BadAddress => ErrorCode::PairingAddress,
         NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
         NodeError::TooManyPairings => ErrorCode::PairingLimit,
         NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
         NodeError::NoPeer => ErrorCode::PeerNotFound,
-    };
-    Response::err(id, code, error.to_string())
+    }
 }
 
 fn peer_info(peer: &Peer, online: bool) -> PeerInfo {
@@ -493,6 +498,11 @@ mod tests {
         };
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.error.is_some()));
+        assert!(
+            results
+                .iter()
+                .all(|r| r.error_code == Some(ErrorCode::PeerUnreachable))
+        );
     }
 
     /// Every variant the node can produce, with the code it arrives under.

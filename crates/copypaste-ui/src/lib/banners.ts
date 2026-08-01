@@ -8,6 +8,7 @@
  * (AT-25). No banner text is ever derived from an error object (INV-12).
  */
 import { t } from "@/i18n";
+import type { StatusData } from "@/lib/ipc";
 
 export type BannerSeverity = "error" | "warning" | "info";
 
@@ -44,15 +45,8 @@ export interface BannerConditions {
   dismissed: readonly string[];
 }
 
-/** The frontend's `StatusData` does not declare the field, while the bridge
- *  passes `copypaste_ipc::StatusData` through verbatim, so it is there at
- *  runtime. Delete this when the interface catches up. */
-export function legacyHistoryPresent(status: unknown): boolean {
-  return (
-    typeof status === "object" &&
-    status !== null &&
-    (status as { legacy_history_present?: unknown }).legacy_history_present === true
-  );
+export function legacyHistoryPresent(status: StatusData | null | undefined): boolean {
+  return status?.legacy_history_present === true;
 }
 
 /** Ordered by priority. The first match whose id is not dismissed wins. */

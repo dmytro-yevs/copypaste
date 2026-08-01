@@ -53,8 +53,8 @@ describe("sync status", () => {
   });
 
   it("distinguishes an unreachable service from a sync backend error", async () => {
-    getStatus.mockRejectedValue(new IpcFailure("offline"));
-    listPeers.mockRejectedValue(new IpcFailure("offline"));
+    getStatus.mockRejectedValue(new IpcFailure("offline", true));
+    listPeers.mockRejectedValue(new IpcFailure("offline", true));
     withClient(<StatusChip />);
 
     const chip = await screen.findByRole("status", { name: /sync: offline/i });

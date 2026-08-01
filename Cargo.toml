@@ -40,6 +40,9 @@ r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
+# Checked-in TypeScript bindings are generated explicitly; ordinary builds do
+# not run the generator. Exact because generated output is version-sensitive.
+ts-rs = { version = "=12.0.1", default-features = false, features = ["serde-compat"] }
 # async
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
 tokio-util = { version = "0.7", features = ["codec"] }

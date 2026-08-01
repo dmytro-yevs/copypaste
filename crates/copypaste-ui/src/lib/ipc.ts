@@ -3,67 +3,46 @@
  * because that is what serde emits.
  */
 import { call, hasBridge } from "./ipcCall";
+import type {
+  ConfigApplied,
+  ConfigData,
+  ConfigPatch,
+  DiscoveredDevice,
+  ExportReport,
+  ImportData,
+  ImportPreview,
+  Item,
+  ItemPage,
+  PeerInfo,
+  ServiceState,
+  StatusData,
+  SyncResult,
+} from "@/generated/ipc";
+
+export type {
+  ConfigApplied,
+  ConfigData,
+  ConfigPatch,
+  DiagnosticCounters,
+  DiscoveredDevice,
+  ErrorCode,
+  ExportReport,
+  ImportData,
+  ImportPreview,
+  Item,
+  ItemPage,
+  Liveness,
+  PeerInfo,
+  ServiceState,
+  StatusData,
+  SyncResult,
+  UiError,
+} from "@/generated/ipc";
+
+/** Stable UI name retained for the Rust `ImportData` response DTO. */
+export type ImportReport = ImportData;
 
 export { hasBridge };
-
-/** INV-10: `content` is `null` for a sensitive item, never a mask. The bridge
- *  drops the plaintext before serialising, so the type enforces it rather than
- *  each component remembering to. `revealItem` is the one route back. */
-export interface Item {
-  readonly id: string;
-  readonly content: string | null;
-  readonly content_type: string;
-  /** Milliseconds since the Unix epoch. */
-  readonly created_at: number;
-  readonly pinned: boolean;
-  /** Never indexed, so `search` cannot return one. */
-  readonly is_sensitive: boolean;
-}
-
-/** `skipped_undecryptable` is not an error: it is the difference between a
- *  short page and a small history (finding 17). */
-export interface ItemPage {
-  readonly items: readonly Item[];
-  /** Full live-history count, so a capped surface never silently truncates. */
-  readonly total: number;
-  readonly skipped_undecryptable: number;
-  /** Opaque; pass it straight back to `listItems`. `null` is the **only**
-   *  end-of-list test — a page shortened by `skipped_undecryptable` rows still
-   *  has the rest of the history behind it. */
-  readonly next_cursor: string | null;
-}
-
-export interface StatusData {
-  readonly version: string;
-  readonly protocol_version: number;
-  readonly item_count: number;
-  readonly capture_running: boolean;
-  /** Surfaced so a fake backend cannot be mistaken for the real pasteboard. */
-  readonly clipboard_backend: string;
-  readonly private_mode: boolean;
-}
-
-/** `code` is the Noise pre-shared key in transferable form: anyone holding it
- *  can pair, so it is hidden until revealed, never logged, never toasted, and
- *  never retrievable again after this one response. */
-export interface PeerInfo {
-  readonly pairing_id: string;
-  readonly name: string;
-  readonly last_addr: string | null;
-  readonly last_seen_ms: number;
-  /** Discovery is a convenience: `false` means "not seen", never
-   *  "unreachable". */
-  readonly online: boolean;
-}
-
-export interface SyncResult {
-  readonly pairing_id: string;
-  readonly name: string;
-  readonly sent: number;
-  readonly received: number;
-  /** Present when this peer failed; the rest of the run still reports. */
-  readonly error: string | null;
-}
 
 /** The IPC protocol version this build speaks. A daemon reporting anything
  *  else raises the mismatch banner (INV-17) rather than degrading silently. */
@@ -157,18 +136,6 @@ export function syncNow(pairingId?: string): Promise<SyncResult[]> {
   return call<SyncResult[]>("sync_now", { pairingId: pairingId ?? null });
 }
 
-/** INV-15: nothing here is verified. Name, address and pairing id are what an
- *  unauthenticated mDNS record claimed; only the Noise handshake proves any of
- *  it. */
-export interface DiscoveredDevice {
-  readonly pairing_id: string;
-  readonly name: string;
-  /** `host:port`, retained for peer reachability diagnostics. */
-  readonly addr: string;
-  readonly last_seen_ms: number;
-  readonly paired: boolean;
-}
-
 export function listDiscovered(): Promise<DiscoveredDevice[]> {
   return call<DiscoveredDevice[]>("discovered");
 }
@@ -178,14 +145,6 @@ export function listDiscovered(): Promise<DiscoveredDevice[]> {
 export function rescanDiscovered(): Promise<DiscoveredDevice[]> {
   return call<DiscoveredDevice[]>("rescan");
 }
-
-/** Four situations need four answers (ADR-0004): nothing to start, something to
- *  start, running, and running on a version this app did not ship with. */
-export type ServiceState =
-  | { readonly state: "running"; readonly version: string; readonly matches_app: boolean; readonly ours: boolean }
-  | { readonly state: "unhealthy" }
-  | { readonly state: "stopped" }
-  | { readonly state: "not_installed" };
 
 export function serviceState(): Promise<ServiceState> {
   return call<ServiceState>("service_state");
@@ -243,74 +202,12 @@ export {
   captureToastExplanation,
 } from "./ipcCapture";
 
-/** `copypaste_ipc::ConfigData`. */
-export interface ConfigData {
-  readonly private_mode: boolean;
-  readonly poll_interval_ms: number;
-  readonly history_limit: number;
-  /** Maximum bytes retained in unpinned live ciphertext. */
-  readonly storage_quota_bytes: number;
-  /** `0` disables age-based eviction. */
-  readonly retention_days: number;
-  readonly dedup_window_secs: number;
-  readonly max_text_size_bytes: number;
-  readonly max_image_size_bytes: number;
-  readonly max_file_size_bytes: number;
-  /** Decoded-bitmap memory budget, in MiB. */
-  readonly max_decoded_image_mb: number;
-  /** `0` is **off**, not "delete immediately" (`CopyPaste-8ebg.1`). */
-  readonly sensitive_ttl_secs: number;
-  readonly excluded_app_bundle_ids: readonly string[];
-  readonly lan_visibility: boolean;
-  readonly sync_enabled: boolean;
-  readonly notify_on_copy: boolean;
-  readonly sound_on_copy: boolean;
-}
-
-/** A patch names only what changed, so two screens editing different settings
- *  cannot overwrite each other. */
-export type ConfigPatch = Partial<{
-  -readonly [K in Exclude<keyof ConfigData, "excluded_app_bundle_ids">]: ConfigData[K];
-}>;
-
-/** `restart_required` names the fields the service kept but has not yet acted
- *  on. It comes back from the write rather than being derived here, so the two
- *  cannot disagree about which those are. */
-export interface ConfigApplied {
-  readonly config: ConfigData;
-  readonly restart_required: readonly string[];
-}
-
 export function getConfig(): Promise<ConfigApplied> {
   return call<ConfigApplied>("get_config");
 }
 
 export function setConfig(patch: ConfigPatch): Promise<ConfigApplied> {
   return call<ConfigApplied>("set_config", { patch });
-}
-
-/** The three skip counts are always present, including when zero: an export
- *  withholds every flagged item unless it was asked twice, and a user who is
- *  not told the number believes they exported everything. */
-export interface ExportReport {
-  readonly exported: number;
-  readonly skipped_sensitive: number;
-  readonly skipped_non_text: number;
-  readonly skipped_undecryptable: number;
-}
-
-/** `skipped` counts items the service already held, not failures: a malformed
- *  file is refused whole, before anything is written. */
-export interface ImportReport {
-  readonly inserted: number;
-  readonly skipped: number;
-}
-
-/** A parsed import waiting for confirmation. The token is opaque and one-use;
- *  neither it nor the preview can carry a selected path. */
-export interface ImportPreview {
-  readonly token: string;
-  readonly item_count: number;
 }
 
 /** INV-12 held by the shape of the command: the platform's own panel asks and
