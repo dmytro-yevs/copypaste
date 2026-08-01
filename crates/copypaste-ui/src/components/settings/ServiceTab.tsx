@@ -25,6 +25,7 @@ import {
   POLL_INTERVAL_MS,
   RETENTION_DAYS,
   SENSITIVE_TTL_SECS,
+  STORAGE_QUOTA_BYTES,
 } from "@/components/settings/serviceChoices";
 import {
   useRestartService,
@@ -119,6 +120,15 @@ export function ServiceTab() {
           value={data.history_limit}
           disabled={busy}
           onChange={(history_limit) => apply({ history_limit })}
+        />
+
+        <ChoiceRow
+          title={t("settings.service.storageQuota.title")}
+          description={t("settings.service.storageQuota.description")}
+          choices={STORAGE_QUOTA_BYTES}
+          value={data.storage_quota_bytes}
+          disabled={busy}
+          onChange={(storage_quota_bytes) => apply({ storage_quota_bytes })}
         />
 
         <ChoiceRow
