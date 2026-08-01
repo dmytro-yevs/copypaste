@@ -6,6 +6,11 @@
 
 use std::path::Path;
 use std::sync::OnceLock;
+#[cfg(any(target_os = "macos", test))]
+use std::{
+    sync::mpsc::{self, RecvTimeoutError},
+    time::Duration,
+};
 
 use hkdf::Hkdf;
 use rand::{rngs::OsRng, RngCore};
@@ -34,6 +39,11 @@ const INFO_ITEM_KEY: &[u8] = b"copypaste/v2/item-content-key";
 /// process cannot flip an already-keyed daemon into ephemeral mode
 /// (port manifest 02, I-23).
 const ENV_EPHEMERAL: &str = "COPYPASTE_EPHEMERAL_KEY";
+
+/// Upper bound on a macOS Keychain load during startup (port manifest 02,
+/// I-22). The previous production implementation used the same deadline.
+#[cfg(any(target_os = "macos", test))]
+const KEYSTORE_LOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The device secret plus the keys derived from it. The secret is zeroized on
 /// drop.
@@ -77,6 +87,15 @@ impl Keyring {
             );
             return Ok(Self::from_secret(&random_secret()));
         }
+        #[cfg(target_os = "macos")]
+        let secret = {
+            let lookup_dir = data_dir.to_path_buf();
+            let lookup = load_with_timeout(KEYSTORE_LOAD_TIMEOUT, move || {
+                super::keystore::lookup_secret(&lookup_dir)
+            })?;
+            super::keystore::finish_load_or_create_secret(data_dir, lookup)?
+        };
+        #[cfg(not(target_os = "macos"))]
         let secret = super::keystore::load_or_create_secret(data_dir)?;
         Ok(Self { secret })
     }
@@ -99,6 +118,45 @@ impl Keyring {
     /// Key for item content AEAD.
     pub fn item_key(&self) -> ItemKey {
         ItemKey(Zeroizing::new(derive(&self.secret, INFO_ITEM_KEY)))
+    }
+}
+
+/// Run a potentially prompting Keychain load without allowing it to hold
+/// startup indefinitely.
+#[cfg(any(target_os = "macos", test))]
+fn load_with_timeout<T, F>(timeout: Duration, load: F) -> Result<T, CryptoError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, CryptoError> + Send + 'static,
+{
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let worker = std::thread::Builder::new()
+        .name("keystore-load".into())
+        .spawn(move || {
+            let _ = sender.send(load());
+        })
+        .map_err(|_| CryptoError::KeystoreUnavailable("the keychain read could not be started"))?;
+
+    match receiver.recv_timeout(timeout) {
+        Ok(result) => {
+            let _ = worker.join();
+            result
+        }
+        Err(RecvTimeoutError::Timeout) => {
+            // Security-framework exposes no cancellation. Dropping the handle
+            // detaches the worker until the prompt resolves or the process
+            // exits; it owns no database handle, and a late secret is zeroized.
+            drop(worker);
+            Err(CryptoError::KeystoreUnavailable(
+                "the keychain read timed out",
+            ))
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            let _ = worker.join();
+            Err(CryptoError::KeystoreUnavailable(
+                "the keychain read ended unexpectedly",
+            ))
+        }
     }
 }
 
@@ -165,9 +223,76 @@ fn ephemeral_requested() -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
     use super::super::test_support::{key_a, ITEM, SECRET_A, SECRET_B};
     use super::super::{decrypt, encrypt};
     use super::*;
+
+    const TEST_TIMEOUT: Duration = Duration::from_millis(20);
+
+    #[test]
+    fn bounded_load_returns_a_successful_secret() {
+        let secret = load_with_timeout(TEST_TIMEOUT, || Ok(Zeroizing::new(SECRET_A))).unwrap();
+
+        assert_eq!(*secret, SECRET_A);
+    }
+
+    #[test]
+    fn bounded_load_preserves_a_backend_error() {
+        let result: Result<Zeroizing<[u8; KEY_LEN]>, CryptoError> =
+            load_with_timeout(TEST_TIMEOUT, || {
+                Err(CryptoError::KeystoreUnavailable(
+                    "the keychain is locked or access was denied",
+                ))
+            });
+
+        assert!(matches!(
+            result,
+            Err(CryptoError::KeystoreUnavailable(
+                "the keychain is locked or access was denied"
+            ))
+        ));
+    }
+
+    #[test]
+    fn bounded_load_preserves_a_wrong_length_error() {
+        let result: Result<Zeroizing<[u8; KEY_LEN]>, CryptoError> =
+            load_with_timeout(TEST_TIMEOUT, || {
+                Err(CryptoError::KeystoreEntryUnusable(
+                    "the stored device secret is the wrong length",
+                ))
+            });
+
+        assert!(matches!(result, Err(CryptoError::KeystoreEntryUnusable(_))));
+    }
+
+    #[test]
+    fn bounded_load_rejects_an_operation_past_the_deadline() {
+        let (release, blocked) = mpsc::channel();
+        let (finished, worker_finished) = mpsc::channel();
+        let result = load_with_timeout(TEST_TIMEOUT, move || {
+            blocked.recv().unwrap();
+            let result = Ok(Zeroizing::new(SECRET_A));
+            finished.send(()).unwrap();
+            result
+        });
+
+        assert!(matches!(
+            result,
+            Err(CryptoError::KeystoreUnavailable(
+                "the keychain read timed out"
+            ))
+        ));
+
+        release.send(()).unwrap();
+        worker_finished.recv().unwrap();
+    }
+
+    #[test]
+    fn production_keychain_deadline_is_eight_seconds() {
+        assert_eq!(KEYSTORE_LOAD_TIMEOUT, Duration::from_secs(8));
+    }
 
     #[test]
     fn key_derivation_is_deterministic_for_a_fixed_secret() {
