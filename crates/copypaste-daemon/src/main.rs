@@ -49,15 +49,15 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     init_tracing();
 
-    // `--data-dir` moves both the database and the socket, so an isolated
-    // instance cannot answer for — or be answered by — the real one.
-    let (db_path, socket_path) = match &args.data_dir {
-        Some(dir) => (
-            relocate(&copypaste_ipc::database_path(), dir),
-            relocate(&copypaste_ipc::socket_path(), dir),
-        ),
-        None => (copypaste_ipc::database_path(), copypaste_ipc::socket_path()),
-    };
+    // `--data-dir` moves both defaults; an explicit `COPYPASTE_SOCKET` still
+    // wins so every process can name the same isolated instance.
+    let db_path = args
+        .data_dir
+        .as_ref()
+        .map_or_else(copypaste_ipc::database_path, |dir| {
+            relocate(&copypaste_ipc::database_path(), dir)
+        });
+    let socket_path = copypaste_ipc::paths::socket_path_for_data_dir(args.data_dir.as_deref());
     // One derivation of "the data directory", used by everything that lives
     // beside the database: the paired-device file, so an isolated instance has
     // isolated pairings too, and the device secret, so it cannot be left behind
