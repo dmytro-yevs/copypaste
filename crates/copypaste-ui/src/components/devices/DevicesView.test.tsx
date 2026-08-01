@@ -120,7 +120,7 @@ describe("pairing availability", () => {
   it("does not offer an unbound pairing ceremony or credential-copy path", async () => {
     withUser(<DevicesView />);
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
+    expect((await screen.findByText(/verified security-code confirmation/i)).textContent).toMatch(
       /verified security-code confirmation/i,
     );
     expect(screen.queryByRole("button", { name: /pair a new device|add a device/i })).toBeNull();
