@@ -25,6 +25,14 @@ import { HISTORY_KEY } from "@/hooks/useHistory";
 
 export const PEERS_KEY = ["peers"] as const;
 export const DISCOVERED_KEY = ["discovered"] as const;
+export const SYNC_KEY = ["peer-sync"] as const;
+export const DISCOVERED_POLL_MS = 3_000;
+
+function uniqueDevices<T extends { readonly pairing_id: string }>(
+  devices: readonly T[],
+): T[] {
+  return [...new Map(devices.map((device) => [device.pairing_id, device])).values()];
+}
 
 export function usePeers() {
   return useQuery<PeerInfo[]>({
@@ -33,21 +41,21 @@ export function usePeers() {
     refetchInterval: (q) =>
       q.state.status === "error" ? POLL_BACKOFF_MS : PEERS_POLL_MS,
     retry: false,
+    select: uniqueDevices,
   });
 }
 
-/** Only while the pairing dialog is open: a clipboard manager that browses mDNS
- *  continuously announces its presence to every network its owner joins.
- *  Nothing here is authenticated (INV-15). */
-export function useDiscovered(enabled: boolean) {
+/** Nothing here is authenticated (INV-15). The Devices view owns this poll so
+ *  discovery stops when the user navigates away. */
+export function useDiscovered() {
   return useQuery<DiscoveredDevice[]>({
     queryKey: DISCOVERED_KEY,
     queryFn: listDiscovered,
-    enabled,
-    refetchInterval: PEERS_POLL_MS,
+    refetchInterval: DISCOVERED_POLL_MS,
     // A build with no discovery answers `unavailable`, which is a fact rather
     // than a transient failure.
     retry: false,
+    select: uniqueDevices,
   });
 }
 
@@ -92,6 +100,7 @@ export function useRevoke() {
 export function useSyncNow() {
   const qc = useQueryClient();
   return useMutation<SyncResult[], unknown, string | undefined>({
+    mutationKey: SYNC_KEY,
     mutationFn: (pairingId) => syncNow(pairingId),
     onSuccess: (results) => {
       const failed = results.filter((r) => r.error !== null);

@@ -54,6 +54,7 @@ export function status(over: Partial<StatusData> = {}): StatusData {
     item_count: 3,
     capture_running: true,
     clipboard_backend: "nspasteboard",
+    private_mode: false,
     ...over,
     private_mode: over.private_mode ?? false,
   };
