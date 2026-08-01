@@ -61,7 +61,7 @@
 use std::str::FromStr;
 use tauri::{AppHandle, Runtime};
 
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 
 /// Whether binding `code` avoids the `CGEventTap` path in `global-hotkey`.
 ///
@@ -175,6 +175,7 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri_plugin_global_shortcut::Modifiers;
 
     /// The load-bearing test. Each of these five reaches
     /// `start_watching_media_keys` in `global-hotkey`, which calls
