@@ -593,7 +593,7 @@ mod tests {
             .unwrap();
         assert_eq!(store.search("alice", 10).unwrap().len(), 1);
 
-        purge_search_index(&store, &Detector::new().unwrap()).unwrap();
+        purge_search_index(&store, &Detector::new().unwrap());
         assert!(store.search("alice", 10).unwrap().is_empty());
     }
 
