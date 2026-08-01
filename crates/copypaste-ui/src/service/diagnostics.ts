@@ -4,10 +4,8 @@
  * extending or reformatting it on this side would put a second one here
  * (CLAUDE.md rule 1, and rule 4's no-paths obligation).
  */
-import { invoke } from "@tauri-apps/api/core";
-
-import { IpcFailure, classifyError } from "@/lib/errors";
-import { hasBridge, type ServiceState } from "@/lib/ipc";
+import { call } from "@/lib/ipcCall";
+import type { ServiceState } from "@/lib/ipc";
 
 /** Cumulative since the service started and never reset, so `uptime_secs` is
  *  the only thing they can honestly be read against. Counts only: there is no
@@ -47,8 +45,5 @@ export interface Diagnostics {
 }
 
 export function getDiagnostics(): Promise<Diagnostics> {
-  if (!hasBridge()) throw new IpcFailure("offline");
-  return invoke<Diagnostics>("diagnostics").catch((raw) => {
-    throw new IpcFailure(classifyError(raw));
-  });
+  return call<Diagnostics>("diagnostics");
 }

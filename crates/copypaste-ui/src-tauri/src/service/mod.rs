@@ -55,6 +55,8 @@ const READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// What the background service is doing, as the UI needs to see it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ServiceState {
     /// Answering on the socket.

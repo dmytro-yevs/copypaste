@@ -2,7 +2,7 @@
  * Two rules, both enforced by `catalogue.test.ts`:
  *
  * Daemon text is never interpolated into a message. It can name the socket path
- * (INV-12), so `classifyError` reduces it to an `ErrorKind` and `errors.<kind>`
+ * (INV-12), so the structured code selects `errors.<kind>`
  * is the one authored sentence for that kind.
  *
  * Clip content is never an argument to `t`. Where an accessible name has to

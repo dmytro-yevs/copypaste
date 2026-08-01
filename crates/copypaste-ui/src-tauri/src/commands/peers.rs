@@ -80,7 +80,10 @@ pub async fn sync_now(
     backend: State<'_, SelectedBackend>,
     pairing_id: Option<String>,
 ) -> Result<Vec<UiSyncResult>> {
-    backend.sync(pairing_id.as_deref()).await
+    backend
+        .sync(pairing_id.as_deref())
+        .await
+        .map(|results| results.into_iter().map(UiSyncResult::from).collect())
 }
 
 /// Devices this network has advertised, paired or not.

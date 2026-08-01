@@ -285,19 +285,15 @@ describe("whether syncing is working with one device", () => {
     expect(await screen.findByText(/sent 3, received 2/i)).toBeTruthy();
   });
 
-  /**
-   * INV-12: the per-peer error is the daemon's own text and can name the socket
-   * path, which spells out the local username. The row gets the classified
-   * sentence, and the next step it names, instead.
-   */
-  it("names why the sync failed without rendering what the daemon said", async () => {
+  /** INV-12: the bridge drops the daemon's text and the row localizes its code. */
+  it("names why the sync failed from its structured code", async () => {
     syncNow.mockResolvedValue([
       {
         pairing_id: "pair-9",
         name: "Lost Phone",
         sent: 0,
         received: 0,
-        error: "peer /Users/someone/.copypaste/daemon.sock stopped responding",
+        error: { code: "peer_unreachable", retryable: true },
       },
     ]);
     await syncOne();
@@ -316,7 +312,7 @@ describe("whether syncing is working with one device", () => {
         name: "Lost Phone",
         sent: 0,
         received: 0,
-        error: "the peer stopped responding",
+        error: { code: "peer_unreachable", retryable: true },
       },
     ]);
     const user = await syncOne();
@@ -330,7 +326,7 @@ describe("whether syncing is working with one device", () => {
         name: "Lost Phone",
         sent: 0,
         received: 0,
-        error: "no such paired device",
+        error: { code: "peer_not_found", retryable: false },
       },
     ]);
     await user.click(retry);
@@ -352,7 +348,7 @@ describe("whether syncing is working with one device", () => {
         name: "Lost Phone",
         sent: 0,
         received: 0,
-        error: "the peer stopped responding",
+        error: { code: "peer_unreachable", retryable: true },
       },
     ]);
     const user = await syncOne();

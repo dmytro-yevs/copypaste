@@ -45,6 +45,7 @@ thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 tempfile.workspace = true
+ts-rs = { workspace = true, optional = true }
 
 # The in-process backend's crates. Optional here so the Android code path can be
 # type-checked on a Linux host with `--features embedded-backend`; the target
@@ -97,3 +98,8 @@ ndk-context = "0.1"
 # code is type-checked somewhere: without it the whole Android path would be
 # dead text on every machine the project is actually built on.
 embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:jni", "dep:ndk-context"]
+typescript = ["dep:ts-rs", "copypaste-ipc/typescript"]
+
+[[example]]
+name = "generate-typescript"
+required-features = ["typescript"]

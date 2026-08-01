@@ -8,7 +8,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import { IpcFailure, classifyError } from "./errors";
+import { IpcFailure, ipcFailure } from "./errors";
 
 /** No bridge is indistinguishable to a user from a service that is down, so it
  *  maps onto the same state rather than a third one. */
@@ -20,11 +20,10 @@ export async function call<T>(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
-  if (!hasBridge()) throw new IpcFailure("offline");
+  if (!hasBridge()) throw new IpcFailure("offline", true);
   try {
     return await invoke<T>(command, args);
   } catch (raw) {
-    // classifyError logs the raw value and returns a safe token (INV-12).
-    throw new IpcFailure(classifyError(raw));
+    throw ipcFailure(raw);
   }
 }

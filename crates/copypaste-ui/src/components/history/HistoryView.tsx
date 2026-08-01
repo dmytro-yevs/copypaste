@@ -180,6 +180,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       <HistoryContentState
         loading={history.loading}
         errorKind={history.errorKind}
+        errorRetryable={history.errorRetryable}
         searching={history.searching}
         filtered={history.filtered}
         privateMode={status.data?.private_mode === true}

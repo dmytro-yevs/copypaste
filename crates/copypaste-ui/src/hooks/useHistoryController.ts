@@ -10,7 +10,7 @@ import {
   useHistorySearch,
   useStatus,
 } from "@/hooks/useHistory";
-import { type ErrorKind, classifyError } from "@/lib/errors";
+import { type ErrorKind, ipcFailure } from "@/lib/errors";
 import type { Item } from "@/lib/ipc";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/layout";
 import {
@@ -41,6 +41,7 @@ export interface HistoryController {
   readonly total: number | undefined;
   readonly loading: boolean;
   readonly errorKind: ErrorKind | null;
+  readonly errorRetryable: boolean;
   readonly searching: boolean;
   readonly filtered: boolean;
   readonly hasMore: boolean;
@@ -165,6 +166,8 @@ export function useHistoryController(pushLive: boolean): HistoryController {
     void history.refetch();
   }, [history]);
 
+  const failure = history.error ? ipcFailure(history.error) : null;
+
   return {
     rawQuery,
     setRawQuery,
@@ -181,7 +184,8 @@ export function useHistoryController(pushLive: boolean): HistoryController {
     skipped: page.skipped,
     total: status.data?.item_count,
     loading: history.isPending,
-    errorKind: history.error ? classifyError(history.error) : null,
+    errorKind: failure?.kind ?? null,
+    errorRetryable: failure?.retryable ?? false,
     searching,
     filtered: searching || isFilteringView(view),
     hasMore: !searching && history.hasNextPage,

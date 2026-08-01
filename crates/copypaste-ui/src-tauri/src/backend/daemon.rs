@@ -107,17 +107,9 @@ pub(super) fn into_data(response: Response) -> Result<Option<ResponseData>> {
     if response.ok {
         return Ok(response.data);
     }
-    if let Some(raw_code) = response.raw_error_code.as_deref() {
-        let message = response
-            .error
-            .as_deref()
-            .unwrap_or("The daemon reported a failure but gave no reason.");
-        return Err(BackendError::from_daemon(&format!(
-            "{message} (error code: {raw_code})"
-        )));
-    }
     Err(BackendError::from_code(
         response.error_code,
+        response.raw_error_code.as_deref(),
         response.error.as_deref(),
     ))
 }

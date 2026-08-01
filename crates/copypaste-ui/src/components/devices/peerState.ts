@@ -54,6 +54,7 @@ export interface SyncSuccess {
 export interface SyncFailure {
   readonly at: number;
   readonly kind: ErrorKind;
+  readonly retryable: boolean;
 }
 
 /** Both halves are kept, because a row has to say when syncing last *worked*
@@ -151,7 +152,14 @@ export function noteSync(
             ...before,
             success: { at, sent: result.sent, received: result.received },
           }
-        : { ...before, failure: { at, kind: classifyError(result.error) } };
+        : {
+            ...before,
+            failure: {
+              at,
+              kind: classifyError(result.error),
+              retryable: result.error.retryable,
+            },
+          };
   }
   return next;
 }
