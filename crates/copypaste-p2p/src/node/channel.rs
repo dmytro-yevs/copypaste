@@ -197,6 +197,8 @@ mod tests {
         let items = std::iter::repeat_with(|| crate::protocol::SyncItem {
             item_id: "x".into(),
             content: String::new(),
+            binary_content: Vec::new(),
+            payload_metadata: None,
             content_type: "text".into(),
             created_at: 1,
             deleted: false,

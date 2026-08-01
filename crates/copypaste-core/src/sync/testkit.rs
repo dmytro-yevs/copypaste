@@ -58,6 +58,8 @@ pub(super) fn version<'a>(
     RemoteVersion {
         item_id,
         content,
+        binary_content: None,
+        payload_metadata: None,
         content_type: "text",
         created_at,
         deleted: false,

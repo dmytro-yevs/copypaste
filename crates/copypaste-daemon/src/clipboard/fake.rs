@@ -218,6 +218,9 @@ impl ClipboardSource for FakeClipboard {
         }
         Some(Capture {
             content,
+            binary_content: None,
+            file_path: None,
+            file_metadata: None,
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             app_bundle_id,
         })

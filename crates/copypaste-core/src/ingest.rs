@@ -220,6 +220,7 @@ pub fn ingest_into_with_capture_context(
         },
         created_at,
         app_bundle_id: app_bundle_id.map(str::to_owned),
+        payload_metadata: None,
     })?;
 
     // Best-effort, and deliberately after the insert: the item is already
@@ -244,6 +245,70 @@ pub fn ingest_into_with_capture_context(
         }
     }
 
+    Ok(Ingested::Stored(stored))
+}
+
+/// Store a raw image or file payload.  Binary values have no string
+/// representation in the ingest path: treating bytes as lossy UTF-8 is how a
+/// file path or base64 stand-in reaches FTS and sync as apparent text.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_into_with_capture_context(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    payload_metadata: Option<&crate::FileMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
+    if bytes.is_empty() {
+        return Err(IngestError::Empty);
+    }
+    if copypaste_ipc::content_type::is_text(content_type) {
+        return Err(IngestError::Empty);
+    }
+    if bytes.len() as u64 > settings.max_item_bytes {
+        return Err(IngestError::TooLarge);
+    }
+
+    let hash = crate::storage::compute_content_hash(bytes);
+    let recent = match store.find_recent_by_hash(&hash, i64::MIN) {
+        Ok(found) => found,
+        Err(e) => {
+            warn!(error = ?e, "binary dedup probe failed; storing the item anyway");
+            None
+        }
+    };
+    if let Some(row) = recent {
+        let row = if sensitive_floor {
+            store.promote_to_sensitive(row)?
+        } else {
+            row
+        };
+        return Ok(Ingested::Duplicate(row));
+    }
+
+    let item_id = crate::binary_item_id(bytes);
+    let ciphertext = crate::seal_binary(bytes, &keyring.item_key(), &item_id)?;
+    let stored = store.insert(NewItem {
+        id: item_id,
+        content_ciphertext: ciphertext,
+        // A binary envelope contains a nonce per chunk.  An empty row nonce
+        // distinguishes it from the text AEAD and is never a fallback path.
+        nonce: Vec::new(),
+        content_type: content_type.to_owned(),
+        content_hash: hash,
+        is_sensitive: sensitive_floor,
+        search_text: None,
+        created_at,
+        app_bundle_id: app_bundle_id.map(str::to_owned),
+        payload_metadata: payload_metadata
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|_| IngestError::Empty)?,
+    })?;
     Ok(Ingested::Stored(stored))
 }
 
@@ -374,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn a_non_text_capture_is_never_indexed_or_offered_to_sync() {
+    fn string_typed_non_text_is_never_indexed() {
         let f = fixture();
         let stored = ingest_into(
             &f.store,
@@ -390,7 +455,38 @@ mod tests {
 
         assert_eq!(stored.content_type, "image/png");
         assert!(f.store.search("encoded", 10).unwrap().is_empty());
-        assert!(f.store.versions_since(i64::MIN, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn binary_ingest_is_chunked_content_addressed_and_never_indexed() {
+        let f = fixture();
+        let bytes = vec![0x89; crate::CHUNK_BYTES + 19];
+        let stored = ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &bytes,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            T0,
+            false,
+            Some("com.apple.Preview"),
+            None,
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+
+        assert_eq!(stored.id, crate::binary_item_id(&bytes));
+        assert!(stored.nonce.is_empty());
+        assert!(f.store.search("89", 10).unwrap().is_empty());
+        assert_eq!(
+            crate::open_binary(
+                &stored.content_ciphertext,
+                &f.keyring.item_key(),
+                &stored.id
+            )
+            .unwrap(),
+            bytes
+        );
     }
 
     #[test]

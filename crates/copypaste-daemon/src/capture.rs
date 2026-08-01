@@ -14,6 +14,7 @@
 //!   the ingest before it returns, and shutdown is observed between ticks, not
 //!   inside one.
 
+use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -178,17 +179,58 @@ fn ingest_capture(
         .app_bundle_id
         .as_deref()
         .is_some_and(crate::clipboard::is_password_manager_app);
-    copypaste_core::ingest_into_with_capture_context(
-        &state.store,
-        &state.detector,
-        &state.keyring,
-        &capture.content,
-        &capture.content_type,
-        created_at,
-        sensitive_floor,
-        capture.app_bundle_id.as_deref(),
-        &settings,
-    )
+    let binary = match (capture.binary_content, capture.file_path) {
+        (Some(bytes), None) => Some((bytes, capture.file_metadata)),
+        (None, Some(path)) => Some((
+            read_file_at_most(&path, settings.max_item_bytes)?,
+            capture.file_metadata,
+        )),
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err(IngestError::Empty),
+    };
+    match binary {
+        Some((bytes, metadata)) => copypaste_core::ingest_binary_into_with_capture_context(
+            &state.store,
+            &state.keyring,
+            &bytes,
+            &capture.content_type,
+            created_at,
+            sensitive_floor,
+            capture.app_bundle_id.as_deref(),
+            metadata.as_ref(),
+            &settings,
+        ),
+        None => copypaste_core::ingest_into_with_capture_context(
+            &state.store,
+            &state.detector,
+            &state.keyring,
+            &capture.content,
+            &capture.content_type,
+            created_at,
+            sensitive_floor,
+            capture.app_bundle_id.as_deref(),
+            &settings,
+        ),
+    }
+}
+
+/// Read through one opened handle, after checking that handle's size.  A
+/// separate `metadata(path)` then `read(path)` lets another process replace a
+/// file between the cap check and read (CopyPaste-b5iz / I-19).
+fn read_file_at_most(path: &std::path::Path, cap: u64) -> Result<Vec<u8>, IngestError> {
+    let mut file = std::fs::File::open(path).map_err(|_| IngestError::Empty)?;
+    if file.metadata().map_err(|_| IngestError::Empty)?.len() > cap {
+        return Err(IngestError::TooLarge);
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| IngestError::Empty)?;
+    if bytes.len() as u64 > cap {
+        return Err(IngestError::TooLarge);
+    }
+    Ok(bytes)
 }
 
 pub fn ingest(
@@ -342,6 +384,9 @@ mod tests {
             &state,
             crate::clipboard::Capture {
                 content: "xK9mQ3nR7pT2vW5".to_string(),
+                binary_content: None,
+                file_path: None,
+                file_metadata: None,
                 content_type: copypaste_ipc::content_type::TEXT.to_string(),
                 app_bundle_id: Some("COM.1Password.Desktop".to_string()),
             },
@@ -375,6 +420,9 @@ mod tests {
             &state,
             crate::clipboard::Capture {
                 content: content.to_string(),
+                binary_content: None,
+                file_path: None,
+                file_metadata: None,
                 content_type: copypaste_ipc::content_type::TEXT.to_string(),
                 app_bundle_id: Some("com.1password.desktop".to_string()),
             },

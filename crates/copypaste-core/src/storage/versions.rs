@@ -52,6 +52,7 @@ pub struct IncomingItem<'a> {
     /// Plaintext for the search index. Ignored when the item is sensitive or a
     /// tombstone — the write-time layer of "sensitive items are never indexed".
     pub search_text: Option<&'a str>,
+    pub payload_metadata: Option<&'a str>,
 }
 
 /// The origin of a row, resolving the empty sentinel to `here`.
@@ -81,7 +82,7 @@ impl Store {
         let mut stmt = conn.prepare_cached(
             "SELECT id, created_at, content_hash, deleted, origin_device_id \
                FROM clipboard_items \
-              WHERE is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%') \
+              WHERE is_sensitive = 0 \
               ORDER BY created_at DESC, id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit], |row| {
@@ -130,8 +131,7 @@ impl Store {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT {} FROM clipboard_items WHERE is_sensitive = 0 \
-             AND (content_type = 'text' OR content_type LIKE 'text/%') AND id IN ({placeholders})",
+            "SELECT {} FROM clipboard_items WHERE is_sensitive = 0 AND id IN ({placeholders})",
             item_columns!()
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -156,8 +156,7 @@ impl Store {
             "SELECT ",
             item_columns!(),
             " FROM clipboard_items \
-               WHERE is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%') \
-                 AND created_at >= ?1 \
+               WHERE is_sensitive = 0 AND created_at >= ?1 \
                ORDER BY created_at ASC, id ASC LIMIT ?2"
         ))?;
         let rows = stmt.query_map(params![since_ms, limit], row_to_item)?;
@@ -207,8 +206,8 @@ impl Store {
         let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted, origin_device_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8, ?9) \
+                  is_sensitive, pinned, pin_order, created_at, deleted, origin_device_id, payload_metadata) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8, ?9, ?10) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  nonce              = excluded.nonce, \
@@ -218,6 +217,7 @@ impl Store {
                  created_at         = excluded.created_at, \
                  deleted            = excluded.deleted, \
                  origin_device_id   = excluded.origin_device_id, \
+                 payload_metadata   = excluded.payload_metadata, \
                  pinned    = CASE WHEN excluded.deleted = 1 THEN 0 ELSE clipboard_items.pinned END, \
                  pin_order = CASE WHEN excluded.deleted = 1 THEN NULL ELSE clipboard_items.pin_order END",
             params![
@@ -230,6 +230,7 @@ impl Store {
                 incoming.created_at,
                 incoming.deleted,
                 incoming.origin_device_id,
+                incoming.payload_metadata,
             ],
         );
 
@@ -281,6 +282,7 @@ mod tests {
             is_sensitive: false,
             origin_device_id: "device-a",
             search_text: Some("remote text"),
+            payload_metadata: None,
         }
     }
 

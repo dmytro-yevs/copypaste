@@ -114,12 +114,21 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
         Err(e) => return storage_error(id, "get", &e),
     };
 
+    let content_type = row.content_type.clone();
+    let binary = copypaste_ipc::content_type::is_binary(&content_type).then(|| {
+        copypaste_core::open_binary(&row.content_ciphertext, &state.keyring.item_key(), &row.id)
+    });
     let item = match to_wire(state, row) {
         Ok(item) => item,
         Err(e) => return decrypt_error(id, &e),
     };
 
-    if let Err(e) = state.clipboard().set_contents(&item.content) {
+    let write = match binary {
+        Some(Ok(bytes)) => state.clipboard().set_binary_contents(&content_type, &bytes),
+        Some(Err(e)) => return decrypt_error(id, &e),
+        None => state.clipboard().set_contents(&item.content),
+    };
+    if let Err(e) = write {
         error!(error = ?e, "pasteboard write failed");
         return Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD);
     }
@@ -291,14 +300,25 @@ fn to_wire_with(
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (CLAUDE.md rule 4,
     // "fail closed on crypto").
-    let plaintext = copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)?;
+    let plaintext = if copypaste_ipc::content_type::is_binary(&row.content_type) {
+        copypaste_core::open_binary(&row.content_ciphertext, &key, &row.id)?
+    } else {
+        copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)?
+    };
     // Measured on the plaintext bytes, because that is what the cloud path
     // measures: `LocalItem::content` is the opened payload, and the seal that
     // follows is a fixed overhead the cap does not count.
     let too_large_to_sync = crate::cloud::too_large_to_sync(&row.content_type, plaintext.len());
     Ok(Item {
         id: row.id,
-        content: String::from_utf8_lossy(&plaintext).into_owned(),
+        content: if copypaste_ipc::content_type::is_binary(&row.content_type) {
+            format!(
+                "[{}]",
+                copypaste_ipc::content_type::label(&row.content_type)
+            )
+        } else {
+            String::from_utf8_lossy(&plaintext).into_owned()
+        },
         content_type: row.content_type,
         created_at: row.created_at,
         pinned: row.pinned,
@@ -385,6 +405,7 @@ mod tests {
             deleted: false,
             origin_device_id: String::new(),
             app_bundle_id: None,
+            payload_metadata: None,
         }
     }
 
@@ -768,6 +789,8 @@ mod tests {
             .apply_version(&copypaste_core::RemoteVersion {
                 item_id: "from-the-phone",
                 content: "arrived over the peer transport",
+                binary_content: None,
+                payload_metadata: None,
                 content_type: copypaste_ipc::content_type::TEXT,
                 created_at: copypaste_core::now_ms(),
                 deleted: false,

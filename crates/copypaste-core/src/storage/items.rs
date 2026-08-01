@@ -92,8 +92,8 @@ impl Store {
         let insert = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8)",
+                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, payload_metadata) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9)",
             params![
                 &id,
                 &item.content_ciphertext,
@@ -103,6 +103,7 @@ impl Store {
                 item.is_sensitive,
                 item.created_at,
                 &item.app_bundle_id,
+                &item.payload_metadata,
             ],
         );
 
@@ -150,6 +151,7 @@ impl Store {
             // id the store has no business knowing — see `versions::origin_or`.
             origin_device_id: String::new(),
             app_bundle_id: item.app_bundle_id,
+            payload_metadata: item.payload_metadata,
         }))
     }
 
@@ -212,7 +214,7 @@ impl Store {
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
-                    pinned = 0, pin_order = NULL \
+                    pinned = 0, pin_order = NULL, payload_metadata = NULL \
               WHERE id = ?1 AND deleted = 0",
             [id],
         )?;
@@ -234,7 +236,7 @@ impl Store {
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
-                    pin_order = NULL \
+                    pin_order = NULL, payload_metadata = NULL \
               WHERE deleted = 0 AND pinned = 0",
             [],
         )?;

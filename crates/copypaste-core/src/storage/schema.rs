@@ -89,8 +89,12 @@ CREATE TABLE sync_device_name (
 );
 "#;
 
+/// Payload metadata is v2-only: existing rows have no file name/MIME, and
+/// binary capture always writes an explicit value before paste-back can use it.
+const SCHEMA_V2: &str = "ALTER TABLE clipboard_items ADD COLUMN payload_metadata TEXT";
+
 static MIGRATIONS: LazyLock<Migrations<'static>> =
-    LazyLock::new(|| Migrations::new(vec![M::up(SCHEMA_V1)]));
+    LazyLock::new(|| Migrations::new(vec![M::up(SCHEMA_V1), M::up(SCHEMA_V2)]));
 
 /// Creates the v2 schema. A database written by a newer schema is refused.
 pub(super) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
