@@ -80,6 +80,7 @@ struct SuppressArgs {
 #[serde(rename_all = "camelCase")]
 struct ArmResult {
     probe: ShizukuProbe,
+    enabled: bool,
     listening: bool,
     outcome: ReadOutcome,
     /// Whether our window had focus for the read `arm` took. Almost always
@@ -114,6 +115,9 @@ struct DrainResult {
 #[serde(rename_all = "camelCase")]
 struct ProbeResult {
     probe: ShizukuProbe,
+    /// Kotlin persists the user's explicit arm across a START_STICKY process
+    /// restart. This is intent, not proof that a listener is still alive.
+    enabled: bool,
     listening: bool,
 }
 
@@ -151,6 +155,7 @@ impl CaptureControl for AndroidCapture {
         match self.call::<_, ProbeResult>("probe", (), MSG_BRIDGE) {
             Ok(result) => self.with(|model| {
                 model.set_probe(result.probe);
+                model.set_enabled(result.enabled);
                 model.record_armed(result.listening);
                 model.snapshot()
             }),
@@ -168,7 +173,7 @@ impl CaptureControl for AndroidCapture {
         };
         let result: ArmResult = self.call("arm", args, MSG_ARM)?;
         Ok(self.with(|model| {
-            model.set_enabled(true);
+            model.set_enabled(result.enabled);
             model.set_probe(result.probe);
             model.record_armed(result.listening);
             model.record_read(result.outcome, result.focused, copypaste_core::now_ms());

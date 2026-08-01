@@ -57,6 +57,7 @@ object ShizukuClipboard {
 
     private var service: Any? = null
     private var listener: Any? = null
+    private var deathListener: Shizuku.OnBinderDeadListener? = null
 
     fun isListening(): Boolean = listening
 
@@ -86,7 +87,12 @@ object ShizukuClipboard {
      * dies on every reboot, and the user must find out then rather than when
      * they go looking for something that was never saved.
      */
+    @Synchronized
     fun arm(onLost: () -> Unit): Boolean {
+        // `arm` is also the refresh action. Tear down the old registration
+        // first, otherwise every tap leaves another remote listener and death
+        // recipient behind.
+        disarmLocked()
         if (!isRunning()) {
             lastFailure = "shizuku is not running"
             return false
@@ -102,21 +108,31 @@ object ShizukuClipboard {
         }
         return try {
             val clipboard = clipboardService()
-            listener = ClipListener.register(clipboard) {
+            val registered = ClipListener.register(clipboard) {
                 pollOnce()?.let { ClipQueue.offer(it, "background") }
             }
-            Shizuku.addBinderDeadListener {
-                listening = false
-                lastFailure = "the shizuku binder died"
+            val recipient = Shizuku.OnBinderDeadListener {
+                synchronized(this) {
+                    // Shizuku is already gone, so unregistering from the
+                    // remote clipboard cannot help. Removing our local death
+                    // listener and cached proxy still matters: a later arm
+                    // must start from a clean connection.
+                    disarmLocked(unregisterRemote = false)
+                    service = null
+                    lastFailure = "the shizuku binder died"
+                }
                 onLost()
             }
-            listening = listener != null
-            if (!listening) lastFailure = "no addPrimaryClipChangedListener overload matched"
-            listening
+            Shizuku.addBinderDeadListener(recipient)
+            listener = registered
+            deathListener = recipient
+            listening = true
+            lastFailure = null
+            true
         } catch (e: Throwable) {
             Log.w(TAG, "arming failed", e)
+            disarmLocked()
             lastFailure = e.javaClass.simpleName
-            listening = false
             false
         }
     }
@@ -132,12 +148,22 @@ object ShizukuClipboard {
 
     private const val PERMISSION_REQUEST = 4919
 
-    fun disarm() {
+    @Synchronized
+    fun disarm() = disarmLocked()
+
+    private fun disarmLocked(unregisterRemote: Boolean = true) {
         try {
-            listener?.let { ClipListener.unregister(clipboardService(), it) }
+            if (unregisterRemote) {
+                val clipboard = service
+                listener?.let { registered ->
+                    if (clipboard != null) ClipListener.unregister(clipboard, registered)
+                }
+            }
         } catch (e: Throwable) {
             Log.w(TAG, "unregistering failed", e)
         }
+        deathListener?.let { Shizuku.removeBinderDeadListener(it) }
+        deathListener = null
         listener = null
         listening = false
     }

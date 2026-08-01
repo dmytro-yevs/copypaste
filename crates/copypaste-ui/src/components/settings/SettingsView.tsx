@@ -17,6 +17,7 @@ import { ServiceTab } from "@/components/settings/ServiceTab";
 import { ShortcutTab } from "@/components/settings/ShortcutTab";
 import { StorageTab } from "@/components/settings/StorageTab";
 import { SyncTab } from "@/components/settings/SyncTab";
+import { isAndroidPlatform } from "@/lib/platform";
 
 const TABS = [
   { value: "appearance", label: "settings.tabs.appearance", render: () => <AppearanceTab /> },
@@ -31,6 +32,12 @@ const TABS = [
 
 export function SettingsView() {
   const { t } = useTranslation();
+  // The Android embedded backend intentionally has neither persistent service
+  // settings nor safe database backup/restore. Do not present controls that
+  // would only fail after the user has made a choice.
+  const tabs = isAndroidPlatform()
+    ? TABS.filter((tab) => tab.value !== "service" && tab.value !== "storage")
+    : TABS;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -42,14 +49,14 @@ export function SettingsView() {
         <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-3">
           <Tabs defaultValue="appearance">
             <TabsList aria-label={t("settings.sections")}>
-              {TABS.map((tab) => (
+              {tabs.map((tab) => (
                 <TabsTrigger key={tab.value} value={tab.value}>
                   {t(tab.label)}
                 </TabsTrigger>
               ))}
             </TabsList>
 
-            {TABS.map((tab) => (
+            {tabs.map((tab) => (
               <TabsContent key={tab.value} value={tab.value}>
                 {tab.render()}
               </TabsContent>

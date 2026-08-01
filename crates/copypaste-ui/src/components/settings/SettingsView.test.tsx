@@ -14,6 +14,7 @@ import { DEFAULT_PREFS, usePrefs } from "@/store/prefs";
 import { status, withClient, withUser } from "@/test/harness";
 
 const getStatus = vi.fn();
+const DEFAULT_USER_AGENT = window.navigator.userAgent;
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -25,7 +26,13 @@ beforeEach(() => {
   usePrefs.setState({ ...DEFAULT_PREFS });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  Object.defineProperty(window.navigator, "userAgent", {
+    configurable: true,
+    value: DEFAULT_USER_AGENT,
+  });
+});
 
 describe("the tab row (A11Y-6 / AT-18)", () => {
   it("is a tablist of tabs with a selected one", () => {
@@ -72,6 +79,18 @@ describe("the tab row (A11Y-6 / AT-18)", () => {
     const list = screen.getByRole("tablist");
     expect(list.className).toContain("flex-wrap");
     expect(list.className).not.toContain("overflow-x");
+  });
+});
+
+describe("Android's intentionally smaller backend surface", () => {
+  it("does not offer service or storage controls that Android cannot honour", () => {
+    Object.defineProperty(window.navigator, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (Linux; Android 15)",
+    });
+    withClient(<SettingsView />);
+    expect(screen.queryByRole("tab", { name: "Service" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Storage" })).toBeNull();
   });
 });
 
