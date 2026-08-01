@@ -249,7 +249,10 @@ fn swap(db_path: &Path, staging: &Path, key: &[u8; 32]) -> Result<(), crate::met
         // and table-name columns, which are not insertable.
         tx.execute(
             "INSERT INTO clipboard_fts (id, content_text) \
-             SELECT id, content_text FROM restore_src.clipboard_fts",
+             SELECT fts.id, fts.content_text FROM restore_src.clipboard_fts fts \
+             JOIN restore_src.clipboard_items ci ON ci.id = fts.id \
+             WHERE ci.deleted = 0 AND ci.is_sensitive = 0 \
+               AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
             [],
         )?;
         tx.execute(
@@ -536,6 +539,36 @@ mod tests {
 
         assert!(restore_from(&state, &dest, true).ok);
         assert_eq!(state.store.search("needle", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_restore_drops_polluted_non_text_fts_rows() {
+        let (state, dir) = test_state("alpha");
+        let image = crate::capture::ingest(&state, "opaque image bytes", "image/png")
+            .unwrap()
+            .into_item();
+        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
+            rusqlite::params![&image.id, "private image caption"],
+        )
+        .unwrap();
+        let dest = dir.path().join("history.backup");
+        assert!(backup_to(&state, &dest).ok);
+
+        state.store.delete_all().unwrap();
+        assert!(restore_from(&state, &dest, true).ok);
+        assert!(state.store.search("caption", 10).unwrap().is_empty());
+
+        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let fts_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                [&image.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_rows, 0);
     }
 
     #[test]

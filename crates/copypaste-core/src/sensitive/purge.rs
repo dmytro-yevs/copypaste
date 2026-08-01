@@ -87,7 +87,7 @@ pub fn purge_indexed_secrets(
     detector: &Detector,
 ) -> Result<PurgeReport, StoreError> {
     let mut report = PurgeReport::default();
-    report.purged += store.purge_index_of_flagged()?;
+    report.purged += store.purge_index_of_unsearchable()?;
 
     let mut after = 0i64;
     loop {
