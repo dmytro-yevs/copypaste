@@ -117,6 +117,45 @@ mod tests {
         assert_eq!(replay.applied, 0);
     }
 
+    #[tokio::test]
+    async fn a_file_payload_keeps_its_signed_metadata_through_cloud() {
+        let backend = Arc::new(FakeRest::default());
+        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#;
+        let a_source = FakeSource::with_outgoing(vec![LocalItem {
+            item_id: "file-a".into(),
+            content: b"%PDF-binary".to_vec(),
+            content_type: "file".into(),
+            payload_metadata: Some(metadata.into()),
+            created_at: 1_000,
+            deleted: false,
+            origin_device_id: "device-a".into(),
+        }]);
+        let device_a = CloudSync::new(
+            SharedRest(Arc::clone(&backend)),
+            FakeAuth::default(),
+            key(),
+            config(),
+            session("token-1"),
+            allow_everything(),
+        );
+        device_a.push(&a_source).await.unwrap();
+
+        let b_source = FakeSource::default();
+        let device_b = CloudSync::new(
+            SharedRest(Arc::clone(&backend)),
+            FakeAuth::default(),
+            crate::crypto::derive_sync_key(PASS, ACCOUNT).unwrap(),
+            config(),
+            session("token-2"),
+            allow_everything(),
+        );
+        assert_eq!(device_b.pull(&b_source).await.unwrap().applied, 1);
+
+        let received = b_source.get("file-a").unwrap();
+        assert_eq!(received.content, b"%PDF-binary");
+        assert_eq!(received.payload_metadata.as_deref(), Some(metadata));
+    }
+
     /// One backend shared by two drivers.
     struct SharedRest(Arc<FakeRest>);
 

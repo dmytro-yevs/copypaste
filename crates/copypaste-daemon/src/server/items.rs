@@ -118,11 +118,9 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
     let metadata = row
         .payload_metadata
         .as_deref()
-        .map(serde_json::from_str::<copypaste_core::FileMetadata>)
-        .transpose();
-    let metadata = match metadata {
-        Ok(metadata) => metadata,
-        Err(_) => return Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD),
+        .and_then(copypaste_core::FileMetadata::from_json);
+    if content_type == copypaste_ipc::content_type::FILE && metadata.is_none() {
+        return Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD);
     };
     let binary = copypaste_ipc::content_type::is_binary(&content_type).then(|| {
         copypaste_core::open_binary(&row.content_ciphertext, &state.keyring.item_key(), &row.id)

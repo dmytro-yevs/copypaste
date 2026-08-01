@@ -171,6 +171,19 @@ pub fn apply_remote_version(
     {
         return Ok(false);
     }
+    if !incoming.deleted && incoming.content_type == copypaste_ipc::content_type::FILE {
+        if !incoming
+            .payload_metadata
+            .and_then(crate::FileMetadata::from_json)
+            .is_some()
+        {
+            return Ok(false);
+        }
+    } else if incoming.payload_metadata.is_some() {
+        // Metadata belongs only to a file payload. Keeping it on a text/image
+        // row would preserve unactionable, user-controlled cleartext forever.
+        return Ok(false);
+    }
     let content = incoming
         .binary_content
         .unwrap_or(incoming.content.as_bytes());
@@ -330,6 +343,28 @@ mod tests {
         );
         // ...and the same version arriving a second time is absorbed.
         assert!(!f.apply(&version("a", "shared text", 1_000)));
+    }
+
+    #[test]
+    fn a_remote_file_with_a_path_in_its_metadata_is_not_persisted() {
+        let f = fixture();
+        let payload = b"not actually a PDF";
+        let incoming = RemoteVersion {
+            item_id: "file-a",
+            content: "",
+            binary_content: Some(payload),
+            payload_metadata: Some(
+                r#"{"filename":"../outside.pdf","mime_type":"application/pdf"}"#,
+            ),
+            content_type: copypaste_ipc::content_type::FILE,
+            created_at: 1_000,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "device-a",
+        };
+
+        assert!(!f.apply(&incoming));
+        assert!(f.store.get("file-a").unwrap().is_none());
     }
 
     #[test]
