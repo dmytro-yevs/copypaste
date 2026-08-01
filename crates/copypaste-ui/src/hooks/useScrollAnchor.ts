@@ -25,6 +25,8 @@ interface Options {
   scrollRef: RefObject<HTMLDivElement | null>;
   virtualizer: Virtualizer<HTMLDivElement, Element>;
   items: readonly Item[];
+  /** `null` marks a non-item virtual row such as a device heading. */
+  anchorIds?: readonly (string | null)[];
   /** Here for INV-6, not for measurement: it is the one mutation that shrinks
    *  total height without changing the list, and AT-4 wants the clamp *now*. */
   previewLines: number;
@@ -34,6 +36,7 @@ export function useScrollAnchor({
   scrollRef,
   virtualizer,
   items,
+  anchorIds,
   previewLines,
 }: Options) {
   const anchorRef = useRef<Anchor | null>(null);
@@ -53,10 +56,21 @@ export function useScrollAnchor({
     }
 
     const row = virtualizer.getVirtualItemForOffset(top);
-    anchorRef.current = row
-      ? { id: String(row.key), offset: top - row.start }
-      : null;
-  }, [scrollRef, virtualizer]);
+    if (!row) {
+      anchorRef.current = null;
+      return;
+    }
+
+    const ids = anchorIds ?? items.map((item) => item.id);
+    let index = row.index;
+    while (index < ids.length && ids[index] === null) index += 1;
+    const id = ids[index];
+    const measurement = virtualizer.measurementsCache[index];
+    anchorRef.current =
+      id && measurement
+        ? { id, offset: top - measurement.start }
+        : null;
+  }, [anchorIds, items, scrollRef, virtualizer]);
 
   // Acts only when the item array identity changed, which an idle poll does
   // not do (INV-2). `useVirtualizer` registers its layout effects earlier in
@@ -81,7 +95,8 @@ export function useScrollAnchor({
     let desired = el.scrollTop;
 
     if (anchor) {
-      const index = items.findIndex((item) => item.id === anchor.id);
+      const ids = anchorIds ?? items.map((item) => item.id);
+      const index = ids.indexOf(anchor.id);
       if (index >= 0) {
         const measurement = virtualizer.measurementsCache[index];
         if (measurement) desired = measurement.start + anchor.offset;

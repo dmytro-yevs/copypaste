@@ -7,7 +7,7 @@
  * turning it on says on screen what it costs.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 
 import { ListTab } from "@/components/settings/ListTab";
 import { en } from "@/i18n/en";
@@ -36,5 +36,38 @@ describe("allow screenshots", () => {
 
     expect(usePrefs.getState().allowScreenshots).toBe(true);
     expect(screen.getByText(COPY.warning)).toBeTruthy();
+  });
+});
+
+describe("display preferences", () => {
+  it("persists group-by-device from the same control the toolbar mirrors", async () => {
+    const { user } = withUser(<ListTab />);
+    const control = screen.getByLabelText(
+      en.settings.list.groupByDevice.title,
+    );
+    expect(control.getAttribute("aria-checked")).toBe("false");
+    await user.click(control);
+    expect(usePrefs.getState().sortByDevice).toBe(true);
+  });
+
+  it("offers bounded popup and history display controls", () => {
+    withUser(<ListTab />);
+
+    fireEvent.keyDown(
+      screen.getByRole("slider", {
+        name: en.settings.list.popupPreviewLines.title,
+      }),
+      { key: "End" },
+    );
+    fireEvent.keyDown(
+      screen.getByRole("slider", {
+        name: en.settings.list.historyDisplayLimit.title,
+      }),
+      { key: "End" },
+    );
+
+    expect(usePrefs.getState().previewLinesPopup).toBe(6);
+    expect(usePrefs.getState().historyDisplayLimit).toBe(100_000);
+    expect(screen.getByText("Unlimited")).toBeTruthy();
   });
 });

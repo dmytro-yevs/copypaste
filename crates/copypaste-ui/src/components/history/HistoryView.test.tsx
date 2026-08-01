@@ -13,6 +13,7 @@ import { HistoryView } from "@/components/history/HistoryView";
 import { historyCount } from "@/components/history/SearchBar";
 import { type ErrorKind, IpcFailure } from "@/lib/errors";
 import { items, page, status, withClient, withUser } from "@/test/harness";
+import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 
 const listItems = vi.fn();
@@ -34,6 +35,7 @@ beforeEach(() => {
   searchItems.mockReset();
   getStatus.mockReset().mockResolvedValue(status());
   useUi.setState({ query: "", activeId: null });
+  usePrefs.getState().reset();
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -121,6 +123,87 @@ describe("the count badge follows the filter (AT-68)", () => {
 
   it("falls back to what is on screen before the total arrives", () => {
     expect(historyCount(false, 2, undefined)).toBe("2 items");
+  });
+});
+
+describe("binding search, device, and display preferences", () => {
+  const from = (id: string, name: string, content: string) =>
+    ({
+      ...items(1)[0]!,
+      id: `${id}-${content}`,
+      content,
+      origin_device_id: id,
+      origin_device_name: name,
+    }) as ReturnType<typeof items>[number];
+
+  it("keeps fuzzy matches when service FTS fails", async () => {
+    listItems.mockResolvedValue(page([from("mac", "Mac", "alpha clipboard")]));
+    searchItems.mockRejectedValue(new Error("fts unavailable"));
+    useUi.setState({ query: "alp clip" });
+    withClient(<HistoryView />);
+
+    expect(await screen.findByText("alpha clipboard")).toBeTruthy();
+  });
+
+  it("adds an FTS-only hit after client matches without duplicating either", async () => {
+    listItems.mockResolvedValue(page([from("mac", "Mac", "client needle")]));
+    searchItems.mockResolvedValue(
+      page([
+        from("mac", "Mac", "client needle"),
+        from("phone", "Phone", "stemming-only result"),
+      ]),
+    );
+    useUi.setState({ query: "needle" });
+    withClient(<HistoryView />);
+
+    expect(await screen.findByText("client needle")).toBeTruthy();
+    expect(await screen.findByText("stemming-only result")).toBeTruthy();
+    expect(screen.getAllByText("client needle")).toHaveLength(1);
+  });
+
+  it("filters by device and persists grouped headings from the toolbar", async () => {
+    listItems.mockResolvedValue(
+      page([
+        from("mac-id", "Mac", "from mac"),
+        from("phone-id", "Phone", "from phone"),
+      ]),
+    );
+    const { user } = withUser(<HistoryView />);
+
+    const filter = await screen.findByRole("combobox", {
+      name: "Filter by device",
+    });
+    await user.selectOptions(filter, "phone-id");
+    expect(screen.queryByText("from mac")).toBeNull();
+    expect(screen.getByText("from phone")).toBeTruthy();
+
+    await user.selectOptions(filter, "all");
+    await user.click(
+      screen.getByRole("button", {
+        name: "Group clipboard items by device",
+      }),
+    );
+    expect(usePrefs.getState().sortByDevice).toBe(true);
+    expect(screen.getByRole("heading", { name: "Mac" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Phone" })).toBeTruthy();
+
+    useUi.getState().setQuery("from");
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Mac" })).toBeNull(),
+    );
+    expect(usePrefs.getState().sortByDevice).toBe(true);
+  });
+
+  it("caps rendering after filtering and announces the hidden remainder", async () => {
+    usePrefs.getState().set("historyDisplayLimit", 100);
+    listItems.mockResolvedValue(page(items(120)));
+    withClient(<HistoryView />);
+
+    expect(
+      await screen.findByText(
+        "Showing first 100 of 120 results — adjust the display limit in Settings › Storage.",
+      ),
+    ).toBeTruthy();
   });
 });
 

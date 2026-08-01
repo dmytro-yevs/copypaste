@@ -6,7 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { markedOrigins, originLabel, wontSync } from "@/components/history/origin";
+import {
+  markedOrigins,
+  originLabel,
+  originsOf,
+  wontSync,
+} from "@/components/history/origin";
 import { item } from "@/test/harness";
 import type { Item } from "@/lib/ipc";
 
@@ -46,6 +51,18 @@ describe("which rows earn a device marker", () => {
     const rows = [item({ id: "a" }), item({ id: "b" })];
     expect(markedOrigins(rows).size).toBe(0);
     expect(originLabel(rows[0]!, markedOrigins(rows))).toBeNull();
+  });
+
+  it("keeps stable ids and prefers a later non-empty name", () => {
+    const rows = [
+      from("device-a"),
+      from("device-a", "Mac"),
+      from("device-b", "Phone"),
+    ];
+    expect(originsOf(rows)).toEqual([
+      { id: "device-a", name: "Mac" },
+      { id: "device-b", name: "Phone" },
+    ]);
   });
 });
 

@@ -142,10 +142,12 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         onEnterList={() => listRef.current?.focus()}
         inputRef={searchRef}
         filtered={history.filtered}
-        visible={items.length}
+        visible={history.resultCount}
         total={history.total}
         view={history.view}
         onViewChange={history.setView}
+        origins={history.origins}
+        displayLimit={history.displayLimit}
         selecting={selection.selecting}
         onToggleSelecting={() =>
           selection.selecting ? selection.end() : selection.begin()
@@ -194,6 +196,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
           revealPendingId: reveal.pendingId,
           previewLines,
           searching: history.searching,
+          groupedByDevice: history.groupedByDevice,
           selection,
           hasMore: history.hasMore,
           loadingMore: history.loadingMore,

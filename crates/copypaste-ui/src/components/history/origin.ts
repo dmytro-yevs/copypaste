@@ -11,6 +11,35 @@ interface Wire {
 
 const wire = (item: Item): Wire => item as Item & Wire;
 
+export interface OriginDevice {
+  readonly id: string;
+  readonly name: string | null;
+}
+
+export function originOf(item: Item): OriginDevice | null {
+  const { origin_device_id: id, origin_device_name: name } = wire(item);
+  return id ? { id, name: name ?? null } : null;
+}
+
+export function originName(origin: OriginDevice): string {
+  return origin.name ?? origin.id.slice(0, 8);
+}
+
+export function originsOf(items: readonly Item[]): readonly OriginDevice[] {
+  const devices = new Map<string, OriginDevice>();
+  for (const item of items) {
+    const origin = originOf(item);
+    if (!origin) continue;
+    const current = devices.get(origin.id);
+    if (!current || (current.name === null && origin.name !== null)) {
+      devices.set(origin.id, origin);
+    }
+  }
+  return [...devices.values()].sort((a, b) =>
+    originName(a).localeCompare(originName(b)) || a.id.localeCompare(b.id),
+  );
+}
+
 /** Cloud sync will not carry this item, before the first attempt and after it
  *  (`CopyPaste-f72f`) — so the row says so rather than looking like an item
  *  that is still on its way. */
@@ -29,8 +58,8 @@ const NONE: ReadonlySet<string> = new Set();
 export function markedOrigins(items: readonly Item[]): ReadonlySet<string> {
   const ids = new Set<string>();
   for (const item of items) {
-    const id = wire(item).origin_device_id;
-    if (id) ids.add(id);
+    const origin = originOf(item);
+    if (origin) ids.add(origin.id);
   }
   return ids.size > 1 ? ids : NONE;
 }
@@ -42,7 +71,7 @@ export function originLabel(
   item: Item,
   marked: ReadonlySet<string>,
 ): string | null {
-  const { origin_device_id: id, origin_device_name: name } = wire(item);
-  if (!id || !marked.has(id)) return null;
-  return name ?? id.slice(0, 8);
+  const origin = originOf(item);
+  if (!origin || !marked.has(origin.id)) return null;
+  return originName(origin);
 }

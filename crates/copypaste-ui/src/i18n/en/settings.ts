@@ -53,6 +53,24 @@ export const settings = {
       value_one: "{{count}} line",
       value_other: "{{count}} lines",
     },
+    groupByDevice: {
+      title: "Group by device",
+      description:
+        "Keep clips from the same origin device together. The History toolbar controls the same setting.",
+    },
+    popupPreviewLines: {
+      title: "Quick Paste preview lines",
+      description:
+        "How many lines each Quick Paste result may show, independently of the main list.",
+      value_one: "{{count}} line",
+      value_other: "{{count}} lines",
+    },
+    historyDisplayLimit: {
+      title: "History display limit",
+      description:
+        "Limits only what the app renders. It does not delete stored clipboard items.",
+      unlimited: "Unlimited",
+    },
     warnBeforeReveal: {
       title: "Warn before revealing",
       description:

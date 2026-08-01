@@ -3,6 +3,7 @@ export const history = {
     label: "Clipboard history",
     loadMore: "Load more",
     loadingMore: "Loading…",
+    unknownDevice: "Unknown device",
   },
 
   search: {
@@ -11,12 +12,18 @@ export const history = {
     hint: "Search (⌘F) · ↓ to move into the list · ⌘A select all",
     clear: "Clear search",
     filterKind: "Filter by kind",
+    filterDevice: "Filter by device",
+    allDevices: "All devices",
     sortOrder: "Sort order",
+    groupByDevice: "Group clipboard items by device",
+    group: "Group",
     selectMultiple: "Select multiple items",
     leaveSelection: "Leave selection mode",
     clearAll: "Clear clipboard history",
     count_one: "{{count}} item",
     count_other: "{{count}} items",
+    displayLimitHint:
+      "Showing first {{limit}} of {{count}} results — adjust the display limit in Settings › Storage.",
   },
 
   kind: {

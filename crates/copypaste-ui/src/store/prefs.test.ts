@@ -50,6 +50,24 @@ describe("per-field recovery (AT-50)", () => {
       DEFAULT_PREFS.previewLines,
     );
   });
+
+  it("bounds every display preference independently", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const prefs = parsePrefs({
+      previewLinesPopup: 0,
+      historyDisplayLimit: 999,
+      sortByDevice: true,
+    });
+    expect(prefs.previewLinesPopup).toBe(DEFAULT_PREFS.previewLinesPopup);
+    expect(prefs.historyDisplayLimit).toBe(DEFAULT_PREFS.historyDisplayLimit);
+    expect(prefs.sortByDevice).toBe(true);
+  });
+
+  it("accepts the unlimited display sentinel", () => {
+    expect(parsePrefs({ historyDisplayLimit: 100_000 }).historyDisplayLimit).toBe(
+      100_000,
+    );
+  });
 });
 
 describe("unknown keys are dropped (AT-52)", () => {
@@ -57,7 +75,7 @@ describe("unknown keys are dropped (AT-52)", () => {
     const prefs = parsePrefs({
       accent: "blue",
       density: "compact",
-      historyDisplayLimit: 1000,
+      oldHistoryDisplayLimit: 1000,
       __proto__: { polluted: true },
     });
     expect(prefs).toEqual({ ...DEFAULT_PREFS, accent: "blue" });

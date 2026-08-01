@@ -64,6 +64,9 @@ export function QuickPasteApp() {
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
+  const [previewLinesPopup, setPreviewLinesPopup] = useState(
+    () => readPrefs().previewLinesPopup,
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [retryAction, setRetryAction] = useState<RetryAction | null>(null);
@@ -114,6 +117,7 @@ export function QuickPasteApp() {
   const refreshForShow = useCallback((trigger: Extract<RefreshTrigger, "mount" | "focus">) => {
     const prefs = readPrefs();
     applyAppearance(prefs);
+    setPreviewLinesPopup(prefs.previewLinesPopup);
     void setAllowScreenshots(prefs.allowScreenshots).catch(() => {});
     refreshHistory(trigger);
     window.setTimeout(() => searchRef.current?.focus(), 50);
@@ -392,7 +396,16 @@ export function QuickPasteApp() {
                 onClick={() => void copyAndDismiss(item)}
                 className="flex min-w-0 flex-1 flex-col px-3 py-2 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
               >
-                <span className="line-clamp-2 break-words">{displayLabel(item) || "Empty item"}</span>
+                <span
+                  className="overflow-hidden break-words"
+                  style={{
+                    display: "-webkit-box",
+                    WebkitBoxOrient: "vertical",
+                    WebkitLineClamp: previewLinesPopup,
+                  }}
+                >
+                  {displayLabel(item) || "Empty item"}
+                </span>
                 {item.pinned && <span className="mt-1 text-xs text-muted-foreground">Pinned</span>}
               </button>
               <button
