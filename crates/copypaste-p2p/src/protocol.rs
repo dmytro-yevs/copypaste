@@ -351,7 +351,7 @@ impl SyncMessage {
                             "item has both text and binary content".into(),
                         ));
                     }
-                    let content_len = i.content.len().max(i.binary_content.len());
+                    let content_len = i.content.len().saturating_add(i.binary_content.len());
                     if content_len > MAX_CONTENT_BYTES {
                         return Err(ProtocolError::ContentTooLarge {
                             bytes: content_len,
