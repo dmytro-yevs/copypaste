@@ -11,7 +11,7 @@ use rusqlite::{ErrorCode, Row};
 macro_rules! item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
-         pinned, is_sensitive, deleted, origin_device_id"
+         pinned, is_sensitive, deleted, origin_device_id, app_bundle_id"
     };
 }
 
@@ -23,7 +23,7 @@ macro_rules! item_columns_ci {
          ci.content_type AS content_type, ci.content_hash AS content_hash, \
          ci.created_at AS created_at, ci.pinned AS pinned, \
          ci.is_sensitive AS is_sensitive, ci.deleted AS deleted, \
-         ci.origin_device_id AS origin_device_id"
+         ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id"
     };
 }
 
@@ -50,6 +50,8 @@ pub struct NewItem {
     pub search_text: Option<String>,
     /// Milliseconds since the Unix epoch.
     pub created_at: i64,
+    /// Frontmost application at local capture time, if the platform supplied it.
+    pub app_bundle_id: Option<String>,
 }
 
 /// What [`super::Store::insert_or_bump`] did with a capture.
@@ -112,6 +114,8 @@ pub struct StoredItem {
     pub deleted: bool,
     /// Empty means "captured on this device" — see [`super::origin_or`].
     pub origin_device_id: String,
+    /// Frontmost application at local capture time. Remote items may not have it.
+    pub app_bundle_id: Option<String>,
 }
 
 /// Storage failures.
@@ -175,6 +179,7 @@ pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
         is_sensitive: row.get("is_sensitive")?,
         deleted: row.get("deleted")?,
         origin_device_id: row.get("origin_device_id")?,
+        app_bundle_id: row.get("app_bundle_id")?,
     })
 }
 

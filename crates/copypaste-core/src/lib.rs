@@ -10,7 +10,7 @@ pub mod sync;
 pub mod transfer;
 
 pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
-pub use ingest::{ingest, ingest_into, IngestError, Ingested};
+pub use ingest::{ingest, ingest_into, ingest_into_with_capture_context, IngestError, Ingested};
 pub use sensitive::{
     purge_indexed_secrets, sweep_sensitive, Detector, Finding, PurgeReport, Severity,
     DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,

@@ -31,6 +31,7 @@ import {
   useServiceConfig,
   useSetServiceConfig,
 } from "@/hooks/useServiceConfig";
+import { useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { isUnavailable } from "@/lib/errors";
 import type { ConfigPatch } from "@/lib/ipc";
@@ -45,6 +46,7 @@ export function ServiceTab() {
   const config = useServiceConfig();
   const save = useSetServiceConfig();
   const restart = useRestartService();
+  const status = useStatus();
   const [pending, setPending] = useState(false);
 
   const apply = (patch: ConfigPatch) => {
@@ -76,6 +78,8 @@ export function ServiceTab() {
 
   const busy = save.isPending;
   const sweeping = data.sensitive_ttl_secs > 0;
+  const supportsPrivateMode =
+    status.data !== undefined && status.data.clipboard_backend !== "android-inprocess";
 
   return (
     <div className="flex flex-col gap-s-4">
@@ -83,14 +87,16 @@ export function ServiceTab() {
         title={t("settings.service.groups.capture.title")}
         description={t("settings.service.groups.capture.description")}
       >
-        <SwitchRow
-          title={t("settings.service.privateMode.title")}
-          description={t("settings.service.privateMode.description")}
-          id="private-mode"
-          checked={data.private_mode}
-          disabled={busy}
-          onChange={(private_mode) => apply({ private_mode })}
-        />
+        {supportsPrivateMode && (
+          <SwitchRow
+            title={t("settings.service.privateMode.title")}
+            description={t("settings.service.privateMode.description")}
+            id="private-mode"
+            checked={data.private_mode}
+            disabled={busy}
+            onChange={(private_mode) => apply({ private_mode })}
+          />
+        )}
 
         <ChoiceRow
           title={t("settings.service.poll.title")}

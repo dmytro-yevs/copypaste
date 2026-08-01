@@ -489,6 +489,7 @@ mod tests {
                 is_sensitive: false,
                 search_text: None,
                 created_at: 1_000,
+                app_bundle_id: None,
             })
             .unwrap();
         assert_eq!(mine.origin_device_id, "", "a capture records no origin");
