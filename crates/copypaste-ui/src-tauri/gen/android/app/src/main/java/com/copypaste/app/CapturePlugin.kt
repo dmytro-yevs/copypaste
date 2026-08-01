@@ -86,7 +86,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         apps.forEach { app ->
             result.put(JSObject().put("packageId", app.packageId).put("label", app.label))
         }
-        invoke.resolve(result)
+        invoke.resolve(JSObject().put("apps", result))
     }
 
     private fun installedApp(info: ResolveInfo): InstalledApp? {
