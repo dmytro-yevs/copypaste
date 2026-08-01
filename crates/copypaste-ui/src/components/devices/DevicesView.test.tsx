@@ -15,7 +15,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
 import { DevicesView } from "@/components/devices/DevicesView";
-import { MAX_PAIRINGS } from "@/components/devices/peerState";
 import { peer, withUser } from "@/test/harness";
 
 const listPeers = vi.fn();
@@ -117,37 +116,22 @@ describe("cutting a device off", () => {
   });
 });
 
-describe("the pairing cap", () => {
-  /**
-   * The store refuses a seventeenth pairing rather than evicting one, and names
-   * "unpair one first" as the remedy. Finding that out by minting a code and
-   * typing it into a phone is the failure this is here to prevent.
-   */
-  it("says the list is full before the user spends a code", async () => {
-    listPeers.mockResolvedValue(
-      Array.from({ length: MAX_PAIRINGS }, (_, i) =>
-        peer({ pairing_id: `pair-${i}`, name: `Device ${i}` }),
-      ),
-    );
+describe("pairing availability", () => {
+  it("does not offer an unbound pairing ceremony or credential-copy path", async () => {
     withUser(<DevicesView />);
 
-    expect(await screen.findByText(/the most it can hold/i)).toBeTruthy();
-    for (const name of [/pair a new device/i, /add a device/i]) {
-      const button = screen.getByRole("button", { name });
-      expect((button as HTMLButtonElement).disabled, String(name)).toBe(true);
-    }
+    expect((await screen.findByText(/verified security-code confirmation/i)).textContent).toMatch(
+      /verified security-code confirmation/i,
+    );
+    expect(screen.queryByRole("button", { name: /pair a new device|add a device/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /copy code/i })).toBeNull();
   });
 
-  it("shows the count, and both ways in, below the cap", async () => {
-    listPeers.mockResolvedValue([PHONE]);
+  it("marks device-reported names as unverified for assistive technology", async () => {
     withUser(<DevicesView />);
-
-    expect(await screen.findByText(/1 device paired · 16 maximum/i)).toBeTruthy();
-    for (const name of [/pair a new device/i, /add a device/i]) {
-      expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(
-        false,
-      );
-    }
+    expect(
+      await screen.findByLabelText(/lost phone\. name reported by the device itself — not verified/i),
+    ).toBeTruthy();
   });
 });
 
