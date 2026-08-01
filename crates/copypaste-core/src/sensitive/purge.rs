@@ -69,15 +69,15 @@ pub struct PurgeReport {
     pub purged: u64,
 }
 
-/// Drop every search-index row that belongs to an already-flagged item, and
-/// every one whose text the *current* ruleset calls sensitive.
+/// Drop every search-index row that belongs to an already-classified item, and
+/// every one whose text the *current* ruleset classifies above the floor.
 ///
 /// Two predicates because they catch different failures. The first (manifest 03
 /// S4, v1's migration v13) catches an index row that should never have been
 /// written for a row already known to be sensitive; the second catches the row
 /// nobody knew about, which is the one a detector fix creates. Neither implies
-/// the other: a flagged item's text may no longer match any rule, and a matching
-/// text may sit on a row flagged clean.
+/// the other: a classified item's text may no longer match above the floor, and
+/// a high-confidence match may sit on a row classified clean.
 ///
 /// Safe to run on every open and safe to run twice. Never removes a clipboard
 /// item; see the module header.
@@ -342,18 +342,21 @@ mod tests {
         assert!(s.get(&flagged.id).unwrap().is_some(), "the item survives");
     }
 
-    /// The inclusive predicate, matching the write guard: an email address is
-    /// flagged and kept out of the index, and is nowhere near the wipe floor.
+    /// Inert findings remain searchable across startup rescans. Detection is
+    /// still available to masking consumers through `scan_all`.
     #[test]
-    fn the_purge_uses_the_same_inclusive_predicate_as_the_write_guard() {
+    fn the_purge_keeps_inert_findings_in_the_index() {
         let s = store();
-        let flagged = missed_at_capture(&s, "mail alice.smith@example.com about it", T0);
+        let inert = missed_at_capture(&s, "mail alice.smith@example.com about it", T0);
         let det = detector();
-        assert!(det.is_sensitive("mail alice.smith@example.com about it"));
+        assert!(!det
+            .scan_all("mail alice.smith@example.com about it")
+            .is_empty());
+        assert!(!det.is_sensitive("mail alice.smith@example.com about it"));
         assert!(!det.may_auto_wipe("mail alice.smith@example.com about it"));
 
-        assert_eq!(purge_indexed_secrets(&s, &det).unwrap().purged, 1);
-        assert_eq!(fts_row_count(&s, &flagged), 0);
-        assert!(s.get(&flagged).unwrap().is_some());
+        assert_eq!(purge_indexed_secrets(&s, &det).unwrap().purged, 0);
+        assert_eq!(fts_row_count(&s, &inert), 1);
+        assert!(s.get(&inert).unwrap().is_some());
     }
 }
