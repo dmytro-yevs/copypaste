@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::crypto::{NONCE_LEN, TAG_LEN};
 use crate::{decrypt, encrypt, CryptoError, ItemKey};
 
 const MAGIC: &[u8; 4] = b"CPB2";
@@ -11,6 +12,10 @@ const VERSION: u8 = 1;
 /// single transport frame to be stored locally.
 pub const CHUNK_BYTES: usize = 512 * 1024;
 const HEADER_BYTES: usize = 4 + 1 + 8 + 4 + 32;
+/// Binary capture is bounded by the same ceiling that storage and every sync
+/// transport enforce.  This header is untrusted until every chunk authenticates,
+/// so it must not be able to request an arbitrary allocation.
+const MAX_BINARY_BYTES: u64 = copypaste_ipc::MAX_CONTENT_BYTES as u64;
 
 /// Metadata authenticated by the envelope's structure and verified against
 /// the recovered plaintext.
@@ -118,12 +123,22 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoE
             .try_into()
             .map_err(|_| CryptoError::AuthFailed)?,
     );
+    if byte_len > MAX_BINARY_BYTES {
+        return Err(CryptoError::AuthFailed);
+    }
+    let expected_chunks = byte_len.div_ceil(CHUNK_BYTES as u64);
+    if expected_chunks != u64::from(chunk_count) {
+        return Err(CryptoError::AuthFailed);
+    }
     let expected_hash = &envelope[17..49];
     let mut offset = HEADER_BYTES;
-    let mut plain =
-        Vec::with_capacity(usize::try_from(byte_len).map_err(|_| CryptoError::AuthFailed)?);
+    // Do not reserve from the peer-controlled `byte_len`.  Every append below
+    // follows successful AEAD verification of one structurally-bounded chunk.
+    let mut plain = Vec::new();
     for index in 0..chunk_count as usize {
-        let end_nonce = offset.checked_add(24).ok_or(CryptoError::AuthFailed)?;
+        let end_nonce = offset
+            .checked_add(NONCE_LEN)
+            .ok_or(CryptoError::AuthFailed)?;
         let end_len = end_nonce.checked_add(4).ok_or(CryptoError::AuthFailed)?;
         if end_len > envelope.len() {
             return Err(CryptoError::AuthFailed);
@@ -133,6 +148,13 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoE
                 .try_into()
                 .map_err(|_| CryptoError::AuthFailed)?,
         ) as usize;
+        let remaining = byte_len
+            .checked_sub((index as u64) * CHUNK_BYTES as u64)
+            .ok_or(CryptoError::AuthFailed)?;
+        let chunk_plain_len = remaining.min(CHUNK_BYTES as u64) as usize;
+        if size != chunk_plain_len.saturating_add(TAG_LEN) {
+            return Err(CryptoError::AuthFailed);
+        }
         let end_chunk = end_len.checked_add(size).ok_or(CryptoError::AuthFailed)?;
         if end_chunk > envelope.len() {
             return Err(CryptoError::AuthFailed);
@@ -144,7 +166,7 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoE
             key,
             &chunk_id,
         )?;
-        if decoded.len() > CHUNK_BYTES {
+        if decoded.len() != chunk_plain_len {
             return Err(CryptoError::AuthFailed);
         }
         plain.extend_from_slice(&decoded);
@@ -192,5 +214,35 @@ mod tests {
             r#"{"filename":"../private.txt","mime_type":"text/plain"}"#
         )
         .is_none());
+    }
+
+    #[test]
+    fn an_absurd_untrusted_byte_length_fails_without_allocating() {
+        let key = Keyring::from_secret(&[8; 32]).item_key();
+        let mut envelope = Vec::from(MAGIC.as_slice());
+        envelope.push(VERSION);
+        envelope.extend_from_slice(&u64::MAX.to_be_bytes());
+        envelope.extend_from_slice(&u32::MAX.to_be_bytes());
+        envelope.extend_from_slice(&[0; 32]);
+
+        assert!(matches!(
+            open(&envelope, &key, "binary-id"),
+            Err(CryptoError::AuthFailed)
+        ));
+    }
+
+    #[test]
+    fn a_header_with_an_impossible_chunk_count_fails_closed() {
+        let key = Keyring::from_secret(&[8; 32]).item_key();
+        let mut envelope = Vec::from(MAGIC.as_slice());
+        envelope.push(VERSION);
+        envelope.extend_from_slice(&1u64.to_be_bytes());
+        envelope.extend_from_slice(&0u32.to_be_bytes());
+        envelope.extend_from_slice(&[0; 32]);
+
+        assert!(matches!(
+            open(&envelope, &key, "binary-id"),
+            Err(CryptoError::AuthFailed)
+        ));
     }
 }

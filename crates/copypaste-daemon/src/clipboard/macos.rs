@@ -391,7 +391,7 @@ impl ClipboardSource for MacOsClipboard {
 
     fn set_binary_contents(
         &mut self,
-        item_id: &str,
+        _item_id: &str,
         content_type: &str,
         bytes: &[u8],
         metadata: Option<&copypaste_core::FileMetadata>,
@@ -410,7 +410,7 @@ impl ClipboardSource for MacOsClipboard {
             let metadata =
                 metadata.ok_or_else(|| anyhow::anyhow!("file metadata is unavailable"))?;
             let root = copypaste_ipc::data_dir().join("paste-files");
-            let path = super::file_materialize::materialize(&root, item_id, bytes, metadata)?;
+            let path = super::file_materialize::materialize(&root, bytes, metadata)?;
             Some(
                 url::Url::from_file_path(path)
                     .map_err(|_| anyhow::anyhow!("could not materialize file paste"))?,
