@@ -159,6 +159,11 @@ export const settings = {
       description:
         "How often the service looks for something new. Checking less often uses less power; anything you copy and replace faster than this is missed, and counted on the Diagnostics tab.",
     },
+    privateMode: {
+      title: "Private mode",
+      description:
+        "Pause clipboard recording until you turn it off. This stays on after CopyPaste restarts.",
+    },
     historyLimit: {
       title: "Keep at most",
       description:

@@ -17,10 +17,11 @@ import { screen, waitFor } from "@testing-library/react";
 
 import { ServiceTab } from "@/components/settings/ServiceTab";
 import type { ConfigApplied, ConfigData, ConfigPatch } from "@/lib/ipc";
-import { withUser } from "@/test/harness";
+import { status, withUser } from "@/test/harness";
 
 const getConfig = vi.fn();
 const setConfig = vi.fn();
+const getStatus = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -28,11 +29,13 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     ...actual,
     getConfig: () => getConfig(),
     setConfig: (patch: ConfigPatch) => setConfig(patch),
+    getStatus: () => getStatus(),
   };
 });
 
 function config(over: Partial<ConfigData> = {}): ConfigData {
   return {
+    private_mode: false,
     poll_interval_ms: 500,
     history_limit: 10_000,
     storage_quota_bytes: 10 * 1_073_741_824,
@@ -57,6 +60,7 @@ const applied = (
 beforeEach(() => {
   getConfig.mockReset().mockResolvedValue(applied());
   setConfig.mockReset().mockImplementation(() => Promise.resolve(applied()));
+  getStatus.mockReset().mockResolvedValue(status());
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -122,6 +126,21 @@ describe("writing one", () => {
     await waitFor(() =>
       expect(setConfig).toHaveBeenCalledWith({ storage_quota_bytes: 5 * 1_073_741_824 }),
     );
+  });
+
+  it("persists private mode through the service", async () => {
+    const { user } = withUser(<ServiceTab />);
+    await user.click(await screen.findByRole("switch", { name: "Private mode" }));
+    await waitFor(() =>
+      expect(setConfig.mock.calls[0]![0]).toEqual({ private_mode: true }),
+    );
+  });
+
+  it("does not offer an unpersisted private-mode control on Android", async () => {
+    getStatus.mockResolvedValue(status({ clipboard_backend: "android-inprocess" }));
+    withUser(<ServiceTab />);
+    expect(await screen.findByRole("combobox", { name: "Check the clipboard every" })).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "Private mode" })).toBeNull();
   });
 });
 

@@ -154,6 +154,7 @@ impl Backend for FakeBackend {
                 item_count: 0,
                 capture_running: true,
                 clipboard_backend: "fake".into(),
+                private_mode: false,
                 legacy_history_present: false,
                 counters: copypaste_ipc::DiagnosticCounters::default(),
             }),

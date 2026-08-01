@@ -5,8 +5,8 @@
 //!    item marked sensitive, whatever the caller passed.
 //! 2. **In-transaction re-read** — [`upsert_fts_in_tx`] re-checks
 //!    `is_sensitive` inside the transaction that writes the index row.
-//! 3. **Read predicate** — [`super::Store::search`] joins on
-//!    `ci.is_sensitive = 0`, so even a row planted directly in the FTS table
+//! 3. **Read predicate** — [`super::Store::search`] joins on a live,
+//!    non-sensitive text item, so even a row planted directly in the FTS table
 //!    can never surface.
 //!
 //! All three are required: v1 shipped databases with plaintext passwords in FTS
@@ -47,6 +47,7 @@ impl Store {
             " FROM clipboard_fts fts \
               JOIN clipboard_items ci ON ci.id = fts.id \
               WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0 \
+                AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
               ORDER BY rank LIMIT ?2"
         ))?;
         let rows = stmt.query_map(params![match_expr, i64::from(limit)], row_to_item)?;
@@ -65,8 +66,11 @@ impl Store {
     ) -> Result<Vec<IndexedText>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(
-            "SELECT rowid, id, content_text FROM clipboard_fts \
-              WHERE rowid > ?1 ORDER BY rowid LIMIT ?2",
+            "SELECT fts.rowid, fts.id, fts.content_text FROM clipboard_fts fts \
+              JOIN clipboard_items ci ON ci.id = fts.id \
+              WHERE fts.rowid > ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0 \
+                AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
+              ORDER BY fts.rowid LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![after_rowid, i64::from(limit)], |row| {
             Ok(IndexedText {
@@ -78,19 +82,22 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Removes every index row belonging to an item already flagged
-    /// `is_sensitive`, returning how many went.
+    /// Removes every index row without a live, non-sensitive text item,
+    /// returning how many went.
     ///
     /// Manifest 03 S4, which v1 discharged as migration v13: an index row for a
     /// flagged item is one the write guard should never have allowed, and it
     /// holds plaintext whatever the current ruleset would say about that
-    /// plaintext now. Costs one indexed sub-select and no scanning, so it is the
+    /// plaintext now. Costs one indexed lookup per FTS row and no decryption, so it is the
     /// cheap half of [`crate::sensitive::purge_indexed_secrets`] and runs first.
-    pub fn purge_index_of_flagged(&self) -> Result<u64, StoreError> {
+    pub fn purge_index_of_unsearchable(&self) -> Result<u64, StoreError> {
         let conn = self.conn()?;
         let removed = conn.execute(
-            "DELETE FROM clipboard_fts WHERE id IN \
-                 (SELECT id FROM clipboard_items WHERE is_sensitive = 1)",
+            "DELETE FROM clipboard_fts \
+              WHERE NOT EXISTS \
+                (SELECT 1 FROM clipboard_items ci \
+                 WHERE ci.id = clipboard_fts.id AND ci.deleted = 0 AND ci.is_sensitive = 0 \
+                   AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%'))",
             [],
         )?;
         Ok(removed as u64)
@@ -129,14 +136,15 @@ impl Store {
 /// in this transaction, so a crash cannot leave an item permanently
 /// unsearchable.
 pub(super) fn upsert_fts_in_tx(tx: &Transaction<'_>, id: &str, text: &str) -> rusqlite::Result<()> {
-    let sensitive: Option<bool> = tx
+    let searchable: Option<bool> = tx
         .query_row(
-            "SELECT is_sensitive FROM clipboard_items WHERE id = ?1 AND deleted = 0",
+            "SELECT is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%') \
+             FROM clipboard_items WHERE id = ?1 AND deleted = 0",
             [id],
             |r| r.get(0),
         )
         .optional()?;
-    if sensitive != Some(false) {
+    if searchable != Some(true) {
         return Ok(());
     }
     tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])?;
@@ -215,7 +223,9 @@ mod tests {
     use rusqlite::params;
 
     use super::super::model::NewItem;
-    use super::super::test_support::{fts_dump, fts_row_count, item, sensitive_item, store, T0};
+    use super::super::test_support::{
+        fts_dump, fts_row_count, item, plant_fts_row, sensitive_item, store, T0,
+    };
     use super::*;
 
     #[test]
@@ -295,6 +305,24 @@ mod tests {
             tx.commit().unwrap();
         }
         assert_eq!(fts_row_count(&s, &secret.id), 0);
+    }
+
+    #[test]
+    fn stale_non_text_rows_never_surface_or_reach_the_rescan() {
+        let s = store();
+        let image = s
+            .insert(NewItem {
+                content_type: "image/png".to_string(),
+                search_text: None,
+                ..item("image bytes", T0)
+            })
+            .unwrap();
+        plant_fts_row(&s, &image.id, "private image caption");
+
+        assert!(s.search("caption", 10).unwrap().is_empty());
+        assert!(s.indexed_texts(0, 10).unwrap().is_empty());
+        assert_eq!(s.purge_index_of_unsearchable().unwrap(), 1);
+        assert_eq!(fts_row_count(&s, &image.id), 0);
     }
 
     #[test]

@@ -14,13 +14,14 @@
 //!   the ingest before it returns, and shutdown is observed between ticks, not
 //!   inside one.
 
+use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 use tracing::{debug, error, info, warn};
 
-pub use copypaste_core::{ingest_into, IngestError, Ingested};
+pub use copypaste_core::{IngestError, Ingested};
 
 use crate::AppState;
 
@@ -126,7 +127,14 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     // The guard is taken for the pasteboard read alone and dropped before the
     // ingest, so an in-flight `copy` waits on one accessor call, not on a
     // database write.
-    let capture = state.clipboard().poll();
+    let settings = state.settings.get().clone();
+    let capture = state
+        .clipboard()
+        .poll_with_policy(crate::clipboard::CapturePolicy {
+            private_mode: settings.private_mode,
+            excluded_app_bundle_ids: &settings.excluded_app_bundle_ids,
+            max_item_bytes: settings.max_item_bytes,
+        });
     if sweep_due {
         sweep_sensitive_items(state);
     }
@@ -134,7 +142,7 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
         return Ok(());
     };
 
-    match ingest(state, &capture.content, &capture.content_type) {
+    match ingest_capture(state, capture, copypaste_core::now_ms()) {
         Ok(Ingested::Stored(item)) => {
             debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
             // Wakes the watchers and pulls both sync loops to their floor, so a
@@ -163,6 +171,70 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
     }
 }
 
+fn ingest_capture(
+    state: &AppState,
+    capture: crate::clipboard::Capture,
+    created_at: i64,
+) -> Result<Ingested, IngestError> {
+    let settings = state.settings.get().clone();
+    let sensitive_floor = capture
+        .app_bundle_id
+        .as_deref()
+        .is_some_and(crate::clipboard::is_password_manager_app);
+    let binary = match (capture.binary_content, capture.file_path) {
+        (Some(bytes), None) => Some((bytes, capture.file_metadata)),
+        (None, Some(path)) => Some((
+            read_file_at_most(&path, settings.max_item_bytes)?,
+            capture.file_metadata,
+        )),
+        (None, None) => None,
+        (Some(_), Some(_)) => return Err(IngestError::Empty),
+    };
+    match binary {
+        Some((bytes, metadata)) => copypaste_core::ingest_binary_into_with_capture_context(
+            &state.store,
+            &state.keyring,
+            &bytes,
+            &capture.content_type,
+            created_at,
+            sensitive_floor,
+            capture.app_bundle_id.as_deref(),
+            metadata.as_ref(),
+            &settings,
+        ),
+        None => copypaste_core::ingest_into_with_capture_context(
+            &state.store,
+            &state.detector,
+            &state.keyring,
+            &capture.content,
+            &capture.content_type,
+            created_at,
+            sensitive_floor,
+            capture.app_bundle_id.as_deref(),
+            &settings,
+        ),
+    }
+}
+
+/// Read through one opened handle, after checking that handle's size.  A
+/// separate `metadata(path)` then `read(path)` lets another process replace a
+/// file between the cap check and read (CopyPaste-b5iz / I-19).
+fn read_file_at_most(path: &std::path::Path, cap: u64) -> Result<Vec<u8>, IngestError> {
+    let mut file = std::fs::File::open(path).map_err(|_| IngestError::Empty)?;
+    if file.metadata().map_err(|_| IngestError::Empty)?.len() > cap {
+        return Err(IngestError::TooLarge);
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|_| IngestError::Empty)?;
+    if bytes.len() as u64 > cap {
+        return Err(IngestError::TooLarge);
+    }
+    Ok(bytes)
+}
+
 pub fn ingest(
     state: &AppState,
     content: &str,
@@ -188,7 +260,7 @@ pub fn ingest_at(
     // reader substitutes this device's id (`copypaste_core::origin_or`). The
     // alternative — stamping the id on every row — costs a column of repeated
     // UUIDs and an extra argument on a path that has no opinion about sync.
-    ingest_into(
+    copypaste_core::ingest_into(
         &state.store,
         &state.detector,
         &state.keyring,
@@ -283,5 +355,91 @@ mod tests {
         let mut events = state.subscribe();
         state.note_local_change();
         assert_eq!(events.try_recv().expect("an event").swept, 0);
+    }
+
+    #[test]
+    fn detected_sensitive_capture_never_reaches_fts_or_sync() {
+        let (state, _dir) = test_state("sensitive-capture");
+        let stored = ingest(
+            &state,
+            "AKIAIOSFODNN7EXAMPLE",
+            copypaste_ipc::content_type::TEXT,
+        )
+        .unwrap()
+        .into_item();
+        assert!(stored.is_sensitive);
+        assert!(state.store.search("generated", 10).unwrap().is_empty());
+        assert!(
+            state
+                .store
+                .versions_since(i64::MIN, 100)
+                .unwrap()
+                .is_empty(),
+            "sensitive rows never enter sync"
+        );
+    }
+
+    #[test]
+    fn credential_store_origin_is_persisted_and_forces_sensitive() {
+        let (state, _dir) = test_state("credential-store-origin");
+        let stored = ingest_capture(
+            &state,
+            crate::clipboard::Capture {
+                content: "xK9mQ3nR7pT2vW5".to_string(),
+                binary_content: None,
+                file_path: None,
+                file_metadata: None,
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                app_bundle_id: Some("COM.1Password.Desktop".to_string()),
+            },
+            copypaste_core::now_ms(),
+        )
+        .unwrap()
+        .into_item();
+        assert!(stored.is_sensitive);
+        assert_eq!(
+            stored.app_bundle_id.as_deref(),
+            Some("COM.1Password.Desktop")
+        );
+        assert!(state
+            .store
+            .search("xK9mQ3nR7pT2vW5", 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn password_manager_recopy_promotes_an_existing_duplicate_to_sensitive() {
+        let (state, _dir) = test_state("credential-store-duplicate");
+        let content = "ordinary-looking clipboard value";
+        let first = ingest(&state, content, copypaste_ipc::content_type::TEXT)
+            .unwrap()
+            .into_item();
+        assert!(!first.is_sensitive);
+        assert_eq!(state.store.search("ordinary-looking", 10).unwrap().len(), 1);
+
+        let duplicate = ingest_capture(
+            &state,
+            crate::clipboard::Capture {
+                content: content.to_string(),
+                binary_content: None,
+                file_path: None,
+                file_metadata: None,
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                app_bundle_id: Some("com.1password.desktop".to_string()),
+            },
+            copypaste_core::now_ms(),
+        )
+        .unwrap()
+        .into_item();
+
+        assert_eq!(duplicate.id, first.id);
+        assert!(duplicate.is_sensitive);
+        assert!(state
+            .store
+            .search("ordinary-looking", 10)
+            .unwrap()
+            .is_empty());
+        assert!(state.store.versions_since(i64::MIN, 10).unwrap().is_empty());
     }
 }

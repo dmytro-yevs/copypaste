@@ -1,7 +1,5 @@
-//! The schema and the migration ladder: one version, one `M::up`. A
-//! `Migrations` value rather than a hand-rolled `user_version` runner, so
-//! adding version 2 later is an append and a database written by a *newer*
-//! build is refused rather than silently downgraded.
+//! The one v2 schema, created in one transaction. `rusqlite_migration` owns
+//! the version marker and refuses a database written by a newer build.
 
 use std::sync::LazyLock;
 
@@ -40,7 +38,9 @@ CREATE TABLE clipboard_items (
     -- is in this device's history". Empty means "captured here" — a reader
     -- substitutes its own device id (`storage::versions::origin_or`), so a
     -- local capture costs no extra write.
-    origin_device_id   TEXT    NOT NULL DEFAULT ''
+    origin_device_id   TEXT    NOT NULL DEFAULT '',
+    app_bundle_id      TEXT,
+    payload_metadata   TEXT
 );
 
 -- Serves the list query verbatim: pinned first, then pin order, then newest
@@ -195,6 +195,18 @@ const CLIPBOARD_ITEMS_COLUMNS: &[Column] = &[
         not_null: true,
         primary_key: false,
     },
+    Column {
+        name: "app_bundle_id",
+        declared_type: "TEXT",
+        not_null: false,
+        primary_key: false,
+    },
+    Column {
+        name: "payload_metadata",
+        declared_type: "TEXT",
+        not_null: false,
+        primary_key: false,
+    },
 ];
 
 const CLIPBOARD_FTS_COLUMNS: &[Column] = &[
@@ -268,8 +280,7 @@ const TABLES: &[Table] = &[
 static MIGRATIONS: LazyLock<Migrations<'static>> =
     LazyLock::new(|| Migrations::new(vec![M::up(SCHEMA_V1)]));
 
-/// Runs the ladder. `rusqlite_migration` owns `PRAGMA user_version`; a database
-/// written by a *newer* schema is refused rather than silently downgraded.
+/// Creates the v2 schema. A database written by a newer schema is refused.
 pub(super) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     MIGRATIONS.to_latest(conn)?;
     Ok(())
