@@ -47,5 +47,5 @@ mod wipe;
 
 pub use engine::{Detector, DetectorError};
 pub use finding::{Finding, Severity};
-pub use purge::{purge_indexed_secrets, PurgeReport};
+pub use purge::{purge_indexed_secrets, purge_indexed_secrets_in_transaction, PurgeReport};
 pub use wipe::{sweep_sensitive, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED};

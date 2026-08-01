@@ -47,8 +47,13 @@
 //! detector fix is for — a persisted verdict from a ruleset that has since
 //! changed, which is the shape [`super::wipe`] rejects for the same reason.
 
+use rusqlite::Transaction;
+
 use crate::sensitive::Detector;
-use crate::storage::{Store, StoreError};
+use crate::storage::{
+    indexed_texts_in, purge_from_index_in, purge_index_of_unsearchable_in, IndexedText, Store,
+    StoreError,
+};
 
 /// Rows per read page. Large enough that the ~10k-row default history is a
 /// handful of statements, small enough that no page is a meaningful allocation.
@@ -86,12 +91,68 @@ pub fn purge_indexed_secrets(
     store: &Store,
     detector: &Detector,
 ) -> Result<PurgeReport, StoreError> {
+    purge_index(store, detector)
+}
+
+/// Purge restored index rows inside the caller's transaction.
+///
+/// This is the restore boundary: a failure rolls the table replacement and
+/// every purge delete back together, so sensitive plaintext is never committed
+/// searchable while a restore reports failure.
+pub fn purge_indexed_secrets_in_transaction(
+    tx: &Transaction<'_>,
+    detector: &Detector,
+) -> rusqlite::Result<PurgeReport> {
+    purge_index(tx, detector)
+}
+
+trait PurgeIndex {
+    type Error;
+
+    fn purge_unsearchable(&self) -> Result<u64, Self::Error>;
+    fn indexed_texts(&self, after: i64, limit: u32) -> Result<Vec<IndexedText>, Self::Error>;
+    fn purge_rowids(&self, rowids: &[i64]) -> Result<u64, Self::Error>;
+}
+
+impl PurgeIndex for Store {
+    type Error = StoreError;
+
+    fn purge_unsearchable(&self) -> Result<u64, Self::Error> {
+        self.purge_index_of_unsearchable()
+    }
+
+    fn indexed_texts(&self, after: i64, limit: u32) -> Result<Vec<IndexedText>, Self::Error> {
+        Store::indexed_texts(self, after, limit)
+    }
+
+    fn purge_rowids(&self, rowids: &[i64]) -> Result<u64, Self::Error> {
+        self.purge_from_index(rowids)
+    }
+}
+
+impl PurgeIndex for Transaction<'_> {
+    type Error = rusqlite::Error;
+
+    fn purge_unsearchable(&self) -> Result<u64, Self::Error> {
+        purge_index_of_unsearchable_in(self)
+    }
+
+    fn indexed_texts(&self, after: i64, limit: u32) -> Result<Vec<IndexedText>, Self::Error> {
+        indexed_texts_in(self, after, limit)
+    }
+
+    fn purge_rowids(&self, rowids: &[i64]) -> Result<u64, Self::Error> {
+        purge_from_index_in(self, rowids)
+    }
+}
+
+fn purge_index<I: PurgeIndex>(index: &I, detector: &Detector) -> Result<PurgeReport, I::Error> {
     let mut report = PurgeReport::default();
-    report.purged += store.purge_index_of_unsearchable()?;
+    report.purged += index.purge_unsearchable()?;
 
     let mut after = 0i64;
     loop {
-        let page = store.indexed_texts(after, PAGE_ROWS)?;
+        let page = index.indexed_texts(after, PAGE_ROWS)?;
         if page.is_empty() {
             break;
         }
@@ -108,7 +169,7 @@ pub fn purge_indexed_secrets(
                 count = doomed.len(),
                 "removing search-index entries the current ruleset calls sensitive"
             );
-            report.purged += store.purge_from_index(&doomed)?;
+            report.purged += index.purge_rowids(&doomed)?;
         }
     }
 

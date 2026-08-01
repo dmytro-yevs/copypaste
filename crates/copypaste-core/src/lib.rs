@@ -20,8 +20,8 @@ pub use ingest::{
     IngestError, Ingested,
 };
 pub use sensitive::{
-    purge_indexed_secrets, sweep_sensitive, Detector, Finding, PurgeReport, Severity,
-    DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
+    purge_indexed_secrets, purge_indexed_secrets_in_transaction, sweep_sensitive, Detector,
+    Finding, PurgeReport, Severity, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
 };
 pub use storage::{
     compute_content_hash, is_v1_database, origin_or, v1_database_in, verify_integrity,

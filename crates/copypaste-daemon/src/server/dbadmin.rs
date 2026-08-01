@@ -35,9 +35,11 @@
 
 use std::path::{Path, PathBuf};
 
-use copypaste_core::{verify_integrity, verify_schema};
+use copypaste_core::{
+    purge_indexed_secrets_in_transaction, verify_integrity, verify_schema, Detector, PurgeReport,
+};
 use copypaste_ipc::{BackupData, ErrorCode, Response, ResponseData};
-use rusqlite::Connection;
+use rusqlite::{Connection, Transaction};
 use tracing::{info, warn};
 
 use super::messages::{
@@ -109,6 +111,24 @@ pub(super) fn backup(state: &AppState, id: u64, dest_path: &str) -> Response {
 }
 
 pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) -> Response {
+    restore_with_purge(
+        state,
+        id,
+        src_path,
+        confirm,
+        purge_indexed_secrets_in_transaction,
+    )
+}
+
+type RestorePurge = for<'tx> fn(&Transaction<'tx>, &Detector) -> rusqlite::Result<PurgeReport>;
+
+fn restore_with_purge(
+    state: &AppState,
+    id: u64,
+    src_path: &str,
+    confirm: bool,
+    purge: RestorePurge,
+) -> Response {
     if !confirm {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_NEEDS_CONFIRM);
     }
@@ -142,16 +162,24 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
         validate(&staging, &key)?;
 
         // ---- Phase B: swap, in one transaction. ----------------------------
-        swap(state.db_path(), &staging, &key).map_err(|e| {
+        let report = swap(
+            state.db_path(),
+            &staging,
+            &key,
+            state.detector.as_ref(),
+            purge,
+        )
+        .map_err(|e| {
             warn!(error = ?e, "restore transaction failed; the database is unchanged");
             MSG_RESTORE_FAILED
         })?;
-        // A backup can predate a detector rule. Its copied FTS is therefore
-        // untrusted until the current detector has scanned it again.
-        copypaste_core::purge_indexed_secrets(&state.store, &state.detector).map_err(|e| {
-            warn!(error = ?e, "could not purge sensitive restored search entries");
-            MSG_RESTORE_FAILED
-        })?;
+        if report.purged > 0 {
+            info!(
+                purged = report.purged,
+                scanned = report.scanned,
+                "removed sensitive restored search entries"
+            );
+        }
         Ok(())
     })();
 
@@ -230,7 +258,13 @@ fn validate(staging: &Path, key: &[u8; 32]) -> Result<(), &'static str> {
 }
 
 /// Replace the restored tables' contents from `staging`, atomically.
-fn swap(db_path: &Path, staging: &Path, key: &[u8; 32]) -> Result<(), crate::meta::MetaError> {
+fn swap(
+    db_path: &Path,
+    staging: &Path,
+    key: &[u8; 32],
+    detector: &Detector,
+    purge: RestorePurge,
+) -> Result<PurgeReport, crate::meta::MetaError> {
     let mut conn = dbfile::open(db_path, key)?;
     // The raw-key form has to be literal in the clause — see
     // `dbfile::attach_key_literal` for why binding it would silently derive a
@@ -241,7 +275,7 @@ fn swap(db_path: &Path, staging: &Path, key: &[u8; 32]) -> Result<(), crate::met
     );
     conn.execute(&attach, [staging.to_string_lossy().as_ref()])?;
 
-    let result = (|| -> rusqlite::Result<()> {
+    let result = (|| -> rusqlite::Result<PurgeReport> {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for table in RESTORED_TABLES {
             tx.execute(&format!("DELETE FROM {table}"), [])?;
@@ -264,7 +298,9 @@ fn swap(db_path: &Path, staging: &Path, key: &[u8; 32]) -> Result<(), crate::met
             "INSERT INTO sync_device_name SELECT * FROM restore_src.sync_device_name",
             [],
         )?;
-        tx.commit()
+        let report = purge(&tx, detector)?;
+        tx.commit()?;
+        Ok(report)
     })();
 
     // Detached whether or not the transaction committed; a rolled-back
@@ -343,6 +379,8 @@ mod tests {
     use crate::testutil::{add, contents, test_state};
     use copypaste_ipc::Method;
 
+    const RESTORED_SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
+
     fn call(state: &AppState, method: Method) -> Response {
         crate::server::dispatch::dispatch_store(state, 1, method)
     }
@@ -364,6 +402,58 @@ mod tests {
                 confirm,
             },
         )
+    }
+
+    fn replace_index_text(state: &AppState, id: &str, text: &str) {
+        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
+            rusqlite::params![id, text],
+        )
+        .unwrap();
+    }
+
+    fn fts_rows(state: &AppState, id: &str) -> i64 {
+        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn deleted(state: &AppState, id: &str) -> bool {
+        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.query_row(
+            "SELECT deleted FROM clipboard_items WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn fail_after_partial_restore_purge(
+        tx: &Transaction<'_>,
+        _detector: &Detector,
+    ) -> rusqlite::Result<PurgeReport> {
+        let restored: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM clipboard_fts WHERE content_text = ?1",
+            [RESTORED_SECRET],
+            |row| row.get(0),
+        )?;
+        assert_eq!(restored, 1, "the failure must be injected after the swap");
+        assert_eq!(
+            tx.execute(
+                "DELETE FROM clipboard_fts WHERE content_text = ?1",
+                [RESTORED_SECRET],
+            )?,
+            1,
+            "the injected purge must partially mutate the transaction"
+        );
+        Err(rusqlite::Error::InvalidQuery)
     }
 
     #[test]
@@ -600,6 +690,83 @@ mod tests {
 
         assert!(restore_from(&state, &dest, true).ok);
         assert_eq!(state.store.search("needle", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_restore_commits_only_after_the_current_detector_purges_fts() {
+        let (state, dir) = test_state("alpha");
+        let leaked = add(&state, "kept history row");
+        replace_index_text(&state, &leaked, RESTORED_SECRET);
+        add(&state, "ordinary restored search marker");
+        let backup = dir.path().join("history.backup");
+        assert!(backup_to(&state, &backup).ok);
+
+        state.store.delete_all().unwrap();
+        let response = restore_from(&state, &backup, true);
+
+        assert!(response.ok, "{:?}", response.error);
+        assert!(!deleted(&state, &leaked), "the restored row was committed");
+        assert!(state.store.get(&leaked).unwrap().is_some());
+        assert_eq!(fts_rows(&state, &leaked), 0);
+        assert!(state.store.search(RESTORED_SECRET, 10).unwrap().is_empty());
+        assert_eq!(
+            state
+                .store
+                .search("ordinary restored search marker", 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_post_swap_purge_failure_rolls_back_and_a_retry_is_safe() {
+        let (state, dir) = test_state("alpha");
+        let leaked = add(&state, "restored history row");
+        replace_index_text(&state, &leaked, RESTORED_SECRET);
+        add(&state, "ordinary restored search marker");
+        let backup = dir.path().join("history.backup");
+        assert!(backup_to(&state, &backup).ok);
+
+        state.store.delete_all().unwrap();
+        add(&state, "live rollback anchor");
+        assert!(deleted(&state, &leaked));
+
+        let failed = restore_with_purge(
+            &state,
+            1,
+            backup.to_string_lossy().as_ref(),
+            true,
+            fail_after_partial_restore_purge,
+        );
+
+        assert!(!failed.ok);
+        assert_eq!(failed.error_code, Some(ErrorCode::Internal));
+        assert_eq!(failed.error.as_deref(), Some(MSG_RESTORE_FAILED));
+        assert_eq!(contents(&state), ["live rollback anchor"]);
+        assert!(deleted(&state, &leaked), "the restored row must roll back");
+        assert_eq!(fts_rows(&state, &leaked), 0);
+        assert_eq!(state.store.search("rollback anchor", 10).unwrap().len(), 1);
+        assert!(state.store.search(RESTORED_SECRET, 10).unwrap().is_empty());
+
+        let retry = restore_from(&state, &backup, true);
+        assert!(retry.ok, "{:?}", retry.error);
+        assert!(!deleted(&state, &leaked), "the retry must commit the row");
+        assert_eq!(fts_rows(&state, &leaked), 0);
+        assert!(state.store.search(RESTORED_SECRET, 10).unwrap().is_empty());
+        assert!(state
+            .store
+            .search("rollback anchor", 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            state
+                .store
+                .search("ordinary restored search marker", 10)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]

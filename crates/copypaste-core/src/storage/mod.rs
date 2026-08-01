@@ -69,6 +69,8 @@ pub use search::IndexedText;
 pub use store::Store;
 pub use versions::{origin_or, IncomingItem, Version};
 
+pub(crate) use search::{indexed_texts_in, purge_from_index_in, purge_index_of_unsearchable_in};
+
 /// Fixtures shared by every test module under `storage`. The direct-SQL helpers
 /// let a test assert what is *in* the FTS table rather than only what `search`
 /// returns — that is how a missing ADR-015 layer would be caught.

@@ -15,7 +15,7 @@
 //! the index through [`Store::indexed_texts`] and drops what the current ruleset
 //! calls a secret, whatever the row was flagged as when it arrived.
 
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::connection::write_tx;
 use super::model::{item_columns_ci, row_to_item, StoreError, StoredItem};
@@ -65,21 +65,7 @@ impl Store {
         limit: u32,
     ) -> Result<Vec<IndexedText>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(
-            "SELECT fts.rowid, fts.id, fts.content_text FROM clipboard_fts fts \
-              JOIN clipboard_items ci ON ci.id = fts.id \
-              WHERE fts.rowid > ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0 \
-                AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
-              ORDER BY fts.rowid LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![after_rowid, i64::from(limit)], |row| {
-            Ok(IndexedText {
-                rowid: row.get(0)?,
-                id: row.get(1)?,
-                text: row.get(2)?,
-            })
-        })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        Ok(indexed_texts_in(&conn, after_rowid, limit)?)
     }
 
     /// Removes every index row without a live, non-sensitive text item,
@@ -92,15 +78,7 @@ impl Store {
     /// cheap half of [`crate::sensitive::purge_indexed_secrets`] and runs first.
     pub fn purge_index_of_unsearchable(&self) -> Result<u64, StoreError> {
         let conn = self.conn()?;
-        let removed = conn.execute(
-            "DELETE FROM clipboard_fts \
-              WHERE NOT EXISTS \
-                (SELECT 1 FROM clipboard_items ci \
-                 WHERE ci.id = clipboard_fts.id AND ci.deleted = 0 AND ci.is_sensitive = 0 \
-                   AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%'))",
-            [],
-        )?;
-        Ok(removed as u64)
+        Ok(purge_index_of_unsearchable_in(&conn)?)
     }
 
     /// Removes index rows by `rowid`, returning how many went.
@@ -116,16 +94,53 @@ impl Store {
         }
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        let mut removed = 0u64;
-        {
-            let mut stmt = tx.prepare("DELETE FROM clipboard_fts WHERE rowid = ?1")?;
-            for rowid in rowids {
-                removed += stmt.execute([rowid])? as u64;
-            }
-        }
+        let removed = purge_from_index_in(&tx, rowids)?;
         tx.commit()?;
         Ok(removed)
     }
+}
+
+pub(crate) fn indexed_texts_in(
+    conn: &Connection,
+    after_rowid: i64,
+    limit: u32,
+) -> rusqlite::Result<Vec<IndexedText>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT fts.rowid, fts.id, fts.content_text FROM clipboard_fts fts \
+          JOIN clipboard_items ci ON ci.id = fts.id \
+          WHERE fts.rowid > ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0 \
+            AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
+          ORDER BY fts.rowid LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![after_rowid, i64::from(limit)], |row| {
+        Ok(IndexedText {
+            rowid: row.get(0)?,
+            id: row.get(1)?,
+            text: row.get(2)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub(crate) fn purge_index_of_unsearchable_in(conn: &Connection) -> rusqlite::Result<u64> {
+    let removed = conn.execute(
+        "DELETE FROM clipboard_fts \
+          WHERE NOT EXISTS \
+            (SELECT 1 FROM clipboard_items ci \
+             WHERE ci.id = clipboard_fts.id AND ci.deleted = 0 AND ci.is_sensitive = 0 \
+               AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%'))",
+        [],
+    )?;
+    Ok(removed as u64)
+}
+
+pub(crate) fn purge_from_index_in(conn: &Connection, rowids: &[i64]) -> rusqlite::Result<u64> {
+    let mut removed = 0u64;
+    let mut stmt = conn.prepare("DELETE FROM clipboard_fts WHERE rowid = ?1")?;
+    for rowid in rowids {
+        removed += stmt.execute([rowid])? as u64;
+    }
+    Ok(removed)
 }
 
 /// Layer 2 of ADR-015: re-read `is_sensitive` **inside the same transaction** as
