@@ -151,7 +151,7 @@ mod tests {
         }
     }
 
-    /// v2 captures text only, but a peer or the cloud can deliver another type.
+    /// Binary payloads are not representable in this plaintext export format.
     /// It is skipped and *counted*, never dropped quietly.
     #[test]
     fn a_non_text_item_is_counted_rather_than_dropped() {

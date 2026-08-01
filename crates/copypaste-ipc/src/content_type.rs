@@ -11,10 +11,9 @@
 //!
 //! # Capture and transport vocabulary
 //!
-//! The macOS capture backend currently emits plain text only; image and file
-//! payloads wait for encrypted binary storage and native paste-back. Imported
-//! or remote rows may still use every type below. Naming them here lets clients
-//! render such a row honestly instead of showing an image as mojibake.
+//! Capture, ingest, storage, and clients all use this classification. Keeping
+//! the MIME dispatch here prevents their size gates and renderers from growing
+//! different definitions of an image or text payload.
 
 /// Plain text (`public.utf8-plain-text` on macOS).
 pub const TEXT: &str = "text";
@@ -35,6 +34,31 @@ pub const FILE: &str = "file";
 /// unknown type is a peer running a newer build, not a corrupt row — but a
 /// client should render it as "unsupported" rather than guess.
 pub const KNOWN: &[&str] = &[TEXT, RICH_TEXT, HTML, IMAGE_PNG, IMAGE_TIFF, FILE];
+
+/// The capture-limit class for a content type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Text,
+    Image,
+    File,
+    /// A future binary type. It remains storable, but gets the conservative
+    /// file-payload limit until this vocabulary names it explicitly.
+    Other,
+}
+
+/// Classify a wire content type once for every capture-size gate.
+#[must_use]
+pub fn classify(content_type: &str) -> Kind {
+    if is_text(content_type) {
+        Kind::Text
+    } else if content_type.starts_with("image/") {
+        Kind::Image
+    } else if content_type == FILE {
+        Kind::File
+    } else {
+        Kind::Other
+    }
+}
 
 /// Is this content a string the user can read, search and paste?
 ///
@@ -86,6 +110,18 @@ mod tests {
             assert!(is_binary(ct), "{ct}");
             assert!(!is_text(ct), "{ct}");
         }
+    }
+
+    #[test]
+    fn every_capture_type_has_one_limit_class() {
+        for ct in [TEXT, RICH_TEXT, HTML, "text/plain"] {
+            assert_eq!(classify(ct), Kind::Text, "{ct}");
+        }
+        for ct in [IMAGE_PNG, IMAGE_TIFF, "image/webp"] {
+            assert_eq!(classify(ct), Kind::Image, "{ct}");
+        }
+        assert_eq!(classify(FILE), Kind::File);
+        assert_eq!(classify("application/x-future"), Kind::Other);
     }
 
     /// An unknown type must not be mistaken for text: a client that renders a

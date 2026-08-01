@@ -13,12 +13,20 @@ import type { ReactNode } from "react";
 interface RowProps {
   title: string;
   description?: string;
+  descriptionId?: string;
   badge?: ReactNode;
   note?: ReactNode;
   children: ReactNode;
 }
 
-export function Row({ title, description, badge, note, children }: RowProps) {
+export function Row({
+  title,
+  description,
+  descriptionId,
+  badge,
+  note,
+  children,
+}: RowProps) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-s-3 border-b border-divider py-s-3 last:border-b-0">
       <div className="flex min-w-[200px] max-w-[380px] flex-1 flex-col gap-s-1">
@@ -27,7 +35,9 @@ export function Row({ title, description, badge, note, children }: RowProps) {
           {badge}
         </span>
         {description && (
-          <span className="text-xs text-muted-foreground">{description}</span>
+          <span id={descriptionId} className="text-xs text-muted-foreground">
+            {description}
+          </span>
         )}
         {note}
       </div>

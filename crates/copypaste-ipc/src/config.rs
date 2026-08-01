@@ -23,6 +23,26 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 /// The smallest retention budget a user may select: 50 MiB.
 pub const MIN_STORAGE_QUOTA_BYTES: u64 = 50 * 1024 * 1024;
+/// Default maximum captured text payload: 10 MiB.
+pub const MAX_TEXT_SIZE_BYTES: u64 = 10 * 1024 * 1024;
+/// Smallest useful captured text payload: 64 KiB.
+pub const MIN_TEXT_SIZE_BYTES: u64 = 64 * 1024;
+/// Default maximum captured image payload: 64 MiB.
+pub const MAX_IMAGE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
+/// Smallest useful captured image payload: 1 MiB.
+pub const MIN_IMAGE_SIZE_BYTES: u64 = 1024 * 1024;
+/// Default and hard maximum captured file payload: 100 MiB.
+pub const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
+/// Smallest useful captured file payload: 1 MiB.
+pub const MIN_FILE_SIZE_BYTES: u64 = 1024 * 1024;
+/// Default decoded-image memory budget, in MiB.
+pub const MAX_DECODED_IMAGE_MB: u32 = 50;
+/// A zero-byte decode budget would reject every image.
+pub const MIN_DECODED_IMAGE_MB: u32 = 1;
+/// Fastest supported clipboard polling interval.
+pub const POLL_INTERVAL_MIN_MS: u64 = 100;
+/// Slowest supported clipboard polling interval.
+pub const POLL_INTERVAL_MAX_MS: u64 = 5_000;
 
 const fn default_storage_quota_bytes() -> u64 {
     DEFAULT_STORAGE_QUOTA_BYTES
@@ -48,9 +68,8 @@ pub enum Liveness {
 ///
 /// Deliberately smaller than v1's 21 fields. What was dropped and why:
 ///
-/// * `max_image_size_bytes`, `max_file_size_bytes`, `max_decoded_image_mb`,
-///   `auto_apply_synced_clip` (images/files half), `paste_as_plain_text` — v2 is
-///   text-only.
+/// * `auto_apply_synced_clip`, `paste_as_plain_text` — neither behavior is
+///   implemented by the v2 capture contract.
 /// * `relay_url`, `sync_on_wifi_only`, `max_bandwidth_kbps`, `collect_public_ip`
 ///   — no relay and no STUN in v2.
 /// * `sqlite_cache_mb`, `config_version` — implementation detail, dead, and
@@ -86,7 +105,17 @@ pub struct ConfigData {
     pub retention_days: u32,
     /// Two identical captures inside this window are one item. **Live.**
     pub dedup_window_secs: u32,
-    /// Captures larger than this are ignored. **Live.**
+    /// Text captures larger than this are ignored. **Live.**
+    pub max_text_size_bytes: u64,
+    /// Encoded image captures larger than this are ignored. **Live.**
+    pub max_image_size_bytes: u64,
+    /// File captures larger than this are ignored. **Live.**
+    pub max_file_size_bytes: u64,
+    /// Maximum decoded image memory, in MiB. **Live.**
+    pub max_decoded_image_mb: u32,
+    /// Rust-only text read-gate cap, omitted from the config wire format.
+    #[doc(hidden)]
+    #[serde(skip)]
     pub max_item_bytes: u64,
     /// Seconds after which an item the detector flagged is deleted.
     ///
@@ -173,7 +202,11 @@ impl Default for ConfigData {
             storage_quota_bytes: DEFAULT_STORAGE_QUOTA_BYTES,
             retention_days: 0,
             dedup_window_secs: 60,
-            max_item_bytes: 4 * 1024 * 1024,
+            max_text_size_bytes: MAX_TEXT_SIZE_BYTES,
+            max_image_size_bytes: MAX_IMAGE_SIZE_BYTES,
+            max_file_size_bytes: MAX_FILE_SIZE_BYTES,
+            max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
+            max_item_bytes: MAX_TEXT_SIZE_BYTES,
             // Auto-wipe off. `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL`
             // is still 30 s and is still the right value *once switched on* —
             // it is the suggestion, not the default. See the field's doc for
@@ -190,14 +223,15 @@ impl Default for ConfigData {
 }
 
 /// Inclusive bounds, as a pair, so the message and the check cannot disagree.
-const POLL_INTERVAL_MS: (u64, u64) = (100, 60_000);
+const POLL_INTERVAL_MS: (u64, u64) = (POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
 const HISTORY_LIMIT: (u32, u32) = (10, 1_000_000);
 const STORAGE_QUOTA_BYTES: (u64, u64) = (MIN_STORAGE_QUOTA_BYTES, u64::MAX);
 const RETENTION_DAYS: (u32, u32) = (0, 3_650);
 const DEDUP_WINDOW_SECS: (u32, u32) = (0, 86_400);
-/// The ceiling is not a free choice: an item a user is allowed to store has to
-/// fit one IPC frame, or it is captured, stored, and unreadable ever after.
-const MAX_ITEM_BYTES: (u64, u64) = (1_024, crate::MAX_CONTENT_BYTES as u64);
+const MAX_TEXT_SIZE_RANGE: (u64, u64) = (MIN_TEXT_SIZE_BYTES, u64::MAX);
+const MAX_IMAGE_SIZE_RANGE: (u64, u64) = (MIN_IMAGE_SIZE_BYTES, u64::MAX);
+const MAX_FILE_SIZE_RANGE: (u64, u64) = (MIN_FILE_SIZE_BYTES, MAX_FILE_SIZE_BYTES);
+const MAX_DECODED_IMAGE_MB_RANGE: (u32, u32) = (MIN_DECODED_IMAGE_MB, u32::MAX);
 const SENSITIVE_TTL_SECS: (u64, u64) = (0, 86_400);
 /// A bundle id is `com.example.app`; the cap is generous and exists so the list
 /// cannot be used to grow the config file without limit.
@@ -254,6 +288,16 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dedup_window_secs: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_text_size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_decoded_image_mb: Option<u32>,
+    /// Rust-only text read-gate patch, omitted from the config wire format.
+    #[doc(hidden)]
+    #[serde(skip)]
     pub max_item_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_ttl_secs: Option<u64>,
@@ -294,8 +338,19 @@ impl ConfigPatch {
         if let Some(v) = self.dedup_window_secs {
             next.dedup_window_secs = range("dedup_window_secs", v, DEDUP_WINDOW_SECS)?;
         }
-        if let Some(v) = self.max_item_bytes {
-            next.max_item_bytes = range("max_item_bytes", v, MAX_ITEM_BYTES)?;
+        if let Some(v) = self.max_text_size_bytes.or(self.max_item_bytes) {
+            next.max_text_size_bytes = range("max_text_size_bytes", v, MAX_TEXT_SIZE_RANGE)?;
+            next.max_item_bytes = next.max_text_size_bytes;
+        }
+        if let Some(v) = self.max_image_size_bytes {
+            next.max_image_size_bytes = range("max_image_size_bytes", v, MAX_IMAGE_SIZE_RANGE)?;
+        }
+        if let Some(v) = self.max_file_size_bytes {
+            next.max_file_size_bytes = range("max_file_size_bytes", v, MAX_FILE_SIZE_RANGE)?;
+        }
+        if let Some(v) = self.max_decoded_image_mb {
+            next.max_decoded_image_mb =
+                range("max_decoded_image_mb", v, MAX_DECODED_IMAGE_MB_RANGE)?;
         }
         if let Some(v) = self.sensitive_ttl_secs {
             next.sensitive_ttl_secs = range("sensitive_ttl_secs", v, SENSITIVE_TTL_SECS)?;
@@ -342,7 +397,11 @@ impl From<&ConfigData> for ConfigPatch {
             storage_quota_bytes: Some(c.storage_quota_bytes),
             retention_days: Some(c.retention_days),
             dedup_window_secs: Some(c.dedup_window_secs),
-            max_item_bytes: Some(c.max_item_bytes),
+            max_text_size_bytes: Some(c.max_text_size_bytes),
+            max_image_size_bytes: Some(c.max_image_size_bytes),
+            max_file_size_bytes: Some(c.max_file_size_bytes),
+            max_decoded_image_mb: Some(c.max_decoded_image_mb),
+            max_item_bytes: None,
             sensitive_ttl_secs: Some(c.sensitive_ttl_secs),
             excluded_app_bundle_ids: Some(c.excluded_app_bundle_ids.clone()),
             lan_visibility: Some(c.lan_visibility),
@@ -356,11 +415,8 @@ impl From<&ConfigData> for ConfigPatch {
 impl ConfigData {
     /// Whether every field is within the bounds this build enforces.
     ///
-    /// Deserializing does not check them, so a file written when a bound was
-    /// wider survives an upgrade that narrowed it — which is how a
-    /// `max_item_bytes` above [`crate::MAX_CONTENT_BYTES`] would come back and
-    /// store items no client can read. Runs the same checks as
-    /// [`ConfigPatch::apply`] rather than a second copy of the bounds.
+    /// Deserializing checks the shape, not the bounds. Runs the same checks as
+    /// [`ConfigPatch::apply`] rather than maintaining a second copy.
     ///
     /// # Errors
     ///
@@ -380,7 +436,10 @@ impl ConfigData {
             ("storage_quota_bytes", Liveness::Live),
             ("retention_days", Liveness::Live),
             ("dedup_window_secs", Liveness::Live),
-            ("max_item_bytes", Liveness::Live),
+            ("max_text_size_bytes", Liveness::Live),
+            ("max_image_size_bytes", Liveness::Live),
+            ("max_file_size_bytes", Liveness::Live),
+            ("max_decoded_image_mb", Liveness::Live),
             ("sensitive_ttl_secs", Liveness::Live),
             ("excluded_app_bundle_ids", Liveness::Live),
             ("lan_visibility", Liveness::NeedsRestart),
@@ -402,6 +461,18 @@ impl ConfigData {
         }
         names
     }
+
+    /// Live capture cap for one shared content-type classification.
+    #[must_use]
+    pub fn capture_limit_bytes(&self, content_type: &str) -> u64 {
+        match crate::content_type::classify(content_type) {
+            crate::content_type::Kind::Text => self.max_text_size_bytes,
+            crate::content_type::Kind::Image => self.max_image_size_bytes,
+            crate::content_type::Kind::File | crate::content_type::Kind::Other => {
+                self.max_file_size_bytes
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -418,12 +489,15 @@ mod tests {
     fn a_patch_sets_only_what_it_names() {
         let base = ConfigData::default();
         let next = ConfigPatch {
-            poll_interval_ms: Some(250),
+            max_image_size_bytes: Some(32 * 1024 * 1024),
             ..Default::default()
         }
         .apply(&base)
         .unwrap();
-        assert_eq!(next.poll_interval_ms, 250);
+        assert_eq!(next.max_image_size_bytes, 32 * 1024 * 1024);
+        assert_eq!(next.max_text_size_bytes, base.max_text_size_bytes);
+        assert_eq!(next.max_file_size_bytes, base.max_file_size_bytes);
+        assert_eq!(next.max_decoded_image_mb, base.max_decoded_image_mb);
         assert_eq!(next.history_limit, base.history_limit);
         assert_eq!(next.storage_quota_bytes, base.storage_quota_bytes);
     }
@@ -434,8 +508,8 @@ mod tests {
     fn a_rejected_patch_yields_nothing_and_touches_nothing() {
         let base = ConfigData::default();
         let patch = ConfigPatch {
-            poll_interval_ms: Some(1),
-            history_limit: Some(50),
+            max_text_size_bytes: Some(2 * 1024 * 1024),
+            max_file_size_bytes: Some(MAX_FILE_SIZE_BYTES + 1),
             ..Default::default()
         };
         assert!(patch.apply(&base).is_err());
@@ -451,7 +525,7 @@ mod tests {
                 ..Default::default()
             },
             ConfigPatch {
-                poll_interval_ms: Some(60_001),
+                poll_interval_ms: Some(POLL_INTERVAL_MAX_MS + 1),
                 ..Default::default()
             },
             ConfigPatch {
@@ -467,7 +541,23 @@ mod tests {
                 ..Default::default()
             },
             ConfigPatch {
-                max_item_bytes: Some(1),
+                max_text_size_bytes: Some(MIN_TEXT_SIZE_BYTES - 1),
+                ..Default::default()
+            },
+            ConfigPatch {
+                max_image_size_bytes: Some(MIN_IMAGE_SIZE_BYTES - 1),
+                ..Default::default()
+            },
+            ConfigPatch {
+                max_file_size_bytes: Some(MIN_FILE_SIZE_BYTES - 1),
+                ..Default::default()
+            },
+            ConfigPatch {
+                max_file_size_bytes: Some(MAX_FILE_SIZE_BYTES + 1),
+                ..Default::default()
+            },
+            ConfigPatch {
+                max_decoded_image_mb: Some(MIN_DECODED_IMAGE_MB - 1),
                 ..Default::default()
             },
             ConfigPatch {
@@ -478,6 +568,76 @@ mod tests {
         for patch in bad {
             assert!(patch.apply(&base).is_err(), "{patch:?} was accepted");
         }
+    }
+
+    #[test]
+    fn payload_limits_have_the_binding_defaults() {
+        let defaults = ConfigData::default();
+        assert_eq!(defaults.poll_interval_ms, 500);
+        assert_eq!(defaults.max_text_size_bytes, 10 * 1024 * 1024);
+        assert_eq!(defaults.max_image_size_bytes, 64 * 1024 * 1024);
+        assert_eq!(defaults.max_file_size_bytes, 100 * 1024 * 1024);
+        assert_eq!(defaults.max_decoded_image_mb, 50);
+    }
+
+    #[test]
+    fn payload_and_poll_boundaries_are_inclusive() {
+        let base = ConfigData::default();
+        let next = ConfigPatch {
+            poll_interval_ms: Some(POLL_INTERVAL_MAX_MS),
+            max_text_size_bytes: Some(MIN_TEXT_SIZE_BYTES),
+            max_image_size_bytes: Some(MIN_IMAGE_SIZE_BYTES),
+            max_file_size_bytes: Some(MAX_FILE_SIZE_BYTES),
+            max_decoded_image_mb: Some(MIN_DECODED_IMAGE_MB),
+            ..Default::default()
+        }
+        .apply(&base)
+        .expect("every inclusive boundary is valid");
+
+        assert_eq!(next.poll_interval_ms, 5_000);
+        assert_eq!(next.max_text_size_bytes, 64 * 1024);
+        assert_eq!(next.max_image_size_bytes, 1024 * 1024);
+        assert_eq!(next.max_file_size_bytes, 100 * 1024 * 1024);
+        assert_eq!(next.max_decoded_image_mb, 1);
+    }
+
+    #[test]
+    fn every_payload_limit_round_trips_in_a_full_config_and_patch() {
+        let patch = ConfigPatch {
+            max_text_size_bytes: Some(12 * 1024 * 1024),
+            max_image_size_bytes: Some(72 * 1024 * 1024),
+            max_file_size_bytes: Some(90 * 1024 * 1024),
+            max_decoded_image_mb: Some(75),
+            ..Default::default()
+        };
+        let patch_json = serde_json::to_string(&patch).unwrap();
+        let decoded_patch: ConfigPatch = serde_json::from_str(&patch_json).unwrap();
+        assert_eq!(decoded_patch, patch);
+        assert!(!patch_json.contains("max_item_bytes"));
+
+        let config = patch.apply(&ConfigData::default()).unwrap();
+        let config_json = serde_json::to_string(&config).unwrap();
+        let decoded: ConfigData = serde_json::from_str(&config_json).unwrap();
+        assert_eq!(decoded.max_text_size_bytes, config.max_text_size_bytes);
+        assert_eq!(decoded.max_image_size_bytes, config.max_image_size_bytes);
+        assert_eq!(decoded.max_file_size_bytes, config.max_file_size_bytes);
+        assert_eq!(decoded.max_decoded_image_mb, config.max_decoded_image_mb);
+        assert!(!config_json.contains("max_item_bytes"));
+    }
+
+    #[test]
+    fn content_kinds_select_one_maintained_capture_limit() {
+        let config = ConfigData {
+            max_text_size_bytes: 11,
+            max_image_size_bytes: 22,
+            max_file_size_bytes: 33,
+            ..Default::default()
+        };
+        assert_eq!(config.capture_limit_bytes(crate::content_type::TEXT), 11);
+        assert_eq!(config.capture_limit_bytes(crate::content_type::HTML), 11);
+        assert_eq!(config.capture_limit_bytes("image/webp"), 22);
+        assert_eq!(config.capture_limit_bytes(crate::content_type::FILE), 33);
+        assert_eq!(config.capture_limit_bytes("application/x-future"), 33);
     }
 
     /// `0` disables the sweep. It must not be mistaken for "delete now", and it
@@ -604,6 +764,10 @@ mod tests {
                 ..Default::default()
             },
             ConfigPatch {
+                max_file_size_bytes: Some(MAX_FILE_SIZE_BYTES + 1),
+                ..Default::default()
+            },
+            ConfigPatch {
                 excluded_app_bundle_ids: Some(vec![String::new()]),
                 ..Default::default()
             },
@@ -640,7 +804,7 @@ mod tests {
     #[test]
     fn a_restart_is_reported_only_for_the_fields_that_need_one() {
         assert!(ConfigData::restart_required_by(&ConfigPatch {
-            poll_interval_ms: Some(250),
+            max_decoded_image_mb: Some(25),
             ..Default::default()
         })
         .is_empty());

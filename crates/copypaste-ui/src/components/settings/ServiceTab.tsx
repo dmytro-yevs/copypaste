@@ -21,8 +21,18 @@ import { Section } from "@/components/settings/Section";
 import {
   DEDUP_WINDOW_SECS,
   HISTORY_LIMIT,
-  MAX_ITEM_BYTES,
+  MAX_DECODED_IMAGE_MB,
+  MAX_FILE_SIZE_BYTES,
+  MAX_FILE_SIZE_BYTES_LIMIT,
+  MAX_IMAGE_SIZE_BYTES,
+  MAX_TEXT_SIZE_BYTES,
+  MIN_DECODED_IMAGE_MB,
+  MIN_FILE_SIZE_BYTES,
+  MIN_IMAGE_SIZE_BYTES,
+  MIN_TEXT_SIZE_BYTES,
   POLL_INTERVAL_MS,
+  POLL_INTERVAL_MAX_MS,
+  POLL_INTERVAL_MIN_MS,
   RETENTION_DAYS,
   SENSITIVE_TTL_SECS,
   STORAGE_QUOTA_BYTES,
@@ -105,6 +115,11 @@ export function ServiceTab() {
           choices={POLL_INTERVAL_MS}
           value={data.poll_interval_ms}
           disabled={busy}
+          validation={{
+            min: POLL_INTERVAL_MIN_MS,
+            max: POLL_INTERVAL_MAX_MS,
+            message: t("settings.service.validation.poll"),
+          }}
           onChange={(poll_interval_ms) => apply({ poll_interval_ms })}
         />
 
@@ -118,12 +133,56 @@ export function ServiceTab() {
         />
 
         <ChoiceRow
-          title={t("settings.service.maxItem.title")}
-          description={t("settings.service.maxItem.description")}
-          choices={MAX_ITEM_BYTES}
-          value={data.max_item_bytes}
+          title={t("settings.service.maxText.title")}
+          description={t("settings.service.maxText.description")}
+          choices={MAX_TEXT_SIZE_BYTES}
+          value={data.max_text_size_bytes}
           disabled={busy}
-          onChange={(max_item_bytes) => apply({ max_item_bytes })}
+          validation={{
+            min: MIN_TEXT_SIZE_BYTES,
+            message: t("settings.service.validation.text"),
+          }}
+          onChange={(max_text_size_bytes) => apply({ max_text_size_bytes })}
+        />
+
+        <ChoiceRow
+          title={t("settings.service.maxImage.title")}
+          description={t("settings.service.maxImage.description")}
+          choices={MAX_IMAGE_SIZE_BYTES}
+          value={data.max_image_size_bytes}
+          disabled={busy}
+          validation={{
+            min: MIN_IMAGE_SIZE_BYTES,
+            message: t("settings.service.validation.image"),
+          }}
+          onChange={(max_image_size_bytes) => apply({ max_image_size_bytes })}
+        />
+
+        <ChoiceRow
+          title={t("settings.service.maxFile.title")}
+          description={t("settings.service.maxFile.description")}
+          choices={MAX_FILE_SIZE_BYTES}
+          value={data.max_file_size_bytes}
+          disabled={busy}
+          validation={{
+            min: MIN_FILE_SIZE_BYTES,
+            max: MAX_FILE_SIZE_BYTES_LIMIT,
+            message: t("settings.service.validation.file"),
+          }}
+          onChange={(max_file_size_bytes) => apply({ max_file_size_bytes })}
+        />
+
+        <ChoiceRow
+          title={t("settings.service.maxDecodedImage.title")}
+          description={t("settings.service.maxDecodedImage.description")}
+          choices={MAX_DECODED_IMAGE_MB}
+          value={data.max_decoded_image_mb}
+          disabled={busy}
+          validation={{
+            min: MIN_DECODED_IMAGE_MB,
+            message: t("settings.service.validation.decodedImage"),
+          }}
+          onChange={(max_decoded_image_mb) => apply({ max_decoded_image_mb })}
         />
       </Section>
 

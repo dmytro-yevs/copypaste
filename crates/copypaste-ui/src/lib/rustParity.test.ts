@@ -13,6 +13,19 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { MAX_PAIRINGS } from "@/components/devices/peerState";
+import {
+  MAX_DECODED_IMAGE_MB as DECODED_IMAGE_CHOICES,
+  MAX_FILE_SIZE_BYTES as FILE_CHOICES,
+  MAX_FILE_SIZE_BYTES_LIMIT,
+  MAX_IMAGE_SIZE_BYTES as IMAGE_CHOICES,
+  MAX_TEXT_SIZE_BYTES as TEXT_CHOICES,
+  MIN_DECODED_IMAGE_MB,
+  MIN_FILE_SIZE_BYTES,
+  MIN_IMAGE_SIZE_BYTES,
+  MIN_TEXT_SIZE_BYTES,
+  POLL_INTERVAL_MAX_MS,
+  POLL_INTERVAL_MIN_MS,
+} from "@/components/settings/serviceChoices";
 import { EVENT_CAPTURE_STATE, EVENT_CAPTURED } from "@/hooks/useCapture";
 import { EVENT_CHANGED, EVENT_PUSH_STATE } from "@/hooks/usePush";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
@@ -24,6 +37,7 @@ import { DEFAULT_SHORTCUT } from "@/lib/accelerator";
 const CRATES = path.resolve(process.cwd(), "..");
 
 const IPC_LIB = "copypaste-ipc/src/lib.rs";
+const IPC_CONFIG = "copypaste-ipc/src/config.rs";
 const IPC_LIMITS = "copypaste-ipc/src/limits.rs";
 const P2P_PEERS = "copypaste-p2p/src/peers/mod.rs";
 const PUSH = "copypaste-ui/src-tauri/src/service/push.rs";
@@ -46,6 +60,13 @@ function value(file: string, name: string): string {
 
 function number(file: string, name: string): number {
   return Number(value(file, name).replace(/_/g, ""));
+}
+
+function product(file: string, name: string): number {
+  return value(file, name)
+    .split("*")
+    .map((factor) => Number(factor.trim().replace(/_/g, "")))
+    .reduce((result, factor) => result * factor, 1);
 }
 
 /** Every `EVENT_*` the Tauri side can emit, by constant name. */
@@ -95,4 +116,44 @@ test(`the page sizes asked for fit MAX_PAGE in ${IPC_LIMITS}`, () => {
   const maxPage = number(IPC_LIMITS, "MAX_PAGE");
   expect(PAGE_SIZE).toBeLessThanOrEqual(maxPage);
   expect(SEARCH_LIMIT).toBeLessThanOrEqual(maxPage);
+});
+
+test(`service capture bounds match ${IPC_CONFIG}`, () => {
+  expect(POLL_INTERVAL_MIN_MS).toBe(product(IPC_CONFIG, "POLL_INTERVAL_MIN_MS"));
+  expect(POLL_INTERVAL_MAX_MS).toBe(product(IPC_CONFIG, "POLL_INTERVAL_MAX_MS"));
+  expect(MIN_TEXT_SIZE_BYTES).toBe(product(IPC_CONFIG, "MIN_TEXT_SIZE_BYTES"));
+  expect(MIN_IMAGE_SIZE_BYTES).toBe(product(IPC_CONFIG, "MIN_IMAGE_SIZE_BYTES"));
+  expect(MIN_FILE_SIZE_BYTES).toBe(product(IPC_CONFIG, "MIN_FILE_SIZE_BYTES"));
+  expect(MAX_FILE_SIZE_BYTES_LIMIT).toBe(product(IPC_CONFIG, "MAX_FILE_SIZE_BYTES"));
+  expect(MIN_DECODED_IMAGE_MB).toBe(product(IPC_CONFIG, "MIN_DECODED_IMAGE_MB"));
+});
+
+test("service choices include every capture default and binding boundary", () => {
+  const values = (choices: readonly { readonly value: number }[]) =>
+    choices.map((choice) => choice.value);
+  expect(values(TEXT_CHOICES)).toEqual(
+    expect.arrayContaining([
+      product(IPC_CONFIG, "MIN_TEXT_SIZE_BYTES"),
+      product(IPC_CONFIG, "MAX_TEXT_SIZE_BYTES"),
+    ]),
+  );
+  expect(values(IMAGE_CHOICES)).toEqual(
+    expect.arrayContaining([
+      product(IPC_CONFIG, "MIN_IMAGE_SIZE_BYTES"),
+      product(IPC_CONFIG, "MAX_IMAGE_SIZE_BYTES"),
+    ]),
+  );
+  expect(values(FILE_CHOICES)).toEqual(
+    expect.arrayContaining([
+      product(IPC_CONFIG, "MIN_FILE_SIZE_BYTES"),
+      product(IPC_CONFIG, "MAX_FILE_SIZE_BYTES"),
+    ]),
+  );
+  expect(Math.max(...values(FILE_CHOICES))).toBe(MAX_FILE_SIZE_BYTES_LIMIT);
+  expect(values(DECODED_IMAGE_CHOICES)).toEqual(
+    expect.arrayContaining([
+      product(IPC_CONFIG, "MIN_DECODED_IMAGE_MB"),
+      product(IPC_CONFIG, "MAX_DECODED_IMAGE_MB"),
+    ]),
+  );
 });
