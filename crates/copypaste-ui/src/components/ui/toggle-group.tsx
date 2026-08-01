@@ -5,7 +5,7 @@ import { type VariantProps, cva } from "class-variance-authority";
 import { cn } from "@/lib/cn";
 
 const toggleVariants = cva(
-  "inline-flex min-h-[var(--tap-min)] min-w-[var(--tap-min)] items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-[color,box-shadow] outline-none hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-xs [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex min-h-[var(--tap-min)] min-w-[var(--tap-min)] items-center justify-center gap-2 rounded-full text-sm font-medium whitespace-nowrap transition-[background-color,color,box-shadow] outline-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-muted data-[state=on]:text-foreground data-[state=on]:shadow-xs [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       size: {
@@ -18,27 +18,36 @@ const toggleVariants = cva(
   },
 );
 
-const ToggleGroupContext = createContext<VariantProps<typeof toggleVariants>>({
+type ToggleGroupContextValue = VariantProps<typeof toggleVariants> & {
+  equalWidth: boolean;
+};
+
+const ToggleGroupContext = createContext<ToggleGroupContextValue>({
   size: "default",
+  equalWidth: false,
 });
 
 function ToggleGroup({
   className,
   size,
+  equalWidth = false,
   children,
   ...props
 }: ComponentProps<typeof ToggleGroupPrimitive.Root> &
-  VariantProps<typeof toggleVariants>) {
+  VariantProps<typeof toggleVariants> & { equalWidth?: boolean }) {
   return (
     <ToggleGroupPrimitive.Root
       data-slot="toggle-group"
+      data-equal-width={equalWidth || undefined}
       className={cn(
-        "flex w-fit flex-wrap items-center gap-1 rounded-lg border border-border-strong bg-muted p-[3px]",
+        equalWidth
+          ? "grid w-fit auto-cols-fr grid-flow-col items-center gap-1 rounded-full border border-border bg-panel/90 p-1 shadow-sm backdrop-blur-sm"
+          : "flex w-fit flex-wrap items-center gap-1 rounded-full border border-border bg-panel/90 p-1 shadow-sm backdrop-blur-sm",
         className,
       )}
       {...props}
     >
-      <ToggleGroupContext.Provider value={{ size }}>
+      <ToggleGroupContext.Provider value={{ size, equalWidth }}>
         {children}
       </ToggleGroupContext.Provider>
     </ToggleGroupPrimitive.Root>
@@ -56,7 +65,11 @@ function ToggleGroupItem({
   return (
     <ToggleGroupPrimitive.Item
       data-slot="toggle-group-item"
-      className={cn(toggleVariants({ size: context.size ?? size }), className)}
+      className={cn(
+        toggleVariants({ size: context.size ?? size }),
+        context.equalWidth && "min-w-0 w-full",
+        className,
+      )}
       {...props}
     >
       {children}

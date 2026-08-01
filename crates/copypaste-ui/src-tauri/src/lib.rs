@@ -47,15 +47,22 @@ pub mod android_context;
 pub mod backend;
 pub mod capture;
 pub mod commands;
+#[cfg(all(feature = "dev-web-bridge", not(target_os = "android")))]
+pub mod dev_web_bridge;
 pub mod model;
+#[cfg(target_os = "android")]
+pub mod network_discovery;
+#[cfg(target_os = "android")]
+pub mod pairing_scanner;
 pub mod service;
 pub mod shell;
+pub mod source_app_icon;
 #[cfg(feature = "typescript")]
 pub mod typescript;
 
 use backend::SelectedBackend;
 use service::Supervisor;
-use tauri::Manager as _;
+use tauri::{AppHandle, Manager as _, Runtime};
 
 /// Build and run the app.
 ///
@@ -74,7 +81,11 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init());
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init());
 
     // Desktop plugins. The `cfg` is here, at the assembly point, rather than
     // inside `shell` — one gate, at the one place that knows it is building a
@@ -90,6 +101,9 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(capture::android::init())
+        .plugin(pairing_scanner::plugin())
+        .plugin(network_discovery::plugin())
+        .plugin(shell::appearance::android::plugin())
         // `set_content_protected` is a no-op on Android (tao gates it to macOS
         // and Windows), so INV-35's Android half is `FLAG_SECURE` and needs a
         // Kotlin call to reach it.
@@ -98,10 +112,31 @@ pub fn run() {
     builder
         .on_window_event(shell::window::on_event)
         .setup(|app| {
+            let runtime_log_dir = runtime_log_dir(app.handle())?;
+            app.manage(copypaste_runtime_log::init(
+                &runtime_log_dir,
+                copypaste_runtime_log::Process::App,
+            )?);
             app.manage(make_backend(app)?);
+            app.manage(source_app_icon::SourceAppIconCache::default());
             app.manage(commands::transfer::PendingImportState::default());
             app.manage(Supervisor::default());
             app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
+
+            #[cfg(target_os = "android")]
+            {
+                let discovery = app
+                    .state::<network_discovery::AndroidNetworkDiscovery>()
+                    .inner()
+                    .clone();
+                tauri::async_runtime::spawn(async move {
+                    if !discovery.acquire().await {
+                        tracing::warn!(
+                            "Wi-Fi multicast lock is unavailable; LAN discovery may be limited"
+                        );
+                    }
+                });
+            }
 
             #[cfg(not(target_os = "android"))]
             app.manage(capture::desktop::DesktopCapture::default());
@@ -148,6 +183,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::appearance::set_native_theme,
+            commands::appearance::system_accent,
             // history
             commands::history::list,
             commands::history::search,
@@ -155,6 +192,9 @@ pub fn run() {
             commands::history::copy_item,
             commands::history::copy_item_as_plain_text,
             commands::history::reveal_item,
+            commands::history::get_image_preview,
+            commands::history::get_source_app_icon,
+            commands::history::list_installed_source_apps,
             commands::history::delete_item,
             commands::history::delete_all,
             commands::history::set_pinned,
@@ -162,6 +202,9 @@ pub fn run() {
             // state
             commands::status::status,
             commands::diagnostics::diagnostics,
+            commands::diagnostics::runtime_log_events,
+            commands::diagnostics::export_diagnostics_report,
+            commands::diagnostics::export_support_bundle,
             // clipboard capture, and the Android ladder
             commands::capture::capture_state,
             commands::capture::capture_refresh,
@@ -194,6 +237,9 @@ pub fn run() {
             commands::transfer::restore_database,
             // peers
             commands::peers::peers,
+            commands::peers::pair_create,
+            commands::peers::pair_accept,
+            commands::peers::scan_pairing_qr,
             commands::peers::unpair,
             commands::peers::revoke,
             commands::peers::sync_now,
@@ -201,6 +247,7 @@ pub fn run() {
             commands::peers::rescan,
             // the clipboard, for text the WebView already holds
             commands::clipboard::copy_text,
+            commands::clipboard::read_pairing_text,
         ])
         .build(tauri::generate_context!())
         .expect("could not start CopyPaste")
@@ -218,6 +265,22 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// The app and desktop daemon intentionally share one private log directory;
+/// Android resolves its app-private storage through Tauri instead.
+pub(crate) fn runtime_log_dir<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    #[cfg(target_os = "android")]
+    {
+        return Ok(app.path().app_data_dir()?.join("logs"));
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(copypaste_ipc::data_dir().join("logs"))
+    }
 }
 
 /// Construct the backend this target uses.
@@ -299,8 +362,10 @@ mod tests {
     fn app_assembly_starts_with_regular_macos_identity() {
         let production_source = production_source();
 
-        assert!(production_source
-            .contains("app.set_activation_policy(tauri::ActivationPolicy::Regular);"));
+        assert!(
+            production_source
+                .contains("app.set_activation_policy(tauri::ActivationPolicy::Regular);")
+        );
         assert!(!production_source.contains("ActivationPolicy::Accessory"));
     }
 
@@ -317,5 +382,6 @@ mod tests {
         assert_eq!(main["minWidth"], 720);
         assert_eq!(main["minHeight"], 460);
         assert_eq!(main["skipTaskbar"], false);
+        assert_eq!(main["transparent"], true);
     }
 }

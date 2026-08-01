@@ -45,17 +45,19 @@ mod transfer;
 use std::path::Path;
 use std::sync::Arc;
 
-use copypaste_core::{ingest, IngestError, ItemCursor, StoredItem};
+use copypaste_core::{
+    IngestError, ItemCursor, StoredItem, ingest, ingest_into_with_capture_source,
+};
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
 };
 use tokio::sync::OnceCell;
 
 use super::{Backend, BackendError, Page, Result};
 use peers::PeerNode;
-use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
-use state::BackendState;
+use rows::{DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, clamp_page};
+use state::{BackendState, write_settings};
 
 /// Reported in [`StatusData::clipboard_backend`] so a build that is not polling
 /// anything cannot be mistaken for one that is.
@@ -70,12 +72,9 @@ const MSG_NO_ITEM: &str = "That item is no longer there.";
 const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
 const MSG_NO_WATCH: &str = "Live updates aren't available in this build.";
-const MSG_NO_SETTINGS: &str =
-    "This build can't change the service's settings — it has no background service to \
-     change them on, and runs on the defaults shown here.";
+const MSG_INVALID_SETTING: &str = "That setting isn't valid.";
 const MSG_NO_BACKUP: &str = "Backup and restore aren't available in this build yet.";
-const MSG_NO_REORDER: &str =
-    "Reordering pinned items isn't available yet. Pinned items keep the order they \
+const MSG_NO_REORDER: &str = "Reordering pinned items isn't available yet. Pinned items keep the order they \
      were pinned in.";
 
 /// Everything the in-process backend owns. Cheap to clone; `Store` is a
@@ -94,6 +93,16 @@ struct Inner {
     /// does not depend on Tauri's plugin types, and so tests can substitute
     /// one — see `Clipboard`.
     clipboard: Box<dyn Clipboard>,
+}
+
+impl Inner {
+    fn settings(&self) -> copypaste_ipc::ConfigData {
+        self.state
+            .settings
+            .read()
+            .expect("settings lock poisoned")
+            .clone()
+    }
 }
 
 /// Whatever can put text on the system clipboard.
@@ -211,13 +220,14 @@ impl Backend for EmbeddedBackend {
     async fn add(&self, content: &str) -> Result<Item> {
         let content = content.to_string();
         self.blocking(move |inner| {
+            let settings = inner.settings();
             let outcome = ingest(
                 &inner.state.store,
                 &inner.state.detector,
                 &inner.state.keyring,
                 &content,
                 copypaste_ipc::content_type::TEXT,
-                &inner.state.settings,
+                &settings,
             );
             match outcome {
                 Ok(ingested) => inner.to_wire(ingested.into_item()),
@@ -235,9 +245,63 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
+    async fn add_captured(
+        &self,
+        content: &str,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+    ) -> Result<Item> {
+        let content = content.to_string();
+        let app_bundle_id = app_bundle_id.map(str::to_owned);
+        let app_name = app_name.map(str::to_owned);
+        self.blocking(move |inner| {
+            let settings = inner.settings();
+            let excluded = app_bundle_id.as_ref().is_some_and(|id| {
+                settings
+                    .excluded_app_bundle_ids
+                    .iter()
+                    .any(|excluded| excluded.eq_ignore_ascii_case(id))
+            });
+            if excluded {
+                return Err(BackendError::Invalid("copies from this app are excluded"));
+            }
+
+            let sensitive_floor = app_bundle_id
+                .as_deref()
+                .is_some_and(copypaste_core::sensitive::is_password_manager_app);
+            let outcome = ingest_into_with_capture_source(
+                &inner.state.store,
+                &inner.state.detector,
+                &inner.state.keyring,
+                &content,
+                copypaste_ipc::content_type::TEXT,
+                copypaste_core::now_ms(),
+                sensitive_floor,
+                app_bundle_id.as_deref(),
+                app_name.as_deref(),
+                &settings,
+            );
+            match outcome {
+                Ok(ingested) => inner.to_wire(ingested.into_item()),
+                Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
+                Err(IngestError::TooLarge) => Err(BackendError::Invalid(MSG_TOO_LARGE)),
+                Err(error) => {
+                    tracing::warn!(?error, "a captured clip could not be stored");
+                    Err(BackendError::internal(MSG_NOT_STORED))
+                }
+            }
+        })
+        .await
+    }
+
     async fn get(&self, id: &str) -> Result<Item> {
         let id = id.to_string();
         self.blocking(move |inner| inner.fetch(&id)).await
+    }
+
+    async fn image_preview(&self, id: &str) -> Result<ImagePreview> {
+        let id = id.to_string();
+        self.blocking(move |inner| inner.image_preview(&id)).await
     }
 
     async fn copy(&self, id: &str) -> Result<Item> {
@@ -396,31 +460,38 @@ impl Backend for EmbeddedBackend {
         Ok(node.discovered())
     }
 
-    /// Real, and always the defaults.
-    ///
-    /// The settings are still worth reading: the per-payload capture limits,
-    /// `dedup_window_secs` and the sensitive TTL govern `copypaste_core::ingest`
-    /// here exactly as they do in the daemon, so a screen that shows them is
-    /// showing what this build actually does. `restart_required` is empty
-    /// because nothing here is read once at start.
     async fn get_config(&self) -> Result<ConfigApplied> {
         self.blocking(move |inner| {
             Ok(ConfigApplied {
-                config: inner.state.settings.clone(),
+                config: inner.settings(),
                 restart_required: Vec::new(),
             })
         })
         .await
     }
 
-    /// Refused, because there is nowhere to put the answer.
-    ///
-    /// A setting has to outlive the process to be a setting, and the file the
-    /// daemon persists to is the daemon's. Accepting the write and keeping it
-    /// in memory would be worse than refusing: the control would appear to
-    /// work, and the value would be gone at the next launch.
-    async fn set_config(&self, _patch: ConfigPatch) -> Result<ConfigApplied> {
-        Err(BackendError::Unsupported(MSG_NO_SETTINGS))
+    async fn set_config(&self, patch: ConfigPatch) -> Result<ConfigApplied> {
+        self.blocking(move |inner| {
+            let current = inner.settings();
+            let next = patch
+                .apply(&current)
+                .map_err(|_| BackendError::Invalid(MSG_INVALID_SETTING))?;
+            let restart_required = copypaste_ipc::ConfigData::restart_required_by(&patch)
+                .into_iter()
+                .map(str::to_string)
+                .collect();
+            write_settings(&inner.state.settings_path, &next)?;
+            *inner
+                .state
+                .settings
+                .write()
+                .expect("settings lock poisoned") = next.clone();
+            Ok(ConfigApplied {
+                config: next,
+                restart_required,
+            })
+        })
+        .await
     }
 
     async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {
@@ -508,12 +579,14 @@ mod tests {
     async fn an_empty_history_lists_and_searches_without_failing() {
         let (backend, _clip, _dir) = backend();
         assert!(backend.list(50, None).await.unwrap().items.is_empty());
-        assert!(backend
-            .search("anything", 20)
-            .await
-            .unwrap()
-            .items
-            .is_empty());
+        assert!(
+            backend
+                .search("anything", 20)
+                .await
+                .unwrap()
+                .items
+                .is_empty()
+        );
     }
 
     /// B-1 / `CopyPaste-8ebg.57` on the platform with no daemon behind it: an
@@ -599,7 +672,7 @@ mod tests {
     /// The whole point of the move: this build can mint a pairing, and the code
     /// it hands back reconstructs the key the listener will accept.
     #[tokio::test]
-    async fn a_pairing_is_minted_and_stored_before_the_other_device_dials_in() {
+    async fn a_minted_pairing_is_a_listener_credential_not_a_device_row() {
         let (backend, _clip, _dir) = backend();
         let pairing = backend.pair_create("laptop").await.unwrap();
         assert!(!pairing.code.is_empty());
@@ -609,9 +682,10 @@ mod tests {
             copypaste_p2p::transport::PairingToken::parse(&pairing.code).expect("a valid code");
         assert_eq!(token.pairing_id(), pairing.pairing_id);
 
-        let listed = backend.peers().await.unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].name, "laptop");
+        assert!(
+            backend.peers().await.unwrap().is_empty(),
+            "a code waiting for another device must not render as this device"
+        );
 
         // ...and forgetting it removes the key from the listener's candidates.
         backend.unpair(&pairing.pairing_id).await.unwrap();
@@ -656,10 +730,12 @@ mod tests {
         assert!(backend.peers().await.unwrap().is_empty());
 
         // A code that is not a code is refused without dialling anything.
-        assert!(backend
-            .pair_accept("not-a-code", "127.0.0.1:1")
-            .await
-            .is_err());
+        assert!(
+            backend
+                .pair_accept("not-a-code", "127.0.0.1:1")
+                .await
+                .is_err()
+        );
         assert!(backend.peers().await.unwrap().is_empty());
     }
 
@@ -671,6 +747,30 @@ mod tests {
         assert!(backend.sync(None).await.unwrap().is_empty());
         assert!(backend.discovered().await.unwrap().is_empty());
         assert!(backend.rescan().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_live_sync_switch_blocks_manual_pairing_and_sync() {
+        let (backend, _clip, _dir) = backend();
+        backend
+            .set_config(copypaste_ipc::ConfigPatch {
+                sync_enabled: Some(false),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            backend.sync(None).await.unwrap_err(),
+            BackendError::NotReady
+        ));
+        assert!(matches!(
+            backend
+                .pair_accept("not-a-code", "127.0.0.1:1")
+                .await
+                .unwrap_err(),
+            BackendError::NotReady
+        ));
     }
 
     /// A locally captured row stores no origin, and the wire item still has to
@@ -728,6 +828,48 @@ mod tests {
             backend.get(&item.id).await.unwrap().content,
             "a shared note"
         );
+    }
+
+    #[tokio::test]
+    async fn a_captured_clip_keeps_the_platform_reported_source_package() {
+        let (backend, _clip, _dir) = backend();
+        let item = backend
+            .add_captured(
+                "a note from another app",
+                Some("com.example.writer"),
+                Some("Writer"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            item.source_app_bundle_id.as_deref(),
+            Some("com.example.writer")
+        );
+        assert_eq!(item.source_app_name.as_deref(), Some("Writer"));
+    }
+
+    #[tokio::test]
+    async fn an_excluded_source_package_is_not_stored() {
+        let (backend, _clip, _dir) = backend();
+        backend
+            .set_config(ConfigPatch {
+                excluded_app_bundle_ids: Some(vec!["com.example.private".into()]),
+                ..ConfigPatch::default()
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            backend
+                .add_captured(
+                    "do not retain",
+                    Some("com.example.private"),
+                    Some("Private")
+                )
+                .await,
+            Err(BackendError::Invalid(_))
+        ));
+        assert!(backend.list(50, None).await.unwrap().items.is_empty());
     }
 
     /// The same text twice is one row. Not because this file says so — the

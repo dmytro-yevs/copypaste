@@ -6,19 +6,20 @@
 //! are network I/O and live in `crate::p2p::handlers` instead — the split
 //! between the two files is the split between the two thread pools.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use copypaste_core::{ItemCursor, StoredItem};
 use copypaste_ipc::{
-    clamp_page, ErrorCode, Item, ItemPage, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
-    DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
+    DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, ErrorCode, Item, ItemPage, MAX_PAGE_CONTENT_BYTES,
+    PROTOCOL_VERSION, Response, ResponseData, StatusData, clamp_page,
 };
 use tracing::{error, warn};
 
 use super::messages::{
-    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT,
-    MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
+    MSG_BAD_CURSOR, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT, MSG_IMAGE_PREVIEW,
+    MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG, decrypt_error, storage_error,
 };
-use crate::capture::{self, IngestError};
 use crate::AppState;
+use crate::capture::{self, IngestError};
 
 /// Ceiling on one `reorder_pinned` request.
 ///
@@ -49,7 +50,6 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             capture_running: state.capture_running(),
             clipboard_backend: state.backend_name().to_string(),
             private_mode: state.settings.get().private_mode,
-            legacy_history_present: state.legacy_history_present(),
             counters: state.counters(),
         }),
     )
@@ -156,6 +156,45 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
 /// payloads are supported.
 pub(super) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Response {
     copy(state, id, item_id)
+}
+
+/// Produce a small PNG only when a history row needs to draw an image.
+///
+/// This is deliberately not part of `list`: decrypting every screenshot in a
+/// long history would spend memory and expose data the user has not viewed.
+pub(super) fn image_preview(state: &AppState, id: u64, item_id: &str) -> Response {
+    let row = match state.store.get(item_id) {
+        Ok(Some(row)) => row,
+        Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
+        Err(error) => return storage_error(id, "image_preview", &error),
+    };
+    if row.is_sensitive || !row.content_type.starts_with("image/") {
+        return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
+    }
+    let bytes = match copypaste_core::open_binary(
+        &row.content_ciphertext,
+        &state.keyring.item_key(),
+        &row.id,
+    ) {
+        Ok(bytes) => bytes,
+        Err(error) => return decrypt_error(id, &error),
+    };
+    let budget = state.settings.get().max_decoded_image_mb;
+    let thumbnail = match copypaste_core::thumbnail_png(&bytes, budget) {
+        Ok(thumbnail) => thumbnail,
+        Err(error) => {
+            warn!(id = %row.id, error = ?error, "image preview unavailable");
+            return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
+        }
+    };
+    Response::ok(
+        id,
+        ResponseData::ImagePreview(copypaste_ipc::ImagePreview {
+            png_base64: STANDARD.encode(thumbnail.png),
+            width: thumbnail.width,
+            height: thumbnail.height,
+        }),
+    )
 }
 
 pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
@@ -335,6 +374,8 @@ fn to_wire_with(
         is_sensitive: row.is_sensitive,
         origin_device_id: origin.device_id.clone(),
         origin_device_name: origin.device_name.clone(),
+        source_app_bundle_id: row.app_bundle_id,
+        source_app_name: row.app_name,
         too_large_to_sync,
     })
 }
@@ -400,7 +441,8 @@ mod tests {
     use super::*;
     use crate::server::dispatch::dispatch_store;
     use crate::testutil::test_state;
-    use copypaste_ipc::{content_type::TEXT, Method};
+    use base64::engine::general_purpose::STANDARD;
+    use copypaste_ipc::{Method, content_type::TEXT};
 
     fn row_of(bytes: usize) -> StoredItem {
         StoredItem {
@@ -417,6 +459,7 @@ mod tests {
             deleted: false,
             origin_device_id: String::new(),
             app_bundle_id: None,
+            app_name: None,
             payload_metadata: None,
         }
     }
@@ -720,6 +763,65 @@ mod tests {
         let second = add(2);
         assert_eq!(first.id, second.id);
         assert_eq!(state.store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn image_preview_is_lazy_bounded_and_never_the_original_payload() {
+        let (state, _dir) = test_state("image-preview");
+        let source = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        let image = copypaste_core::ingest_binary_into_with_capture_context(
+            &state.store,
+            &state.keyring,
+            &source,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            copypaste_core::now_ms(),
+            false,
+            None,
+            None,
+            &state.settings.get(),
+        )
+        .unwrap()
+        .into_item();
+
+        let listed = match list(&state, 1, 20, None).data {
+            Some(ResponseData::Page(page)) => page.items,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(listed[0].content, "[image]");
+
+        let preview = match image_preview(&state, 2, &image.id).data {
+            Some(ResponseData::ImagePreview(preview)) => preview,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((preview.width, preview.height), (1, 1));
+        assert_eq!(
+            &STANDARD.decode(preview.png_base64).unwrap()[..8],
+            b"\x89PNG\r\n\x1a\n"
+        );
+    }
+
+    #[test]
+    fn image_preview_refuses_a_sensitive_item() {
+        let (state, _dir) = test_state("image-preview-sensitive");
+        let image = copypaste_core::ingest_binary_into_with_capture_context(
+            &state.store,
+            &state.keyring,
+            b"bytes",
+            copypaste_ipc::content_type::IMAGE_PNG,
+            copypaste_core::now_ms(),
+            true,
+            None,
+            None,
+            &state.settings.get(),
+        )
+        .unwrap()
+        .into_item();
+
+        let response = image_preview(&state, 1, &image.id);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(response.error.as_deref(), Some(MSG_IMAGE_PREVIEW));
     }
 
     /// The whole ordering, applied at once. A partial move is not offered

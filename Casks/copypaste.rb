@@ -65,14 +65,9 @@ cask "copypaste" do
   #    a README also matters: telling users to run `xattr -rd` teaches a habit
   #    that is genuinely dangerous applied anywhere else.
   #
-  # 2. It re-signs the bundle. v1 did this too, with `--sign -`, to work around
-  #    a quarantined hardened-runtime ad-hoc bundle refusing to launch. v2 signs
-  #    with a self-signed certificate generated once on this machine instead,
-  #    because that is what makes a TCC grant survive an update — see ADR-0001,
-  #    which also carries the test procedure for the one thing about it that
-  #    documentation does not settle. The script falls back to `--sign -` if the
-  #    certificate path fails for any reason, so the outcome is never worse than
-  #    what v1 shipped.
+  # 2. It re-signs the bundle with a self-signed certificate generated once on
+  #    this machine. That makes a TCC grant survive an update; the script falls
+  #    back to `--sign -` if the certificate path fails.
   #
   # Why a script in the bundle rather than commands here. The logic has real
   # failure handling in it — roughly two hundred lines — and inlining that into
@@ -102,8 +97,7 @@ cask "copypaste" do
     if File.exist?(selfsign)
       system_command "/bin/bash", args: [selfsign, app_path]
     else
-      # A DMG built before the script existed. Do what v1 did, and keep the
-      # `|| true` on the xattr call for the must-succeed reason above.
+      # Keep the `|| true` on the xattr call for the must-succeed reason above.
       system_command "/bin/bash",
                      args: ["-c",
                             "/usr/bin/xattr -dr com.apple.quarantine \"$1\" 2>/dev/null || true; " \
@@ -112,8 +106,6 @@ cask "copypaste" do
     end
   end
 
-  # Carried from v1, where it fixed an observed production failure.
-  #
   # On `brew upgrade`/`reinstall`, Homebrew uninstalls the old version by
   # MOVING /Applications/CopyPaste.app back to staging. If that path is already
   # gone — which is what an earlier failed upgrade leaves behind — the move
@@ -142,10 +134,6 @@ cask "copypaste" do
   # uninstall` leaves the certificate, which is what makes uninstall-then-
   # reinstall keep a grant.
   #
-  # It must NOT name `~/Library/Application Support/CopyPaste`. That is v0.4.x's
-  # directory, holding a `clipboard.db` this version never opens and CLAUDE.md
-  # rule 3 promises to leave intact for anyone who downgrades. Zapping it
-  # deleted the one history v2 cannot restore and none of v2's own.
   zap trash: [
     "~/Library/Application Support/com.copypaste.CopyPaste",
     "~/Library/Caches/CopyPaste",

@@ -1,4 +1,4 @@
-import { CloudOff, Copy, Eye, EyeOff, LoaderCircle, ShieldAlert } from "lucide-react";
+import { CloudOff, Copy, EyeOff, ImageIcon, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { wontSync } from "@/components/history/origin";
+import { HistoryImagePreview } from "@/components/history/HistoryImagePreview";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { MONO_KINDS, absoluteTime, kindOf } from "@/lib/format";
@@ -52,6 +53,7 @@ export function HistoryDetail({
   // keeps no copy of it, so INV-11's expiry re-masks the view by itself.
   const body = revealed ? revealedContent : (item?.content ?? null);
   const kind = item ? kindOf(item) : "text";
+  const isImage = kind === "image";
 
   const meta = item
     ? [absoluteTime(item.created_at), kindLabel(kindOf(item))]
@@ -82,23 +84,37 @@ export function HistoryDetail({
         )}
 
         {masked ? (
-          <div className="flex flex-col items-start gap-s-2 rounded-md border border-withheld-border bg-withheld p-s-3 text-sm text-withheld-fg">
-            <span className="flex items-center gap-2">
-              <ShieldAlert size={14} aria-hidden="true" />
-              {t("history.row.sensitivePlaceholder")}
+          <button
+            type="button"
+            aria-label={t("history.row.sensitiveReveal")}
+            aria-busy={revealPending || undefined}
+            className="flex min-h-24 w-full flex-col justify-center gap-s-2 rounded-md bg-withheld p-s-3 text-left text-sm text-withheld-fg outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+            onClick={() => item && !revealPending && onReveal(item)}
+          >
+            <span aria-hidden="true" className="flex w-full flex-col gap-2">
+              <span className="h-3 w-10/12 rounded-full bg-withheld-fg/25" />
+              <span className="h-3 w-7/12 rounded-full bg-withheld-fg/25" />
+              <span className="h-3 w-9/12 rounded-full bg-withheld-fg/25" />
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => item && onReveal(item)}
-            >
-              {revealPending ? (
-                <LoaderCircle aria-hidden="true" className="animate-spin" />
-              ) : (
-                <Eye aria-hidden="true" />
-              )}
-              {t("history.detail.reveal")}
-            </Button>
+            {revealPending && (
+              <LoaderCircle aria-hidden="true" className="animate-spin self-center" />
+            )}
+          </button>
+        ) : isImage && item ? (
+          <div
+            role="region"
+            aria-label={t("history.detail.image")}
+            tabIndex={0}
+            className="flex max-h-[54vh] min-h-48 w-full items-center justify-center overflow-hidden rounded-md border border-border-strong bg-panel p-s-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+          >
+            <HistoryImagePreview
+              id={item.id}
+              className="max-h-[calc(54vh-var(--s-6))] max-w-full"
+              style={{ maxHeight: "calc(54vh - var(--s-6))" }}
+              loadingLabel={t("history.detail.imageLoading")}
+              failureLabel={t("history.detail.imageUnavailable")}
+              title={t("history.detail.image")}
+            />
           </div>
         ) : (
           <div
@@ -131,8 +147,8 @@ export function HistoryDetail({
               onClose();
             }}
           >
-            <Copy aria-hidden="true" />
-            {t("history.detail.copy")}
+            {isImage ? <ImageIcon aria-hidden="true" /> : <Copy aria-hidden="true" />}
+            {isImage ? t("history.detail.copyImage") : t("history.detail.copy")}
           </Button>
         </DialogFooter>
       </DialogContent>

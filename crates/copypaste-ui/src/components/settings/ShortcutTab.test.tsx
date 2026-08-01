@@ -47,7 +47,11 @@ describe("desktop shortcut settings", () => {
   it("uses the backend default for reset", async () => {
     const { user } = withUser(<ShortcutTab />);
     await screen.findByRole("button", { name: /current shortcut/i });
-    await user.click(screen.getByRole("button", { name: /reset to default/i }));
+    const reset = screen.getByRole("button", { name: /reset to default/i });
+    expect(reset.textContent).toBe("");
+    expect(reset.querySelector("svg")).toBeTruthy();
+    expect(reset.getAttribute("aria-describedby")).toBeTruthy();
+    await user.click(reset);
     await waitFor(() =>
       expect(setShortcut).toHaveBeenCalledWith("CmdOrCtrl+Shift+V"),
     );

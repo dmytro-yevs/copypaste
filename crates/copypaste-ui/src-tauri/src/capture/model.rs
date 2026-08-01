@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::messages::{detail, headline, MSG_TOAST_UNEXPLAINED};
+use super::messages::{MSG_TOAST_UNEXPLAINED, detail, headline};
 
 pub use super::messages::{LOST_BODY, LOST_TITLE, TOAST_EXPLANATION};
 
@@ -190,6 +190,14 @@ pub struct Clip {
     /// Milliseconds since the Unix epoch, stamped when it was read rather than
     /// when it was drained.
     pub at_ms: i64,
+    /// Android package that wrote the current clip, when the privileged
+    /// clipboard service exposed it.
+    #[serde(default)]
+    pub source_app_bundle_id: Option<String>,
+    /// Resolved from Android's PackageManager only after the clipboard service
+    /// supplied a package id. It is not guessed from the copied content.
+    #[serde(default)]
+    pub source_app_name: Option<String>,
 }
 
 /// Whether the user has been told what suppressing the toast turns off.

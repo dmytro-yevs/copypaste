@@ -105,6 +105,7 @@ crates/copypaste-ui/test-results/
 !compat/golden-v0.4.1/*.db
 
 # UI build artefacts
+/node_modules/
 crates/copypaste-ui/node_modules/
 crates/copypaste-ui/dist/
 design/node_modules/

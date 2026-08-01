@@ -34,24 +34,21 @@ beforeEach(() => {
   listItems.mockReset();
   searchItems.mockReset();
   getStatus.mockReset().mockResolvedValue(status());
-  useUi.setState({ query: "", activeId: null });
+  useUi.setState({ query: "", activeId: null, settingsTab: null });
   usePrefs.getState().reset();
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("the service is not running", () => {
-  it("hands over to the start-the-service screen instead of an empty list", async () => {
+  it("explains that browser preview has no native service instead of showing empty history", async () => {
     listItems.mockRejectedValue(new IpcFailure("offline", true));
     withClient(<HistoryView />);
 
-    // Which variant of the offer is shown depends on whether the bridge is
-    // there to start it — see ServiceOffline.test.tsx. Either way it is an
-    // offer with an action, and emphatically not "Nothing copied yet".
     await waitFor(() =>
-      expect(screen.getByText(/clipboard service/i)).toBeTruthy(),
+      expect(screen.getByText("This is the web preview")).toBeTruthy(),
     );
-    expect(screen.getByRole("button", { name: /check again/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /start the service/i })).toBeNull();
     expect(screen.queryByText("Nothing copied yet")).toBeNull();
   });
 
@@ -63,7 +60,7 @@ describe("the service is not running", () => {
     const { container } = withClient(<HistoryView />);
 
     await waitFor(() =>
-      expect(screen.getByText(/background service returned an error/i)).toBeTruthy(),
+      expect(screen.getByText(/clipboard service returned an error/i)).toBeTruthy(),
     );
     expect(container.innerHTML).not.toMatch(/\/Users\/|dmitriy|\.sock/);
   });
@@ -86,10 +83,25 @@ describe("empty and filtered states", () => {
     );
     expect(
       screen.getByText(
-        "Clipboard is not recorded while private mode is active.",
+        "Clipboard items are not recorded while private mode is active.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText("Nothing copied yet")).toBeNull();
+  });
+
+  it("turns an empty paused capture into an actionable capture state", async () => {
+    listItems.mockResolvedValue(page([]));
+    getStatus.mockResolvedValue(status({ capture_running: false }));
+    const { user } = withUser(<HistoryView />);
+
+    expect(await screen.findByText("Clipboard capture is paused")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "New clipboard items will appear here after capture is set up again.",
+      ),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Set up capture" }));
+    expect(useUi.getState().view).toBe("capture");
   });
 
   it("reports a search with no matches as a search result, not as empty", async () => {
@@ -250,27 +262,15 @@ describe("clear all", () => {
 
 /**
  * The regression this file exists to stop reappearing: an unrecoverable state
- * rendered with the affordance of a transient one. Both of these used to land
- * on the generic `Failed to load history` screen and its **Try again**, which
- * retried forever against a condition retrying cannot fix (backlog B-4,
- * ui-parity finding 2).
+ * explained the recovery poorly. Every failure now offers a recheck plus a
+ * safe diagnostic report, so support does not have to reconstruct a failure
+ * from a screenshot.
  */
-describe("states no retry can clear", () => {
+describe("history failure recovery", () => {
   const failWith = (kind: ErrorKind, retryable = false) => {
     listItems.mockRejectedValue(new IpcFailure(kind, retryable));
     getStatus.mockRejectedValue(new IpcFailure(kind, retryable));
   };
-
-  it("says a v0.4 history is a v0.4 history, and that it is untouched", async () => {
-    failWith("legacy_database");
-    withClient(<HistoryView />);
-
-    const title = await screen.findByText(/CopyPaste 0\.4 clipboard history/i);
-    expect(title).toBeTruthy();
-    // The reassuring half is the half the user cannot work out alone.
-    expect(document.body.textContent).toMatch(/still on this device/i);
-    expect(screen.queryByText("Failed to load history")).toBeNull();
-  });
 
   it("admits there is nothing to do about an unusable key", async () => {
     failWith("key_unusable");
@@ -280,20 +280,13 @@ describe("states no retry can clear", () => {
     expect(document.body.textContent).toMatch(/won't change that/i);
   });
 
-  it.each(["legacy_database", "key_unusable"] as const)(
-    "offers no retry for %s",
-    async (kind) => {
-      failWith(kind);
-      withClient(<HistoryView />);
+  it("offers a recheck and diagnostics for an unusable key", async () => {
+    failWith("key_unusable");
+    withClient(<HistoryView />);
 
-      await waitFor(() =>
-        expect(screen.queryByText("Loading…")).toBeNull(),
-      );
-      for (const button of screen.queryAllByRole("button")) {
-        expect(button.textContent ?? "").not.toMatch(/try again|retry|restart/i);
-      }
-    },
-  );
+    expect(await screen.findByRole("button", { name: /try again/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /export support bundle/i })).toBeTruthy();
+  });
 
   /** The gate must not swallow the ordinary case: a transient fault is still
    *  worth another go, and removing the retry from everything would be the
@@ -317,7 +310,6 @@ describe("states no retry can clear", () => {
   });
 
   it.each([
-    ["legacy_database", false],
     ["key_unusable", false],
     ["key_locked", true],
   ] as const)(

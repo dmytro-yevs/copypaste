@@ -16,6 +16,8 @@ fn item() -> Item {
         is_sensitive: false,
         origin_device_id: "device-1".into(),
         origin_device_name: Some("Laptop".into()),
+        source_app_bundle_id: None,
+        source_app_name: None,
         too_large_to_sync: false,
     }
 }
@@ -98,7 +100,6 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             capture_running: true,
             clipboard_backend: "fake".into(),
             private_mode: false,
-            legacy_history_present: false,
             counters: DiagnosticCounters::default(),
         }),
         ResponseData::Export(ExportData {
@@ -117,7 +118,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Backup(BackupData { size_bytes: 3 }),
         ResponseData::Discovered(DiscoveredData {
             devices: vec![DiscoveredDevice {
-                pairing_id: "peer-1".into(),
+                discovery_id: "peer-1".into(),
                 name: "Phone".into(),
                 addr: "192.0.2.1:47654".into(),
                 last_seen_ms: 1,

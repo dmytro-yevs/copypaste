@@ -49,6 +49,8 @@ export function isFilteringView(view: ViewOptions): boolean {
  *  `secret` is offered; the rows stay masked when it answers. */
 export const FILTERABLE_KINDS: readonly Kind[] = [
   "text",
+  "image",
+  "file",
   "url",
   "mail",
   "path",
@@ -62,6 +64,8 @@ export const FILTERABLE_KINDS: readonly Kind[] = [
 const KIND_KEY = {
   all: "history.kind.all",
   text: "history.kind.text",
+  image: "history.kind.image",
+  file: "history.kind.file",
   url: "history.kind.url",
   mail: "history.kind.mail",
   path: "history.kind.path",

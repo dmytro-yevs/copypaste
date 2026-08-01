@@ -22,12 +22,12 @@ use copypaste_ipc::{
     DiscoveredData, DiscoveredDevice, ErrorCode, PairingData, PeerInfo, Response, ResponseData,
     SyncResult,
 };
-use copypaste_p2p::peers::Peer;
 use copypaste_p2p::NodeError;
+use copypaste_p2p::peers::Peer;
 use tracing::{info, warn};
 
-use crate::sync::peer_source;
 use crate::AppState;
+use crate::sync::peer_source;
 
 /// Mint a pairing and hand back the code to read out to the other device.
 pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response {
@@ -55,6 +55,9 @@ pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response
 /// The peer is persisted only after a complete session — the node's rule, and
 /// the reason a failed pairing leaves the paired-device list untouched.
 pub async fn pair_accept(state: &Arc<AppState>, id: u64, code: &str, addr: &str) -> Response {
+    if !state.settings.get().sync_enabled {
+        return sync_disabled(id);
+    }
     let source = peer_source(state);
     let accepted = match state.p2p.node().pair_accept(code, addr, &source).await {
         Ok(accepted) => accepted,
@@ -139,6 +142,9 @@ pub async fn peers(state: &Arc<AppState>, id: u64) -> Response {
 /// and a failure is reported in that peer's `error` field while the run
 /// continues. The whole request only fails when a named peer does not exist.
 pub async fn sync_now(state: &Arc<AppState>, id: u64, pairing_id: Option<&str>) -> Response {
+    if !state.settings.get().sync_enabled {
+        return sync_disabled(id);
+    }
     let targets = match pairing_id {
         Some(pairing_id) => match state.p2p.peers().get(pairing_id) {
             Some(peer) => vec![peer],
@@ -155,6 +161,10 @@ pub async fn sync_now(state: &Arc<AppState>, id: u64, pairing_id: Option<&str>) 
         state.note_remote_change();
     }
     Response::ok(id, ResponseData::Sync(results))
+}
+
+fn sync_disabled(id: u64) -> Response {
+    Response::err(id, ErrorCode::NotReady, "Sync is turned off.")
 }
 
 /// LAN devices, paired or not.
@@ -186,9 +196,12 @@ fn devices(state: &Arc<AppState>) -> DiscoveredData {
             // Resolved locally rather than taken from the advertisement:
             // anyone on the LAN can claim any pairing id, and `paired` decides
             // whether the UI offers "pair" or "sync" (`CopyPaste-vgpy`).
-            paired: state.p2p.peers().get(&found.pairing_id).is_some(),
+            paired: found
+                .pairing_ids
+                .iter()
+                .any(|id| state.p2p.peers().get(id).is_some()),
             addr: found.addr.to_string(),
-            pairing_id: found.pairing_id,
+            discovery_id: found.discovery_id,
             name: found.name,
             last_seen_ms: found.last_seen_ms,
         })
@@ -236,7 +249,9 @@ fn failed(id: u64, error: NodeError) -> Response {
 
 fn node_error_code(error: &NodeError) -> ErrorCode {
     match error {
-        NodeError::BadCode | NodeError::Handshake => ErrorCode::PairingCode,
+        NodeError::BadCode | NodeError::Handshake | NodeError::SelfPairing => {
+            ErrorCode::PairingCode
+        }
         NodeError::BadAddress => ErrorCode::PairingAddress,
         NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
         NodeError::TooManyPairings => ErrorCode::PairingLimit,
@@ -285,6 +300,9 @@ mod tests {
             .expect("the peer is stored before the other device dials in");
         assert!(stored.psk_matches(&token.psk()));
         assert_eq!(stored.name, "laptop");
+
+        let listed = peers(&state, 2).await;
+        assert!(matches!(listed.data, Some(ResponseData::Peers(ref rows)) if rows.is_empty()));
     }
 
     #[tokio::test]
@@ -424,17 +442,19 @@ mod tests {
 
         let response = revoke(&state, 1, &token.pairing_id()).await;
         assert!(response.ok, "{:?}", response.error);
-        assert!(state
-            .p2p
-            .peers()
-            .upsert(Peer {
-                pairing_id: token.pairing_id(),
-                name: "the lost phone".into(),
-                psk: token.psk(),
-                last_addr: None,
-                last_seen_ms: 0,
-            })
-            .is_err());
+        assert!(
+            state
+                .p2p
+                .peers()
+                .upsert(Peer {
+                    pairing_id: token.pairing_id(),
+                    name: "the lost phone".into(),
+                    psk: token.psk(),
+                    last_addr: None,
+                    last_seen_ms: 0,
+                })
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -472,6 +492,32 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn the_live_sync_switch_blocks_manual_pairing_and_sync() {
+        let (state, _dir) = test_state("alpha");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &copypaste_ipc::ConfigPatch {
+                    sync_enabled: Some(false),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            pair_accept(&state, 1, "not-a-code", "127.0.0.1:1")
+                .await
+                .error_code,
+            Some(ErrorCode::NotReady)
+        );
+        assert_eq!(
+            sync_now(&state, 2, None).await.error_code,
+            Some(ErrorCode::NotReady)
+        );
+    }
+
     /// A peer that has never been reached and is not on the network is reported
     /// per-peer, and the run still succeeds.
     #[tokio::test]
@@ -498,9 +544,11 @@ mod tests {
         };
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.error.is_some()));
-        assert!(results
-            .iter()
-            .all(|r| r.error_code == Some(ErrorCode::PeerUnreachable)));
+        assert!(
+            results
+                .iter()
+                .all(|r| r.error_code == Some(ErrorCode::PeerUnreachable))
+        );
     }
 
     /// Every variant the node can produce, with the code it arrives under.
@@ -510,6 +558,7 @@ mod tests {
     const EVERY_FAILURE: &[(NodeError, ErrorCode)] = &[
         (NodeError::BadCode, ErrorCode::PairingCode),
         (NodeError::Handshake, ErrorCode::PairingCode),
+        (NodeError::SelfPairing, ErrorCode::PairingCode),
         (NodeError::BadAddress, ErrorCode::PairingAddress),
         (NodeError::NoAddress, ErrorCode::PeerUnreachable),
         (NodeError::Timeout, ErrorCode::PeerUnreachable),

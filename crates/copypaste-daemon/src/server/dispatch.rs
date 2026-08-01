@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use copypaste_ipc::{ErrorCode, Method, Request, Response, PROTOCOL_VERSION};
+use copypaste_ipc::{ErrorCode, Method, PROTOCOL_VERSION, Request, Response};
 use tracing::{debug, error};
 
 use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
@@ -116,6 +116,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Copy { .. }
         | Method::CopyPlainText { .. }
         | Method::Get { .. }
+        | Method::ImagePreview { .. }
         | Method::Add { .. }
         | Method::Delete { .. }
         | Method::DeleteAll
@@ -211,6 +212,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
         Method::CopyPlainText { id: item_id } => items::copy_plain_text(state, id, &item_id),
         Method::Get { id: item_id } => items::get(state, id, &item_id),
+        Method::ImagePreview { id: item_id } => items::image_preview(state, id, &item_id),
         Method::Add { content } => items::add(state, id, &content),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
         Method::DeleteAll => items::delete_all(state, id),
@@ -272,12 +274,14 @@ mod tests {
 
     #[test]
     fn matching_protocol_version_passes_the_gate() {
-        assert!(protocol_gate(&Request {
-            id: 1,
-            protocol_version: PROTOCOL_VERSION,
-            method: Method::Status,
-        })
-        .is_none());
+        assert!(
+            protocol_gate(&Request {
+                id: 1,
+                protocol_version: PROTOCOL_VERSION,
+                method: Method::Status,
+            })
+            .is_none()
+        );
     }
 
     #[test]
@@ -315,6 +319,7 @@ mod tests {
         assert!(requires_ready(&Method::Copy { id: "x".into() }));
         assert!(requires_ready(&Method::CopyPlainText { id: "x".into() }));
         assert!(requires_ready(&Method::Get { id: "x".into() }));
+        assert!(requires_ready(&Method::ImagePreview { id: "x".into() }));
         assert!(requires_ready(&Method::Add {
             content: "x".into()
         }));

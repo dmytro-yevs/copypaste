@@ -31,7 +31,10 @@
   }
 
   body {
-    background: var(--bg);
+    /* The application shell supplies the solid fallback. Keeping the native
+     * window clear lets the desktop translucency preference show the macOS
+     * compositor through the app surface. */
+    background: transparent;
     color: var(--text);
     font-family: var(--f-ui);
     font-size: var(--fs-sm);
@@ -48,7 +51,7 @@
   /* A11Y — a visible focus ring, everywhere. Never `outline: none` without a
    * replacement; shadcn components carry their own `focus-visible:ring-*`, and
    * this is the floor under everything else. */
-  :focus-visible {
+  :focus-visible:not([data-slot]) {
     outline: var(--stroke-2) solid var(--accent);
     outline-offset: var(--focus-ring-offset);
   }
@@ -71,20 +74,206 @@
  * surfaces stay solid: a clipboard preview must never be read through anything
  * behind it. */
 @layer components {
+  .app-surface {
+    background: var(--app-bg);
+  }
+
+  /* Desktop keeps the content ground calm and legible, then adds one diffuse
+   * accent glow to make the macOS window feel like a single surface instead of
+   * unrelated black panes. The colour is always the active (including system)
+   * accent, so it never creates a second palette. Android deliberately keeps
+   * its existing flat activity background. */
+  .app-surface--desktop {
+    background-color: var(--app-bg);
+    background-image:
+      radial-gradient(
+        105% 75% at 100% -20%,
+        color-mix(in oklab, var(--accent) 12%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        70% 55% at -18% 112%,
+        color-mix(in oklab, var(--accent) 6%, transparent),
+        transparent 72%
+      );
+    background-repeat: no-repeat;
+  }
+
+  /* Preserve the visual hierarchy over the ambient desktop ground: chrome is
+   * subtly quieter than content and continues to use the translucency axis. */
+  .app-surface--desktop > main {
+    background: color-mix(in oklab, var(--bg) 94%, var(--accent));
+  }
+
+  .app-surface--desktop .chrome {
+    background: color-mix(in oklab, var(--chrome-bg) 94%, var(--accent));
+  }
+
+  :root[data-translucency="on"] .app-surface--desktop > main {
+    background: color-mix(
+      in oklab,
+      var(--bg) var(--translucency-app-opacity),
+      transparent
+    );
+  }
+
   .chrome {
     background: var(--chrome-bg);
     backdrop-filter: var(--frost-filter);
     -webkit-backdrop-filter: var(--frost-filter);
   }
+
+  /* The native macOS window is transparent. The range below controls both the
+   * blur radius and surface opacity; zero remains the solid, readable baseline.
+   * Android has no window content behind the activity, so it never receives
+   * this data attribute. */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    :root[data-translucency="on"] {
+      --frost-filter: saturate(var(--translucency-saturation)) blur(var(--translucency-blur));
+      --chrome-bg: color-mix(in oklab, var(--panel) var(--translucency-chrome-opacity), transparent);
+      --app-bg: color-mix(in oklab, var(--bg) var(--translucency-app-opacity), transparent);
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      :root[data-translucency="on"] {
+        --frost-filter: none;
+        --chrome-bg: var(--panel);
+        --app-bg: var(--bg);
+      }
+    }
+  }
+
+  @keyframes settings-search-highlight {
+    0%,
+    100% {
+      background: transparent;
+      box-shadow: none;
+    }
+
+    35%,
+    70% {
+      background: var(--selected);
+      box-shadow: 0 0 0 var(--stroke-2) var(--selected-edge);
+    }
+  }
+
+  [data-settings-search-highlight="true"] {
+    animation: settings-search-highlight 900ms ease-in-out 2;
+    border-radius: var(--r-md);
+    scroll-margin-block: var(--s-6);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-settings-search-highlight="true"] {
+      animation: none;
+      background: var(--selected);
+      box-shadow: 0 0 0 var(--stroke-2) var(--selected-edge);
+    }
+  }
 }
 
-/* sonner reads its surface from these custom properties, so the toast stack is
- * themed from our tokens rather than from sonner's own palette. */
-[data-sonner-toaster] {
+/* Sonner adds its own light/dark variables after mounting. Scope these through
+ * the already-resolved CopyPaste theme so its defaults cannot flash first. */
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] {
   --normal-bg: var(--card);
   --normal-text: var(--text);
   --normal-border: var(--border);
-  --border-radius: var(--r-card);
+  --success-bg: color-mix(in oklab, var(--ok) 14%, var(--card));
+  --success-border: color-mix(in oklab, var(--ok) 42%, var(--border));
+  --success-text: var(--ok-strong);
+  --info-bg: color-mix(in oklab, var(--info) 14%, var(--card));
+  --info-border: color-mix(in oklab, var(--info) 42%, var(--border));
+  --info-text: var(--info-strong);
+  --warning-bg: color-mix(in oklab, var(--warn) 14%, var(--card));
+  --warning-border: color-mix(in oklab, var(--warn) 42%, var(--border));
+  --warning-text: var(--warn-strong);
+  --error-bg: color-mix(in oklab, var(--err) 14%, var(--card));
+  --error-border: color-mix(in oklab, var(--err) 42%, var(--border));
+  --error-text: var(--err-strong);
+  /* Ephemeral feedback is a compact floating pill, not another card. */
+  --border-radius: var(--r-pill);
   /* Below an open dialog, never above it (SCRH-12). */
   z-index: var(--z-toast);
+}
+
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-description] {
+  color: var(--dim);
+}
+
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-close-button] {
+  position: relative;
+  order: 2;
+  width: 20px;
+  height: 20px;
+  margin-left: var(--s-1);
+  padding: 0;
+  transform: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-close-button]::after {
+  position: absolute;
+  inset: -6px;
+  content: "";
+}
+
+/* Sonner defaults to a 356px card with an overhanging close affordance. Toasts
+ * here are brief feedback, so they size to their content and remain one calm
+ * line whenever the viewport permits it. */
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] {
+  width: min(480px, calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6))) !important;
+  max-width: calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6));
+}
+
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-sonner-toast][data-styled="true"] {
+  width: fit-content !important;
+  min-width: min(280px, 100%);
+  max-width: min(480px, 100%);
+  padding: var(--s-2) var(--s-3);
+  gap: var(--s-2);
+  box-shadow: var(--sh2);
+}
+
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-icon] {
+  margin: 0;
+}
+
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-content] {
+  min-width: 0;
+  flex: 1;
+}
+
+/* The delete undo is part of the sentence, not a second primary control. */
+:root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-sonner-toast] [data-button] {
+  height: var(--ctl-h-sm);
+  min-width: 48px;
+  margin-left: var(--s-1);
+  padding-inline: var(--s-2);
+  border: var(--stroke-1) solid currentColor;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: inherit;
+}
+
+/* Sonner portals to <body>, outside the main pane. AppToaster measures the
+ * real pane and publishes its midpoint, so sidebar width never becomes a
+ * positioning assumption. */
+@media (min-width: 640px) {
+  :root[data-theme] [data-sonner-toaster][data-sonner-theme][data-x-position="center"] {
+    left: var(--content-pane-center, 50%) !important;
+  }
+}
+
+@media (max-width: 600px) {
+  :root[data-theme] [data-sonner-toaster][data-sonner-theme] {
+    width: calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6)) !important;
+  }
+
+  :root[data-theme] [data-sonner-toaster][data-sonner-theme] [data-sonner-toast][data-styled="true"] {
+    width: 100% !important;
+    min-width: 0;
+    margin-inline: auto;
+  }
 }

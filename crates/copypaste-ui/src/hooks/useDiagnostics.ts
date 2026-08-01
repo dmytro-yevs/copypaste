@@ -7,7 +7,11 @@ import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import { copyText, hasBridge } from "@/lib/ipc";
 import { EVENT_CHANGED, type ChangePayload } from "@/hooks/usePush";
-import { getDiagnostics, type Diagnostics } from "@/service/diagnostics";
+import {
+  exportSupportBundle,
+  getDiagnostics,
+  type Diagnostics,
+} from "@/service/diagnostics";
 
 export const DIAGNOSTICS_KEY = ["diagnostics"] as const;
 
@@ -15,15 +19,16 @@ export const DIAGNOSTICS_KEY = ["diagnostics"] as const;
  *  rather than a second declaration: `usePush` owns the shape. */
 type SweepPayload = ChangePayload & { readonly swept: number };
 
-/** Polled, unlike every other settings query: a panel opened because something
- *  is wrong must not show the state from when it was opened. */
-const POLL_MS = 5_000;
+/** A diagnostics panel is a live view. React Query starts it on mount and
+ * tears the interval down with its last observer. */
+export const DIAGNOSTICS_POLL_MS = 5_000;
 
 export function useDiagnostics() {
   return useQuery<Diagnostics>({
     queryKey: DIAGNOSTICS_KEY,
     queryFn: getDiagnostics,
-    refetchInterval: POLL_MS,
+    refetchInterval: DIAGNOSTICS_POLL_MS,
+    refetchIntervalInBackground: false,
     retry: false,
   });
 }
@@ -34,6 +39,18 @@ export function useCopyReport() {
   return useMutation<void, unknown, string>({
     mutationFn: (report) => copyText(report),
     onSuccess: () => toast.success(t("settings.diagnostics.report.copied")),
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+/** Opens the system save flow. The backend builds the report again so the
+ * exported file is redacted at its only source rather than trusting the page. */
+export function useExportSupportBundle() {
+  return useMutation<boolean, unknown, void>({
+    mutationFn: exportSupportBundle,
+    onSuccess: (saved) => {
+      if (saved) toast.success(t("settings.diagnostics.report.exported"));
+    },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
 }

@@ -11,12 +11,8 @@
 # that must agree is a thing to keep in sync; one file that gets two lines
 # rewritten is not.
 #
-# Unlike v1's version of this script, nothing here commits, pushes, sets a git
-# remote, or reads a token. v1's gen-cask.sh fetched the release with `gh`,
-# embedded GH_TOKEN into the origin URL, force-switched branches and pushed to
-# main with a retry loop — roughly a hundred lines of git choreography inside a
-# release step. Publishing is the workflow's job, in a step that is visible in
-# the run log; this script only edits a file.
+# This script does not commit, push, set a git remote or read a token.
+# Publishing is the workflow's job; this script only edits a file.
 set -euo pipefail
 
 usage() {

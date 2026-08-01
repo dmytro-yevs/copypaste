@@ -4,6 +4,7 @@ members = [
     "crates/copypaste-clock",
     "tools/sensitive-rules",
     "crates/copypaste-ipc",
+    "crates/copypaste-runtime-log",
     "crates/copypaste-core",
     "crates/copypaste-p2p",
     "crates/copypaste-cloud",
@@ -13,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.2"
+version = "2.0.0-alpha.3"
 edition = "2021"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -66,6 +67,10 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["c
 # Passphrase -> sync key. The server must never be able to derive it.
 argon2 = "0.5"
 base64 = "0.22"
+# Image previews use image-rs rather than asking a WebView to decode an
+# unbounded clipboard payload. PNG and TIFF are the formats our capture ports
+# store on macOS and Android.
+image = { version = "0.25.10", default-features = false, features = ["png", "tiff"] }
 url = "2"
 plist = "1.10"
 mime_guess = "2"
@@ -73,7 +78,8 @@ mime_guess = "2"
 thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2.5"
 clap = { version = "4", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
@@ -86,11 +92,13 @@ directories = "5"
 # and Android.
 rustix = { version = "1", features = ["fs"] }
 tempfile = "3"
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
 comfy-table = "7"
 # macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }
-objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "NSImage"] }
 security-framework = "3.7"
 
 [profile.release]

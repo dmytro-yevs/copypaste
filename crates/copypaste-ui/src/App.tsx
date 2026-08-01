@@ -3,25 +3,20 @@
  * main pane get sibling boundaries, so a crash in a screen cannot take
  * navigation with it (CopyPaste-8ebg.12).
  */
-import { lazy, Suspense, useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 
 import { BannerBar } from "@/components/shell/Banners";
 import { Boundary } from "@/components/shell/Boundary";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { HistoryView } from "@/components/history/HistoryView";
-import { useCaptureSync } from "@/hooks/useCapture";
+import { useCaptureState, useCaptureSync } from "@/hooks/useCapture";
 import { useStatus } from "@/hooks/useHistory";
 import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
-import { legacyHistoryPresent } from "@/lib/banners";
 import { classifyError } from "@/lib/errors";
-import {
-  CURRENT_PROTOCOL_VERSION,
-  hasBridge,
-  setAllowScreenshots,
-} from "@/lib/ipc";
+import { hasBridge, setAllowScreenshots } from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
 import { cn } from "@/lib/cn";
 import { isAndroidPlatform } from "@/lib/platform";
@@ -52,16 +47,34 @@ const SCREENS = {
 export default function App() {
   const { t } = useTranslation();
   const view = useUi((s) => s.view);
+  const setView = useUi((s) => s.setView);
   // `useShallow` is load-bearing: without it this is a render loop that
   // unmounts the app — 55 renders in 2.5s, measured.
   const appearance = usePrefs(useShallow(selectAppearance));
   const allowScreenshots = usePrefs((s) => s.allowScreenshots);
   const status = useStatus();
-  const qc = useQueryClient();
   // Both subscribed once, here, not per screen: two subscribers invalidate the
   // same queries twice for one change.
   const pushLive = usePush();
   useCaptureSync();
+  const capture = useCaptureState();
+  const welcomed = useRef(false);
+
+  useEffect(() => {
+    const global = window as typeof window & { __copypasteRequestedView?: string };
+    const openSettings = () => {
+      useUi.getState().setView("settings");
+      delete global.__copypasteRequestedView;
+    };
+    if (
+      new URLSearchParams(window.location.search).get("view") === "settings" ||
+      global.__copypasteRequestedView === "settings"
+    ) {
+      openSettings();
+    }
+    window.addEventListener("copypaste:open-settings", openSettings);
+    return () => window.removeEventListener("copypaste:open-settings", openSettings);
+  }, []);
 
   useEffect(() => {
     if (!hasBridge()) return;
@@ -77,11 +90,42 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!hasBridge()) return;
+    let unlisten: (() => void) | undefined;
+    const receive = (urls: string[]) => {
+      const pairingUri = urls.find((url) => {
+        try {
+          const parsed = new URL(url);
+          return parsed.protocol === "copypaste:" && parsed.hostname === "pair";
+        } catch {
+          return false;
+        }
+      });
+      if (pairingUri) {
+        useUi.getState().setPairingUri(pairingUri);
+        useUi.getState().setView("devices");
+      }
+    };
+    void getCurrent().then((urls) => urls && receive(urls)).catch(() => {});
+    void onOpenUrl(receive).then((detach) => {
+      unlisten = detach;
+    }).catch(() => {});
+    return () => unlisten?.();
+  }, []);
+
   // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply
   // (CopyPaste-g27b.20).
   useEffect(() => {
-    applyAppearance(appearance);
-    subscribeSystemTheme(() => applyAppearance(usePrefs.getState()));
+    // Android has no window behind the activity to blur. Keep its app surface
+    // solid even if this preference travelled through a shared native store.
+    const apply = () =>
+      applyAppearance({
+        ...usePrefs.getState(),
+        translucency: isAndroidPlatform() ? 0 : usePrefs.getState().translucency,
+      });
+    apply();
+    subscribeSystemTheme(apply);
   }, [appearance]);
 
   // INV-35. The window is already protected, so this only ever *relaxes* it and
@@ -95,34 +139,34 @@ export default function App() {
   const screen = SCREENS[view];
   const android = isAndroidPlatform();
 
+  useEffect(() => {
+    if (
+      android &&
+      !welcomed.current &&
+      capture.data !== undefined &&
+      capture.data.health.state !== "working"
+    ) {
+      welcomed.current = true;
+      setView("capture");
+    }
+  }, [android, capture.data, setView]);
+
   return (
     <div
       className={cn(
-        "flex h-full min-h-0 bg-background text-foreground",
-        android ? "flex-col-reverse" : "flex-row",
+        "app-surface flex h-full min-h-0 text-foreground",
+        android ? "flex-col-reverse" : "app-surface--desktop flex-row",
       )}
     >
       <Boundary label={t("shell.boundary.navigation")}>
         <Sidebar />
       </Boundary>
 
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <main data-content-pane className="flex min-h-0 min-w-0 flex-1 flex-col">
         <BannerBar
           conditions={{
-            serviceOffline: statusKind === "offline",
-            historyUnreadable:
-              statusKind === "legacy_database" || statusKind === "key_unusable"
-                ? statusKind
-                : null,
-            protocolMismatch:
-              status.data !== undefined &&
-              status.data.protocol_version !== CURRENT_PROTOCOL_VERSION
-                ? status.data.protocol_version
-                : null,
-            capturePaused: status.data?.capture_running === false,
-            legacyHistory: legacyHistoryPresent(status.data),
+            historyUnreadable: statusKind === "key_unusable" ? statusKind : null,
           }}
-          onRetry={() => void qc.invalidateQueries()}
         />
 
         <Boundary label={t(screen.label)}>

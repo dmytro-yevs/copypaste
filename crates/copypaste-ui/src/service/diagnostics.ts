@@ -28,9 +28,13 @@ export interface DiagnosticsStatus {
   readonly item_count: number;
   readonly capture_running: boolean;
   readonly clipboard_backend: string;
-  readonly legacy_history_present: boolean;
   readonly counters: DiagnosticCounters;
 }
+
+/** A bounded one-item read of the same history query the History screen uses. */
+export type HistoryRead =
+  | { readonly state: "readable" }
+  | { readonly state: "failed"; readonly code: string };
 
 export interface Diagnostics {
   readonly app_version: string;
@@ -40,10 +44,22 @@ export interface Diagnostics {
   readonly service: ServiceState;
   /** `null` when the service did not answer — itself the diagnosis. */
   readonly status: DiagnosticsStatus | null;
+  /** A stable error code only; no daemon message or clipboard content. */
+  readonly history_read: HistoryRead;
   /** Redacted in Rust. Rendered verbatim; never rebuilt here. */
   readonly report: string;
 }
 
 export function getDiagnostics(): Promise<Diagnostics> {
   return call<Diagnostics>("diagnostics");
+}
+
+/** `false` means the system save panel was dismissed, never an error. */
+export function exportDiagnosticsReport(): Promise<boolean> {
+  return call<boolean>("export_diagnostics_report");
+}
+
+/** Exports diagnostics plus bounded, redacted runtime events via native I/O. */
+export function exportSupportBundle(): Promise<boolean> {
+  return call<boolean>("export_support_bundle");
 }

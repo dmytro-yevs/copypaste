@@ -27,6 +27,8 @@ export function item(over: Partial<Item> = {}): Item {
     is_sensitive: sensitive,
     origin_device_id: "device-1",
     origin_device_name: "This Mac",
+    source_app_bundle_id: null,
+    source_app_name: null,
     too_large_to_sync: false,
     ...over,
   };
@@ -62,7 +64,6 @@ export function status(over: Partial<StatusData> = {}): StatusData {
     item_count: 3,
     capture_running: true,
     clipboard_backend: "nspasteboard",
-    legacy_history_present: false,
     counters: {
       rejected_too_large: 0,
       lost_intermediates: 0,

@@ -11,7 +11,8 @@ import { screen, waitFor } from "@testing-library/react";
 
 import { SettingsView } from "@/components/settings/SettingsView";
 import * as platform from "@/lib/platform";
-import { DEFAULT_PREFS, usePrefs } from "@/store/prefs";
+import { ACCENTS, DEFAULT_PREFS, usePrefs } from "@/store/prefs";
+import { useUi } from "@/store/ui";
 import { status, withClient, withUser } from "@/test/harness";
 
 const getStatus = vi.fn();
@@ -29,6 +30,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
 beforeEach(() => {
   getStatus.mockReset().mockResolvedValue(status());
   usePrefs.setState({ ...DEFAULT_PREFS });
+  useUi.setState({ view: "history", settingsTab: null });
 });
 
 afterEach(() => {
@@ -43,6 +45,14 @@ describe("the settings navigation", () => {
     expect(tabs.length).toBeGreaterThanOrEqual(6);
     expect(tabs.filter((tab) => tab.getAttribute("aria-selected") === "true")).toHaveLength(1);
     expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+    const search = screen.getByRole("searchbox", { name: "Search settings" })
+      .closest<HTMLElement>('[role="search"]')!;
+    expect(search.className).toContain("w-full");
+    expect(search.className).toContain("relative");
+    expect(search.className).not.toContain("max-w");
+
+    const header = search.closest<HTMLElement>("header")!;
+    expect(header.className).toContain("chrome");
   });
 
   it("pairs each pane with its tab", async () => {
@@ -80,6 +90,9 @@ describe("the settings navigation", () => {
     expect(screen.getByText("CopyPaste")).toBeTruthy();
     expect(screen.getByText("Support")).toBeTruthy();
     expect(list.className).toContain("flex-col");
+    expect(list.className).toContain("self-stretch");
+    expect(list.className).toContain("border-r");
+    expect(list.className).not.toContain("h-fit");
   });
 
   it("keeps the compact horizontal tab row on Android", () => {
@@ -93,10 +106,10 @@ describe("the settings navigation", () => {
     expect(screen.queryByText("Personal")).toBeNull();
   });
 
-  it("does not offer service or storage controls Android cannot honour", () => {
+  it("keeps Service visible on Android while omitting desktop-only storage", () => {
     setUserAgent("Mozilla/5.0 (Linux; Android 15)");
     withClient(<SettingsView />);
-    expect(screen.queryByRole("tab", { name: "Service" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Service" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Storage" })).toBeNull();
   });
 
@@ -105,23 +118,98 @@ describe("the settings navigation", () => {
     withClient(<SettingsView />);
     expect(screen.queryByRole("tab", { name: "Shortcut" })).toBeNull();
   });
+
+  it("does not offer desktop window translucency on Android", () => {
+    setUserAgent("Mozilla/5.0 (Linux; Android 15)");
+    withClient(<SettingsView />);
+    expect(screen.queryByRole("slider", { name: "Translucency" })).toBeNull();
+  });
+
+  it("shows a compact search dropdown without replacing the current settings pane", async () => {
+    const { user } = withUser(<SettingsView />);
+    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "storage quota");
+
+    expect(await screen.findByText("Storage quota")).toBeTruthy();
+    expect(screen.getByText("Service · What gets kept")).toBeTruthy();
+    expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+    const dropdown = screen.getByRole("region", { name: "Settings search results" });
+    expect(dropdown.className).toContain("fixed");
+    expect(dropdown.dataset.settingsSearchPortal).toBe("true");
+    expect(dropdown.parentElement).toBe(document.body);
+  });
+
+  it("clears a search and restores the settings navigation", async () => {
+    const { user } = withUser(<SettingsView />);
+    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "privacy");
+    await user.click(screen.getByRole("button", { name: "Clear search" }));
+
+    expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeTruthy();
+  });
+
+  it("opens the result's tab and its matching setting", async () => {
+    const { user } = withUser(<SettingsView />);
+    await user.type(screen.getByRole("searchbox", { name: "Search settings" }), "screenshots");
+    await user.click(await screen.findByRole("button", { name: /Allow screenshots/i }));
+
+    expect(await screen.findByRole("switch", { name: "Allow screenshots" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "List" }).getAttribute("aria-selected")).toBe("true");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("switch", { name: "Allow screenshots" })
+          .closest<HTMLElement>("[data-settings-search-target]")
+          ?.dataset.settingsSearchHighlight,
+      ).toBe("true"),
+    );
+    const row = screen.getByRole("switch", { name: "Allow screenshots" })
+      .closest<HTMLElement>("[data-settings-search-target]")!;
+    expect(row.className).toContain("px-s-3");
+    expect(row.className).toContain("after:left-s-3");
+  });
+
+  it("opens Diagnostics when a recovery screen requests it", async () => {
+    useUi.getState().setSettingsTab("diagnostics");
+    withClient(<SettingsView />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Diagnostics" }).getAttribute("aria-selected")).toBe("true"),
+    );
+    expect(useUi.getState().settingsTab).toBeNull();
+  });
+
+  it("keeps search useful on Android, including the persistent Service controls", async () => {
+    setUserAgent("Mozilla/5.0 (Linux; Android 15)");
+    const { user } = withUser(<SettingsView />);
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    await user.type(search, "Capture from other apps");
+    expect(await screen.findByText("Capture from other apps")).toBeTruthy();
+
+    await user.clear(search);
+    await user.type(search, "storage quota");
+    expect(await screen.findByText("Storage quota")).toBeTruthy();
+
+    await user.clear(search);
+    await user.type(search, "translucency");
+    expect(await screen.findByText("No settings found")).toBeTruthy();
+  });
 });
 
 describe("appearance", () => {
-  it("says what System currently resolves to (CopyPaste-8ebg.63)", () => {
+  it("says which appearance System is using (CopyPaste-8ebg.63)", () => {
     withClient(<SettingsView />);
-    expect(screen.getByText(/Currently resolves to (Dark|Light)\./)).toBeTruthy();
+    expect(screen.getByText(/Using (Dark|Light) now\./)).toBeTruthy();
   });
 
   it("exposes each accent as a named, pressable control (A11Y-8, A11Y-9)", () => {
     withClient(<SettingsView />);
     const group = screen.getByRole("group", { name: "Accent" });
-    const swatches = group.querySelectorAll("button");
-    expect(swatches).toHaveLength(6);
+    const swatches = [...group.querySelectorAll<HTMLButtonElement>("button")];
+    expect(swatches.map((swatch) => swatch.dataset.swatch)).toEqual(ACCENTS);
     for (const swatch of swatches) {
       expect(swatch.getAttribute("aria-label")?.length ?? 0).toBeGreaterThan(0);
       expect(swatch.getAttribute("aria-pressed")).toMatch(/true|false/);
     }
+    const system = screen.getByRole("button", { name: "System accent" });
+    expect(system.textContent).toContain("System");
     expect(group.querySelectorAll('[aria-pressed="true"]')).toHaveLength(1);
   });
 
@@ -131,25 +219,32 @@ describe("appearance", () => {
     expect(usePrefs.getState().accent).toBe("teal");
   });
 
+  it("lets macOS set the translucency intensity", async () => {
+    const { user } = withUser(<SettingsView />);
+    const slider = screen.getByRole("slider", { name: "Translucency" });
+    await user.click(slider);
+    await user.keyboard("{ArrowRight}".repeat(3));
+    expect(usePrefs.getState().translucency).toBeGreaterThan(0);
+    expect(screen.getByText(`${usePrefs.getState().translucency}%`)).toBeTruthy();
+  });
+
   it("keeps every swatch colour immutable when another accent is selected", async () => {
     const { user } = withUser(<SettingsView />);
     const group = screen.getByRole("group", { name: "Accent" });
     const before = [...group.querySelectorAll<HTMLButtonElement>("button")].map(
       (swatch) => swatch.style.backgroundColor,
     );
-    const classes = [...group.querySelectorAll<HTMLButtonElement>("button")].map(
-      (swatch) => swatch.className,
-    );
+    const swatches = [...group.querySelectorAll<HTMLButtonElement>("button")];
 
-    expect(new Set(before)).toHaveLength(6);
-    expect(new Set(classes)).toHaveLength(1);
+    expect(new Set(before)).toHaveLength(ACCENTS.length);
+    for (const swatch of swatches) {
+      expect(swatch.className).toContain("rounded-full");
+      expect(swatch.className).toContain("focus-visible:ring-ring");
+    }
     await user.click(screen.getByRole("button", { name: "Teal" }));
     expect([...group.querySelectorAll<HTMLButtonElement>("button")].map(
       (swatch) => swatch.style.backgroundColor,
     )).toEqual(before);
-    expect([...group.querySelectorAll<HTMLButtonElement>("button")].map(
-      (swatch) => swatch.className,
-    )).toEqual(classes);
   });
 });
 

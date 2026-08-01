@@ -1,9 +1,3 @@
-/**
- * Pair creation and acceptance are deliberately absent from the UI: the
- * current daemon protocol persists a pairing before it can complete the
- * manifest-required SAS confirmation and has no abort state machine. Known
- * devices remain manageable below; see ADR-0007.
- */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -12,8 +6,11 @@ import { toFriendly } from "@/lib/errors";
 import { PEERS_POLL_MS, POLL_BACKOFF_MS } from "@/lib/layout";
 import {
   type DiscoveredDevice,
+  type PairingData,
   type PeerInfo,
   type SyncResult,
+  acceptPairing,
+  createPairing,
   listDiscovered,
   listPeers,
   rescanDiscovered,
@@ -28,10 +25,12 @@ export const DISCOVERED_KEY = ["discovered"] as const;
 export const SYNC_KEY = ["peer-sync"] as const;
 export const DISCOVERED_POLL_MS = 3_000;
 
-function uniqueDevices<T extends { readonly pairing_id: string }>(
-  devices: readonly T[],
-): T[] {
+function uniqueDevices<T extends { readonly pairing_id: string }>(devices: readonly T[]): T[] {
   return [...new Map(devices.map((device) => [device.pairing_id, device])).values()];
+}
+
+function uniqueDiscovered(devices: readonly DiscoveredDevice[]): DiscoveredDevice[] {
+  return [...new Map(devices.map((device) => [device.discovery_id, device])).values()];
 }
 
 export function usePeers() {
@@ -55,7 +54,7 @@ export function useDiscovered() {
     // A build with no discovery answers `unavailable`, which is a fact rather
     // than a transient failure.
     retry: false,
-    select: uniqueDevices,
+    select: uniqueDiscovered,
   });
 }
 
@@ -64,6 +63,26 @@ export function useRescan() {
   return useMutation<DiscoveredDevice[], unknown, void>({
     mutationFn: () => rescanDiscovered(),
     onSuccess: (devices) => qc.setQueryData(DISCOVERED_KEY, devices),
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+export function useCreatePairing() {
+  return useMutation<PairingData, unknown, string>({
+    mutationFn: createPairing,
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+export function useAcceptPairing() {
+  const qc = useQueryClient();
+  return useMutation<PeerInfo[], unknown, { code: string; addr: string }>({
+    mutationFn: ({ code, addr }) => acceptPairing(code, addr),
+    onSuccess: () => {
+      toast.success(t("devices.pairing.joined"));
+      void qc.invalidateQueries({ queryKey: PEERS_KEY });
+      void qc.invalidateQueries({ queryKey: DISCOVERED_KEY });
+    },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
 }

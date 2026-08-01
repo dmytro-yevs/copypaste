@@ -30,8 +30,8 @@ use copypaste_p2p::sync::SyncOutcome;
 use copypaste_p2p::{Node, NodeError};
 use tokio::sync::watch;
 
-use super::rows::peer_info;
 use super::Inner;
+use super::rows::peer_info;
 use crate::backend::{BackendError, Result};
 
 /// The node, plus the handle that stops its listener.
@@ -61,12 +61,17 @@ impl PeerNode {
             .collect();
         // Never fatal: a network that filters multicast still pairs and still
         // syncs to an explicit address, which is the common case on a phone.
-        let discovery = match Discovery::start(&inner.state.device_name, &pairing_ids, PORT) {
-            Ok(discovery) => Some(discovery),
-            Err(e) => {
-                tracing::warn!(error = %e, "could not start discovery; peers must be given an address");
-                None
+        let discovery = if inner.settings().lan_visibility {
+            match Discovery::start(&inner.state.device_name, &pairing_ids, PORT) {
+                Ok(discovery) => Some(discovery),
+                Err(e) => {
+                    tracing::warn!(error = %e, "could not start discovery; peers must be given an address");
+                    None
+                }
             }
+        } else {
+            tracing::info!("LAN visibility is off; not advertising or browsing");
+            None
         };
 
         let node = Arc::new(Node::new(peers, discovery, PORT));
@@ -114,6 +119,9 @@ impl PeerNode {
         code: &str,
         addr: &str,
     ) -> Result<Vec<PeerInfo>> {
+        if !inner.settings().sync_enabled {
+            return Err(BackendError::NotReady);
+        }
         let accepted = self
             .node
             .pair_accept(code, addr, &source(inner))
@@ -171,6 +179,9 @@ impl PeerNode {
         inner: &Arc<Inner>,
         pairing_id: Option<&str>,
     ) -> Result<Vec<SyncResult>> {
+        if !inner.settings().sync_enabled {
+            return Err(BackendError::NotReady);
+        }
         let targets = match pairing_id {
             Some(pairing_id) => match self.node.peers().get(pairing_id) {
                 Some(peer) => vec![peer],
@@ -226,9 +237,12 @@ impl PeerNode {
                 // anyone on the LAN can claim any pairing id, and `paired`
                 // decides whether the UI offers "pair" or "sync"
                 // (`CopyPaste-vgpy`).
-                paired: self.node.peers().get(&found.pairing_id).is_some(),
+                paired: found
+                    .pairing_ids
+                    .iter()
+                    .any(|id| self.node.peers().get(id).is_some()),
                 addr: found.addr.to_string(),
-                pairing_id: found.pairing_id,
+                discovery_id: found.discovery_id,
                 name: found.name,
                 last_seen_ms: found.last_seen_ms,
             })
@@ -248,13 +262,14 @@ const PORT: u16 = copypaste_p2p::DEFAULT_PORT;
 /// Built per operation, as the daemon builds it: it is three `Arc` clones and a
 /// pool handle, and a source parked on the backend it reads is a cycle.
 fn source(inner: &Arc<Inner>) -> StoreSource {
-    StoreSource::new(
+    let settings = Arc::clone(inner);
+    StoreSource::with_retention_settings(
         inner.state.store.clone(),
         Arc::clone(&inner.state.keyring),
         Arc::clone(&inner.state.detector),
         inner.state.device_id.clone(),
         inner.state.device_name.clone(),
-        inner.state.settings.clone(),
+        move || settings.settings(),
     )
 }
 
@@ -290,7 +305,9 @@ fn node_error_code(error: &NodeError) -> copypaste_ipc::ErrorCode {
     use copypaste_ipc::ErrorCode;
 
     match error {
-        NodeError::BadCode | NodeError::Handshake => ErrorCode::PairingCode,
+        NodeError::BadCode | NodeError::Handshake | NodeError::SelfPairing => {
+            ErrorCode::PairingCode
+        }
         NodeError::BadAddress => ErrorCode::PairingAddress,
         NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
         NodeError::TooManyPairings => ErrorCode::PairingLimit,

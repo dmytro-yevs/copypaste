@@ -10,18 +10,6 @@
 //! and whether a pairing was revoked ([`PeerStore::revoke`]). Both are refusals,
 //! and both are enforced on every read path rather than at one gate.
 //!
-//! # No backward compatibility
-//!
-//! `CLAUDE.md` rule 3: v2 must not open, or appear to open, anything v1 wrote.
-//! Two guards, both cheap:
-//!
-//! * [`DEFAULT_FILE_NAME`] is `peers-v2.json`, so v1's `peers.json` is never
-//!   touched and a user who downgrades finds it intact.
-//! * The envelope carries a `format` tag. A file that is valid JSON but not
-//!   tagged [`FORMAT_TAG`] is [`PeerStoreError::Legacy`], a plain "this was
-//!   written by a different version" — not a decryption error, and not silently
-//!   overwritten.
-
 mod error;
 mod file;
 mod peer;
@@ -76,13 +64,7 @@ pub struct RevokedDevice {
 
 /// Filename the daemon should use.
 ///
-/// Deliberately not `peers.json`: that is v1's name, and v2 must never open a
-/// v1 file (`CLAUDE.md` rule 3).
-pub const DEFAULT_FILE_NAME: &str = "peers-v2.json";
-
-/// Envelope tag. Its only job is to make "written by another version" a
-/// distinguishable answer from "corrupt".
-pub const FORMAT_TAG: &str = "copypaste-peers-v2";
+pub const DEFAULT_FILE_NAME: &str = "peers.json";
 
 #[cfg(test)]
 mod tests {
@@ -92,12 +74,4 @@ mod tests {
     /// one advertisement. A build failure if that stops being true, rather than
     /// a comment that quietly goes stale.
     const _: () = assert!(MAX_PAIRINGS <= crate::discovery::MAX_ADVERTISED_PAIRING_IDS);
-
-    #[test]
-    fn default_file_name_is_not_v1s() {
-        // `CLAUDE.md` rule 3: a v1 install's file must never be opened, or
-        // appear to be opened, by v2.
-        assert_eq!(DEFAULT_FILE_NAME, "peers-v2.json");
-        assert_ne!(DEFAULT_FILE_NAME, "peers.json");
-    }
 }

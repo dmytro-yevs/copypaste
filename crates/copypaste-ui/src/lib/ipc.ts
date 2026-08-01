@@ -2,12 +2,15 @@
  * Command names track `copypaste_ipc::Method`; field names are snake_case
  * because that is what serde emits.
  */
-import { call, hasBridge } from "./ipcCall";
+import { call, hasBridge, hasWebBridge } from "./ipcCall";
 import type {
   ConfigApplied,
   ConfigPatch,
   DiscoveredDevice,
   ExportReport,
+  ImagePreview,
+  InstalledSourceApp,
+  SourceAppIcon,
   ImportData,
   ImportPreview,
   Item,
@@ -26,6 +29,9 @@ export type {
   DiscoveredDevice,
   ErrorCode,
   ExportReport,
+  ImagePreview,
+  InstalledSourceApp,
+  SourceAppIcon,
   ImportData,
   ImportPreview,
   Item,
@@ -40,6 +46,12 @@ export type {
 
 /** Stable UI name retained for the Rust `ImportData` response DTO. */
 export type ImportReport = ImportData;
+
+export interface PairingData {
+  readonly code: string;
+  readonly pairing_id: string;
+  readonly listen_addr: string | null;
+}
 
 export { hasBridge };
 
@@ -86,6 +98,21 @@ export function revealItem(id: string): Promise<string> {
   return call<string>("reveal_item", { id });
 }
 
+/** A bounded PNG thumbnail requested only for a visible history image. */
+export function getImagePreview(id: string): Promise<ImagePreview> {
+  return call<ImagePreview>("get_image_preview", { id });
+}
+
+/** A bounded native app icon resolved from a captured bundle/package id. */
+export function getSourceAppIcon(bundleId: string): Promise<SourceAppIcon | null> {
+  return call<SourceAppIcon | null>("get_source_app_icon", { bundleId });
+}
+
+/** Android's PackageManager catalogue for Settings → Service exclusions. */
+export function listInstalledSourceApps(): Promise<InstalledSourceApp[]> {
+  return call<InstalledSourceApp[]>("list_installed_source_apps");
+}
+
 export function deleteItem(id: string): Promise<boolean> {
   return call<boolean>("delete_item", { id });
 }
@@ -113,6 +140,18 @@ export function listPeers(): Promise<PeerInfo[]> {
   return call<PeerInfo[]>("peers");
 }
 
+export function createPairing(name: string): Promise<PairingData> {
+  return call<PairingData>("pair_create", { name });
+}
+
+export function acceptPairing(code: string, addr: string): Promise<PeerInfo[]> {
+  return call<PeerInfo[]>("pair_accept", { code, addr });
+}
+
+export function scanPairingQr(): Promise<string | null> {
+  return call<string | null>("scan_pairing_qr");
+}
+
 export function unpair(pairingId: string): Promise<void> {
   return call<void>("unpair", { pairingId });
 }
@@ -128,7 +167,15 @@ export function revokeDevice(pairingId: string): Promise<void> {
  *  the route for an item — it takes an id, so a clipping's plaintext never
  *  enters the WebView. */
 export function copyText(text: string): Promise<void> {
+  if (hasWebBridge()) return navigator.clipboard.writeText(text);
   return call<void>("copy_text", { text });
+}
+
+/** Reads pairing credentials only after an explicit Paste action. The native
+ * command keeps arbitrary page code from receiving permanent clipboard access. */
+export function readPairingText(): Promise<string> {
+  if (hasWebBridge()) return navigator.clipboard.readText();
+  return call<string>("read_pairing_text");
 }
 
 export function syncNow(pairingId?: string): Promise<SyncResult[]> {
@@ -171,6 +218,18 @@ export function hideWindow(): Promise<void> {
 /** Show the full application surface from the compact Quick Paste popup. */
 export function showMainWindow(): Promise<void> {
   return call<void>("show_main_window");
+}
+
+/** Browser Quick Paste has no native window to reveal. */
+export function openSettingsFromQuickPaste(): Promise<void> {
+  if (hasWebBridge()) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("surface");
+    url.searchParams.set("view", "settings");
+    window.location.assign(url.toString());
+    return Promise.resolve();
+  }
+  return showMainWindow();
 }
 
 /** INV-35. The window is created protected on both platforms, so this only

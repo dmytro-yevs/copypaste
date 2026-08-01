@@ -10,8 +10,8 @@ use copypaste_ipc::{
     ConfigApplied, ConfigData, ConfigPatch, ErrorCode, PrivateModeData, Response, ResponseData,
 };
 
-use crate::settings::SettingsError;
 use crate::AppState;
+use crate::settings::SettingsError;
 
 pub(super) fn get(state: &AppState, id: u64) -> Response {
     Response::ok(

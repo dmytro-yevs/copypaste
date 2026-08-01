@@ -32,18 +32,23 @@ export function Sidebar() {
     <nav
       aria-label={t("nav.primary")}
       className={cn(
-        "flex shrink-0 bg-sidebar",
+        "flex shrink-0",
         android
-          ? "min-h-[var(--tabbar-h)] border-t border-sidebar-border pb-[var(--inset-bottom)]"
-          : "w-[var(--sidebar-w)] flex-col gap-s-1 border-r border-sidebar-border p-s-2",
+          ? "chrome min-h-[calc(var(--tabbar-h)+var(--inset-bottom))] bg-transparent px-s-3 pt-s-2 pb-[var(--inset-bottom)]"
+          : "w-[var(--sidebar-w)] flex-col gap-s-1 border-r border-sidebar-border bg-transparent p-s-2",
       )}
     >
-      <ul className={cn("flex flex-1", !android && "flex-col gap-s-1")}>
+      <ul className={cn(
+        "flex",
+        android
+          ? "flex-1 rounded-xl border border-sidebar-border bg-sidebar p-1 shadow-sm"
+          : "shrink-0 flex-col gap-s-1",
+      )}>
         {ITEMS.map(({ view: id, label: key, icon: Icon }) => {
           const active = view === id;
           const label = t(key);
           return (
-            <li key={id} className="flex-1">
+            <li key={id} className={android ? "flex-1" : undefined}>
               <button
                 type="button"
                 onClick={() => setView(id)}
@@ -66,6 +71,8 @@ export function Sidebar() {
           );
         })}
       </ul>
+
+      {android && <StatusChip attentionOnly />}
 
       {!android && (
         <div className="mt-auto">

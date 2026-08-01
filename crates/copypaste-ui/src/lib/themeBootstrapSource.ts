@@ -2,6 +2,7 @@ import {
   APPEARANCE_SERIALIZATION,
   parseAppearanceFields,
   translucencyAttribute,
+  translucencyStyle,
   unwrapPersistedPrefs,
 } from "./appearancePrefs.ts";
 
@@ -19,6 +20,7 @@ export function themeBootstrapSource(): string {
   var unwrapPersistedPrefs = ${unwrapPersistedPrefs.toString()};
   var parseAppearanceFields = ${parseAppearanceFields.toString()};
   var translucencyAttribute = ${translucencyAttribute.toString()};
+  var translucencyStyle = ${translucencyStyle.toString()};
   var appearance = { ...contract.defaults };
 
   try {
@@ -49,6 +51,10 @@ export function themeBootstrapSource(): string {
   root.dataset.themePref = appearance.theme;
   root.dataset.accent = appearance.accent;
   root.dataset.translucency = translucencyAttribute(appearance.translucency);
+  var translucencyValues = translucencyStyle(appearance.translucency);
+  for (var name in translucencyValues) {
+    root.style.setProperty(name, translucencyValues[name]);
+  }
   root.dataset.themeBootstrapped = "1";
 })();
 `;

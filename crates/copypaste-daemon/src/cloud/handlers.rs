@@ -20,8 +20,8 @@ use copypaste_ipc::{ErrorCode, Response, ResponseData};
 use tracing::{info, warn};
 use zeroize::Zeroizing;
 
-use crate::cloud::{poll, source::StoreSource, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM};
 use crate::AppState;
+use crate::cloud::{KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, poll, source::StoreSource};
 
 const MSG_NOT_CONFIGURED: &str =
     "cloud sync is not configured; the daemon needs a project URL and anon key";
@@ -188,6 +188,9 @@ pub async fn status(state: &Arc<AppState>, id: u64) -> Response {
 
 /// Run one round now rather than waiting for the poll.
 pub async fn sync_now(state: &Arc<AppState>, id: u64) -> Response {
+    if !state.settings.get().sync_enabled {
+        return Response::err(id, ErrorCode::NotReady, "Sync is turned off.");
+    }
     if !state.cloud.is_configured() {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_NOT_CONFIGURED);
     }
@@ -366,6 +369,26 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn the_live_sync_switch_blocks_an_explicit_cloud_round() {
+        let (state, _dir) = test_state("alpha");
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &copypaste_ipc::ConfigPatch {
+                    sync_enabled: Some(false),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            sync_now(&state, 1).await.error_code,
+            Some(ErrorCode::NotReady)
+        );
     }
 
     #[tokio::test]

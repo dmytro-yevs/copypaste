@@ -37,18 +37,13 @@
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
 //!
-//! v2 drops backward compatibility (`CLAUDE.md` rule 3), so the v1→v15
-//! migration ladder, `migration_state` and `key_version` dispatch are gone: the
-//! schema starts clean at version 1 and `rusqlite_migration` owns the ladder.
-//! The one obligation that creates is [`legacy`]: a v0.4.x file is identified
-//! and refused with [`StoreError::LegacyDatabase`], never opened and never
-//! reported as corrupt.
+//! The schema starts clean at version 1 and `rusqlite_migration` owns its
+//! evolution.
 
 mod connection;
 mod dbfile;
 mod identity;
 mod items;
-mod legacy;
 mod model;
 mod page;
 mod pinning;
@@ -61,7 +56,6 @@ mod versions;
 
 pub use dbfile::{attach_key_literal, open_validated, verify_integrity, verify_schema};
 pub use identity::DeviceIdentity;
-pub use legacy::{is_v1_database, v1_database_in, V1_DATABASE_FILENAME};
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page};
 pub use retention::{compute_content_hash, DEDUP_WINDOW_MS};
@@ -114,6 +108,7 @@ pub(crate) mod test_support {
             search_text: Some(text.to_string()),
             created_at,
             app_bundle_id: None,
+            app_name: None,
             payload_metadata: None,
         }
     }

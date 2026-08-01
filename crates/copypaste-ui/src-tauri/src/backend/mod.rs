@@ -48,7 +48,7 @@ use std::path::Path;
 
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -130,11 +130,28 @@ pub trait Backend: Send + Sync + 'static {
     /// Add an item directly, bypassing clipboard capture.
     async fn add(&self, content: &str) -> Result<Item>;
 
+    /// Store a clipboard capture with platform-supplied provenance.
+    ///
+    /// Backends that cannot observe a source use the ordinary add path. The
+    /// embedded Android backend overrides this so captured package ids reach
+    /// the shared ingest implementation rather than being discarded in UI.
+    async fn add_captured(
+        &self,
+        content: &str,
+        _app_bundle_id: Option<&str>,
+        _app_name: Option<&str>,
+    ) -> Result<Item> {
+        self.add(content).await
+    }
+
     /// Fetch one item by id, including a sensitive one's plaintext.
     ///
     /// The only route back to a secret, and it exists for the explicit reveal
     /// gesture. See `crate::model` for why nothing else needs one.
     async fn get(&self, id: &str) -> Result<Item>;
+
+    /// Decode one non-sensitive history image into a bounded preview on demand.
+    async fn image_preview(&self, id: &str) -> Result<ImagePreview>;
 
     /// Put an item's content on the system clipboard.
     ///

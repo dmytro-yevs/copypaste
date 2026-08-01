@@ -104,6 +104,8 @@ mod tests {
             is_sensitive,
             origin_device_id: "device-1".into(),
             origin_device_name: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             too_large_to_sync: false,
         }
     }

@@ -56,7 +56,6 @@ pub struct AppState {
     /// Set rather than passed: decided outside construction, read by `status`,
     /// and threading it through `new` would touch every caller for a value none
     /// of them has an opinion about. Same for `ready` and `index_purged`.
-    legacy_history: AtomicBool,
     /// The clipboard's own two counters live on the port; these are the ones
     /// nothing else owns.
     sensitive_swept: AtomicU64,
@@ -97,7 +96,6 @@ impl AppState {
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
-            legacy_history: AtomicBool::new(false),
             sensitive_swept: AtomicU64::new(0),
             index_purged: AtomicU64::new(0),
             started_at: Instant::now(),
@@ -207,14 +205,6 @@ impl AppState {
 
     pub fn set_capture_running(&self, running: bool) {
         self.capture_running.store(running, Ordering::Release);
-    }
-
-    pub fn legacy_history_present(&self) -> bool {
-        self.legacy_history.load(Ordering::Acquire)
-    }
-
-    pub fn set_legacy_history_present(&self, present: bool) {
-        self.legacy_history.store(present, Ordering::Release);
     }
 
     pub fn set_index_purged(&self, purged: u64) {

@@ -1,5 +1,5 @@
 {
-  "$description": "The translucency axis. Solid is the baseline and the fallback: the frosted values are applied additively inside an @supports (backdrop-filter) block, so an engine without backdrop-filter gets the solid values with no separate rule and no lower-specificity rule for the on-state to defeat. prefers-reduced-transparency forces them back (A11Y-12). Only chrome surfaces frost — the sidebar, the header, the dialog scrim; content surfaces stay solid so a clipboard preview is never read through anything.",
+  "$description": "The desktop translucency axis. Solid is the baseline and the fallback: the frosted values are applied additively inside an @supports (backdrop-filter) block, so an engine without backdrop-filter gets the solid values with no separate rule and no lower-specificity rule for the on-state to defeat. prefers-reduced-transparency forces them back (A11Y-12). Only chrome surfaces frost — the sidebar, the header, the dialog scrim; content surfaces stay solid so a clipboard preview is never read through anything.",
   "$type": "string",
   "$extensions": { "com.copypaste": { "platforms": ["css"] } },
 
@@ -8,12 +8,14 @@
       "$description": "Default, and what [data-translucency=\"off\"] or an engine without backdrop-filter gets.",
       "frost-filter": { "$value": "none" },
       "chrome-bg": { "$value": "var(--panel)" },
+      "app-bg": { "$value": "var(--bg)" },
       "scrim-blur": { "$value": "none" }
     },
     "frosted": {
-      "$description": "Applied only under [data-translucency=\"on\"] AND @supports backdrop-filter. On macOS this is what makes the window read as a native panel; on Android it is a quiet blur behind the header.",
+      "$description": "Applied only under [data-translucency=\"on\"] AND @supports backdrop-filter. On macOS the transparent native window makes this read as a native frosted panel.",
       "frost-filter": { "$value": "saturate(180%) blur(20px)" },
       "chrome-bg": { "$value": "color-mix(in oklab, var(--panel) 72%, transparent)" },
+      "app-bg": { "$value": "color-mix(in oklab, var(--bg) 84%, transparent)" },
       "scrim-blur": { "$value": "blur(2px)" }
     }
   }

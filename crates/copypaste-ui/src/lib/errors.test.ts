@@ -15,7 +15,6 @@ describe("structured IPC failures", () => {
   it.each([
     ["not_ready", true],
     ["protocol_mismatch", false],
-    ["legacy_database", false],
     ["key_locked", true],
     ["key_unusable", false],
     ["peer_unreachable", true],
@@ -80,7 +79,7 @@ describe("structured IPC failures", () => {
     expect(isUnavailable({ code: "offline", retryable: true })).toBe(false);
   });
 
-  it("turns a malformed legacy rejection into a safe unknown failure", () => {
+  it("turns a malformed rejection into a safe unknown failure", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const failure = ipcFailure({ code: "not_ready", retryable: "yes" });
     expect(failure).toEqual(expect.objectContaining({

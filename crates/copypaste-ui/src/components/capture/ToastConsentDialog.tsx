@@ -9,6 +9,8 @@
  * * With the explanation off screen there is no confirm button, absent rather
  *   than disabled: there is nothing to consent to yet.
  */
+import { Check, X } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,6 +54,7 @@ export function ToastConsentDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <X aria-hidden="true" />
             {t("common.cancel")}
           </Button>
 
@@ -64,6 +67,7 @@ export function ToastConsentDialog({
                 })
               }
             >
+              <Check aria-hidden="true" />
               {t("capture.toast.dialog.confirm")}
             </Button>
           )}

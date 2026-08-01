@@ -5,10 +5,13 @@
 //! better than blocking access to encrypted history when SQLite cannot read
 //! the index.
 
+use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::RwLock;
 
-use copypaste_core::{purge_indexed_secrets, CryptoError, Detector, Keyring, Store, StoreError};
+use copypaste_core::{CryptoError, Detector, Keyring, Store, StoreError, purge_indexed_secrets};
 use copypaste_ipc::ErrorCode;
 
 use crate::backend::{BackendError, Result};
@@ -22,9 +25,6 @@ const DEVICE_NAME_HINT: &str = "CopyPaste phone";
 
 pub(super) struct BackendState {
     pub(super) store: Store,
-    /// Kept for the v0.4 probe in [`super::rows::status_of`], which states why
-    /// (B-33).
-    pub(super) data_dir: PathBuf,
     // Both are behind an `Arc` because `copypaste_core::StoreSource` holds them
     // for as long as the peer listener runs.
     pub(super) keyring: Arc<Keyring>,
@@ -36,9 +36,8 @@ pub(super) struct BackendState {
     /// Where the paired-device list lives. The `PeerStore` itself belongs to
     /// the node, which owns it by value.
     pub(super) peers_path: PathBuf,
-    /// The defaults, and only the defaults: there is no daemon here and no
-    /// config file, so a settings screen on Android will not stick (ADR-0005).
-    pub(super) settings: copypaste_ipc::ConfigData,
+    pub(super) settings: RwLock<copypaste_ipc::ConfigData>,
+    pub(super) settings_path: PathBuf,
     /// Search-index rows removed by this process's startup purge. Kept so the
     /// status/diagnostics surface tells the same truth as the daemon does.
     pub(super) index_purged: u64,
@@ -54,8 +53,7 @@ impl BackendState {
         // somewhere the history is not (security review F-11).
         let keyring = Keyring::load_or_create(data_dir).map_err(keyring_error)?;
 
-        // The v2 filename, from the shared crate. Deliberately distinct from
-        // v1's so an old database is never touched (CLAUDE.md rule 3).
+        // The database filename comes from the shared crate.
         let db_path = data_dir.join(
             copypaste_ipc::database_path()
                 .file_name()
@@ -77,21 +75,52 @@ impl BackendState {
         // opening the user's clips (the daemon follows the same rule).
         let index_purged = purge_search_index(&store, &detector);
 
+        let settings_path = data_dir.join("settings-v2.json");
         Ok(Self {
             store,
-            data_dir: data_dir.to_path_buf(),
             keyring: Arc::new(keyring),
             detector: Arc::new(detector),
             device_id: identity.device_id,
             device_name: identity.device_name,
-            // The name from the shared crate, as the daemon uses. Spelling it
-            // here is how this backend came to open `peers.json`, which is v1's
-            // file (CLAUDE.md rule 3).
+            // The name from the shared crate, as the daemon uses.
             peers_path: data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
-            settings: copypaste_ipc::ConfigData::default(),
+            settings: RwLock::new(read_settings(&settings_path)),
+            settings_path,
             index_purged,
         })
     }
+}
+
+const SETTINGS_SAVE_ERROR: &str = "CopyPaste couldn't save these settings.";
+
+fn read_settings(path: &Path) -> copypaste_ipc::ConfigData {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+pub(super) fn write_settings(path: &Path, settings: &copypaste_ipc::ConfigData) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| BackendError::internal(SETTINGS_SAVE_ERROR))?;
+    fs::create_dir_all(parent).map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
+    let encoded =
+        serde_json::to_vec(settings).map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
+    temporary
+        .write_all(&encoded)
+        .and_then(|_| temporary.flush())
+        .and_then(|_| temporary.as_file().sync_all())
+        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
+    temporary
+        .persist(path)
+        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
+    if let Ok(directory) = fs::File::open(parent) {
+        let _ = directory.sync_all();
+    }
+    Ok(())
 }
 
 fn keyring_error(error: CryptoError) -> BackendError {
@@ -109,7 +138,6 @@ fn keyring_error(error: CryptoError) -> BackendError {
 fn store_open_error(error: StoreError) -> BackendError {
     let message = format!("could not open history: {error}");
     let code = match error {
-        StoreError::LegacyDatabase => ErrorCode::LegacyDatabase,
         StoreError::Sqlite(_)
         | StoreError::Pool(_)
         | StoreError::Migration(_)
@@ -162,6 +190,7 @@ mod tests {
                 is_sensitive: false,
                 search_text: Some(text.to_string()),
                 app_bundle_id: None,
+                app_name: None,
                 payload_metadata: None,
                 created_at: 1,
             })
@@ -199,6 +228,7 @@ mod tests {
                 is_sensitive: false,
                 search_text: Some(secret.into()),
                 app_bundle_id: None,
+                app_name: None,
                 payload_metadata: None,
                 created_at: 1_700_000_000_000,
             })

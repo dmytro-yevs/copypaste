@@ -237,6 +237,7 @@ impl ClipboardSource for FakeClipboard {
             file_metadata: None,
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             app_bundle_id,
+            app_name: None,
         })
     }
 

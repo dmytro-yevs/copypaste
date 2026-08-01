@@ -18,7 +18,10 @@ export function CaptureLadder({ rungs }: { rungs: readonly LadderRung[] }) {
   const { t } = useTranslation();
 
   return (
-    <section className="flex flex-col gap-s-2">
+    <section
+      data-settings-search-target={`section:${t("capture.setup.ladder.title")}`}
+      className="flex flex-col gap-s-2"
+    >
       <h2 className="text-sm font-medium">{t("capture.setup.ladder.title")}</h2>
 
       <ol

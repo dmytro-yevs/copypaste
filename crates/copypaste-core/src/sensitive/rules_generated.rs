@@ -49,9 +49,7 @@ pub(super) static GLOBAL_ALLOWLISTS: &[AllowlistSpec] = &[];
 
 pub(super) static RULES: &[RuleSpec] = &[
     RuleSpec {
-        upstream_ids: &[
-            "aws-access-token",
-        ],
+        upstream_ids: &["aws-access-token"],
         name: "aws_access_key",
         category: Category::Credential,
         confidence: 0.99,
@@ -59,20 +57,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "a3t",
-            "akia",
-            "asia",
-            "abia",
-            "acca",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["a3t", "akia", "asia", "abia", "acca"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "github-fine-grained-pat",
-        ],
+        upstream_ids: &["github-fine-grained-pat"],
         name: "github_fine_grained",
         category: Category::Credential,
         confidence: 0.99,
@@ -80,16 +69,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "github_pat_",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["github_pat_"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "github-pat",
-        ],
+        upstream_ids: &["github-pat"],
         name: "github_classic_pat",
         category: Category::Credential,
         confidence: 0.99,
@@ -97,16 +81,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "ghp_",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["ghp_"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "github-app-token",
-        ],
+        upstream_ids: &["github-app-token"],
         name: "github_app_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -114,17 +93,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "ghu_",
-            "ghs_",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["ghu_", "ghs_"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "github-oauth",
-        ],
+        upstream_ids: &["github-oauth"],
         name: "github_oauth",
         category: Category::Credential,
         confidence: 0.99,
@@ -132,16 +105,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "gho_",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["gho_"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "github-refresh-token",
-        ],
+        upstream_ids: &["github-refresh-token"],
         name: "github_refresh_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -149,16 +117,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "ghr_",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["ghr_"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "openai-api-key",
-        ],
+        upstream_ids: &["openai-api-key"],
         name: "openai_api_key",
         category: Category::Credential,
         confidence: 0.99,
@@ -166,17 +129,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "t3blbkfj",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["t3blbkfj"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "anthropic-api-key",
-            "anthropic-admin-api-key",
-        ],
+        upstream_ids: &["anthropic-api-key", "anthropic-admin-api-key"],
         name: "anthropic",
         category: Category::Credential,
         confidence: 0.99,
@@ -184,17 +141,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "sk-ant-api03",
-            "sk-ant-admin01",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["sk-ant-api03", "sk-ant-admin01"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "stripe-access-token",
-        ],
+        upstream_ids: &["stripe-access-token"],
         name: "stripe_live",
         category: Category::Credential,
         confidence: 0.99,
@@ -203,20 +154,12 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[
-            "sk_test",
-            "sk_live",
-            "sk_prod",
-            "rk_test",
-            "rk_live",
-            "rk_prod",
+            "sk_test", "sk_live", "sk_prod", "rk_test", "rk_live", "rk_prod",
         ],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "npm-access-token",
-        ],
+        upstream_ids: &["npm-access-token"],
         name: "npm_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -224,16 +167,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "npm_",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["npm_"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "pypi-upload-token",
-        ],
+        upstream_ids: &["pypi-upload-token"],
         name: "pypi_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -241,16 +179,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "pypi-ageichlwas5vcmc",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["pypi-ageichlwas5vcmc"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "slack-bot-token",
-        ],
+        upstream_ids: &["slack-bot-token"],
         name: "slack_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -258,16 +191,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "xoxb",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["xoxb"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "slack-webhook-url",
-        ],
+        upstream_ids: &["slack-webhook-url"],
         name: "slack_webhook",
         category: Category::Credential,
         confidence: 0.99,
@@ -275,16 +203,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "hooks.slack.com",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["hooks.slack.com"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "discord-api-token",
-        ],
+        upstream_ids: &["discord-api-token"],
         name: "discord_api_token",
         category: Category::Credential,
         confidence: 0.92,
@@ -292,16 +215,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "discord",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["discord"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "twilio-api-key",
-        ],
+        upstream_ids: &["twilio-api-key"],
         name: "twilio_signing_key_sid",
         category: Category::Credential,
         confidence: 0.65,
@@ -309,16 +227,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "sk",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["sk"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "sendgrid-api-token",
-        ],
+        upstream_ids: &["sendgrid-api-token"],
         name: "sendgrid_api_key",
         category: Category::Credential,
         confidence: 0.99,
@@ -326,16 +239,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "sg.",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["sg."],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "hashicorp-tf-api-token",
-        ],
+        upstream_ids: &["hashicorp-tf-api-token"],
         name: "terraform_cloud_token",
         category: Category::Credential,
         confidence: 0.99,
@@ -343,16 +251,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "atlasv1",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["atlasv1"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "gcp-api-key",
-        ],
+        upstream_ids: &["gcp-api-key"],
         name: "google_api_key",
         category: Category::Credential,
         confidence: 0.99,
@@ -360,39 +263,33 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(4.0),
-        keywords: &[
-            "aiza",
-        ],
-        allowlists: &[
-            AllowlistSpec {
-                condition: AllowlistCondition::Any,
-                target: AllowlistTarget::Secret,
-                regexes: &[
-                    "AIzaSyabcdefghijklmnopqrstuvwxyz1234567",
-                    "AIzaSyAnLA7NfeLquW1tJFpx_eQCxoX-oo6YyIs",
-                    "AIzaSyCkEhVjf3pduRDt6d1yKOMitrUEke8agEM",
-                    "AIzaSyDMAScliyLx7F0NPDEJi1QmyCgHIAODrlU",
-                    "AIzaSyD3asb-2pEZVqMkmL6M9N6nHZRR_znhrh0",
-                    "AIzayDNSXIbFmlXbIE6mCzDLQAqITYefhixbX4A",
-                    "AIzaSyAdOS2zB6NCsk1pCdZ4-P6GBdi_UUPwX7c",
-                    "AIzaSyASWm6HmTMdYWpgMnjRBjxcQ9CKctWmLd4",
-                    "AIzaSyANUvH9H9BsUccjsu2pCmEkOPjjaXeDQgY",
-                    "AIzaSyA5_iVawFQ8ABuTZNUdcwERLJv_a_p4wtM",
-                    "AIzaSyA4UrcGxgwQFTfaI3no3t7Lt1sjmdnP5sQ",
-                    "AIzaSyDSb51JiIcB6OJpwwMicseKRhhrOq1cS7g",
-                    "AIzaSyBF2RrAIm4a0mO64EShQfqfd2AFnzAvvuU",
-                    "AIzaSyBcE-OOIbhjyR83gm4r2MFCu4MJmprNXsw",
-                    "AIzaSyB8qGxt4ec15vitgn44duC5ucxaOi4FmqE",
-                    "AIzaSyA8vmApnrHNFE0bApF4hoZ11srVL_n0nvY",
-                ],
-                stopwords: &[],
-            },
-        ],
+        keywords: &["aiza"],
+        allowlists: &[AllowlistSpec {
+            condition: AllowlistCondition::Any,
+            target: AllowlistTarget::Secret,
+            regexes: &[
+                "AIzaSyabcdefghijklmnopqrstuvwxyz1234567",
+                "AIzaSyAnLA7NfeLquW1tJFpx_eQCxoX-oo6YyIs",
+                "AIzaSyCkEhVjf3pduRDt6d1yKOMitrUEke8agEM",
+                "AIzaSyDMAScliyLx7F0NPDEJi1QmyCgHIAODrlU",
+                "AIzaSyD3asb-2pEZVqMkmL6M9N6nHZRR_znhrh0",
+                "AIzayDNSXIbFmlXbIE6mCzDLQAqITYefhixbX4A",
+                "AIzaSyAdOS2zB6NCsk1pCdZ4-P6GBdi_UUPwX7c",
+                "AIzaSyASWm6HmTMdYWpgMnjRBjxcQ9CKctWmLd4",
+                "AIzaSyANUvH9H9BsUccjsu2pCmEkOPjjaXeDQgY",
+                "AIzaSyA5_iVawFQ8ABuTZNUdcwERLJv_a_p4wtM",
+                "AIzaSyA4UrcGxgwQFTfaI3no3t7Lt1sjmdnP5sQ",
+                "AIzaSyDSb51JiIcB6OJpwwMicseKRhhrOq1cS7g",
+                "AIzaSyBF2RrAIm4a0mO64EShQfqfd2AFnzAvvuU",
+                "AIzaSyBcE-OOIbhjyR83gm4r2MFCu4MJmprNXsw",
+                "AIzaSyB8qGxt4ec15vitgn44duC5ucxaOi4FmqE",
+                "AIzaSyA8vmApnrHNFE0bApF4hoZ11srVL_n0nvY",
+            ],
+            stopwords: &[],
+        }],
     },
     RuleSpec {
-        upstream_ids: &[
-            "heroku-api-key",
-        ],
+        upstream_ids: &["heroku-api-key"],
         name: "heroku_api_key",
         category: Category::Credential,
         confidence: 0.95,
@@ -400,17 +297,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "heroku",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["heroku"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "vault-service-token",
-            "vault-batch-token",
-        ],
+        upstream_ids: &["vault-service-token", "vault-batch-token"],
         name: "hashicorp_vault",
         category: Category::Credential,
         confidence: 0.95,
@@ -418,26 +309,16 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "hvs.",
-            "hvb.",
-            "s.",
-        ],
-        allowlists: &[
-            AllowlistSpec {
-                condition: AllowlistCondition::Any,
-                target: AllowlistTarget::Secret,
-                regexes: &[
-                    "^s\\.[A-Za-z]{24}$",
-                ],
-                stopwords: &[],
-            },
-        ],
+        keywords: &["hvs.", "hvb.", "s."],
+        allowlists: &[AllowlistSpec {
+            condition: AllowlistCondition::Any,
+            target: AllowlistTarget::Secret,
+            regexes: &["^s\\.[A-Za-z]{24}$"],
+            stopwords: &[],
+        }],
     },
     RuleSpec {
-        upstream_ids: &[
-            "cloudflare-api-key",
-        ],
+        upstream_ids: &["cloudflare-api-key"],
         name: "cloudflare_api_token",
         category: Category::Credential,
         confidence: 0.92,
@@ -445,17 +326,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "cloudflare_api_",
-            "cf_api_token",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["cloudflare_api_", "cf_api_token"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "private-key",
-        ],
+        upstream_ids: &["private-key"],
         name: "private_key",
         category: Category::Credential,
         confidence: 0.99,
@@ -463,16 +338,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "-----begin",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["-----begin"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "generic-api-key",
-        ],
+        upstream_ids: &["generic-api-key"],
         name: "generic_api_key",
         category: Category::Credential,
         confidence: 0.75,
@@ -496,9 +366,7 @@ pub(super) static RULES: &[RuleSpec] = &[
             AllowlistSpec {
                 condition: AllowlistCondition::Any,
                 target: AllowlistTarget::Secret,
-                regexes: &[
-                    "^[a-zA-Z_.-]+$",
-                ],
+                regexes: &["^[a-zA-Z_.-]+$"],
                 stopwords: &[],
             },
             AllowlistSpec {
@@ -1968,9 +1836,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         ],
     },
     RuleSpec {
-        upstream_ids: &[
-            "jwt",
-        ],
+        upstream_ids: &["jwt"],
         name: "jwt",
         category: Category::Credential,
         confidence: 0.95,
@@ -1978,16 +1844,11 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: Some(3.0),
-        keywords: &[
-            "ey",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["ey"],
+        allowlists: &[],
     },
     RuleSpec {
-        upstream_ids: &[
-            "gitlab-pat",
-        ],
+        upstream_ids: &["gitlab-pat"],
         name: "gitlab_pat",
         category: Category::Credential,
         confidence: 0.99,
@@ -1995,11 +1856,8 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
         secret_group: 0,
         entropy: None,
-        keywords: &[
-            "glpat-",
-        ],
-        allowlists: &[
-        ],
+        keywords: &["glpat-"],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2011,8 +1869,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2024,8 +1881,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2037,8 +1893,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2050,8 +1905,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2063,8 +1917,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2076,8 +1929,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2089,8 +1941,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2102,8 +1953,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2115,8 +1965,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2128,8 +1977,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2141,8 +1989,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2154,8 +2001,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 1,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2167,8 +2013,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 1,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2180,8 +2025,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2193,8 +2037,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 1,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2206,8 +2049,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2219,8 +2061,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2232,8 +2073,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2245,8 +2085,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2258,8 +2097,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2271,8 +2109,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2284,8 +2121,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
     RuleSpec {
         upstream_ids: &[],
@@ -2297,7 +2133,6 @@ pub(super) static RULES: &[RuleSpec] = &[
         secret_group: 0,
         entropy: None,
         keywords: &[],
-        allowlists: &[
-        ],
+        allowlists: &[],
     },
 ];

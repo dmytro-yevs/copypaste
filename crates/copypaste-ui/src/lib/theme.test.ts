@@ -29,7 +29,7 @@ describe("system appearance after startup (AT-53)", () => {
       configurable: true,
       value: vi.fn(() => ({ matches, addEventListener }) as unknown as MediaQueryList),
     });
-    const prefs = { theme: "system", accent: "blue", translucency: false } as const;
+    const prefs = { theme: "system", accent: "blue", translucency: 0 } as const;
 
     applyAppearance(prefs);
     subscribeSystemTheme(() => applyAppearance(prefs));
@@ -40,5 +40,23 @@ describe("system appearance after startup (AT-53)", () => {
     matches = true;
     onChange?.();
     expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
+  it("applies translucency intensity as CSS variables", () => {
+    applyAppearance({ theme: "dark", accent: "indigo", translucency: 50 });
+
+    expect(document.documentElement.dataset.translucency).toBe("on");
+    expect(document.documentElement.style.getPropertyValue("--translucency-blur")).toBe("10px");
+    expect(document.documentElement.style.getPropertyValue("--translucency-chrome-opacity")).toBe("86%");
+
+    applyAppearance({ theme: "dark", accent: "indigo", translucency: 0 });
+    expect(document.documentElement.dataset.translucency).toBe("off");
+  });
+
+  it("keeps the browser-preview fallback when System accent is selected", () => {
+    applyAppearance({ theme: "dark", accent: "system", translucency: 0 });
+
+    expect(document.documentElement.dataset.accent).toBe("system");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
   });
 });

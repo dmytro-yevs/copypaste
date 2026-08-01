@@ -19,15 +19,29 @@ function Tabs({ className, ...props }: ComponentProps<typeof TabsPrimitive.Root>
  * (CopyPaste-g27b.31), so `flex-wrap` here is a requirement, not a preference —
  * `shell-reflow.test.tsx` asserts it.
  */
+type TabsListProps = ComponentProps<typeof TabsPrimitive.List> & {
+  variant?: "bare" | "floating";
+  equalWidth?: boolean;
+};
+
 function TabsList({
   className,
+  variant = "floating",
+  equalWidth = false,
   ...props
-}: ComponentProps<typeof TabsPrimitive.List>) {
+}: TabsListProps) {
   return (
     <TabsPrimitive.List
       data-slot="tabs-list"
+      data-equal-width={equalWidth || undefined}
       className={cn(
-        "inline-flex w-fit flex-wrap items-center justify-start gap-1 rounded-lg bg-muted p-[3px] text-muted-foreground",
+        variant === "floating"
+          ? equalWidth
+            ? "grid w-full grid-flow-col auto-cols-fr items-center gap-1 rounded-full border border-border bg-panel/90 p-1 text-muted-foreground shadow-sm backdrop-blur-sm"
+            : "inline-flex w-fit flex-wrap items-center justify-start gap-1 rounded-full border border-border bg-panel/90 p-1 text-muted-foreground shadow-sm backdrop-blur-sm"
+          : equalWidth
+            ? "grid w-full grid-flow-col auto-cols-fr"
+            : "flex",
         className,
       )}
       {...props}
@@ -43,8 +57,8 @@ function TabsTrigger({
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "inline-flex min-h-[var(--tap-min)] min-w-[var(--tap-min)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50",
-        "data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs",
+        "inline-flex min-h-[var(--tap-min)] min-w-[var(--tap-min)] flex-1 items-center justify-center gap-1.5 rounded-full border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap transition-[color,background-color,box-shadow] hover:bg-accent hover:text-accent-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50",
+        "data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-xs",
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}

@@ -7,7 +7,6 @@
  */
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/i18n";
 import { MAX_PREVIEW_LINES, MIN_PREVIEW_LINES } from "@/lib/layout";
 import {
@@ -54,17 +53,12 @@ export function ListTab() {
         title={t("settings.list.groupByDevice.title")}
         description={t("settings.list.groupByDevice.description")}
       >
-        <div className="flex items-center gap-s-2">
-          <Switch
-            id="group-by-device"
-            aria-label={t("settings.list.groupByDevice.title")}
-            checked={sortByDevice}
-            onCheckedChange={(value) => set("sortByDevice", value)}
-          />
-          <Label htmlFor="group-by-device">
-            {t(sortByDevice ? "common.on" : "common.off")}
-          </Label>
-        </div>
+        <Switch
+          id="group-by-device"
+          aria-label={t("settings.list.groupByDevice.title")}
+          checked={sortByDevice}
+          onCheckedChange={(value) => set("sortByDevice", value)}
+        />
       </Row>
 
       <Row
@@ -119,19 +113,12 @@ export function ListTab() {
         title={t("settings.list.warnBeforeReveal.title")}
         description={t("settings.list.warnBeforeReveal.description")}
       >
-        <div className="flex items-center gap-s-2">
-          {/* A11Y-9: the visible label reads "On"/"Off", which names the state
-              and not the setting, so the accessible name has to come from here. */}
-          <Switch
-            id="warn-before-reveal"
-            aria-label={t("settings.list.warnBeforeReveal.title")}
-            checked={warnBeforeReveal}
-            onCheckedChange={(value) => set("warnBeforeReveal", value)}
-          />
-          <Label htmlFor="warn-before-reveal">
-            {t(warnBeforeReveal ? "common.on" : "common.off")}
-          </Label>
-        </div>
+        <Switch
+          id="warn-before-reveal"
+          aria-label={t("settings.list.warnBeforeReveal.title")}
+          checked={warnBeforeReveal}
+          onCheckedChange={(value) => set("warnBeforeReveal", value)}
+        />
       </Row>
 
       <Row
@@ -145,17 +132,12 @@ export function ListTab() {
           ) : undefined
         }
       >
-        <div className="flex items-center gap-s-2">
-          <Switch
-            id="allow-screenshots"
-            aria-label={t("settings.list.allowScreenshots.title")}
-            checked={allowScreenshots}
-            onCheckedChange={(value) => set("allowScreenshots", value)}
-          />
-          <Label htmlFor="allow-screenshots">
-            {t(allowScreenshots ? "common.on" : "common.off")}
-          </Label>
-        </div>
+        <Switch
+          id="allow-screenshots"
+          aria-label={t("settings.list.allowScreenshots.title")}
+          checked={allowScreenshots}
+          onCheckedChange={(value) => set("allowScreenshots", value)}
+        />
       </Row>
     </div>
   );

@@ -355,7 +355,7 @@ mod tests {
 
         // Nothing was taken to make room, and unpairing is what unblocks it.
         assert_eq!(node.peers().len(), crate::peers::MAX_PAIRINGS);
-        let existing = node.peers().list()[0].pairing_id.clone();
+        let existing = node.peers().psks()[0].pairing_id.clone();
         assert!(node.unpair(&existing).unwrap());
         node.pair_create("the replacement")
             .expect("a freed slot must be usable");

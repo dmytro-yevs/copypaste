@@ -126,7 +126,13 @@ pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<UiItem
     if clip.text.trim().is_empty() {
         return Ok(None);
     }
-    let item = backend.add(&clip.text).await?;
+    let item = backend
+        .add_captured(
+            &clip.text,
+            clip.source_app_bundle_id.as_deref(),
+            clip.source_app_name.as_deref(),
+        )
+        .await?;
     Ok(Some(item.into()))
 }
 
@@ -225,6 +231,12 @@ async fn sync_after_capture<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(target_os = "android")]
     {
         let backend = app.state::<SelectedBackend>();
+        let Ok(config) = backend.get_config().await else {
+            return;
+        };
+        if !config.config.sync_enabled {
+            return;
+        }
         if let Err(error) = backend.sync(None).await {
             tracing::debug!(%error, "could not sync the captured item");
         }
@@ -290,6 +302,8 @@ mod tests {
             text: text.into(),
             source: CaptureSource::Tile,
             at_ms: 1_700_000_000_000,
+            source_app_bundle_id: None,
+            source_app_name: None,
         }
     }
 

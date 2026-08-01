@@ -7,11 +7,11 @@ use copypaste_core::{Detector, Keyring, Store};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 
+use crate::AppState;
 use crate::clipboard::{Capture, ClipboardSource};
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
-use crate::AppState;
 
 /// Reads nothing; records what is written, so a test can assert the *absence*
 /// of a pasteboard write — the whole difference between `get` and `copy`.
@@ -102,7 +102,8 @@ fn reopen_with(
     let keyring = Arc::new(Keyring::from_secret(&secret));
     let store = Store::open(&db_path, &keyring.db_key()).expect("store");
     let meta = Meta::open(&store, name).expect("meta");
-    let peers = PeerStore::open(&dir.path().join("peers-v2.json")).expect("peer store");
+    let peers = PeerStore::open(&dir.path().join(copypaste_p2p::peers::DEFAULT_FILE_NAME))
+        .expect("peer store");
     // Port 0 is never bound in these tests; discovery degrades either way.
     let discovery = Discovery::start(name, &[], 0).expect("discovery");
     let settings = crate::settings::Settings::load(&meta);
