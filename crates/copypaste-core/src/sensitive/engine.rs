@@ -124,10 +124,11 @@ impl Detector {
             .any(|finding| finding.severity == Severity::HighConfidence)
     }
 
-    /// True when any validated finding exists, including the inert band.
-    /// Never use this compatibility predicate for whole-item classification.
+    /// Compatibility predicate for whole-item sensitive classification. This
+    /// is the same high-confidence gate as [`Detector::may_auto_wipe`]; use
+    /// [`Detector::scan_all`] for inert findings.
     pub fn is_sensitive(&self, text: &str) -> bool {
-        !self.scan_all(text).is_empty()
+        self.may_auto_wipe(text)
     }
 
     /// Redact every validated match. When matches exist, surrounding text is
@@ -465,7 +466,7 @@ mod tests {
         let det = detector();
         let offenders: Vec<_> = BENIGN_CORPUS
             .iter()
-            .filter(|t| det.is_sensitive(t))
+            .filter(|text| !det.scan_all(text).is_empty())
             .map(|t| (t, all_rules(&det, t)))
             .collect();
         assert!(offenders.is_empty(), "false positives: {offenders:#?}");
@@ -503,7 +504,7 @@ mod tests {
         ];
         for input in &cases {
             assert!(
-                !det.is_sensitive(input),
+                det.scan_all(input).is_empty(),
                 "false positive on {input:?}: {:?}",
                 all_rules(&det, input)
             );
@@ -524,15 +525,15 @@ mod tests {
             "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         ] {
             assert!(
-                !det.is_sensitive(input),
+                det.scan_all(input).is_empty(),
                 "{input:?} -> {:?}",
                 all_rules(&det, input)
             );
         }
     }
 
-    /// §9.2's inert band: detected, labelled, kept out of the index — never
-    /// deleted. This is manifest I1, the prime directive.
+    /// §9.2's inert band: detected and maskable, but searchable and never
+    /// classified for deletion. This is manifest I1, the prime directive.
     #[test]
     fn inert_band_is_detected_but_never_auto_wipes() {
         let det = detector();
@@ -568,9 +569,8 @@ mod tests {
                 "{expected_rule} did not fire on {input:?}; fired: {:?}",
                 all_rules(&det, input)
             );
-            // detected and kept out of the index …
-            assert!(det.is_sensitive(input), "{input:?}");
-            // … but inert for deletion
+            assert!(!det.is_sensitive(input), "{input:?}");
+            assert!(!det.may_auto_wipe(input), "{input:?}");
             let f = det.scan(input).unwrap();
             assert_eq!(f.severity, Severity::Flag, "{input:?} -> {f:?}");
             assert!(f.confidence < AUTOWIPE_CONFIDENCE_FLOOR);
@@ -676,6 +676,8 @@ mod tests {
             .any(|finding| finding.rule == "aws_access_key"));
         assert!(det.may_auto_wipe(text));
         assert!(!det.may_auto_wipe("mail alice@example.com"));
+        assert!(det.is_sensitive(text));
+        assert!(!det.is_sensitive("mail alice@example.com"));
     }
 
     #[test]

@@ -374,7 +374,7 @@ pub(super) static RULES: &[RuleSpec] = &[
         // ⚠ INERT. `Basic` carries base64(user:password), so it is credential
         // material — but it sits in curl examples and API docs exactly like
         // `generic_bearer`, which **P2 fb3e** demoted for that reason. Same
-        // treatment: detected and kept out of the index, never auto-deleted.
+        // treatment: detected and maskable, but searchable and never deleted.
         name: "http_basic_auth",
         category: Category::Credential,
         confidence: 0.65,

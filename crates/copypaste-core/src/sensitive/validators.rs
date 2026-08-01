@@ -343,14 +343,14 @@ mod tests {
     }
 
     /// `Authorization: Basic` carries base64(user:password), so it is detected
-    /// and kept out of the index — but it is inert, exactly like
-    /// `generic_bearer` (**P2 fb3e**), because it lives in curl examples too.
+    /// and maskable — but searchable and inert, exactly like `generic_bearer`
+    /// (**P2 fb3e**), because it lives in curl examples too.
     #[test]
     fn http_basic_auth_is_detected_but_inert() {
         let det = detector();
         let header = "Authorization: Basic dXNlcjpwYXNzd29yZA==";
         assert!(fired(&det, header, "http_basic_auth"));
-        assert!(det.is_sensitive(header));
+        assert!(!det.is_sensitive(header));
         assert_eq!(det.scan(header).unwrap().severity, Severity::Flag);
     }
 }

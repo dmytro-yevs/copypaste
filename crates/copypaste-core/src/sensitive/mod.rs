@@ -12,10 +12,10 @@
 //! low-confidence PII, with byte offsets into the NFKC-normalised string.
 //! [`Detector::scan`] preserves the deterministic highest-confidence label.
 //!
-//! Only [`Detector::may_auto_wipe`] authorises whole-item sensitive
-//! classification and deletion. Everything below the 0.70 floor remains
-//! detectable and redactable but inert. Password-manager provenance is an
-//! independent capture-time floor outside content detection.
+//! [`Detector::may_auto_wipe`] and its compatibility predicate
+//! [`Detector::is_sensitive`] share the only content-based whole-item gate.
+//! Everything below the 0.70 floor remains detectable and redactable but
+//! inert. Password-manager provenance is an independent capture-time floor.
 
 mod engine;
 mod finding;
