@@ -17,6 +17,49 @@ export const devices = {
     syncAllHint: "Sync with every paired device now",
   },
 
+  own: {
+    heading: "This device",
+    name: "This device",
+    description: "The CopyPaste app and clipboard service on this device.",
+    loading: "Checking this device…",
+    checking: "Checking",
+    unavailableLabel: "Unavailable",
+    unavailable: "This device's details are temporarily unavailable.",
+    version: "App version",
+    history: "Local history",
+    items_one: "{{count}} item",
+    items_other: "{{count}} items",
+    capture: "Clipboard capture",
+    captureOn: "Recording",
+    captureOff: "Paused",
+    privateMode: "Private mode",
+    clipboard: "Clipboard connection",
+    clipboardConnected: "Connected through the background service",
+  },
+
+  paired: {
+    heading: "Paired devices",
+    online_one: "{{count}} on this network",
+    online_other: "{{count}} on this network",
+    listLabel: "Paired devices",
+  },
+
+  discovered: {
+    heading: "Discovered on your network",
+    refresh: "Refresh",
+    refreshLabel: "Refresh devices discovered on this network",
+    loading: "Looking for devices on this network…",
+    unavailable:
+      "Network discovery isn't available in this build. Existing paired devices can still sync by their saved address.",
+    failed: "Devices on this network couldn't be checked. Try Refresh.",
+    none: "No devices found on the network yet.",
+    listLabel: "Devices discovered on this network",
+    unverified: "Unverified device details reported over the network",
+    paired: "Paired",
+    address: "Reported address",
+    lastSeen: "Last discovered",
+  },
+
   loading: { title: "Loading…", body: "Looking for paired devices." },
   failed: { title: "Couldn't load your devices" },
   none: {
@@ -100,7 +143,7 @@ export const devices = {
     unpairHint: "Unpair this device",
     unpairAction: "Unpair",
     revokeOne: "Revoke {{name}}",
-    revokeHint: "Cut this device off for good — for a device you no longer have",
+    revokeHint: "Permanently block this pairing from peer sync on this device",
     revokeAction: "Revoke",
   },
 
@@ -121,7 +164,7 @@ export const devices = {
    */
   revoke: {
     title: "Revoke {{name}}?",
-    body: "This can't be undone from this device.",
+    body: "This can't be undone from this device. It blocks this peer pairing only; this app has no command to rotate or revoke a cloud sync key.",
     lostCode:
       "The pairing code stops working for good. Pairing these devices again means generating a new code and entering it by hand.",
     lostOneSided:
@@ -133,7 +176,8 @@ export const devices = {
 
   toast: {
     unpaired: "Unpaired {{name}}",
-    revoked: "Revoked {{name}} — its pairing code can never be used again",
+    revoked:
+      "Revoked {{name}} from peer sync — its pairing code can never be used again",
     nothingToSync: "Nothing to sync — no paired devices",
     synced_one: "Synced {{count}} device — sent {{sent}}, received {{received}}",
     synced_other:

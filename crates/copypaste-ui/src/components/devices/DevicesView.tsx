@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/EmptyState";
 import { PeerRow } from "@/components/devices/PeerRow";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
@@ -42,10 +43,19 @@ import {
   noteSync,
 } from "@/components/devices/peerState";
 import { ServiceOffline } from "@/components/shell/ServiceOffline";
-import { usePeers, useRevoke, useSyncNow, useUnpair } from "@/hooks/useDevices";
+import {
+  useDiscovered,
+  usePeers,
+  useRescan,
+  useRevoke,
+  useSyncNow,
+  useUnpair,
+} from "@/hooks/useDevices";
+import { useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
+import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
 
 export function DevicesView() {
@@ -54,14 +64,23 @@ export function DevicesView() {
   const unpair = useUnpair();
   const revoke = useRevoke();
   const sync = useSyncNow();
+  const discovered = useDiscovered();
+  const rescan = useRescan();
+  const own = useStatus();
 
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
   const [health, setHealth] = useState<PeerHealthMap>({});
 
   const errorKind = peers.error ? classifyError(peers.error) : null;
+  const ownErrorKind = own.error ? classifyError(own.error) : null;
+  const discoveredErrorKind = discovered.error
+    ? classifyError(discovered.error)
+    : null;
   const list = peers.data ?? [];
+  const nearby = discovered.data ?? [];
   const full = atPairingCap(list.length);
+  const online = list.filter((peer) => peer.online).length;
 
   const runSync = (pairingId: string | undefined) =>
     sync.mutate(pairingId, {
@@ -69,16 +88,8 @@ export function DevicesView() {
         setHealth((previous) => noteSync(previous, results)),
     });
 
-  if (errorKind === "offline") return <ServiceOffline />;
-
-  if (errorKind === "unavailable") {
-    return (
-      <EmptyState
-        icon={Link2}
-        title={t("devices.unavailable.title")}
-        body={t("devices.unavailable.body")}
-      />
-    );
+  if (errorKind === "offline" || ownErrorKind === "offline") {
+    return <ServiceOffline />;
   }
 
   return (
@@ -107,29 +118,133 @@ export function DevicesView() {
         <p role="status" className="mx-auto mb-s-3 max-w-[var(--content-max-width)] rounded-md border border-warn/20 bg-warn/15 px-s-3 py-s-2 text-sm text-warn-strong">
           {t("devices.pairingUnavailable")}
         </p>
-        {peers.isPending ? (
-          <EmptyState
-            busy
-            title={t("devices.loading.title")}
-            body={t("devices.loading.body")}
-          />
-        ) : errorKind !== null ? (
-          <EmptyState
-            title={t("devices.failed.title")}
-            body={friendlyError(errorKind)}
-            action={{
-              label: t("common.tryAgain"),
-              onClick: () => void peers.refetch(),
-            }}
-          />
-        ) : list.length === 0 ? (
-          <EmptyState
-            icon={Laptop}
-            title={t("devices.none.title")}
-            body={t("devices.none.body")}
-          />
-        ) : (
-          <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-2">
+
+        <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-4">
+          <section aria-labelledby="own-device-heading" className="flex flex-col gap-s-2">
+            <h2 id="own-device-heading" className="text-sm font-semibold">
+              {t("devices.own.heading")}
+            </h2>
+            <div className="rounded-xl border border-border bg-card p-s-3">
+              <div className="flex items-start gap-s-3">
+                <span
+                  aria-hidden="true"
+                  className="flex size-[var(--sz-tile)] shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+                >
+                  <Laptop size={18} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{t("devices.own.name")}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("devices.own.description")}
+                  </p>
+                </div>
+                <Badge
+                  variant={
+                    ownErrorKind !== null
+                      ? "error"
+                      : own.data?.capture_running && !own.data.private_mode
+                        ? "ok"
+                        : "secondary"
+                  }
+                >
+                  {t(
+                    ownErrorKind !== null
+                      ? "devices.own.unavailableLabel"
+                      : own.data === undefined
+                        ? "devices.own.checking"
+                        : own.data.private_mode
+                          ? "devices.own.privateMode"
+                          : own.data.capture_running
+                            ? "devices.own.captureOn"
+                            : "devices.own.captureOff",
+                  )}
+                </Badge>
+              </div>
+
+              {own.isPending ? (
+                <p role="status" aria-busy="true" className="mt-s-3 text-xs text-muted-foreground">
+                  {t("devices.own.loading")}
+                </p>
+              ) : ownErrorKind !== null ? (
+                <p role="status" className="mt-s-3 text-xs text-err-strong">
+                  {t("devices.own.unavailable")}
+                </p>
+              ) : own.data ? (
+                <dl className="mt-s-3 grid gap-x-s-4 gap-y-s-2 border-t border-divider pt-s-3 text-xs sm:grid-cols-2">
+                  <div>
+                    <dt className="text-muted-foreground">{t("devices.own.version")}</dt>
+                    <dd className="mt-0.5 font-medium">{own.data.version}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("devices.own.history")}</dt>
+                    <dd className="mt-0.5 font-medium">
+                      {t("devices.own.items", { count: own.data.item_count })}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("devices.own.capture")}</dt>
+                    <dd className="mt-0.5 font-medium">
+                      {t(
+                        own.data.private_mode
+                          ? "devices.own.privateMode"
+                          : own.data.capture_running
+                            ? "devices.own.captureOn"
+                            : "devices.own.captureOff",
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">{t("devices.own.clipboard")}</dt>
+                    <dd className="mt-0.5 font-medium">
+                      {t("devices.own.clipboardConnected")}
+                    </dd>
+                  </div>
+                </dl>
+              ) : null}
+            </div>
+          </section>
+
+          <section aria-labelledby="paired-devices-heading" className="flex flex-col gap-s-2">
+            <div className="flex flex-wrap items-baseline justify-between gap-s-2">
+              <h2 id="paired-devices-heading" className="text-sm font-semibold">
+                {t("devices.paired.heading")}
+              </h2>
+              {!peers.isPending && errorKind === null && (
+                <span className="text-xs text-muted-foreground">
+                  {t("devices.paired.online", { count: online })}
+                </span>
+              )}
+            </div>
+
+            {peers.isPending ? (
+              <EmptyState
+                busy
+                title={t("devices.loading.title")}
+                body={t("devices.loading.body")}
+              />
+            ) : errorKind === "unavailable" ? (
+              <EmptyState
+                icon={Link2}
+                title={t("devices.unavailable.title")}
+                body={t("devices.unavailable.body")}
+              />
+            ) : errorKind !== null ? (
+              <EmptyState
+                title={t("devices.failed.title")}
+                body={friendlyError(errorKind)}
+                action={{
+                  label: t("common.tryAgain"),
+                  onClick: () => void peers.refetch(),
+                }}
+              />
+            ) : list.length === 0 ? (
+              <EmptyState
+                icon={Laptop}
+                title={t("devices.none.title")}
+                body={t("devices.none.body")}
+              />
+            ) : (
+              <>
             {full ? (
               <p className="rounded-md border border-warn/20 bg-warn/15 px-s-3 py-s-2 text-xs text-warn-strong">
                 {t("devices.cap.full", { max: MAX_PAIRINGS })}
@@ -143,7 +258,7 @@ export function DevicesView() {
               </p>
             )}
 
-            <ul className="flex flex-col gap-s-2">
+            <ul aria-label={t("devices.paired.listLabel")} className="flex flex-col gap-s-2">
               {list.map((peer) => (
                 <PeerRow
                   key={peer.pairing_id}
@@ -164,8 +279,90 @@ export function DevicesView() {
                 />
               ))}
             </ul>
-          </div>
-        )}
+              </>
+            )}
+          </section>
+
+          <section aria-labelledby="discovered-devices-heading" className="flex flex-col gap-s-2">
+            <div className="flex flex-wrap items-center gap-s-2">
+              <h2 id="discovered-devices-heading" className="mr-auto text-sm font-semibold">
+                {t("devices.discovered.heading")}
+              </h2>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={rescan.isPending}
+                onClick={() => rescan.mutate()}
+                aria-label={t("devices.discovered.refreshLabel")}
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  className={cn(rescan.isPending && "animate-spin motion-reduce:animate-none")}
+                />
+                {t("devices.discovered.refresh")}
+              </Button>
+            </div>
+
+            {discovered.isPending ? (
+              <p role="status" aria-busy="true" className="rounded-xl border border-border bg-card p-s-3 text-sm text-muted-foreground">
+                {t("devices.discovered.loading")}
+              </p>
+            ) : discoveredErrorKind !== null ? (
+              <p role="status" className="rounded-xl border border-border bg-card p-s-3 text-sm text-muted-foreground">
+                {t(
+                  discoveredErrorKind === "unavailable"
+                    ? "devices.discovered.unavailable"
+                    : "devices.discovered.failed",
+                )}
+              </p>
+            ) : nearby.length === 0 ? (
+              <p className="rounded-xl border border-border bg-card p-s-3 text-sm text-muted-foreground">
+                {t("devices.discovered.none")}
+              </p>
+            ) : (
+              <ul aria-label={t("devices.discovered.listLabel")} className="flex flex-col gap-s-2">
+                {nearby.map((device) => (
+                  <li key={device.pairing_id} className="rounded-xl border border-border bg-card p-s-3">
+                    <div className="flex min-w-0 items-start gap-s-3">
+                      <span
+                        aria-hidden="true"
+                        className="flex size-[var(--sz-tile)] shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+                      >
+                        <Link2 size={18} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className="truncate text-sm font-medium"
+                          aria-label={`${device.name}. ${t("devices.discovered.unverified")}`}
+                        >
+                          {device.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {t("devices.discovered.unverified")}
+                        </p>
+                      </div>
+                      {device.paired && (
+                        <Badge variant="secondary">{t("devices.discovered.paired")}</Badge>
+                      )}
+                    </div>
+                    <dl className="mt-s-3 grid gap-x-s-4 gap-y-s-2 text-xs sm:grid-cols-2">
+                      <div className="min-w-0">
+                        <dt className="text-muted-foreground">{t("devices.discovered.address")}</dt>
+                        <dd className="mt-0.5 truncate font-mono text-[0.6875rem]">
+                          {device.addr}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-muted-foreground">{t("devices.discovered.lastSeen")}</dt>
+                        <dd className="mt-0.5 font-medium">{longAge(device.last_seen_ms)}</dd>
+                      </div>
+                    </dl>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
 
       {sync.isPending && (

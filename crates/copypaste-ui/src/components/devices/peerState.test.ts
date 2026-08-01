@@ -12,6 +12,7 @@ import {
   STALE_AFTER_MS,
   atPairingCap,
   noteSync,
+  peerIsStalled,
   peerState,
   unsettledFailure,
 } from "@/components/devices/peerState";
@@ -68,16 +69,47 @@ describe("what a paired device is doing", () => {
     ).toBe("synced");
   });
 
-  /** A gap while the device is not on the network is the cadence working, not
-   *  a fault — so age must not turn `away` into `stalled`. */
-  it("does not fault a device that is off the network for being out of date", () => {
+  /** Manifest 06 §3.8 defines freshness independently from current mDNS
+   *  presence: an away peer can still be the peer silently not receiving. */
+  it("calls an old successful sync stalled even when discovery is quiet", () => {
     expect(
       peerState(
         peer({ last_seen_ms: NOW - 30 * STALE_AFTER_MS, online: false }),
         undefined,
         NOW,
       ),
-    ).toBe("away");
+    ).toBe("stalled");
+  });
+
+  it("uses the binding thirty-minute boundary exactly", () => {
+    expect(
+      peerIsStalled(peer({ last_seen_ms: NOW - STALE_AFTER_MS }), NOW),
+    ).toBe(false);
+    expect(
+      peerIsStalled(peer({ last_seen_ms: NOW - STALE_AFTER_MS - 1 }), NOW),
+    ).toBe(true);
+  });
+
+  it("flags a rekey failure immediately, including on a fresh pairing", () => {
+    const fresh = peer({ last_seen_ms: 0 }) as ReturnType<typeof peer> & {
+      rekey_failures: number;
+      added_at: number;
+    };
+    fresh.rekey_failures = 1;
+    fresh.added_at = NOW - 1000;
+
+    expect(peerIsStalled(fresh, NOW)).toBe(true);
+    expect(peerState(fresh, undefined, NOW)).toBe("stalled");
+  });
+
+  it("guards a never-synced peer until its known pairing age passes", () => {
+    const withoutDate = peer({ last_seen_ms: 0 });
+    const fresh = { ...withoutDate, added_at: NOW - STALE_AFTER_MS };
+    const old = { ...withoutDate, added_at: NOW - STALE_AFTER_MS - 1 };
+
+    expect(peerIsStalled(withoutDate, NOW)).toBe(false);
+    expect(peerIsStalled(fresh, NOW)).toBe(false);
+    expect(peerIsStalled(old, NOW)).toBe(true);
   });
 });
 
