@@ -5,6 +5,7 @@
  */
 import { lazy, Suspense, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
 
 import { BannerBar } from "@/components/shell/Banners";
 import { Boundary } from "@/components/shell/Boundary";
@@ -18,6 +19,7 @@ import { legacyHistoryPresent } from "@/lib/banners";
 import { classifyError } from "@/lib/errors";
 import {
   CURRENT_PROTOCOL_VERSION,
+  hasBridge,
   setAllowScreenshots,
 } from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
@@ -60,6 +62,20 @@ export default function App() {
   // same queries twice for one change.
   const pushLive = usePush();
   useCaptureSync();
+
+  useEffect(() => {
+    if (!hasBridge()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listen("open-settings", () => useUi.getState().setView("settings")).then((detach) => {
+      if (cancelled) detach();
+      else unlisten = detach;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply
   // (CopyPaste-g27b.20).

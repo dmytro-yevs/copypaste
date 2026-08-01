@@ -15,9 +15,10 @@
         "transparent": false,
         "shadow": true,
         "center": true,
-        "skipTaskbar": false,
+        "skipTaskbar": true,
         "visible": true,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "contentProtected": true
       }
     ]
   },

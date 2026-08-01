@@ -141,6 +141,12 @@ pub trait Backend: Send + Sync + 'static {
     /// plaintext ever entering the WebView.
     async fn copy(&self, id: &str) -> Result<Item>;
 
+    /// Put only an item's textual representation on the system clipboard.
+    ///
+    /// This is the backend half of Quick Paste's ⌥Enter action. It remains an
+    /// id-based operation, so a sensitive item still never enters the WebView.
+    async fn copy_as_plain_text(&self, id: &str) -> Result<Item>;
+
     async fn delete(&self, id: &str) -> Result<()>;
 
     /// Delete everything. Returns how many rows went.

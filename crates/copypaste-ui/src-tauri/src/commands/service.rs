@@ -5,7 +5,7 @@
 //! command, because it is not a thing the user asks for: it happens on
 //! `RunEvent::Exit` in `crate::run`.
 
-use tauri::State;
+use tauri::{State, WebviewWindow};
 
 use crate::backend::{BackendError, SelectedBackend};
 use crate::service::{ServiceState, Supervisor};
@@ -49,16 +49,23 @@ pub async fn restart_service(
     supervisor.restart(backend.inner()).await
 }
 
-/// Hide the window from the frontend, through the backend's hide path.
+/// Hide the invoking window from the frontend, through the backend's hide path.
 ///
 /// INV-25: the frontend must never reach for the window itself. On macOS the
-/// app is an `Accessory`, so hiding hands activation back to whatever the user
-/// was in — which is the whole point of the quick-copy flow, since the app
-/// never synthesises a paste (ADR-0001) and the user presses ⌘V themselves.
+/// Quick Paste hide path hands activation back to whatever the user was in —
+/// which is the whole point of the quick-copy flow, since the app never
+/// synthesises a paste (ADR-0001) and the user presses ⌘V themselves.
 ///
 /// Deliberately infallible: a hide that could fail would leave the caller
 /// deciding what to do about a window it must not touch.
 #[tauri::command]
-pub fn hide_window(app: tauri::AppHandle) {
-    crate::shell::window::hide(&app);
+pub fn hide_window(window: WebviewWindow) {
+    crate::shell::window::hide_window(&window);
+}
+
+/// Open the full application surface from Quick Paste's settings affordance.
+#[tauri::command]
+pub fn show_main_window(app: tauri::AppHandle, window: WebviewWindow) {
+    crate::shell::window::hide_window_for_main(&window);
+    crate::shell::window::show_main_settings(&app);
 }
