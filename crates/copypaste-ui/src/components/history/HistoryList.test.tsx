@@ -59,6 +59,7 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
     onLoadMore: vi.fn(),
     listRef,
     searching: false,
+    groupedByDevice: false,
     selection: fakeSelection(),
     hasMore: false,
     loadingMore: false,
@@ -141,6 +142,38 @@ describe("list semantics", () => {
     setup(3, { activeId: "row-1" });
     const list = screen.getByRole("list", { name: "Clipboard history" });
     expect(list.getAttribute("data-active-descendant")).toBe("history-row-row-1");
+  });
+
+  it("renders device headings inside the virtualized list when grouped", () => {
+    const data = [
+      {
+        ...items(1)[0]!,
+        id: "mac",
+        origin_device_id: "device-a",
+        origin_device_name: "Mac",
+      },
+      {
+        ...items(1)[0]!,
+        id: "phone",
+        origin_device_id: "device-b",
+        origin_device_name: "Phone",
+      },
+    ] as unknown as Item[];
+    setup(2, { items: data, groupedByDevice: true });
+    expect(screen.getByRole("heading", { name: "Mac" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Phone" })).toBeTruthy();
+  });
+
+  it("keeps the device label when the cap leaves one visible group", () => {
+    const data = [
+      {
+        ...items(1)[0]!,
+        origin_device_id: "device-a",
+        origin_device_name: "Mac",
+      },
+    ] as unknown as Item[];
+    setup(1, { items: data, groupedByDevice: true });
+    expect(screen.getByRole("heading", { name: "Mac" })).toBeTruthy();
   });
 });
 

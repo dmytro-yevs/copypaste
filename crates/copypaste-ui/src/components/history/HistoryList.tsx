@@ -27,11 +27,17 @@ import {
   rowHeight,
 } from "@/lib/layout";
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
-import { markedOrigins, originLabel } from "@/components/history/origin";
+import {
+  markedOrigins,
+  originLabel,
+  originName,
+  originOf,
+} from "@/components/history/origin";
 import type { Selection } from "@/hooks/useSelection";
 
 /** ⌘1–⌘9 only; there is no ⌘0 and no second row of ten. */
 export const QUICK_SLOTS = 9;
+const GROUP_HEADER_PX = 32;
 
 /** Inactive while a search is running (manifest §3.5.3): the digits address
  *  positions in the history, and a filtered list renumbers them under the
@@ -52,6 +58,7 @@ interface HistoryListProps {
   revealPendingId: string | null;
   previewLines: number;
   searching: boolean;
+  groupedByDevice: boolean;
   selection: Selection;
   hasMore: boolean;
   loadingMore: boolean;
@@ -76,6 +83,7 @@ export function HistoryList({
   revealPendingId,
   previewLines,
   searching,
+  groupedByDevice,
   selection,
   hasMore,
   loadingMore,
@@ -99,14 +107,58 @@ export function HistoryList({
   const markedRef = useRef(marked);
   markedRef.current = marked;
 
-  // INV-5: the reservation is a function of the *setting*, never of the item.
-  const estimateSize = useCallback(() => rowHeight(previewLines), [previewLines]);
+  const entries = useMemo(() => {
+    const rows: Array<
+      | { readonly type: "item"; readonly itemIndex: number }
+      | {
+          readonly type: "group";
+          readonly key: string;
+          readonly label: string;
+        }
+    > = [];
+    let previousOrigin: string | null = null;
+    items.forEach((item, itemIndex) => {
+      const origin = originOf(item);
+      const id = origin?.id ?? "";
+      if (groupedByDevice && id !== previousOrigin) {
+        rows.push({
+          type: "group",
+          key: `history-device-${id || "unknown"}`,
+          label: origin ? originName(origin) : t("history.list.unknownDevice"),
+        });
+      }
+      rows.push({ type: "item", itemIndex });
+      previousOrigin = id;
+    });
+    return rows;
+  }, [groupedByDevice, items, t]);
+
+  const anchorIds = useMemo(
+    () =>
+      entries.map((entry) =>
+        entry.type === "item" ? (items[entry.itemIndex]?.id ?? null) : null,
+      ),
+    [entries, items],
+  );
+
+  const estimateSize = useCallback(
+    (index: number) =>
+      entries[index]?.type === "group"
+        ? GROUP_HEADER_PX
+        : rowHeight(previewLines),
+    [entries, previewLines],
+  );
 
   const virtualizer = useVirtualizer({
-    count: items.length,
+    count: entries.length,
     getScrollElement: () => listRef.current,
     estimateSize,
-    getItemKey: (index) => items[index]?.id ?? index,
+    getItemKey: (index) => {
+      const entry = entries[index];
+      return entry?.type === "group"
+        ? entry.key
+        : (items[entry?.itemIndex ?? -1]?.id ?? index);
+    },
     overscan: overscanRows(previewLines),
   });
 
@@ -114,6 +166,7 @@ export function HistoryList({
     scrollRef: listRef,
     virtualizer,
     items,
+    anchorIds,
     previewLines,
   });
 
@@ -143,7 +196,12 @@ export function HistoryList({
     onActiveIdChange(item.id);
     // From the height model, not scrollIntoView: the target row may not be in
     // the DOM at all.
-    virtualizer.scrollToIndex(index, { align: "auto" });
+    const virtualIndex = entries.findIndex(
+      (entry) => entry.type === "item" && entry.itemIndex === index,
+    );
+    if (virtualIndex >= 0) {
+      virtualizer.scrollToIndex(virtualIndex, { align: "auto" });
+    }
   }
 
   function onScroll(event: UIEvent<HTMLDivElement>) {
@@ -270,7 +328,26 @@ export function HistoryList({
           style={{ height: virtualizer.getTotalSize() }}
         >
           {virtualRows.map((row) => {
-            const item = items[row.index];
+            const entry = entries[row.index];
+            if (!entry) return null;
+            if (entry.type === "group") {
+              return (
+                <div
+                  key={row.key}
+                  role="listitem"
+                  className="absolute top-0 left-0 flex w-full items-end px-s-3 pb-s-1"
+                  style={{
+                    height: row.size,
+                    transform: `translateY(${row.start}px)`,
+                  }}
+                >
+                  <h2 className="truncate text-xs font-semibold text-muted-foreground">
+                    {entry.label}
+                  </h2>
+                </div>
+              );
+            }
+            const item = items[entry.itemIndex];
             if (!item) return null;
             return (
               <div

@@ -11,8 +11,9 @@
  * screen reader behaviour a popup we assembled would not match.
  */
 import type { RefObject } from "react";
-import { ListChecks, Search, Trash2, X } from "lucide-react";
+import { ListChecks, MonitorSmartphone, Search, Trash2, X } from "lucide-react";
 
+import { type OriginDevice, originName } from "@/components/history/origin";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { t as translate, useTranslation } from "@/i18n";
@@ -50,6 +51,8 @@ interface SearchBarProps {
   total: number | undefined;
   view: ViewOptions;
   onViewChange: (view: ViewOptions) => void;
+  origins: readonly OriginDevice[];
+  displayLimit: number | null;
   selecting: boolean;
   onToggleSelecting: () => void;
   onClearAll?: () => void;
@@ -65,6 +68,8 @@ export function SearchBar({
   total,
   view,
   onViewChange,
+  origins,
+  displayLimit,
   selecting,
   onToggleSelecting,
   onClearAll,
@@ -130,6 +135,24 @@ export function SearchBar({
         ))}
       </select>
 
+      {origins.length > 1 && (
+        <select
+          aria-label={t("history.search.filterDevice")}
+          className={SELECT_CLASS}
+          value={view.device}
+          onChange={(event) =>
+            onViewChange({ ...view, device: event.target.value })
+          }
+        >
+          <option value="all">{t("history.search.allDevices")}</option>
+          {origins.map((origin) => (
+            <option key={origin.id} value={origin.id}>
+              {originName(origin)}
+            </option>
+          ))}
+        </select>
+      )}
+
       <select
         aria-label={t("history.search.sortOrder")}
         className={SELECT_CLASS}
@@ -141,6 +164,29 @@ export function SearchBar({
         <option value="newest">{sortLabel("newest")}</option>
         <option value="oldest">{sortLabel("oldest")}</option>
       </select>
+
+      {origins.length > 1 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label={t("history.search.groupByDevice")}
+          aria-pressed={view.groupByDevice}
+          title={t("history.search.groupByDevice")}
+          className={cn(
+            "h-8",
+            view.groupByDevice && "bg-selected text-foreground",
+          )}
+          onClick={() =>
+            onViewChange({
+              ...view,
+              groupByDevice: !view.groupByDevice,
+            })
+          }
+        >
+          <MonitorSmartphone aria-hidden="true" />
+          {t("history.search.group")}
+        </Button>
+      )}
 
       <span
         className="shrink-0 text-xs tabular-nums text-muted-foreground"
@@ -179,6 +225,18 @@ export function SearchBar({
         >
           <Trash2 aria-hidden="true" />
         </Button>
+      )}
+
+      {displayLimit !== null && (
+        <p
+          aria-live="polite"
+          className="basis-full text-xs text-muted-foreground"
+        >
+          {t("history.search.displayLimitHint", {
+            limit: displayLimit,
+            count: visible,
+          })}
+        </p>
       )}
     </div>
   );
