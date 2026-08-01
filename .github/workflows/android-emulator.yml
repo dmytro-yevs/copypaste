@@ -2,8 +2,9 @@ name: Android emulator
 
 # Runs the Android app. Until this file existed, no line of Kotlin and no line
 # of the Android-only Rust — the keystore backend, the capture plugin, the JNI
-# context hand-off — had ever executed. The release job proves the APK builds
-# and nothing else.
+# context hand-off — had ever executed. The separate release pipeline
+# smoke-tests its signed universal artifact before publication; this workflow
+# is the repeatable Android layer for the broader debug and minified checks.
 #
 # Two legs, because no single APK can answer both halves.
 #
@@ -319,10 +320,9 @@ jobs:
   # The same build people install: release build type, so R8 runs.
   #
   # It has to be signed to install at all — Android refuses an unsigned APK and
-  # there is no ad-hoc equivalent. The key is generated here and thrown away,
-  # which is the fallback ADR-0006 already describes for the release job when no
-  # keystore secrets are set. Nothing about release signing is decided here and
-  # this APK is never published; it exists to be installed on an emulator once.
+  # there is no ad-hoc equivalent. Its generated key is limited to this
+  # never-published emulator fixture; ADR-0006 requires the release workflow to
+  # fail closed rather than use such a key for a published artifact.
   # ---------------------------------------------------------------------------
   release-apk:
     name: Build the release APK (x86_64, minified)

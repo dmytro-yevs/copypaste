@@ -5,8 +5,8 @@ on both platforms, over a shared Rust core. On desktop the app talks to a local
 daemon; on Android it links the core in-process
 ([ADR-0003](docs/adr/0003-one-command-surface-two-backends.md)).
 
-**v2.0.0-alpha.1, on the `v2-main` rewrite branch, unaudited.** `main` was reset
-to an empty history on 2026-07-29; v0.4.1 remains intact at
+**v2.0.0-alpha.1, on `main`, unaudited.** The v2 rewrite now lives on `main`,
+which was reset to an empty history on 2026-07-29; v0.4.1 remains intact at
 `archive/v0.4.1-pre-rewrite` (2,153 commits). v2 reads nothing that version
 wrote and uses a distinct database filename, `copypaste-v2.db`, so an old file
 is never opened — [CLAUDE.md](CLAUDE.md) rule 3 has the reasoning and the one
@@ -50,7 +50,7 @@ there rather than being credited to a layer that cannot see it.
 | Thing | What is and is not established |
 |---|---|
 | The macOS shell — tray, popover, global hotkey, launch at login, notification and sound on copy, WKWebView | `macos-check` on `macos-14` runs the real `NSPasteboard` and the real Keychain on every push and pull request, and an empty run fails the job; those two are verified. Nothing anywhere registers a shortcut, posts a notification or renders a frame on WKWebView. |
-| Android beyond launch and storage | The nightly emulator run installs both APKs, and it establishes launch, a painted WebView, the Keystore secret surviving a restart, an unreadable SQLCipher file, R8 and signing. Rung 2 (the Shizuku shell-uid read), the background capture service, the Quick Settings tile and `FLAG_SECURE` are asserted only negatively or not at all; [`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md) lists what a first device run would falsify. |
+| Android beyond launch and storage | The nightly emulator run installs debug and release x86_64 test APKs. It establishes launch, a painted WebView, the Keystore secret surviving a restart, an unreadable SQLCipher file, R8 and signing; its release key is ephemeral and that artifact is never published. On a publishable tag, the pipeline checksum-verifies, installs and runs the exact signed universal APK before publication. Rung 2 (the Shizuku shell-uid read), the background capture service, the Quick Settings tile and `FLAG_SECURE` are asserted only negatively or not at all; [`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md) lists what a first device run would falsify. |
 | Cloud sync against Supabase | `scripts/demo-cloud.sh` drives two daemons through sign-in, convergence and sensitive-item refusal against a **local stub** (`scripts/cloud-stub.py`), and no workflow runs it. Nothing has ever spoken to a real project, and no deployment has had `supabase/`'s schema and RLS policies applied. |
 | The app on a shipping engine | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. That is the browser layer: it establishes the shared React app's behaviour and nothing about WKWebView or the Android WebView. |
 | Packaging and release | `release.yml` builds, signs and smoke-installs the DMG on `macos-14`, but only on a tag — so `codesign`, `hdiutil` and the Tauri bundler never run on a pull request, and the smoke script's app-launch and Keychain-after-resign legs report rather than fail. `brew install --cask` as a user runs it is unexercised; `check.sh` round-trips the generators. |

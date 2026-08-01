@@ -183,6 +183,11 @@ jobs:
 
       - run: npm ci
 
+      # Lockfile vulnerabilities are a gate too. `npm audit` includes dev
+      # dependencies: test and build tools execute in CI and can compromise the
+      # release path even when they do not ship in the desktop bundle.
+      - run: npm audit
+
       # Two gates. check-contrast.mjs composites every token pair; check-usage
       # scans crates/copypaste-ui/src/ for the cases the token gate cannot see —
       # a fill diluted with an alpha at the call site, or a fill utility used to
@@ -332,6 +337,10 @@ jobs:
       # `npm ci` rather than `npm install`: it fails when package.json and the
       # lockfile disagree, which is the check we want in CI.
       - run: npm ci
+
+      # This lockfile drives both the shipped UI build and Android builds.
+      # Include dev tools: they execute in the trusted CI release path.
+      - run: npm audit
 
       # `npm run build` is `tsc --noEmit && vite build`, so this is the
       # TypeScript type-check as well as the bundle.

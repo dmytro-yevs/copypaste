@@ -139,6 +139,6 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | macOS build, codesign, DMG, no linkage outside the bundle | macOS | Partial — ENFORCED, tag-only |
 | Cask postflight, quarantine removal, re-seal | macOS | Partial — ENFORCED, tag-only; Gatekeeper's verdict is a note |
 | `brew install --cask` as a user runs it | macOS | **NOT VERIFIED IN CI** — `check.sh` round-trips the generators only |
-| APK build, R8, signing, install, no stripped symbol | Android | Verified |
+| Published universal APK: build, R8, release signing, install, launch, no stripped symbol | Android | Partial — the exact signed artifact is checksum-verified and smoke-tested before publication, tag-only |
 | Notarisation and Gatekeeper acceptance | macOS | **NOT VERIFIED IN CI** — ADR-0001 decided against notarisation; recorded so it is not mistaken for coverage |
 | CLI verbs and `--json` | Rust | Verified |
