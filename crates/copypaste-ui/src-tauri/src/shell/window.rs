@@ -124,22 +124,24 @@ pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn create_quick_paste<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
-    WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         QUICK_PASTE_CONFIG.label,
         WebviewUrl::App(QUICK_PASTE_CONFIG.route.into()),
     )
     .title("Quick Paste")
     .inner_size(QUICK_PASTE_WIDTH, QUICK_PASTE_HEIGHT)
-    .resizable(false)
-    .always_on_top(true)
-    .decorations(false)
-    .transparent(true)
-    .shadow(true)
-    .skip_taskbar(true)
-    .visible(QUICK_PASTE_CONFIG.visible)
-    .content_protected(QUICK_PASTE_CONFIG.content_protected)
-    .build()
+    .resizable(false);
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.always_on_top(true);
+    builder
+        .decorations(false)
+        .transparent(true)
+        .shadow(true)
+        .skip_taskbar(true)
+        .visible(QUICK_PASTE_CONFIG.visible)
+        .content_protected(QUICK_PASTE_CONFIG.content_protected)
+        .build()
 }
 
 /// Hide whichever app surface issued the command.
