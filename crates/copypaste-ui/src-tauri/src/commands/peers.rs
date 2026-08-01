@@ -11,87 +11,22 @@
 //!
 //! | screen state | command |
 //! |---|---|
-//! | show a code and where to connect | [`pair_create`] |
-//! | enter the other device's code | [`pair_accept`] |
 //! | the list of known devices | [`peers`] |
 //! | forget one | [`unpair`] |
 //! | sync now, with per-device results | [`sync_now`] |
 //! | the devices on this network | [`discovered`] / [`rescan`] |
 //!
-//! # The code is a secret
-//!
-//! [`pair_create`] returns a pre-shared key in transferable form. Anyone
-//! holding it can pair with this device. It is minted once and the backend
-//! keeps no retrievable copy, so there is deliberately no "show me the code
-//! again" command — the frontend must treat it like a password: shown once,
-//! never persisted, never logged, and cleared from component state when the
-//! pairing screen closes.
+//! Pair-create and pair-accept are intentionally **not** Tauri commands. The
+//! current wire cannot bind a peer-visible SAS decision before persistence;
+//! exposing a credential-returning command would invite a non-compliant UI.
+//! ADR-0007 records the re-entry requirements.
 
 use tauri::State;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
-use crate::model::{UiDiscovered, UiPairing, UiPeer, UiSyncResult};
+use crate::model::{UiDiscovered, UiPeer, UiSyncResult};
 
 type Result<T> = std::result::Result<T, BackendError>;
-
-/// Mint a pairing code on this device, to be entered on the other one.
-///
-/// `name` is what to call the other device until it says its own name.
-#[tauri::command]
-pub async fn pair_create(backend: State<'_, SelectedBackend>, name: String) -> Result<UiPairing> {
-    backend.pair_create(&name).await
-}
-
-/// Consume a code from another device and complete the pairing.
-///
-/// The pairing is only kept if a sync session with that device succeeds, so a
-/// wrong code or an unreachable address leaves nothing behind — which means the
-/// UI can treat a failure here as "nothing happened" and let the user retype.
-///
-/// Returns the paired device, so the screen can move straight to the success
-/// state without re-listing.
-#[tauri::command]
-pub async fn pair_accept(
-    backend: State<'_, SelectedBackend>,
-    code: String,
-    addr: String,
-) -> Result<Vec<UiPeer>> {
-    if code.trim().is_empty() {
-        return Err(BackendError::Invalid(
-            "Enter the code from the other device.",
-        ));
-    }
-    if addr.trim().is_empty() {
-        return Err(BackendError::Invalid(
-            "Enter the address the other device is listening on.",
-        ));
-    }
-    backend.pair_accept(code.trim(), addr.trim()).await
-}
-
-/// Open Android's system-owned QR scanner and return the string it decoded.
-///
-/// The scanner owns camera access, so CopyPaste never requests `CAMERA` and
-/// the untrusted result is validated by the React pairing decoder before it can
-/// reach [`pair_accept`]. macOS uses its in-window scanner instead.
-#[cfg(target_os = "android")]
-#[tauri::command]
-pub async fn scan_pairing_qr(
-    scanner: tauri::State<'_, crate::pairing_scanner::AndroidPairingScanner>,
-) -> Result<Option<String>> {
-    scanner.scan().await
-}
-
-/// macOS scans in the WebView so it can use the app's camera entitlement.
-/// Keeping the command present means an unexpected platform check degrades to
-/// the manual-code fallback instead of becoming a missing-command failure.
-#[cfg(not(target_os = "android"))]
-#[tauri::command]
-pub fn scan_pairing_qr() -> Result<Option<String>> {
-    Err(BackendError::Unsupported(
-        "The native QR scanner is only available on Android.",
-    ))
-}
 
 /// Known devices and when each was last reachable.
 ///
@@ -146,25 +81,6 @@ pub async fn sync_now(
     pairing_id: Option<String>,
 ) -> Result<Vec<UiSyncResult>> {
     backend.sync(pairing_id.as_deref()).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Empty input is caught before it reaches a backend, and the messages tell
-    /// the user what to do rather than what went wrong.
-    #[test]
-    fn empty_pairing_input_is_rejected_actionably() {
-        for err in [
-            BackendError::Invalid("Enter the code from the other device."),
-            BackendError::Invalid("Enter the address the other device is listening on."),
-        ] {
-            let shown = err.to_string();
-            assert!(shown.starts_with("Enter "), "{shown}");
-            assert!(!shown.contains('/'), "{shown}");
-        }
-    }
 }
 
 /// Devices this network has advertised, paired or not.

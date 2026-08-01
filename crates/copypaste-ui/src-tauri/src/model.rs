@@ -41,7 +41,7 @@
 //! Everything else — copy, delete, pin — travels by id and does its work in the
 //! backend, so the secret never needs to be in the WebView to be *used*.
 
-use copypaste_ipc::{DiscoveredDevice, Item, PairingData, PeerInfo, StatusData, SyncResult};
+use copypaste_ipc::{DiscoveredDevice, Item, PeerInfo, StatusData, SyncResult};
 use serde::Serialize;
 
 /// One history item, as the WebView is allowed to see it.
@@ -177,16 +177,6 @@ pub type UiSyncResult = SyncResult;
 /// it is trusted: it is unauthenticated mDNS chatter either way, and a wrapper
 /// would only invite someone to sanitise it into looking confirmed.
 pub type UiDiscovered = DiscoveredDevice;
-
-/// A freshly minted pairing.
-///
-/// Unlike [`UiItem`] this **does** carry a secret — `code` is the pre-shared
-/// key in transferable form — and it crosses the bridge on purpose, because
-/// showing the code to the user is the entire feature. It is passed straight
-/// through rather than wrapped so that no one is tempted to add a
-/// "get the code again" command: the backend mints it once, this is the single
-/// delivery, and the frontend must not persist it.
-pub type UiPairing = PairingData;
 
 #[cfg(test)]
 mod tests {
