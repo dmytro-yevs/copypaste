@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "clap",
  "comfy-table",
@@ -891,11 +891,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 
 [[package]]
 name = "copypaste-cloud"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "argon2",
  "backon",
@@ -923,7 +923,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "android-native-keyring-store",
  "chacha20poly1305",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "backon",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ipc"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "directories",
  "serde",
@@ -1008,7 +1008,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-macos-keychain"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "core-foundation",
  "security-framework",
@@ -1017,7 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "copypaste-clock",
  "data-encoding",
@@ -1042,7 +1042,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sensitive-rules"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "anyhow",
  "regex",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ui"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.2"
 dependencies = [
  "backon",
  "copypaste-core",
