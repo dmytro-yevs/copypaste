@@ -145,6 +145,15 @@ pub struct ShizukuProbe {
     pub rearm_requested: bool,
 }
 
+/// The status fields every Kotlin command returning a probe must include.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AndroidProbeResult {
+    pub probe: ShizukuProbe,
+    pub enabled: bool,
+    pub listening: bool,
+}
+
 /// What one read attempt did.
 ///
 /// `Empty` is separate from `Refused` because they are indistinguishable from
@@ -158,6 +167,16 @@ pub enum ReadOutcome {
     Succeeded,
     Empty,
     Refused,
+}
+
+/// The result of Kotlin's `arm` command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AndroidArmResult {
+    #[serde(flatten)]
+    pub status: AndroidProbeResult,
+    pub outcome: ReadOutcome,
+    pub focused: bool,
 }
 
 /// One clip Kotlin captured and has not handed over yet.
@@ -778,6 +797,22 @@ mod tests {
         )
         .unwrap();
         assert!(probe.running && !probe.permission && probe.rearm_requested);
+
+        let status: AndroidProbeResult = serde_json::from_str(
+            r#"{"probe":{"supported":true,"installed":true,"running":true,"permission":true,
+                "toastSuppressed":false,"rearmRequested":false},"enabled":true,"listening":true}"#,
+        )
+        .unwrap();
+        assert!(status.enabled && status.listening && status.probe.running);
+
+        let arm: AndroidArmResult = serde_json::from_str(
+            r#"{"probe":{"supported":true,"installed":true,"running":true,"permission":true,
+                "toastSuppressed":false,"rearmRequested":false},"enabled":true,"listening":true,
+                "outcome":"succeeded","focused":true}"#,
+        )
+        .unwrap();
+        assert!(arm.status.enabled && arm.status.listening && arm.focused);
+        assert_eq!(arm.outcome, ReadOutcome::Succeeded);
 
         let clip: Clip =
             serde_json::from_str(r#"{"text":"hi","source":"process_text","atMs":12}"#).unwrap();

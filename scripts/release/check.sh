@@ -268,7 +268,7 @@ done
 # The capture feature. An APK that builds, installs and captures nothing is a
 # worse outcome than a failed build, and it is invisible in the artefact.
 for k in CapturePlugin IntakeActivity CaptureTileService ShizukuClipboard \
-         ClipListener CaptureService CaptureNotifications ClipQueue; do
+         ClipListener CaptureService CaptureNotifications CaptureState ClipQueue; do
     if git ls-files --error-unmatch "$GEN/app/src/main/java/com/copypaste/app/$k.kt" >/dev/null 2>&1; then
         ok "$k.kt is committed"
     else
