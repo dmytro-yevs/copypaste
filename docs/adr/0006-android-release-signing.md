@@ -26,10 +26,10 @@ us.
 
 ## Decision
 
-**The APK is signed by the release workflow, from a keystore supplied through
-repository secrets. When those secrets are absent, the workflow still produces
-an installable APK, signed with a keystore generated during that run, and says
-so in the artefact's own filename.**
+**The APK is signed by the release workflow, from a durable keystore supplied
+through repository secrets. All four secrets are required. If any are absent,
+the release fails before it uploads an Android artifact or creates a GitHub
+Release.**
 
 The four secret names are carried over from v0.4.x rather than invented, so a
 keystore made for v1 still works:
@@ -41,35 +41,23 @@ keystore made for v1 still works:
 | `ANDROID_KEY_ALIAS` | key alias |
 | `ANDROID_KEY_PASSWORD` | key password |
 
-**None of them is set today.** The workflow does not assume otherwise: absence
-is the default path, it is not an error, and it does not fail the release.
+The public SHA-256 certificate fingerprint lives in
+`packaging/android/release-cert.sha256`. The release workflow compares the
+signed APK's `apksigner` value to that file before it uploads the artifact, so
+a changed or accidentally replaced secret cannot create a non-upgradable
+release. The checked-in value is deliberately `UNCONFIGURED` until the durable
+keystore exists; that sentinel blocks publication.
 
-What each path produces:
-
-| Secrets | Artefact | Upgrades in place |
-|---|---|---|
-| present | `CopyPaste-v<version>-android.apk` | yes |
-| absent | `CopyPaste-v<version>-android-unstable-key.apk` | **no** |
-
-The workflow prints the SHA-256 of the signing certificate into the run summary
-either way. That is the one number that decides whether an upgrade will work,
-and it costs nothing to publish it.
-
-### The sentence the user gets
-
-In the release notes, unhedged:
-
-> Android will warn that this app comes from an unknown developer. If the
-> filename ends in `-unstable-key`, Android will also refuse to install it over
-> an earlier CopyPaste — uninstall the old version first, which deletes its
-> clipboard history.
+**None of the secrets is set today.** The maintainer must configure all four
+and replace the sentinel before tagging. A key change requires updating this
+public pin in the same reviewed change; it is an upgrade-breaking event, not a
+routine secret rotation.
 
 ## Why not the alternatives
 
-**A debug keystore, generated per run.** This is the same thing as the fallback
-above and is what "just use debug signing" means in practice; naming it
-`-unstable-key` and putting the certificate hash in the log is the only
-difference, and the difference is that nobody is surprised.
+**A debug keystore, generated per run.** This is useful only for an ephemeral,
+never-published emulator test. A release signed this way cannot upgrade an
+existing install, so the workflow refuses to create one.
 
 **A keystore committed to the repository.** This is what v1 actually did — it
 carried `android/app/debug.keystore` and signed the fallback with it. It has a
@@ -93,24 +81,26 @@ for direct download, which is the channel this ADR is about.
 
 ## Consequences
 
-- The Android job is a hard dependency of the publish job. A broken APK build
-  stops the macOS release too. This is deliberate: the alternative is a release
-  page that silently serves one platform, and "one release page for both" is the
-  requirement.
+- The Android build and a smoke test of its signed universal artifact are hard
+  dependencies of the publish job. A missing signing secret, a broken APK or an
+  APK that cannot install and run stops the macOS release too. This is
+  deliberate: the alternative is a release page that silently serves one
+  platform, and "one release page for both" is the requirement.
 - The Rust Android targets and the NDK are pinned in the workflow, for the
   reason `rust-toolchain.toml` exists — an unpinned NDK is a build that changes
   under you.
 - A universal APK is built rather than per-ABI splits. It is larger; it is also
   one file that installs on any device, which is what direct download needs.
-- **Untested.** No Android build has run in CI and no APK has been installed on
-  a device. The paths in the workflow are written against the Tauri scaffold at
-  `crates/copypaste-ui/src-tauri/gen/android`, and the job fails with an
-  explicit message rather than a stack trace if that scaffold is not where it
-  expects.
+- On publishable runs, the workflow downloads the signed universal APK it just
+  produced, verifies its sidecar checksum, and installs/runs that exact file on
+  an x86_64 emulator before publication. The paths in the workflow are written
+  against the Tauri scaffold at `crates/copypaste-ui/src-tauri/gen/android`, and
+  the job fails with an explicit message rather than a stack trace if that
+  scaffold is not where it expects.
 
 ## What would change this
 
-Setting the four secrets. Generate the keystore once, keep it somewhere you will
+Set the four secrets. Generate the keystore once, keep it somewhere you will
 still have it in five years — losing it means no existing install can ever be
 upgraded again:
 
@@ -120,4 +110,12 @@ keytool -genkeypair -v \
   -alias copypaste \
   -keyalg RSA -keysize 4096 -validity 10000
 base64 -w0 copypaste-release.jks    # the value for ANDROID_KEYSTORE_BASE64
+```
+
+Record its public certificate fingerprint, without colons or whitespace, in
+`packaging/android/release-cert.sha256` before setting the secrets:
+
+```sh
+keytool -list -v -keystore copypaste-release.jks -alias copypaste \
+  | sed -n 's/.*SHA256: //p'
 ```
