@@ -22,9 +22,20 @@ use crate::Keyring;
 /// live row with no ciphertext must not fail a whole session — the rest of the
 /// history is still worth syncing.
 #[must_use]
-pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Option<String> {
-    if row.content_ciphertext.is_empty() || row.nonce.is_empty() {
+pub fn open_version_bytes(keyring: &Keyring, row: &StoredItem) -> Option<Vec<u8>> {
+    if row.content_ciphertext.is_empty() {
         warn!(id = %row.id, "live item has no payload; not sending it");
+        return None;
+    }
+    if copypaste_ipc::content_type::is_binary(&row.content_type) {
+        return crate::open_binary(&row.content_ciphertext, &keyring.item_key(), &row.id)
+            .map_err(
+                |e| warn!(id = %row.id, error = ?e, "skipping binary item that failed to decrypt"),
+            )
+            .ok();
+    }
+    if row.nonce.is_empty() {
+        warn!(id = %row.id, "text item has no nonce; not sending it");
         return None;
     }
     // The item id is the AAD, exactly as the read paths use it.
@@ -34,12 +45,22 @@ pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Option<String> {
         &keyring.item_key(),
         &row.id,
     ) {
-        Ok(plaintext) => Some(String::from_utf8_lossy(&plaintext).into_owned()),
+        Ok(plaintext) => Some(plaintext),
         Err(e) => {
             warn!(id = %row.id, error = ?e, "skipping an item that failed to decrypt");
             None
         }
     }
+}
+
+/// Open a text version for the legacy P2P wire.  Binary callers must use
+/// [`open_version_bytes`] so arbitrary bytes can never be lossily stringified.
+#[must_use]
+pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Option<String> {
+    if !copypaste_ipc::content_type::is_text(&row.content_type) {
+        return None;
+    }
+    String::from_utf8(open_version_bytes(keyring, row)?).ok()
 }
 
 /// One version of one item, arriving from another device.
@@ -48,8 +69,15 @@ pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Option<String> {
 /// sealed it with.
 pub struct RemoteVersion<'a> {
     pub item_id: &'a str,
-    /// Empty for a tombstone.
+    /// UTF-8 payload for text. Empty for a tombstone and for a binary version,
+    /// whose bytes are carried in `binary_content`.
     pub content: &'a str,
+    /// Raw bytes for an image or file. This is deliberately not a base64
+    /// string: callers must choose the binary transport field explicitly.
+    pub binary_content: Option<&'a [u8]>,
+    /// JSON-encoded file metadata, private to the encrypted local store and
+    /// an explicit field on authenticated transports.
+    pub payload_metadata: Option<&'a str>,
     pub content_type: &'a str,
     pub created_at: i64,
     pub deleted: bool,
@@ -199,6 +227,28 @@ fn apply_remote_version_with_pin_state(
     incoming: &RemoteVersion<'_>,
     pin_state: Option<(bool, Option<f64>, i64, bool)>,
 ) -> Result<bool, MergeError> {
+    if !incoming.deleted
+        && copypaste_ipc::content_type::is_binary(incoming.content_type)
+        && incoming.binary_content.is_none()
+    {
+        return Ok(false);
+    }
+    if !incoming.deleted && incoming.content_type == copypaste_ipc::content_type::FILE {
+        if !incoming
+            .payload_metadata
+            .and_then(crate::FileMetadata::from_json)
+            .is_some()
+        {
+            return Ok(false);
+        }
+    } else if incoming.payload_metadata.is_some() {
+        // Metadata belongs only to a file payload. Keeping it on a text/image
+        // row would preserve unactionable, user-controlled cleartext forever.
+        return Ok(false);
+    }
+    let content = incoming
+        .binary_content
+        .unwrap_or(incoming.content.as_bytes());
     let local = store.version(incoming.item_id).map_err(|e| {
         warn!(error = ?e, "could not read the local version of an incoming item");
         MergeError::Store
@@ -218,7 +268,7 @@ fn apply_remote_version_with_pin_state(
         Some(hash) if incoming.deleted => hash,
         None if incoming.deleted => local.as_ref().map_or("", |l| l.content_hash.as_str()),
         _ => {
-            computed = crate::storage::compute_content_hash(incoming.content.as_bytes());
+            computed = crate::storage::compute_content_hash(content);
             &computed
         }
     };
@@ -260,19 +310,28 @@ fn apply_remote_version_with_pin_state(
     let is_sensitive = if incoming.deleted {
         local.as_ref().is_some_and(|l| l.is_sensitive)
     } else {
-        detector.is_sensitive(incoming.content)
+        copypaste_ipc::content_type::is_text(incoming.content_type)
+            && detector.is_sensitive(incoming.content)
     };
 
     let sealed = if incoming.deleted {
         None
     } else {
         let key = keyring.item_key();
-        Some(
-            crate::encrypt(incoming.content.as_bytes(), &key, incoming.item_id).map_err(|e| {
-                warn!(error = ?e, "could not seal an incoming item");
+        if copypaste_ipc::content_type::is_binary(incoming.content_type) {
+            let ciphertext = crate::seal_binary(content, &key, incoming.item_id).map_err(|e| {
+                warn!(error = ?e, "could not seal incoming binary item");
                 MergeError::Encrypt
-            })?,
-        )
+            })?;
+            Some((Vec::new(), ciphertext))
+        } else {
+            Some(
+                crate::encrypt(content, &key, incoming.item_id).map_err(|e| {
+                    warn!(error = ?e, "could not seal an incoming item");
+                    MergeError::Encrypt
+                })?,
+            )
+        }
     };
     let (nonce, ciphertext) = match &sealed {
         Some((nonce, ciphertext)) => (Some(nonce.as_slice()), Some(ciphertext.as_slice())),
@@ -305,10 +364,18 @@ fn apply_remote_version_with_pin_state(
             pinned,
             pin_order,
             pin_updated_at,
-            search_text: if is_sensitive || incoming.deleted {
+            search_text: if is_sensitive
+                || incoming.deleted
+                || copypaste_ipc::content_type::is_binary(incoming.content_type)
+            {
                 None
             } else {
                 Some(incoming.content)
+            },
+            payload_metadata: if incoming.deleted {
+                None
+            } else {
+                incoming.payload_metadata
             },
         })
         .map_err(|e| {
@@ -374,6 +441,40 @@ mod tests {
         );
         // ...and the same version arriving a second time is absorbed.
         assert!(!f.apply(&version("a", "shared text", 1_000)));
+    }
+
+    #[test]
+    fn a_remote_file_with_a_path_in_its_metadata_is_not_persisted() {
+        let f = fixture();
+        let payload = b"not actually a PDF";
+        let incoming = RemoteVersion {
+            item_id: "file-a",
+            content: "",
+            binary_content: Some(payload),
+            payload_metadata: Some(
+                r#"{"filename":"../outside.pdf","mime_type":"application/pdf"}"#,
+            ),
+            content_type: copypaste_ipc::content_type::FILE,
+            created_at: 1_000,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "device-a",
+        };
+
+        assert!(!f.apply(&incoming));
+        assert!(f.store.get("file-a").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_non_text_remote_version_is_refused_before_storage() {
+        let f = fixture();
+        let applied = f.apply(&RemoteVersion {
+            content_type: "image/png",
+            ..version("image", "encoded image stand-in", 1_000)
+        });
+
+        assert!(!applied);
+        assert!(f.store.version("image").unwrap().is_none());
     }
 
     /// The same pair of versions must be decided identically whether the hash
@@ -545,6 +646,8 @@ mod tests {
         let local = RemoteVersion {
             item_id: "shared",
             content: "new content",
+            binary_content: None,
+            payload_metadata: None,
             content_type: "text",
             created_at: 200,
             deleted: false,
@@ -556,6 +659,8 @@ mod tests {
         let stale = RemoteVersion {
             item_id: "shared",
             content: "stale content",
+            binary_content: None,
+            payload_metadata: None,
             content_type: "text",
             created_at: 100,
             deleted: false,
@@ -628,6 +733,8 @@ mod tests {
                 is_sensitive: false,
                 search_text: None,
                 created_at: 1_000,
+                app_bundle_id: None,
+                payload_metadata: None,
             })
             .unwrap();
         assert_eq!(mine.origin_device_id, "", "a capture records no origin");

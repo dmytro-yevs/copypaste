@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Listener as _, Manager as _, Runtime};
+use tauri::{AppHandle, Emitter as _, Listener as _, Manager as _, Runtime};
 use tokio::sync::Notify;
 
 use self::menu::TrayMenu;
@@ -95,6 +95,33 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
                 tracing::warn!("could not change the launch-at-login setting");
             }
             let _ = tray_menu.autostart.set_checked(autostart::is_enabled(app));
+        }
+        menu::ID_PRIVATE_MODE => {
+            // Tauri toggles a check item before delivering the event, so its
+            // current state is the requested one. Confirm it from persisted
+            // daemon state below and roll it back if that write fails.
+            let wanted = tray_menu.private_mode.is_checked().unwrap_or(false);
+            let menu = Arc::clone(tray_menu);
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let backend = app.state::<SelectedBackend>();
+                match backend
+                    .set_config(copypaste_ipc::ConfigPatch {
+                        private_mode: Some(wanted),
+                        ..Default::default()
+                    })
+                    .await
+                {
+                    Ok(applied) => {
+                        let _ = menu.private_mode.set_checked(applied.config.private_mode);
+                        let _ = app.emit("private-mode-changed", applied.config.private_mode);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "could not change private mode");
+                        let _ = menu.private_mode.set_checked(!wanted);
+                    }
+                }
+            });
         }
         menu::ID_QUIT => app.exit(0),
         id => {

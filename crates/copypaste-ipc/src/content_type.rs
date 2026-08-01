@@ -9,22 +9,18 @@
 //! would break under image, file and rich-text capture, where the question
 //! "is this text?" stops having an obvious answer.
 //!
-//! # v2 captures text and nothing else
+//! # Capture and transport vocabulary
 //!
-//! The other constants below are **not** aspirational. Each one is already
-//! reachable: a peer or a cloud account can deliver a row of any type, an
-//! import can name one, and `server::transfer` already counts what it had to
-//! leave out of an export because of it. Naming them here is what lets a
-//! client render such a row honestly instead of showing an image as mojibake.
-//!
-//! What is *not* here is the capture path. See `daemon/src/clipboard/mod.rs`
-//! for what remains before a screenshot can be copied.
+//! The macOS capture backend currently emits plain text only; image and file
+//! payloads wait for encrypted binary storage and native paste-back. Imported
+//! or remote rows may still use every type below. Naming them here lets clients
+//! render such a row honestly instead of showing an image as mojibake.
 
-/// Plain text — the only type v2's own capture path produces.
+/// Plain text (`public.utf8-plain-text` on macOS).
 pub const TEXT: &str = "text";
-/// Rich text (`public.rtf` on macOS). Carried as its plain-text rendering.
+/// Rich text (`public.rtf` on macOS); currently accepted from imports/remotes.
 pub const RICH_TEXT: &str = "text/rtf";
-/// HTML (`public.html`). Carried as its plain-text rendering.
+/// HTML (`public.html`); currently accepted from imports/remotes.
 pub const HTML: &str = "text/html";
 /// A PNG image (`public.png`).
 pub const IMAGE_PNG: &str = "image/png";
@@ -42,9 +38,8 @@ pub const KNOWN: &[&str] = &[TEXT, RICH_TEXT, HTML, IMAGE_PNG, IMAGE_TIFF, FILE]
 
 /// Is this content a string the user can read, search and paste?
 ///
-/// The `text/` prefix is accepted because rich text and HTML are carried as
-/// their plain-text rendering: the bytes are a string either way, which is what
-/// every caller is actually asking.
+/// The `text/` prefix is accepted because rich text and HTML are string
+/// payloads too, which is what every caller is actually asking.
 #[must_use]
 pub fn is_text(content_type: &str) -> bool {
     content_type == TEXT || content_type.starts_with("text/")

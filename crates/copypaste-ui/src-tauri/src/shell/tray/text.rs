@@ -7,6 +7,7 @@
 
 pub const SHOW: &str = "Show CopyPaste";
 pub const OPEN_AT_LOGIN: &str = "Open at Login";
+pub const PRIVATE_MODE: &str = "Private Mode";
 pub const QUIT: &str = "Quit CopyPaste";
 
 pub const RECENT: &str = "Recent clippings";
@@ -22,6 +23,7 @@ pub const STATUS_OFFLINE: &str = "Background service not running";
 const CATALOGUE: &[(&str, &str)] = &[
     ("show", SHOW),
     ("openAtLogin", OPEN_AT_LOGIN),
+    ("privateMode", PRIVATE_MODE),
     ("quit", QUIT),
     ("recent", RECENT),
     ("recentEmpty", RECENT_EMPTY),

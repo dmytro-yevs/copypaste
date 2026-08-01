@@ -30,6 +30,7 @@
 //!     ciphertext        text,
 //!     nonce             text,
 //!     content_type      text not null,
+//!     payload_metadata  text,
 //!     -- Version wall clock, ms since epoch, client-supplied. This is the
 //!     -- value the poll cursor pages on, so every writer must restamp it on
 //!     -- every mutation (see `SupabaseRest::fetch_since`).
@@ -170,7 +171,7 @@ pub const TABLE: &str = "clipboard_items";
 /// Explicit column list. Naming the columns rather than `select=*` means a
 /// column added to the table later cannot change what this client parses.
 pub const SELECT_COLUMNS: &str =
-    "item_id,ciphertext,nonce,content_type,created_at,deleted,origin_device_id,signature";
+    "item_id,ciphertext,nonce,content_type,payload_metadata,created_at,deleted,origin_device_id,signature";
 
 /// Upper bound on a page, whatever the caller asks for.
 ///

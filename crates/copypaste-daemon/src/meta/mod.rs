@@ -184,6 +184,8 @@ mod tests {
             copypaste_p2p::protocol::SyncItem {
                 item_id: "theirs".into(),
                 content: "from the phone".into(),
+                binary_content: Vec::new(),
+                payload_metadata: None,
                 content_type: "text".into(),
                 created_at: 1_000,
                 deleted: false,

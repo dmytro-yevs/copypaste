@@ -33,6 +33,8 @@ pub(crate) fn item(id: &str, created_at: i64, content: &str, origin: &str) -> Sy
     SyncItem {
         item_id: id.into(),
         content: content.into(),
+        binary_content: Vec::new(),
+        payload_metadata: None,
         content_type: "text".into(),
         created_at,
         deleted: false,
@@ -50,6 +52,8 @@ pub(super) fn tombstone(id: &str, created_at: i64, hash: &str, origin: &str) -> 
     SyncItem {
         item_id: id.into(),
         content: String::new(),
+        binary_content: Vec::new(),
+        payload_metadata: None,
         content_type: "text".into(),
         created_at,
         deleted: true,

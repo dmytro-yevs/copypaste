@@ -27,6 +27,10 @@ pub struct LocalItem {
     /// Plaintext. Empty for a tombstone — see [`LocalItem::deleted`].
     pub content: Vec<u8>,
     pub content_type: String,
+    /// Opaque payload metadata needed to restore a binary value faithfully.
+    /// For file payloads this is the validated JSON form of `FileMetadata`.
+    /// It is signed before leaving the device and never interpreted here.
+    pub payload_metadata: Option<String>,
     /// Version stamp, Unix milliseconds.
     pub created_at: i64,
     /// A tombstone. Carried on the wire and persisted on the receiver

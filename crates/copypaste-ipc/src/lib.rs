@@ -35,7 +35,7 @@ pub use limits::{
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
     DiscoveredDevice, ExportData, ExportItem, ImportData, Item, ItemPage, PairingData, PeerInfo,
-    StatusData, SyncResult,
+    PrivateModeData, StatusData, SyncResult,
 };
 
 use serde::{Deserialize, Serialize};
@@ -273,6 +273,13 @@ pub enum Method {
     SetConfig {
         patch: ConfigPatch,
     },
+    /// Set the persisted capture gate without requiring a client to merge the
+    /// whole settings object.
+    SetPrivateMode {
+        enabled: bool,
+    },
+    /// Read the persisted capture gate.
+    GetPrivateMode,
 
     /// Turn this connection into a change stream.
     ///
@@ -450,6 +457,7 @@ pub enum ResponseData {
     Sync(Vec<SyncResult>),
     CloudStatus(CloudStatusData),
     CloudSync(CloudSyncData),
+    PrivateMode(PrivateModeData),
     /// Must stay last: an empty struct variant matches any JSON object, so an
     /// arm below it would never be reached by the untagged decoder.
     Empty {},

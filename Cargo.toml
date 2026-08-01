@@ -61,6 +61,9 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["c
 # Passphrase -> sync key. The server must never be able to derive it.
 argon2 = "0.5"
 base64 = "0.22"
+url = "2"
+plist = "1.10"
+mime_guess = "2"
 # errors, logging, cli, misc
 thiserror = "1"
 anyhow = "1"
@@ -81,7 +84,7 @@ comfy-table = "7"
 # macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }
-objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem"] }
+objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication"] }
 security-framework = "2"
 
 [profile.release]

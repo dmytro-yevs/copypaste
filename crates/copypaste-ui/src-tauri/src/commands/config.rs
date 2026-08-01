@@ -24,7 +24,7 @@
 //! bridge verbatim — unlike an item, which has plaintext to drop (`crate::model`).
 
 use copypaste_ipc::{ConfigApplied, ConfigPatch};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 
@@ -43,6 +43,7 @@ pub async fn get_config(backend: State<'_, SelectedBackend>) -> Result<ConfigApp
 /// field — including the valid ones in the same patch — exactly as it was.
 #[tauri::command]
 pub async fn set_config(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     patch: ConfigPatch,
 ) -> Result<ConfigApplied> {
@@ -52,7 +53,12 @@ pub async fn set_config(
         // value from silently "saving" nothing.
         return Err(BackendError::Invalid("There was nothing to change."));
     }
-    backend.set_config(patch).await
+    let private_mode_changed = patch.private_mode.is_some();
+    let applied = backend.set_config(patch).await?;
+    if private_mode_changed {
+        let _ = app.emit("private-mode-changed", applied.config.private_mode);
+    }
+    Ok(applied)
 }
 
 #[cfg(test)]

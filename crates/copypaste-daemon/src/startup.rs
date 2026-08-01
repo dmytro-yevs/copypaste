@@ -21,8 +21,12 @@ use crate::server;
 /// resolvers disagree. `data_dir` is the `--data-dir` case, and on Linux it is
 /// the same directory — which is exactly why v2's *filename* is different.
 pub fn legacy_history_present(data_dir: &std::path::Path) -> bool {
+    legacy_history_present_in(data_dir, copypaste_ipc::v1_data_dir())
+}
+
+fn legacy_history_present_in(data_dir: &std::path::Path, v1_data_dir: Option<PathBuf>) -> bool {
     std::iter::once(data_dir.to_path_buf())
-        .chain(copypaste_ipc::v1_data_dir())
+        .chain(v1_data_dir)
         .any(|dir| copypaste_core::v1_database_in(&dir))
 }
 

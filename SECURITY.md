@@ -195,10 +195,11 @@ Two limitations change what the rest is worth:
 - **`unpair` is local and unilateral.** It removes this device's half; the other
   device keeps its half until it also unpairs. Nothing revokes a lost device
   from here, and there is no sync-key rotation.
-- **The application exclusion list is stored and enforced by nothing** — the
-  capture path has no frontmost-app attribution to match it against. What *is*
-  enforced is the `org.nspasteboard.*` opt-out, which is how password managers
-  ask to be skipped. Private mode does not exist.
+- **Application attribution is necessarily best effort.** The macOS capture
+  path caches the frontmost bundle id briefly, applies the persisted exclusion
+  list and always skips known password managers before reading a representation.
+  If exclusions are configured but attribution is unavailable, it fails closed.
+  Private mode is persisted and gates capture before any representation read.
 
 ## macOS permissions
 

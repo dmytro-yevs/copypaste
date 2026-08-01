@@ -638,6 +638,7 @@ mod tests {
             item_id: "a".into(),
             content: content.as_bytes().to_vec(),
             content_type: "text".into(),
+            payload_metadata: None,
             created_at: 1_000,
             deleted: false,
             origin_device_id: "device-a".into(),

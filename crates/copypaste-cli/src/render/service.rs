@@ -40,6 +40,7 @@ pub fn export_summary(export: &ExportData) -> String {
 pub fn config_text(applied: &ConfigApplied) -> String {
     let config = &applied.config;
     let mut lines = vec![
+        setting("private mode", yes_no(config.private_mode)),
         setting("poll interval", format!("{} ms", config.poll_interval_ms)),
         setting("history limit", format!("{} items", config.history_limit)),
         setting(
@@ -288,6 +289,7 @@ mod tests {
             item_count: 42,
             capture_running: true,
             clipboard_backend: backend.into(),
+            private_mode: false,
             legacy_history_present: false,
             counters: copypaste_ipc::DiagnosticCounters::default(),
         }

@@ -123,6 +123,13 @@ impl StoreSource {
         open_version(&self.keyring, row)
     }
 
+    /// Decrypt the raw payload for a transport.  Unlike [`Self::open`], this
+    /// retains image and file bytes exactly.
+    #[must_use]
+    pub fn open_bytes(&self, row: &StoredItem) -> Option<Vec<u8>> {
+        super::open_version_bytes(&self.keyring, row)
+    }
+
     /// Merge one remote version in, whichever transport carried it.
     pub fn apply_version(&self, incoming: &RemoteVersion<'_>) -> Result<bool, MergeError> {
         let applied = apply_remote_version(
@@ -145,13 +152,17 @@ impl StoreSource {
     fn to_wire(&self, row: StoredItem) -> Option<SyncItem> {
         // A tombstone has no payload to open, and carries none on the wire
         // either (manifest 05 rule T-4).
-        let content = if row.deleted {
-            String::new()
+        let (content, binary_content) = if row.deleted {
+            (String::new(), Vec::new())
+        } else if copypaste_ipc::content_type::is_binary(&row.content_type) {
+            (String::new(), self.open_bytes(&row)?)
         } else {
-            self.open(&row)?
+            (self.open(&row)?, Vec::new())
         };
         Some(SyncItem {
             content,
+            binary_content,
+            payload_metadata: row.payload_metadata,
             content_type: row.content_type,
             created_at: row.created_at,
             deleted: row.deleted,
@@ -225,6 +236,9 @@ impl SyncSource for StoreSource {
                 &RemoteVersion {
                     item_id: &item.item_id,
                     content: &item.content,
+                    binary_content: (!item.binary_content.is_empty())
+                        .then_some(item.binary_content.as_slice()),
+                    payload_metadata: item.payload_metadata.as_deref(),
                     content_type: &item.content_type,
                     created_at: item.created_at,
                     deleted: item.deleted,
@@ -275,6 +289,8 @@ mod tests {
                     Some(content.to_string())
                 },
                 created_at,
+                app_bundle_id: None,
+                payload_metadata: None,
             })
             .expect("insert")
             .id
@@ -284,6 +300,8 @@ mod tests {
         SyncItem {
             item_id: item_id.into(),
             content: content.into(),
+            binary_content: Vec::new(),
+            payload_metadata: None,
             content_type: "text".into(),
             created_at,
             deleted: false,
@@ -428,6 +446,8 @@ mod tests {
             .apply(SyncItem {
                 item_id: "deleted".into(),
                 content: String::new(),
+                binary_content: Vec::new(),
+                payload_metadata: None,
                 content_type: "text".into(),
                 created_at: 4_000,
                 deleted: true,
@@ -609,6 +629,8 @@ mod tests {
                 is_sensitive: false,
                 search_text: None,
                 created_at: 1_000,
+                app_bundle_id: None,
+                payload_metadata: None,
             })
             .unwrap();
         add(&f, "readable", "readable", 2_000);

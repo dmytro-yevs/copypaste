@@ -59,6 +59,7 @@ pub struct IncomingItem<'a> {
     /// Plaintext for the search index. Ignored when the item is sensitive or a
     /// tombstone — the write-time layer of "sensitive items are never indexed".
     pub search_text: Option<&'a str>,
+    pub payload_metadata: Option<&'a str>,
 }
 
 /// The origin of a row, resolving the empty sentinel to `here`.
@@ -253,8 +254,8 @@ impl Store {
         let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, payload_metadata) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  nonce              = excluded.nonce, \
@@ -264,6 +265,8 @@ impl Store {
                  created_at         = excluded.created_at, \
                  deleted            = excluded.deleted, \
                  origin_device_id   = excluded.origin_device_id, \
+                 app_bundle_id      = NULL, \
+                 payload_metadata   = excluded.payload_metadata, \
                  pinned             = excluded.pinned, \
                  pin_order          = excluded.pin_order, \
                  pin_updated_at     = excluded.pin_updated_at",
@@ -280,6 +283,7 @@ impl Store {
                 incoming.created_at,
                 incoming.deleted,
                 incoming.origin_device_id,
+                incoming.payload_metadata,
             ],
         );
 
@@ -299,7 +303,7 @@ impl Store {
         // write-time layer of "sensitive items never reach the search index"
         // for the sync path (CLAUDE.md rule 4).
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [incoming.id])?;
-        if !incoming.deleted {
+        if !incoming.deleted && copypaste_ipc::content_type::is_text(incoming.content_type) {
             if let Some(text) = incoming.search_text.filter(|t| !t.trim().is_empty()) {
                 // Layer 2 rather than a second `is_sensitive` test here: it
                 // re-reads the row this transaction just wrote, so a caller
@@ -334,6 +338,7 @@ mod tests {
             pin_order: None,
             pin_updated_at: 0,
             search_text: Some("remote text"),
+            payload_metadata: None,
         }
     }
 
