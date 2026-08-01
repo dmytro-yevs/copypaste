@@ -362,10 +362,8 @@ mod tests {
     fn app_assembly_starts_with_regular_macos_identity() {
         let production_source = production_source();
 
-        assert!(
-            production_source
-                .contains("app.set_activation_policy(tauri::ActivationPolicy::Regular);")
-        );
+        assert!(production_source
+            .contains("app.set_activation_policy(tauri::ActivationPolicy::Regular);"));
         assert!(!production_source.contains("ActivationPolicy::Accessory"));
     }
 

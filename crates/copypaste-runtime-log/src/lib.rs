@@ -222,10 +222,7 @@ pub fn list(
     });
 
     let end = offset.saturating_add(limit).min(events.len());
-    let page = events
-        .get(offset..end)
-        .unwrap_or_default()
-        .to_vec();
+    let page = events.get(offset..end).unwrap_or_default().to_vec();
     Ok(RuntimeLogPage {
         events: page,
         next_cursor: (end < events.len()).then(|| end.to_string()),

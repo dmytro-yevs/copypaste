@@ -7,11 +7,11 @@ use copypaste_core::{Detector, Keyring, Store};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 
-use crate::AppState;
 use crate::clipboard::{Capture, ClipboardSource};
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
+use crate::AppState;
 
 /// Reads nothing; records what is written, so a test can assert the *absence*
 /// of a pasteboard write — the whole difference between `get` and `copy`.

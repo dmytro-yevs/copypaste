@@ -31,12 +31,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use copypaste_ipc::{ErrorCode, MAX_FRAME_BYTES, Method, Response, ResponseData};
+use copypaste_ipc::{ErrorCode, Method, Response, ResponseData, MAX_FRAME_BYTES};
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
@@ -373,9 +373,9 @@ pub(super) type Reader = FramedRead<OwnedReadHalf, LinesCodec>;
 mod tests {
     use super::*;
     use crate::testutil::test_state;
-    use copypaste_ipc::{Method, PROTOCOL_VERSION, Request};
-    use std::sync::Barrier;
+    use copypaste_ipc::{Method, Request, PROTOCOL_VERSION};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Barrier;
 
     fn request(id: u64, method: Method) -> Request {
         Request {

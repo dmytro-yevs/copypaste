@@ -33,7 +33,7 @@
 // compiling across binding revisions instead of flipping with each bump.
 #![allow(unused_unsafe)]
 
-use objc2::rc::{Retained, autoreleasepool};
+use objc2::rc::{autoreleasepool, Retained};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -898,11 +898,9 @@ mod tests {
 
         let oversized = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize + 1];
         write_types(&[(UTI_PNG, &oversized)]);
-        assert!(
-            clipboard
-                .poll_with_policy(CapturePolicy::new(&settings))
-                .is_none()
-        );
+        assert!(clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .is_none());
 
         let boundary = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize];
         write_types(&[(UTI_PNG, &boundary)]);

@@ -528,10 +528,12 @@ mod tests {
         let mine = s.insert(item("mine", T0)).unwrap();
 
         // Same content hash, same bucket, different id: the dedup index owns
-        // that pair.
-        let applied = s
-            .upsert(&incoming("theirs", &mine.content_hash, T0 + 500))
-            .unwrap();
+        // that pair when both versions share an origin.
+        let theirs = IncomingItem {
+            origin_device_id: "",
+            ..incoming("theirs", &mine.content_hash, T0 + 500)
+        };
+        let applied = s.upsert(&theirs).unwrap();
         assert!(!applied, "the collision must be reported, not stored");
         assert!(s.get("theirs").unwrap().is_none());
         assert!(s.get(&mine.id).unwrap().is_some(), "no local data lost");

@@ -1,8 +1,8 @@
 use copypaste_ipc::{ExportData, ExportItem};
 use tracing::{info, warn};
 
-use crate::Keyring;
 use crate::storage::{Store, StoreError};
+use crate::Keyring;
 
 /// How many rows one export reads out of the store at a time.
 const EXPORT_CHUNK: u32 = 500;
@@ -87,7 +87,7 @@ fn finish(data: ExportData) -> ExportData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transfer::testkit::{Fixture, fixture};
+    use crate::transfer::testkit::{fixture, Fixture};
 
     fn export_of(f: &Fixture, include_sensitive: bool) -> ExportData {
         export(&f.store, &f.keyring, 0, include_sensitive).expect("the store must read")

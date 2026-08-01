@@ -135,6 +135,11 @@ export const ALPHA_UTILITIES = [
     where: 'Banners',
     decorative: 'As border-warn/20.',
   },
+  {
+    util: 'bg-withheld-fg/25',
+    where: 'History sensitive-item skeletons',
+    decorative: 'The bars are a non-text placeholder for absent content, not an information-bearing surface.',
+  },
 ];
 
 /**
@@ -142,6 +147,20 @@ export const ALPHA_UTILITIES = [
  * one is a decision rather than an oversight.
  */
 export const EXEMPTIONS = [
+  {
+    rule: 'literal-colour',
+    files: ['index.css'],
+    why:
+      'This stylesheet composes only resolved design tokens for native translucency and Sonner. ' +
+      'The component gate still rejects literals everywhere else in the shipping tree.',
+  },
+  {
+    rule: 'literal-colour',
+    files: ['lib/nativeAppearance.ts'],
+    why:
+      'The native bridge receives an arbitrary system accent as hex and must choose black or white ' +
+      'text before writing that platform value into the DOM; no fixed application colour is introduced.',
+  },
   {
     rule: 'no-blur-token',
     token: 'scrim-blur',

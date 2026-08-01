@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use copypaste_ipc::{ErrorCode, Method, PROTOCOL_VERSION, Request, Response};
+use copypaste_ipc::{ErrorCode, Method, Request, Response, PROTOCOL_VERSION};
 use tracing::{debug, error};
 
 use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
@@ -274,14 +274,12 @@ mod tests {
 
     #[test]
     fn matching_protocol_version_passes_the_gate() {
-        assert!(
-            protocol_gate(&Request {
-                id: 1,
-                protocol_version: PROTOCOL_VERSION,
-                method: Method::Status,
-            })
-            .is_none()
-        );
+        assert!(protocol_gate(&Request {
+            id: 1,
+            protocol_version: PROTOCOL_VERSION,
+            method: Method::Status,
+        })
+        .is_none());
     }
 
     #[test]

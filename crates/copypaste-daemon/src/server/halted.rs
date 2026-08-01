@@ -20,14 +20,14 @@
 
 use std::sync::Arc;
 
-use copypaste_ipc::{ErrorCode, MAX_FRAME_BYTES, Method, Request, Response, ResponseData};
+use copypaste_ipc::{ErrorCode, Method, Request, Response, ResponseData, MAX_FRAME_BYTES};
 use futures_util::StreamExt;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tracing::{debug, warn};
 
-use super::listener::{MAX_CONCURRENT_CONNECTIONS, READ_TIMEOUT, send};
+use super::listener::{send, MAX_CONCURRENT_CONNECTIONS, READ_TIMEOUT};
 
 /// Accept connections and refuse each one, until told to stop.
 pub async fn serve(
@@ -115,7 +115,7 @@ async fn refuse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::messages::{MSG_KEY_LOCKED, Refusal};
+    use crate::server::messages::{Refusal, MSG_KEY_LOCKED};
     use copypaste_core::CryptoError;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

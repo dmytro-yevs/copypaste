@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 use super::super::keys::random_secret;
-use super::{CryptoError, DeviceSecret, KEY_LEN, Lookup, SECRET_FILE_NAME};
+use super::{CryptoError, DeviceSecret, Lookup, KEY_LEN, SECRET_FILE_NAME};
 
 /// The secret sits in the data directory it belongs to, not in the platform
 /// default: security review F-11. Resolving through `directories::ProjectDirs`

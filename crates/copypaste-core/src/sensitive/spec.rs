@@ -1,7 +1,7 @@
 //! What a rule *is*: the fields every entry in [`super::rules::RULES`] carries,
 //! and the mapping from a rule to the [`Finding`] it produces.
 
-use super::finding::{AUTOWIPE_CONFIDENCE_FLOOR, Finding, Severity};
+use super::finding::{Finding, Severity, AUTOWIPE_CONFIDENCE_FLOOR};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Category {

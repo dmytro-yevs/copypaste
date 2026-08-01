@@ -37,8 +37,8 @@ function TabsList({
       className={cn(
         variant === "floating"
           ? equalWidth
-            ? "grid w-full grid-flow-col auto-cols-fr items-center gap-1 rounded-full border border-border bg-panel/90 p-1 text-muted-foreground shadow-sm backdrop-blur-sm"
-            : "inline-flex w-fit flex-wrap items-center justify-start gap-1 rounded-full border border-border bg-panel/90 p-1 text-muted-foreground shadow-sm backdrop-blur-sm"
+            ? "grid w-full grid-flow-col auto-cols-fr items-center gap-1 rounded-full border border-border bg-panel p-1 text-muted-foreground shadow-sm backdrop-blur-sm"
+            : "inline-flex w-fit flex-wrap items-center justify-start gap-1 rounded-full border border-border bg-panel p-1 text-muted-foreground shadow-sm backdrop-blur-sm"
           : equalWidth
             ? "grid w-full grid-flow-col auto-cols-fr"
             : "flex",

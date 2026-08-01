@@ -21,16 +21,16 @@
 use std::sync::{Arc, Mutex};
 
 use copypaste_cloud::sync::{CloudSource, LocalItem, SyncError};
-use copypaste_core::RemoteVersion;
 use copypaste_core::sync::blocking;
+use copypaste_core::RemoteVersion;
 use copypaste_p2p::protocol::ItemSummary;
-use copypaste_p2p::sync::{MergeDecision, merge_decision};
+use copypaste_p2p::sync::{merge_decision, MergeDecision};
 use tracing::warn;
 
-use crate::AppState;
 use crate::cloud::{
-    KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM, UploadFloor,
+    UploadFloor, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM,
 };
+use crate::AppState;
 
 /// Local versions offered to one push.
 ///
@@ -463,12 +463,10 @@ mod tests {
         let after = copypaste_core::now_ms() + 1;
         state.meta.set_state_ms(KEY_UPLOAD_FLOOR, after).unwrap();
         assert_eq!(source.upload_floor().unwrap(), after);
-        assert!(
-            source
-                .local_changes_since(source.upload_floor().unwrap())
-                .unwrap()
-                .is_empty()
-        );
+        assert!(source
+            .local_changes_since(source.upload_floor().unwrap())
+            .unwrap()
+            .is_empty());
     }
 
     /// An item that arrived from a peer carries the *sender's* stamp, which can
@@ -705,13 +703,11 @@ mod tests {
             local.created_at,
             "the local LWW winner was not scheduled for republishing"
         );
-        assert!(
-            source
-                .local_changes_after(local.created_at, None)
-                .unwrap()
-                .iter()
-                .any(|item| item.item_id == id)
-        );
+        assert!(source
+            .local_changes_after(local.created_at, None)
+            .unwrap()
+            .iter()
+            .any(|item| item.item_id == id));
 
         state
             .meta

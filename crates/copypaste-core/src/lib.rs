@@ -12,27 +12,26 @@ pub mod sync;
 pub mod transfer;
 
 pub use binary::{
-    BinaryMetadata, CHUNK_BYTES, FileMetadata, item_id as binary_item_id,
-    metadata as binary_metadata, open as open_binary, seal as seal_binary,
+    item_id as binary_item_id, metadata as binary_metadata, open as open_binary,
+    seal as seal_binary, BinaryMetadata, FileMetadata, CHUNK_BYTES,
 };
-pub use crypto::{CryptoError, ItemKey, Keyring, decrypt, encrypt};
-pub use image_preview::{ImagePreviewError, ImageThumbnail, MAX_THUMBNAIL_EDGE, thumbnail_png};
+pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
+pub use image_preview::{thumbnail_png, ImagePreviewError, ImageThumbnail, MAX_THUMBNAIL_EDGE};
 pub use ingest::{
-    IngestError, Ingested, ingest, ingest_binary_into_with_capture_context,
-    ingest_binary_into_with_capture_source, ingest_into, ingest_into_with_capture_context,
-    ingest_into_with_capture_source,
+    ingest, ingest_binary_into_with_capture_context, ingest_binary_into_with_capture_source,
+    ingest_into, ingest_into_with_capture_context, ingest_into_with_capture_source, IngestError,
+    Ingested,
 };
 pub use sensitive::{
-    DEFAULT_SENSITIVE_TTL, Detector, Finding, PurgeReport, SENSITIVE_TTL_DISABLED, Severity,
-    purge_indexed_secrets, purge_indexed_secrets_in_transaction, sweep_sensitive,
+    purge_indexed_secrets, purge_indexed_secrets_in_transaction, sweep_sensitive, Detector,
+    Finding, PurgeReport, Severity, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
 };
 pub use storage::{
-    DeviceIdentity, IncomingItem, IndexedText, Ingest, ItemCursor, NewItem, Page, Store,
-    StoreError, StoredItem, Version, compute_content_hash, origin_or, verify_integrity,
-    verify_schema,
+    compute_content_hash, origin_or, verify_integrity, verify_schema, DeviceIdentity, IncomingItem,
+    IndexedText, Ingest, ItemCursor, NewItem, Page, Store, StoreError, StoredItem, Version,
 };
 pub use sync::{MergeError, RemoteVersion, StoreSource};
-pub use transfer::{ImportError, MAX_IMPORT_ITEMS, export, import};
+pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};
 
 /// Milliseconds since the Unix epoch.
 ///

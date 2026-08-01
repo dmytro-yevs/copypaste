@@ -46,7 +46,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use copypaste_core::{
-    IngestError, ItemCursor, StoredItem, ingest, ingest_into_with_capture_source,
+    ingest, ingest_into_with_capture_source, IngestError, ItemCursor, StoredItem,
 };
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
@@ -56,8 +56,8 @@ use tokio::sync::OnceCell;
 
 use super::{Backend, BackendError, Page, Result};
 use peers::PeerNode;
-use rows::{DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, clamp_page};
-use state::{BackendState, write_settings};
+use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
+use state::{write_settings, BackendState};
 
 /// Reported in [`StatusData::clipboard_backend`] so a build that is not polling
 /// anything cannot be mistaken for one that is.
@@ -74,7 +74,8 @@ const MSG_NO_PEER: &str = "That device isn't paired.";
 const MSG_NO_WATCH: &str = "Live updates aren't available in this build.";
 const MSG_INVALID_SETTING: &str = "That setting isn't valid.";
 const MSG_NO_BACKUP: &str = "Backup and restore aren't available in this build yet.";
-const MSG_NO_REORDER: &str = "Reordering pinned items isn't available yet. Pinned items keep the order they \
+const MSG_NO_REORDER: &str =
+    "Reordering pinned items isn't available yet. Pinned items keep the order they \
      were pinned in.";
 
 /// Everything the in-process backend owns. Cheap to clone; `Store` is a
@@ -579,14 +580,12 @@ mod tests {
     async fn an_empty_history_lists_and_searches_without_failing() {
         let (backend, _clip, _dir) = backend();
         assert!(backend.list(50, None).await.unwrap().items.is_empty());
-        assert!(
-            backend
-                .search("anything", 20)
-                .await
-                .unwrap()
-                .items
-                .is_empty()
-        );
+        assert!(backend
+            .search("anything", 20)
+            .await
+            .unwrap()
+            .items
+            .is_empty());
     }
 
     /// B-1 / `CopyPaste-8ebg.57` on the platform with no daemon behind it: an
@@ -730,12 +729,10 @@ mod tests {
         assert!(backend.peers().await.unwrap().is_empty());
 
         // A code that is not a code is refused without dialling anything.
-        assert!(
-            backend
-                .pair_accept("not-a-code", "127.0.0.1:1")
-                .await
-                .is_err()
-        );
+        assert!(backend
+            .pair_accept("not-a-code", "127.0.0.1:1")
+            .await
+            .is_err());
         assert!(backend.peers().await.unwrap().is_empty());
     }
 

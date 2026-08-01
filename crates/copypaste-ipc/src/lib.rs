@@ -25,15 +25,15 @@ mod response;
 pub use paths::{data_dir, database_path, socket_path};
 
 pub use config::{
-    ConfigData, ConfigError, ConfigPatch, DEFAULT_STORAGE_QUOTA_BYTES, Liveness,
+    ConfigData, ConfigError, ConfigPatch, Liveness, DEFAULT_STORAGE_QUOTA_BYTES,
     MAX_DECODED_IMAGE_MB, MAX_FILE_SIZE_BYTES, MAX_IMAGE_SIZE_BYTES, MAX_TEXT_SIZE_BYTES,
     MIN_DECODED_IMAGE_MB, MIN_FILE_SIZE_BYTES, MIN_IMAGE_SIZE_BYTES, MIN_STORAGE_QUOTA_BYTES,
     MIN_TEXT_SIZE_BYTES, POLL_INTERVAL_MAX_MS, POLL_INTERVAL_MIN_MS,
 };
 pub use error::ErrorCode;
 pub use limits::{
-    DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES, MAX_PAGE,
-    MAX_PAGE_CONTENT_BYTES, clamp_page,
+    clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES,
+    MAX_PAGE, MAX_PAGE_CONTENT_BYTES,
 };
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
