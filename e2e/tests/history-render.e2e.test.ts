@@ -103,14 +103,30 @@ describe("row geometry (INV-5)", () => {
 });
 
 describe("keyboard navigation", () => {
-  test("the list takes focus and arrow keys move the selection", async () => {
+  test("the named list owns focus, scrolling, and valid ARIA state", async () => {
     const { browser } = app;
     await focusList(browser);
 
-    const focused = await browser.execute(
-      () => document.activeElement?.tagName ?? "none",
-    );
-    expect(focused).toBe("DIV");
+    const semantics = (await browser.execute(function (selector: string) {
+      const list = document.querySelector(selector) as HTMLElement | null;
+      return {
+        focused: document.activeElement === list,
+        tabIndex: list?.tabIndex,
+        overflowY: list ? getComputedStyle(list).overflowY : "",
+        multiselectable: list?.getAttribute("aria-multiselectable") ?? null,
+      };
+    }, '[role="list"][aria-label="Clipboard history"]')) as {
+      focused: boolean;
+      tabIndex: number;
+      overflowY: string;
+      multiselectable: string | null;
+    };
+    expect(semantics).toEqual({
+      focused: true,
+      tabIndex: 0,
+      overflowY: "auto",
+      multiselectable: null,
+    });
 
     await browser.keys(["ArrowDown"]);
     await browser.waitUntil(
