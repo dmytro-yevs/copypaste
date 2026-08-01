@@ -150,17 +150,30 @@ mod tests {
                 &state.meta,
                 &ConfigPatch {
                     poll_interval_ms: Some(250),
+                    max_text_size_bytes: Some(12 * 1024 * 1024),
+                    max_image_size_bytes: Some(72 * 1024 * 1024),
+                    max_file_size_bytes: Some(90 * 1024 * 1024),
+                    max_decoded_image_mb: Some(75),
                     ..Default::default()
                 },
             )
             .expect("a valid patch");
         assert_eq!(applied.poll_interval_ms, 250);
+        assert_eq!(applied.max_text_size_bytes, 12 * 1024 * 1024);
+        assert_eq!(applied.max_image_size_bytes, 72 * 1024 * 1024);
+        assert_eq!(applied.max_file_size_bytes, 90 * 1024 * 1024);
+        assert_eq!(applied.max_decoded_image_mb, 75);
         assert_eq!(state.settings.get().poll_interval_ms, 250);
 
         // A restart reads it back.
         let (restarted, _dir) =
             crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
-        assert_eq!(restarted.settings.get().poll_interval_ms, 250);
+        let loaded = restarted.settings.get();
+        assert_eq!(loaded.poll_interval_ms, 250);
+        assert_eq!(loaded.max_text_size_bytes, 12 * 1024 * 1024);
+        assert_eq!(loaded.max_image_size_bytes, 72 * 1024 * 1024);
+        assert_eq!(loaded.max_file_size_bytes, 90 * 1024 * 1024);
+        assert_eq!(loaded.max_decoded_image_mb, 75);
     }
 
     /// The rule this whole module is shaped around.
@@ -210,18 +223,14 @@ mod tests {
         Ok(())
     }
 
-    /// A value that was in bounds when it was written and is not any more.
-    ///
-    /// Deserializing checks the shape, never the bounds, so without this a
-    /// `max_item_bytes` from before the ceiling was lowered to
-    /// `MAX_CONTENT_BYTES` would come back and go on storing items whose reply
-    /// no client can decode.
+    /// Deserializing checks the shape, never the bounds, so a stored value that
+    /// exceeds today's binding range must fall back atomically.
     #[test]
     fn a_stored_value_the_current_bounds_reject_falls_back_to_the_defaults(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let (state, _dir) = test_state("alpha");
         let stale = serde_json::to_string(&ConfigData {
-            max_item_bytes: copypaste_ipc::MAX_CONTENT_BYTES as u64 * 4,
+            max_file_size_bytes: copypaste_ipc::MAX_FILE_SIZE_BYTES + 1,
             ..ConfigData::default()
         })?;
         state.meta.set_state(KEY_SETTINGS, &stale)?;

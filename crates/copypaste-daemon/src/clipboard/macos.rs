@@ -42,7 +42,7 @@ use objc2_foundation::{NSArray, NSData, NSString};
 use tracing::{debug, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{Capture, CapturePolicy, ClipboardSource, MAX_TEXT_BYTES};
+use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
 /// statics: the values are frozen by the OS and by nspasteboard.org, and
@@ -176,11 +176,8 @@ impl MacOsClipboard {
 
 impl ClipboardSource for MacOsClipboard {
     fn poll(&mut self) -> Option<Capture> {
-        self.poll_with_policy(CapturePolicy {
-            private_mode: false,
-            excluded_app_bundle_ids: &[],
-            max_item_bytes: MAX_TEXT_BYTES as u64,
-        })
+        let settings = copypaste_ipc::ConfigData::default();
+        self.poll_with_policy(CapturePolicy::new(&settings))
     }
 
     fn poll_with_policy(&mut self, policy: CapturePolicy<'_>) -> Option<Capture> {
@@ -232,7 +229,7 @@ impl ClipboardSource for MacOsClipboard {
 
             // Private mode must be a capture gate, not merely an ingest choice:
             // acknowledge the change without reading either attribution or data.
-            if policy.private_mode {
+            if policy.settings.private_mode {
                 return None;
             }
 
@@ -241,9 +238,10 @@ impl ClipboardSource for MacOsClipboard {
             // empty list the same `None` is safe because content detection
             // remains active. The 750 ms cache bounds stale exclusion decisions.
             let app_bundle_id = self.frontmost_bundle_id();
-            if !policy.excluded_app_bundle_ids.is_empty()
+            if !policy.settings.excluded_app_bundle_ids.is_empty()
                 && app_bundle_id.as_ref().is_none_or(|id| {
                     policy
+                        .settings
                         .excluded_app_bundle_ids
                         .iter()
                         .any(|excluded| excluded == id)
@@ -290,9 +288,8 @@ impl ClipboardSource for MacOsClipboard {
             // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
             // multi-GiB item is a multi-GiB allocation. Check first.
             let len = unsafe { data.length() };
-            let cap = usize::try_from(policy.max_item_bytes)
-                .unwrap_or(MAX_TEXT_BYTES)
-                .min(MAX_TEXT_BYTES);
+            let cap =
+                usize::try_from(policy.limit_bytes(content_type)).unwrap_or(MAX_CAPTURE_BYTES);
             if len > cap {
                 self.rejected_too_large += 1;
                 // I-39 / §6.5: counted, not silently dropped.
@@ -796,7 +793,7 @@ mod tests {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
 
-        let oversized = vec![b'a'; MAX_TEXT_BYTES + 1];
+        let oversized = vec![b'a'; MAX_CAPTURE_BYTES + 1];
         write_types(&[(UTI_TEXT, &oversized)]);
         assert!(offers(UTI_TEXT), "the oversized write never landed");
         assert!(clipboard.poll().is_none(), "T-30: over the cap by one byte");
@@ -806,12 +803,36 @@ mod tests {
             "I-39: a rejection must be counted, not only logged"
         );
 
-        let at_the_cap = vec![b'a'; MAX_TEXT_BYTES];
+        let at_the_cap = vec![b'a'; MAX_CAPTURE_BYTES];
         write_types(&[(UTI_TEXT, &at_the_cap)]);
         assert!(offers(UTI_TEXT), "the boundary write never landed");
         let capture = clipboard.poll().expect("T-33: len == cap is accepted");
-        assert_eq!(capture.content.len(), MAX_TEXT_BYTES);
+        assert_eq!(capture.content.len(), MAX_CAPTURE_BYTES);
         assert_eq!(clipboard.rejected_too_large_count(), 1);
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn image_pre_read_uses_the_image_limit_and_keeps_its_boundary() {
+        let _lock = serialised();
+        let mut clipboard = MacOsClipboard::new();
+        let settings = copypaste_ipc::ConfigData {
+            max_image_size_bytes: copypaste_ipc::MIN_IMAGE_SIZE_BYTES,
+            ..Default::default()
+        };
+
+        let oversized = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize + 1];
+        write_types(&[(UTI_PNG, &oversized)]);
+        assert!(clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .is_none());
+
+        let boundary = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize];
+        write_types(&[(UTI_PNG, &boundary)]);
+        let capture = clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .expect("the encoded-image boundary is accepted");
+        assert_eq!(capture.binary_content.as_deref(), Some(boundary.as_slice()));
     }
 
     /// An empty pasteboard is a change like any other: nothing to capture, and

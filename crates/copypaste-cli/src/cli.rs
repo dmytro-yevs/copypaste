@@ -378,7 +378,6 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         max_image_size_bytes: *max_image_size_bytes,
         max_file_size_bytes: *max_file_size_bytes,
         max_decoded_image_mb: *max_decoded_image_mb,
-        max_item_bytes: None,
         sensitive_ttl_secs: *sensitive_ttl_secs,
         excluded_app_bundle_ids: excluded_apps.as_ref().map(|raw| {
             raw.split(',')
@@ -453,7 +452,6 @@ mod tests {
                 max_image_size_bytes: Some(67_108_864),
                 max_file_size_bytes: Some(104_857_600),
                 max_decoded_image_mb: Some(50),
-                max_item_bytes: None,
                 sensitive_ttl_secs: Some(60),
                 excluded_app_bundle_ids: Some(vec![
                     "com.example.One".to_string(),

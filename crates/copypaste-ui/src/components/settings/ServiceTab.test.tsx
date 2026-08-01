@@ -115,7 +115,7 @@ describe("reading the service's settings", () => {
     const helpId = file.getAttribute("aria-describedby");
     expect(helpId).toBeTruthy();
     expect(document.getElementById(helpId!)?.textContent).toContain(
-      "hard maximum and default are 100 MB",
+      "effective limit at most 4 MiB",
     );
   });
 
