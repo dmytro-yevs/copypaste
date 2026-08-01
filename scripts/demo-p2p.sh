@@ -17,6 +17,7 @@ A_DIR="$(mktemp -d)"
 B_DIR="$(mktemp -d)"
 A_PORT=47701
 B_PORT=47702
+export COPYPASTE_EPHEMERAL_KEY=1
 
 # Prefer the pinned toolchain, fall back to whatever `cargo` resolves to.
 #
@@ -42,8 +43,8 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✗ %s\033[0m\n' "$*"; exit 1; }
 
 # Every CLI call names which device it is talking to by swapping the data home.
-a() { XDG_DATA_HOME="$A_DIR" "$CLI" "$@"; }
-b() { XDG_DATA_HOME="$B_DIR" "$CLI" "$@"; }
+a() { XDG_DATA_HOME="$A_DIR" COPYPASTE_SOCKET="$A_DIR/daemon.sock" "$CLI" "$@"; }
+b() { XDG_DATA_HOME="$B_DIR" COPYPASTE_SOCKET="$B_DIR/daemon.sock" "$CLI" "$@"; }
 
 # Item content on one device, one line per item. Reads `list --json` rather
 # than the table so nothing depends on column widths.
@@ -76,9 +77,11 @@ DAEMON="$ROOT/target/release/copypaste-daemon"
 CLI="$ROOT/target/release/copypaste"
 
 step "Starting two daemons on separate data directories and ports"
-XDG_DATA_HOME="$A_DIR" "$DAEMON" --foreground --port "$A_PORT" --device-name device-a &
+XDG_DATA_HOME="$A_DIR" COPYPASTE_SOCKET="$A_DIR/daemon.sock" \
+    "$DAEMON" --foreground --data-dir "$A_DIR" --port "$A_PORT" --device-name device-a &
 A_PID=$!
-XDG_DATA_HOME="$B_DIR" "$DAEMON" --foreground --port "$B_PORT" --device-name device-b &
+XDG_DATA_HOME="$B_DIR" COPYPASTE_SOCKET="$B_DIR/daemon.sock" \
+    "$DAEMON" --foreground --data-dir "$B_DIR" --port "$B_PORT" --device-name device-b &
 B_PID=$!
 
 for _ in $(seq 1 50); do
