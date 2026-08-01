@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
 import { SettingsView } from "@/components/settings/SettingsView";
+import * as platform from "@/lib/platform";
 import { DEFAULT_PREFS, usePrefs } from "@/store/prefs";
 import { status, withClient, withUser } from "@/test/harness";
 
@@ -97,6 +98,12 @@ describe("the settings navigation", () => {
     withClient(<SettingsView />);
     expect(screen.queryByRole("tab", { name: "Service" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Storage" })).toBeNull();
+  });
+
+  it("does not offer a desktop shortcut control on Android", () => {
+    vi.spyOn(platform, "isAndroid").mockReturnValue(true);
+    withClient(<SettingsView />);
+    expect(screen.queryByRole("tab", { name: "Shortcut" })).toBeNull();
   });
 });
 
