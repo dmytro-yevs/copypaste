@@ -48,8 +48,6 @@ pub mod backend;
 pub mod capture;
 pub mod commands;
 pub mod model;
-#[cfg(target_os = "android")]
-pub mod pairing_scanner;
 pub mod service;
 pub mod shell;
 
@@ -90,7 +88,6 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(capture::android::init())
-        .plugin(pairing_scanner::plugin())
         // `set_content_protected` is a no-op on Android (tao gates it to macOS
         // and Windows), so INV-35's Android half is `FLAG_SECURE` and needs a
         // Kotlin call to reach it.
@@ -100,23 +97,24 @@ pub fn run() {
         .setup(|app| {
             app.manage(make_backend(app)?);
             app.manage(Supervisor::default());
+            app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
 
             #[cfg(not(target_os = "android"))]
             app.manage(capture::desktop::DesktopCapture::default());
+
+            // A menu-bar app, not a windowed one: no Dock icon, no app menu,
+            // and the popover does not steal the active application. Without
+            // this the tray icon and a Dock icon both appear, which is two
+            // entry points to one window.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             #[cfg(not(target_os = "android"))]
             {
                 let handle = app.handle();
                 shell::tray::build(handle)?;
-                // A hotkey the OS refuses — because another app already has it
-                // — is not a reason to fail to start. The app is still fully
-                // usable from the menu-bar item, so this is reported and
-                // stepped over.
-                if let Err(message) =
-                    shell::hotkey::register(handle, shell::hotkey::default_shortcut())
-                {
-                    tracing::warn!(%message, "the global shortcut was not registered");
-                }
+                app.state::<shell::shortcut::ShortcutSettings>()
+                    .register_startup(handle);
             }
 
             // ADR-0004: opening the app starts the background service.
@@ -178,6 +176,10 @@ pub fn run() {
             commands::service::hide_window,
             commands::service::show_main_window,
             commands::protection::set_allow_screenshots,
+            // desktop global shortcut
+            commands::shortcut::get_default_shortcut,
+            commands::shortcut::get_shortcut,
+            commands::shortcut::set_shortcut,
             // the service's own settings
             commands::config::get_config,
             commands::config::set_config,
@@ -187,9 +189,6 @@ pub fn run() {
             commands::transfer::backup_database,
             commands::transfer::restore_database,
             // peers
-            commands::peers::pair_create,
-            commands::peers::pair_accept,
-            commands::peers::scan_pairing_qr,
             commands::peers::peers,
             commands::peers::unpair,
             commands::peers::revoke,
