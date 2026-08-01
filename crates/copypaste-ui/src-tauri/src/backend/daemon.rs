@@ -512,7 +512,8 @@ mod tests {
             r#"{"id":1,"ok":false,"error":"new refusal","error_code":"future_daemon_state"}"#,
         ))
         .unwrap_err();
-        assert!(error.to_string().contains("future_daemon_state"), "{error}");
+        assert_eq!(error.ui_error().code, "future_daemon_state");
+        assert_eq!(error.to_string(), "new refusal");
     }
 
     #[test]

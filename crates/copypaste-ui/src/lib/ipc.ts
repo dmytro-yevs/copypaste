@@ -5,7 +5,6 @@
 import { call, hasBridge } from "./ipcCall";
 import type {
   ConfigApplied,
-  ConfigData,
   ConfigPatch,
   DiscoveredDevice,
   ExportReport,
