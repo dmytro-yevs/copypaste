@@ -149,7 +149,6 @@ edition = "2021"
 [dependencies]
 copypaste-ipc = { path = "$REPO_ROOT/crates/copypaste-ipc" }
 copypaste-core = { path = "copypaste-core-stub" }
-copypaste-macos-keychain = { path = "$REPO_ROOT/crates/copypaste-macos-keychain", features = ["test-readback"] }
 objc2 = "=$PIN_OBJC2"
 objc2-foundation = { version = "=$PIN_OBJC2_FOUNDATION", features = ["NSString", "NSData", "NSArray"] }
 objc2-app-kit = { version = "=$PIN_OBJC2_APP_KIT", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication"] }
