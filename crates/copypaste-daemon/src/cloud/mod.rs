@@ -18,6 +18,7 @@
 pub mod handlers;
 pub mod poll;
 pub mod realtime;
+pub mod refresh;
 pub mod source;
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
@@ -167,10 +168,6 @@ impl Cloud {
         *self.lock_error() = None;
     }
 
-    pub fn note_failure(&self, message: &'static str) {
-        *self.lock_error() = Some(message);
-    }
-
     /// Ask the poll loop to run a round now.
     pub fn wake(&self) {
         self.wake.notify_one();
@@ -289,14 +286,19 @@ impl Cloud {
     /// GoTrue rotates the refresh token on every refresh and retires the old
     /// one, so a round that refreshed and did not write the new token back
     /// leaves the next start presenting a token the server has already killed.
-    pub fn persist_session(&self, meta: &Meta) {
-        let account = self.lock_account();
-        if let Some(account) = account.as_ref() {
-            if let Err(e) = write_session(meta, &account.driver) {
-                warn!(error = ?e, "could not persist the rotated cloud session");
-            }
-            self.notify_session_changed();
+    pub fn persist_session(&self, meta: &Meta, expected: &Arc<Driver>) {
+        let account_guard = self.lock_account();
+        let Some(account) = account_guard
+            .as_ref()
+            .filter(|account| Arc::ptr_eq(&account.driver, expected))
+        else {
+            return;
+        };
+        if let Err(e) = write_session(meta, &account.driver) {
+            warn!(error = ?e, "could not persist the rotated cloud session");
         }
+        drop(account_guard);
+        self.notify_session_changed();
     }
 
     /// Forget the account on this device. Keeps the deployment configuration
