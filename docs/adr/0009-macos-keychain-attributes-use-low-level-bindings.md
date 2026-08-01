@@ -9,12 +9,12 @@ Port manifest 02 requires `kSecAttrAccessControl` with
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, explicit
 `kSecAttrSynchronizable=false`, and the same attributes on `SecItemUpdate`.
 
-The current maintained `security-framework` 3.7 API does not provide that
-operation. `PasswordOptions` can add both attributes, but its duplicate path
-puts every option in the update search and only the password data in the
-attributes-to-update dictionary. `ItemUpdateOptions` exposes neither access
-control nor synchronizability. Apple requires changed attributes in
-`SecItemUpdate`'s second dictionary.
+The workspace uses the current maintained `security-framework` 3.7 line. Its
+high-level API does not provide that operation. `PasswordOptions` can add both
+attributes, but its duplicate path puts every option in the update search and
+only the password data in the attributes-to-update dictionary.
+`ItemUpdateOptions` exposes neither access control nor synchronizability.
+Apple requires changed attributes in `SecItemUpdate`'s second dictionary.
 
 Sources evaluated:
 
@@ -26,9 +26,11 @@ Sources evaluated:
 ## Decision
 
 Use CLAUDE.md dependency exemption 1: no maintained high-level package
-provides the required update. Keep `security-framework` for access-control
-construction and reads, and use its maintained `security-framework-sys`
-bindings plus `core-foundation` in one macOS-only support crate.
+provides the required update. Standardize the existing workspace dependency
+on `security-framework` 3.7 and use its documented generic-password read API.
+Keep the high-level crate for access-control construction and reads, and use
+its `security-framework-sys` 2.17 bindings plus `core-foundation` 0.10 in one
+macOS-only support crate.
 
 The core keystore owns the frozen device-secret service/account pair and its
 32-byte type boundary. The support crate builds one add dictionary and, on
