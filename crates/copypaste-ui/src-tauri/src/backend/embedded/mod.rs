@@ -3,7 +3,7 @@
 //!
 //! Android will not host a long-lived background daemon, so there is no socket
 //! and no second process (ADR-0002). The store, the keyring and the peer file
-//! are opened here and the same operations run inline.
+//! are opened inside the app and the same operations run inline.
 //!
 //! # What this file will not do, and why that matters
 //!
@@ -39,14 +39,13 @@
 
 mod peers;
 mod rows;
+mod state;
 mod transfer;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
-use copypaste_core::{
-    ingest, purge_indexed_secrets, Detector, IngestError, ItemCursor, Keyring, Store, StoredItem,
-};
+use copypaste_core::{ingest, IngestError, ItemCursor, StoredItem};
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
     ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
@@ -56,6 +55,7 @@ use tokio::sync::OnceCell;
 use super::{Backend, BackendError, Page, Result};
 use peers::PeerNode;
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
+use state::BackendState;
 
 /// Reported in [`StatusData::clipboard_backend`] so a build that is not polling
 /// anything cannot be mistaken for one that is.
@@ -86,32 +86,10 @@ pub struct EmbeddedBackend {
 }
 
 struct Inner {
-    store: Store,
-    /// Kept for the v0.4 probe in [`rows::status_of`], which states why (B-33).
-    data_dir: PathBuf,
-    // `rows` and `peers` read these; a child module sees its parent's private
-    // fields, so none of them has to be published to get there.
-    //
-    // Both are behind an `Arc` because `copypaste_core::StoreSource` holds them
-    // for as long as the peer listener runs.
-    keyring: Arc<Keyring>,
-    detector: Arc<Detector>,
-    /// This device's sync identity, resolved once from the history database and
-    /// then fixed: merge key 4 and every hello depend on it not moving.
-    device_id: String,
-    device_name: String,
-    /// Where the paired-device list lives. The `PeerStore` itself belongs to
-    /// the node, which owns it by value.
-    peers_path: PathBuf,
+    state: BackendState,
     /// The peer node, brought up on the first operation that needs it — see
     /// [`peers`] for why it is not built in [`EmbeddedBackend::open`].
     node: OnceCell<PeerNode>,
-    /// The defaults, and only the defaults: there is no daemon here and no
-    /// config file, so a settings screen on Android will not stick (ADR-0005).
-    settings: copypaste_ipc::ConfigData,
-    /// Search-index rows removed by this process's startup purge. Kept so the
-    /// status/diagnostics surface tells the same truth as the daemon does.
-    index_purged: u64,
     /// Writes the system clipboard. Held as a boxed trait object so this file
     /// does not depend on Tauri's plugin types, and so tests can substitute
     /// one — see `Clipboard`.
@@ -138,51 +116,10 @@ impl EmbeddedBackend {
     /// from `copypaste_ipc::data_dir()`, because on Android the right answer
     /// comes from the Android context and not from `directories`.
     pub fn open(data_dir: &Path, clipboard: Box<dyn Clipboard>) -> Result<Self> {
-        std::fs::create_dir_all(data_dir)
-            .map_err(|e| BackendError::internal(&format!("could not prepare storage: {e}")))?;
-
-        // The same directory the database goes in, so the secret cannot end up
-        // somewhere the history is not (security review F-11).
-        let keyring = Keyring::load_or_create(data_dir)
-            .map_err(|e| BackendError::internal(&format!("could not open the keystore: {e}")))?;
-
-        // The v2 filename, from the shared crate. Deliberately distinct from
-        // v1's so an old database is never touched (CLAUDE.md rule 3).
-        let db_path = data_dir.join(
-            copypaste_ipc::database_path()
-                .file_name()
-                .unwrap_or_else(|| std::ffi::OsStr::new("copypaste-v2.db")),
-        );
-        let store = Store::open(&db_path, &keyring.db_key())
-            .map_err(|e| BackendError::internal(&format!("could not open history: {e}")))?;
-
-        // Minted on first run, in the history database, so it moves with the
-        // history and is the same identity a restored backup keeps out of.
-        let identity = peers::identity(&store)?;
-
-        let detector = Detector::new()
-            .map_err(|e| BackendError::internal(&format!("could not build the detector: {e}")))?;
-        // The third enforcement layer: a detector rule can be added after a
-        // row entered FTS. This only removes the plaintext index entry, never
-        // history, so failure is logged rather than preventing the app from
-        // opening the user's clips (the daemon follows the same rule).
-        let index_purged = purge_search_index(&store, &detector);
-
         Ok(Self {
             inner: Arc::new(Inner {
-                store,
-                data_dir: data_dir.to_path_buf(),
-                keyring: Arc::new(keyring),
-                detector: Arc::new(detector),
-                device_id: identity.device_id,
-                device_name: identity.device_name,
-                // The name from the shared crate, as the daemon uses. Spelling
-                // it here is how this backend came to open `peers.json`, which
-                // is v1's file (CLAUDE.md rule 3).
-                peers_path: data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
+                state: BackendState::open(data_dir)?,
                 node: OnceCell::new(),
-                settings: copypaste_ipc::ConfigData::default(),
-                index_purged,
                 clipboard,
             }),
         })
@@ -216,29 +153,6 @@ impl EmbeddedBackend {
     }
 }
 
-/// The startup repair is deliberately best-effort: losing a stale FTS row is
-/// better than blocking access to the encrypted history if SQLite cannot read
-/// the index. Kept outside `open` so the embedded-specific proof drives the
-/// exact same call that startup does.
-fn purge_search_index(store: &Store, detector: &Detector) -> u64 {
-    match purge_indexed_secrets(store, detector) {
-        Ok(report) => {
-            if report.purged > 0 {
-                tracing::info!(
-                    purged = report.purged,
-                    scanned = report.scanned,
-                    "removed search-index rows the current ruleset calls sensitive"
-                );
-            }
-            report.purged
-        }
-        Err(error) => {
-            tracing::warn!(%error, "the search-index purge did not finish");
-            0
-        }
-    }
-}
-
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
         let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
@@ -251,6 +165,7 @@ impl Backend for EmbeddedBackend {
         };
         self.blocking(move |inner| {
             let page = inner
+                .state
                 .store
                 .list_from(after.as_ref(), limit)
                 .map_err(|_| BackendError::internal("history could not be read"))?;
@@ -269,6 +184,7 @@ impl Backend for EmbeddedBackend {
         let query = query.to_string();
         self.blocking(move |inner| {
             let rows = inner
+                .state
                 .store
                 .search(&query, limit)
                 .map_err(|_| BackendError::internal("history could not be searched"))?;
@@ -296,12 +212,12 @@ impl Backend for EmbeddedBackend {
         let content = content.to_string();
         self.blocking(move |inner| {
             let outcome = ingest(
-                &inner.store,
-                &inner.detector,
-                &inner.keyring,
+                &inner.state.store,
+                &inner.state.detector,
+                &inner.state.keyring,
                 &content,
                 copypaste_ipc::content_type::TEXT,
-                &inner.settings,
+                &inner.state.settings,
             );
             match outcome {
                 Ok(ingested) => inner.to_wire(ingested.into_item()),
@@ -359,7 +275,7 @@ impl Backend for EmbeddedBackend {
             // Read first so an unknown id is `not_found` rather than a silent
             // success: a client that deleted nothing needs to know it deleted
             // nothing. Same rule as the daemon's `items::delete`.
-            match inner.store.delete(&id) {
+            match inner.state.store.delete(&id) {
                 Ok(true) => Ok(()),
                 Ok(false) => Err(BackendError::NotFound(MSG_NO_ITEM)),
                 Err(_) => Err(BackendError::internal("that item could not be deleted")),
@@ -371,6 +287,7 @@ impl Backend for EmbeddedBackend {
     async fn clear(&self) -> Result<u64> {
         self.blocking(move |inner| {
             inner
+                .state
                 .store
                 .delete_all()
                 .map_err(|_| BackendError::internal("history could not be cleared"))
@@ -381,7 +298,7 @@ impl Backend for EmbeddedBackend {
     async fn set_pinned(&self, id: &str, pinned: bool) -> Result<Item> {
         let id = id.to_string();
         self.blocking(move |inner| {
-            match inner.store.set_pinned(&id, pinned) {
+            match inner.state.store.set_pinned(&id, pinned) {
                 Ok(true) => {}
                 Ok(false) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
                 Err(_) => return Err(BackendError::internal("that item could not be changed")),
@@ -489,7 +406,7 @@ impl Backend for EmbeddedBackend {
     async fn get_config(&self) -> Result<ConfigApplied> {
         self.blocking(move |inner| {
             Ok(ConfigApplied {
-                config: inner.settings.clone(),
+                config: inner.state.settings.clone(),
                 restart_required: Vec::new(),
             })
         })
@@ -585,29 +502,6 @@ mod tests {
             "there is no capture loop in this build"
         );
         assert_eq!(status.clipboard_backend, BACKEND_NAME);
-    }
-
-    #[test]
-    fn the_embedded_open_purge_removes_previously_indexed_sensitive_text() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let store = Store::open(&dir.path().join("copypaste-v2.db"), &[7; 32]).unwrap();
-        let text = "mail alice.smith@example.com about it";
-        store
-            .insert(copypaste_core::NewItem {
-                id: "old-sensitive-index-row".to_string(),
-                content_ciphertext: Vec::new(),
-                nonce: Vec::new(),
-                content_type: "text/plain".to_string(),
-                content_hash: "old-sensitive-index-row".to_string(),
-                is_sensitive: false,
-                search_text: Some(text.to_string()),
-                created_at: 1,
-            })
-            .unwrap();
-        assert_eq!(store.search("alice", 10).unwrap().len(), 1);
-
-        purge_search_index(&store, &Detector::new().unwrap());
-        assert!(store.search("alice", 10).unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -734,7 +628,7 @@ mod tests {
         backend.revoke(&pairing.pairing_id).await.unwrap();
         assert!(backend.peers().await.unwrap().is_empty());
 
-        let store = copypaste_p2p::peers::PeerStore::open(&backend.inner.peers_path).unwrap();
+        let store = copypaste_p2p::peers::PeerStore::open(&backend.inner.state.peers_path).unwrap();
         let token =
             copypaste_p2p::transport::PairingToken::parse(&pairing.code).expect("a valid code");
         assert!(
@@ -866,44 +760,6 @@ mod tests {
         // …and it is still the user's data: reachable by id, which is how the
         // reveal gesture gets to it.
         assert!(backend.get(&item.id).await.unwrap().is_sensitive);
-    }
-
-    /// A detector update must be applied by the same startup helper Android
-    /// calls. The fixture is a row written as ordinary by an older ruleset,
-    /// with plaintext deliberately present in FTS.
-    #[tokio::test]
-    async fn the_embedded_startup_purge_removes_a_newly_sensitive_fts_row() {
-        let (backend, _clip, _dir) = backend();
-        let id = "indexed-before-detector-rule";
-        let secret = "AKIAIOSFODNN7EXAMPLE";
-        let (nonce, ciphertext) =
-            copypaste_core::encrypt(secret.as_bytes(), &backend.inner.keyring.item_key(), id)
-                .unwrap();
-        backend
-            .inner
-            .store
-            .insert(copypaste_core::NewItem {
-                id: id.into(),
-                content_ciphertext: ciphertext,
-                nonce,
-                content_type: copypaste_ipc::content_type::TEXT.into(),
-                content_hash: copypaste_core::compute_content_hash(secret.as_bytes()),
-                is_sensitive: false,
-                search_text: Some(secret.into()),
-                created_at: 1_700_000_000_000,
-            })
-            .unwrap();
-        assert_eq!(backend.inner.store.search(secret, 10).unwrap().len(), 1);
-
-        assert_eq!(
-            purge_search_index(&backend.inner.store, &backend.inner.detector),
-            1
-        );
-        assert!(backend.search(secret, 10).await.unwrap().items.is_empty());
-        assert!(
-            backend.get(id).await.is_ok(),
-            "the history item was deleted"
-        );
     }
 
     #[tokio::test]

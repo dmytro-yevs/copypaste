@@ -23,8 +23,9 @@ impl Inner {
     /// decrypted under another row's identity fails authentication rather than
     /// falling back to a plaintext read (CLAUDE.md rule 4, "fail closed").
     pub(super) fn to_wire(&self, row: StoredItem) -> Result<Item> {
-        let device_id = origin_or(&row.origin_device_id, &self.device_id).to_string();
+        let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
         let names = self
+            .state
             .store
             .device_names(std::slice::from_ref(&device_id))
             .unwrap_or_default();
@@ -33,14 +34,14 @@ impl Inner {
 
     /// [`Inner::to_wire`] with the page's device names already resolved.
     fn to_wire_with(&self, row: StoredItem, names: &HashMap<String, String>) -> Result<Item> {
-        let key = self.keyring.item_key();
+        let key = self.state.keyring.item_key();
         let plaintext = decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
             .map_err(|_| BackendError::internal("that item could not be decrypted"))?;
         // A row captured here stores no origin; substituting this device's id
         // is what makes the field mean the same thing on both platforms
         // (`copypaste_core::origin_or`). The name is `None` rather than a guess
         // until a session with that device has told us one.
-        let device_id = origin_or(&row.origin_device_id, &self.device_id).to_string();
+        let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
         let origin_device_name = names.get(&device_id).cloned();
         Ok(Item {
             id: row.id,
@@ -69,9 +70,13 @@ impl Inner {
         // `MAX_PAGE` items and this runs on every list and every search.
         let device_ids: Vec<String> = rows
             .iter()
-            .map(|row| origin_or(&row.origin_device_id, &self.device_id).to_string())
+            .map(|row| origin_or(&row.origin_device_id, &self.state.device_id).to_string())
             .collect();
-        let names = self.store.device_names(&device_ids).unwrap_or_default();
+        let names = self
+            .state
+            .store
+            .device_names(&device_ids)
+            .unwrap_or_default();
 
         let mut page = Page::default();
         for row in rows {
@@ -88,7 +93,7 @@ impl Inner {
     }
 
     pub(super) fn fetch(&self, id: &str) -> Result<Item> {
-        match self.store.get(id) {
+        match self.state.store.get(id) {
             Ok(Some(row)) => self.to_wire(row),
             Ok(None) => Err(BackendError::NotFound(MSG_NO_ITEM)),
             Err(_) => Err(BackendError::internal("history could not be read")),
@@ -117,19 +122,19 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
     Ok(copypaste_ipc::StatusData {
         version: env!("CARGO_PKG_VERSION").to_string(),
         protocol_version: copypaste_ipc::PROTOCOL_VERSION,
-        item_count: inner.store.count().unwrap_or(0),
+        item_count: inner.state.store.count().unwrap_or(0),
         // There is no capture loop in this build: Android has no background
         // daemon and no clipboard polling. Reporting `true` would tell the
         // status line that history is growing when it is not.
         capture_running: false,
         clipboard_backend: super::BACKEND_NAME.to_string(),
         private_mode: false,
-        legacy_history_present: legacy_history_present(&inner.data_dir),
+        legacy_history_present: legacy_history_present(&inner.state.data_dir),
         // Android has no daemon poller, but it does run the same startup FTS
         // purge as the daemon. Surface that one counter rather than claiming
         // the purge never happened.
         counters: copypaste_ipc::DiagnosticCounters {
-            index_purged: inner.index_purged,
+            index_purged: inner.state.index_purged,
             ..Default::default()
         },
     })
