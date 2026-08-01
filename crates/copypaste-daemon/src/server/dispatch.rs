@@ -202,7 +202,7 @@ pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) ->
     }
 }
 
-/// The blocking half of [`dispatch`]. Exhaustive over `Method` by design.
+/// The blocking half of [`dispatch_request`]. Exhaustive over `Method` by design.
 pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
     match method {
         Method::Status => items::status(state, id),
