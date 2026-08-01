@@ -547,8 +547,8 @@ mod tests {
         let stub = StubDaemon::start(
             "watch-stream",
             vec![StubAction::Watch {
-                ack: r#"{"id":{id},"ok":true,"data":{}}"#.to_string(),
-                event: r#"{"id":{id},"ok":true,"data":{"event":"items","item_count":7}}"#
+                ack: r#"{"id":{id},"ok":true,"data":{"empty":{}}}"#.to_string(),
+                event: r#"{"id":{id},"ok":true,"data":{"event":{"event":"items","item_count":7}}}"#
                     .to_string(),
                 event_delay: Duration::from_millis(300),
             }],
