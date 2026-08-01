@@ -8,14 +8,14 @@
 //! eviction and the size cap are all decisions this file must not re-make
 //! (CLAUDE.md rule 1).
 //!
-//! # Today `add` refuses, and that is the whole dependency
+//! # The backend is the one ingest path
 //!
-//! `Backend::add` on Android returns `Unsupported` until `capture::ingest`
-//! moves into `copypaste-core` (ADR-0003). So this module is complete and its
-//! sink is not: a captured clip is buffered, retried, and — if the refusal is
-//! structural — reported. What it must never do is drop it quietly, because a
-//! copy the user believes was saved and was not is the exact failure the
-//! android doc calls the worst outcome.
+//! Android's embedded backend calls `copypaste_core::ingest`, the same shared
+//! path used by the daemon. This module therefore only buffers clips around a
+//! transient backend failure; it never decides deduplication, secret handling
+//! or eviction itself. A structural error is still surfaced rather than
+//! retried forever, because a copy the user believes was saved and was not is
+//! the exact failure the android doc calls the worst outcome.
 //!
 //! # Why nothing here filters what it stores
 //!
@@ -58,9 +58,9 @@ const DRAIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 /// How many clips may wait for a sink that is refusing before the oldest are
 /// counted as lost.
 ///
-/// Bounded because an `Unsupported` sink never recovers within a run, and an
-/// unbounded queue of clipboard plaintext in memory is its own problem. The
-/// count is surfaced, so the loss is visible.
+/// Bounded because a structural backend refusal cannot recover within a run,
+/// and an unbounded queue of clipboard plaintext in memory is its own problem.
+/// The count is surfaced, so the loss is visible.
 const MAX_BUFFERED: usize = 128;
 
 #[derive(Debug, Clone, Serialize)]
@@ -274,9 +274,8 @@ async fn announce<R: Runtime>(
 
 /// Whether a refusal is worth telling the user about rather than retrying.
 ///
-/// `Unsupported` is structural — the ingest pipeline is not in this build — so
-/// a retry loop would spin forever and the user would never learn that nothing
-/// is being saved.
+/// `Unsupported` is structural, so a retry loop would spin forever and the
+/// user would never learn that nothing is being saved.
 pub fn is_structural(error: &BackendError) -> bool {
     matches!(error, BackendError::Unsupported(_))
 }
@@ -311,9 +310,8 @@ mod tests {
         assert!(backend.added().is_empty());
     }
 
-    /// The dependency, stated as a test: until `capture::ingest` moves into
-    /// `copypaste-core`, a capture on Android fails structurally rather than
-    /// vanishing.
+    /// A structural backend failure is surfaced rather than turned into a
+    /// silent drop. The Android embedded backend itself accepts this path.
     #[tokio::test]
     async fn a_refusing_sink_produces_a_structural_error_rather_than_a_silent_drop() {
         let backend = FakeBackend::running("2.0.0");

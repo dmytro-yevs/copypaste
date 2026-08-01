@@ -129,8 +129,8 @@ object ShizukuClipboard {
             listening
         } catch (e: Throwable) {
             Log.w(TAG, "arming failed", e)
+            disarm()
             lastFailure = e.javaClass.simpleName
-            listening = false
             false
         }
     }
@@ -149,7 +149,10 @@ object ShizukuClipboard {
     @Synchronized
     fun disarm() {
         try {
-            listener?.let { ClipListener.unregister(clipboardService(), it) }
+            val clipboard = service
+            listener?.let { registered ->
+                if (clipboard != null) ClipListener.unregister(clipboard, registered)
+            }
         } catch (e: Throwable) {
             Log.w(TAG, "unregistering failed", e)
         }
@@ -160,6 +163,7 @@ object ShizukuClipboard {
         }
         listener = null
         deathListener = null
+        service = null
         listening = false
     }
 

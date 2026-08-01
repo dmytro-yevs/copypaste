@@ -57,6 +57,12 @@ object CaptureNotifications {
         )
     }
 
+    /** Android 13+ blocks ordinary notifications until this runtime grant. */
+    fun canPost(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+
     fun ongoing(context: Context, text: String): Notification =
         builder(context, CHANNEL_STATUS)
             .setContentTitle("CopyPaste")
@@ -67,6 +73,7 @@ object CaptureNotifications {
             .build()
 
     fun postLost(context: Context, title: String, body: String) {
+        if (!canPost(context)) return
         ensureChannels(context)
         val notification = builder(context, CHANNEL_LOST)
             .setContentTitle(title)
