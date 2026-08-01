@@ -14,7 +14,7 @@ use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::cloud::source::StoreSource;
-use crate::cloud::{KEY_LAST_SYNC, KEY_UPLOAD_FLOOR};
+use crate::cloud::KEY_LAST_SYNC;
 
 use crate::AppState;
 
@@ -80,10 +80,7 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
             if let Err(e) = state.meta.set_state_ms(KEY_LAST_SYNC, at_ms) {
                 warn!(error = ?e, "could not record when the round completed");
             }
-            if let Err(e) = state
-                .meta
-                .set_state_ms(KEY_UPLOAD_FLOOR, source.next_floor(started_ms))
-            {
+            if let Err(e) = source.commit_upload_floor(started_ms) {
                 warn!(error = ?e, "could not advance the upload floor");
             }
             if stats.applied > 0 {
@@ -147,6 +144,7 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cloud::KEY_UPLOAD_FLOOR;
     use crate::testutil::test_state;
 
     #[tokio::test]
