@@ -274,13 +274,16 @@ pub(super) static RULES: &[RuleSpec] = &[
         validator: Validator::None,
     },
     RuleSpec {
-        // **P2 ozzt.** Anchors only on the two stable, order-independent
-        // markers (`sv=` and `&sig=`); the previous over-specified form matched
-        // almost no real tokens.
+        // **P2 ozzt.** Anchors only on the two stable markers (`sv=` and
+        // `sig=`), in either order and with raw or HTML-escaped separators;
+        // the previous over-specified form matched almost no real tokens.
         name: "azure_sas_token",
         category: Category::Credential,
         confidence: 0.92,
-        pattern: r"(?i)\bsv=\d{4}-\d{2}-\d{2}\b[^\s]*&sig=[A-Za-z0-9%+/]{40,}",
+        pattern: concat!(
+            r"(?i)(?:\bsv=\d{4}-\d{2}-\d{2}\b[^\s#]*&(?:amp;)?sig=[A-Za-z0-9%+/]{40,}",
+            r"|\bsig=[A-Za-z0-9%+/]{40,}[^\s#]*&(?:amp;)?sv=\d{4}-\d{2}-\d{2}\b)",
+        ),
         validator: Validator::None,
     },
     RuleSpec {
@@ -500,6 +503,7 @@ pub(super) fn rule(name: &str) -> &'static RuleSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sensitive::engine::test_support::{detector, fired};
     use crate::sensitive::finding::AUTOWIPE_CONFIDENCE_FLOOR;
 
     #[test]
@@ -588,6 +592,41 @@ mod tests {
             let r = rule(name);
             assert_eq!(r.category, Category::Credential, "{name}");
             assert!(r.confidence >= 0.90, "{name}");
+        }
+    }
+
+    #[test]
+    fn azure_sas_markers_match_in_either_order() {
+        let det = detector();
+        let raw_sig = format!("{}+/=", "A".repeat(41));
+        let encoded_sig = format!("{}%2B%2F%3D", "b".repeat(41));
+        let cases = [
+            format!("sv=2024-11-04&sig={raw_sig}"),
+            format!("sig={encoded_sig}&amp;sv=2024-11-04"),
+            format!("sv=2024-11-04&sp=rw&se=2030-01-01&sig={encoded_sig}"),
+            format!("sig={raw_sig}&amp;sp=rw&amp;se=2030-01-01&amp;sv=2024-11-04"),
+        ];
+
+        for sas in cases {
+            assert!(fired(&det, &sas, "azure_sas_token"), "{sas}");
+            assert!(det.may_auto_wipe(&sas), "{sas}");
+        }
+    }
+
+    #[test]
+    fn azure_sas_requires_both_exact_markers_in_one_query() {
+        let det = detector();
+        let signature = "A".repeat(40);
+        let cases = [
+            "sv=2024-11-04&sig=too-short".to_string(),
+            format!("sig={signature}&sv=not-a-version"),
+            format!("signature={signature}&sv=2024-11-04"),
+            format!("sig={signature} sv=2024-11-04"),
+            format!("sig={signature}#fragment&sv=2024-11-04"),
+        ];
+
+        for benign in cases {
+            assert!(!fired(&det, &benign, "azure_sas_token"), "{benign}");
         }
     }
 }
