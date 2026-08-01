@@ -73,6 +73,19 @@ describe("Quick Paste", () => {
     await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
   });
 
+  it("retries a failed Option+Enter copy as plain text", async () => {
+    copyItemAsPlainText.mockRejectedValueOnce(new Error("clipboard unavailable"));
+    const { user } = withUser(<QuickPasteApp />);
+
+    await screen.findByRole("listitem");
+    fireEvent.keyDown(screen.getByRole("main"), { key: "Enter", altKey: true });
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => expect(copyItemAsPlainText).toHaveBeenCalledTimes(2));
+    expect(copyItem).not.toHaveBeenCalled();
+  });
+
   it("exposes the history cap instead of silently showing the first page", async () => {
     listItems.mockResolvedValue(page([item()], 0, "next", 214));
     withUser(<QuickPasteApp />);
@@ -87,6 +100,28 @@ describe("Quick Paste", () => {
 
     await waitFor(() => expect(showMainWindow).toHaveBeenCalledTimes(1));
     expect(hideWindow).not.toHaveBeenCalled();
+  });
+
+  it("ignores a delayed response after a newer focus refresh", async () => {
+    let resolveMount: ((value: ReturnType<typeof page>) => void) | undefined;
+    let resolveFocus: ((value: ReturnType<typeof page>) => void) | undefined;
+    const mount = new Promise<ReturnType<typeof page>>((resolve) => {
+      resolveMount = resolve;
+    });
+    const focus = new Promise<ReturnType<typeof page>>((resolve) => {
+      resolveFocus = resolve;
+    });
+    listItems.mockReset().mockReturnValueOnce(mount).mockReturnValueOnce(focus);
+
+    withUser(<QuickPasteApp />);
+    window.dispatchEvent(new Event("focus"));
+    resolveFocus?.(page([item({ content: "newer response" })]));
+
+    expect(await screen.findByText("newer response")).not.toBeNull();
+    resolveMount?.(page([item({ content: "stale response" })]));
+
+    await waitFor(() => expect(screen.queryByText("stale response")).toBeNull());
+    expect(screen.getByText("newer response")).not.toBeNull();
   });
 
   it("uses the compact surface’s wrapping keyboard selection", async () => {
