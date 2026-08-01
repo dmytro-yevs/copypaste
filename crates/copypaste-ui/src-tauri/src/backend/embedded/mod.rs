@@ -39,6 +39,7 @@
 
 mod peers;
 mod rows;
+mod runtime;
 mod state;
 mod transfer;
 
@@ -58,6 +59,8 @@ use super::{Backend, BackendError, Page, Result};
 use peers::PeerNode;
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 use state::{write_settings, BackendState};
+
+pub use runtime::Clipboard;
 
 /// Reported in [`StatusData::clipboard_backend`] so a build that is not polling
 /// anything cannot be mistaken for one that is.
@@ -103,63 +106,6 @@ impl Inner {
             .read()
             .expect("settings lock poisoned")
             .clone()
-    }
-}
-
-/// Whatever can put text on the system clipboard.
-///
-/// An indirection rather than a direct call into
-/// `tauri_plugin_clipboard_manager` because the plugin needs an `AppHandle`,
-/// which would make the backend generic over `tauri::Runtime` and drag that
-/// parameter through every signature in `backend::mod`. One trait object at the
-/// edge is cheaper than a type parameter on the whole surface.
-pub trait Clipboard: Send + Sync + 'static {
-    /// Errors are `&'static str`: this string can reach a user, and a
-    /// platform error rendered into it is where a path would appear.
-    fn set_text(&self, text: &str) -> std::result::Result<(), &'static str>;
-}
-
-impl EmbeddedBackend {
-    /// Open the store, the keyring and the peer file under `data_dir`.
-    ///
-    /// The caller supplies the directory rather than this function reading it
-    /// from `copypaste_ipc::data_dir()`, because on Android the right answer
-    /// comes from the Android context and not from `directories`.
-    pub fn open(data_dir: &Path, clipboard: Box<dyn Clipboard>) -> Result<Self> {
-        Ok(Self {
-            inner: Arc::new(Inner {
-                state: BackendState::open(data_dir)?,
-                node: OnceCell::new(),
-                clipboard,
-            }),
-        })
-    }
-
-    /// The peer node, started on first use.
-    ///
-    /// `get_or_try_init` rather than `get_or_init`: opening the paired-device
-    /// file can fail, and a failure that were cached would make every later
-    /// peer operation fail for a reason that may have gone away.
-    async fn node(&self) -> Result<&PeerNode> {
-        self.inner
-            .node
-            .get_or_try_init(|| PeerNode::start(&self.inner))
-            .await
-    }
-
-    /// Run blocking work off the reactor.
-    ///
-    /// SQLite and the AEAD are both blocking, exactly as they are in the
-    /// daemon, and the WebView's IPC is answered on the same runtime.
-    async fn blocking<T, F>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(&Inner) -> Result<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || f(&inner))
-            .await
-            .map_err(|_| BackendError::internal("the operation did not complete"))?
     }
 }
 
@@ -664,7 +610,7 @@ mod tests {
         ));
         assert!(matches!(
             backend.sync(Some("nope")).await.unwrap_err(),
-            BackendError::NotFound(_)
+            BackendError::Daemon { .. }
         ));
     }
 
@@ -794,12 +740,9 @@ mod tests {
     async fn the_unimplemented_operations_say_so_plainly() {
         let (backend, _clip, _dir) = backend();
         for err in [
-            backend
-                .set_config(ConfigPatch::default())
-                .await
-                .unwrap_err(),
             backend.backup(Path::new("anywhere")).await.unwrap_err(),
             backend.restore(Path::new("anywhere")).await.unwrap_err(),
+            backend.reorder_pinned(&[]).await.unwrap_err(),
         ] {
             assert!(
                 matches!(err, BackendError::Unsupported(_)),

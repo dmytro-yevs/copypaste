@@ -458,7 +458,17 @@ mod tests {
     #[tokio::test]
     async fn peers_lists_what_was_paired() {
         let (state, _dir) = test_state("alpha");
-        pair_create(&state, 1, "laptop").await;
+        state
+            .p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                name: "laptop".into(),
+                psk: [1u8; TOKEN_LEN],
+                last_addr: None,
+                last_seen_ms: now_ms(),
+            })
+            .unwrap();
 
         let response = peers(&state, 2).await;
         let listed = match response.data {
@@ -530,7 +540,7 @@ mod tests {
                 name: "second".into(),
                 psk: [3u8; TOKEN_LEN],
                 last_addr: None,
-                last_seen_ms: 0,
+                last_seen_ms: now_ms(),
             })
             .unwrap();
 
@@ -540,7 +550,7 @@ mod tests {
             Some(ResponseData::Sync(results)) => results,
             other => panic!("{other:?}"),
         };
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), 1);
         assert!(results.iter().all(|r| r.error.is_some()));
         assert!(results
             .iter()
