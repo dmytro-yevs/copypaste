@@ -72,7 +72,9 @@ jobs:
           key: e2e-profile
 
       - name: Install tauri-driver
-        run: cargo install tauri-driver --locked
+        # Keep the WebDriver bridge reproducible too: an unversioned install
+        # selects whatever tauri-driver was published that day.
+        run: cargo install tauri-driver --version 2.0.6 --locked
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -92,9 +94,17 @@ jobs:
         working-directory: crates/copypaste-ui
         run: npm ci
 
+      - name: Audit frontend dependencies
+        working-directory: crates/copypaste-ui
+        run: npm audit
+
       - name: Install harness dependencies
         working-directory: e2e
         run: npm ci
+
+      - name: Audit harness dependencies
+        working-directory: e2e
+        run: npm audit
 
       - name: Run the suite
         working-directory: e2e
