@@ -210,9 +210,7 @@ impl BackendError {
             Self::Unreachable => UiError::new("offline", true),
             Self::Daemon { ui, .. } => ui.clone(),
             Self::NotReady => UiError::from_error_code(Some(ErrorCode::NotReady)),
-            Self::ProtocolMismatch => {
-                UiError::from_error_code(Some(ErrorCode::ProtocolMismatch))
-            }
+            Self::ProtocolMismatch => UiError::from_error_code(Some(ErrorCode::ProtocolMismatch)),
             Self::NotFound(_) => UiError::from_error_code(Some(ErrorCode::NotFound)),
             Self::Invalid(_) => UiError::from_error_code(Some(ErrorCode::InvalidRequest)),
             Self::Internal(_) => UiError::from_error_code(Some(ErrorCode::Internal)),
@@ -345,8 +343,7 @@ mod tests {
     /// so its fixed sentence is finally the true one.
     #[test]
     fn a_missing_item_and_a_missing_device_do_not_render_alike() {
-        let item =
-            BackendError::from_code(Some(ErrorCode::NotFound), None, Some("item not found"));
+        let item = BackendError::from_code(Some(ErrorCode::NotFound), None, Some("item not found"));
         let device = BackendError::from_code(
             Some(ErrorCode::PeerNotFound),
             None,

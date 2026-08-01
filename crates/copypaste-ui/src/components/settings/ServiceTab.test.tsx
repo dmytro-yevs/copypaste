@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
 import { ServiceTab } from "@/components/settings/ServiceTab";
+import { IpcFailure } from "@/lib/errors";
 import type { ConfigApplied, ConfigData, ConfigPatch } from "@/lib/ipc";
 import { status, withUser } from "@/test/harness";
 
@@ -120,7 +121,7 @@ describe("reading the service's settings", () => {
   });
 
   it("says so plainly on a build that has no service to configure", async () => {
-    getConfig.mockRejectedValue("not available in this build");
+    getConfig.mockRejectedValue(new IpcFailure("unavailable", false));
     withUser(<ServiceTab />);
     expect(await screen.findByText(/can't change the background service/)).toBeTruthy();
   });

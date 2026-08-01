@@ -47,7 +47,12 @@ export function page(
   nextCursor: string | null = null,
   total = items.length,
 ): ItemPage {
-  return { items, total, skipped_undecryptable: skipped, next_cursor: nextCursor };
+  return {
+    items: [...items],
+    total,
+    skipped_undecryptable: skipped,
+    next_cursor: nextCursor,
+  };
 }
 
 export function status(over: Partial<StatusData> = {}): StatusData {
