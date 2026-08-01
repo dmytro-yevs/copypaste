@@ -306,6 +306,19 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
+    async fn copy_as_plain_text(&self, id: &str) -> Result<Item> {
+        let id = id.to_string();
+        self.blocking(move |inner| {
+            let item = inner.fetch(&id)?;
+            inner
+                .clipboard
+                .set_text(&item.content)
+                .map_err(|msg| BackendError::Internal(msg.to_string()))?;
+            Ok(item)
+        })
+        .await
+    }
+
     async fn delete(&self, id: &str) -> Result<()> {
         let id = id.to_string();
         self.blocking(move |inner| {

@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
 import { item, page, withUser } from "@/test/harness";
 
 const copyItem = vi.fn();
+const copyItemAsPlainText = vi.fn();
 const hideWindow = vi.fn();
 const listItems = vi.fn();
 const setAllowScreenshots = vi.fn();
@@ -15,6 +16,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
   return {
     ...actual,
     copyItem: (...args: unknown[]) => copyItem(...args),
+    copyItemAsPlainText: (...args: unknown[]) => copyItemAsPlainText(...args),
     hideWindow: () => hideWindow(),
     listItems: (...args: unknown[]) => listItems(...args),
     setAllowScreenshots: (...args: unknown[]) => setAllowScreenshots(...args),
@@ -24,6 +26,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
 
 beforeEach(() => {
   copyItem.mockReset().mockResolvedValue(item());
+  copyItemAsPlainText.mockReset().mockResolvedValue(item());
   hideWindow.mockReset().mockResolvedValue(undefined);
   listItems.mockReset().mockResolvedValue(page([item()]));
   setAllowScreenshots.mockReset().mockResolvedValue(undefined);
@@ -32,10 +35,10 @@ beforeEach(() => {
 
 describe("Quick Paste", () => {
   it("copies the selected item and dismisses only after a successful copy", async () => {
-    const { user } = withUser(<QuickPasteApp />);
+    withUser(<QuickPasteApp />);
 
     await screen.findByRole("listitem");
-    await user.keyboard("{Enter}");
+    fireEvent.keyDown(screen.getByRole("main"), { key: "Enter" });
 
     await waitFor(() => expect(copyItem).toHaveBeenCalledWith("row-1"));
     await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
@@ -46,13 +49,31 @@ describe("Quick Paste", () => {
     const { user } = withUser(<QuickPasteApp />);
 
     await screen.findByRole("listitem");
-    await user.keyboard("{Enter}");
+    fireEvent.keyDown(screen.getByRole("main"), { key: "Enter" });
 
     expect((await screen.findByRole("alert")).textContent).toContain("Couldn’t copy");
     expect(hideWindow).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(copyItem).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
+  });
+
+  it("uses the explicit plain-text backend path for Option+Enter", async () => {
+    withUser(<QuickPasteApp />);
+
+    await screen.findByRole("listitem");
+    fireEvent.keyDown(screen.getByRole("main"), { key: "Enter", altKey: true });
+
+    await waitFor(() => expect(copyItemAsPlainText).toHaveBeenCalledWith("row-1"));
+    expect(copyItem).not.toHaveBeenCalled();
+    await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
+  });
+
+  it("exposes the history cap instead of silently showing the first page", async () => {
+    listItems.mockResolvedValue(page([item()], 0, "next", 214));
+    withUser(<QuickPasteApp />);
+
+    expect((await screen.findByText("1 of 214")).getAttribute("aria-live")).toBe("polite");
   });
 
   it("opens Settings through the backend without asking the popup to restore focus", async () => {
@@ -66,10 +87,11 @@ describe("Quick Paste", () => {
 
   it("uses the compact surface’s wrapping keyboard selection", async () => {
     listItems.mockResolvedValue(page([item({ id: "first" }), item({ id: "last" })]));
-    const { user } = withUser(<QuickPasteApp />);
+    withUser(<QuickPasteApp />);
 
     await screen.findAllByRole("listitem");
-    await user.keyboard("{ArrowUp}{Enter}");
+    fireEvent.keyDown(screen.getByRole("main"), { key: "ArrowUp" });
+    fireEvent.keyDown(screen.getByRole("main"), { key: "Enter" });
 
     await waitFor(() => expect(copyItem).toHaveBeenCalledWith("last"));
   });
