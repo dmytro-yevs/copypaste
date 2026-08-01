@@ -890,6 +890,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "copypaste-clock"
+version = "2.0.0-alpha.1"
+
+[[package]]
 name = "copypaste-cloud"
 version = "2.0.0-alpha.1"
 dependencies = [
@@ -923,6 +927,7 @@ version = "2.0.0-alpha.1"
 dependencies = [
  "android-native-keyring-store",
  "chacha20poly1305",
+ "copypaste-clock",
  "copypaste-ipc",
  "copypaste-macos-keychain",
  "copypaste-p2p",
@@ -959,6 +964,7 @@ dependencies = [
  "backon",
  "base64 0.22.1",
  "clap",
+ "copypaste-clock",
  "copypaste-cloud",
  "copypaste-core",
  "copypaste-ipc",
@@ -1012,6 +1018,7 @@ dependencies = [
 name = "copypaste-p2p"
 version = "2.0.0-alpha.1"
 dependencies = [
+ "copypaste-clock",
  "data-encoding",
  "futures-util",
  "hex",
