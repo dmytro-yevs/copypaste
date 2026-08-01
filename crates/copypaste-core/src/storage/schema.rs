@@ -165,6 +165,12 @@ const CLIPBOARD_ITEMS_COLUMNS: &[Column] = &[
         primary_key: false,
     },
     Column {
+        name: "pin_updated_at",
+        declared_type: "INTEGER",
+        not_null: true,
+        primary_key: false,
+    },
+    Column {
         name: "created_at",
         declared_type: "INTEGER",
         not_null: true,
