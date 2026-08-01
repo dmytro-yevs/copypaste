@@ -81,7 +81,7 @@ impl Store {
         let mut stmt = conn.prepare_cached(
             "SELECT id, created_at, content_hash, deleted, origin_device_id \
                FROM clipboard_items \
-              WHERE is_sensitive = 0 \
+              WHERE is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%') \
               ORDER BY created_at DESC, id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit], |row| {
@@ -130,7 +130,8 @@ impl Store {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT {} FROM clipboard_items WHERE is_sensitive = 0 AND id IN ({placeholders})",
+            "SELECT {} FROM clipboard_items WHERE is_sensitive = 0 \
+             AND (content_type = 'text' OR content_type LIKE 'text/%') AND id IN ({placeholders})",
             item_columns!()
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -155,7 +156,8 @@ impl Store {
             "SELECT ",
             item_columns!(),
             " FROM clipboard_items \
-               WHERE is_sensitive = 0 AND created_at >= ?1 \
+               WHERE is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%') \
+                 AND created_at >= ?1 \
                ORDER BY created_at ASC, id ASC LIMIT ?2"
         ))?;
         let rows = stmt.query_map(params![since_ms, limit], row_to_item)?;
@@ -170,7 +172,8 @@ impl Store {
     pub fn oldest_version_ms(&self) -> Result<Option<i64>, StoreError> {
         let conn = self.conn()?;
         let oldest: Option<i64> = conn.query_row(
-            "SELECT MIN(created_at) FROM clipboard_items WHERE is_sensitive = 0",
+            "SELECT MIN(created_at) FROM clipboard_items WHERE is_sensitive = 0 \
+             AND (content_type = 'text' OR content_type LIKE 'text/%')",
             [],
             |row| row.get(0),
         )?;
@@ -246,7 +249,7 @@ impl Store {
         // write-time layer of "sensitive items never reach the search index"
         // for the sync path (CLAUDE.md rule 4).
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [incoming.id])?;
-        if !incoming.deleted {
+        if !incoming.deleted && copypaste_ipc::content_type::is_text(incoming.content_type) {
             if let Some(text) = incoming.search_text.filter(|t| !t.trim().is_empty()) {
                 // Layer 2 rather than a second `is_sensitive` test here: it
                 // re-reads the row this transaction just wrote, so a caller

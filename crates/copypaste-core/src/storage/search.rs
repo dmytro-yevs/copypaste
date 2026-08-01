@@ -129,14 +129,15 @@ impl Store {
 /// in this transaction, so a crash cannot leave an item permanently
 /// unsearchable.
 pub(super) fn upsert_fts_in_tx(tx: &Transaction<'_>, id: &str, text: &str) -> rusqlite::Result<()> {
-    let sensitive: Option<bool> = tx
+    let searchable: Option<bool> = tx
         .query_row(
-            "SELECT is_sensitive FROM clipboard_items WHERE id = ?1 AND deleted = 0",
+            "SELECT is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%') \
+             FROM clipboard_items WHERE id = ?1 AND deleted = 0",
             [id],
             |r| r.get(0),
         )
         .optional()?;
-    if sensitive != Some(false) {
+    if searchable != Some(true) {
         return Ok(());
     }
     tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])?;
