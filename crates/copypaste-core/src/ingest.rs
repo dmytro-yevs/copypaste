@@ -165,6 +165,10 @@ pub fn ingest_into_with_capture_context(
     }
 
     let hash = crate::storage::compute_content_hash(content.as_bytes());
+    // Classify before dedup. A password-manager capture can be identical to a
+    // row first copied from an ordinary app; dedup must promote that row rather
+    // than returning it with its old, searchable classification.
+    let is_sensitive = sensitive_floor || detector.is_sensitive(content);
 
     // Manifest 01 I-33: a probe failure must not abort the ingest. Falling
     // through costs at most a duplicate row; returning here costs the capture.
@@ -181,10 +185,13 @@ pub fn ingest_into_with_capture_context(
         }
     };
     if let Some(row) = recent {
+        let row = if is_sensitive {
+            store.promote_to_sensitive(row)?
+        } else {
+            row
+        };
         return Ok(Ingested::Duplicate(row));
     }
-
-    let is_sensitive = sensitive_floor || detector.is_sensitive(content);
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
     // bind item identity"), and `decrypt` is handed `StoredItem::id` on the way
@@ -206,7 +213,7 @@ pub fn ingest_into_with_capture_context(
         // CLAUDE.md rule 4 / manifest 03 ADR-015: a sensitive item never
         // reaches the search index. This is the write-time layer of that rule;
         // the search handler enforces it again at read time.
-        search_text: if is_sensitive {
+        search_text: if is_sensitive || !copypaste_ipc::content_type::is_text(content_type) {
             None
         } else {
             Some(content.to_string())
@@ -364,6 +371,26 @@ mod tests {
         // ...and it is still stored and still readable: flagging is not
         // deleting (CLAUDE.md rule 4).
         assert_eq!(f.plaintext(&stored), "AKIAIOSFODNN7EXAMPLE");
+    }
+
+    #[test]
+    fn a_non_text_capture_is_never_indexed_or_offered_to_sync() {
+        let f = fixture();
+        let stored = ingest_into(
+            &f.store,
+            &f.detector,
+            &f.keyring,
+            "encoded image stand-in",
+            "image/png",
+            T0,
+            &f.settings,
+        )
+        .unwrap()
+        .into_item();
+
+        assert_eq!(stored.content_type, "image/png");
+        assert!(f.store.search("encoded", 10).unwrap().is_empty());
+        assert!(f.store.versions_since(i64::MIN, 10).unwrap().is_empty());
     }
 
     #[test]

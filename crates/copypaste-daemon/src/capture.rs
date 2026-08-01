@@ -360,4 +360,36 @@ mod tests {
             .unwrap()
             .is_empty());
     }
+
+    #[test]
+    fn password_manager_recopy_promotes_an_existing_duplicate_to_sensitive() {
+        let (state, _dir) = test_state("credential-store-duplicate");
+        let content = "ordinary-looking clipboard value";
+        let first = ingest(&state, content, copypaste_ipc::content_type::TEXT)
+            .unwrap()
+            .into_item();
+        assert!(!first.is_sensitive);
+        assert_eq!(state.store.search("ordinary-looking", 10).unwrap().len(), 1);
+
+        let duplicate = ingest_capture(
+            &state,
+            crate::clipboard::Capture {
+                content: content.to_string(),
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                app_bundle_id: Some("com.1password.desktop".to_string()),
+            },
+            copypaste_core::now_ms(),
+        )
+        .unwrap()
+        .into_item();
+
+        assert_eq!(duplicate.id, first.id);
+        assert!(duplicate.is_sensitive);
+        assert!(state
+            .store
+            .search("ordinary-looking", 10)
+            .unwrap()
+            .is_empty());
+        assert!(state.store.versions_since(i64::MIN, 10).unwrap().is_empty());
+    }
 }

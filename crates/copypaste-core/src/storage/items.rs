@@ -13,6 +13,24 @@ use super::retention::{bump_in_tx, find_in_bucket, newest_live_with_hash};
 use super::search::upsert_fts_in_tx;
 use super::store::Store;
 
+fn promote_sensitive_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    mut item: StoredItem,
+) -> rusqlite::Result<StoredItem> {
+    if item.is_sensitive {
+        return Ok(item);
+    }
+    tx.execute(
+        "UPDATE clipboard_items SET is_sensitive = 1 WHERE id = ?1 AND deleted = 0",
+        [&item.id],
+    )?;
+    // This must share the classification update's transaction: otherwise a
+    // password-manager re-copy can leave an ordinary row searchable.
+    tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [&item.id])?;
+    item.is_sensitive = true;
+    Ok(item)
+}
+
 impl Store {
     /// Stores a capture, or promotes the row that already holds this content.
     ///
@@ -40,16 +58,17 @@ impl Store {
     pub fn insert_or_bump(&self, item: NewItem) -> Result<Ingest, StoreError> {
         // ADR-015 layer 1: unconditional, and it ignores what the caller
         // passed. A sensitive item is never indexed.
-        let search_text = if item.is_sensitive {
-            if item.search_text.is_some() {
-                tracing::warn!(
-                    "search_text supplied for a sensitive item; dropping it (it must be None)"
-                );
-            }
-            None
-        } else {
-            item.search_text.as_deref().filter(|t| !t.trim().is_empty())
-        };
+        let search_text =
+            if item.is_sensitive || !copypaste_ipc::content_type::is_text(&item.content_type) {
+                if item.search_text.is_some() {
+                    tracing::warn!(
+                        "search_text supplied for a sensitive item; dropping it (it must be None)"
+                    );
+                }
+                None
+            } else {
+                item.search_text.as_deref().filter(|t| !t.trim().is_empty())
+            };
 
         // The caller's id, not a fresh one: the ciphertext is already sealed
         // against it (see `NewItem::id`).
@@ -60,6 +79,11 @@ impl Store {
         // The probe and the bump share the insert's transaction, so no third
         // capture can land between finding the row and restamping it.
         if let Some(existing) = newest_live_with_hash(&tx, &item.content_hash, i64::MIN)? {
+            let existing = if item.is_sensitive {
+                promote_sensitive_in_tx(&tx, existing)?
+            } else {
+                existing
+            };
             let bumped = bump_in_tx(&tx, &existing, item.created_at)?;
             tx.commit()?;
             return Ok(Ingest::Bumped(bumped));
@@ -92,6 +116,11 @@ impl Store {
                 let existing = find_in_bucket(&tx, &item.content_hash, item.created_at)?;
                 return match existing {
                     Some(existing) => {
+                        let existing = if item.is_sensitive {
+                            promote_sensitive_in_tx(&tx, existing)?
+                        } else {
+                            existing
+                        };
                         let bumped = bump_in_tx(&tx, &existing, item.created_at)?;
                         tx.commit()?;
                         Ok(Ingest::Bumped(bumped))
@@ -128,6 +157,16 @@ impl Store {
     /// the two happened.
     pub fn insert(&self, item: NewItem) -> Result<StoredItem, StoreError> {
         self.insert_or_bump(item).map(Ingest::into_item)
+    }
+
+    /// Raises a live row's sensitivity classification and removes its FTS
+    /// entry in the same transaction.
+    pub fn promote_to_sensitive(&self, item: StoredItem) -> Result<StoredItem, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let promoted = promote_sensitive_in_tx(&tx, item)?;
+        tx.commit()?;
+        Ok(promoted)
     }
 
     /// Pinned first, then newest first, by offset.
