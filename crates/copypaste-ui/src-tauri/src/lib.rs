@@ -183,6 +183,7 @@ pub fn run() {
             commands::service::start_service,
             commands::service::restart_service,
             commands::service::hide_window,
+            commands::service::show_main_window,
             commands::protection::set_allow_screenshots,
             // the service's own settings
             commands::config::get_config,

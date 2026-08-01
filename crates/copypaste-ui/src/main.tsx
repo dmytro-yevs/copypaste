@@ -8,9 +8,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 
 import App from "@/App";
+import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
 import { IpcFailure } from "@/lib/errors";
 import { applyAppearance } from "@/lib/theme";
 import { readPrefs } from "@/store/prefs";
+import { isQuickPasteSurface } from "@/surface";
 import "@/index.css";
 
 applyAppearance(readPrefs());
@@ -46,18 +48,23 @@ const queryClient = new QueryClient({
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
 
+const isQuickPaste = isQuickPasteSurface(window.location.search);
+
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
-      {/* One app-level stack. Bottom-right, not centred: centring bled into the
-          sidebar footer at narrow widths (manifest §3.7). */}
-      <Toaster
-        position="bottom-right"
-        closeButton
-        duration={3000}
-        toastOptions={{ className: "font-sans" }}
-      />
+      {isQuickPaste ? <QuickPasteApp /> : <App />}
+      {!isQuickPaste && (
+        // One app-level stack. Bottom-right, not centred: centring bled into
+        // the sidebar footer at narrow widths (manifest §3.7). Quick Paste is
+        // its own compact surface and deliberately does not mount this shell.
+        <Toaster
+          position="bottom-right"
+          closeButton
+          duration={3000}
+          toastOptions={{ className: "font-sans" }}
+        />
+      )}
     </QueryClientProvider>
   </StrictMode>,
 );
