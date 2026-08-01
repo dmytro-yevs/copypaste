@@ -191,7 +191,12 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
     Ok(Ingested::Stored(stored))
 }
 
-fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
+/// Apply every local retention limit after a write, regardless of whether it
+/// arrived from capture, import, cloud, or a paired device.
+///
+/// This is best-effort after accepting a version: failing a cleanup must not
+/// turn a successfully stored capture or remote merge into data loss.
+pub fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
     // Best-effort after accepting a capture: a failed sweep must never turn a
     // stored capture into a lost one.
     if let Err(e) = store.evict_over_cap(u64::from(settings.history_limit)) {
