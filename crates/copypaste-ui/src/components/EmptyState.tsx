@@ -32,6 +32,8 @@ export function EmptyState({
   return (
     <div
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-s-3 px-[var(--pad-empty)] py-s-6 text-center"
+      role={busy ? "status" : undefined}
+      aria-live={busy ? "polite" : undefined}
       aria-busy={busy || undefined}
     >
       <span
