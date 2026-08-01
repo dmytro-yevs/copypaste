@@ -1,5 +1,5 @@
-//! The menu-bar item, and the only exit: closing the window hides it
-//! (manifest 06, INV-36) and the window has no decorations.
+//! The menu-bar item, and the only exit: closing either app surface hides it
+//! (manifest 06, INV-36); only the Quick Paste surface is frameless.
 //!
 //! `show_menu_on_left_click(false)` — with a popover, clicking the icon *is*
 //! the gesture, so the menu stays on the secondary click.
@@ -36,7 +36,17 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// so, and the frontend keeps a slow poll for the same reason. A tray that
 /// stopped updating because it believed it was subscribed would show yesterday's
 /// clippings indefinitely.
-const BACKSTOP: Duration = Duration::from_secs(30);
+const BACKSTOP: Duration = Duration::from_secs(5);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_freshness_backstop_re_reads_the_recent_menu_every_five_seconds() {
+        assert_eq!(BACKSTOP, Duration::from_secs(5));
+    }
+}
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // Read once at build: a change made in System Settings while the app runs
@@ -59,7 +69,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 ..
             } = event
             {
-                window::toggle(tray.app_handle());
+                window::toggle_quick_paste(tray.app_handle());
             }
         });
 
@@ -74,7 +84,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, id: &str) {
     match id {
-        menu::ID_TOGGLE => window::toggle(app),
+        menu::ID_TOGGLE => window::toggle_quick_paste(app),
         menu::ID_AUTOSTART => {
             // The checkbox has already flipped itself, so the wanted state is
             // the opposite of what the plugin currently reports. If the plugin

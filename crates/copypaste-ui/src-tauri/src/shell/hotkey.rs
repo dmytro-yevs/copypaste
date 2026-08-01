@@ -116,7 +116,7 @@ pub fn register<R: Runtime>(
             // Released for a Carbon hotkey, and acting on both toggles the
             // window twice per keypress — it opens and immediately closes.
             if event.state == ShortcutState::Pressed {
-                super::window::toggle(app);
+                super::window::toggle_quick_paste(app);
             }
         })
         .map_err(|_| "That shortcut is already in use by another app.")
