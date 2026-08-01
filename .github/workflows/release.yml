@@ -561,9 +561,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android
           path: dist
@@ -580,7 +580,7 @@ jobs:
           ( cd dist && sha256sum --check "$(basename "$sidecar")" )
           echo "Testing $(sha256sum "$apk" | cut -d' ' -f1)  $(basename "$apk")"
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
           java-version: "21"
@@ -594,7 +594,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           [[ -e /dev/kvm ]] || { echo "::error::/dev/kvm is absent — this runner cannot accelerate the emulator"; exit 1; }
 
-      - uses: reactivecircus/android-emulator-runner@v2.38.0
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: "36"
           target: google_apis
@@ -607,7 +607,7 @@ jobs:
           APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
           SMOKE_OUT: artifacts/release-android-smoke
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: release-android-smoke-evidence
