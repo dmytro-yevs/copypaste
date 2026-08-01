@@ -8,6 +8,8 @@
 //! click-to-copy path have never been run.
 
 mod menu;
+#[cfg(target_os = "macos")]
+mod menu_image_visibility;
 mod recent;
 mod text;
 
@@ -17,6 +19,12 @@ use std::time::Duration;
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter as _, Listener as _, Manager as _, Runtime};
 use tokio::sync::Notify;
+
+#[cfg(target_os = "macos")]
+pub(super) use menu_image_visibility::force_menu_image_visibility;
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn force_menu_image_visibility<R: Runtime>(_app: &AppHandle<R>) {}
 
 use self::menu::TrayMenu;
 use super::{autostart, notify, window};
@@ -67,6 +75,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         tray = tray.icon(icon);
     }
     tray.build(app)?;
+    force_menu_image_visibility(app);
 
     spawn_refresh(app.clone(), tray_menu);
     Ok(())
@@ -74,23 +83,23 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, id: &str) {
     match id {
-        menu::ID_TOGGLE => window::toggle_quick_paste(app),
+        // The menu item is named “Show CopyPaste”, so it must reveal the
+        // primary application window. The menu-bar icon and global shortcut
+        // remain the explicit Quick Paste affordances.
+        menu::ID_TOGGLE => window::show_main(app),
+        menu::ID_SETTINGS => window::show_main_settings(app),
         menu::ID_AUTOSTART => {
-            // The checkbox has already flipped itself, so the wanted state is
-            // the opposite of what the plugin currently reports. If the plugin
-            // refuses, put the tick back rather than leaving the menu claiming
-            // something untrue.
+            // The visible state is updated only after the system setting is
+            // written, so a refusal cannot leave the menu claiming it worked.
             let wanted = !autostart::is_enabled(app);
             if autostart::set_enabled(app, wanted).is_err() {
                 tracing::warn!("could not change the launch-at-login setting");
             }
-            let _ = tray_menu.autostart.set_checked(autostart::is_enabled(app));
+            tray_menu.set_autostart(autostart::is_enabled(app));
         }
         menu::ID_PRIVATE_MODE => {
-            // Tauri toggles a check item before delivering the event, so its
-            // current state is the requested one. Confirm it from persisted
-            // daemon state below and roll it back if that write fails.
-            let wanted = tray_menu.private_mode.is_checked().unwrap_or(false);
+            let previous = tray_menu.private_mode_enabled();
+            let wanted = !previous;
             let menu = Arc::clone(tray_menu);
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -103,12 +112,12 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
                     .await
                 {
                     Ok(applied) => {
-                        let _ = menu.private_mode.set_checked(applied.config.private_mode);
+                        menu.set_private_mode(applied.config.private_mode);
                         let _ = app.emit("private-mode-changed", applied.config.private_mode);
                     }
                     Err(error) => {
                         tracing::warn!(%error, "could not change private mode");
-                        let _ = menu.private_mode.set_checked(!wanted);
+                        menu.set_private_mode(previous);
                     }
                 }
             });

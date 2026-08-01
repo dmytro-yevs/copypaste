@@ -1,20 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
 import fuzzysort from "fuzzysort";
+import {
+  ClipboardList,
+  Play,
+  PlugZap,
+  RefreshCw,
+  Search,
+  SearchX,
+  Settings2,
+  TriangleAlert,
+} from "lucide-react";
+import { toast } from "sonner";
 
+import { EmptyState } from "@/components/EmptyState";
+import { QuickPasteRow } from "@/components/quick-paste/QuickPasteRow";
+import { Input } from "@/components/ui/input";
 import { applyAppearance } from "@/lib/theme";
 import {
   copyItem,
   copyItemAsPlainText,
   hideWindow,
   listItems,
+  openSettingsFromQuickPaste,
   restartService,
   setAllowScreenshots,
   setPinned,
-  showMainWindow,
   type Item,
   type ItemPage,
 } from "@/lib/ipc";
 import { classifyError } from "@/lib/errors";
+import { isAndroid } from "@/lib/platform";
 import { readPrefs } from "@/store/prefs";
 
 const LIMIT = 50;
@@ -26,22 +41,10 @@ type HistoryState = {
   isLoading: boolean;
 };
 
-type RetryAction =
-  | { kind: "copy"; item: Item; plainText: boolean }
-  | { kind: "pin"; id: string; pinned: boolean };
-
 declare global {
   interface Window {
     __copypasteFreeMemory?: () => void;
   }
-}
-
-/** What can be searched without making sensitive plaintext reachable. */
-function displayLabel(item: Item): string {
-  if (item.is_sensitive) return "Sensitive content";
-  if (item.content_type.toLowerCase().startsWith("image/")) return "Image";
-  if (item.content_type.toLowerCase() === "file") return "File";
-  return item.content ?? "";
 }
 
 function searchLabel(item: Item): string {
@@ -61,17 +64,21 @@ function nextIndex(current: number, direction: 1 | -1, length: number): number {
  * shown, so a warm WebView cannot show a stale clipboard list.
  */
 export function QuickPasteApp() {
+  const android = isAndroid();
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [previewLinesPopup, setPreviewLinesPopup] = useState(
     () => readPrefs().previewLinesPopup,
   );
+  // The popup can show fewer lines of text, but it must keep the same row
+  // geometry as History. This stops the two surfaces drifting into different
+  // card sizes while preserving the compact-preview preference.
+  const [historyPreviewLines, setHistoryPreviewLines] = useState(
+    () => readPrefs().previewLines,
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [retryAction, setRetryAction] = useState<RetryAction | null>(null);
   const [pinPendingId, setPinPendingId] = useState<string | null>(null);
-  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryState>({ data: null, error: null, isLoading: true });
   const keyboardNavigation = useRef(false);
   const lastKeyboardMove = useRef(0);
@@ -118,6 +125,7 @@ export function QuickPasteApp() {
     const prefs = readPrefs();
     applyAppearance(prefs);
     setPreviewLinesPopup(prefs.previewLinesPopup);
+    setHistoryPreviewLines(prefs.previewLines);
     void setAllowScreenshots(prefs.allowScreenshots).catch(() => {});
     refreshHistory(trigger);
     window.setTimeout(() => searchRef.current?.focus(), 50);
@@ -130,8 +138,6 @@ export function QuickPasteApp() {
     cacheGeneration.current += 1;
     setSelectedId(null);
     setQuery("");
-    setActionError(null);
-    setRetryAction(null);
     setPinPendingId(null);
     setHistory({ data: null, error: null, isLoading: true });
   }, []);
@@ -193,18 +199,24 @@ export function QuickPasteApp() {
 
   const dismissOnRootBlur = (event: FocusEvent<HTMLElement>) => {
     // React bubbles blur. Moving from the field to Settings is still inside
-    // the popup; only focus leaving the root is a dismissal.
+    // the popup. A retry action in its transient toast is also intentional;
+    // only focus leaving both surfaces is a dismissal.
     if (event.currentTarget.contains(event.relatedTarget)) return;
+    if (
+      event.relatedTarget instanceof Element &&
+      event.relatedTarget.closest("[data-sonner-toaster]") !== null
+    ) return;
     dismiss();
   };
 
   const restart = async () => {
-    setRecoveryError(null);
     try {
       await restartService();
       refreshHistory("retry");
     } catch {
-      setRecoveryError("Couldn’t restart the clipboard service. Try again.");
+      toast.error("Couldn’t restart the clipboard service.", {
+        action: { label: "Retry", onClick: () => void restart() },
+      });
     }
   };
 
@@ -212,8 +224,6 @@ export function QuickPasteApp() {
     async (item: Item, plainText = false) => {
       const generation = cacheGeneration.current;
       try {
-        setActionError(null);
-        setRetryAction(null);
         await (plainText ? copyItemAsPlainText(item.id) : copyItem(item.id));
         // Drop the popup cache before it is hidden. The next invocation always
         // starts from a daemon read, and the Accessory hide path restores the
@@ -223,8 +233,9 @@ export function QuickPasteApp() {
         console.error("Quick Paste copy failed", error);
         if (cacheGeneration.current !== generation) return;
         // Keep the result visible rather than pretending the clipboard changed.
-        setActionError("Couldn’t copy that item. Try again.");
-        setRetryAction({ kind: "copy", item, plainText });
+        toast.error("Couldn’t copy that item.", {
+          action: { label: "Retry", onClick: () => void copyAndDismiss(item, plainText) },
+        });
       }
     },
     [dismiss],
@@ -233,8 +244,6 @@ export function QuickPasteApp() {
   const changePin = useCallback(
     async (id: string, pinned: boolean) => {
       const generation = cacheGeneration.current;
-      setActionError(null);
-      setRetryAction(null);
       setPinPendingId(id);
       try {
         await setPinned(id, pinned);
@@ -242,8 +251,9 @@ export function QuickPasteApp() {
       } catch (error: unknown) {
         console.error("Quick Paste pin failed", error);
         if (cacheGeneration.current === generation) {
-          setActionError(`Couldn’t ${pinned ? "pin" : "unpin"} that item. Try again.`);
-          setRetryAction({ kind: "pin", id, pinned });
+          toast.error(`Couldn’t ${pinned ? "pin" : "unpin"} that item.`, {
+            action: { label: "Retry", onClick: () => void changePin(id, pinned) },
+          });
         }
       } finally {
         if (cacheGeneration.current === generation) setPinPendingId(null);
@@ -306,137 +316,111 @@ export function QuickPasteApp() {
   return (
     <main
       aria-label="Quick Paste"
-      className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-background p-3 text-foreground shadow-lg"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background p-3 text-foreground shadow-xl"
       onKeyDown={onKeyDown}
       onBlur={dismissOnRootBlur}
     >
-      <div className="mb-2 flex items-center gap-2">
-        <input
+      <div className="relative mb-2 flex items-center gap-2">
+        <Search
+          size={17}
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 text-muted-foreground"
+        />
+        <Input
           ref={searchRef}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           aria-label="Search clipboard history"
           placeholder="Search clipboard history"
-          className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+          className="h-11 flex-1 rounded-xl bg-secondary/45 py-0 pl-9 pr-3"
         />
-        <button
-          type="button"
-          className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onClick={() => void showMainWindow().catch(() => setActionError("Couldn’t open Settings. Try again."))}
-        >
-          Settings
-        </button>
       </div>
 
-      {actionError && (
-        <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md bg-err/15 px-3 py-2 text-sm text-err-strong">
-          <span>{actionError}</span>
-          {retryAction && (
-            <button
-              type="button"
-              className="rounded px-2 py-1 text-xs font-medium hover:bg-destructive-hover hover:text-destructive-foreground"
-              onClick={() => {
-                if (retryAction.kind === "copy") {
-                  void copyAndDismiss(retryAction.item, retryAction.plainText);
-                } else {
-                  void changePin(retryAction.id, retryAction.pinned);
-                }
-              }}
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      )}
-
-      <div ref={listRef} role="list" onScroll={noteScroll} className="min-h-0 flex-1 overflow-auto rounded-md">
-        {history.isLoading ? null : historyError === "offline" ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            <p>Clipboard service offline</p>
-            <button
-              type="button"
-              className="mt-2 rounded px-2 py-1 text-xs font-medium hover:bg-accent hover:text-foreground"
-              onClick={() => void restart()}
-            >
-              Restart
-            </button>
-            {recoveryError && <p role="alert" className="mt-2 text-destructive">{recoveryError}</p>}
-          </div>
+      <div ref={listRef} role="list" onScroll={noteScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-0.5">
+        {history.isLoading ? (
+          <EmptyState
+            busy
+            title="Loading clipboard history"
+            body="Looking for your recent copies."
+          />
+        ) : historyError === "offline" ? (
+          <EmptyState
+            icon={PlugZap}
+            tone="attention"
+            title="The clipboard service isn't running"
+            body="Start it to see and copy recent items."
+            action={{ label: "Restart service", icon: Play, onClick: () => void restart() }}
+          />
         ) : historyError === "not_ready" ? (
-          <p className="p-4 text-sm text-muted-foreground">Starting up…</p>
+          <EmptyState
+            busy
+            icon={PlugZap}
+            tone="info"
+            title="Starting clipboard service"
+            body="Your recent copies will appear as soon as it is ready."
+          />
         ) : history.error ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            <p>Something went wrong</p>
-            <button
-              type="button"
-              className="mt-2 rounded px-2 py-1 text-xs font-medium hover:bg-accent hover:text-foreground"
-              onClick={() => refreshHistory("retry")}
-            >
-              Try again
-            </button>
-          </div>
+          <EmptyState
+            icon={TriangleAlert}
+            tone="danger"
+            title="Couldn't load clipboard history"
+            body="Try again. If this keeps happening, open Settings to view diagnostics."
+            action={{ label: "Try again", icon: RefreshCw, onClick: () => refreshHistory("retry") }}
+          />
         ) : items.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">
-            {searching ? `No matches for “${query}”` : "Nothing copied yet"}
-          </p>
+          <EmptyState
+            icon={searching ? SearchX : ClipboardList}
+            title={searching ? `No matches for “${query}”` : "Nothing copied yet"}
+            body={
+              searching
+                ? "Try a different word or clear the search."
+                : "Copies from your device will appear here."
+            }
+          />
         ) : (
-          items.map((item) => (
-            <div
+          items.map((item, index) => (
+            <QuickPasteRow
               key={item.id}
-              role="listitem"
-              aria-current={selectedId === item.id || undefined}
-              onMouseEnter={() => selectFromPointer(item.id)}
-              className={`flex w-full items-stretch rounded-md text-sm ${
-                selectedId === item.id ? "bg-accent" : "hover:bg-accent"
-              }`}
-            >
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={() => void copyAndDismiss(item)}
-                className="flex min-w-0 flex-1 flex-col px-3 py-2 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
-              >
-                <span
-                  className="overflow-hidden break-words"
-                  style={{
-                    display: "-webkit-box",
-                    WebkitBoxOrient: "vertical",
-                    WebkitLineClamp: previewLinesPopup,
-                  }}
-                >
-                  {displayLabel(item) || "Empty item"}
-                </span>
-                {item.pinned && <span className="mt-1 text-xs text-muted-foreground">Pinned</span>}
-              </button>
-              <button
-                type="button"
-                aria-label={item.pinned ? "Unpin" : "Pin"}
-                title={item.pinned ? "Unpin" : "Pin"}
-                disabled={pinPendingId === item.id}
-                onClick={() => void changePin(item.id, !item.pinned)}
-                className="m-1 shrink-0 self-center rounded px-2 py-1 text-xs font-medium text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring disabled:opacity-50"
-              >
-                {item.pinned ? "Unpin" : "Pin"}
-              </button>
-            </div>
+              item={item}
+              active={selectedId === item.id}
+              previewLines={previewLinesPopup}
+              rowPreviewLines={historyPreviewLines}
+              shortcut={!android && !searching && index < 9 ? `⌘${index + 1}` : null}
+              pinPending={pinPendingId === item.id}
+              onSelect={() => selectFromPointer(item.id)}
+              onCopy={() => void copyAndDismiss(item)}
+              onTogglePin={() => void changePin(item.id, !item.pinned)}
+            />
           ))
         )}
       </div>
 
-      <p aria-live="polite" className="mt-2 text-center text-xs text-muted-foreground">
-        {history.isLoading
-          ? "Loading…"
-          : searching
-            ? `${items.length} of ${history.data?.items.length ?? 0}`
-            : (history.data?.total ?? 0) > items.length
-              ? `${items.length} of ${history.data?.total}`
-              : `${items.length} items`}
-      </p>
-      <p className="mt-1 text-center text-xs text-muted-foreground">
-        ↑↓ navigate
-        {!searching && " · ⌘1–9 quick paste"}
-        {" · ⌥⏎ plain text · ⏎ copy · Esc close"}
-      </p>
+      <footer className="mt-2 flex h-8 shrink-0 items-center gap-2 border-t border-border pt-1 text-xs text-muted-foreground">
+        <button
+          type="button"
+          aria-label="Open Settings"
+          title="Open Settings"
+          className="flex size-[var(--sz-iconbtn)] shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+          onClick={() =>
+            void openSettingsFromQuickPaste().catch(() =>
+              toast.error("Couldn’t open Settings.", {
+                action: { label: "Retry", onClick: () => void openSettingsFromQuickPaste() },
+              }),
+            )
+          }
+        >
+          <Settings2 size={16} aria-hidden="true" />
+        </button>
+        <p aria-live="polite" className="shrink-0 tabular-nums">
+          {history.isLoading
+            ? "Loading…"
+            : searching
+              ? `${items.length} of ${history.data?.items.length ?? 0}`
+              : (history.data?.total ?? 0) > items.length
+                ? `${items.length} of ${history.data?.total}`
+                : `${items.length} items`}
+        </p>
+      </footer>
     </main>
   );
 }

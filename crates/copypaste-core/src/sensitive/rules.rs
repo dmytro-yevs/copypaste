@@ -119,14 +119,16 @@ mod tests {
         let rule = rule("generic_api_key");
         assert_eq!(rule.entropy, Some(3.5));
         assert!(rule.keywords.contains(&"credential"));
-        assert!(rule
-            .allowlists
-            .iter()
-            .any(|allowlist| !allowlist.stopwords.is_empty()));
-        assert!(rule
-            .allowlists
-            .iter()
-            .any(|allowlist| allowlist.target == AllowlistTarget::Line));
+        assert!(
+            rule.allowlists
+                .iter()
+                .any(|allowlist| !allowlist.stopwords.is_empty())
+        );
+        assert!(
+            rule.allowlists
+                .iter()
+                .any(|allowlist| allowlist.target == AllowlistTarget::Line)
+        );
     }
 
     #[test]

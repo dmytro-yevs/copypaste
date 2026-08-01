@@ -12,7 +12,7 @@ macro_rules! item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
          pinned, pin_order, pin_updated_at, is_sensitive, deleted, origin_device_id, \
-         app_bundle_id, payload_metadata"
+         app_bundle_id, app_name, payload_metadata"
     };
 }
 
@@ -26,7 +26,7 @@ macro_rules! item_columns_ci {
          ci.pin_updated_at AS pin_updated_at, \
          ci.is_sensitive AS is_sensitive, ci.deleted AS deleted, \
          ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id, \
-         ci.payload_metadata AS payload_metadata"
+         ci.app_name AS app_name, ci.payload_metadata AS payload_metadata"
     };
 }
 
@@ -55,6 +55,8 @@ pub struct NewItem {
     pub created_at: i64,
     /// Frontmost application at local capture time, if the platform supplied it.
     pub app_bundle_id: Option<String>,
+    /// Human-readable label resolved by the platform alongside the app id.
+    pub app_name: Option<String>,
     /// JSON-encoded [`crate::FileMetadata`], only for file payloads.
     pub payload_metadata: Option<String>,
 }
@@ -123,6 +125,9 @@ pub struct StoredItem {
     pub origin_device_id: String,
     /// Frontmost application at local capture time. Remote items may not have it.
     pub app_bundle_id: Option<String>,
+    /// Name resolved by the capturing platform. It is advisory and never used
+    /// as an identifier or as a filesystem path.
+    pub app_name: Option<String>,
     pub payload_metadata: Option<String>,
 }
 
@@ -145,15 +150,6 @@ pub enum StoreError {
     /// database at all. Fail closed: never fall back to an unkeyed read.
     #[error("database could not be opened with the supplied key")]
     InvalidKey,
-
-    /// A database written by v0.4.x. Its own code because the recovery is a
-    /// human decision — keep the old history and downgrade, or start fresh —
-    /// and never a retry. v2 shares no formats with it (CLAUDE.md rule 3), and
-    /// nothing here opens, migrates or removes it.
-    #[error(
-        "this is a CopyPaste 0.4 history; this version cannot read it, and has left it as it was"
-    )]
-    LegacyDatabase,
 
     /// `PRAGMA integrity_check` returned something other than `ok`. The key was
     /// right and the pages are not: a candidate file in this state must not
@@ -193,6 +189,7 @@ pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
         deleted: row.get("deleted")?,
         origin_device_id: row.get("origin_device_id")?,
         app_bundle_id: row.get("app_bundle_id")?,
+        app_name: row.get("app_name")?,
         payload_metadata: row.get("payload_metadata")?,
     })
 }

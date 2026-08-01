@@ -9,7 +9,6 @@ use rusqlite::Connection;
 use zeroize::Zeroizing;
 
 use super::connection::{apply_connection_pragmas, apply_key, build_pool, validate_key};
-use super::legacy::is_v1_database;
 use super::model::StoreError;
 use super::schema::migrate;
 
@@ -39,12 +38,6 @@ impl Store {
     /// read and no unkeyed plaintext probe.
     pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
         let db_key = Zeroizing::new(*db_key);
-        // Before anything is opened: a file written by v0.4.x is refused with
-        // its own error, never migrated and never mistaken for corruption
-        // (CLAUDE.md rule 3, [`super::legacy`]).
-        if is_v1_database(path) {
-            return Err(StoreError::LegacyDatabase);
-        }
         // Probe on a private connection first so a wrong key surfaces as
         // InvalidKey instead of an opaque pool-construction failure, and so the
         // migration runs once rather than once per pooled connection.

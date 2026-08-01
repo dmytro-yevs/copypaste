@@ -11,14 +11,16 @@
 
 use std::sync::Mutex;
 
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{IconMenuItem, Menu, NativeIcon, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Manager as _, Runtime};
 
+use super::force_menu_image_visibility;
 use super::recent::{self, Clipping};
 use super::text;
 use crate::backend::{Backend as _, SelectedBackend};
 
 pub const ID_TOGGLE: &str = "toggle";
+pub const ID_SETTINGS: &str = "settings";
 pub const ID_AUTOSTART: &str = "autostart";
 pub const ID_PRIVATE_MODE: &str = "private-mode";
 pub const ID_QUIT: &str = "quit";
@@ -40,57 +42,100 @@ struct Shown {
 
 pub struct TrayMenu<R: Runtime> {
     pub menu: Menu<R>,
-    pub autostart: CheckMenuItem<R>,
-    pub private_mode: CheckMenuItem<R>,
-    status: MenuItem<R>,
+    pub autostart: IconMenuItem<R>,
+    pub private_mode: IconMenuItem<R>,
+    status: IconMenuItem<R>,
     recent: Submenu<R>,
-    slots: Vec<MenuItem<R>>,
-    placeholder: MenuItem<R>,
+    slots: Vec<IconMenuItem<R>>,
+    placeholder: IconMenuItem<R>,
     shown: Mutex<Shown>,
+    private_mode_enabled: Mutex<bool>,
 }
 
 impl<R: Runtime> TrayMenu<R> {
     pub fn build(app: &AppHandle<R>, autostart_enabled: bool) -> tauri::Result<Self> {
         // Disabled: it reports, it is not a verb. The one thing the tray could
         // not say before is why nothing is being captured.
-        let status = MenuItem::with_id(app, ID_STATUS, text::STATUS_OFFLINE, false, None::<&str>)?;
-        let toggle = MenuItem::with_id(app, ID_TOGGLE, text::SHOW, true, None::<&str>)?;
+        let status = IconMenuItem::with_id_and_native_icon(
+            app,
+            ID_STATUS,
+            text::STATUS_OFFLINE,
+            false,
+            Some(NativeIcon::StatusUnavailable),
+            None::<&str>,
+        )?;
+        let toggle = IconMenuItem::with_id_and_native_icon(
+            app,
+            ID_TOGGLE,
+            text::SHOW,
+            true,
+            Some(NativeIcon::QuickLook),
+            None::<&str>,
+        )?;
+        let settings = IconMenuItem::with_id_and_native_icon(
+            app,
+            ID_SETTINGS,
+            text::SETTINGS,
+            true,
+            Some(NativeIcon::PreferencesGeneral),
+            None::<&str>,
+        )?;
 
-        let placeholder = MenuItem::new(app, text::RECENT_EMPTY, false, None::<&str>)?;
+        let placeholder = IconMenuItem::with_native_icon(
+            app,
+            text::RECENT_EMPTY,
+            false,
+            Some(NativeIcon::MultipleDocuments),
+            None::<&str>,
+        )?;
         let slots = (0..recent::SLOTS)
             .map(|i| {
-                MenuItem::with_id(
+                IconMenuItem::with_id_and_native_icon(
                     app,
                     format!("{RECENT_PREFIX}{i}"),
                     // Replaced by the first refresh; a slot is only ever in the
                     // submenu once it has a clipping's text.
                     text::RECENT_EMPTY,
                     true,
+                    Some(NativeIcon::MultipleDocuments),
                     None::<&str>,
                 )
             })
             .collect::<tauri::Result<Vec<_>>>()?;
-        let recent = Submenu::with_items(app, text::RECENT, true, &[&placeholder])?;
+        let recent = Submenu::new_with_native_icon(
+            app,
+            text::RECENT,
+            true,
+            Some(NativeIcon::MultipleDocuments),
+        )?;
+        recent.append(&placeholder)?;
 
-        let autostart = CheckMenuItem::with_id(
+        let autostart = IconMenuItem::with_id_and_native_icon(
             app,
             ID_AUTOSTART,
-            text::OPEN_AT_LOGIN,
+            autostart_label(autostart_enabled),
             true,
-            autostart_enabled,
+            Some(NativeIcon::PreferencesGeneral),
             None::<&str>,
         )?;
         // Startup never waits for IPC. The refresh loop replaces this safe
-        // unchecked default with the persisted daemon truth.
-        let private_mode = CheckMenuItem::with_id(
+        // default with the persisted daemon truth.
+        let private_mode = IconMenuItem::with_id_and_native_icon(
             app,
             ID_PRIVATE_MODE,
-            text::PRIVATE_MODE,
+            private_mode_label(false),
             true,
-            false,
+            Some(NativeIcon::LockUnlocked),
             None::<&str>,
         )?;
-        let quit = MenuItem::with_id(app, ID_QUIT, text::QUIT, true, None::<&str>)?;
+        let quit = IconMenuItem::with_id_and_native_icon(
+            app,
+            ID_QUIT,
+            text::QUIT,
+            true,
+            Some(NativeIcon::StopProgress),
+            None::<&str>,
+        )?;
 
         let menu = Menu::with_items(
             app,
@@ -98,6 +143,7 @@ impl<R: Runtime> TrayMenu<R> {
                 &status,
                 &PredefinedMenuItem::separator(app)?,
                 &toggle,
+                &settings,
                 &recent,
                 &PredefinedMenuItem::separator(app)?,
                 &private_mode,
@@ -120,7 +166,35 @@ impl<R: Runtime> TrayMenu<R> {
                 placeholder: true,
                 ..Shown::default()
             }),
+            private_mode_enabled: Mutex::new(false),
         })
+    }
+
+    /// The toolbar API cannot show both a checkmark and an image on macOS.
+    /// We keep the state in the visible label and pair it with the relevant
+    /// native icon so toggle rows do not become the only iconless tray actions.
+    pub fn set_autostart(&self, enabled: bool) {
+        let _ = self.autostart.set_text(autostart_label(enabled));
+    }
+
+    pub fn private_mode_enabled(&self) -> bool {
+        self.private_mode_enabled
+            .lock()
+            .map(|enabled| *enabled)
+            .unwrap_or(false)
+    }
+
+    pub fn set_private_mode(&self, enabled: bool) {
+        if let Ok(mut current) = self.private_mode_enabled.lock() {
+            *current = enabled;
+        }
+        let _ = self.private_mode.set_text(private_mode_label(enabled));
+        let icon = if enabled {
+            NativeIcon::LockLocked
+        } else {
+            NativeIcon::LockUnlocked
+        };
+        let _ = self.private_mode.set_native_icon(Some(icon));
     }
 
     /// The clipping id a slot is showing.
@@ -136,15 +210,18 @@ impl<R: Runtime> TrayMenu<R> {
     pub async fn refresh(&self, app: &AppHandle<R>) {
         let backend = app.state::<SelectedBackend>();
 
-        let status = match backend.status().await {
-            Ok(status) if status.capture_running => text::STATUS_CAPTURING,
-            Ok(_) => text::STATUS_STOPPED,
-            Err(_) => text::STATUS_OFFLINE,
+        let (status, icon) = match backend.status().await {
+            Ok(status) if status.capture_running => {
+                (text::STATUS_CAPTURING, NativeIcon::StatusAvailable)
+            }
+            Ok(_) => (text::STATUS_STOPPED, NativeIcon::StatusPartiallyAvailable),
+            Err(_) => (text::STATUS_OFFLINE, NativeIcon::StatusUnavailable),
         };
         let _ = self.status.set_text(status);
+        let _ = self.status.set_native_icon(Some(icon));
 
         if let Ok(config) = backend.get_config().await {
-            let _ = self.private_mode.set_checked(config.config.private_mode);
+            self.set_private_mode(config.config.private_mode);
         }
 
         // The page carries plaintext, which is exactly why `Clipping` and not
@@ -153,6 +230,7 @@ impl<R: Runtime> TrayMenu<R> {
             Ok(page) => self.show(&recent::menu_clippings(&page.items), text::RECENT_EMPTY),
             Err(_) => self.show(&[], text::RECENT_OFFLINE),
         }
+        force_menu_image_visibility(app);
     }
 
     fn show(&self, clippings: &[Clipping], empty: &str) {
@@ -199,6 +277,22 @@ impl<R: Runtime> TrayMenu<R> {
     }
 }
 
+fn autostart_label(enabled: bool) -> &'static str {
+    if enabled {
+        text::OPEN_AT_LOGIN_ON
+    } else {
+        text::OPEN_AT_LOGIN_OFF
+    }
+}
+
+fn private_mode_label(enabled: bool) -> &'static str {
+    if enabled {
+        text::PRIVATE_MODE_ON
+    } else {
+        text::PRIVATE_MODE_OFF
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +304,13 @@ mod tests {
         assert_eq!(recent_slot("quit"), None);
         assert_eq!(recent_slot("recent."), None);
         assert_eq!(recent_slot("recent.x"), None);
+    }
+
+    #[test]
+    fn toggle_rows_keep_their_state_in_their_accessible_label() {
+        assert_eq!(autostart_label(true), text::OPEN_AT_LOGIN_ON);
+        assert_eq!(autostart_label(false), text::OPEN_AT_LOGIN_OFF);
+        assert_eq!(private_mode_label(true), text::PRIVATE_MODE_ON);
+        assert_eq!(private_mode_label(false), text::PRIVATE_MODE_OFF);
     }
 }

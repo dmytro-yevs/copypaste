@@ -10,7 +10,9 @@ use ts_rs::{Config, ExportError, TS};
 
 use crate::backend::UiError;
 use crate::commands::transfer::{ExportReport, ImportPreview};
-use crate::model::{UiItem, UiPage, UiSyncResult};
+use crate::model::{
+    UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon, UiSyncResult,
+};
 use crate::service::ServiceState;
 
 /// Export every Rust-owned DTO into one checked-in frontend module.
@@ -31,6 +33,9 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<ExportReport>(&config, &mut output);
     declaration::<ImportData>(&config, &mut output);
     declaration::<ImportPreview>(&config, &mut output);
+    declaration::<UiImagePreview>(&config, &mut output);
+    declaration::<UiSourceAppIcon>(&config, &mut output);
+    declaration::<UiInstalledSourceApp>(&config, &mut output);
     declaration::<UiItem>(&config, &mut output);
     declaration::<UiPage>(&config, &mut output);
     declaration::<Liveness>(&config, &mut output);

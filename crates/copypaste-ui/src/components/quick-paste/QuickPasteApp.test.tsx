@@ -3,6 +3,8 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
 import { IpcFailure } from "@/lib/errors";
+import { rowHeight } from "@/lib/layout";
+import { absoluteTime } from "@/lib/format";
 import { DEFAULT_PREFS, STORAGE_KEY } from "@/store/prefs";
 import { item, page, withUser } from "@/test/harness";
 
@@ -10,10 +12,16 @@ const copyItem = vi.fn();
 const copyItemAsPlainText = vi.fn();
 const hideWindow = vi.fn();
 const listItems = vi.fn();
+const getImagePreview = vi.fn();
 const setAllowScreenshots = vi.fn();
 const setPinned = vi.fn();
-const showMainWindow = vi.fn();
+const openSettingsFromQuickPaste = vi.fn();
 const restartService = vi.fn();
+const toastError = vi.fn();
+
+vi.mock("sonner", () => ({
+  toast: { error: (...args: unknown[]) => toastError(...args) },
+}));
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -23,9 +31,10 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     copyItemAsPlainText: (...args: unknown[]) => copyItemAsPlainText(...args),
     hideWindow: () => hideWindow(),
     listItems: (...args: unknown[]) => listItems(...args),
+    getImagePreview: (...args: unknown[]) => getImagePreview(...args),
     setAllowScreenshots: (...args: unknown[]) => setAllowScreenshots(...args),
     setPinned: (...args: unknown[]) => setPinned(...args),
-    showMainWindow: () => showMainWindow(),
+    openSettingsFromQuickPaste: () => openSettingsFromQuickPaste(),
     restartService: () => restartService(),
   };
 });
@@ -36,13 +45,27 @@ beforeEach(() => {
   copyItemAsPlainText.mockReset().mockResolvedValue(item());
   hideWindow.mockReset().mockResolvedValue(undefined);
   listItems.mockReset().mockResolvedValue(page([item()]));
+  getImagePreview.mockReset().mockRejectedValue(new Error("not used in this test"));
   setAllowScreenshots.mockReset().mockResolvedValue(undefined);
   setPinned.mockReset().mockResolvedValue(item());
-  showMainWindow.mockReset().mockResolvedValue(undefined);
+  openSettingsFromQuickPaste.mockReset().mockResolvedValue(undefined);
   restartService.mockReset().mockResolvedValue({ state: "running", version: "2.0.0", matches_app: true, ours: true });
+  toastError.mockReset();
 });
 
 describe("Quick Paste", () => {
+  it("shows an exact local timestamp inline without copying", async () => {
+    const clip = item({ created_at: new Date("2026-08-01T20:35:24Z").valueOf() });
+    listItems.mockResolvedValue(page([clip]));
+    const { user } = withUser(<QuickPasteApp />);
+
+    const time = await screen.findByRole("button", { name: /Activate to show exact time/ });
+    await user.click(time);
+
+    expect(time.textContent).toBe(absoluteTime(clip.created_at));
+    expect(copyItem).not.toHaveBeenCalled();
+  });
+
   it("clamps result previews to the persisted popup line setting", async () => {
     window.localStorage.setItem(
       STORAGE_KEY,
@@ -58,6 +81,25 @@ describe("Quick Paste", () => {
     expect(preview.getAttribute("style")).toContain("-webkit-line-clamp: 5");
   });
 
+  it("uses History's card density even when the popup shows fewer text lines", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: { ...DEFAULT_PREFS, previewLines: 4, previewLinesPopup: 1 },
+        version: 0,
+      }),
+    );
+    listItems.mockResolvedValue(page([item({ content: "one visible line" })]));
+    withUser(<QuickPasteApp />);
+
+    const row = await screen.findByRole("listitem");
+    expect(row.dataset.clipRowDensity).toBe("history");
+    expect(row.style.height).toBe(`${rowHeight(4)}px`);
+    expect(screen.getByText("one visible line").getAttribute("style")).toContain(
+      "-webkit-line-clamp: 1",
+    );
+  });
+
   it("copies the selected item and dismisses only after a successful copy", async () => {
     withUser(<QuickPasteApp />);
 
@@ -68,16 +110,17 @@ describe("Quick Paste", () => {
     await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
   });
 
-  it("keeps the popup open and offers retry when copying fails", async () => {
+  it("keeps the popup open and offers retry in a floating notification when copying fails", async () => {
     copyItem.mockRejectedValueOnce(new Error("clipboard unavailable"));
-    const { user } = withUser(<QuickPasteApp />);
+    withUser(<QuickPasteApp />);
 
     await screen.findByRole("listitem");
     fireEvent.keyDown(screen.getByRole("main"), { key: "Enter" });
 
-    expect((await screen.findByRole("alert")).textContent).toContain("Couldn’t copy");
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(toastError.mock.calls[0]?.[0]).toContain("Couldn’t copy");
     expect(hideWindow).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await (toastError.mock.calls[0]?.[1] as { action: { onClick: () => void } }).action.onClick();
     await waitFor(() => expect(copyItem).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
   });
@@ -95,12 +138,12 @@ describe("Quick Paste", () => {
 
   it("retries a failed Option+Enter copy as plain text", async () => {
     copyItemAsPlainText.mockRejectedValueOnce(new Error("clipboard unavailable"));
-    const { user } = withUser(<QuickPasteApp />);
+    withUser(<QuickPasteApp />);
 
     await screen.findByRole("listitem");
     fireEvent.keyDown(screen.getByRole("main"), { key: "Enter", altKey: true });
-    await screen.findByRole("alert");
-    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    await (toastError.mock.calls[0]?.[1] as { action: { onClick: () => void } }).action.onClick();
 
     await waitFor(() => expect(copyItemAsPlainText).toHaveBeenCalledTimes(2));
     expect(copyItem).not.toHaveBeenCalled();
@@ -116,10 +159,22 @@ describe("Quick Paste", () => {
   it("opens Settings through the backend without asking the popup to restore focus", async () => {
     const { user } = withUser(<QuickPasteApp />);
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "Open Settings" }));
 
-    await waitFor(() => expect(showMainWindow).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(openSettingsFromQuickPaste).toHaveBeenCalledTimes(1));
     expect(hideWindow).not.toHaveBeenCalled();
+  });
+
+  it("keeps the compact footer touch-ready without desktop hotkeys on Android", async () => {
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("CopyPaste Android");
+    withUser(<QuickPasteApp />);
+
+    const settings = screen.getByRole("button", { name: "Open Settings" });
+    expect(settings.className).toContain("size-[var(--sz-iconbtn)]");
+    expect(screen.queryByText(/⌘1–9 quick paste/)).toBeNull();
+    userAgent.mockRestore();
   });
 
   it("releases the warm popup cache when native hide invokes its memory hook", async () => {
@@ -195,30 +250,39 @@ describe("Quick Paste", () => {
     await screen.findAllByRole("listitem");
     await user.type(search, "copy");
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      "copy referencePin",
-      "Copy Paste entryPin",
-      "notes about copyPin",
+      expect.stringContaining("copy reference"),
+      expect.stringContaining("Copy Paste entry"),
+      expect.stringContaining("notes about copy"),
     ]);
 
     await user.clear(search);
     await user.type(search, "cpt");
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      "Copy Paste entryPin",
+      expect.stringContaining("Copy Paste entry"),
     ]);
   });
 
-  it("renders safe labels for sensitive, image, and file items", async () => {
+  it("renders safe labels, type icons, and the copied time in popup metadata", async () => {
     const secret = "sk_live_SUPER_PRIVATE";
     listItems.mockResolvedValue(page([
       item({ id: "secret", is_sensitive: true, content: secret }),
-      item({ id: "image", content: "opaque image bytes", content_type: "image/png" }),
+      item({
+        id: "image",
+        content: "opaque image bytes",
+        content_type: "image/png",
+        source_app_bundle_id: "com.google.Chrome",
+        created_at: Date.now() - 120_000,
+      }),
       item({ id: "file", content: "[file]", content_type: "file" }),
     ]));
     const { user } = withUser(<QuickPasteApp />);
 
     await screen.findByText("Sensitive content");
-    expect(screen.getByText("Image")).not.toBeNull();
-    expect(screen.getByText("File")).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Image" })).not.toBeNull();
+    expect(screen.getByRole("img", { name: "File" })).not.toBeNull();
+    expect(screen.getByText("Google Chrome")).toBeTruthy();
+    expect(screen.getAllByText("2m").length).toBeGreaterThan(0);
+    expect(screen.getByTitle("Image")).not.toBeNull();
     expect(document.body.textContent).not.toContain(secret);
     expect(document.body.textContent).not.toContain("opaque image bytes");
 
@@ -241,28 +305,30 @@ describe("Quick Paste", () => {
     await waitFor(() => expect(setPinned).toHaveBeenCalledWith("fixed", false));
   });
 
-  it("keeps a failed pin visible and retries the same mutation", async () => {
+  it("keeps a failed pin actionable in a floating notification", async () => {
     setPinned.mockRejectedValueOnce(new Error("socket /Users/alice/private.sock"));
     const { user } = withUser(<QuickPasteApp />);
 
     await screen.findByRole("listitem");
     await user.click(screen.getByRole("button", { name: "Pin" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("Couldn’t pin");
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(toastError.mock.calls[0]?.[0]).toContain("Couldn’t pin");
     expect(document.body.textContent).not.toContain("/Users/alice/private.sock");
     expect(hideWindow).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await (toastError.mock.calls[0]?.[1] as { action: { onClick: () => void } }).action.onClick();
     await waitFor(() => expect(setPinned).toHaveBeenCalledTimes(2));
     expect(setPinned).toHaveBeenNthCalledWith(2, "row-1", true);
   });
 
-  it("keeps the Cmd quick-paste hint and action out of a search", async () => {
+  it("keeps each Cmd quick-paste hint beside its matching pin action", async () => {
     const { user } = withUser(<QuickPasteApp />);
 
     await screen.findByRole("listitem");
-    expect(screen.getByText(/⌘1–9 quick paste/)).not.toBeNull();
+    expect(screen.getByText("⌘1")).not.toBeNull();
+    expect(screen.queryByText(/↑↓ navigate/)).toBeNull();
     await user.type(screen.getByRole("textbox", { name: "Search clipboard history" }), "entry");
-    expect(screen.queryByText(/⌘1–9 quick paste/)).toBeNull();
+    expect(screen.queryByText("⌘1")).toBeNull();
     fireEvent.keyDown(screen.getByRole("main"), { key: "1", metaKey: true });
     expect(copyItem).not.toHaveBeenCalled();
 
@@ -284,8 +350,8 @@ describe("Quick Paste", () => {
     listItems.mockRejectedValue(new IpcFailure("offline", true));
     const { user } = withUser(<QuickPasteApp />);
 
-    expect(await screen.findByText("Clipboard service offline")).not.toBeNull();
-    await user.click(screen.getByRole("button", { name: "Restart" }));
+    expect(await screen.findByText("The clipboard service isn't running")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Restart service" }));
     await waitFor(() => expect(restartService).toHaveBeenCalledTimes(1));
   });
 
@@ -293,7 +359,7 @@ describe("Quick Paste", () => {
     listItems.mockRejectedValue(new IpcFailure("not_ready", true));
     withUser(<QuickPasteApp />);
 
-    expect(await screen.findByText("Starting up…")).not.toBeNull();
+    expect(await screen.findByText("Starting clipboard service")).not.toBeNull();
     expect(screen.queryByRole("button", { name: /restart|try again/i })).toBeNull();
   });
 
@@ -301,7 +367,8 @@ describe("Quick Paste", () => {
     listItems.mockRejectedValueOnce(new Error("unexpected")).mockResolvedValueOnce(page([item()]));
     const { user } = withUser(<QuickPasteApp />);
 
-    expect(await screen.findByText("Something went wrong")).not.toBeNull();
+    const title = await screen.findByText("Couldn't load clipboard history");
+    expect(title.closest("[data-slot='empty-state']")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await screen.findByRole("listitem");
     expect(listItems).toHaveBeenCalledTimes(2);
@@ -310,7 +377,7 @@ describe("Quick Paste", () => {
   it("closes only when focus leaves the popup root and debounces the blur", async () => {
     withUser(<QuickPasteApp />);
     const root = screen.getByRole("main");
-    const settings = screen.getByRole("button", { name: "Settings" });
+    const settings = screen.getByRole("button", { name: "Open Settings" });
 
     fireEvent.blur(root, { relatedTarget: settings });
     expect(hideWindow).not.toHaveBeenCalled();
@@ -318,5 +385,20 @@ describe("Quick Paste", () => {
     fireEvent.blur(root, { relatedTarget: document.body });
     fireEvent.blur(root, { relatedTarget: document.body });
     await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps the popup open while a transient retry action receives focus", async () => {
+    withUser(<QuickPasteApp />);
+    const root = screen.getByRole("main");
+    const toaster = document.createElement("div");
+    toaster.dataset.sonnerToaster = "";
+    const retry = document.createElement("button");
+    toaster.append(retry);
+    document.body.append(toaster);
+
+    fireEvent.blur(root, { relatedTarget: retry });
+    expect(hideWindow).not.toHaveBeenCalled();
+
+    toaster.remove();
   });
 });

@@ -58,8 +58,7 @@ const MSG_IMPORT_TOO_LARGE: &str = "That export is too large to import safely on
 const MSG_IMPORT_EXPIRED: &str = "That import is no longer available. Choose the file again.";
 const MSG_IMPORT_STATE: &str = "The pending import couldn't be accessed. Choose the file again.";
 const MSG_NOT_WRITTEN: &str = "The export couldn't be written.";
-const MSG_BACKUP_EXISTS: &str =
-    "There is already a file with that name. A backup is never written over an existing \
+const MSG_BACKUP_EXISTS: &str = "There is already a file with that name. A backup is never written over an existing \
      file — choose another name.";
 
 /// A file import must fit comfortably in the UI process. The item-count limit
@@ -285,6 +284,18 @@ pub async fn restore_database<R: Runtime>(
 
 /// Ask where to write, and answer `None` if the user closed the panel.
 async fn save_panel<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<Option<PathBuf>> {
+    to_path(save_panel_file(app, name).await)
+}
+
+/// Choose a destination without allowing its location to cross the WebView.
+///
+/// Diagnostics also exports through this panel. It needs the original
+/// [`FilePath`] so Android's `content://` URI can be opened by the native file
+/// plugin instead of being incorrectly treated as a desktop path.
+pub(crate) async fn save_panel_file<R: Runtime>(
+    app: &AppHandle<R>,
+    name: &str,
+) -> Option<FilePath> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
@@ -292,7 +303,7 @@ async fn save_panel<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<Option
         .save_file(move |chosen| {
             let _ = tx.send(chosen);
         });
-    to_path(rx.await.unwrap_or(None))
+    rx.await.unwrap_or(None)
 }
 
 async fn open_panel<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PathBuf>> {

@@ -6,13 +6,14 @@
 
 use std::collections::HashMap;
 
-use copypaste_core::{decrypt, origin_or, StoredItem};
-use copypaste_ipc::{Item, PeerInfo};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use copypaste_core::{StoredItem, decrypt, open_binary, origin_or, thumbnail_png};
+use copypaste_ipc::{ImagePreview, Item, PeerInfo};
 
 use super::Inner;
 use crate::backend::{BackendError, Page, Result};
 
-pub(super) use copypaste_ipc::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
+pub(super) use copypaste_ipc::{DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, clamp_page};
 
 const MSG_NO_ITEM: &str = "That item is no longer there.";
 
@@ -35,8 +36,12 @@ impl Inner {
     /// [`Inner::to_wire`] with the page's device names already resolved.
     fn to_wire_with(&self, row: StoredItem, names: &HashMap<String, String>) -> Result<Item> {
         let key = self.state.keyring.item_key();
-        let plaintext = decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
-            .map_err(|_| BackendError::internal("that item could not be decrypted"))?;
+        let plaintext = if copypaste_ipc::content_type::is_binary(&row.content_type) {
+            open_binary(&row.content_ciphertext, &key, &row.id)
+        } else {
+            decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)
+        }
+        .map_err(|_| BackendError::internal("that item could not be decrypted"))?;
         // A row captured here stores no origin; substituting this device's id
         // is what makes the field mean the same thing on both platforms
         // (`copypaste_core::origin_or`). The name is `None` rather than a guess
@@ -45,13 +50,22 @@ impl Inner {
         let origin_device_name = names.get(&device_id).cloned();
         Ok(Item {
             id: row.id,
-            content: String::from_utf8_lossy(&plaintext).into_owned(),
+            content: if copypaste_ipc::content_type::is_binary(&row.content_type) {
+                format!(
+                    "[{}]",
+                    copypaste_ipc::content_type::label(&row.content_type)
+                )
+            } else {
+                String::from_utf8_lossy(&plaintext).into_owned()
+            },
             content_type: row.content_type,
             created_at: row.created_at,
             pinned: row.pinned,
             is_sensitive: row.is_sensitive,
             origin_device_id: device_id,
             origin_device_name,
+            source_app_bundle_id: row.app_bundle_id,
+            source_app_name: row.app_name,
             // Nothing here talks to a cloud account.
             too_large_to_sync: false,
         })
@@ -99,6 +113,30 @@ impl Inner {
             Err(_) => Err(BackendError::internal("history could not be read")),
         }
     }
+
+    pub(super) fn image_preview(&self, id: &str) -> Result<ImagePreview> {
+        let row = match self.state.store.get(id) {
+            Ok(Some(row)) => row,
+            Ok(None) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
+            Err(_) => return Err(BackendError::internal("history could not be read")),
+        };
+        if row.is_sensitive || !row.content_type.starts_with("image/") {
+            return Err(BackendError::Invalid("That image preview is unavailable."));
+        }
+        let bytes = open_binary(
+            &row.content_ciphertext,
+            &self.state.keyring.item_key(),
+            &row.id,
+        )
+        .map_err(|_| BackendError::internal("that item could not be decrypted"))?;
+        let thumbnail = thumbnail_png(&bytes, self.settings().max_decoded_image_mb)
+            .map_err(|_| BackendError::Invalid("That image preview is unavailable."))?;
+        Ok(ImagePreview {
+            png_base64: STANDARD.encode(thumbnail.png),
+            width: thumbnail.width,
+            height: thumbnail.height,
+        })
+    }
 }
 
 pub(super) fn peer_info(peer: &copypaste_p2p::Peer, online: bool) -> PeerInfo {
@@ -129,7 +167,6 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         capture_running: false,
         clipboard_backend: super::BACKEND_NAME.to_string(),
         private_mode: false,
-        legacy_history_present: legacy_history_present(&inner.state.data_dir),
         // Android has no daemon poller, but it does run the same startup FTS
         // purge as the daemon. Surface that one counter rather than claiming
         // the purge never happened.
@@ -138,75 +175,4 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
             ..Default::default()
         },
     })
-}
-
-/// Whether a CopyPaste 0.4 history is inside this sandbox (B-33).
-///
-/// Read-only: `v1_database_in` opens nothing with a key and writes nothing, so
-/// a downgrade finds the file exactly as it was (CLAUDE.md rule 3).
-///
-/// Three directories rather than one. `copypaste_ipc::v1_data_dir` cannot
-/// address an Android sandbox and this build was handed the one it needs — but
-/// `app_data_dir()` is `Context.dataDir`, the sandbox *root*, and an Android app
-/// puts a database under `databases/` or `files/`. No manifest records which
-/// v0.4 used, so none is guessed at. A wrong hit is not the hazard here:
-/// `v1_database_in` answers on v0.4's schema or on its exact filename plus a
-/// page-aligned size, and v2 writes neither.
-fn legacy_history_present(data_dir: &std::path::Path) -> bool {
-    const SUBDIRS: [&str; 2] = ["databases", "files"];
-    std::iter::once(data_dir.to_path_buf())
-        .chain(SUBDIRS.iter().map(|name| data_dir.join(name)))
-        .any(|dir| copypaste_core::v1_database_in(&dir))
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::backend::embedded::tests::backend;
-    use crate::backend::Backend as _;
-
-    /// v2's own directory holds `copypaste-v2.db`, a keyring and a peer file,
-    /// and none of them is a v0.4 history. The negative has to hold first: a
-    /// probe that answered yes here would put the banner in front of every user
-    /// who never ran 0.4.
-    #[tokio::test]
-    async fn a_directory_this_build_made_itself_is_not_a_v0_4_history() {
-        let (backend, _clip, _dir) = backend();
-        backend.add("something").await.unwrap();
-        assert!(!backend.status().await.unwrap().legacy_history_present);
-    }
-
-    /// B-33. `clipboard.db` under this build's own data directory is the case
-    /// the Android hard-coded `false` hid: the file is there, this build cannot
-    /// read it, and until now nothing said so.
-    ///
-    /// Staged as SQLCipher-shaped bytes rather than a v0.4 schema because an
-    /// encrypted v0.4 file is what an Android upgrade actually leaves behind,
-    /// and v2 cannot derive v0.4's key to write a real one.
-    ///
-    /// Run for each candidate directory, because `app_data_dir()` is the
-    /// sandbox root and the two conventional places are where a v0.4 file would
-    /// really be — a probe that only asked the root would answer "no history"
-    /// for the case B-33 is about.
-    #[tokio::test]
-    async fn a_v0_4_history_anywhere_in_the_sandbox_is_reported_and_left_untouched() {
-        for subdir in ["", "databases", "files"] {
-            let (backend, _clip, dir) = backend();
-            let at = dir.path().join(subdir);
-            std::fs::create_dir_all(&at).unwrap();
-            let legacy = at.join(copypaste_core::V1_DATABASE_FILENAME);
-            std::fs::write(&legacy, vec![0x5au8; 3 * 4096]).unwrap();
-            let before = std::fs::read(&legacy).unwrap();
-
-            let status = backend.status().await.unwrap();
-            assert!(status.legacy_history_present, "missed one under {subdir:?}");
-
-            // Rule 3's obligation, checked the way the desktop probe checks it:
-            // a user who downgrades finds the file exactly as they left it.
-            assert_eq!(std::fs::read(&legacy).unwrap(), before, "the file changed");
-            for suffix in ["-wal", "-shm", "-journal"] {
-                let sidecar = at.join(format!("clipboard.db{suffix}"));
-                assert!(!sidecar.exists(), "the probe wrote {suffix}");
-            }
-        }
-    }
 }

@@ -50,7 +50,7 @@ describe("store snapshots settle", () => {
     expect(selectAppearance(state)).not.toBe(selectAppearance(state));
   });
 
-  it("selectAppearance under useShallow does not re-render on an unrelated change", () => {
+  it("selectAppearance under useShallow does not re-render on an unrelated change", async () => {
     usePrefs.setState({ ...DEFAULT_PREFS });
     let renders = 0;
     const { result } = renderHook(() => {
@@ -61,16 +61,22 @@ describe("store snapshots settle", () => {
     const before = renders;
     // A field the selector does not read. Without `useShallow` this alone
     // would spin: any store notification hands back a new object.
-    act(() => usePrefs.setState({ previewLines: 4 }));
+    await act(async () => {
+      usePrefs.setState({ previewLines: 4 });
+    });
     expect(renders).toBe(before);
     expect(result.current.theme).toBe(DEFAULT_PREFS.theme);
 
     // A field it does read still gets through — the guard must not make the
     // subscription deaf.
-    act(() => usePrefs.setState({ accent: "teal" }));
+    await act(async () => {
+      usePrefs.setState({ accent: "teal" });
+    });
     expect(renders).toBeGreaterThan(before);
     expect(result.current.accent).toBe("teal");
 
-    act(() => usePrefs.setState({ ...DEFAULT_PREFS }));
+    await act(async () => {
+      usePrefs.setState({ ...DEFAULT_PREFS });
+    });
   });
 });

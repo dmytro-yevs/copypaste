@@ -5,9 +5,8 @@
 //! binds the item's logical id. Binary content uses RustCrypto STREAM over the
 //! same primitive so ordering and the final block are authenticated too.
 //!
-//! No `key_version` dispatch, no trial decryption, no rotation or repair sweep:
-//! v2 does not read v0.4.x data (`CLAUDE.md` rule 3). A version field that only
-//! ever holds one value is the beginning of the v1 problem, not a defence.
+//! No key-version dispatch, trial decryption, rotation or repair sweep. A
+//! version field that only ever holds one value is needless complexity.
 //!
 //! # Security properties (port manifest 02, §2)
 //!
@@ -33,10 +32,10 @@ mod keys;
 mod keystore;
 mod stream;
 
-pub use aead::{decrypt, encrypt, NONCE_LEN, TAG_LEN};
-pub use keys::{ItemKey, Keyring, KEY_LEN};
+pub use aead::{NONCE_LEN, TAG_LEN, decrypt, encrypt};
+pub use keys::{ItemKey, KEY_LEN, Keyring};
 pub(crate) use stream::{
-    decryptor as stream_decryptor, encryptor as stream_encryptor, STREAM_NONCE_LEN,
+    STREAM_NONCE_LEN, decryptor as stream_decryptor, encryptor as stream_encryptor,
 };
 
 /// Every failure this module can produce.
@@ -94,7 +93,7 @@ pub enum CryptoError {
 
 #[cfg(test)]
 pub(super) mod test_support {
-    use super::{ItemKey, Keyring, KEY_LEN};
+    use super::{ItemKey, KEY_LEN, Keyring};
 
     pub(super) const SECRET_A: [u8; KEY_LEN] = [7u8; KEY_LEN];
     pub(super) const SECRET_B: [u8; KEY_LEN] = [9u8; KEY_LEN];

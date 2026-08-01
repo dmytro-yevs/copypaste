@@ -51,8 +51,6 @@ impl PeerStore {
     ///
     /// # Errors
     ///
-    /// [`PeerStoreError::Legacy`] if another version wrote it — distinguishable
-    /// on purpose, so the daemon can explain rather than report corruption;
     /// `Corrupt` if damaged; `Io` if it could not be read.
     pub fn open(path: &Path) -> Result<Self, PeerStoreError> {
         let state = match std::fs::read(path) {
@@ -70,11 +68,12 @@ impl PeerStore {
         })
     }
 
-    /// Every usable peer, ordered by pairing id so callers and tests see a
-    /// stable sequence.
+    /// Every established peer, ordered by pairing id so callers and tests see
+    /// a stable sequence.
     ///
-    /// A pairing whose unredeemed code has aged out is not a device and is not
-    /// here.
+    /// A pairing code waiting to be redeemed is an inbound credential, not a
+    /// paired device. Keeping it out of this list prevents its creator from
+    /// seeing — and being able to sync, unpair or revoke — a row for itself.
     #[must_use]
     pub fn list(&self) -> Vec<Peer> {
         let Ok(guard) = self.state.read() else {
@@ -88,7 +87,10 @@ impl PeerStore {
         let mut peers: Vec<Peer> = guard
             .peers
             .values()
-            .filter(|peer| !is_expired(&guard, &peer.pairing_id, now))
+            .filter(|peer| {
+                !is_expired(&guard, &peer.pairing_id, now)
+                    && !guard.pending.contains_key(&peer.pairing_id)
+            })
             .cloned()
             .collect();
         peers.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
@@ -401,16 +403,21 @@ impl PeerStore {
         Zeroizing::new(candidates)
     }
 
-    /// How many usable peers are known.
+    /// How many usable pairing credentials are held, including codes that have
+    /// not yet been redeemed. This is the capacity count, not the UI list.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.list().len()
+        let Ok(guard) = self.state.read() else {
+            tracing::error!("paired-devices store lock is poisoned");
+            return 0;
+        };
+        usable_count(&guard, now_ms())
     }
 
     /// Whether this device is paired with anything.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.list().is_empty()
     }
 }
 
@@ -644,6 +651,21 @@ mod tests {
         assert!(store.get(&id).is_none());
         assert!(store.list().is_empty());
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn an_unredeemed_pairing_is_not_rendered_as_a_paired_device() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let minted = unredeemed("other device");
+        let id = minted.pairing_id.clone();
+
+        store.upsert(minted).expect("mint");
+
+        assert!(store.list().is_empty());
+        assert_eq!(store.len(), 1, "the credential still counts toward the cap");
+        assert!(store.get(&id).is_some(), "the listener still needs the key");
+        assert_eq!(store.psks().len(), 1, "the code must remain redeemable");
     }
 
     /// The other half of INV-28: one redemption. The first session establishes

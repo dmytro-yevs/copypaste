@@ -1,11 +1,11 @@
 //! Encrypted, content-addressed binary clipboard payloads.
 
 use chacha20poly1305::aead::Payload;
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::crypto::{stream_decryptor, stream_encryptor, STREAM_NONCE_LEN, TAG_LEN};
+use crate::crypto::{STREAM_NONCE_LEN, TAG_LEN, stream_decryptor, stream_encryptor};
 use crate::{CryptoError, ItemKey};
 
 const MAGIC: &[u8; 4] = b"CPB2";
@@ -470,10 +470,10 @@ mod tests {
 
     #[test]
     fn transport_metadata_rejects_a_path_even_after_deserializing() {
-        assert!(FileMetadata::from_json(
-            r#"{"filename":"../private.txt","mime_type":"text/plain"}"#
-        )
-        .is_none());
+        assert!(
+            FileMetadata::from_json(r#"{"filename":"../private.txt","mime_type":"text/plain"}"#)
+                .is_none()
+        );
     }
 
     #[test]

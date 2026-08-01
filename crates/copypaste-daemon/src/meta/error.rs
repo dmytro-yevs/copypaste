@@ -29,7 +29,7 @@ impl From<rusqlite::Error> for MetaError {
 impl From<StoreError> for MetaError {
     fn from(e: StoreError) -> Self {
         match e {
-            StoreError::InvalidKey | StoreError::LegacyDatabase => MetaError::InvalidKey,
+            StoreError::InvalidKey => MetaError::InvalidKey,
             e => MetaError::Store(e),
         }
     }

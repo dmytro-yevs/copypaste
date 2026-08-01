@@ -1,6 +1,7 @@
 package com.copypaste.app
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.enableEdgeToEdge
@@ -29,5 +30,19 @@ class MainActivity : TauriActivity() {
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
+  }
+
+  override fun onRequestPermissionsResult(
+    requestCode: Int,
+    permissions: Array<out String>,
+    grantResults: IntArray,
+  ) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+    CapturePlugin.onRequestPermissionsResult(requestCode, granted)
+    PairingScannerPlugin.onRequestPermissionsResult(
+      requestCode,
+      granted,
+    )
   }
 }

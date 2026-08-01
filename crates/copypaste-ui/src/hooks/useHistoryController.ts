@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDebounceValue } from "usehooks-ts";
+import { toast } from "sonner";
 
 import { type OriginDevice, originsOf } from "@/components/history/origin";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
@@ -10,7 +11,7 @@ import {
   useHistorySearch,
   useStatus,
 } from "@/hooks/useHistory";
-import { type ErrorKind, ipcFailure } from "@/lib/errors";
+import { type ErrorKind, ipcFailure, toFriendly } from "@/lib/errors";
 import type { Item } from "@/lib/ipc";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/layout";
 import {
@@ -162,8 +163,11 @@ export function useHistoryController(pushLive: boolean): HistoryController {
     }
   }, [history, searching]);
 
-  const retry = useCallback(() => {
-    void history.refetch();
+  const retry = useCallback(async () => {
+    const result = await history.refetch();
+    if (result.error) {
+      toast.error(toFriendly(result.error), { id: "history-retry" });
+    }
   }, [history]);
 
   const failure = history.error ? ipcFailure(history.error) : null;

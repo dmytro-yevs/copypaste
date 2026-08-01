@@ -15,6 +15,8 @@ pub enum NodeError {
     BadAddress,
     #[error("the other device did not accept this pairing code")]
     Handshake,
+    #[error("a device cannot pair with itself")]
+    SelfPairing,
     #[error("no such paired device")]
     NoPeer,
     #[error("this peer has never been reached and is not visible on the network; sync from the other device, or re-pair with an address")]
@@ -46,6 +48,7 @@ impl NodeError {
             NodeError::BadCode
                 | NodeError::BadAddress
                 | NodeError::Handshake
+                | NodeError::SelfPairing
                 | NodeError::TooManyPairings
         )
     }
@@ -60,6 +63,7 @@ mod tests {
         NodeError::BadCode,
         NodeError::BadAddress,
         NodeError::Handshake,
+        NodeError::SelfPairing,
         NodeError::NoPeer,
         NodeError::NoAddress,
         NodeError::Session,

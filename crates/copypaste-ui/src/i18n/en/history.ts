@@ -29,6 +29,8 @@ export const history = {
   kind: {
     all: "All kinds",
     text: "Text",
+    image: "Images",
+    file: "Files",
     url: "Links",
     mail: "Email addresses",
     path: "File paths",
@@ -87,6 +89,7 @@ export const history = {
     fromPrefix: "From",
     wontSyncBadge: "Won't sync",
     wontSync: "Too large to sync — this item stays on this device",
+    sourceUnavailable: "Source unavailable",
   },
 
   /**
@@ -97,10 +100,14 @@ export const history = {
   detail: {
     title: "Clipboard item",
     contents: "Item contents",
+    image: "Image preview",
+    imageLoading: "Loading image preview",
+    imageUnavailable: "Image preview unavailable",
     empty: "This item has no text.",
     reveal: "Reveal",
     hide: "Hide again",
     copy: "Copy",
+    copyImage: "Copy image",
   },
 
   empty: {
@@ -109,20 +116,20 @@ export const history = {
       body: "Fetching your clipboard history.",
     },
     starting: { title: "Starting up…" },
-    failed: { title: "Failed to load history" },
+    failed: {
+      title: "Failed to load history",
+      support:
+        "If this keeps happening, copy or export a diagnostic report for support.",
+    },
     /**
-     * The three states no retry can clear. Each says what happened, what is
+     * The two states no retry can clear. Each says what happened, what is
      * still true, and the one thing that would actually change the outcome —
      * and `keyUnusable` says outright that there is nothing, because a screen
      * that pretends otherwise costs the user an evening.
      *
      * No path is named in any of them, and none may be: the location of the
-     * old history discloses the local username (CLAUDE.md rule 4).
+     * database discloses the local username (CLAUDE.md rule 4).
      */
-    legacy: {
-      title: "This is a CopyPaste 0.4 clipboard history",
-      body: "CopyPaste 0.4 wrote this history, and this version can't read it. Nothing has been changed or deleted — the old history is still on this device exactly as it was, and installing CopyPaste 0.4 again brings it back. This version can only start a new history.",
-    },
     keyUnusable: {
       title: "This clipboard history can't be unlocked",
       body: "This device's encryption key is there but can't be used, so nothing can decrypt the history it protects — not this version, and not a later one. Trying again won't change that. Whatever had already synced to a paired device is still on that device.",
@@ -130,6 +137,15 @@ export const history = {
     keyLocked: {
       title: "Waiting for the key store",
       body: "CopyPaste couldn't reach the key store that holds this device's encryption key, so your history stayed locked. Unlock it and try again.",
+    },
+    private: {
+      title: "Private mode is on",
+      body: "Clipboard items are not recorded while private mode is active.",
+    },
+    capturePaused: {
+      title: "Clipboard capture is paused",
+      body: "New clipboard items will appear here after capture is set up again.",
+      action: "Set up capture",
     },
     /** `{{query}}` is the user's own search text, already visible in the field
      *  beside it. It is the one interpolation here that is not authored copy. */
@@ -148,8 +164,9 @@ export const history = {
   skipped_other: "{{count}} items could not be read and are not shown.",
 
   reveal: {
-    unavailable:
-      "Showing this item isn't available yet. You can still copy it — its contents never enter this window.",
+    unavailable: "Sensitive content can't be shown here.",
+    missing: "This item is no longer in your clipboard history.",
+    failed: "CopyPaste couldn't show this sensitive item. Try again.",
     confirm: {
       title: "Reveal sensitive content?",
       body: "This item looks like a password, key or token. It will be shown for 10 seconds, and hidden again as soon as this window loses focus.",
@@ -170,23 +187,11 @@ export const history = {
     action: "Delete",
   },
 
-  /** Rendered through `<Trans>`; `<kbd>` is supplied by the component. */
-  hint: {
-    move: "<kbd>↑↓</kbd> move",
-    copy: "<kbd>⏎</kbd> copy",
-    quickCopy: "<kbd>⌘1</kbd>–<kbd>⌘9</kbd> copy and close",
-    paste:
-      "Copying puts the item on the clipboard — press <kbd>⌘V</kbd> yourself to paste",
-  },
-
   toast: {
     copied: "Copied — press ⌘V to paste",
     cleared_one: "Cleared {{count}} item — pinned items kept",
     cleared_other: "Cleared {{count}} items — pinned items kept",
     deleted: "Deleted",
-    /** The description slot beside it carries the clip itself, passed as a
-     *  value rather than through a template. */
-    deletedSensitive: "Sensitive item",
     undo: "Undo",
     pinned_one: "Pinned {{count}} item",
     pinned_other: "Pinned {{count}} items",

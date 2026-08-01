@@ -24,13 +24,17 @@ export function SyncTab() {
         description={t("settings.sync.paired.description")}
       >
         <div className="flex items-center gap-s-2">
-          {!unavailable && (
-            <Badge variant={count > 0 ? "secondary" : "warn"}>
-              {count === 0
+          <Badge
+            variant={
+              unavailable ? "secondary" : count > 0 ? "secondary" : "warn"
+            }
+          >
+            {unavailable
+              ? t("settings.sync.cloud.badge")
+              : count === 0
                 ? t("settings.sync.paired.none")
                 : t("settings.sync.paired.count", { n: count })}
-            </Badge>
-          )}
+          </Badge>
           <Button variant="outline" size="sm" onClick={() => setView("devices")}>
             <MonitorSmartphone aria-hidden="true" />
             {t("settings.sync.paired.manage")}
@@ -55,16 +59,9 @@ export function SyncTab() {
 
       <Row
         title={t("settings.sync.cloud.title")}
-        description={t("settings.sync.cloud.description")}
       >
         <Badge variant="secondary">{t("settings.sync.cloud.badge")}</Badge>
       </Row>
-
-      {unavailable && (
-        <p className="py-s-3 text-sm text-muted-foreground">
-          {t("settings.sync.unavailable")}
-        </p>
-      )}
     </div>
   );
 }

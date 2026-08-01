@@ -158,7 +158,7 @@ mod tests {
         let store = PeerStore::open(&path).expect("open");
         let rendered = format!("{store:?}");
         assert!(!rendered.contains(&path.to_string_lossy().to_string()));
-        assert!(!rendered.contains("peers-v2.json"));
+        assert!(!rendered.contains("peers.json"));
     }
 
     #[test]

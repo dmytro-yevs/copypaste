@@ -36,6 +36,7 @@ pub(super) const MSG_WATCHERS_FULL: &str = "too many clients are already watchin
 pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured size limit";
 pub(super) const MSG_REORDER_TOO_MANY: &str =
     "too many items in one reorder; a pinned list is never this long";
+pub(super) const MSG_IMAGE_PREVIEW: &str = "an image preview is unavailable for this item";
 /// Refused rather than restarted from the top: a load-more that silently began
 /// again would repeat the whole history, and a client cannot tell that from a
 /// list that really does.
@@ -55,18 +56,11 @@ pub(super) const MSG_RESTORE_NOT_A_BACKUP: &str =
 pub(super) const MSG_RESTORE_FAILED: &str =
     "the restore could not be completed; this device's history is unchanged";
 
-/// The reassuring half is load-bearing: the old history is still on disk, byte
-/// for byte, and a user told only "cannot read it" has no way to know that.
-pub(crate) const MSG_LEGACY_DATABASE: &str =
-    "this is a CopyPaste 0.4 history; this version cannot read it and has left it as it was, \
-     so an earlier build still opens it — this version can only start a new history";
-pub(crate) const MSG_KEY_LOCKED: &str =
-    "the key store could not be read, so this history could not be unlocked; \
+pub(crate) const MSG_KEY_LOCKED: &str = "the key store could not be read, so this history could not be unlocked; \
      it is worth trying again once the key store is available";
 /// Says the two things `MSG_KEY_LOCKED` does not: no retry helps, and the
 /// history is gone rather than waiting.
-pub(crate) const MSG_KEY_UNUSABLE: &str =
-    "this device's key is present and cannot be used, so the history encrypted with it \
+pub(crate) const MSG_KEY_UNUSABLE: &str = "this device's key is present and cannot be used, so the history encrypted with it \
      cannot be read by anything; trying again will not change that";
 
 /// A failure that carries a code of its own, distinct from the operation that
@@ -83,10 +77,8 @@ pub(crate) trait Refusal {
 
 impl Refusal for StoreError {
     fn refusal(&self) -> Option<(ErrorCode, &'static str)> {
-        match self {
-            StoreError::LegacyDatabase => Some((ErrorCode::LegacyDatabase, MSG_LEGACY_DATABASE)),
-            _ => None,
-        }
+        let _ = self;
+        None
     }
 }
 
@@ -151,6 +143,7 @@ mod tests {
         MSG_WATCHERS_FULL,
         MSG_TOO_BIG,
         MSG_REORDER_TOO_MANY,
+        MSG_IMAGE_PREVIEW,
         MSG_BAD_CURSOR,
         MSG_IMPORT_EMPTY,
         MSG_IMPORT_TOO_MANY,
@@ -162,7 +155,6 @@ mod tests {
         MSG_RESTORE_NOT_FOUND,
         MSG_RESTORE_NOT_A_BACKUP,
         MSG_RESTORE_FAILED,
-        MSG_LEGACY_DATABASE,
         MSG_KEY_LOCKED,
         MSG_KEY_UNUSABLE,
     ];
@@ -193,14 +185,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn a_v1_history_gets_its_own_code_and_never_the_generic_one() {
-        let (code, message) = StoreError::LegacyDatabase.refusal().expect("its own code");
-        assert_eq!(code, ErrorCode::LegacyDatabase);
-        assert_eq!(message, MSG_LEGACY_DATABASE);
-        assert!(!code.retryable());
     }
 
     /// The whole reason `KeystoreEntryUnusable` is a separate variant: the two

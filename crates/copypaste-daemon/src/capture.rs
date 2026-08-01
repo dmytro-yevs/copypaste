@@ -187,7 +187,7 @@ fn ingest_capture(
         (Some(_), Some(_)) => return Err(IngestError::Empty),
     };
     match binary {
-        Some((bytes, metadata)) => copypaste_core::ingest_binary_into_with_capture_context(
+        Some((bytes, metadata)) => copypaste_core::ingest_binary_into_with_capture_source(
             &state.store,
             &state.keyring,
             &bytes,
@@ -195,10 +195,11 @@ fn ingest_capture(
             created_at,
             sensitive_floor,
             capture.app_bundle_id.as_deref(),
+            capture.app_name.as_deref(),
             metadata.as_ref(),
             &settings,
         ),
-        None => copypaste_core::ingest_into_with_capture_context(
+        None => copypaste_core::ingest_into_with_capture_source(
             &state.store,
             &state.detector,
             &state.keyring,
@@ -207,6 +208,7 @@ fn ingest_capture(
             created_at,
             sensitive_floor,
             capture.app_bundle_id.as_deref(),
+            capture.app_name.as_deref(),
             &settings,
         ),
     }
@@ -401,6 +403,7 @@ mod tests {
                 file_metadata: None,
                 content_type: copypaste_ipc::content_type::TEXT.to_string(),
                 app_bundle_id: Some("COM.1Password.Desktop".to_string()),
+                app_name: Some("1Password".to_string()),
             },
             copypaste_core::now_ms(),
         )
@@ -411,11 +414,14 @@ mod tests {
             stored.app_bundle_id.as_deref(),
             Some("COM.1Password.Desktop")
         );
-        assert!(state
-            .store
-            .search("xK9mQ3nR7pT2vW5", 10)
-            .unwrap()
-            .is_empty());
+        assert_eq!(stored.app_name.as_deref(), Some("1Password"));
+        assert!(
+            state
+                .store
+                .search("xK9mQ3nR7pT2vW5", 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -437,6 +443,7 @@ mod tests {
                 file_metadata: None,
                 content_type: copypaste_ipc::content_type::TEXT.to_string(),
                 app_bundle_id: Some("com.1password.desktop".to_string()),
+                app_name: Some("1Password".to_string()),
             },
             copypaste_core::now_ms(),
         )
@@ -445,11 +452,13 @@ mod tests {
 
         assert_eq!(duplicate.id, first.id);
         assert!(duplicate.is_sensitive);
-        assert!(state
-            .store
-            .search("ordinary-looking", 10)
-            .unwrap()
-            .is_empty());
+        assert!(
+            state
+                .store
+                .search("ordinary-looking", 10)
+                .unwrap()
+                .is_empty()
+        );
         assert!(state.store.versions_since(i64::MIN, 10).unwrap().is_empty());
     }
 }

@@ -22,7 +22,7 @@ describe("per-field recovery (AT-50)", () => {
     const prefs = parsePrefs({
       theme: "chartreuse",
       accent: "teal",
-      translucency: 5,
+      translucency: 101,
       previewLines: 4,
     });
 
@@ -39,6 +39,16 @@ describe("per-field recovery (AT-50)", () => {
     const prefs = parsePrefs({ accent: "rose" });
     expect(prefs).toEqual({ ...DEFAULT_PREFS, accent: "rose" });
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("persists the system accent choice", () => {
+    expect(parsePrefs({ accent: "system" }).accent).toBe("system");
+  });
+
+  it("accepts a bounded translucency percentage and upgrades the alpha switch", () => {
+    expect(parsePrefs({ translucency: 45 }).translucency).toBe(45);
+    expect(parsePrefs({ translucency: true }).translucency).toBe(100);
+    expect(parsePrefs({ translucency: false }).translucency).toBe(0);
   });
 
   it("rejects an out-of-range preview-line count", () => {

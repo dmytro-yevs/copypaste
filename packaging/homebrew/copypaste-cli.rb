@@ -38,9 +38,7 @@ class CopypasteCli < Formula
 
   # The daemon does not fork — README is explicit that backgrounding is the
   # service manager's job. Homebrew's `service` DSL generates and manages the
-  # launchd plist, which is why this project ships no plist of its own: v1
-  # hand-wrote com.copypaste.daemon.plist plus an install-agent.sh to load it,
-  # and that is precisely the kind of wheel CLAUDE.md rule 1 exists to stop.
+  # launchd plist, which is why this project ships no plist of its own.
   #
   #   brew services start copypaste-cli
   service do

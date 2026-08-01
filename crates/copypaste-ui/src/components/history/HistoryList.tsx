@@ -15,13 +15,16 @@ import {
   useState,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { ChevronDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useScrollAnchor } from "@/hooks/useScrollAnchor";
 import { useTranslation } from "@/i18n";
 import type { Item } from "@/lib/ipc";
+import { isAndroidPlatform } from "@/lib/platform";
 import {
   COPY_FLASH_MS,
+  imageRowHeight,
   LOAD_MORE_THRESHOLD_PX,
   overscanRows,
   rowHeight,
@@ -63,7 +66,6 @@ interface HistoryListProps {
   hasMore: boolean;
   loadingMore: boolean;
   onReveal: (item: Item) => void;
-  onHide: () => void;
   onCopy: (item: Item) => void;
   /** Copy and then dismiss the window — the ⌘1–⌘9 path. */
   onQuickCopy: (item: Item) => void;
@@ -88,7 +90,6 @@ export function HistoryList({
   hasMore,
   loadingMore,
   onReveal,
-  onHide,
   onCopy,
   onQuickCopy,
   onTogglePin,
@@ -145,8 +146,10 @@ export function HistoryList({
     (index: number) =>
       entries[index]?.type === "group"
         ? GROUP_HEADER_PX
-        : rowHeight(previewLines),
-    [entries, previewLines],
+        : items[entries[index]?.itemIndex ?? -1]?.content_type.toLowerCase().startsWith("image/")
+          ? imageRowHeight(previewLines)
+          : rowHeight(previewLines),
+    [entries, items, previewLines],
   );
 
   const virtualizer = useVirtualizer({
@@ -358,8 +361,13 @@ export function HistoryList({
                 // too would announce every row twice.
                 aria-current={item.id === activeId ? "true" : undefined}
                 className="absolute top-0 left-0 w-full"
+                data-index={row.index}
+                ref={isAndroidPlatform() ? virtualizer.measureElement : undefined}
                 style={{
-                  height: row.size,
+                  // Android image previews preserve their aspect ratio at the
+                  // available row width. Let TanStack remeasure after the
+                  // lazy thumbnail loads; desktop remains a fixed virtual row.
+                  ...(isAndroidPlatform() ? { minHeight: row.size } : { height: row.size }),
                   transform: `translateY(${row.start}px)`,
                 }}
               >
@@ -381,7 +389,6 @@ export function HistoryList({
                   onTogglePin={onTogglePin}
                   onDelete={onDelete}
                   onReveal={onReveal}
-                  onHide={onHide}
                   onOpen={onOpen}
                 />
               </div>
@@ -400,6 +407,7 @@ export function HistoryList({
               disabled={loadingMore}
               onClick={onLoadMore}
             >
+              <ChevronDown aria-hidden="true" />
               {t(
                 loadingMore ? "history.list.loadingMore" : "history.list.loadMore",
               )}

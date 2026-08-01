@@ -83,6 +83,8 @@ mod tests {
             is_sensitive: false,
             origin_device_id: "3c6e0b8a-9c15-424f-b8b8-1a2b3c4d5e6f".into(),
             origin_device_name: Some("a device with a fairly long display name".into()),
+            source_app_bundle_id: None,
+            source_app_name: None,
             too_large_to_sync: false,
         }
     }

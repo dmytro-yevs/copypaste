@@ -16,6 +16,8 @@ import { cn } from "@/lib/cn";
 import { classifyError } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
+import { isAndroidPlatform } from "@/lib/platform";
+import { useUi } from "@/store/ui";
 
 type ChipState =
   | "synced"
@@ -40,9 +42,11 @@ const STATE_KEY = {
   error: "shell.status.error",
 } as const satisfies Record<ChipState, string>;
 
-export function StatusChip() {
+export function StatusChip({ attentionOnly = false }: { attentionOnly?: boolean }) {
   const { t } = useTranslation();
   const tooltipId = useId();
+  const setView = useUi((state) => state.setView);
+  const setSettingsTab = useUi((state) => state.setSettingsTab);
   const status = useStatus();
   const peers = usePeers();
   const syncing = useIsMutating({ mutationKey: SYNC_KEY }) > 0;
@@ -118,28 +122,65 @@ export function StatusChip() {
       }
     }
   }
-  detail.push(t("shell.status.detail.cloudUnavailable"));
-
   const label = t(STATE_KEY[state]);
   const tooltip = detail.join(" · ");
+  const serviceNeedsAttention =
+    statusErrorKind === "offline" ||
+    mismatch ||
+    status.data?.capture_running === false;
+
+  if (attentionOnly && !serviceNeedsAttention) return null;
+
+  const openRecovery = () => {
+    if (isAndroidPlatform() && status.data?.capture_running === false) {
+      setView("capture");
+      return;
+    }
+    setSettingsTab("service");
+    setView("settings");
+  };
+
+  const actionLabel = serviceNeedsAttention
+    ? t("shell.status.openService")
+    : undefined;
 
   return (
     <div
       role="status"
-      tabIndex={0}
       aria-describedby={tooltipId}
       aria-label={t("shell.status.label", { state: label, detail: tooltip })}
       title={tooltip}
-      className="group relative flex items-center gap-s-2 rounded-md px-s-2 py-s-1 text-xs text-muted-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+      className={cn(
+        "group relative",
+        attentionOnly && "absolute bottom-[calc(100%+var(--s-2))] left-1/2 -translate-x-1/2",
+      )}
     >
-      <span
-        aria-hidden="true"
+      <button
+        type="button"
+        onClick={serviceNeedsAttention ? openRecovery : undefined}
+        disabled={!serviceNeedsAttention}
+        aria-label={
+          actionLabel === undefined
+            ? t("shell.status.label", { state: label, detail: tooltip })
+            : `${t("shell.status.label", { state: label, detail: tooltip })} ${actionLabel}`
+        }
         className={cn(
-          "size-[var(--sz-badge-dot)] shrink-0 rounded-full",
-          DOT[state],
+          "flex items-center gap-s-2 rounded-full border border-transparent px-s-2 py-s-1 text-xs text-muted-foreground outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
+          serviceNeedsAttention
+            ? "border-warn/30 bg-warn/10 text-warn-strong hover:bg-warn/15"
+            : "disabled:cursor-default",
+          attentionOnly && "shadow-sm",
         )}
-      />
-      <span className="truncate">{label}</span>
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            "size-[var(--sz-badge-dot)] shrink-0 rounded-full",
+            DOT[state],
+          )}
+        />
+        <span className="max-w-44 truncate">{label}</span>
+      </button>
       <span
         id={tooltipId}
         role="tooltip"

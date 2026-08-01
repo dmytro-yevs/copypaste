@@ -10,7 +10,7 @@ use std::sync::Mutex;
 
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
 };
 
 use super::{Backend, BackendError, Page, Result};
@@ -112,11 +112,17 @@ impl Backend for FakeBackend {
             is_sensitive: content.contains("AKIA"),
             origin_device_id: "fake-device".into(),
             origin_device_name: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
             too_large_to_sync: false,
         })
     }
 
     async fn get(&self, _id: &str) -> Result<Item> {
+        Err(refused())
+    }
+
+    async fn image_preview(&self, _id: &str) -> Result<ImagePreview> {
         Err(refused())
     }
 
@@ -155,7 +161,6 @@ impl Backend for FakeBackend {
                 capture_running: true,
                 clipboard_backend: "fake".into(),
                 private_mode: false,
-                legacy_history_present: false,
                 counters: copypaste_ipc::DiagnosticCounters::default(),
             }),
         }

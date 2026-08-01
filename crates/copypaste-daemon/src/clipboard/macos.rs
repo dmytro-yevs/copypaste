@@ -33,13 +33,13 @@
 // compiling across binding revisions instead of flipping with each bump.
 #![allow(unused_unsafe)]
 
-use objc2::rc::{autoreleasepool, Retained};
+use objc2::rc::{Retained, autoreleasepool};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use objc2_app_kit::{NSPasteboard, NSWorkspace};
 use objc2_foundation::{NSArray, NSData, NSString};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
 use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
@@ -119,8 +119,37 @@ thread_local! {
 pub struct MacOsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
-    frontmost: Option<(Instant, Option<String>)>,
+    frontmost: Option<(Instant, Option<FrontmostApp>)>,
+    last_attribution: Option<Attribution>,
     staging: super::file_materialize::StagingArea,
+}
+
+#[derive(Clone)]
+struct FrontmostApp {
+    /// Some foreground helpers do not advertise a bundle identifier even
+    /// though AppKit can still tell us their localized name. Keep the two
+    /// independently so the UI never turns a known source into “Unknown app”.
+    bundle_id: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Attribution {
+    Bundle,
+    NameOnly,
+    Unavailable,
+}
+
+impl Attribution {
+    fn from_app(app: Option<&FrontmostApp>) -> Self {
+        match app {
+            Some(FrontmostApp {
+                bundle_id: Some(_), ..
+            }) => Self::Bundle,
+            Some(FrontmostApp { name: Some(_), .. }) => Self::NameOnly,
+            _ => Self::Unavailable,
+        }
+    }
 }
 
 enum SelectedRepresentation {
@@ -143,7 +172,11 @@ fn first_absolute_filename_plist(bytes: &[u8]) -> Option<PathBuf> {
         .find(|path| path.is_absolute())
 }
 
-fn file_capture(path: PathBuf, app_bundle_id: Option<String>) -> Option<Capture> {
+fn file_capture(
+    path: PathBuf,
+    app_bundle_id: Option<String>,
+    app_name: Option<String>,
+) -> Option<Capture> {
     if !path.is_absolute() {
         debug!("pasteboard file path was not absolute; dropped");
         return None;
@@ -160,6 +193,7 @@ fn file_capture(path: PathBuf, app_bundle_id: Option<String>) -> Option<Capture>
         file_metadata: Some(metadata),
         content_type: copypaste_ipc::content_type::FILE.to_string(),
         app_bundle_id,
+        app_name,
     })
 }
 
@@ -169,6 +203,7 @@ impl MacOsClipboard {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
             frontmost: None,
+            last_attribution: None,
             staging: super::file_materialize::StagingArea::new(data_dir)?,
         })
     }
@@ -237,7 +272,10 @@ impl ClipboardSource for MacOsClipboard {
             // exclusion list fails closed when it cannot be resolved; with an
             // empty list the same `None` is safe because content detection
             // remains active. The 750 ms cache bounds stale exclusion decisions.
-            let app_bundle_id = self.frontmost_bundle_id();
+            let source_app = self.frontmost_app();
+            self.note_attribution(source_app.as_ref());
+            let app_bundle_id = source_app.as_ref().and_then(|app| app.bundle_id.clone());
+            let app_name = source_app.and_then(|app| app.name);
             if !policy.settings.excluded_app_bundle_ids.is_empty()
                 && app_bundle_id.as_ref().is_none_or(|id| {
                     policy
@@ -317,6 +355,7 @@ impl ClipboardSource for MacOsClipboard {
                     file_metadata: None,
                     content_type: content_type.to_string(),
                     app_bundle_id,
+                    app_name,
                 })
             } else if content_type == copypaste_ipc::content_type::FILE {
                 let path = if legacy_file_names {
@@ -330,7 +369,7 @@ impl ClipboardSource for MacOsClipboard {
                     };
                     path
                 };
-                file_capture(path, app_bundle_id)
+                file_capture(path, app_bundle_id, app_name)
             } else {
                 Some(Capture {
                     content: String::new(),
@@ -339,6 +378,7 @@ impl ClipboardSource for MacOsClipboard {
                     file_metadata: None,
                     content_type: content_type.to_string(),
                     app_bundle_id,
+                    app_name,
                 })
             }
         })
@@ -402,7 +442,7 @@ impl ClipboardSource for MacOsClipboard {
             _ => {
                 return Err(anyhow::anyhow!(
                     "the pasteboard cannot write this binary content type"
-                ))
+                ));
             }
         };
         let file_url = if content_type == copypaste_ipc::content_type::FILE {
@@ -455,20 +495,44 @@ impl ClipboardSource for MacOsClipboard {
 }
 
 impl MacOsClipboard {
-    fn frontmost_bundle_id(&mut self) -> Option<String> {
-        if let Some((seen, bundle_id)) = &self.frontmost {
-            if seen.elapsed() < Duration::from_millis(750) {
-                return bundle_id.clone();
+    fn note_attribution(&mut self, app: Option<&FrontmostApp>) {
+        let attribution = Attribution::from_app(app);
+        if self.last_attribution == Some(attribution) {
+            return;
+        }
+        self.last_attribution = Some(attribution);
+        match attribution {
+            Attribution::Bundle => info!("macOS capture source attribution is available"),
+            Attribution::NameOnly => {
+                info!("macOS capture source attribution is available without a bundle identifier")
+            }
+            Attribution::Unavailable => {
+                warn!("macOS could not identify the source application for clipboard capture")
             }
         }
-        let bundle_id = unsafe {
+    }
+
+    fn frontmost_app(&mut self) -> Option<FrontmostApp> {
+        if let Some((seen, app)) = &self.frontmost {
+            if seen.elapsed() < Duration::from_millis(750) {
+                return app.clone();
+            }
+        }
+        let app = unsafe {
             NSWorkspace::sharedWorkspace()
                 .frontmostApplication()
-                .and_then(|app| app.bundleIdentifier())
-                .map(|id| id.to_string())
+                .and_then(|app| {
+                    let bundle_id = app.bundleIdentifier().map(|id| id.to_string());
+                    let name = app.localizedName().map(|name| name.to_string());
+                    // A foreground application can be an unbundled helper.
+                    // It has neither value only when AppKit genuinely cannot
+                    // attribute the foreground process.
+                    (bundle_id.is_some() || name.is_some())
+                        .then_some(FrontmostApp { bundle_id, name })
+                })
         };
-        self.frontmost = Some((Instant::now(), bundle_id.clone()));
-        bundle_id
+        self.frontmost = Some((Instant::now(), app.clone()));
+        app
     }
 }
 
@@ -571,7 +635,7 @@ mod tests {
 
     #[test]
     fn file_capture_uses_the_extension_mime_and_never_retains_the_full_path() {
-        let capture = file_capture(PathBuf::from("/Users/example/Report.pdf"), None).unwrap();
+        let capture = file_capture(PathBuf::from("/Users/example/Report.pdf"), None, None).unwrap();
         assert_eq!(
             capture.file_path,
             Some(PathBuf::from("/Users/example/Report.pdf"))
@@ -579,6 +643,17 @@ mod tests {
         assert_eq!(
             capture.file_metadata,
             Some(copypaste_core::FileMetadata::new("Report.pdf", "application/pdf").unwrap())
+        );
+    }
+
+    #[test]
+    fn source_attribution_preserves_a_name_when_a_helper_has_no_bundle_id() {
+        assert_eq!(
+            Attribution::from_app(Some(&FrontmostApp {
+                bundle_id: None,
+                name: Some("Helper".to_owned()),
+            })),
+            Attribution::NameOnly
         );
     }
 
@@ -823,9 +898,11 @@ mod tests {
 
         let oversized = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize + 1];
         write_types(&[(UTI_PNG, &oversized)]);
-        assert!(clipboard
-            .poll_with_policy(CapturePolicy::new(&settings))
-            .is_none());
+        assert!(
+            clipboard
+                .poll_with_policy(CapturePolicy::new(&settings))
+                .is_none()
+        );
 
         let boundary = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize];
         write_types(&[(UTI_PNG, &boundary)]);

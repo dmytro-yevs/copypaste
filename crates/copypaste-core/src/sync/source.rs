@@ -33,6 +33,8 @@ use crate::sensitive::Detector;
 use crate::storage::{origin_or, Store, StoredItem};
 use crate::Keyring;
 
+const MSG_SYNC_DISABLED: &str = "sync is disabled";
+
 /// A [`SyncSource`] over a [`Store`].
 ///
 /// Holds the keyring and the detector as well as the store: applying an item
@@ -174,6 +176,14 @@ impl StoreSource {
             item_id: row.id,
         })
     }
+
+    fn require_sync_enabled(&self) -> Result<(), SyncError> {
+        if (self.retention_settings)().sync_enabled {
+            Ok(())
+        } else {
+            Err(SyncError::Source(MSG_SYNC_DISABLED.to_string()))
+        }
+    }
 }
 
 fn store_error(e: crate::StoreError, what: &str) -> SyncError {
@@ -191,6 +201,7 @@ impl SyncSource for StoreSource {
     }
 
     fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError> {
+        self.require_sync_enabled()?;
         super::blocking(|| {
             let rows = self
                 .store
@@ -214,6 +225,7 @@ impl SyncSource for StoreSource {
     }
 
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+        self.require_sync_enabled()?;
         super::blocking(|| {
             let rows = self
                 .store
@@ -227,6 +239,7 @@ impl SyncSource for StoreSource {
     }
 
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+        self.require_sync_enabled()?;
         super::blocking(|| {
             let result = apply_remote_p2p_version_with_pin_stamp(
                 &self.store,
@@ -290,6 +303,7 @@ mod tests {
                 },
                 created_at,
                 app_bundle_id: None,
+                app_name: None,
                 payload_metadata: None,
             })
             .expect("insert")
@@ -410,6 +424,54 @@ mod tests {
             !source.apply(item).unwrap(),
             "a replayed version must not be re-applied"
         );
+    }
+
+    #[test]
+    fn identical_clips_from_different_origins_keep_their_distinct_item_ids() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        let created_at = 1_700_000_000_000;
+
+        assert!(source
+            .apply(peer_item("device-a-item", "same clipboard text", created_at))
+            .unwrap());
+        assert!(source
+            .apply(SyncItem {
+                item_id: "device-b-item".into(),
+                origin_device_id: "device-b".into(),
+                ..peer_item("device-b-item", "same clipboard text", created_at)
+            })
+            .unwrap());
+
+        assert!(f.store.get("device-a-item").unwrap().is_some());
+        assert!(f.store.get("device-b-item").unwrap().is_some());
+    }
+
+    #[test]
+    fn a_disabled_sync_switch_refuses_every_peer_data_path() {
+        let f = fixture_named("beta");
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            Arc::clone(&f.detector),
+            f.here.clone(),
+            "test-device".to_string(),
+            copypaste_ipc::ConfigData {
+                sync_enabled: false,
+                ..Default::default()
+            },
+        );
+
+        for result in [
+            source.summaries().map(|_| ()),
+            source.fetch(&["anything".to_string()]).map(|_| ()),
+            source
+                .apply(peer_item("peer-item", "not stored", 1_700_000_000_000))
+                .map(|_| ()),
+        ] {
+            assert_eq!(result, Err(SyncError::Source(MSG_SYNC_DISABLED.to_string())));
+        }
+        assert!(f.store.get("peer-item").unwrap().is_none());
     }
 
     #[test]
@@ -630,6 +692,7 @@ mod tests {
                 search_text: None,
                 created_at: 1_000,
                 app_bundle_id: None,
+                app_name: None,
                 payload_metadata: None,
             })
             .unwrap();

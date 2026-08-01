@@ -84,7 +84,13 @@ impl Store {
             } else {
                 existing
             };
-            let bumped = bump_in_tx(&tx, &existing, item.created_at)?;
+            let bumped = bump_in_tx(
+                &tx,
+                &existing,
+                item.created_at,
+                &item.app_bundle_id,
+                &item.app_name,
+            )?;
             tx.commit()?;
             return Ok(Ingest::Bumped(bumped));
         }
@@ -92,8 +98,8 @@ impl Store {
         let insert = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, payload_metadata) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9)",
+                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10)",
             params![
                 &id,
                 &item.content_ciphertext,
@@ -103,6 +109,7 @@ impl Store {
                 item.is_sensitive,
                 item.created_at,
                 &item.app_bundle_id,
+                &item.app_name,
                 &item.payload_metadata,
             ],
         );
@@ -122,7 +129,13 @@ impl Store {
                         } else {
                             existing
                         };
-                        let bumped = bump_in_tx(&tx, &existing, item.created_at)?;
+                        let bumped = bump_in_tx(
+                            &tx,
+                            &existing,
+                            item.created_at,
+                            &item.app_bundle_id,
+                            &item.app_name,
+                        )?;
                         tx.commit()?;
                         Ok(Ingest::Bumped(bumped))
                     }
@@ -153,6 +166,7 @@ impl Store {
             // id the store has no business knowing — see `versions::origin_or`.
             origin_device_id: String::new(),
             app_bundle_id: item.app_bundle_id,
+            app_name: item.app_name,
             payload_metadata: item.payload_metadata,
         }))
     }
@@ -221,7 +235,7 @@ impl Store {
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?2) \
                     END, \
-                    pinned = 0, pin_order = NULL, app_bundle_id = NULL, payload_metadata = NULL \
+                    pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL \
               WHERE id = ?1 AND deleted = 0",
             params![id, crate::now_ms()],
         )?;
@@ -246,7 +260,7 @@ impl Store {
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
-                    content_hash = '', pinned = 0, pin_order = NULL, app_bundle_id = NULL, \
+                    content_hash = '', pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, \
                     payload_metadata = NULL, \
                     created_at = CASE \
                         WHEN created_at = 9223372036854775807 THEN created_at \
@@ -279,7 +293,7 @@ impl Store {
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?1) \
                     END, \
-                    pin_order = NULL, app_bundle_id = NULL, payload_metadata = NULL \
+                    pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL \
               WHERE deleted = 0 AND pinned = 0",
             [crate::now_ms()],
         )?;

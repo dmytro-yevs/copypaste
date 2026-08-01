@@ -84,24 +84,20 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-group "Install-time tooling stays out of the v0.4 directory"
+group "Install-time tooling uses the application data directory"
 # ---------------------------------------------------------------------------
-# `~/Library/Application Support/CopyPaste` is v0.4.x's, holding a database this
-# version never opens and CLAUDE.md rule 3 promises to leave intact. The cask
-# once zapped it — deleting the one history v2 cannot restore, and none of v2's.
-# No Rust names that path outside `v1_data_dir`, so nothing else catches this.
 for f in Casks/copypaste.rb packaging/macos/selfsign.sh; do
     if grep -qE 'Application Support/CopyPaste([/"]|$)' "$f"; then
-        bad "$f names only the v2 data directory" \
-            "it names ~/Library/Application Support/CopyPaste — v0.4.x's, read-only by contract"
+        bad "$f names only the application data directory" \
+            "it names an unsupported application-support directory"
     else
-        ok "$f names only the v2 data directory"
+        ok "$f names only the application data directory"
     fi
 done
 if grep -q 'Application Support/com.copypaste.CopyPaste' Casks/copypaste.rb; then
-    ok "the cask zaps the v2 data directory"
+    ok "the cask zaps the application data directory"
 else
-    bad "the cask zaps the v2 data directory" \
+    bad "the cask zaps the application data directory" \
         "zap removes no CopyPaste data at all"
 fi
 
@@ -176,8 +172,7 @@ else
 fi
 
 # The URL the cask builds must be the filename make-dmg.sh writes. This is the
-# join between two scripts that never see each other, and v1 shipped
-# CopyPaste-vv0.5.1-... exactly once by getting it wrong.
+# join between two scripts that never see each other.
 EXPECTED_DMG="CopyPaste-v${VERSION_A}-macos-arm64.dmg"
 if grep -q 'CopyPaste-v#{version}-macos-arm64\.dmg' Casks/copypaste.rb; then
     ok "cask URL interpolates to $EXPECTED_DMG"

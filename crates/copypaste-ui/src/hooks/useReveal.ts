@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { t } from "@/i18n";
-import { classifyError, friendlyError } from "@/lib/errors";
+import { classifyError } from "@/lib/errors";
 import { REVEAL_TIMEOUT_MS } from "@/lib/layout";
 import { type Item, revealItem } from "@/lib/ipc";
 import { usePrefs } from "@/store/prefs";
@@ -37,15 +37,19 @@ export function useReveal() {
       setRevealed({ id, content });
     } catch (raw) {
       setRevealed(null);
-      // INV-12: a kind, never the raw text.
+      // INV-12: a kind, never the raw text. A request to reveal needs a
+      // reveal-specific next step; the generic IPC sentence gives no useful
+      // explanation and makes a normal privacy refusal sound like a crash.
       const kind = classifyError(raw);
       // `reveal_item` refuses on desktop deliberately: routing it through
       // `Copy`, as the bridge's first attempt did, publishes the secret to the
       // system pasteboard as a side effect of *looking* at it.
       setError(
-        kind === "unavailable"
-          ? t("history.reveal.unavailable")
-          : friendlyError(kind),
+        kind === "not_found"
+          ? t("history.reveal.missing")
+          : kind === "unavailable"
+            ? t("history.reveal.unavailable")
+            : t("history.reveal.failed"),
       );
     } finally {
       setPendingId(null);

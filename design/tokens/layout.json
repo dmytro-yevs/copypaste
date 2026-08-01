@@ -18,6 +18,10 @@
       "$value": "200px",
       "$description": "Fixed nav rail width. Expanded layout only — below the `sm` boundary the nav is a bottom bar, because a 200px rail on a 380px viewport leaves no content."
     },
+    "sidebar-half-w": {
+      "$value": "100px",
+      "$description": "Half the fixed sidebar width. Bottom-centred overlays add it to the viewport midpoint so they centre inside the desktop content pane."
+    },
     "tabbar-h": {
       "$value": "56px",
       "$description": "Bottom nav height on the compact layout, the counterpart to --sidebar-w. Material 3's navigation-bar height. Add --inset-bottom to it rather than baking the inset in; the gesture bar is not always present."

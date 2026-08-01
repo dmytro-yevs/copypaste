@@ -33,8 +33,8 @@ use copypaste_cloud::{RealtimeError, RealtimeEvent, RealtimeSubscription};
 use tokio::sync::watch;
 use tracing::{debug, info};
 
-use crate::cloud::{Cloud, Driver};
 use crate::AppState;
+use crate::cloud::{Cloud, Driver};
 
 /// How long to wait before rebuilding a subscription that ended or refused.
 const RECONNECT_MIN: Duration = Duration::from_secs(5);
@@ -285,8 +285,8 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::mpsc;
 
-    use crate::cloud::source::StoreSource;
     use crate::cloud::Cloud;
+    use crate::cloud::source::StoreSource;
     use crate::testutil::{test_state, test_state_with_cloud};
 
     #[test]
@@ -546,11 +546,13 @@ mod tests {
         expect_wake(&state).await;
         assert!(!old_driver.push_channel_live());
         assert_eq!(old_driver.poll_interval(), MAX_POLL_INTERVAL_WITHOUT_PUSH);
-        assert!(!state
-            .cloud
-            .driver()
-            .expect("replacement driver")
-            .push_channel_live());
+        assert!(
+            !state
+                .cloud
+                .driver()
+                .expect("replacement driver")
+                .push_channel_live()
+        );
         assert!(closed.load(Ordering::Acquire));
     }
 }

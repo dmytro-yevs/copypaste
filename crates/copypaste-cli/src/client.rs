@@ -741,7 +741,7 @@ mod tests {
 
     #[test]
     fn discovered_devices_read_back_as_devices() {
-        let line = r#"{"id":1,"ok":true,"data":{"discovered":{"devices":[{"pairing_id":"abc","name":"phone",
+        let line = r#"{"id":1,"ok":true,"data":{"discovered":{"devices":[{"discovery_id":"abc","name":"phone",
             "addr":"192.168.1.9:47654","last_seen_ms":5,"paired":false}]}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let found = expect_discovered(into_data(response).unwrap()).unwrap();

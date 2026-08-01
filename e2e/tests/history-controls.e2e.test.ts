@@ -146,29 +146,3 @@ describe("selection mode", () => {
     );
   });
 });
-
-describe("the quick-copy hint", () => {
-  /**
-   * ADR-0001: choosing an item makes it the clipboard and the user presses ⌘V.
-   * Without this line on screen the app looks broken to anyone who expects the
-   * paste to happen — they press ⌘3, the window goes away, and nothing
-   * appears. So it must be *rendered*, not merely present in the markup.
-   */
-  test("tells the user they still have to paste", async () => {
-    const hint = (await app.browser.execute(function () {
-      const nodes = Array.prototype.slice.call(document.querySelectorAll("p"));
-      for (const node of nodes) {
-        const el = node as HTMLElement;
-        if (el.innerText.indexOf("to paste") !== -1) {
-          const rect = el.getBoundingClientRect();
-          return { text: el.innerText, width: rect.width, height: rect.height };
-        }
-      }
-      return null;
-    })) as { text: string; width: number; height: number } | null;
-
-    expect(hint, "no visible hint about pasting").not.toBeNull();
-    expect(hint!.height).toBeGreaterThan(0);
-    expect(hint!.text).toContain("⌘V");
-  });
-});

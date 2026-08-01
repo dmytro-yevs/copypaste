@@ -10,12 +10,13 @@
  *
  * Rungs 1 and 3 have no state in the model and no representation here.
  */
-import { ClipboardPlus, TriangleAlert } from "lucide-react";
+import { ClipboardPlus, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { CaptureLadder } from "@/components/capture/CaptureLadder";
 import { ToastNotice } from "@/components/capture/ToastNotice";
 import { EmptyState } from "@/components/EmptyState";
 import { Row } from "@/components/settings/Row";
+import { SourceExclusions } from "@/components/settings/SourceExclusions";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -23,6 +24,7 @@ import {
   useCaptureNow,
   useCaptureState,
 } from "@/hooks/useCapture";
+import { useServiceConfig, useSetServiceConfig } from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import {
   type CapturePrimary,
@@ -59,7 +61,11 @@ export function CaptureSetup() {
         icon={TriangleAlert}
         title={t("capture.unknown.title")}
         body={t("capture.unknown.body")}
-        action={{ label: t("common.tryAgain"), onClick: () => void capture.refetch() }}
+        action={{
+          label: t("common.tryAgain"),
+          icon: RefreshCw,
+          onClick: () => void capture.refetch(),
+        }}
       />
     );
   }
@@ -70,12 +76,12 @@ export function CaptureSetup() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex shrink-0 items-center border-b border-divider bg-panel px-s-3 py-s-2">
+      <header className="chrome flex shrink-0 items-center border-b border-divider px-s-3 py-s-2">
         <h1 className="text-sm font-semibold">{t("capture.title")}</h1>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-s-3">
-        <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-4">
+        <div className="flex w-full flex-col gap-s-4">
           <StateCard snapshot={snapshot} />
 
           {snapshot.droppedClips > 0 && <Dropped count={snapshot.droppedClips} />}
@@ -89,12 +95,29 @@ export function CaptureSetup() {
             </>
           )}
 
+          {managed && <SourceExclusionsPanel />}
+
           {managed && snapshot.shizuku.permission && (
             <ToastNotice suppressed={snapshot.toastSuppressed} />
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function SourceExclusionsPanel() {
+  const config = useServiceConfig();
+  const save = useSetServiceConfig();
+  const data = config.data?.config;
+
+  if (!data) return null;
+  return (
+    <SourceExclusions
+      ids={data.excluded_app_bundle_ids}
+      disabled={save.isPending}
+      onChange={(excluded_app_bundle_ids) => save.mutate({ excluded_app_bundle_ids })}
+    />
   );
 }
 
@@ -146,6 +169,10 @@ function StateCard({ snapshot }: { snapshot: CaptureSnapshot }) {
               )
             }
           >
+            <RefreshCw
+              aria-hidden="true"
+              className={run.isPending ? "animate-spin motion-reduce:animate-none" : undefined}
+            />
             {t(run.isPending ? "capture.setup.action.busy" : PRIMARY_LABEL[primary])}
           </Button>
         </div>
@@ -161,7 +188,10 @@ function AlwaysOn() {
   const now = useCaptureNow();
 
   return (
-    <section className="flex flex-col gap-s-2">
+    <section
+      data-settings-search-target={`section:${t("capture.setup.always.title")}`}
+      className="flex flex-col gap-s-2"
+    >
       <h2 className="text-sm font-medium">{t("capture.setup.always.title")}</h2>
       <p className="text-xs text-muted-foreground">{t("capture.setup.always.body")}</p>
       <div className="flex flex-wrap gap-s-2">

@@ -11,8 +11,6 @@ pub enum ErrorCode {
     ProtocolMismatch,
     NotReady,
     AuthFailed,
-    /// A v0.4 history that v2 deliberately leaves unopened.
-    LegacyDatabase,
     /// The keystore is temporarily inaccessible.
     KeyLocked,
     /// The stored key cannot decrypt this history; retrying cannot repair it.
@@ -39,7 +37,6 @@ impl ErrorCode {
             Self::ProtocolMismatch => "protocol_mismatch",
             Self::NotReady => "not_ready",
             Self::AuthFailed => "auth_failed",
-            Self::LegacyDatabase => "legacy_database",
             Self::KeyLocked => "key_locked",
             Self::KeyUnusable => "key_unusable",
             Self::PairingCode => "pairing_code",
@@ -59,7 +56,6 @@ impl ErrorCode {
             "protocol_mismatch" => Some(Self::ProtocolMismatch),
             "not_ready" => Some(Self::NotReady),
             "auth_failed" => Some(Self::AuthFailed),
-            "legacy_database" => Some(Self::LegacyDatabase),
             "key_locked" => Some(Self::KeyLocked),
             "key_unusable" => Some(Self::KeyUnusable),
             "pairing_code" => Some(Self::PairingCode),
@@ -86,7 +82,6 @@ impl ErrorCode {
             | Self::InvalidRequest
             | Self::ProtocolMismatch
             | Self::AuthFailed
-            | Self::LegacyDatabase
             | Self::KeyUnusable
             | Self::PairingCode
             | Self::PairingAddress
@@ -108,7 +103,6 @@ mod tests {
             (ErrorCode::ProtocolMismatch, "\"protocol_mismatch\""),
             (ErrorCode::NotReady, "\"not_ready\""),
             (ErrorCode::AuthFailed, "\"auth_failed\""),
-            (ErrorCode::LegacyDatabase, "\"legacy_database\""),
             (ErrorCode::KeyLocked, "\"key_locked\""),
             (ErrorCode::KeyUnusable, "\"key_unusable\""),
             (ErrorCode::PairingCode, "\"pairing_code\""),
@@ -135,7 +129,6 @@ mod tests {
     fn a_locked_key_store_is_retryable_and_an_unusable_key_is_not() {
         assert!(ErrorCode::KeyLocked.retryable());
         assert!(!ErrorCode::KeyUnusable.retryable());
-        assert!(!ErrorCode::LegacyDatabase.retryable());
     }
 
     #[test]

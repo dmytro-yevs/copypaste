@@ -19,7 +19,7 @@ use mdns_sd::{DaemonEvent, ServiceDaemon, ServiceEvent};
 use tracing::debug;
 
 use super::names::{instance_of, sanitise_instance};
-use super::record::{build_service_info, peers_from_resolved};
+use super::record::{build_service_info, peer_from_resolved};
 use super::table::{now_ms, DiscoveredPeer, PeerTable};
 use super::DiscoveryError;
 use crate::netif::LocalAddrs;
@@ -264,14 +264,13 @@ fn browse_loop(shared: &Shared, events: impl IntoIterator<Item = ServiceEvent>) 
                     continue;
                 }
                 let now = now_ms();
-                let peers: Vec<_> = peers_from_resolved(&resolved, now)
-                    .into_iter()
-                    .filter(|peer| !is_own_endpoint(shared, peer.addr, now))
-                    .collect();
-                if peers.is_empty() {
+                let Some(peer) = peer_from_resolved(&resolved, now) else {
+                    continue;
+                };
+                if is_own_endpoint(shared, peer.addr, now) {
                     continue;
                 }
-                lock(&shared.table).observe(&resolved.fullname, peers, now);
+                lock(&shared.table).observe(&resolved.fullname, peer, now);
             }
             ServiceEvent::ServiceRemoved(_, fullname) => {
                 lock(&shared.table).remove_service(&fullname);
@@ -392,7 +391,7 @@ mod tests {
 
         let found = lock(&shared.table).snapshot(now_ms());
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].pairing_id, "pair-one");
+        assert_eq!(found[0].pairing_ids, ["pair-one"]);
         assert_eq!(found[0].name, "Laptop");
         assert_eq!(found[0].addr.port(), 47_654);
         assert_eq!(
@@ -408,6 +407,25 @@ mod tests {
             )],
         );
         assert!(lock(&shared.table).snapshot(now_ms()).is_empty());
+    }
+
+    #[test]
+    fn browse_loop_keeps_a_fresh_device_without_any_pairings() {
+        let shared = Shared::default();
+        browse_loop(
+            &shared,
+            vec![ServiceEvent::ServiceResolved(Box::new(resolved_from(
+                "New phone",
+                &[],
+                "192.168.1.9",
+                47_654,
+            )))],
+        );
+
+        let found = lock(&shared.table).snapshot(now_ms());
+        assert_eq!(found.len(), 1);
+        assert!(found[0].pairing_ids.is_empty());
+        assert_eq!(found[0].name, "New phone");
     }
 
     /// The case the fullname check misses: mDNS took our browse and refused our

@@ -28,11 +28,12 @@ describe("primitive touch targets", () => {
     );
 
     expectClass(screen.getByRole("textbox"), "min-h-[var(--tap-min)]");
-    expectClass(screen.getByRole("switch"), "size-[var(--tap-min)]");
+    expectClass(screen.getByRole("switch"), "h-[var(--tap-min)]");
+    expectClass(screen.getByRole("switch"), "w-12");
     expectClass(screen.getByRole("checkbox"), "size-[var(--tap-min)]");
     expectClass(
       document.querySelector('[data-slot="switch-track"]')!,
-      "h-5",
+      "h-7",
     );
     expectClass(
       document.querySelector('[data-slot="checkbox-control"]')!,
@@ -69,5 +70,39 @@ describe("primitive touch targets", () => {
       document.querySelector('[data-slot="dialog-close"]')!,
       "size-[var(--sz-iconbtn)]",
     );
+  });
+
+  it("can divide a segmented control into equal-width items", () => {
+    render(
+      <ToggleGroup type="single" equalWidth aria-label="Theme">
+        <ToggleGroupItem value="system">System</ToggleGroupItem>
+        <ToggleGroupItem value="dark">Dark</ToggleGroupItem>
+        <ToggleGroupItem value="light">Light</ToggleGroupItem>
+      </ToggleGroup>,
+    );
+
+    const group = screen.getByRole("radiogroup", { name: "Theme" });
+    expect(group.getAttribute("data-equal-width")).toBe("true");
+    expectClass(group, "grid");
+    for (const item of screen.getAllByRole("radio", { hidden: true })) {
+      expectClass(item, "w-full");
+      expectClass(item, "min-w-0");
+    }
+  });
+
+  it("can divide pill tabs into equal-width items", () => {
+    render(
+      <Tabs defaultValue="overview">
+        <TabsList equalWidth aria-label="Views">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="events">Runtime events</TabsTrigger>
+        </TabsList>
+      </Tabs>,
+    );
+
+    const list = screen.getByRole("tablist", { name: "Views" });
+    expect(list.getAttribute("data-equal-width")).toBe("true");
+    expectClass(list, "grid");
+    expectClass(list, "auto-cols-fr");
   });
 });

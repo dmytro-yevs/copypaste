@@ -23,7 +23,7 @@ mod tests {
     use regex::Regex;
 
     use super::*;
-    use crate::sensitive::engine::test_support::{detector, BENIGN_CORPUS};
+    use crate::sensitive::engine::test_support::{BENIGN_CORPUS, detector};
     use crate::sensitive::rules::rule;
 
     /// The bypass NFKC closes: full-width Latin renders as ASCII but matches no
@@ -34,9 +34,11 @@ mod tests {
         let fullwidth = "\u{FF21}\u{FF2B}\u{FF29}\u{FF21}IOSFODNN7EXAMPLE";
         assert_ne!(fullwidth, "AKIAIOSFODNN7EXAMPLE");
         // without normalisation the raw bytes match nothing
-        assert!(!Regex::new(rule("aws_access_key").pattern)
-            .unwrap()
-            .is_match(fullwidth));
+        assert!(
+            !Regex::new(rule("aws_access_key").pattern)
+                .unwrap()
+                .is_match(fullwidth)
+        );
         // with it, the same key is found
         assert!(det.is_sensitive(fullwidth));
         assert_eq!(det.scan(fullwidth).unwrap().rule, "aws_access_key");

@@ -7,7 +7,7 @@
  * it is the whole sensitive-content rule undone in one gesture.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 
 import { DiagnosticsTab } from "@/components/settings/DiagnosticsTab";
 import type { Diagnostics } from "@/service/diagnostics";
@@ -15,11 +15,16 @@ import { withUser } from "@/test/harness";
 
 const getDiagnostics = vi.fn();
 const copyText = vi.fn();
+const exportSupportBundle = vi.fn();
 
 vi.mock("@/service/diagnostics", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/service/diagnostics")>();
-  return { ...actual, getDiagnostics: () => getDiagnostics() };
+  return {
+    ...actual,
+    getDiagnostics: () => getDiagnostics(),
+    exportSupportBundle: () => exportSupportBundle(),
+  };
 });
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
@@ -45,7 +50,6 @@ function diagnostics(over: Partial<Diagnostics> = {}): Diagnostics {
       item_count: 42,
       capture_running: true,
       clipboard_backend: "macos-pasteboard",
-      legacy_history_present: false,
       counters: {
         rejected_too_large: 3,
         lost_intermediates: 1,
@@ -54,6 +58,7 @@ function diagnostics(over: Partial<Diagnostics> = {}): Diagnostics {
         uptime_secs: 12_045,
       },
     },
+    history_read: { state: "readable" },
     report: [
       "CopyPaste diagnostics",
       "app: 2.0.0-alpha.1",
@@ -72,9 +77,44 @@ function diagnostics(over: Partial<Diagnostics> = {}): Diagnostics {
 beforeEach(() => {
   getDiagnostics.mockReset().mockResolvedValue(diagnostics());
   copyText.mockReset().mockResolvedValue(undefined);
+  exportSupportBundle.mockReset().mockResolvedValue(true);
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe("live diagnostics", () => {
+  it("loads on entry and refreshes while the panel is open", async () => {
+    vi.useFakeTimers();
+    withUser(<DiagnosticsTab />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(getDiagnostics).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(getDiagnostics).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+  });
+
+  it("stops refreshing when the panel closes", async () => {
+    vi.useFakeTimers();
+    const view = withUser(<DiagnosticsTab />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    view.unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(getDiagnostics).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("what is running", () => {
   it("says the service is running, and on which version", async () => {
@@ -98,10 +138,7 @@ describe("what is running", () => {
     expect(screen.getByText(/not answering/)).toBeTruthy();
   });
 
-  /** An adopted daemon on another version is the upgrade case, and the two
-   *  facts are different: one explains the breakage, the other explains why
-   *  this app cannot fix it. */
-  it("names both an adopted service and a version difference", async () => {
+  it("reports a version difference without process-management details", async () => {
     getDiagnostics.mockResolvedValue(
       diagnostics({
         service: {
@@ -114,7 +151,7 @@ describe("what is running", () => {
     );
     withUser(<DiagnosticsTab />);
     expect(await screen.findByText(/different version from this app/)).toBeTruthy();
-    expect(screen.getByText(/can't restart it/)).toBeTruthy();
+    expect(screen.queryByText(/started outside|can't restart/i)).toBeNull();
   });
 
   it("flags a test backend rather than letting it pass for the real one", async () => {
@@ -126,6 +163,14 @@ describe("what is running", () => {
     withUser(<DiagnosticsTab />);
     const badge = await screen.findByText("fake");
     expect(badge.className).toContain("warn");
+  });
+
+  it("shows the stable history read error code", async () => {
+    getDiagnostics.mockResolvedValue(
+      diagnostics({ history_read: { state: "failed", code: "internal" } }),
+    );
+    withUser(<DiagnosticsTab />);
+    expect(await screen.findByText("Failed (internal)")).toBeTruthy();
   });
 });
 
@@ -170,9 +215,18 @@ describe("the copyable report", () => {
 
   it("copies exactly what it displayed, through the backend", async () => {
     const { user } = withUser(<DiagnosticsTab />);
-    await user.click(await screen.findByRole("button", { name: /Copy report/ }));
+    await user.click(await screen.findByRole("button", { name: /Copy diagnostics/ }));
     await waitFor(() => expect(copyText).toHaveBeenCalledTimes(1));
     expect(copyText.mock.calls[0]![0]).toBe(diagnostics().report);
+  });
+
+  it("uses the native export command for a saved support bundle", async () => {
+    const { user } = withUser(<DiagnosticsTab />);
+    await user.click(
+      await screen.findByRole("button", { name: "Export support bundle" }),
+    );
+
+    expect(exportSupportBundle).toHaveBeenCalledOnce();
   });
 
   /**
@@ -189,7 +243,7 @@ describe("the copyable report", () => {
    */
   it("renders no filesystem path anywhere", async () => {
     const { container } = withUser(<DiagnosticsTab />);
-    await screen.findByRole("button", { name: /Copy report/ });
+    await screen.findByRole("button", { name: /Copy diagnostics/ });
     expect(container.textContent ?? "").not.toMatch(
       /\/Users\/|\/home\/|~\/|\.sock|[A-Za-z]:\\|\$HOME/,
     );
@@ -210,7 +264,7 @@ describe("the copyable report", () => {
       }),
     );
     const { container } = withUser(<DiagnosticsTab />);
-    await screen.findByRole("button", { name: /Copy report/ });
+    await screen.findByRole("button", { name: /Copy diagnostics/ });
     // The backend name is the one daemon-authored string this screen prints,
     // and it is a backend name — not an item. Nothing else may echo it.
     expect(

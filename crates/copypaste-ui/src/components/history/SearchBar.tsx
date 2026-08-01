@@ -16,6 +16,7 @@ import { ListChecks, MonitorSmartphone, Search, Trash2, X } from "lucide-react";
 import { type OriginDevice, originName } from "@/components/history/origin";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { t as translate, useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import {
@@ -37,9 +38,6 @@ export function historyCount(
   const n = filtered || total === undefined ? visible : total;
   return translate("history.search.count", { count: n });
 }
-
-const SELECT_CLASS =
-  "h-8 rounded-md border border-border-strong bg-panel px-2 text-xs text-foreground outline-none focus-visible:ring-[3px] focus-visible:ring-ring";
 
 interface SearchBarProps {
   value: string;
@@ -77,7 +75,10 @@ export function SearchBar({
   const { t } = useTranslation();
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-panel px-s-3 py-s-2">
+    <div
+      data-slot="history-toolbar"
+      className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-transparent px-s-3 py-s-2"
+    >
       <div className="relative flex min-w-[180px] flex-1 items-center">
         <Search
           size={14}
@@ -119,9 +120,9 @@ export function SearchBar({
         )}
       </div>
 
-      <select
+      <NativeSelect
         aria-label={t("history.search.filterKind")}
-        className={SELECT_CLASS}
+        className="border-border-strong"
         value={view.kind}
         onChange={(event) =>
           onViewChange({ ...view, kind: event.target.value as KindFilter })
@@ -133,12 +134,12 @@ export function SearchBar({
             {kindLabel(kind)}
           </option>
         ))}
-      </select>
+      </NativeSelect>
 
       {origins.length > 1 && (
-        <select
+        <NativeSelect
           aria-label={t("history.search.filterDevice")}
-          className={SELECT_CLASS}
+          className="border-border-strong"
           value={view.device}
           onChange={(event) =>
             onViewChange({ ...view, device: event.target.value })
@@ -150,12 +151,12 @@ export function SearchBar({
               {originName(origin)}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       )}
 
-      <select
+      <NativeSelect
         aria-label={t("history.search.sortOrder")}
-        className={SELECT_CLASS}
+        className="border-border-strong"
         value={view.sort}
         onChange={(event) =>
           onViewChange({ ...view, sort: event.target.value as SortOrder })
@@ -163,7 +164,7 @@ export function SearchBar({
       >
         <option value="newest">{sortLabel("newest")}</option>
         <option value="oldest">{sortLabel("oldest")}</option>
-      </select>
+      </NativeSelect>
 
       {origins.length > 1 && (
         <Button

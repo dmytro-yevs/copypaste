@@ -34,16 +34,13 @@
 # ---------------------------------------------------------------------------
 # The hardened runtime is a *precondition for notarisation*, not a benefit on
 # its own. ADR-0001 rules notarisation out, so `--options runtime` buys nothing
-# — and it costs something specific. v1 shipped `--options runtime` on an
-# ad-hoc signature and had to add a `codesign --force --deep --sign -` to the
-# cask's postflight to make the app launchable at all; its recorded symptom was
-# `RBSRequestErrorDomain Code=5` / POSIX 163, surfaced to users as "CopyPaste.app
-# can't be opened."
+# — and it costs something specific: a hardened ad-hoc signature can prevent
+# the app from launching after quarantine.
 #
 # Dropping the hardened runtime should remove that failure mode along with the
 # entitlements file. UNVERIFIED — reasoned from Apple's documented behaviour,
 # not observed. If a quarantined ad-hoc build still refuses to launch on a real
-# Mac, the fallback is v1's: re-sign in the cask postflight. Casks/copypaste.rb
+# Mac, the fallback is to re-sign in the cask postflight. Casks/copypaste.rb
 # documents where that goes.
 #
 # ---------------------------------------------------------------------------
@@ -62,8 +59,7 @@ if [[ -z "$VERSION" ]]; then
     exit 1
 fi
 # Accept a tag or a bare version; the rest of the pipeline uses the bare form
-# and re-adds a single 'v' where it wants one. v1 shipped a DMG called
-# CopyPaste-vv0.5.1-... exactly once because this normalisation was missing.
+# and re-adds a single 'v' where it wants one.
 VERSION="${VERSION#v}"
 
 ARCH="${2:-}"

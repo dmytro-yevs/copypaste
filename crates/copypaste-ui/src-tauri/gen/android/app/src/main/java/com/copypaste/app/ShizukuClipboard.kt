@@ -88,7 +88,7 @@ object ShizukuClipboard {
      * they go looking for something that was never saved.
      */
     @Synchronized
-    fun arm(onLost: () -> Unit): Boolean {
+    fun arm(context: android.content.Context, onLost: () -> Unit): Boolean {
         // A listener is registered with a remote service, so retaining only the
         // newest local reference would leave earlier callbacks alive forever.
         disarm()
@@ -97,18 +97,20 @@ object ShizukuClipboard {
             return false
         }
         if (!hasPermission()) {
-            // Ask, and report not-listening. The user answers in Shizuku's own
-            // dialog and comes back; the refresh on resume finds the grant and
-            // the same button then arms. One command for both steps, so the
-            // frontend has one thing to call.
-            requestPermission()
             lastFailure = "shizuku has not granted permission yet"
             return false
         }
         return try {
             val clipboard = clipboardService()
             listener = ClipListener.register(clipboard) {
-                pollOnce()?.let { ClipQueue.offer(it, "background") }
+                pollOnce()?.let { clip ->
+                    ClipQueue.offer(
+                        clip.text,
+                        "background",
+                        clip.sourceAppBundleId,
+                        SourceAppResolver.label(context, clip.sourceAppBundleId),
+                    )
+                }
             }
             if (listener != null) {
                 val registeredDeathListener = Shizuku.OnBinderDeadListener {
@@ -135,12 +137,18 @@ object ShizukuClipboard {
         }
     }
 
-    fun requestPermission() {
-        try {
+    fun requestPermission(): Boolean {
+        if (!isRunning()) {
+            lastFailure = "shizuku is not running"
+            return false
+        }
+        return try {
             Shizuku.requestPermission(PERMISSION_REQUEST)
+            true
         } catch (e: Throwable) {
             Log.w(TAG, "requesting the shizuku permission failed", e)
             lastFailure = e.javaClass.simpleName
+            false
         }
     }
 
@@ -168,13 +176,33 @@ object ShizukuClipboard {
     }
 
     /** `null` when the clipboard was empty, unreadable, or not text. */
-    fun pollOnce(): String? = try {
+    fun pollOnce(): CapturedClip? = try {
         val clipboard = clipboardService()
         val clip = invoke(clipboard, "getPrimaryClip")
-        clip?.let { asText(it) }
+        clip?.let { value ->
+            asText(value)?.let { text ->
+                CapturedClip(text, sourcePackage(clipboard))
+            }
+        }
     } catch (e: Throwable) {
         Log.w(TAG, "reading the clipboard as shell failed", e)
         lastFailure = e.javaClass.simpleName
+        null
+    }
+
+    /**
+     * Android's public clipboard API intentionally omits the writer package.
+     * The shell identity used by Shizuku holds the hidden service permission,
+     * so it can ask the same clipboard service for the package that set the
+     * current primary clip. A device/version that denies the hidden call still
+     * captures the clip; only its source remains absent.
+     */
+    private fun sourcePackage(clipboard: Any): String? = try {
+        (invoke(clipboard, "getPrimaryClipSource") as? String)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it != SHELL }
+    } catch (e: Throwable) {
+        Log.d(TAG, "clipboard source is unavailable", e)
         null
     }
 
@@ -269,6 +297,11 @@ object ShizukuClipboard {
 
     /** Exposed so [ClipListener] can reach the same proxy. */
     fun service(): Any = clipboardService()
+
+    private data class CapturedClip(
+        val text: String,
+        val sourceAppBundleId: String?,
+    )
 
     /** The first text item of a `ClipData`, or null when it holds none. */
     private fun asText(clip: Any): String? {

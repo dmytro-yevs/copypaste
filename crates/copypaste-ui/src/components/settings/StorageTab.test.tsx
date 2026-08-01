@@ -251,9 +251,9 @@ describe("backup", () => {
     await waitFor(() => expect(backupDatabase).toHaveBeenCalledTimes(1));
   });
 
-  it("says a backup is never written over an existing one", () => {
+  it("says a backup does not overwrite an existing one", () => {
     withUser(<StorageTab />);
-    expect(screen.getByText(/never written over something that already exists/)).toBeTruthy();
+    expect(screen.getByText(/without overwriting backups/)).toBeTruthy();
   });
 });
 

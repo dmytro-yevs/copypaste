@@ -24,7 +24,7 @@ use std::path::Path;
 
 use zeroize::Zeroizing;
 
-use super::{Peer, PeerStoreError, FORMAT_TAG};
+use super::{Peer, PeerStoreError};
 
 /// File mode for the store on unix.
 #[cfg(unix)]
@@ -48,11 +48,9 @@ pub(super) struct State {
     pub(super) revoked: BTreeMap<String, i64>,
 }
 
-/// On-disk envelope. Separate from the in-memory state so the `format` tag is
-/// checked before anything else is believed.
+/// On-disk envelope.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoreFile {
-    format: String,
     peers: Vec<Peer>,
     #[serde(default)]
     pending: BTreeMap<String, i64>,
@@ -60,23 +58,9 @@ struct StoreFile {
     revoked: BTreeMap<String, i64>,
 }
 
-/// Parse the envelope, separating "another version wrote this" from "this is
-/// damaged".
+/// Parse the persisted state.
 pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
-    // Two passes rather than one: the first tells us whether the bytes are JSON
-    // at all and whether the format tag is ours, which is what makes `Legacy`
-    // and `Corrupt` distinguishable.
-    let value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|_| PeerStoreError::Corrupt)?;
-    let tagged = value
-        .get("format")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|tag| tag == FORMAT_TAG);
-    if !tagged {
-        return Err(PeerStoreError::Legacy);
-    }
-
-    let file: StoreFile = serde_json::from_value(value).map_err(|_| PeerStoreError::Corrupt)?;
+    let file: StoreFile = serde_json::from_slice(bytes).map_err(|_| PeerStoreError::Corrupt)?;
     let mut peers = HashMap::with_capacity(file.peers.len());
     for peer in file.peers {
         peer.validate().map_err(|_| PeerStoreError::Corrupt)?;
@@ -104,7 +88,6 @@ pub(super) fn write_atomically(path: &Path, state: &State) -> Result<(), PeerSto
     let mut records: Vec<Peer> = state.peers.values().cloned().collect();
     records.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
     let file = StoreFile {
-        format: FORMAT_TAG.to_string(),
         peers: records,
         pending: state.pending.clone(),
         revoked: state.revoked.clone(),
@@ -219,32 +202,6 @@ mod tests {
     }
 
     #[test]
-    fn a_file_from_another_version_is_reported_as_such() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = store_path(&dir);
-        // Shaped like v1's peers.json: valid JSON, no v2 format tag.
-        std::fs::write(
-            &path,
-            br#"{"peers":[{"device_id":"abc","password_file_b64":"AQID"}]}"#,
-        )
-        .expect("write");
-        assert!(matches!(
-            PeerStore::open(&path),
-            Err(PeerStoreError::Legacy)
-        ));
-        // The file is still there, untouched — a downgrade must find its data.
-        assert!(path.exists());
-
-        // A bare array (another plausible older shape) is also Legacy, not
-        // Corrupt.
-        std::fs::write(&path, b"[]").expect("write");
-        assert!(matches!(
-            PeerStore::open(&path),
-            Err(PeerStoreError::Legacy)
-        ));
-    }
-
-    #[test]
     fn a_damaged_file_is_reported_and_never_discarded() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
@@ -252,12 +209,9 @@ mod tests {
         for bad in [
             &b"not json at all"[..],
             &b""[..],
-            // Right tag, wrong shape.
-            br#"{"format":"copypaste-peers-v2","peers":"nope"}"#,
-            // Right tag, a peer whose psk is not 32 bytes.
-            br#"{"format":"copypaste-peers-v2","peers":[{"pairing_id":"a","name":"n","psk":"ab","last_addr":null,"last_seen_ms":0}]}"#,
-            // Right tag, a peer whose psk is not hex.
-            br#"{"format":"copypaste-peers-v2","peers":[{"pairing_id":"a","name":"n","psk":"zzzz","last_addr":null,"last_seen_ms":0}]}"#,
+            br#"{"peers":"nope"}"#,
+            br#"{"peers":[{"pairing_id":"a","name":"n","psk":"ab","last_addr":null,"last_seen_ms":0}]}"#,
+            br#"{"peers":[{"pairing_id":"a","name":"n","psk":"zzzz","last_addr":null,"last_seen_ms":0}]}"#,
         ] {
             std::fs::write(&path, bad).expect("write");
             assert!(
@@ -282,7 +236,6 @@ mod tests {
         store.upsert(p).expect("upsert");
 
         let text = std::fs::read_to_string(&path).expect("read");
-        assert!(text.contains(FORMAT_TAG));
         assert!(text.contains(&pairing_id));
         assert!(
             text.contains(&hex::encode(psk)),

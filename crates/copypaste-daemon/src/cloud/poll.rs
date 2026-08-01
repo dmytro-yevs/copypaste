@@ -61,6 +61,9 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 /// swallowed: a backend that is down must not stop the daemon, and the next
 /// tick will try again.
 pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, SyncError>> {
+    if !state.settings.get().sync_enabled {
+        return None;
+    }
     let driver = state.cloud.driver()?;
     let source = StoreSource::new(Arc::clone(state));
 
@@ -170,9 +173,9 @@ mod tests {
     /// re-derives the same work from local state. There is no queue to lose.
     #[tokio::test]
     async fn a_failed_round_leaves_the_upload_floor_where_it_was() {
+        use copypaste_cloud::CloudConfig;
         use copypaste_cloud::crypto::derive_sync_key;
         use copypaste_cloud::sync::CloudSource;
-        use copypaste_cloud::CloudConfig;
 
         // A URL that resolves nowhere: the round must fail at the transport
         // rather than hang.
@@ -236,8 +239,8 @@ mod tests {
 
     #[test]
     fn a_terminal_refresh_failure_invalidates_the_live_account() {
-        use copypaste_cloud::crypto::derive_sync_key;
         use copypaste_cloud::CloudConfig;
+        use copypaste_cloud::crypto::derive_sync_key;
 
         let config = CloudConfig {
             url: "https://example.supabase.co".into(),
