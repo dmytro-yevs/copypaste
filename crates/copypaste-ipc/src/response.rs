@@ -37,41 +37,20 @@ pub struct EventData {
     /// Live item count at the time of the event, so a client can render a badge
     /// without a round trip.
     pub item_count: u64,
-    /// The change was a *capture* — something the user copied, as opposed to a
-    /// delete, a pin, an import, or a row arriving from a peer.
+    /// True only for a clipboard capture, so the client can apply
+    /// `notify_on_copy`/`sound_on_copy`; the daemon reports what happened and
+    /// does not apply those client-owned settings.
     ///
-    /// This is what a client needs to post the notification and play the sound
-    /// that `ConfigData::notify_on_copy` and `ConfigData::sound_on_copy` gate.
-    /// A flag rather than a new [`EventKind`] variant so that a client built
-    /// against an older build still decodes the frame: an unknown enum variant
-    /// fails deserialisation, and a watcher that stops decoding stops updating.
-    ///
-    /// It carries no content and no id, for the reason [`crate::Method::Watch`] gives:
-    /// a subscriber that wants the item re-reads it through the ordinary
-    /// methods, which keeps one set of rules about what a client may see.
-    ///
-    /// The daemon does **not** consult `notify_on_copy` before setting it. The
-    /// flag says what happened; the setting says what to do about it, and the
-    /// client that owns the notification is the one that should read it (the
-    /// daemon has no bundle and therefore cannot post one — see
-    /// `daemon/src/notify.rs`).
+    /// A defaulted flag, not a new [`EventKind`], keeps older watchers decoding:
+    /// an unknown enum variant would reject the frame. It carries no content or
+    /// id; subscribers re-read through ordinary methods.
     #[serde(default)]
     pub captured: bool,
 
-    /// Detected secrets the auto-wipe sweep deleted, in the change this event
-    /// reports. Zero on every other change.
+    /// Secrets deleted by auto-wipe in this change; zero otherwise. This count
+    /// makes an unrequested deletion visible without exposing ids or content.
     ///
-    /// A deletion the user did not ask for is the one history change they have
-    /// to be told about, and until this field there was no way to tell them:
-    /// `ConfigData::sensitive_ttl_secs` defaults to `0` — the feature off —
-    /// *because* the count could not leave the daemon, and the Settings screen
-    /// says so in as many words.
-    ///
-    /// A count and not a list of ids, for the reason [`crate::Method::Watch`] gives:
-    /// the rows are gone, and an event carries no content.
-    ///
-    /// Same `#[serde(default)]` reasoning as [`EventData::captured`] — a
-    /// watcher built against an older daemon must keep decoding.
+    /// Defaulted so watchers built before the field keep decoding.
     #[serde(default)]
     pub swept: u32,
 }
