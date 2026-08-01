@@ -238,6 +238,10 @@ pub struct StatusData {
     /// on non-macOS hosts and in tests. Surfaced so a demo cannot be mistaken
     /// for the real thing.
     pub clipboard_backend: String,
+    /// Persisted capture gate. Present on status so a lightweight poller and
+    /// the tray converge without a second settings round-trip.
+    #[serde(default)]
+    pub private_mode: bool,
 
     /// A CopyPaste 0.4 history is on this device, unread and unaltered.
     ///
@@ -271,6 +275,12 @@ pub struct StatusData {
     /// `#[serde(default)]` for the same reason as the field above.
     #[serde(default)]
     pub counters: DiagnosticCounters,
+}
+
+/// The private capture gate's authoritative value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PrivateModeData {
+    pub private_mode: bool,
 }
 
 /// An item as seen by clients. Content is plaintext here: it is decrypted by

@@ -33,6 +33,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
 
 function config(over: Partial<ConfigData> = {}): ConfigData {
   return {
+    private_mode: false,
     poll_interval_ms: 500,
     history_limit: 10_000,
     retention_days: 0,
@@ -110,6 +111,14 @@ describe("writing one", () => {
     await user.click(await screen.findByRole("switch", { name: "Notify on capture" }));
     await waitFor(() =>
       expect(setConfig.mock.calls[0]![0]).toEqual({ notify_on_copy: true }),
+    );
+  });
+
+  it("persists private mode through the service", async () => {
+    const { user } = withUser(<ServiceTab />);
+    await user.click(await screen.findByRole("switch", { name: "Private mode" }));
+    await waitFor(() =>
+      expect(setConfig.mock.calls[0]![0]).toEqual({ private_mode: true }),
     );
   });
 });

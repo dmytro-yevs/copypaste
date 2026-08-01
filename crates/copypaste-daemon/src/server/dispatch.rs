@@ -104,6 +104,8 @@ fn requires_ready(method: &Method) -> bool {
         // `Status` remains the one question answerable before readiness.
         | Method::GetConfig
         | Method::SetConfig { .. }
+        | Method::GetPrivateMode
+        | Method::SetPrivateMode { .. }
         // Discovery is a network table held in memory, and a client asking
         // "what is on the LAN" has nothing to do with the database.
         | Method::Discovered
@@ -222,6 +224,8 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::Restore { src_path, confirm } => dbadmin::restore(state, id, &src_path, confirm),
         Method::GetConfig => config::get(state, id),
         Method::SetConfig { patch } => config::set(state, id, &patch),
+        Method::GetPrivateMode => config::private_mode(state, id),
+        Method::SetPrivateMode { enabled } => config::set_private_mode(state, id, enabled),
         // Unreachable: `dispatch` takes these first. Spelled out rather than
         // left to a `_` so that adding a method to the enum is still a compile
         // error here, which is the whole point of dispatching on a type.

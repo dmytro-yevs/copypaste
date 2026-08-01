@@ -62,6 +62,9 @@ pub enum Liveness {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ConfigData {
+    /// Stop recording clipboard changes. Persisted so a restart cannot
+    /// accidentally resume capture after the user explicitly paused it.
+    pub private_mode: bool,
     /// How often the clipboard is polled, in milliseconds. **Live.**
     pub poll_interval_ms: u64,
     /// How many live items are kept before the oldest unpinned ones are
@@ -110,12 +113,8 @@ pub struct ConfigData {
     /// Bundle ids whose copies are never captured, e.g. a password manager.
     /// **Live.**
     ///
-    /// **Stored and returned, not yet enforced.** Honouring it needs the
-    /// capture source to report which application owns the pasteboard change,
-    /// which `daemon/src/clipboard/macos.rs` does not read today. Until it
-    /// does, the enforced exclusion is the `org.nspasteboard.*` opt-out marker
-    /// set, which is the mechanism password managers actually use. A client
-    /// showing this field should say so rather than imply it is in force.
+    /// On macOS this is applied before any representation is read. A non-empty
+    /// list fails closed when frontmost-app attribution is unavailable.
     pub excluded_app_bundle_ids: Vec<String>,
     /// Whether this device advertises itself on the LAN. **Needs a restart** —
     /// the mDNS registration is made once at start.
@@ -157,6 +156,7 @@ pub struct ConfigData {
 impl Default for ConfigData {
     fn default() -> Self {
         Self {
+            private_mode: false,
             poll_interval_ms: 500,
             history_limit: 10_000,
             retention_days: 0,
@@ -229,6 +229,8 @@ fn range<T: PartialOrd + std::fmt::Display>(
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub private_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub poll_interval_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_limit: Option<u32>,
@@ -259,6 +261,9 @@ impl ConfigPatch {
     /// caller cannot half-apply a patch. `base` is untouched either way.
     pub fn apply(&self, base: &ConfigData) -> Result<ConfigData, ConfigError> {
         let mut next = base.clone();
+        if let Some(v) = self.private_mode {
+            next.private_mode = v;
+        }
         if let Some(v) = self.poll_interval_ms {
             next.poll_interval_ms = range("poll_interval_ms", v, POLL_INTERVAL_MS)?;
         }
@@ -313,6 +318,7 @@ impl ConfigPatch {
 impl From<&ConfigData> for ConfigPatch {
     fn from(c: &ConfigData) -> Self {
         Self {
+            private_mode: Some(c.private_mode),
             poll_interval_ms: Some(c.poll_interval_ms),
             history_limit: Some(c.history_limit),
             retention_days: Some(c.retention_days),
@@ -349,6 +355,7 @@ impl ConfigData {
     #[must_use]
     pub fn field_liveness() -> &'static [(&'static str, Liveness)] {
         &[
+            ("private_mode", Liveness::Live),
             ("poll_interval_ms", Liveness::Live),
             ("history_limit", Liveness::Live),
             ("retention_days", Liveness::Live),

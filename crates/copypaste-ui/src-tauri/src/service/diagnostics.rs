@@ -216,6 +216,7 @@ mod tests {
             item_count: 42,
             capture_running: true,
             clipboard_backend: "macos-pasteboard".into(),
+            private_mode: false,
             legacy_history_present: true,
             counters: DiagnosticCounters {
                 rejected_too_large: 3,
