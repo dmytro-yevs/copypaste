@@ -115,6 +115,15 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
     };
 
     let content_type = row.content_type.clone();
+    let metadata = row
+        .payload_metadata
+        .as_deref()
+        .map(serde_json::from_str::<copypaste_core::FileMetadata>)
+        .transpose();
+    let metadata = match metadata {
+        Ok(metadata) => metadata,
+        Err(_) => return Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD),
+    };
     let binary = copypaste_ipc::content_type::is_binary(&content_type).then(|| {
         copypaste_core::open_binary(&row.content_ciphertext, &state.keyring.item_key(), &row.id)
     });
@@ -124,7 +133,12 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
     };
 
     let write = match binary {
-        Some(Ok(bytes)) => state.clipboard().set_binary_contents(&content_type, &bytes),
+        Some(Ok(bytes)) => state.clipboard().set_binary_contents(
+            &item.id,
+            &content_type,
+            &bytes,
+            metadata.as_ref(),
+        ),
         Some(Err(e)) => return decrypt_error(id, &e),
         None => state.clipboard().set_contents(&item.content),
     };
