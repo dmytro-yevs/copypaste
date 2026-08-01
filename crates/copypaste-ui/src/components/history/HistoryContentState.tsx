@@ -19,6 +19,7 @@ interface HistoryContentStateProps {
   errorKind: ErrorKind | null;
   searching: boolean;
   filtered: boolean;
+  privateMode: boolean;
   query: string;
   hasMore: boolean;
   onLoadMore: () => void;
@@ -31,6 +32,7 @@ export function HistoryContentState({
   errorKind,
   searching,
   filtered,
+  privateMode,
   query,
   hasMore,
   onLoadMore,
@@ -110,6 +112,16 @@ export function HistoryContentState({
           }
         />
       );
+  }
+
+  if (privateMode) {
+    return (
+      <EmptyState
+        icon={Lock}
+        title="Private mode is on"
+        body="Clipboard is not recorded while private mode is active."
+      />
+    );
   }
 
   if (filtered) {

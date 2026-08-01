@@ -25,6 +25,7 @@ import { useUi } from "@/store/ui";
 const listItems = vi.fn();
 const searchItems = vi.fn();
 const getStatus = vi.fn();
+const copyItem = vi.fn();
 const setPinned = vi.fn();
 const deleteItem = vi.fn();
 
@@ -35,6 +36,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     listItems: (...a: unknown[]) => listItems(...a),
     searchItems: (...a: unknown[]) => searchItems(...a),
     getStatus: () => getStatus(),
+    copyItem: (...a: unknown[]) => copyItem(...a),
     setPinned: (...a: unknown[]) => setPinned(...a),
     deleteItem: (...a: unknown[]) => deleteItem(...a),
   };
@@ -44,6 +46,7 @@ beforeEach(() => {
   listItems.mockReset().mockResolvedValue(page(items(4)));
   searchItems.mockReset().mockResolvedValue(page([]));
   getStatus.mockReset().mockResolvedValue(status());
+  copyItem.mockReset().mockResolvedValue(item());
   setPinned.mockReset().mockResolvedValue(item());
   deleteItem.mockReset().mockResolvedValue(true);
   useUi.setState({ query: "", activeId: null });
@@ -91,6 +94,71 @@ describe("selection mode", () => {
 
     const bar = screen.getByRole("region", { name: /selection actions/i });
     expect(bar.textContent).toContain("2 items selected");
+  });
+
+  it("exits after the last selected item is unchecked", async () => {
+    const { user } = withUser(<HistoryView />);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await selectRows(user, 1);
+
+    await user.click(screen.getAllByRole("checkbox")[0]!);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: /selection actions/i }),
+      ).toBeNull(),
+    );
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+});
+
+describe("bulk copy", () => {
+  it("copies the first row and writes safe previews in screen order", async () => {
+    listItems.mockResolvedValue(
+      page([
+        item({ id: "first", content: "first preview" }),
+        item({ id: "secret", is_sensitive: true }),
+        item({ id: "image", content: "image preview", content_type: "image/png" }),
+        item({ id: "last", content: "last preview" }),
+      ]),
+    );
+    const { user } = withUser(<HistoryView />);
+    const writeText = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockResolvedValue(undefined);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await selectRows(user, 4);
+
+    const bar = screen.getByRole("region", { name: /selection actions/i });
+    await user.click(within(bar).getByRole("button", { name: /^copy$/i }));
+
+    await waitFor(() => expect(copyItem).toHaveBeenCalledWith("first"));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("first preview\nlast preview"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: /selection actions/i }),
+      ).toBeNull(),
+    );
+  });
+
+  it("stops on daemon failure and leaves the selection available", async () => {
+    copyItem.mockRejectedValueOnce(new Error("copy failed"));
+    const { user } = withUser(<HistoryView />);
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await selectRows(user, 2);
+
+    const bar = screen.getByRole("region", { name: /selection actions/i });
+    const copy = within(bar).getByRole("button", { name: /^copy$/i });
+    await user.click(copy);
+
+    await waitFor(() => expect(copyItem).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((copy as HTMLButtonElement).disabled).toBe(false));
+    expect(writeText).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("region", { name: /selection actions/i }),
+    ).toBeTruthy();
   });
 });
 

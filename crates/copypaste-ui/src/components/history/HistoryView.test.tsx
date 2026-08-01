@@ -74,6 +74,22 @@ describe("empty and filtered states", () => {
     await waitFor(() => expect(screen.getByText("Nothing copied yet")).toBeTruthy());
   });
 
+  it("shows the paused empty state when status reports private mode", async () => {
+    listItems.mockResolvedValue(page([]));
+    getStatus.mockResolvedValue(status({ private_mode: true }));
+    withClient(<HistoryView />);
+
+    await waitFor(() =>
+      expect(screen.getByText("Private mode is on")).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(
+        "Clipboard is not recorded while private mode is active.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Nothing copied yet")).toBeNull();
+  });
+
   it("reports a search with no matches as a search result, not as empty", async () => {
     listItems.mockResolvedValue(page([]));
     searchItems.mockResolvedValue(page([]));

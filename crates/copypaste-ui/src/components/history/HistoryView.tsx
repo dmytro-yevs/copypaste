@@ -10,12 +10,13 @@ import { RevealNotice } from "@/components/history/RevealNotice";
 import { SearchBar } from "@/components/history/SearchBar";
 import { SkippedNotice } from "@/components/history/SkippedNotice";
 import { markedOrigins, originLabel } from "@/components/history/origin";
-import { useCopy, usePin } from "@/hooks/useHistory";
+import { useCopy, usePin, useStatus } from "@/hooks/useHistory";
 import { useHistoryController } from "@/hooks/useHistoryController";
 import { useHistorySelection } from "@/hooks/useHistorySelection";
 import { useReveal } from "@/hooks/useReveal";
 import { hideWindow } from "@/lib/ipc";
 import type { Item } from "@/lib/ipc";
+import { previewOf } from "@/lib/format";
 import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 
@@ -37,9 +38,11 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
   const reveal = useReveal();
   const copy = useCopy();
   const pin = usePin();
+  const status = useStatus();
 
   const [confirmClear, setConfirmClear] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [bulkCopying, setBulkCopying] = useState(false);
 
   const selection = bulk.selection;
   const items = history.items;
@@ -93,6 +96,44 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
     [copy],
   );
 
+  const copySelected = useCallback(() => {
+    const selected = selection.items;
+    const first = selected[0];
+    if (!first || bulkCopying) return;
+
+    setBulkCopying(true);
+    copy.mutate(first, {
+      onSuccess: () => {
+        const text = selected
+          .filter(
+            (item) =>
+              !item.is_sensitive &&
+              item.content !== null &&
+              !item.content_type.toLowerCase().startsWith("image"),
+          )
+          .map((item) => previewOf(item.content!))
+          .join("\n");
+        const finish = () => {
+          selection.end();
+          setBulkCopying(false);
+        };
+
+        if (!text || typeof navigator.clipboard?.writeText !== "function") {
+          finish();
+          return;
+        }
+
+        void Promise.resolve()
+          .then(() => navigator.clipboard.writeText(text))
+          .catch(() => {
+            // Best effort: the daemon copy has already succeeded (§3.1.9).
+          })
+          .finally(finish);
+      },
+      onError: () => setBulkCopying(false),
+    });
+  }, [bulkCopying, copy, selection]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <SearchBar
@@ -120,7 +161,8 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         <BulkBar
           count={selection.items.length}
           allPinned={selection.allPinned}
-          busy={bulk.busy}
+          busy={bulk.busy || bulkCopying}
+          onCopy={copySelected}
           onTogglePin={bulk.togglePin}
           onDelete={bulk.requestDelete}
           onCancel={selection.end}
@@ -138,6 +180,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         errorKind={history.errorKind}
         searching={history.searching}
         filtered={history.filtered}
+        privateMode={status.data?.private_mode === true}
         query={history.query}
         hasMore={history.hasMore}
         onLoadMore={history.loadMore}

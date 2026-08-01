@@ -2,9 +2,9 @@
  * INV-10: a sensitive item's plaintext is *absent*, not blurred, and the
  * accessible name is a fixed string (AT-13).
  *
- * Click selects, double-click copies: a single click that overwrites the system
- * clipboard is a destructive default. Actions stay visible because Android has
- * no hover.
+ * A click or tap selects and copies (§3.1.5). Repeated click detail is ignored
+ * so a desktop double-click cannot issue the copy twice. Actions stay visible
+ * because Android has no hover.
  *
  * The body button and the action buttons are siblings, never nested — nesting
  * is the `nested-interactive` violation INV-8 is about.
@@ -157,17 +157,22 @@ function HistoryRowImpl({
         type="button"
         aria-label={rowLabel(item, origin)}
         title={tr(
-          selecting ? "history.row.selectingHint" : "history.row.hint",
+          selecting
+            ? "history.row.selectingHint"
+            : android
+              ? "history.row.tapHint"
+              : "history.row.copy",
         )}
         tabIndex={tab}
-        onClick={() => {
-          if (selecting) onToggleChecked(item);
-          else onSelect(item);
+        onClick={(event) => {
+          if (event.detail > 1) return;
+          if (selecting) {
+            onToggleChecked(item);
+          } else {
+            onSelect(item);
+            onCopy(item);
+          }
         }}
-        // No double-click-to-copy while selecting: a second click there means
-        // "deselect", and copying on it would put an item on the clipboard the
-        // user was in the middle of un-choosing.
-        onDoubleClick={selecting || android ? undefined : () => onCopy(item)}
         className="flex min-w-0 flex-1 flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
         {masked ? (
