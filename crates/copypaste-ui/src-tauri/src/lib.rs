@@ -94,6 +94,7 @@ pub fn run() {
         .plugin(shell::protection::android::plugin());
 
     builder
+        .on_window_event(shell::window::on_event)
         .setup(|app| {
             app.manage(make_backend(app)?);
             app.manage(Supervisor::default());
@@ -265,5 +266,23 @@ impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
             .clipboard()
             .write_text(text.to_string())
             .map_err(|_| "That item couldn't be copied to the clipboard.")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn app_assembly_registers_the_window_lifecycle_policy() {
+        let production_source = include_str!("lib.rs")
+            .split_once("\n#[cfg(test)]\nmod tests")
+            .expect("the test module follows production assembly")
+            .0;
+        let compact_source = production_source.split_whitespace().collect::<String>();
+        let registration = [".on_window_", "event(shell::window::on_", "event)"].concat();
+
+        assert!(
+            compact_source.contains(&registration),
+            "the app builder must register shell::window::on_event"
+        );
     }
 }
