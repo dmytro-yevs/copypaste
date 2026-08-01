@@ -418,6 +418,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          EXPECTED_CERT_FILE: packaging/android/release-cert.sha256
         run: |
           set -euo pipefail
           outputs="crates/copypaste-ui/src-tauri/gen/android/app/build/outputs/apk"
@@ -476,6 +477,16 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
           echo "Signing with the release keystore from repository secrets."
 
+          [[ -f "$EXPECTED_CERT_FILE" ]] || {
+            echo "::error::$EXPECTED_CERT_FILE is missing; release signer continuity cannot be checked"
+            exit 1
+          }
+          expected_cert="$(tr -d '[:space:]:' < "$EXPECTED_CERT_FILE" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$expected_cert" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::$EXPECTED_CERT_FILE must contain one SHA-256 certificate fingerprint before a release can be published"
+            exit 1
+          fi
+
           out="dist/CopyPaste-v${VERSION}-android.apk"
           "${tools}/zipalign" -p -f 4 "$unsigned" "${out}.aligned"
           "${tools}/apksigner" sign \
@@ -487,7 +498,24 @@ jobs:
             "${out}.aligned"
           rm -f "${out}.aligned" "$keystore"
 
-          "${tools}/apksigner" verify --verbose --print-certs "$out"
+          signer_report="$("${tools}/apksigner" verify --verbose --print-certs "$out")"
+          printf '%s\n' "$signer_report"
+          mapfile -t signer_certs < <(printf '%s\n' "$signer_report" \
+            | sed -n 's/^Signer #[0-9][0-9]* certificate SHA-256 digest: //p' \
+            | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          if (( ${#signer_certs[@]} != 1 )); then
+            echo "::error::APK must contain exactly one signing certificate"
+            exit 1
+          fi
+          actual_cert="${signer_certs[0]}"
+          if [[ ! "$actual_cert" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::apksigner did not report the SHA-256 certificate fingerprint"
+            exit 1
+          fi
+          if [[ "$actual_cert" != "$expected_cert" ]]; then
+            echo "::error::APK signer fingerprint does not match packaging/android/release-cert.sha256"
+            exit 1
+          fi
           ( cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
           cat "${out}.sha256"
 
