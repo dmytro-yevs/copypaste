@@ -146,6 +146,7 @@ pub struct ShizukuProbe {
 }
 
 /// The status fields every Kotlin command returning a probe must include.
+#[cfg(any(target_os = "android", test))]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AndroidProbeResult {
@@ -170,6 +171,7 @@ pub enum ReadOutcome {
 }
 
 /// The result of Kotlin's `arm` command.
+#[cfg(any(target_os = "android", test))]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AndroidArmResult {
