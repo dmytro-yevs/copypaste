@@ -53,6 +53,7 @@
 
 mod change;
 mod fake;
+#[cfg(any(target_os = "macos", test))]
 mod file_materialize;
 mod format;
 
@@ -85,6 +86,7 @@ mod macos;
 pub use fake::FakeClipboard;
 
 /// Current storage and transport hard bound, in bytes.
+#[cfg(any(target_os = "macos", test))]
 const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
 /// Credential stores mark a capture sensitive even when its text does not
