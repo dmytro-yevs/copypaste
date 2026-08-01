@@ -12,21 +12,30 @@
  * carry, not about the mutation firing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { configure, screen, waitFor } from "@testing-library/react";
 
 import { DevicesView } from "@/components/devices/DevicesView";
-import { peer, withUser } from "@/test/harness";
+import { peer, status, withUser } from "@/test/harness";
 
+const getStatus = vi.fn();
 const listPeers = vi.fn();
+const listDiscovered = vi.fn();
+const rescanDiscovered = vi.fn();
 const unpair = vi.fn();
 const revokeDevice = vi.fn();
 const syncNow = vi.fn();
+
+configure({ asyncUtilTimeout: 15_000 });
+vi.setConfig({ testTimeout: 20_000 });
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
   return {
     ...actual,
+    getStatus: () => getStatus(),
     listPeers: () => listPeers(),
+    listDiscovered: () => listDiscovered(),
+    rescanDiscovered: () => rescanDiscovered(),
     unpair: (pairingId: string) => unpair(pairingId),
     revokeDevice: (pairingId: string) => revokeDevice(pairingId),
     syncNow: (pairingId?: string) => syncNow(pairingId),
@@ -36,7 +45,10 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
 const PHONE = peer({ pairing_id: "pair-9", name: "Lost Phone" });
 
 beforeEach(() => {
+  getStatus.mockReset().mockResolvedValue(status());
   listPeers.mockReset().mockResolvedValue([PHONE]);
+  listDiscovered.mockReset().mockResolvedValue([]);
+  rescanDiscovered.mockReset().mockResolvedValue([]);
   unpair.mockReset().mockResolvedValue(undefined);
   revokeDevice.mockReset().mockResolvedValue(undefined);
   syncNow.mockReset().mockResolvedValue([]);
@@ -68,6 +80,8 @@ describe("cutting a device off", () => {
     // thinks revoking erases the history will not revoke a stolen phone.
     expect(dialog.textContent).toMatch(/nothing already synced is deleted/i);
     expect(dialog.textContent).toMatch(/can't be undone/i);
+    expect(dialog.textContent).toMatch(/peer pairing only/i);
+    expect(dialog.textContent).toMatch(/no command to rotate or revoke a cloud sync key/i);
   });
 
   /** The weight the two actions carry has to differ, or the recoverable one
@@ -132,6 +146,54 @@ describe("pairing availability", () => {
     expect(
       await screen.findByLabelText(/lost phone\. name reported by the device itself — not verified/i),
     ).toBeTruthy();
+  });
+});
+
+describe("the supported device surfaces", () => {
+  it("shows this device from the status fields the app already exposes", async () => {
+    withUser(<DevicesView />);
+
+    expect(await screen.findByRole("heading", { name: "This device" })).toBeTruthy();
+    expect(await screen.findByText("App version")).toBeTruthy();
+    expect(screen.getByText("2.0.0-alpha.1")).toBeTruthy();
+    expect(screen.getByText("3 items")).toBeTruthy();
+    expect(screen.getAllByText("Recording").length).toBeGreaterThan(0);
+  });
+
+  /** HB-9: passive discovery returning nothing must not remove the only way
+   *  to ask the network again. */
+  it("keeps manual discovery refresh reachable when nothing was found", async () => {
+    const { user } = withUser(<DevicesView />);
+
+    expect(await screen.findByText("No devices found on the network yet.")).toBeTruthy();
+    const refresh = screen.getByRole("button", {
+      name: "Refresh devices discovered on this network",
+    });
+    await user.click(refresh);
+    await waitFor(() => expect(rescanDiscovered).toHaveBeenCalledOnce());
+  });
+
+  it("shows discovered details as unverified without restoring Pair/Add", async () => {
+    listDiscovered.mockResolvedValue([
+      {
+        pairing_id: "nearby-1",
+        name: "Nearby Phone",
+        addr: "192.168.1.55:7420",
+        last_seen_ms: Date.now(),
+        paired: false,
+      },
+    ]);
+    withUser(<DevicesView />);
+
+    expect(
+      await screen.findByLabelText(
+        /nearby phone\. unverified device details reported over the network/i,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("192.168.1.55:7420")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /pair a new device|add a device|pair nearby/i }),
+    ).toBeNull();
   });
 });
 
