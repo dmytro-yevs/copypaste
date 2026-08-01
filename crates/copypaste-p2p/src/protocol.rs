@@ -125,22 +125,19 @@ pub struct ItemSummary {
 /// content bytes, never truncated (a v1 helper cut it to 16 bytes and threw
 /// away second-preimage resistance for nothing, `CopyPaste-y4v1`).
 ///
-/// This must equal `copypaste_core::storage::compute_content_hash`, which
-/// computes the same value for the dedup index. Stating it twice is the cost of
-/// not pulling SQLCipher into the transport crate for one digest; identical
-/// pinned vectors in each crate's tests are what stop the two drifting, since
-/// the compiler cannot.
 #[must_use]
 pub fn content_hash(content: &str) -> String {
-    content_hash_bytes(content.as_bytes())
+    plaintext_content_hash(content.as_bytes())
 }
 
-/// The content-addressed digest of either a UTF-8 or binary payload.
+/// The shared plaintext identity for P2P transfer and local deduplication.
 #[must_use]
-pub fn content_hash_bytes(content: &[u8]) -> String {
+pub fn plaintext_content_hash(content: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     hex::encode(Sha256::digest(content))
 }
+
+pub use plaintext_content_hash as content_hash_bytes;
 
 /// An item being transferred. `content` is plaintext — see the module docs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -481,10 +478,6 @@ fn check_pin_state(pinned: bool, pin_order: Option<f64>) -> Result<(), ProtocolE
 mod tests {
     use super::*;
 
-    /// The anti-drift pin promised by [`content_hash`]'s docs: the same vectors
-    /// `copypaste_core::storage::compute_content_hash` pins. If either side ever
-    /// changes, one of these two tests fails instead of sync quietly rejecting
-    /// every item.
     #[test]
     fn content_hash_is_the_full_sha256_hex() {
         assert_eq!(
@@ -542,7 +535,7 @@ mod tests {
                 content_type: "image/png".into(),
                 created_at: 1,
                 deleted: false,
-                content_hash: content_hash_bytes(&bytes),
+                content_hash: plaintext_content_hash(&bytes),
                 origin_device_id: "device-a".into(),
                 pinned: false,
                 pin_order: None,

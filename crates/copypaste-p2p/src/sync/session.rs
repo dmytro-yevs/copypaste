@@ -32,7 +32,7 @@ use crate::protocol::{
 };
 
 #[cfg(test)]
-use crate::protocol::{content_hash, content_hash_bytes};
+use crate::protocol::{content_hash, plaintext_content_hash};
 
 /// Runs the initiating half of a session to completion.
 pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
@@ -301,7 +301,7 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
                         &item.binary_content
                     };
                     if !item.deleted
-                        && crate::protocol::content_hash_bytes(payload) != item.content_hash
+                        && crate::protocol::plaintext_content_hash(payload) != item.content_hash
                     {
                         // The peer's `content_hash` is comparator key 2. Taking
                         // its word for it lets a hostile peer pick that key
@@ -1039,7 +1039,7 @@ mod tests {
                 content_type: "image/png".into(),
                 created_at: 1,
                 deleted: false,
-                content_hash: content_hash_bytes(&bytes),
+                content_hash: plaintext_content_hash(&bytes),
                 origin_device_id: "dev-a".into(),
                 pinned: false,
                 pin_order: None,

@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+copypaste-clock = { path = "../copypaste-clock" }
 # `ConfigData` — the settings the ingest path reads. The dependency runs this
 # way only: `copypaste-ipc` must never depend on this crate, because the CLI
 # depends on it and must not be able to open a database.

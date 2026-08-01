@@ -36,9 +36,6 @@ pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};
 /// One helper, called everywhere. v1 had several time sources and a
 /// clock-skew bug that came from mixing them.
 pub fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    use copypaste_clock::{SystemWallClock, WallClock};
+    SystemWallClock.now_ms()
 }

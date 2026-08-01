@@ -45,15 +45,9 @@ pub const SERVICE_TYPE: &str = "_copypaste._tcp.local.";
 
 /// Milliseconds since the Unix epoch.
 ///
-/// Local because this crate does not depend on `copypaste-core`, where the
-/// shared helper lives — but one copy, not one per module: discovery, sync and
-/// the pairing deadline had grown their own. A clock before the epoch reads as
-/// 0, which loses every comparison, and losing is the safe direction for all
-/// three.
+/// A clock before the epoch reads as 0, which loses every comparison, and
+/// losing is the safe direction for discovery, sync and pairing deadlines.
 pub(crate) fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    use copypaste_clock::{SystemWallClock, WallClock};
+    SystemWallClock.now_ms()
 }

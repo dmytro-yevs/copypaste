@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+copypaste-clock = { path = "../copypaste-clock" }
 snow.workspace = true
 mdns-sd.workspace = true
 data-encoding.workspace = true

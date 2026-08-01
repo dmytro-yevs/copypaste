@@ -316,10 +316,7 @@ fn hard_delete_in_tx(tx: &Transaction<'_>, ids: &[String]) -> rusqlite::Result<u
 /// chars, which threw away second-preimage resistance for nothing
 /// (`CopyPaste-y4v1`). Hashing the content only — not the source app or any
 /// other metadata — is what makes the same text copied from two apps dedup.
-pub fn compute_content_hash(raw: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    hex::encode(Sha256::digest(raw))
-}
+pub use copypaste_p2p::protocol::plaintext_content_hash as compute_content_hash;
 
 #[cfg(test)]
 mod tests {

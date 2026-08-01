@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/copypaste-clock",
     "crates/copypaste-ipc",
     "crates/copypaste-macos-keychain",
     "crates/copypaste-core",

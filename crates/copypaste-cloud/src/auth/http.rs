@@ -128,8 +128,11 @@ fn truncate(text: &str) -> String {
 /// tombstone restamp in [`crate::rest`], and the future-skew refusal in
 /// [`crate::sync`]. One reader means one saturating rule.
 pub(crate) fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    unix_millis(SystemTime::now())
+}
+
+fn unix_millis(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
         .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
         .unwrap_or(0)
 }
@@ -221,5 +224,12 @@ mod tests {
         let detail = truncate(&text);
         assert!(detail.ends_with('…'));
         assert!(detail.is_char_boundary(detail.len() - '…'.len_utf8()));
+    }
+
+    #[test]
+    fn cloud_wall_time_saturates_at_the_wire_integer_limit() {
+        let overflow = UNIX_EPOCH + Duration::from_millis(i64::MAX as u64 + 1);
+        assert_eq!(unix_millis(overflow), i64::MAX);
+        assert_eq!(unix_millis(UNIX_EPOCH - Duration::from_millis(1)), 0);
     }
 }
