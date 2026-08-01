@@ -21,7 +21,7 @@ use std::time::SystemTime;
 use tracing::{debug, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{Capture, ClipboardSource, MAX_TEXT_BYTES};
+use super::{is_password_manager_app, Capture, CapturePolicy, ClipboardSource, MAX_TEXT_BYTES};
 
 /// Environment variable naming a file the [`FakeClipboard`] watches.
 const FAKE_CLIPBOARD_ENV: &str = "COPYPASTE_FAKE_CLIPBOARD";
@@ -40,6 +40,7 @@ pub struct FakeClipboard {
     contents: Option<String>,
     watched: Option<WatchedFile>,
     rejected_too_large: u64,
+    frontmost_app: Option<String>,
 }
 
 /// The watched-file half of the fake.
@@ -71,6 +72,7 @@ impl FakeClipboard {
             contents: None,
             watched: None,
             rejected_too_large: 0,
+            frontmost_app: None,
         }
     }
 
@@ -92,6 +94,12 @@ impl FakeClipboard {
     pub fn push_external(&mut self, text: &str) {
         self.contents = Some(text.to_string());
         self.change_count += 1;
+    }
+
+    /// Drive frontmost-app attribution in cross-platform integration tests.
+    #[cfg(test)]
+    pub fn set_frontmost_app(&mut self, bundle_id: Option<&str>) {
+        self.frontmost_app = bundle_id.map(str::to_owned);
     }
 
     /// Fold any external edit of the watched file into the change counter.
@@ -156,6 +164,14 @@ impl Default for FakeClipboard {
 
 impl ClipboardSource for FakeClipboard {
     fn poll(&mut self) -> Option<Capture> {
+        self.poll_with_policy(CapturePolicy {
+            private_mode: false,
+            excluded_app_bundle_ids: &[],
+            max_item_bytes: MAX_TEXT_BYTES as u64,
+        })
+    }
+
+    fn poll_with_policy(&mut self, policy: CapturePolicy<'_>) -> Option<Capture> {
         self.sync_watched_file();
 
         match self.tracker.observe(self.change_count) {
@@ -174,14 +190,40 @@ impl ClipboardSource for FakeClipboard {
             }
         }
 
+        // Private mode and app exclusions acknowledge the change after its
+        // cursor was advanced above, but before any content is cloned.
+        let app_bundle_id = self.frontmost_app.clone();
+        if policy.private_mode
+            || app_bundle_id
+                .as_deref()
+                .is_some_and(is_password_manager_app)
+            || (!policy.excluded_app_bundle_ids.is_empty()
+                && app_bundle_id.as_ref().is_none_or(|id| {
+                    policy
+                        .excluded_app_bundle_ids
+                        .iter()
+                        .any(|excluded| excluded == id)
+                }))
+        {
+            return None;
+        }
+
         // §3.2: whatever the burst arithmetic said, the surviving value is
         // returned. §3.20: no content dedup here — re-copying the same text is
         // a real change and ingest is what collapses it into a recency bump.
         let content = self.contents.clone()?;
+        if content.len() as u64 > policy.max_item_bytes {
+            self.rejected_too_large += 1;
+            return None;
+        }
         if content.is_empty() {
             return None;
         }
-        Some(Capture::text(content))
+        Some(Capture {
+            content,
+            content_type: copypaste_ipc::content_type::TEXT.to_string(),
+            app_bundle_id,
+        })
     }
 
     fn changed(&mut self) -> bool {
@@ -448,5 +490,81 @@ mod tests {
             cb.poll().map(|c| c.content),
             Some("small again".to_string())
         );
+    }
+
+    #[test]
+    fn excluded_and_unknown_apps_are_acknowledged_without_reading_again() {
+        let mut cb = fake();
+        cb.set_frontmost_app(Some("com.example.excluded"));
+        cb.push_external("secret");
+        let exclusions = ["com.example.excluded".to_string()];
+        assert!(cb
+            .poll_with_policy(CapturePolicy {
+                private_mode: false,
+                excluded_app_bundle_ids: &exclusions,
+                max_item_bytes: MAX_TEXT_BYTES as u64,
+            })
+            .is_none());
+        assert!(cb.poll().is_none(), "excluded change was replayed");
+
+        cb.set_frontmost_app(None);
+        cb.push_external("unknown source");
+        assert!(
+            cb.poll_with_policy(CapturePolicy {
+                private_mode: false,
+                excluded_app_bundle_ids: &exclusions,
+                max_item_bytes: MAX_TEXT_BYTES as u64,
+            })
+            .is_none(),
+            "non-empty exclusions fail closed"
+        );
+        cb.push_external("normal");
+        assert_eq!(
+            cb.poll().map(|capture| capture.content),
+            Some("normal".into())
+        );
+    }
+
+    #[test]
+    fn password_manager_apps_are_skipped_without_an_exclusion_setting() {
+        let mut cb = fake();
+        cb.set_frontmost_app(Some("com.1password.1password"));
+        cb.push_external("generated-password");
+        assert!(cb.poll().is_none());
+        assert!(cb.poll().is_none(), "password-manager copy was replayed");
+    }
+
+    #[test]
+    fn private_mode_suppresses_without_replaying_old_copies() {
+        let mut cb = fake();
+        cb.push_external("while private");
+        assert!(cb
+            .poll_with_policy(CapturePolicy {
+                private_mode: true,
+                excluded_app_bundle_ids: &[],
+                max_item_bytes: MAX_TEXT_BYTES as u64,
+            })
+            .is_none());
+        assert!(cb.poll().is_none(), "private copy was replayed");
+        cb.push_external("after private");
+        assert_eq!(
+            cb.poll().map(|capture| capture.content),
+            Some("after private".into())
+        );
+    }
+
+    #[test]
+    fn live_size_policy_rejects_before_the_capture_is_returned() {
+        let mut cb = fake();
+        cb.push_external("four");
+        assert!(cb
+            .poll_with_policy(CapturePolicy {
+                private_mode: false,
+                excluded_app_bundle_ids: &[],
+                max_item_bytes: 3,
+            })
+            .is_none());
+        assert_eq!(cb.rejected_too_large_count(), 1);
+        assert!(cb.poll().is_none(), "oversized copy was replayed");
     }
 }

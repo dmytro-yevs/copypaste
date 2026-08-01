@@ -83,6 +83,15 @@ export function ServiceTab() {
         title={t("settings.service.groups.capture.title")}
         description={t("settings.service.groups.capture.description")}
       >
+        <SwitchRow
+          title={t("settings.service.privateMode.title")}
+          description={t("settings.service.privateMode.description")}
+          id="private-mode"
+          checked={data.private_mode}
+          disabled={busy}
+          onChange={(private_mode) => apply({ private_mode })}
+        />
+
         <ChoiceRow
           title={t("settings.service.poll.title")}
           description={t("settings.service.poll.description")}

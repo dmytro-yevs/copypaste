@@ -48,6 +48,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             item_count,
             capture_running: state.capture_running(),
             clipboard_backend: state.backend_name().to_string(),
+            private_mode: state.settings.get().private_mode,
             legacy_history_present: state.legacy_history_present(),
             counters: state.counters(),
         }),

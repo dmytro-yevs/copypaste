@@ -44,12 +44,15 @@ if-addrs = "0.15"
 # Device name. Reading /etc/hostname works on Linux only, and `uname -n` is a
 # subprocess; this is the portable `gethostname(3)` binding.
 gethostname = "1"
+base64.workspace = true
+url.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 security-framework.workspace = true
+plist.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

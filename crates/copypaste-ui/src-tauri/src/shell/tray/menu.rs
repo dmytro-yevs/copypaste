@@ -20,6 +20,7 @@ use crate::backend::{Backend as _, SelectedBackend};
 
 pub const ID_TOGGLE: &str = "toggle";
 pub const ID_AUTOSTART: &str = "autostart";
+pub const ID_PRIVATE_MODE: &str = "private-mode";
 pub const ID_QUIT: &str = "quit";
 pub const ID_STATUS: &str = "status";
 pub const RECENT_PREFIX: &str = "recent.";
@@ -40,6 +41,7 @@ struct Shown {
 pub struct TrayMenu<R: Runtime> {
     pub menu: Menu<R>,
     pub autostart: CheckMenuItem<R>,
+    pub private_mode: CheckMenuItem<R>,
     status: MenuItem<R>,
     recent: Submenu<R>,
     slots: Vec<MenuItem<R>>,
@@ -78,6 +80,16 @@ impl<R: Runtime> TrayMenu<R> {
             autostart_enabled,
             None::<&str>,
         )?;
+        // Startup never waits for IPC. The refresh loop replaces this safe
+        // unchecked default with the persisted daemon truth.
+        let private_mode = CheckMenuItem::with_id(
+            app,
+            ID_PRIVATE_MODE,
+            text::PRIVATE_MODE,
+            true,
+            false,
+            None::<&str>,
+        )?;
         let quit = MenuItem::with_id(app, ID_QUIT, text::QUIT, true, None::<&str>)?;
 
         let menu = Menu::with_items(
@@ -88,6 +100,8 @@ impl<R: Runtime> TrayMenu<R> {
                 &toggle,
                 &recent,
                 &PredefinedMenuItem::separator(app)?,
+                &private_mode,
+                &PredefinedMenuItem::separator(app)?,
                 &autostart,
                 &PredefinedMenuItem::separator(app)?,
                 &quit,
@@ -97,6 +111,7 @@ impl<R: Runtime> TrayMenu<R> {
         Ok(Self {
             menu,
             autostart,
+            private_mode,
             status,
             recent,
             slots,
@@ -127,6 +142,10 @@ impl<R: Runtime> TrayMenu<R> {
             Err(_) => text::STATUS_OFFLINE,
         };
         let _ = self.status.set_text(status);
+
+        if let Ok(config) = backend.get_config().await {
+            let _ = self.private_mode.set_checked(config.config.private_mode);
+        }
 
         // The page carries plaintext, which is exactly why `Clipping` and not
         // this function decides what a menu may say about it.
