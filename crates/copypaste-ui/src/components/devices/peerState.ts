@@ -1,6 +1,5 @@
 /**
- * Three field names in `peers()` mean something other than they say, and every
- * state below turns on that (`ui-parity-audit.md` finding 4):
+ * Three field names in `peers()` mean something other than they say:
  *
  *  - `last_seen_ms` is a last-*synced* time — `Node::touch_peer` writes it at
  *    the end of a successful session. `0` means never contacted.

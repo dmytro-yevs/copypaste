@@ -5,7 +5,7 @@
     </style>
 
     <!--
-      IntakeActivity's theme. It exists only to hold window focus for the
+      Clipboard capture activity theme. It exists only to hold window focus for the
       instant a clipboard read needs it, so it must not draw, must not animate,
       and must not dim what is behind it: the user asked to save a clip, not to
       leave the app they were in.

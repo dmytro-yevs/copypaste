@@ -3,6 +3,7 @@ import {
   CircleAlert,
   CircleCheck,
   Clock,
+  Link2,
   LoaderCircle,
   Moon,
   RefreshCw,
@@ -88,8 +89,8 @@ export function PeerRow({
   const presence = t(peer.online ? "devices.peer.online" : "devices.peer.offline");
 
   return (
-    <li className="flex flex-col gap-s-2 rounded-xl border border-border bg-card px-s-3 py-s-3">
-      <div className="flex flex-wrap items-center gap-s-3">
+    <li className="flex flex-col gap-s-3 rounded-xl border border-border bg-card p-s-3">
+      <div className="flex min-w-0 items-start gap-s-3">
         <span
           aria-hidden="true"
           className="flex size-[var(--sz-tile)] shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
@@ -97,33 +98,52 @@ export function PeerRow({
           <StateIcon size={18} />
         </span>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="min-w-0 flex-1">
           <span
             className="truncate text-sm font-medium"
             title={t("devices.peer.nameHint")}
           >
             {peer.name}
           </span>
-          <span className="truncate text-xs text-muted-foreground">
-            {synced} · {presence}
-            {peer.last_addr ? ` · ${peer.last_addr}` : ""}
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {t("devices.peer.nameUnverified")}
           </span>
         </div>
 
         <Badge variant={variant}>{t(`devices.state.${state}.label`)}</Badge>
+      </div>
 
+      <dl className="grid gap-x-s-4 gap-y-s-2 text-xs sm:grid-cols-2">
+        <div className="min-w-0">
+          <dt className="text-muted-foreground">{t("devices.peer.lastSyncLabel")}</dt>
+          <dd className="mt-0.5 font-medium">{synced}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-muted-foreground">{t("devices.peer.networkLabel")}</dt>
+          <dd className="mt-0.5 font-medium">{presence}</dd>
+        </div>
+        {peer.last_addr && (
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="text-muted-foreground">{t("devices.peer.addressLabel")}</dt>
+            <dd className="mt-0.5 truncate font-mono text-[0.6875rem]">{peer.last_addr}</dd>
+          </div>
+        )}
+      </dl>
+
+      <div className="flex flex-wrap gap-s-2 border-t border-divider pt-s-2">
         <Button
-          size="icon-sm"
-          variant="ghost"
+          size="sm"
+          variant="outline"
           aria-label={t("devices.peer.syncOne", { name: peer.name })}
           title={t("devices.peer.syncOneHint")}
           disabled={syncing}
           onClick={() => onSync(peer)}
         >
           <RefreshCw aria-hidden="true" />
+          {t("devices.peer.syncAction")}
         </Button>
         <Button
-          size="icon-sm"
+          size="sm"
           variant="ghost"
           aria-label={t("devices.peer.unpairOne", { name: peer.name })}
           title={t("devices.peer.unpairHint")}
@@ -136,9 +156,10 @@ export function PeerRow({
           ) : (
             <Unlink aria-hidden="true" />
           )}
+          {t("devices.peer.unpairAction")}
         </Button>
         <Button
-          size="icon-sm"
+          size="sm"
           variant="ghost"
           aria-label={t("devices.peer.revokeOne", { name: peer.name })}
           title={t("devices.peer.revokeHint")}
@@ -151,6 +172,7 @@ export function PeerRow({
           ) : (
             <ShieldOff aria-hidden="true" />
           )}
+          {t("devices.peer.revokeAction")}
         </Button>
       </div>
 
@@ -175,7 +197,8 @@ export function PeerRow({
       ) : (
         <>
           {hasHint(state) && (
-            <p className="text-xs text-muted-foreground">
+            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+              <Link2 aria-hidden="true" className="mt-px size-3.5 shrink-0" />
               {t(`devices.state.${state}.hint`)}
             </p>
           )}

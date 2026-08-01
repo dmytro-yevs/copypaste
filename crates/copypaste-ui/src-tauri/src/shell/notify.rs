@@ -21,6 +21,8 @@ use crate::backend::{Backend as _, SelectedBackend};
 /// argument `tray::recent` makes about menu labels.
 pub const TITLE: &str = "Saved to CopyPaste";
 pub const BODY: &str = "What you just copied is in your history.";
+pub const COPY_TITLE: &str = "Copied from CopyPaste";
+pub const COPY_BODY: &str = "The clipping is ready to paste.";
 
 /// Something was captured. Post the notification, if the user asked for one and
 /// is not already looking at the app.
@@ -46,7 +48,29 @@ pub fn on_capture<R: Runtime>(app: &AppHandle<R>) {
         }
         // `show` goes to the platform and blocks; the caller is the change
         // stream's task.
-        let _ = tauri::async_runtime::spawn_blocking(move || post(&app)).await;
+        let _ = tauri::async_runtime::spawn_blocking(move || post(&app, TITLE, BODY, false)).await;
+    });
+}
+
+/// A tray selection is a copy just as a history-row selection is. It needs the
+/// same native acknowledgement without exposing the clipping in a notification.
+pub fn on_recent_copy<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let config = {
+            let backend = app.state::<SelectedBackend>();
+            match backend.get_config().await {
+                Ok(applied) => applied.config,
+                Err(_) => return,
+            }
+        };
+        if !config.notify_on_copy {
+            return;
+        }
+        let sound = config.sound_on_copy;
+        let _ =
+            tauri::async_runtime::spawn_blocking(move || post(&app, COPY_TITLE, COPY_BODY, sound))
+                .await;
     });
 }
 
@@ -56,16 +80,11 @@ pub fn should_post(enabled: bool, foreground: bool) -> bool {
 }
 
 /// Whether the user is already looking at the app.
-///
-/// Visibility alone: `window::on_event` hides the popover the moment it loses
-/// focus, so a visible window is a focused one. An unanswerable window counts as
-/// hidden, matching `window::toggle` — the recoverable direction there is to act
-/// as if it is not on screen.
 fn is_foreground<R: Runtime>(app: &AppHandle<R>) -> bool {
-    window::main_window(app).is_some_and(|window| window.is_visible().unwrap_or(false))
+    window::main_window(app).is_some_and(|window| window.is_focused().unwrap_or(false))
 }
 
-fn post<R: Runtime>(app: &AppHandle<R>) {
+fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str, sound: bool) {
     let notifier = app.notification();
 
     // Inert on the desktop, where both calls answer `Granted` — macOS decides at
@@ -84,7 +103,13 @@ fn post<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
 
-    if let Err(error) = notifier.builder().title(TITLE).body(BODY).show() {
+    let notification = notifier.builder().title(title).body(body);
+    let notification = if sound {
+        notification.sound("default")
+    } else {
+        notification
+    };
+    if let Err(error) = notification.show() {
         tracing::debug!(%error, "the capture notification was not posted");
     }
 }
@@ -110,7 +135,7 @@ mod tests {
     /// Whatever was copied must not be in it, and neither must a path (INV-12).
     #[test]
     fn the_notification_carries_neither_content_nor_a_path() {
-        for text in [TITLE, BODY] {
+        for text in [TITLE, BODY, COPY_TITLE, COPY_BODY] {
             assert!(!text.contains('/'), "{text}");
             assert!(!text.contains('\\'), "{text}");
         }

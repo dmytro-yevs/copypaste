@@ -14,6 +14,11 @@ import { DEFAULT_PREFS, usePrefs } from "@/store/prefs";
 import { status, withClient, withUser } from "@/test/harness";
 
 const getStatus = vi.fn();
+const userAgent = navigator.userAgent;
+
+function setUserAgent(value: string) {
+  Object.defineProperty(navigator, "userAgent", { configurable: true, value });
+}
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -25,9 +30,12 @@ beforeEach(() => {
   usePrefs.setState({ ...DEFAULT_PREFS });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  setUserAgent(userAgent);
+  vi.restoreAllMocks();
+});
 
-describe("the tab row (A11Y-6 / AT-18)", () => {
+describe("the settings navigation", () => {
   it("is a tablist of tabs with a selected one", () => {
     withClient(<SettingsView />);
     const tabs = screen.getAllByRole("tab");
@@ -44,12 +52,11 @@ describe("the tab row (A11Y-6 / AT-18)", () => {
     expect(document.getElementById(labelledBy!)?.getAttribute("role")).toBe("tab");
   });
 
-  it("wraps from the last tab back to the first with an arrow key", async () => {
+  it("moves through the vertical desktop navigation with an arrow key", async () => {
     const { user } = withUser(<SettingsView />);
     const tabs = screen.getAllByRole("tab");
     tabs[0]!.focus();
-    // One right per tab lands back where it started, which is the wrap.
-    await user.keyboard("{ArrowRight}".repeat(tabs.length));
+    await user.keyboard("{ArrowDown}".repeat(tabs.length));
     await waitFor(() =>
       expect(tabs[0]!.getAttribute("aria-selected")).toBe("true"),
     );
@@ -64,14 +71,25 @@ describe("the tab row (A11Y-6 / AT-18)", () => {
     }
   });
 
-  it("wraps rather than scrolling, so nothing hides at 720px (A11Y-15)", () => {
-    // CopyPaste-g27b.31: at the minimum width v1's tab row overflowed behind a
-    // scrollbar-less scroller and its last tab was entirely off-screen. jsdom
-    // cannot measure that, so the invariant is asserted where it lives.
+  it("uses grouped vertical navigation on desktop", () => {
     withClient(<SettingsView />);
     const list = screen.getByRole("tablist");
+    expect(list.getAttribute("aria-orientation")).toBe("vertical");
+    expect(screen.getByText("Personal")).toBeTruthy();
+    expect(screen.getByText("CopyPaste")).toBeTruthy();
+    expect(screen.getByText("Support")).toBeTruthy();
+    expect(list.className).toContain("flex-col");
+  });
+
+  it("keeps the compact horizontal tab row on Android", () => {
+    setUserAgent("Mozilla/5.0 (Linux; Android 15)");
+    withClient(<SettingsView />);
+
+    const list = screen.getByRole("tablist");
+    expect(list.getAttribute("aria-orientation")).toBe("horizontal");
     expect(list.className).toContain("flex-wrap");
-    expect(list.className).not.toContain("overflow-x");
+    expect(list.className).toContain("w-full");
+    expect(screen.queryByText("Personal")).toBeNull();
   });
 });
 
@@ -97,6 +115,27 @@ describe("appearance", () => {
     const { user } = withUser(<SettingsView />);
     await user.click(screen.getByRole("button", { name: "Teal" }));
     expect(usePrefs.getState().accent).toBe("teal");
+  });
+
+  it("keeps every swatch colour immutable when another accent is selected", async () => {
+    const { user } = withUser(<SettingsView />);
+    const group = screen.getByRole("group", { name: "Accent" });
+    const before = [...group.querySelectorAll<HTMLButtonElement>("button")].map(
+      (swatch) => swatch.style.backgroundColor,
+    );
+    const classes = [...group.querySelectorAll<HTMLButtonElement>("button")].map(
+      (swatch) => swatch.className,
+    );
+
+    expect(new Set(before)).toHaveLength(6);
+    expect(new Set(classes)).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Teal" }));
+    expect([...group.querySelectorAll<HTMLButtonElement>("button")].map(
+      (swatch) => swatch.style.backgroundColor,
+    )).toEqual(before);
+    expect([...group.querySelectorAll<HTMLButtonElement>("button")].map(
+      (swatch) => swatch.className,
+    )).toEqual(classes);
   });
 });
 

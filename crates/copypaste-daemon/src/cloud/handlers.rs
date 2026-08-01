@@ -20,7 +20,7 @@ use copypaste_ipc::{ErrorCode, Response, ResponseData};
 use tracing::{info, warn};
 use zeroize::Zeroizing;
 
-use crate::cloud::{poll, KEY_UPLOAD_FLOOR, KEY_WATERMARK};
+use crate::cloud::{poll, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK};
 use crate::AppState;
 
 const MSG_NOT_CONFIGURED: &str =
@@ -109,7 +109,10 @@ pub async fn sign_in(
     }
     // Always: signing in is what triggers the backlog sweep, or only future
     // captures ever reach the backend (manifest 05 §4.9, BUG C2).
-    if let Err(e) = state.meta.set_state_ms(KEY_UPLOAD_FLOOR, 0) {
+    if let Err(e) = state
+        .meta
+        .set_state_all(&[(KEY_UPLOAD_FLOOR, "0"), (KEY_UPLOAD_FLOOR_ITEM, "")])
+    {
         warn!(error = ?e, "could not reset the upload floor");
         return Response::err(id, ErrorCode::Internal, MSG_STORE);
     }

@@ -64,7 +64,6 @@ crates/copypaste-daemon/src/clipboard/mod.rs
 crates/copypaste-daemon/src/cloud/mod.rs
 crates/copypaste-daemon/src/cloud/realtime.rs
 crates/copypaste-daemon/src/cloud/source.rs
-crates/copypaste-daemon/src/main.rs
 crates/copypaste-daemon/src/meta/mod.rs
 crates/copypaste-daemon/src/notify.rs
 crates/copypaste-daemon/src/p2p/handlers.rs
@@ -124,9 +123,7 @@ crates/copypaste-ui/src-tauri/src/service/mod.rs
 crates/copypaste-ui/src-tauri/src/service/push.rs
 crates/copypaste-ui/src-tauri/src/shell/autostart.rs
 crates/copypaste-ui/src-tauri/src/shell/hotkey.rs
-crates/copypaste-ui/src-tauri/src/shell/mod.rs
 crates/copypaste-ui/src-tauri/src/shell/tray.rs
-crates/copypaste-ui/src-tauri/src/shell/window.rs
 crates/copypaste-ui/src/components/devices/DevicesView.tsx
 crates/copypaste-ui/src/components/devices/PairAcceptDialog.tsx
 crates/copypaste-ui/src/components/devices/PairCreateDialog.tsx

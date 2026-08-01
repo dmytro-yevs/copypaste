@@ -18,14 +18,14 @@ use copypaste_ipc::Item;
 /// v1 listed ten in a submenu. Five is what fits without the menu becoming the
 /// thing you scan rather than the thing you click, and the window is one item
 /// above it for the rest.
-pub const SLOTS: usize = 5;
+pub const SLOTS: usize = 10;
 
 /// How many rows to ask the backend for.
 ///
 /// More than [`SLOTS`], because flagged items are dropped from the answer: a
 /// page of exactly five would leave the menu short by however many of them the
 /// user had just copied, which reads as clippings going missing.
-pub const FETCH: u32 = 32;
+pub const FETCH: u32 = 64;
 
 /// Longest menu label. v1's number, kept: past this a macOS menu grows wider
 /// than the screen it drops out of.
@@ -149,6 +149,12 @@ mod tests {
             .map(|i| item(&format!("row-{i}"), &format!("entry {i}"), false))
             .collect();
         assert_eq!(menu_clippings(&items).len(), SLOTS);
+    }
+
+    #[test]
+    fn the_tray_keeps_ten_recent_slots_available() {
+        assert_eq!(SLOTS, 10);
+        assert!(FETCH > SLOTS as u32);
     }
 
     /// A menu draws neither newlines nor tabs, so a multi-line clipping has to

@@ -43,9 +43,27 @@ pub fn local_ips() -> Vec<IpAddr> {
 pub fn routable_ip() -> Option<IpAddr> {
     local_ips()
         .into_iter()
-        .filter(|ip| !ip.is_loopback())
+        .filter(is_peer_reachable)
         // IPv4 first: it is what a user can read out over the phone.
         .min_by_key(|ip| u8::from(ip.is_ipv6()))
+}
+
+fn is_peer_reachable(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            !ip.is_loopback()
+                && !ip.is_unspecified()
+                && !ip.is_broadcast()
+                && !ip.is_link_local()
+                && !ip.is_multicast()
+        }
+        IpAddr::V6(ip) => {
+            !ip.is_loopback()
+                && !ip.is_unspecified()
+                && !ip.is_unicast_link_local()
+                && !ip.is_multicast()
+        }
+    }
 }
 
 /// A cached "is this address one of ours".
@@ -93,6 +111,21 @@ mod tests {
     fn a_routable_address_is_never_loopback() {
         if let Some(ip) = routable_ip() {
             assert!(!ip.is_loopback(), "{ip}");
+        }
+    }
+
+    #[test]
+    fn local_only_addresses_are_never_advertised_for_pairing() {
+        for ip in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1)),
+            IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)),
+            IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+            IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+            IpAddr::V6("fe80::1".parse().unwrap()),
+        ] {
+            assert!(!is_peer_reachable(&ip), "{ip}");
         }
     }
 }

@@ -140,6 +140,13 @@ export function pairAccept(code: string, addr: string): Promise<PeerInfo[]> {
   return call<PeerInfo[]>("pair_accept", { code, addr });
 }
 
+/** Android delegates camera access to Google Play services. A `null` result
+ * means the user dismissed the scanner, so the pairing form remains available
+ * for manual entry. The returned string is still untrusted QR data. */
+export function scanPairingQr(): Promise<string | null> {
+  return call<string | null>("scan_pairing_qr");
+}
+
 export function unpair(pairingId: string): Promise<void> {
   return call<void>("unpair", { pairingId });
 }

@@ -46,14 +46,23 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         val title = args.optString("lostTitle", "Background capture stopped.")
         val body = args.optString("lostBody", "")
 
-        ensureNotificationPermission()
+        if (!ensureNotificationPermission()) {
+            invoke.resolve(
+                JSObject()
+                    .put("probe", probeObject())
+                    .put("listening", false)
+                    .put("outcome", "refused")
+                    .put("focused", true)
+                    .put("notificationPermission", false)
+            )
+            return
+        }
 
         val listening = ShizukuClipboard.arm {
-            CaptureNotifications.postLost(activity, title, body)
-            CaptureService.stop(activity)
+            CaptureService.lost(activity, title, body)
         }
         if (listening) {
-            CaptureService.start(activity, "Capturing from every app.")
+            CaptureService.start(activity, "Capturing from every app.", title, body)
         }
 
         invoke.resolve(
@@ -65,6 +74,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
                 // refusal early rather than to claim success.
                 .put("outcome", if (listening) ShizukuClipboard.readOutcome() else "refused")
                 .put("focused", true)
+                .put("notificationPermission", true)
         )
     }
 
@@ -154,13 +164,12 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      * make "background capture stopped" a silent event — the one outcome the
      * whole feature exists to prevent.
      */
-    private fun ensureNotificationPermission() {
-        if (android.os.Build.VERSION.SDK_INT < 33) return
-        val granted = activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
+    private fun ensureNotificationPermission(): Boolean {
+        val granted = CaptureNotifications.isPermissionGranted(activity)
         if (!granted) {
             activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4920)
         }
+        return granted
     }
 
     /**

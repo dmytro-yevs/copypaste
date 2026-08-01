@@ -28,7 +28,7 @@ use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard};
 use copypaste_cloud::{CloudConfig, SyncKey};
 use copypaste_ipc::CloudStatusData;
-use tokio::sync::Notify;
+use tokio::sync::{watch, Notify};
 use tracing::{info, warn};
 
 use crate::meta::Meta;
@@ -70,6 +70,8 @@ pub(crate) const KEY_WATERMARK: &str = "cloud_watermark_ms";
 pub(crate) const KEY_WATERMARK_ITEM: &str = "cloud_watermark_item_id";
 /// The upload floor: everything created before this has been offered for upload.
 pub(crate) const KEY_UPLOAD_FLOOR: &str = "cloud_upload_floor_ms";
+/// The tie-break half of the upload cursor.
+pub(crate) const KEY_UPLOAD_FLOOR_ITEM: &str = "cloud_upload_floor_item_id";
 
 /// A signed-in account and the driver bound to it.
 struct Account {
@@ -95,6 +97,10 @@ pub struct Cloud {
     /// Woken by sign-in and by `cloud sync`, so neither has to wait out the
     /// idle interval.
     wake: Notify,
+    /// Changes whenever the in-memory session may have rotated. Realtime
+    /// listens to this so its live channel receives the new bearer before the
+    /// old one expires.
+    session_revision: watch::Sender<u64>,
 }
 
 impl std::fmt::Debug for Cloud {
@@ -109,12 +115,14 @@ impl std::fmt::Debug for Cloud {
 
 impl Cloud {
     pub fn new(config: Option<CloudConfig>) -> Self {
+        let (session_revision, _) = watch::channel(0_u64);
         Self {
             config,
             account: Mutex::new(None),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
             wake: Notify::new(),
+            session_revision,
         }
     }
 
@@ -148,6 +156,16 @@ impl Cloud {
     /// Ask the poll loop to run a round now.
     pub fn wake(&self) {
         self.wake.notify_one();
+    }
+
+    pub(crate) fn session_updates(&self) -> watch::Receiver<u64> {
+        self.session_revision.subscribe()
+    }
+
+    fn notify_session_changed(&self) {
+        self.session_revision.send_modify(|revision| {
+            *revision = revision.wrapping_add(1);
+        });
     }
 
     /// Resolves when someone calls [`Cloud::wake`]. `Notify` stores one permit,
@@ -233,6 +251,7 @@ impl Cloud {
             user_id,
             driver: Arc::new(driver),
         });
+        self.notify_session_changed();
     }
 
     /// Persist the account, its tokens and its key.
@@ -258,6 +277,7 @@ impl Cloud {
             if let Err(e) = write_session(meta, &account.driver) {
                 warn!(error = ?e, "could not persist the rotated cloud session");
             }
+            self.notify_session_changed();
         }
     }
 
@@ -270,6 +290,7 @@ impl Cloud {
         }
         self.last_sync_ms.store(0, Ordering::Release);
         *self.lock_error() = None;
+        self.notify_session_changed();
         previous.map(|account| account.driver)
     }
 
@@ -305,9 +326,12 @@ impl Cloud {
 pub fn note_version_written(state: &AppState, created_at_ms: i64) {
     let meta = &state.meta;
     match meta.state_ms(KEY_UPLOAD_FLOOR) {
-        Ok(floor) if floor <= created_at_ms => {}
+        Ok(floor) if floor < created_at_ms => {}
         Ok(_) => {
-            if let Err(e) = meta.set_state_ms(KEY_UPLOAD_FLOOR, created_at_ms) {
+            if let Err(e) = meta.set_state_all(&[
+                (KEY_UPLOAD_FLOOR, &created_at_ms.max(0).to_string()),
+                (KEY_UPLOAD_FLOOR_ITEM, ""),
+            ]) {
                 warn!(error = ?e, "could not lower the cloud upload floor");
             }
         }

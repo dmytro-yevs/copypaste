@@ -10,14 +10,13 @@ import android.service.quicksettings.TileService
  * viewer: one tap on a Quick Settings tile saves whatever is on the clipboard.
  *
  * The tile does not read anything itself — a tile has no window and therefore
- * no focus. It launches [IntakeActivity], whose focus is what makes the read
- * legal.
+ * no focus. It launches [ClipboardCaptureActivity], whose focus is what makes
+ * the read legal.
  */
 class CaptureTileService : TileService() {
     override fun onClick() {
         super.onClick()
-        val intent = Intent(this, IntakeActivity::class.java)
-            .setAction(ACTION_CAPTURE_NOW)
+        val intent = Intent(this, ClipboardCaptureActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -33,9 +32,5 @@ class CaptureTileService : TileService() {
             @Suppress("DEPRECATION")
             startActivityAndCollapse(intent)
         }
-    }
-
-    companion object {
-        const val ACTION_CAPTURE_NOW = "com.copypaste.app.CAPTURE_NOW"
     }
 }

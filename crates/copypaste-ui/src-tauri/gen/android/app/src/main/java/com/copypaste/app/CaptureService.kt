@@ -23,20 +23,58 @@ class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val state = state(this)
+        if (!state.enabled) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if (!CaptureNotifications.isPermissionGranted(this)) {
+            clearState(this)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        val listening = ShizukuClipboard.isListening() || ShizukuClipboard.arm {
+            lost(this, state.lostTitle, state.lostBody)
+        }
+        if (!listening) {
+            lost(this, state.lostTitle, state.lostBody)
+            return START_NOT_STICKY
+        }
+
         CaptureNotifications.ensureChannels(this)
-        val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Capturing from every app."
+        val text = intent?.getStringExtra(EXTRA_TEXT) ?: state.text
         startForeground(CaptureNotifications.ONGOING_ID, CaptureNotifications.ongoing(this, text))
-        // Restarted after a kill, because the user's expectation is that this
-        // keeps running. It re-arms through the plugin's next probe rather than
-        // arming here: whether the grant survived is not this class's decision.
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        ShizukuClipboard.disarm()
+        super.onDestroy()
     }
 
     companion object {
         private const val EXTRA_TEXT = "text"
+        private const val EXTRA_LOST_TITLE = "lostTitle"
+        private const val EXTRA_LOST_BODY = "lostBody"
+        private const val PREFS = "capture-service"
+        private const val KEY_ENABLED = "enabled"
+        private const val KEY_TEXT = "text"
+        private const val KEY_LOST_TITLE = "lostTitle"
+        private const val KEY_LOST_BODY = "lostBody"
 
-        fun start(context: Context, text: String) {
-            val intent = Intent(context, CaptureService::class.java).putExtra(EXTRA_TEXT, text)
+        fun start(context: Context, text: String, lostTitle: String, lostBody: String) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_ENABLED, true)
+                .putString(KEY_TEXT, text)
+                .putString(KEY_LOST_TITLE, lostTitle)
+                .putString(KEY_LOST_BODY, lostBody)
+                .apply()
+            val intent = Intent(context, CaptureService::class.java)
+                .putExtra(EXTRA_TEXT, text)
+                .putExtra(EXTRA_LOST_TITLE, lostTitle)
+                .putExtra(EXTRA_LOST_BODY, lostBody)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -45,7 +83,37 @@ class CaptureService : Service() {
         }
 
         fun stop(context: Context) {
+            clearState(context)
             context.stopService(Intent(context, CaptureService::class.java))
         }
+
+        fun lost(context: Context, title: String, body: String) {
+            clearState(context)
+            CaptureNotifications.postLost(context, title, body)
+            context.stopService(Intent(context, CaptureService::class.java))
+        }
+
+        private fun clearState(context: Context) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        }
+
+        private fun state(context: Context): CaptureState {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            return CaptureState(
+                enabled = prefs.getBoolean(KEY_ENABLED, false),
+                text = prefs.getString(KEY_TEXT, "Capturing from every app.")
+                    ?: "Capturing from every app.",
+                lostTitle = prefs.getString(KEY_LOST_TITLE, "Background capture stopped.")
+                    ?: "Background capture stopped.",
+                lostBody = prefs.getString(KEY_LOST_BODY, "") ?: "",
+            )
+        }
     }
+
+    private data class CaptureState(
+        val enabled: Boolean,
+        val text: String,
+        val lostTitle: String,
+        val lostBody: String,
+    )
 }

@@ -93,11 +93,21 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// A row that will not decrypt is **not** an error: it is skipped, counted,
     /// and the cursor still advances past it (INV-N3, INV-I4).
     pub async fn pull(&self, source: &dyn CloudSource) -> Result<SyncStats, SyncError> {
+        self.pull_with_republish(source)
+            .await
+            .map(|(stats, _)| stats)
+    }
+
+    pub(super) async fn pull_with_republish(
+        &self,
+        source: &dyn CloudSource,
+    ) -> Result<(SyncStats, bool), SyncError> {
         let mut cursor = Cursor {
             created_at: source.watermark()?,
             item_id: source.watermark_item_id()?,
         };
         let mut stats = SyncStats::default();
+        let mut republish = false;
 
         for _ in 0..MAX_PAGES_PER_PULL {
             let mut rows = self
@@ -179,16 +189,19 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 };
 
                 let item_id = row.item_id;
-                let applied = source.apply_remote(LocalItem {
+                let incoming = LocalItem {
                     item_id: item_id.clone(),
                     content,
                     content_type: row.content_type,
                     created_at,
                     deleted: row.deleted,
                     origin_device_id: row.origin_device_id,
-                })?;
+                };
+                let applied = source.apply_remote(incoming.clone())?;
                 if applied {
                     stats.applied += 1;
+                } else {
+                    republish |= source.requeue_local_winner(&incoming)?;
                 }
                 advanced.advance_past(created_at, &item_id);
             }
@@ -219,7 +232,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             cursor = advanced;
         }
 
-        Ok(stats)
+        Ok((stats, republish))
     }
 }
 

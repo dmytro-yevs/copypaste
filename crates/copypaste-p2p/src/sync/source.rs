@@ -6,6 +6,7 @@
 //! over an in-memory store and an in-memory duplex.
 
 use std::future::Future;
+use std::net::SocketAddr;
 
 use super::SyncError;
 use crate::protocol::{ItemSummary, SyncItem, SyncMessage};
@@ -26,18 +27,20 @@ pub struct SyncOutcome {
     pub stats: SyncStats,
     pub peer_device_id: String,
     pub peer_device_name: String,
+    pub peer_listen_addr: Option<SocketAddr>,
 }
 
 /// What the session needs from the local store. The daemon implements it over
 /// its `Store`.
 ///
-/// # Sensitive items must never leave the device
+/// # Live sensitive items must never leave the device
 ///
-/// [`summaries`](SyncSource::summaries) MUST exclude any item flagged sensitive,
-/// and [`fetch`](SyncSource::fetch) MUST refuse to return one even if asked. The
-/// session is the third layer: it serves only ids it advertised in its own
-/// summary, so an item that never appeared in a summary cannot be pulled out of
-/// this device by a request. Three layers for one rule, deliberately.
+/// [`summaries`](SyncSource::summaries) MUST exclude a live item flagged
+/// sensitive, and [`fetch`](SyncSource::fetch) MUST refuse to return one even if
+/// asked. A sensitive tombstone is the exception: it has no payload and must
+/// travel to delete a stale peer copy. The session serves only ids it advertised
+/// in its own summary, so an item that never appeared there cannot be pulled out
+/// of this device by a request. Three layers for one rule, deliberately.
 ///
 /// # Apply must guard itself
 ///
@@ -51,11 +54,12 @@ pub trait SyncSource {
     fn device_id(&self) -> String;
     fn device_name(&self) -> String;
 
-    /// Summaries of everything eligible to sync. Sensitive items excluded.
+    /// Summaries of everything eligible to sync. Live sensitive items excluded;
+    /// payload-less sensitive tombstones included.
     fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError>;
 
     /// Full items for the given ids, plaintext. Unknown ids are omitted rather
-    /// than erroring; sensitive ids are omitted too.
+    /// than erroring; live sensitive ids are omitted too.
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError>;
 
     /// Applies a remote item. Returns whether it was stored.

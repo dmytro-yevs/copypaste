@@ -11,10 +11,6 @@ use super::event::{RealtimeError, RealtimeEvent};
 use super::TABLE;
 use crate::rest::CloudItem;
 
-/// How much of an unparseable frame is safe to log: a length and this many
-/// bytes as hex. Never the frame.
-const LOG_PREFIX_BYTES: usize = 16;
-
 /// The Phoenix envelope.
 #[derive(Debug, PartialEq)]
 pub(super) struct Frame {
@@ -151,17 +147,11 @@ fn change_event(payload: &Value) -> Result<Option<RealtimeEvent>, RealtimeError>
 
 /// Log that a frame could not be parsed, without logging the frame.
 ///
-/// Length plus a short hex prefix is enough to distinguish an HTML error page
-/// from truncated JSON from a protocol change, and is not enough to disclose a
-/// row (manifest 05 §4.7, log hygiene).
+/// Frame bytes may contain ciphertext, metadata, or a bearer token. Length is
+/// sufficient to identify a repeated protocol failure without retaining any
+/// reversible part of attacker-controlled input.
 fn log_unparseable(text: &str) {
-    let bytes = text.as_bytes();
-    let prefix = &bytes[..bytes.len().min(LOG_PREFIX_BYTES)];
-    tracing::warn!(
-        len = bytes.len(),
-        prefix = %hex::encode(prefix),
-        "realtime frame could not be parsed"
-    );
+    tracing::warn!(len = text.len(), "realtime frame could not be parsed");
 }
 
 // ---------------------------------------------------------------------------

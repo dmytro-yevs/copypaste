@@ -30,6 +30,9 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.copypaste_ui"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:launchMode="singleTask"
@@ -45,8 +48,8 @@
         </activity>
 
         <!--
-          Rung 0's three doorways. Invisible and immediate: the user stays in
-          the app they were in.
+          Rung 0's text-bearing doorways. Invisible and immediate: the user
+          stays in the app they were in.
         -->
         <activity
             android:name=".IntakeActivity"
@@ -66,15 +69,20 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="com.copypaste.app.CAPTURE_NOW" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ClipboardCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/capture_action"
+            android:theme="@style/Theme.CopyPaste.Invisible" />
 
         <!--
           One tap saves the current clipboard. Tapping the tile is what gives
-          IntakeActivity focus, and focus is what makes the read legal.
+          ClipboardCaptureActivity focus, and focus is what makes the read legal.
         -->
         <service
             android:name=".CaptureTileService"

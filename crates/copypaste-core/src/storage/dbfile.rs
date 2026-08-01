@@ -57,6 +57,12 @@ pub fn verify_integrity(conn: &Connection) -> Result<(), StoreError> {
     }
 }
 
+/// Refuse a candidate whose version, tables, columns, or declared types do
+/// not exactly match the schema this build writes.
+pub fn verify_schema(conn: &Connection) -> Result<(), StoreError> {
+    super::schema::verify_schema(conn)
+}
+
 /// The raw key rendered for an `ATTACH … KEY` clause.
 ///
 /// Inline in the SQL rather than bound as a parameter: SQLCipher recognises the

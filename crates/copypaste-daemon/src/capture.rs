@@ -110,7 +110,9 @@ fn sweep_sensitive_items(state: &AppState) {
         // `note_sensitive_swept` rather than `note_local_change`: this is the
         // one history change nobody asked for, and a client cannot say so on an
         // event that only reports that the count moved.
-        Ok(removed) => state.note_sensitive_swept(u32::try_from(removed).unwrap_or(u32::MAX)),
+        Ok(removed) => {
+            state.note_sensitive_swept(u32::try_from(removed).unwrap_or(u32::MAX));
+        }
         Err(e) => warn!(error = ?e, "the sensitive-item sweep failed"),
     }
 }

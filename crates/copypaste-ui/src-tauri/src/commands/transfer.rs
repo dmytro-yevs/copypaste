@@ -29,7 +29,10 @@
 //! save them (`P2-tj9s`, `CopyPaste-93yr`). [`ExportReport`] therefore carries
 //! all three skip counts, always, including when they are zero.
 
+use std::fs::File;
+use std::io::{BufReader, Write};
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
 use std::path::PathBuf;
 
 use copypaste_ipc::{ExportData, ImportData};
@@ -50,10 +53,16 @@ const MSG_NO_PLACE: &str =
     "That location can't be written to directly. Pick a folder on this device instead.";
 const MSG_UNREADABLE: &str = "That file couldn't be read.";
 const MSG_NOT_AN_EXPORT: &str = "That file isn't a CopyPaste export.";
+const MSG_IMPORT_TOO_LARGE: &str = "That export is too large to import safely on this device.";
 const MSG_NOT_WRITTEN: &str = "The export couldn't be written.";
 const MSG_BACKUP_EXISTS: &str =
     "There is already a file with that name. A backup is never written over an existing \
      file — choose another name.";
+
+/// A file import must fit comfortably in the UI process. The item-count limit
+/// in core constrains work only after JSON decoding, so it cannot protect the
+/// process from one enormous JSON string.
+const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// What an export contained, and everything it left out.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -118,11 +127,23 @@ pub async fn import_history<R: Runtime>(
         return Ok(None);
     };
 
-    let raw = std::fs::read_to_string(&src).map_err(|_| BackendError::Invalid(MSG_UNREADABLE))?;
-    let data: ExportData =
-        serde_json::from_str(&raw).map_err(|_| BackendError::Invalid(MSG_NOT_AN_EXPORT))?;
+    let data = read_export(&src)?;
 
     Ok(Some(backend.import(data.items).await?))
+}
+
+fn read_export(src: &Path) -> Result<ExportData> {
+    let file = File::open(src).map_err(|_| BackendError::Invalid(MSG_UNREADABLE))?;
+    let bytes = file
+        .metadata()
+        .map_err(|_| BackendError::Invalid(MSG_UNREADABLE))?
+        .len();
+    if bytes > MAX_IMPORT_FILE_BYTES {
+        return Err(BackendError::Invalid(MSG_IMPORT_TOO_LARGE));
+    }
+
+    serde_json::from_reader(BufReader::new(file))
+        .map_err(|_| BackendError::Invalid(MSG_NOT_AN_EXPORT))
 }
 
 /// Copy the encrypted database to a file the user picks.
@@ -210,12 +231,9 @@ fn to_path(chosen: Option<FilePath>) -> Result<Option<PathBuf>> {
 /// would be world-readable on a shared machine, and the mode has to be set at
 /// `open` rather than after the write, or there is a window in which it is not.
 fn write_owner_only(dest: &PathBuf, bytes: &[u8]) -> Result<()> {
-    use std::io::Write as _;
-
     let mut file = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(dest)
         .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
@@ -290,5 +308,16 @@ mod tests {
     #[test]
     fn something_that_is_not_an_export_is_refused_rather_than_half_read() {
         assert!(serde_json::from_str::<ExportData>(r#"{"nope":true}"#).is_err());
+    }
+
+    #[test]
+    fn an_oversized_import_is_refused_before_json_can_allocate_it() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        file.as_file().set_len(MAX_IMPORT_FILE_BYTES + 1).unwrap();
+
+        assert!(matches!(
+            read_export(file.path()),
+            Err(BackendError::Invalid(MSG_IMPORT_TOO_LARGE))
+        ));
     }
 }

@@ -57,10 +57,17 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
         }
 
         match subscribe(&state).await {
-            Some(subscription) => {
+            Some((subscription, session_updates, user_id)) => {
                 backoff = RECONNECT_MIN;
                 // Returns when the socket ended for good, or on shutdown.
-                pump(&state, subscription, &mut shutdown).await;
+                pump(
+                    &state,
+                    subscription,
+                    session_updates,
+                    &user_id,
+                    &mut shutdown,
+                )
+                .await;
             }
             None => {
                 // Not signed in, no token, or the join was refused. All three
@@ -79,16 +86,20 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
 }
 
 /// Open one subscription for the account that is signed in right now.
-async fn subscribe(state: &Arc<AppState>) -> Option<RealtimeSubscription> {
+async fn subscribe(
+    state: &Arc<AppState>,
+) -> Option<(RealtimeSubscription, watch::Receiver<u64>, String)> {
     let config = state.cloud.config()?.clone();
     let driver = state.cloud.driver()?;
+    let session_updates = state.cloud.session_updates();
     // Read at connect time, never cached across a reconnect.
-    let token = driver.inspect_session(|session| session.access_token.clone());
+    let (user_id, token) =
+        driver.inspect_session(|session| (session.user_id.clone(), session.access_token.clone()));
 
     match RealtimeSubscription::connect(&config, &token).await {
         Ok(subscription) => {
             info!("cloud realtime subscribed");
-            Some(subscription)
+            Some((subscription, session_updates, user_id))
         }
         Err(e) => {
             // `RealtimeError`'s payloads are `&'static str` by construction, so
@@ -103,12 +114,29 @@ async fn subscribe(state: &Arc<AppState>) -> Option<RealtimeSubscription> {
 async fn pump(
     state: &Arc<AppState>,
     mut subscription: RealtimeSubscription,
+    mut session_updates: watch::Receiver<u64>,
+    user_id: &str,
     shutdown: &mut watch::Receiver<bool>,
 ) {
     loop {
         tokio::select! {
             biased;
             _ = shutdown.changed() => break,
+            changed = session_updates.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                let Some(driver) = state.cloud.driver() else {
+                    break;
+                };
+                let (current_user_id, access_token) = driver.inspect_session(|session| {
+                    (session.user_id.clone(), session.access_token.clone())
+                });
+                if current_user_id != user_id {
+                    break;
+                }
+                subscription.set_access_token(&access_token);
+            }
             event = subscription.next_event() => match event {
                 // Terminal: the task gave up. The outer loop rebuilds.
                 None => break,

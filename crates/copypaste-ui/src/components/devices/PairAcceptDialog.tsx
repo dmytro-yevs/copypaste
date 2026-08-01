@@ -28,7 +28,9 @@ import { Label } from "@/components/ui/label";
 import { useDiscovered, usePairAccept, useRescan } from "@/hooks/useDevices";
 import { useTranslation } from "@/i18n";
 import { isUnavailable, toFriendly } from "@/lib/errors";
-import type { PairingPayload } from "@/lib/pairing";
+import { scanPairingQr } from "@/lib/ipc";
+import { decodePairing, type PairingPayload } from "@/lib/pairing";
+import { isAndroidPlatform } from "@/lib/platform";
 
 /**
  * Split out of the main bundle.
@@ -55,6 +57,7 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
   const [code, setCode] = useState("");
   const [addr, setAddr] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [nativeScanPending, setNativeScanPending] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -65,6 +68,7 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
       // re-open a stream the next time the dialog is shown, before the user
       // asked for one.
       setScanning(false);
+      setNativeScanPending(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -84,6 +88,25 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
     setCode(payload.code);
     setAddr(payload.addr);
     accept.mutate(payload, { onSuccess: () => onOpenChange(false) });
+  }
+
+  async function startScan() {
+    if (!isAndroidPlatform()) {
+      setScanning(true);
+      return;
+    }
+
+    setNativeScanPending(true);
+    try {
+      const scanned = await scanPairingQr();
+      const payload = scanned === null ? null : decodePairing(scanned);
+      if (payload !== null) onScan(payload);
+    } catch {
+      // The form is the fallback when Play services is unavailable or its
+      // scanner module has not downloaded yet. Never surface raw bridge errors.
+    } finally {
+      setNativeScanPending(false);
+    }
   }
 
   const nearby = (discovered.data ?? []).filter((device) => !device.paired);
@@ -114,10 +137,11 @@ export function PairAcceptDialog({ open, onOpenChange }: PairAcceptDialogProps) 
             <Button
               type="button"
               variant="outline"
-              onClick={() => setScanning(true)}
+              onClick={() => void startScan()}
+              disabled={nativeScanPending}
             >
               <QrIcon aria-hidden="true" />
-              {t("devices.accept.scan")}
+              {t(nativeScanPending ? "devices.accept.startingCamera" : "devices.accept.scan")}
             </Button>
           )}
 

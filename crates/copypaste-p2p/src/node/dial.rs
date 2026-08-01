@@ -66,7 +66,7 @@ impl Node {
             pairing_id: pairing_id.clone(),
             name: placeholder_name(&outcome.peer_device_name),
             psk: token.psk(),
-            last_addr: Some(addr),
+            last_addr: outcome.peer_listen_addr.or(Some(addr)),
             last_seen_ms: crate::now_ms(),
         };
         self.peers().upsert(peer.clone()).map_err(store_error)?;
@@ -104,7 +104,11 @@ impl Node {
         };
 
         let outcome = self.run_session(session, source).await?;
-        self.touch_peer(peer, Some(addr), Some(&outcome.peer_device_name));
+        self.touch_peer(
+            peer,
+            outcome.peer_listen_addr.or(Some(addr)),
+            Some(&outcome.peer_device_name),
+        );
         info!(
             pairing_id = %peer.pairing_id,
             sent = outcome.stats.sent,
@@ -126,11 +130,12 @@ impl Node {
         source: &S,
     ) -> Result<SyncOutcome, NodeError> {
         let mut channel = NoiseChannel::new(session);
+        let listen_addr = self.listen_addr();
         // The wait for the peer's close is inside the same budget on purpose:
         // see `NoiseChannel::wait_for_close` for why a session is not over when
         // `run_initiator` returns.
         let outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
-            let outcome = run_initiator(&mut channel, source).await?;
+            let outcome = run_initiator(&mut channel, source, listen_addr.as_deref()).await?;
             channel.wait_for_close().await;
             Ok::<_, SyncError>(outcome)
         })

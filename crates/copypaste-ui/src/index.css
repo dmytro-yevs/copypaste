@@ -24,6 +24,12 @@
     height: 100%;
   }
 
+  #root {
+    padding-top: var(--inset-top);
+    padding-right: var(--inset-right);
+    padding-left: var(--inset-left);
+  }
+
   body {
     background: var(--bg);
     color: var(--text);
