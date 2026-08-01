@@ -104,6 +104,14 @@ pub enum Method {
     Copy {
         id: String,
     },
+    /// Put an item's textual representation on the system clipboard.
+    ///
+    /// This is intentionally distinct from [`Method::Copy`]. `Copy` preserves
+    /// the item's native representation as capture grows beyond text, whereas
+    /// this verb is the explicit Quick Paste ⌥Enter request for plain text.
+    CopyPlainText {
+        id: String,
+    },
     /// One item by id, with its content, and **no side effects**.
     ///
     /// The read-only twin of [`Method::Copy`]. It exists because a UI that

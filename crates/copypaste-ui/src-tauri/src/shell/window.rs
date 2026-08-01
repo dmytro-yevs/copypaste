@@ -1,66 +1,95 @@
-//! The document window and the separate Quick Paste popover.
+//! The main window and the Quick Paste popover.
+//!
+//! A menu-bar clipboard manager is a popover, not a document window: it appears
+//! on a gesture under the icon that summoned it, takes focus, and goes away when
+//! the user looks elsewhere. Each of these is a defect if it is missing.
+//!
+//! * **Closing hides.** The window is the app's only surface, so closing it
+//!   must not quit — quitting is a tray decision (manifest 06, INV-36).
+//! * **Losing focus hides.** A popover that stays up after you click elsewhere
+//!   is a window, and an always-on-top window that will not go away is worse
+//!   than no popover at all.
+//! * **Showing focuses.** A window shown without focus swallows the first
+//!   keystroke, which for a search-first UI is the whole interaction.
+//! * **Showing positions.** See [`anchor`].
+//!
+//! # Android
+//!
+//! This module compiles everywhere; `tray`, `hotkey` and `autostart` do not.
+//! [`hide_window`] is a deliberate no-op there — the app *is* its window on a phone,
+//! and hiding it would leave the user at the launcher with no way back.
 
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
 };
 
+#[cfg(target_os = "macos")]
+use std::sync::{Mutex, OnceLock};
+
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+
+/// The full application surface. Named in `tauri.conf.json`.
 pub const MAIN: &str = "main";
+
+/// The compact, lazy-created Quick Paste surface.
 pub const QUICK_PASTE: &str = "quick-paste";
 
+/// The route loaded by the popup's separate WebView. Keeping it here makes a
+/// full `App` mount in the popup impossible by construction: the builder never
+/// points at the default route.
+pub const QUICK_PASTE_ROUTE: &str = "index.html?surface=quick-paste";
+
+/// The popup is security-sensitive from its first frame. A preference may only
+/// relax this after the frontend has loaded, exactly like the main window.
+pub const QUICK_PASTE_CONTENT_PROTECTED: bool = true;
+
+/// The dynamic window's creation policy, kept as data so its security and
+/// lifecycle properties can be tested without a native window server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuickPasteWindowConfig {
+    pub label: &'static str,
+    pub route: &'static str,
+    pub visible: bool,
+    pub content_protected: bool,
+}
+
+pub const QUICK_PASTE_CONFIG: QuickPasteWindowConfig = QuickPasteWindowConfig {
+    label: QUICK_PASTE,
+    route: QUICK_PASTE_ROUTE,
+    visible: false,
+    content_protected: QUICK_PASTE_CONTENT_PROTECTED,
+};
+
+#[cfg(target_os = "macos")]
+fn previous_application() -> &'static Mutex<Option<i32>> {
+    static PREVIOUS_APPLICATION: OnceLock<Mutex<Option<i32>>> = OnceLock::new();
+    PREVIOUS_APPLICATION.get_or_init(|| Mutex::new(None))
+}
+
+const QUICK_PASTE_WIDTH: f64 = 403.0;
+const QUICK_PASTE_HEIGHT: f64 = 624.0;
+
+/// Gap between the menu bar and the top of the popover, in physical pixels at
+/// scale 1. Scaled by the target monitor's factor before use.
 const GAP_PX: f64 = 6.0;
+
+/// Keep this much of the screen edge clear, so the popover never sits flush
+/// against the side of a display.
 const EDGE_INSET_PX: f64 = 8.0;
-
-pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    if let Some(main) = main_window(app) {
-        hide_on_close(main);
-    }
-
-    #[cfg(not(target_os = "android"))]
-    if app.get_webview_window(QUICK_PASTE).is_none() {
-        let popup =
-            WebviewWindowBuilder::new(app, QUICK_PASTE, WebviewUrl::App("index.html".into()))
-                .title("Quick Paste")
-                .inner_size(420.0, 600.0)
-                .min_inner_size(360.0, 400.0)
-                .resizable(false)
-                .always_on_top(true)
-                .decorations(false)
-                .transparent(true)
-                .shadow(true)
-                .skip_taskbar(true)
-                .visible(false)
-                .build()?;
-        hide_on_close(popup);
-    }
-
-    Ok(())
-}
-
-fn hide_on_close<R: Runtime>(window: WebviewWindow<R>) {
-    let handler_window = window.clone();
-    window.on_window_event(move |event| match event {
-        WindowEvent::CloseRequested { api, .. } => {
-            api.prevent_close();
-            let _ = handler_window.hide();
-        }
-        WindowEvent::Focused(false) if handler_window.label() == QUICK_PASTE => {
-            let _ = handler_window.hide();
-        }
-        _ => {}
-    });
-}
 
 pub fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
 
-#[cfg(not(target_os = "android"))]
-fn quick_paste_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
+pub fn quick_paste_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(QUICK_PASTE)
 }
 
-pub fn show<R: Runtime>(app: &AppHandle<R>) {
+/// Show the full application surface. This is intentionally not the tray or
+/// hotkey action; the popup's gear is the route here.
+pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = main_window(app) else {
         return;
     };
@@ -68,42 +97,252 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.set_focus();
 }
 
-pub fn hide<R: Runtime>(app: &AppHandle<R>) {
+/// Open the main window on its settings route. The event is emitted only after
+/// the window is visible, so its persistent webview cannot miss the request.
+pub fn show_main_settings<R: Runtime>(app: &AppHandle<R>) {
+    show_main(app);
+    if let Some(window) = main_window(app) {
+        let _ = window.emit("open-settings", ());
+    }
+}
+
+/// Lazily create, position and focus the compact Quick Paste surface.
+pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
+    let window = match quick_paste_window(app) {
+        Some(window) => window,
+        None => match create_quick_paste(app) {
+            Ok(window) => window,
+            Err(error) => {
+                tracing::warn!(%error, "could not create the Quick Paste window");
+                return;
+            }
+        },
+    };
+    if !window.is_visible().unwrap_or(false) {
+        remember_frontmost_application();
+    }
+    // Positioned before it is shown, so it never appears in one place and
+    // jumps to another. Android has no tray to position under, and no
+    // `tray_by_id` on `AppHandle` either — the window there is the activity.
+    #[cfg(not(target_os = "android"))]
+    position_under_tray(app, &window);
+    let _ = window.show();
+    // Focus is what makes the search field live. Requested after `show`
+    // because focusing a hidden window is a no-op on macOS.
+    let _ = window.set_focus();
+}
+
+fn create_quick_paste<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
+    WebviewWindowBuilder::new(
+        app,
+        QUICK_PASTE_CONFIG.label,
+        WebviewUrl::App(QUICK_PASTE_CONFIG.route.into()),
+    )
+    .title("Quick Paste")
+    .inner_size(QUICK_PASTE_WIDTH, QUICK_PASTE_HEIGHT)
+    .resizable(false)
+    .always_on_top(true)
+    .decorations(false)
+    .transparent(true)
+    .shadow(true)
+    .skip_taskbar(true)
+    .visible(QUICK_PASTE_CONFIG.visible)
+    .content_protected(QUICK_PASTE_CONFIG.content_protected)
+    .build()
+}
+
+/// Hide whichever app surface issued the command.
+///
+/// A Quick Paste hide gives focus back to the application that was active
+/// before it opened; we deliberately do not activate the main window on this
+/// path.
+pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) {
     if cfg!(target_os = "android") {
         return;
     }
-    if let Some(window) = main_window(app) {
-        let _ = window.hide();
-    }
-}
-
-pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
-    let Some(window) = main_window(app) else {
+    // Both a root blur and the native focus event can request this path. The
+    // first one hides the popup; the second sees it already hidden and must
+    // not reactivate the prior application a second time (V-12).
+    if !window.is_visible().unwrap_or(true) {
         return;
-    };
-    if window.is_visible().unwrap_or(false) {
-        hide(app);
-    } else {
-        show(app);
+    }
+
+    if window.label() != QUICK_PASTE {
+        let _ = window.hide();
+        return;
+    }
+
+    hide_quick_paste_window(window, QuickPasteHideTarget::RestorePreviousApplication);
+}
+
+/// Hide a popup while moving into CopyPaste's main window. Restoring the
+/// previous application here would immediately steal focus back from Settings.
+pub fn hide_window_for_main<R: Runtime>(window: &WebviewWindow<R>) {
+    if cfg!(target_os = "android") {
+        return;
+    }
+    match main_transition_action(window.label()) {
+        MainTransitionAction::HideQuickPaste(target) => hide_quick_paste_window(window, target),
+        MainTransitionAction::HideWindow => {
+            let _ = window.hide();
+        }
     }
 }
 
-/// Toggle the dedicated Quick Paste popover without changing the document window.
-#[cfg(not(target_os = "android"))]
+/// Hide Quick Paste through the same policy used by the frontend.
+pub fn hide_quick_paste<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = quick_paste_window(app) {
+        hide_window(&window);
+    }
+}
+
+/// A hide produces a trailing blur on macOS. It must not trigger a second
+/// focus hand-off after the popup is already gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusLossAction {
+    Ignore,
+    HideQuickPasteAndRestorePrior,
+}
+
+/// A close request must follow the same path as Escape, copy, and focus loss.
+/// A direct `Window::hide` skips activation recovery and leaves the warm popup
+/// data in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloseRequestAction {
+    HideQuickPaste(QuickPasteHideTarget),
+    HideWindow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MainTransitionAction {
+    HideQuickPaste(QuickPasteHideTarget),
+    HideWindow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuickPasteHideTarget {
+    RestorePreviousApplication,
+    MainWindow,
+}
+
+fn close_request_action(label: &str) -> CloseRequestAction {
+    if label == QUICK_PASTE {
+        CloseRequestAction::HideQuickPaste(QuickPasteHideTarget::RestorePreviousApplication)
+    } else {
+        CloseRequestAction::HideWindow
+    }
+}
+
+fn main_transition_action(label: &str) -> MainTransitionAction {
+    if label == QUICK_PASTE {
+        MainTransitionAction::HideQuickPaste(QuickPasteHideTarget::MainWindow)
+    } else {
+        MainTransitionAction::HideWindow
+    }
+}
+
+fn focus_loss_action(label: &str, visible: bool) -> FocusLossAction {
+    if label == QUICK_PASTE && visible {
+        FocusLossAction::HideQuickPasteAndRestorePrior
+    } else {
+        FocusLossAction::Ignore
+    }
+}
+
+fn hide_after_window_event<R: Runtime>(window: &tauri::Window<R>, target: QuickPasteHideTarget) {
+    if let Some(popup) = quick_paste_window(window.app_handle()) {
+        if popup.is_visible().unwrap_or(false) {
+            hide_quick_paste_window(&popup, target);
+        }
+    }
+}
+
+/// The popup retains its WebView to avoid reparsing the bundle. Its image cache
+/// and item list must not survive a hide (AT-44), so ask the dedicated surface
+/// to release them after native visibility changes.
+fn free_quick_paste_memory<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.eval("window.__copypasteFreeMemory?.()");
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HideStep {
+    Accessory,
+    Hide,
+    FreeMemory,
+    Regular,
+}
+
+#[cfg(test)]
+const NO_PRIOR_APPLICATION_HIDE: [HideStep; 4] = [
+    HideStep::Accessory,
+    HideStep::Hide,
+    HideStep::FreeMemory,
+    HideStep::Regular,
+];
+
+#[cfg(target_os = "macos")]
+fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickPasteHideTarget) {
+    match target {
+        QuickPasteHideTarget::MainWindow => {
+            if window.hide().is_ok() {
+                free_quick_paste_memory(window);
+            }
+        }
+        QuickPasteHideTarget::RestorePreviousApplication => {
+            if has_previous_application() {
+                if window.hide().is_ok() {
+                    free_quick_paste_memory(window);
+                    restore_previous_application();
+                }
+                return;
+            }
+
+            // AT-39 / V-11: no prior app means CopyPaste itself was frontmost. Making
+            // it an Accessory only while the popup disappears prevents macOS from
+            // promoting the main window; Regular is restored immediately so Dock and
+            // Cmd+Tab retain their normal main-app behaviour.
+            let app = window.app_handle();
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if window.hide().is_ok() {
+                free_quick_paste_memory(window);
+            }
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickPasteHideTarget) {
+    if window.hide().is_ok() {
+        free_quick_paste_memory(window);
+        if target == QuickPasteHideTarget::RestorePreviousApplication {
+            restore_previous_application();
+        }
+    }
+}
+
+/// What the hotkey and every tray entry point do.
 pub fn toggle_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = quick_paste_window(app) else {
+        show_quick_paste(app);
         return;
     };
+    // `is_visible` failing is not a reason to do nothing: treating an
+    // unanswerable window as hidden means the gesture still shows it, which is
+    // the recoverable direction.
     if window.is_visible().unwrap_or(false) {
-        let _ = window.hide();
-        return;
+        hide_window(&window);
+    } else {
+        show_quick_paste(app);
     }
-
-    position_under_tray(app, &window);
-    let _ = window.show();
-    let _ = window.set_focus();
 }
 
+/// Place the window under the menu-bar item, when we can find out where that is.
+///
+/// Every failure here is silent and leaves the window where it was. A popover
+/// in the wrong place is a cosmetic problem; a popover that refuses to appear
+/// because a monitor query returned `None` is not.
 #[cfg(not(target_os = "android"))]
 fn position_under_tray<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     let Some(tray) = app.tray_by_id("main") else {
@@ -115,27 +354,30 @@ fn position_under_tray<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>
     let Ok(size) = window.outer_size() else {
         return;
     };
+
+    // The tray rect arrives in whatever unit the platform reported. Both arms
+    // are converted to physical pixels against the monitor the icon is on,
+    // because mixing the two is how a window lands on the wrong display when
+    // the built-in screen and an external one have different scale factors.
     let scale = window.scale_factor().unwrap_or(1.0);
     let icon = to_physical(rect, scale);
+
     let Ok(Some(monitor)) = window.monitor_from_point(icon.centre_x, icon.bottom) else {
         return;
     };
-    let position = anchor(
-        icon,
-        size,
-        monitor.position(),
-        monitor.size(),
-        monitor.scale_factor(),
-    );
+    let scale = monitor.scale_factor();
+    let position = anchor(icon, size, monitor.position(), monitor.size(), scale);
     let _ = window.set_position(position);
 }
 
+/// A tray icon's screen rectangle, in physical pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IconRect {
     pub centre_x: f64,
     pub bottom: f64,
 }
 
+#[cfg(not(target_os = "android"))]
 fn to_physical(rect: tauri::Rect, scale: f64) -> IconRect {
     let position = match rect.position {
         tauri::Position::Physical(p) => PhysicalPosition::new(p.x as f64, p.y as f64),
@@ -151,6 +393,17 @@ fn to_physical(rect: tauri::Rect, scale: f64) -> IconRect {
     }
 }
 
+/// Where the popover goes: centred under the icon, clamped onto the monitor.
+///
+/// Split out from [`position_under_tray`] because it is the only part with a
+/// right answer that can be checked — everything around it is platform state
+/// this host cannot produce.
+///
+/// The clamp is what makes this correct on a second display. An icon near the
+/// right edge of a wide screen would otherwise put half the window off it, and
+/// on a monitor whose origin is negative (a display arranged to the left of the
+/// primary) an unclamped calculation lands the window on the wrong screen
+/// entirely.
 pub fn anchor(
     icon: IconRect,
     window: PhysicalSize<u32>,
@@ -161,68 +414,294 @@ pub fn anchor(
     let width = f64::from(window.width);
     let height = f64::from(window.height);
     let inset = EDGE_INSET_PX * scale;
+
     let left = f64::from(monitor_position.x) + inset;
     let right = f64::from(monitor_position.x) + f64::from(monitor_size.width) - width - inset;
     let top = f64::from(monitor_position.y) + inset;
     let bottom = f64::from(monitor_position.y) + f64::from(monitor_size.height) - height - inset;
+
+    // `max` then `min`: on a monitor narrower than the window the window is
+    // pinned to the left edge rather than pushed off the left one.
     let x = (icon.centre_x - width / 2.0).max(left).min(right.max(left));
     let y = (icon.bottom + GAP_PX * scale).max(top).min(bottom.max(top));
 
     PhysicalPosition::new(x.round() as i32, y.round() as i32)
 }
 
+/// Window-event policy. Wired once in `crate::run`.
+///
+/// `Focused(false)` hides rather than closes so that the WebView keeps its
+/// state — a popover that reloaded React on every dismissal would lose the
+/// scroll position and the search text, and manifest 06's scroll-anchoring
+/// requirements assume the list survives.
+pub fn on_event<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEvent) {
+    match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            api.prevent_close();
+            match close_request_action(window.label()) {
+                CloseRequestAction::HideQuickPaste(target) => {
+                    hide_after_window_event(window, target)
+                }
+                CloseRequestAction::HideWindow => {
+                    let _ = window.hide();
+                }
+            }
+        }
+        tauri::WindowEvent::Focused(false)
+            if focus_loss_action(window.label(), window.is_visible().unwrap_or(false))
+                == FocusLossAction::HideQuickPasteAndRestorePrior =>
+        {
+            hide_after_window_event(window, QuickPasteHideTarget::RestorePreviousApplication);
+        }
+        _ => {}
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn remember_frontmost_application() {
+    // Captured before the popup receives focus. A PID, rather than an Objective-C
+    // object, is retained so this cross-thread window state remains Send + Sync.
+    let Ok(mut previous) = previous_application().lock() else {
+        return;
+    };
+    *previous = None;
+    let current = unsafe { NSRunningApplication::currentApplication().processIdentifier() };
+    let frontmost = unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() };
+    let Some(frontmost) = frontmost else {
+        return;
+    };
+    let pid = unsafe { frontmost.processIdentifier() };
+    if pid != current {
+        *previous = Some(pid);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn remember_frontmost_application() {}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn take_previous_application() -> Option<i32> {
+    previous_application()
+        .lock()
+        .ok()
+        .and_then(|mut previous| previous.take())
+}
+
+#[cfg(target_os = "macos")]
+fn has_previous_application() -> bool {
+    previous_application()
+        .lock()
+        .is_ok_and(|previous| previous.is_some())
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn restore_previous_application() {
+    let pid = take_previous_application();
+    let Some(pid) = pid else {
+        return;
+    };
+    let Some(application) =
+        (unsafe { NSRunningApplication::runningApplicationWithProcessIdentifier(pid) })
+    else {
+        return;
+    };
+    let _ = unsafe { application.activateWithOptions(NSApplicationActivationOptions::empty()) };
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restore_previous_application() {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A 1440×900 primary at the origin, and a 2560×1440 secondary arranged to
+    /// its left — so the secondary's origin is negative, which is the case an
+    /// unclamped calculation gets wrong.
+    fn primary() -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
+        (PhysicalPosition::new(0, 0), PhysicalSize::new(1440, 900))
+    }
+
+    fn secondary_on_the_left() -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
+        (
+            PhysicalPosition::new(-2560, 0),
+            PhysicalSize::new(2560, 1440),
+        )
+    }
+
     const WINDOW: PhysicalSize<u32> = PhysicalSize {
         width: 420,
-        height: 600,
+        height: 640,
     };
 
     #[test]
-    fn the_popup_is_centred_under_the_icon() {
-        let at = anchor(
-            IconRect {
-                centre_x: 700.0,
-                bottom: 24.0,
-            },
-            WINDOW,
-            &PhysicalPosition::new(0, 0),
-            &PhysicalSize::new(1440, 900),
-            1.0,
-        );
-        assert_eq!(at, PhysicalPosition::new(490, 30));
+    fn quick_paste_has_its_own_window_label_and_route() {
+        assert_ne!(MAIN, QUICK_PASTE);
+        assert_eq!(QUICK_PASTE_CONFIG.label, "quick-paste");
+        assert_eq!(QUICK_PASTE_CONFIG.route, "index.html?surface=quick-paste");
     }
 
     #[test]
-    fn the_popup_stays_on_a_negative_origin_monitor() {
-        let at = anchor(
-            IconRect {
-                centre_x: -2555.0,
-                bottom: 24.0,
-            },
-            WINDOW,
-            &PhysicalPosition::new(-2560, 0),
-            &PhysicalSize::new(2560, 1440),
-            1.0,
+    fn quick_paste_starts_hidden_and_protected() {
+        assert!(!QUICK_PASTE_CONFIG.visible);
+        assert!(QUICK_PASTE_CONFIG.content_protected);
+    }
+
+    #[test]
+    fn no_prior_application_hides_between_accessory_and_regular() {
+        assert_eq!(
+            NO_PRIOR_APPLICATION_HIDE,
+            [
+                HideStep::Accessory,
+                HideStep::Hide,
+                HideStep::FreeMemory,
+                HideStep::Regular,
+            ]
         );
+    }
+
+    #[test]
+    fn settings_hides_the_popup_and_releases_its_cache() {
+        assert_eq!(
+            main_transition_action(QUICK_PASTE),
+            MainTransitionAction::HideQuickPaste(QuickPasteHideTarget::MainWindow)
+        );
+        assert_eq!(
+            main_transition_action(MAIN),
+            MainTransitionAction::HideWindow
+        );
+    }
+
+    #[test]
+    fn close_requested_uses_the_popup_dismiss_lifecycle() {
+        assert_eq!(
+            close_request_action(QUICK_PASTE),
+            CloseRequestAction::HideQuickPaste(QuickPasteHideTarget::RestorePreviousApplication)
+        );
+        assert_eq!(close_request_action(MAIN), CloseRequestAction::HideWindow);
+        assert_eq!(
+            NO_PRIOR_APPLICATION_HIDE,
+            [
+                HideStep::Accessory,
+                HideStep::Hide,
+                HideStep::FreeMemory,
+                HideStep::Regular,
+            ]
+        );
+    }
+
+    #[test]
+    fn blur_event_sequence_hides_only_popup_and_restores_once() {
+        let actions = [
+            focus_loss_action(QUICK_PASTE, true),
+            // macOS delivers a trailing Focused(false) after `hide`.
+            focus_loss_action(QUICK_PASTE, false),
+            focus_loss_action(MAIN, true),
+        ];
+
+        assert_eq!(
+            actions,
+            [
+                FocusLossAction::HideQuickPasteAndRestorePrior,
+                FocusLossAction::Ignore,
+                FocusLossAction::Ignore,
+            ]
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| **action == FocusLossAction::HideQuickPasteAndRestorePrior)
+                .count(),
+            1
+        );
+
+        #[cfg(target_os = "macos")]
+        {
+            *previous_application().lock().unwrap() = Some(42);
+            let restored = actions
+                .iter()
+                .filter(|action| **action == FocusLossAction::HideQuickPasteAndRestorePrior)
+                .filter_map(|_| take_previous_application())
+                .collect::<Vec<_>>();
+            assert_eq!(restored, [42]);
+            assert_eq!(take_previous_application(), None);
+        }
+    }
+
+    #[test]
+    fn the_window_is_centred_under_the_icon_and_hangs_below_it() {
+        let (pos, size) = primary();
+        let icon = IconRect {
+            centre_x: 700.0,
+            bottom: 24.0,
+        };
+        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
+        assert_eq!(at.x, 700 - 210);
+        assert_eq!(at.y, 24 + GAP_PX as i32);
+    }
+
+    /// The menu bar is at the right-hand end of the screen, which is where a
+    /// menu-bar app's icon actually lives.
+    #[test]
+    fn an_icon_near_the_right_edge_does_not_push_the_window_off_screen() {
+        let (pos, size) = primary();
+        let icon = IconRect {
+            centre_x: 1430.0,
+            bottom: 24.0,
+        };
+        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
+        assert!(
+            at.x + 420 <= 1440,
+            "the window ran off the right edge: x={}",
+            at.x
+        );
+        assert_eq!(at.x, 1440 - 420 - EDGE_INSET_PX as i32);
+    }
+
+    /// The failure this clamp exists for: a display to the left of the primary
+    /// has a negative origin, and an unclamped window lands on the wrong screen.
+    #[test]
+    fn a_monitor_with_a_negative_origin_keeps_the_window_on_that_monitor() {
+        let (pos, size) = secondary_on_the_left();
+        let icon = IconRect {
+            centre_x: -2555.0,
+            bottom: 24.0,
+        };
+        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
         assert!(at.x >= -2560, "{at:?}");
-        assert!(at.x + WINDOW.width as i32 <= 0, "{at:?}");
+        assert!(at.x + 420 <= 0, "{at:?}");
     }
 
+    /// A Retina display reports scale 2, so the gap and the inset have to
+    /// double with it or the popover sits visibly tight to the menu bar.
     #[test]
-    fn the_popup_never_runs_off_the_right_edge() {
-        let at = anchor(
-            IconRect {
-                centre_x: 1430.0,
-                bottom: 24.0,
-            },
-            WINDOW,
-            &PhysicalPosition::new(0, 0),
-            &PhysicalSize::new(1440, 900),
-            1.0,
-        );
-        assert_eq!(at.x + WINDOW.width as i32, 1440 - EDGE_INSET_PX as i32);
+    fn the_gap_and_the_inset_scale_with_the_display() {
+        let (pos, size) = primary();
+        let icon = IconRect {
+            centre_x: 700.0,
+            bottom: 48.0,
+        };
+        let at = anchor(icon, WINDOW, &pos, &size, 2.0);
+        assert_eq!(at.y, 48 + (GAP_PX * 2.0) as i32);
+    }
+
+    /// Degenerate rather than impossible: a very small external display, or a
+    /// window sized larger than the screen it is being placed on. Pinning to
+    /// the top-left keeps the title area reachable; the alternative pushes the
+    /// window's origin off the screen and makes it unmovable.
+    #[test]
+    fn a_window_larger_than_the_monitor_is_pinned_to_the_top_left() {
+        let pos = PhysicalPosition::new(0, 0);
+        let size = PhysicalSize::new(320, 240);
+        let icon = IconRect {
+            centre_x: 160.0,
+            bottom: 12.0,
+        };
+        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
+        assert_eq!(at.x, EDGE_INSET_PX as i32);
+        assert_eq!(at.y, EDGE_INSET_PX as i32);
     }
 }

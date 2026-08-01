@@ -36,7 +36,9 @@ pub async fn list(
     limit: u32,
     cursor: Option<String>,
 ) -> Result<UiPage> {
-    Ok(backend.list(limit, cursor.as_deref()).await?.into())
+    let page = backend.list(limit, cursor.as_deref()).await?;
+    let total = backend.status().await?.item_count;
+    Ok(UiPage::with_total(page, total))
 }
 
 /// Full-text search. Sensitive items are never indexed and never returned, so
@@ -70,6 +72,15 @@ pub async fn add_item(backend: State<'_, SelectedBackend>, content: String) -> R
 #[tauri::command]
 pub async fn copy_item(backend: State<'_, SelectedBackend>, id: String) -> Result<UiItem> {
     Ok(backend.copy(&id).await?.into())
+}
+
+/// Put an item on the clipboard as plain text, without exposing it to the WebView.
+#[tauri::command]
+pub async fn copy_item_as_plain_text(
+    backend: State<'_, SelectedBackend>,
+    id: String,
+) -> Result<UiItem> {
+    Ok(backend.copy_as_plain_text(&id).await?.into())
 }
 
 /// The deliberate reveal gesture: return one item's plaintext.
