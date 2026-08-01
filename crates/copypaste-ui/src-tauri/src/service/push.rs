@@ -19,9 +19,11 @@
 
 use std::time::Duration;
 
+use backon::{BackoffBuilder, ExponentialBuilder};
 use copypaste_ipc::{EventData, EventKind};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tokio_util::sync::CancellationToken;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 
@@ -36,8 +38,34 @@ pub const EVENT_CHANGED: &str = "copypaste://changed";
 pub const EVENT_PUSH_STATE: &str = "copypaste://push-state";
 
 /// How long to wait before reconnecting a stream that ended.
-const RECONNECT_MIN: Duration = Duration::from_millis(500);
-const RECONNECT_MAX: Duration = Duration::from_secs(30);
+const RECONNECT_MIN: Duration = Duration::from_secs(5);
+const RECONNECT_MAX: Duration = Duration::from_secs(300);
+
+fn reconnect_policy() -> ExponentialBuilder {
+    // Jitter stays disabled so every client follows the required exact ladder.
+    ExponentialBuilder::new()
+        .with_min_delay(RECONNECT_MIN)
+        .with_max_delay(RECONNECT_MAX)
+        .without_max_times()
+}
+
+/// Owns the app-wide push subscription and its shutdown signal.
+pub struct PushMonitor {
+    shutdown: CancellationToken,
+}
+
+impl PushMonitor {
+    /// Cancel an active subscription or reconnect wait.
+    pub fn stop(&self) {
+        self.shutdown.cancel();
+    }
+}
+
+impl Drop for PushMonitor {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct ChangePayload {
@@ -64,31 +92,56 @@ pub struct PushStatePayload {
 /// purpose: the tray and the menu-bar badge want to know about changes while
 /// the window is hidden, and re-subscribing on every window show would burn a
 /// connection per gesture.
-pub fn spawn<R: Runtime>(app: AppHandle<R>) {
-    tauri::async_runtime::spawn(async move {
-        let mut delay = RECONNECT_MIN;
-        loop {
-            match subscribe(&app).await {
-                // The stream ended cleanly — the daemon stopped or was
-                // restarted. Reconnect, backing off so a daemon that is down
-                // is not hammered.
-                Ok(()) => {}
-                Err(BackendError::Unsupported(_)) => {
-                    // This build has no daemon to subscribe to (Android).
-                    // Nothing will change that, so stop rather than retry
-                    // forever; the frontend polls.
-                    set_live(&app, false);
-                    return;
-                }
-                Err(error) => {
-                    tracing::debug!(%error, "the change stream is not available");
-                }
+pub fn spawn<R: Runtime>(app: AppHandle<R>) -> PushMonitor {
+    let monitor = PushMonitor {
+        shutdown: CancellationToken::new(),
+    };
+    let shutdown = monitor.shutdown.clone();
+    tauri::async_runtime::spawn(run(app, shutdown));
+    monitor
+}
+
+async fn run<R: Runtime>(app: AppHandle<R>, shutdown: CancellationToken) {
+    let policy = reconnect_policy();
+    let mut schedule = policy.build();
+    loop {
+        let result = tokio::select! {
+            biased;
+            () = shutdown.cancelled() => {
+                set_live(&app, false);
+                return;
             }
-            set_live(&app, false);
-            tokio::time::sleep(delay).await;
-            delay = (delay * 2).min(RECONNECT_MAX);
+            result = subscribe(&app) => result,
+        };
+
+        match result {
+            // A stream that was live resets the next reconnect to the floor.
+            Ok(()) => schedule = policy.build(),
+            Err(BackendError::Unsupported(_)) => {
+                set_live(&app, false);
+                return;
+            }
+            Err(error) => {
+                tracing::debug!(%error, "the change stream is not available");
+            }
         }
-    });
+        set_live(&app, false);
+
+        let Some(delay) = schedule.next() else {
+            return;
+        };
+        if wait_to_reconnect(delay, &shutdown).await {
+            return;
+        }
+    }
+}
+
+async fn wait_to_reconnect(delay: Duration, shutdown: &CancellationToken) -> bool {
+    tokio::select! {
+        biased;
+        () = shutdown.cancelled() => true,
+        () = tokio::time::sleep(delay) => false,
+    }
 }
 
 /// One subscription, from connect to hang-up.
@@ -167,11 +220,37 @@ mod tests {
     }
 
     #[test]
-    fn the_reconnect_delay_is_bounded() {
-        let mut delay = RECONNECT_MIN;
-        for _ in 0..20 {
-            delay = (delay * 2).min(RECONNECT_MAX);
-        }
-        assert_eq!(delay, RECONNECT_MAX);
+    fn the_reconnect_schedule_is_exact_and_bounded() {
+        let delays: Vec<_> = reconnect_policy().build().take(9).collect();
+        assert_eq!(
+            delays,
+            [5, 10, 20, 40, 80, 160, 300, 300, 300].map(Duration::from_secs)
+        );
+    }
+
+    #[test]
+    fn a_live_stream_resets_the_reconnect_schedule() {
+        let mut failed = reconnect_policy().build();
+        assert_eq!(failed.nth(5), Some(Duration::from_secs(160)));
+
+        let mut after_success = reconnect_policy().build();
+        assert_eq!(after_success.next(), Some(RECONNECT_MIN));
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_the_longest_reconnect_wait() {
+        let shutdown = CancellationToken::new();
+        let waiting = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { wait_to_reconnect(RECONNECT_MAX, &shutdown).await }
+        });
+        tokio::task::yield_now().await;
+
+        shutdown.cancel();
+        let cancelled = tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("cancellation left the reconnect sleep running")
+            .expect("wait task panicked");
+        assert!(cancelled);
     }
 }

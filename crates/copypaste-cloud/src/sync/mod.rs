@@ -58,7 +58,9 @@ pub mod transport;
 #[cfg(test)]
 mod fakes;
 
-pub use cadence::{MAX_POLL_INTERVAL, MAX_POLL_INTERVAL_WITHOUT_PUSH, MIN_POLL_INTERVAL};
+pub use cadence::{
+    AdaptiveCadence, MAX_POLL_INTERVAL, MAX_POLL_INTERVAL_WITHOUT_PUSH, MIN_POLL_INTERVAL,
+};
 pub use driver::CloudSync;
 pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;

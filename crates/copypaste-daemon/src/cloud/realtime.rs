@@ -28,6 +28,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use backon::{BackoffBuilder, ExponentialBuilder};
 use copypaste_cloud::{RealtimeError, RealtimeEvent, RealtimeSubscription};
 use tokio::sync::watch;
 use tracing::{debug, info};
@@ -36,13 +37,42 @@ use crate::cloud::{Cloud, Driver};
 use crate::AppState;
 
 /// How long to wait before rebuilding a subscription that ended or refused.
-///
-/// Bounded doubling rather than `backoff`'s full machinery: there is one
-/// operation, one failure mode and no jitter requirement, and the subscription
-/// does its own reconnects internally — this only covers the case where it gave
-/// up entirely.
 const RECONNECT_MIN: Duration = Duration::from_secs(5);
 const RECONNECT_MAX: Duration = Duration::from_secs(300);
+
+fn reconnect_policy() -> ExponentialBuilder {
+    // Jitter stays disabled so every client follows the required exact ladder.
+    ExponentialBuilder::new()
+        .with_min_delay(RECONNECT_MIN)
+        .with_max_delay(RECONNECT_MAX)
+        .without_max_times()
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ReconnectWait {
+    Retry,
+    SessionChanged,
+    Shutdown,
+}
+
+async fn wait_to_reconnect(
+    delay: Duration,
+    session_updates: &mut watch::Receiver<u64>,
+    shutdown: &mut watch::Receiver<bool>,
+) -> ReconnectWait {
+    tokio::select! {
+        biased;
+        _ = shutdown.changed() => ReconnectWait::Shutdown,
+        changed = session_updates.changed() => {
+            if changed.is_ok() {
+                ReconnectWait::SessionChanged
+            } else {
+                ReconnectWait::Shutdown
+            }
+        }
+        _ = tokio::time::sleep(delay) => ReconnectWait::Retry,
+    }
+}
 
 /// Hold a realtime subscription for as long as an account is signed in.
 pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
@@ -51,18 +81,32 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
         return;
     }
 
-    let mut backoff = RECONNECT_MIN;
+    let policy = reconnect_policy();
+    let mut schedule = policy.build();
     let mut session_updates = state.cloud.session_updates();
     loop {
         if *shutdown.borrow() {
             break;
         }
 
-        match subscribe(&state).await {
+        let subscription = tokio::select! {
+            biased;
+            _ = shutdown.changed() => break,
+            changed = session_updates.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                schedule = policy.build();
+                continue;
+            }
+            subscription = subscribe(&state) => subscription,
+        };
+
+        match subscription {
             Some((subscription, driver, user_id)) => {
-                backoff = RECONNECT_MIN;
+                schedule = policy.build();
                 // Returns when the socket ended for good, or on shutdown.
-                pump(
+                match pump(
                     &state,
                     subscription,
                     driver,
@@ -70,25 +114,23 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
                     &user_id,
                     &mut shutdown,
                 )
-                .await;
-            }
-            None => {
-                // Not signed in, no token, or the join was refused. All three
-                // recover the same way: wait and look again.
-                tokio::select! {
-                    biased;
-                    _ = shutdown.changed() => break,
-                    changed = session_updates.changed() => {
-                        if changed.is_err() {
-                            break;
-                        }
-                        backoff = RECONNECT_MIN;
-                        continue;
-                    }
-                    _ = tokio::time::sleep(backoff) => {}
+                .await
+                {
+                    PumpExit::Shutdown => break,
+                    PumpExit::SessionChanged => continue,
+                    PumpExit::Disconnected => {}
                 }
-                backoff = (backoff * 2).min(RECONNECT_MAX);
             }
+            None => {}
+        }
+
+        let Some(delay) = schedule.next() else {
+            break;
+        };
+        match wait_to_reconnect(delay, &mut session_updates, &mut shutdown).await {
+            ReconnectWait::Retry => {}
+            ReconnectWait::SessionChanged => schedule = policy.build(),
+            ReconnectWait::Shutdown => break,
         }
     }
 
@@ -143,6 +185,13 @@ struct PushChannel<'a> {
     live: bool,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum PumpExit {
+    Disconnected,
+    SessionChanged,
+    Shutdown,
+}
+
 impl<'a> PushChannel<'a> {
     fn confirmed(cloud: &'a Cloud, driver: Arc<Driver>) -> Self {
         let live = driver.push_channel_live();
@@ -180,33 +229,33 @@ async fn pump<S: Subscription>(
     session_updates: &mut watch::Receiver<u64>,
     user_id: &str,
     shutdown: &mut watch::Receiver<bool>,
-) {
+) -> PumpExit {
     let mut channel = PushChannel::confirmed(&state.cloud, Arc::clone(&driver));
-    loop {
+    let exit = loop {
         tokio::select! {
             biased;
-            _ = shutdown.changed() => break,
+            _ = shutdown.changed() => break PumpExit::Shutdown,
             changed = session_updates.changed() => {
                 if changed.is_err() {
-                    break;
+                    break PumpExit::Shutdown;
                 }
                 let Some(driver) = state.cloud.driver() else {
-                    break;
+                    break PumpExit::SessionChanged;
                 };
                 if !Arc::ptr_eq(&driver, &channel.driver) {
-                    break;
+                    break PumpExit::SessionChanged;
                 }
                 let (current_user_id, access_token) = driver.inspect_session(|session| {
                     (session.user_id.clone(), session.access_token.clone())
                 });
                 if current_user_id != user_id {
-                    break;
+                    break PumpExit::SessionChanged;
                 }
                 subscription.set_access_token(&access_token);
             }
             event = subscription.next_event() => match event {
                 // Terminal: the task gave up. The outer loop rebuilds.
-                None => break,
+                None => break PumpExit::Disconnected,
                 Some(Ok(RealtimeEvent::Resubscribed)) => {
                     // The one moment at-most-once is known to have bitten.
                     debug!("cloud realtime re-joined; forcing a round");
@@ -222,9 +271,10 @@ async fn pump<S: Subscription>(
                 }
             },
         }
-    }
+    };
     channel.set_live(false);
     subscription.close().await;
+    exit
 }
 
 #[cfg(test)]
@@ -241,6 +291,41 @@ mod tests {
     use crate::cloud::source::StoreSource;
     use crate::cloud::Cloud;
     use crate::testutil::{test_state, test_state_with_cloud};
+
+    #[test]
+    fn the_outer_reconnect_schedule_is_exact_and_bounded() {
+        let delays: Vec<_> = reconnect_policy().build().take(9).collect();
+        assert_eq!(
+            delays,
+            [5, 10, 20, 40, 80, 160, 300, 300, 300].map(Duration::from_secs)
+        );
+    }
+
+    #[test]
+    fn a_success_rebuilds_the_outer_schedule_at_its_floor() {
+        let mut failed = reconnect_policy().build();
+        assert_eq!(failed.nth(5), Some(Duration::from_secs(160)));
+
+        let mut after_success = reconnect_policy().build();
+        assert_eq!(after_success.next(), Some(RECONNECT_MIN));
+    }
+
+    #[tokio::test]
+    async fn shutdown_interrupts_the_longest_outer_reconnect_wait() {
+        let (_session_tx, mut session_updates) = watch::channel(0_u64);
+        let (shutdown_tx, mut shutdown) = watch::channel(false);
+        let task = tokio::spawn(async move {
+            wait_to_reconnect(RECONNECT_MAX, &mut session_updates, &mut shutdown).await
+        });
+        tokio::task::yield_now().await;
+
+        shutdown_tx.send(true).unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(1), task)
+            .await
+            .expect("shutdown left the reconnect sleep running")
+            .expect("wait task panicked");
+        assert_eq!(outcome, ReconnectWait::Shutdown);
+    }
 
     struct EmptyBackend {
         config: CloudConfig,
