@@ -64,6 +64,8 @@ export const history = {
     selectPrefix: "Select",
     selectingHint: "Click to add to the selection",
     hint: "Click to select · double-click to copy",
+    tapHint: "Tap to copy",
+    actions: "Item actions",
     hide: "Hide sensitive content",
     reveal: "Reveal sensitive content",
     copy: "Copy to clipboard",

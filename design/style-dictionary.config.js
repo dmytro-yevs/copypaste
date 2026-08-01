@@ -171,6 +171,26 @@ StyleDictionary.registerFormat({
   },
 });
 
+StyleDictionary.registerFormat({
+  name: 'css/copypaste-swatches',
+  format({ dictionary, options }) {
+    const swatches = new Map();
+    for (const token of dictionary.allTokens) {
+      if (token.path[0] !== 'accents') continue;
+      const [_, accent, role] = token.path;
+      if (!swatches.has(accent)) swatches.set(accent, new Map());
+      swatches.get(accent).set(role, token.$value ?? token.value);
+    }
+
+    const selectors = options.selectors.join(',\n');
+    const declarations = [...swatches].flatMap(([accent, roles]) => [
+      `  --swatch-${accent}: ${roles.get('accent')};`,
+      `  --on-swatch-${accent}: ${roles.get('on-accent')};`,
+    ]);
+    return [banner(options.title), `${selectors} {`, declarations.join('\n'), '}\n'].join('\n');
+  },
+});
+
 /**
  * The Tailwind v4 theme layer. Two parts:
  *   1. the explicit semantic slots from tokens/semantic/tailwind.json — the
@@ -333,6 +353,15 @@ function cssFiles(theme) {
         selectors: accentSelectors(theme),
       },
     },
+    {
+      destination: `css/swatches.${theme}.css`,
+      format: 'css/copypaste-swatches',
+      filter: (t) => inGroup(t, 'accents'),
+      options: {
+        title: `CopyPaste accent swatches, ${theme} — immutable picker colours.`,
+        selectors: themeSelectors(theme),
+      },
+    },
   ];
   if (theme !== 'dark') return files;
   return [
@@ -361,6 +390,8 @@ function cssFiles(theme) {
           'tokens.light.css',
           'accents.dark.css',
           'accents.light.css',
+          'swatches.dark.css',
+          'swatches.light.css',
           'theme.css',
         ],
       },

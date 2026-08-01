@@ -71,9 +71,7 @@
 //!
 //! A raw frame embeds clipboard ciphertext and metadata. Nothing in this module
 //! logs a frame body, a payload, an access token or the socket URL. A parse
-//! failure logs the frame length and a sixteen-byte hex prefix, which is enough
-//! to tell "HTML error page" from "truncated JSON" and not enough to be worth
-//! exfiltrating.
+//! failure logs only the frame length.
 //!
 //! [`channel`] and [`frame`] are separate files on purpose: parsing an
 //! attacker-influenced frame and deciding what to connect *as* are different

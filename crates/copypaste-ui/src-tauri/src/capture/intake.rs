@@ -152,6 +152,7 @@ pub async fn capture_once<R: Runtime>(
     let stored = store(backend.inner(), &clip).await?;
     if let Some(item) = &stored {
         announce(app, item, source, clip.at_ms).await;
+        sync_after_capture(app).await;
     }
     Ok(stored)
 }
@@ -204,7 +205,10 @@ async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
         let backend = app.state::<SelectedBackend>();
         match store(backend.inner(), &clip).await {
             Ok(None) => {}
-            Ok(Some(item)) => announce(app, &item, clip.source, clip.at_ms).await,
+            Ok(Some(item)) => {
+                announce(app, &item, clip.source, clip.at_ms).await;
+                sync_after_capture(app).await;
+            }
             Err(error) => {
                 // Back on the queue, and stop for this tick: whatever refused
                 // this clip will refuse the next one, and draining the rest
@@ -215,6 +219,19 @@ async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
             }
         }
     }
+}
+
+async fn sync_after_capture<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(target_os = "android")]
+    {
+        let backend = app.state::<SelectedBackend>();
+        if let Err(error) = backend.sync(None).await {
+            tracing::debug!(%error, "could not sync the captured item");
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    let _ = app;
 }
 
 /// Tell the frontend that history changed and how the new item arrived.

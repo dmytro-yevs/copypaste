@@ -6,6 +6,7 @@ use std::path::Path;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
+use zeroize::Zeroizing;
 
 use super::connection::{apply_connection_pragmas, apply_key, build_pool, validate_key};
 use super::legacy::is_v1_database;
@@ -37,6 +38,7 @@ impl Store {
     /// existing file yields [`StoreError::InvalidKey`]; there is no fallback
     /// read and no unkeyed plaintext probe.
     pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
+        let db_key = Zeroizing::new(*db_key);
         // Before anything is opened: a file written by v0.4.x is refused with
         // its own error, never migrated and never mistaken for corruption
         // (CLAUDE.md rule 3, [`super::legacy`]).
@@ -47,13 +49,13 @@ impl Store {
         // InvalidKey instead of an opaque pool-construction failure, and so the
         // migration runs once rather than once per pooled connection.
         let mut conn = Connection::open(path)?;
-        apply_key(&conn, db_key)?;
+        apply_key(&conn, &db_key)?;
         validate_key(&conn)?;
         apply_connection_pragmas(&conn)?;
         migrate(&mut conn)?;
         drop(conn);
 
-        let pool = build_pool(SqliteConnectionManager::file(path), *db_key, false)?;
+        let pool = build_pool(SqliteConnectionManager::file(path), db_key, false)?;
         Ok(Self { pool })
     }
 
@@ -62,6 +64,7 @@ impl Store {
     /// its *own* empty database; one connection is held permanently idle so the
     /// database is not dropped when the pool goes quiet.
     pub fn open_in_memory(db_key: &[u8; 32]) -> Result<Self, StoreError> {
+        let db_key = Zeroizing::new(*db_key);
         let uri = format!(
             "file:copypaste-{}?mode=memory&cache=shared",
             uuid::Uuid::new_v4()
@@ -72,7 +75,7 @@ impl Store {
                 | rusqlite::OpenFlags::SQLITE_OPEN_URI
                 | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         );
-        let pool = build_pool(manager, *db_key, true)?;
+        let pool = build_pool(manager, db_key, true)?;
         let mut conn = pool.get()?;
         migrate(&mut conn)?;
         drop(conn);

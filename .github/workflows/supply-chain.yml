@@ -51,8 +51,8 @@ jobs:
         # others.
         check: [advisories, bans, licenses, sources]
     steps:
-      - uses: actions/checkout@v5
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check ${{ matrix.check }}
           # `arguments` go before the subcommand, `command-arguments` after —
@@ -68,20 +68,20 @@ jobs:
     name: cargo-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Advisory DB cache key
         id: stamp
         run: echo "week=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
 
       - name: Cache advisory-db
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/advisory-db
           key: advisory-db-${{ steps.stamp.outputs.week }}
           restore-keys: advisory-db-
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
         with:
           tool: cargo-audit
 

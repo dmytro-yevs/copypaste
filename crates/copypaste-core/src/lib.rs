@@ -16,9 +16,9 @@ pub use sensitive::{
     DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
 };
 pub use storage::{
-    compute_content_hash, is_v1_database, origin_or, v1_database_in, DeviceIdentity, IncomingItem,
-    IndexedText, Ingest, ItemCursor, NewItem, Page, Store, StoreError, StoredItem, Version,
-    V1_DATABASE_FILENAME,
+    compute_content_hash, is_v1_database, origin_or, v1_database_in, verify_integrity,
+    verify_schema, DeviceIdentity, IncomingItem, IndexedText, Ingest, ItemCursor, NewItem, Page,
+    Store, StoreError, StoredItem, Version, V1_DATABASE_FILENAME,
 };
 pub use sync::{MergeError, RemoteVersion, StoreSource};
 pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};

@@ -45,6 +45,10 @@ pub async fn listen<S, F>(
     S: SyncSource + Send + Sync + 'static,
     F: Fn(&str, &SyncOutcome) + Send + Sync + Clone + 'static,
 {
+    match listener.local_addr() {
+        Ok(addr) => node.set_listen_addr(addr),
+        Err(error) => warn!(error = %error, "could not determine the peer listener address"),
+    }
     info!(port = node.port(), "peer listener started");
     let mut sessions = tokio::task::JoinSet::new();
 
@@ -100,7 +104,12 @@ async fn serve_peer<S, F>(
     };
 
     let mut channel = NoiseChannel::new(session);
-    let outcome = tokio::time::timeout(SESSION_TIMEOUT, run_responder(&mut channel, source)).await;
+    let listen_addr = node.listen_addr();
+    let outcome = tokio::time::timeout(
+        SESSION_TIMEOUT,
+        run_responder(&mut channel, source, listen_addr.as_deref()),
+    )
+    .await;
     channel.close().await;
 
     match outcome {
@@ -113,9 +122,11 @@ async fn serve_peer<S, F>(
                 "served a peer sync session"
             );
             if let Some(peer) = node.peers().get(&pairing_id) {
-                // The dialler's source port is not where it listens, so only
-                // the name is learned here.
-                node.touch_peer(&peer, None, Some(&outcome.peer_device_name));
+                node.touch_peer(
+                    &peer,
+                    outcome.peer_listen_addr,
+                    Some(&outcome.peer_device_name),
+                );
             }
             on_session(&pairing_id, &outcome);
         }
@@ -207,6 +218,61 @@ mod tests {
         let token = PairingToken::generate();
         assert!(Session::connect(addr, &token.psk()).await.is_err());
         let _ = tx.send(true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_pairing_code_completes_a_session_and_syncs_both_histories() {
+        let a_dir = tempfile::tempdir().unwrap();
+        let b_dir = tempfile::tempdir().unwrap();
+        let a = Arc::new(Node::new(
+            PeerStore::open(&a_dir.path().join("a-peers.json")).unwrap(),
+            None,
+            crate::DEFAULT_PORT,
+        ));
+        let b = Node::new(
+            PeerStore::open(&b_dir.path().join("b-peers.json")).unwrap(),
+            None,
+            crate::DEFAULT_PORT,
+        );
+        let a_source = Arc::new(TestSource::new(
+            "desktop",
+            vec![item("from-desktop", 1_000, "desktop item", "desktop")],
+        ));
+        let b_source = TestSource::new(
+            "phone",
+            vec![item("from-phone", 2_000, "phone item", "phone")],
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        tokio::spawn(listen(
+            Arc::clone(&a),
+            listener,
+            Arc::clone(&a_source),
+            |_: &str, _: &SyncOutcome| {},
+            shutdown_rx,
+        ));
+
+        let pairing = a.pair_create("phone").unwrap();
+        let accepted = b
+            .pair_accept(&pairing.code, &addr.to_string(), &b_source)
+            .await
+            .expect("the code and listener must establish a pairing");
+
+        assert_eq!(a.peers().len(), 1);
+        assert_eq!(b.peers().len(), 1);
+        assert_eq!(accepted.peer.pairing_id, pairing.pairing_id);
+        assert!(accepted.peer.last_addr.is_some());
+        assert!(a_source
+            .snapshot()
+            .iter()
+            .any(|entry| entry.item_id == "from-phone"));
+        assert!(b_source
+            .snapshot()
+            .iter()
+            .any(|entry| entry.item_id == "from-desktop"));
+
+        let _ = shutdown_tx.send(true);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

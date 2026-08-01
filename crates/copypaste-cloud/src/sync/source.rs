@@ -63,6 +63,23 @@ pub trait CloudSource: Send + Sync {
     /// [`SyncError::Source`] for a store failure.
     fn local_changes_since(&self, since_ms: i64) -> Result<Vec<LocalItem>, SyncError>;
 
+    /// Local versions after an optional upload keyset cursor.
+    ///
+    /// Sources that have not persisted the tie-break retain the inclusive
+    /// timestamp behaviour. Production sources override this with a database
+    /// keyset query so a full timestamp bucket cannot stall behind a page cap.
+    fn local_changes_after(
+        &self,
+        since_ms: i64,
+        after_item_id: Option<&str>,
+    ) -> Result<Vec<LocalItem>, SyncError> {
+        let mut items = self.local_changes_since(since_ms)?;
+        if let Some(item_id) = after_item_id {
+            items.retain(|item| (item.created_at, item.item_id.as_str()) > (since_ms, item_id));
+        }
+        Ok(items)
+    }
+
     /// Merge one remote version into the local history, returning whether
     /// anything changed.
     ///
@@ -155,6 +172,22 @@ pub trait CloudSource: Send + Sync {
     /// [`SyncError::Source`] for a store failure.
     fn upload_floor(&self) -> Result<i64, SyncError> {
         self.watermark()
+    }
+
+    /// The tie-break half of the upload cursor.
+    ///
+    /// Unlike the download cursor this is only advanced after a complete
+    /// round, but it needs the same pair to drain a timestamp bucket larger
+    /// than the per-round offer limit.
+    fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
+        Ok(None)
+    }
+
+    /// Schedule a local LWW winner for upload after an incoming cloud row was
+    /// declined. The default is for sources that cannot preserve a local
+    /// version independently of their watermark.
+    fn requeue_local_winner(&self, _incoming: &LocalItem) -> Result<bool, SyncError> {
+        Ok(false)
     }
 
     /// Persist the cursor.

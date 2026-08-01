@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CopyPaste history stack">
+  <rect x="220" y="220" width="520" height="600" rx="74" fill="#FFFFFF" fill-opacity=".62"/>
+  <path d="M307 320h298M307 380h258M307 440h218" fill="none" stroke="#4338CA" stroke-linecap="round" stroke-opacity=".22" stroke-width="22"/>
+  <rect x="304" y="304" width="520" height="600" rx="74" fill="#FFFFFF"/>
+  <path d="M394 434h340M394 502h292M394 570h244" fill="none" stroke="#1E1B4B" stroke-linecap="round" stroke-width="28"/>
+  <circle cx="394" cy="740" r="18" fill="#5B5BD6"/>
+  <rect x="430" y="722" width="200" height="36" rx="18" fill="#5B5BD6" fill-opacity=".18"/>
+</svg>

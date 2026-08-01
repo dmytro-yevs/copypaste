@@ -88,13 +88,12 @@ impl Keyring {
         }
     }
 
-    /// Key for SQLCipher, as raw bytes. The caller formats the PRAGMA:
+    /// Key for SQLCipher. The caller formats the PRAGMA:
     /// SQLCipher wants `PRAGMA key = "x'<64 lowercase hex chars>'"` applied
     /// *before any other statement*, and both the hex string and this array
-    /// should be wrapped in `zeroize::Zeroizing` at the call site — the fixed
-    /// signature cannot do it for you.
-    pub fn db_key(&self) -> [u8; KEY_LEN] {
-        derive(&self.secret, INFO_DB_KEY)
+    /// and the returned copy is zeroized when the caller is done with it.
+    pub fn db_key(&self) -> Zeroizing<[u8; KEY_LEN]> {
+        Zeroizing::new(derive(&self.secret, INFO_DB_KEY))
     }
 
     /// Key for item content AEAD.
@@ -198,12 +197,18 @@ mod tests {
     }
 
     #[test]
+    fn database_keys_zeroize_on_drop() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<Zeroizing<[u8; KEY_LEN]>>();
+    }
+
+    #[test]
     fn db_key_and_item_key_are_domain_separated() {
         // Same IKM, same salt, different `info`. If these ever collide, a
         // SQLCipher header disclosure would also disclose the item key.
         let ring = Keyring::from_secret(&SECRET_A);
         let item = ring.item_key();
-        assert_ne!(ring.db_key(), *item.0.as_ref());
+        assert_ne!(*ring.db_key(), *item.0.as_ref());
     }
 
     #[test]
@@ -212,7 +217,7 @@ mod tests {
         // the single most easily-broken thing in that design. v2 derives both
         // keys; neither is the stored secret.
         let ring = Keyring::from_secret(&SECRET_A);
-        assert_ne!(ring.db_key(), SECRET_A);
+        assert_ne!(*ring.db_key(), SECRET_A);
         assert_ne!(*ring.item_key().0.as_ref(), SECRET_A);
     }
 
@@ -237,7 +242,7 @@ mod tests {
                 !rendered.contains('7'),
                 "secret byte value leaked: {rendered}"
             );
-            for byte in ring.db_key() {
+            for byte in ring.db_key().iter() {
                 assert!(!rendered.contains(&byte.to_string()));
             }
         }
