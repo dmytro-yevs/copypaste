@@ -457,13 +457,28 @@ else
         "expected OWASP Dependency-Check after the Android build on its schedule"
 fi
 
-if [[ -f packaging/android/release-cert.sha256 ]] \
+CERT_FILE="packaging/android/release-cert.sha256"
+CERT_ERROR=""
+if [[ ! -f "$CERT_FILE" ]]; then
+    CERT_ERROR="$CERT_FILE is missing"
+else
+    EXPECTED_CERT="$(tr -d '[:space:]:' < "$CERT_FILE" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$EXPECTED_CERT" == "unconfigured" ]]; then
+        CERT_ERROR="$CERT_FILE is still UNCONFIGURED; the release owner must verify and record the durable keystore fingerprint"
+    elif [[ ${#EXPECTED_CERT} -ne 64 ]]; then
+        CERT_ERROR="$CERT_FILE must contain one SHA-256 fingerprint; found ${#EXPECTED_CERT} characters after removing whitespace and colons"
+    elif [[ ! "$EXPECTED_CERT" =~ ^[0-9a-f]{64}$ ]]; then
+        CERT_ERROR="$CERT_FILE must contain only hexadecimal characters"
+    fi
+fi
+
+if [[ -z "$CERT_ERROR" ]] \
    && grep -q 'EXPECTED_CERT_FILE: packaging/android/release-cert.sha256' .github/workflows/release.yml \
    && grep -q 'APK signer fingerprint does not match' .github/workflows/release.yml; then
     ok "release.yml pins the Android signing certificate before artifact upload"
 else
     bad "release.yml pins the Android signing certificate before artifact upload" \
-        "expected a checked-in certificate fingerprint and an apksigner comparison"
+        "${CERT_ERROR:-expected the certificate file and apksigner comparison to remain wired}"
 fi
 
 if grep -q 'cargo install tauri-driver --version 2.0.6 --locked' .github/workflows/browser-webkitgtk.yml; then
