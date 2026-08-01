@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter as _, Listener as _, Manager as _, Runtime};
 use tokio::sync::Notify;
 
 use self::menu::TrayMenu;
-use super::{autostart, window};
+use super::{autostart, notify, window};
 use crate::backend::{Backend as _, SelectedBackend};
 use crate::service::push::{EVENT_CHANGED, EVENT_PUSH_STATE};
 
@@ -37,16 +37,6 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// stopped updating because it believed it was subscribed would show yesterday's
 /// clippings indefinitely.
 const BACKSTOP: Duration = Duration::from_secs(5);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_freshness_backstop_re_reads_the_recent_menu_every_five_seconds() {
-        assert_eq!(BACKSTOP, Duration::from_secs(5));
-    }
-}
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // Read once at build: a change made in System Settings while the app runs
@@ -136,8 +126,11 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 let backend = app.state::<SelectedBackend>();
-                if let Err(error) = backend.copy(&item).await {
-                    tracing::warn!(%error, "could not copy a clipping from the menu");
+                match backend.copy(&item).await {
+                    Ok(_) => notify::on_recent_copy(&app),
+                    Err(error) => {
+                        tracing::warn!(%error, "could not copy a clipping from the menu");
+                    }
                 }
             });
         }
@@ -166,4 +159,14 @@ fn spawn_refresh<R: Runtime>(app: AppHandle<R>, tray_menu: Arc<TrayMenu<R>>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_freshness_backstop_re_reads_the_recent_menu_every_five_seconds() {
+        assert_eq!(BACKSTOP, Duration::from_secs(5));
+    }
 }
