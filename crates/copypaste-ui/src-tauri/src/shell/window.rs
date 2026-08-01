@@ -1,4 +1,4 @@
-//! Popover-style window behaviour, and where the popover goes.
+//! The main window and the Quick Paste popover.
 //!
 //! A menu-bar clipboard manager is a popover, not a document window: it appears
 //! on a gesture under the icon that summoned it, takes focus, and goes away when
@@ -16,13 +16,48 @@
 //! # Android
 //!
 //! This module compiles everywhere; `tray`, `hotkey` and `autostart` do not.
-//! [`hide`] is a deliberate no-op there — the app *is* its window on a phone,
+//! [`hide_window`] is a deliberate no-op there — the app *is* its window on a phone,
 //! and hiding it would leave the user at the launcher with no way back.
 
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow};
+use tauri::{
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
-/// The one window. Named in `tauri.conf.json`.
+/// The full application surface. Named in `tauri.conf.json`.
 pub const MAIN: &str = "main";
+
+/// The compact, lazy-created Quick Paste surface.
+pub const QUICK_PASTE: &str = "quick-paste";
+
+/// The route loaded by the popup's separate WebView. Keeping it here makes a
+/// full `App` mount in the popup impossible by construction: the builder never
+/// points at the default route.
+pub const QUICK_PASTE_ROUTE: &str = "index.html?surface=quick-paste";
+
+/// The popup is security-sensitive from its first frame. A preference may only
+/// relax this after the frontend has loaded, exactly like the main window.
+pub const QUICK_PASTE_CONTENT_PROTECTED: bool = true;
+
+/// The dynamic window's creation policy, kept as data so its security and
+/// lifecycle properties can be tested without a native window server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuickPasteWindowConfig {
+    pub label: &'static str,
+    pub route: &'static str,
+    pub visible: bool,
+    pub content_protected: bool,
+}
+
+pub const QUICK_PASTE_CONFIG: QuickPasteWindowConfig = QuickPasteWindowConfig {
+    label: QUICK_PASTE,
+    route: QUICK_PASTE_ROUTE,
+    visible: false,
+    content_protected: QUICK_PASTE_CONTENT_PROTECTED,
+};
+
+const QUICK_PASTE_WIDTH: f64 = 403.0;
+const QUICK_PASTE_HEIGHT: f64 = 624.0;
 
 /// Gap between the menu bar and the top of the popover, in physical pixels at
 /// scale 1. Scaled by the target monitor's factor before use.
@@ -36,10 +71,31 @@ pub fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
 
-/// Show and focus, in that order, under the menu-bar item.
-pub fn show<R: Runtime>(app: &AppHandle<R>) {
+pub fn quick_paste_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
+    app.get_webview_window(QUICK_PASTE)
+}
+
+/// Show the full application surface. This is intentionally not the tray or
+/// hotkey action; the popup's gear is the route here.
+pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = main_window(app) else {
         return;
+    };
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Lazily create, position and focus the compact Quick Paste surface.
+pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
+    let window = match quick_paste_window(app) {
+        Some(window) => window,
+        None => match create_quick_paste(app) {
+            Ok(window) => window,
+            Err(error) => {
+                tracing::warn!(%error, "could not create the Quick Paste window");
+                return;
+            }
+        },
     };
     // Positioned before it is shown, so it never appears in one place and
     // jumps to another. Android has no tray to position under, and no
@@ -52,31 +108,64 @@ pub fn show<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.set_focus();
 }
 
-/// Hide the window.
+fn create_quick_paste<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
+    WebviewWindowBuilder::new(
+        app,
+        QUICK_PASTE_CONFIG.label,
+        WebviewUrl::App(QUICK_PASTE_CONFIG.route.into()),
+    )
+    .title("Quick Paste")
+    .inner_size(QUICK_PASTE_WIDTH, QUICK_PASTE_HEIGHT)
+    .resizable(false)
+    .always_on_top(true)
+    .decorations(false)
+    .transparent(true)
+    .shadow(true)
+    .skip_taskbar(true)
+    .visible(QUICK_PASTE_CONFIG.visible)
+    .content_protected(QUICK_PASTE_CONFIG.content_protected)
+    .build()
+}
+
+/// Hide whichever app surface issued the command.
 ///
-/// The only hide path. The frontend reaches it through the `hide_window`
-/// command rather than touching the window itself (INV-25).
-pub fn hide<R: Runtime>(app: &AppHandle<R>) {
+/// macOS's Accessory activation policy keeps the app out of the frontmost-app
+/// chain. Consequently hiding a focused CopyPaste window gives focus back to
+/// the application that was active before Quick Paste opened; we deliberately
+/// do not activate the main window on this path.
+pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) {
     if cfg!(target_os = "android") {
         return;
     }
-    if let Some(window) = main_window(app) {
-        let _ = window.hide();
+    let _ = window.hide();
+}
+
+/// Hide Quick Paste through the same policy used by the frontend.
+pub fn hide_quick_paste<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = quick_paste_window(app) {
+        hide_window(&window);
     }
 }
 
-/// What the hotkey and the tray's Show/Hide item both do.
-pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
-    let Some(window) = main_window(app) else {
+/// A hide produces a trailing blur on macOS. It must not trigger a second
+/// focus hand-off after the popup is already gone.
+const fn should_hide_on_focus_lost(visible: bool) -> bool {
+    visible
+}
+
+/// What the hotkey and every tray entry point do.
+pub fn toggle_quick_paste<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = quick_paste_window(app) else {
+        show_quick_paste(app);
         return;
     };
     // `is_visible` failing is not a reason to do nothing: treating an
     // unanswerable window as hidden means the gesture still shows it, which is
     // the recoverable direction.
     if window.is_visible().unwrap_or(false) {
-        hide(app);
+        hide_window(&window);
     } else {
-        show(app);
+        show_quick_paste(app);
     }
 }
 
@@ -180,10 +269,14 @@ pub fn on_event<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEven
     match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            let _ = window.hide();
+            hide_window(window);
         }
         tauri::WindowEvent::Focused(false) => {
-            let _ = window.hide();
+            // A hide can produce a trailing blur. The visibility guard avoids
+            // a second hide/focus hand-off racing the first one.
+            if should_hide_on_focus_lost(window.is_visible().unwrap_or(false)) {
+                hide_window(window);
+            }
         }
         _ => {}
     }
@@ -211,6 +304,25 @@ mod tests {
         width: 420,
         height: 640,
     };
+
+    #[test]
+    fn quick_paste_has_its_own_window_label_and_route() {
+        assert_ne!(MAIN, QUICK_PASTE);
+        assert_eq!(QUICK_PASTE_CONFIG.label, "quick-paste");
+        assert_eq!(QUICK_PASTE_CONFIG.route, "index.html?surface=quick-paste");
+    }
+
+    #[test]
+    fn quick_paste_starts_hidden_and_protected() {
+        assert!(!QUICK_PASTE_CONFIG.visible);
+        assert!(QUICK_PASTE_CONFIG.content_protected);
+    }
+
+    #[test]
+    fn hide_on_blur_is_idempotent_after_the_window_is_hidden() {
+        assert!(should_hide_on_focus_lost(true));
+        assert!(!should_hide_on_focus_lost(false));
+    }
 
     #[test]
     fn the_window_is_centred_under_the_icon_and_hangs_below_it() {

@@ -215,6 +215,11 @@ export function hideWindow(): Promise<void> {
   return call<void>("hide_window");
 }
 
+/** Show the full application surface from the compact Quick Paste popup. */
+export function showMainWindow(): Promise<void> {
+  return call<void>("show_main_window");
+}
+
 /** INV-35. The window is created protected on both platforms, so this only
  *  carries the user's opt-out across; a rejection can be logged and dropped. */
 export function setAllowScreenshots(allow: boolean): Promise<void> {
