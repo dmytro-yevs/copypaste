@@ -3,12 +3,14 @@
 //!
 //! Two rules the transports depend on and cannot check for themselves:
 //!
-//! * **[`Store::summaries`] and [`Store::versions`] never return a live
-//!   sensitive item.** A sensitive tombstone is the deliberate exception: it
-//!   has no payload and lets a peer delete a copy it already has.
-//! * **A tombstone is a newer version.** Deletion advances `created_at`, so it
-//!   wins against its earlier live row without carrying sensitive content's
-//!   plaintext-derived hash.
+//! * **[`Store::summaries`] and [`Store::versions`] never return a sensitive
+//!   item.** That is what makes "a sensitive item never leaves the device" a
+//!   property of the protocol rather than a promise: a session serves only ids
+//!   it advertised, so an item outside the summary list cannot be requested out
+//!   of this device.
+//! * **A tombstone is a version.** It keeps its item's `content_hash` and its
+//!   `created_at`, which is what lets a delete tie the row it deletes on merge
+//!   keys 1 and 2 and win on key 3.
 
 use std::collections::HashSet;
 
@@ -72,15 +74,14 @@ pub fn origin_or<'a>(stored: &'a str, here: &'a str) -> &'a str {
 impl Store {
     /// Everything eligible to sync, newest first, tombstones included.
     ///
-    /// Live sensitive items are excluded here and nowhere else matters more.
-    /// Their payload-less tombstones remain eligible so auto-wipe converges on
-    /// peers without disclosing the secret.
+    /// **Sensitive items are excluded here and nowhere else matters more.**
+    /// This is the query that decides what may leave the device.
     pub fn summaries(&self, limit: i64) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, created_at, content_hash, deleted, origin_device_id \
                FROM clipboard_items \
-              WHERE deleted = 1 OR is_sensitive = 0 \
+              WHERE is_sensitive = 0 \
               ORDER BY created_at DESC, id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit], |row| {
@@ -110,9 +111,9 @@ impl Store {
         Ok(stmt.query_row([id], row_to_item).optional()?)
     }
 
-    /// The rows behind a request, still encrypted. Live sensitive items and
-    /// unknown ids are omitted; sensitive tombstones are included because they
-    /// carry no payload and are the delete protocol's only data.
+    /// The rows behind a request, still encrypted. Sensitive items are omitted,
+    /// and so are ids that do not exist — a session promises the caller a
+    /// subset, never an error.
     pub fn versions(&self, ids: &[String]) -> Result<Vec<StoredItem>, StoreError> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -129,8 +130,7 @@ impl Store {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT {} FROM clipboard_items \
-              WHERE (deleted = 1 OR is_sensitive = 0) AND id IN ({placeholders})",
+            "SELECT {} FROM clipboard_items WHERE is_sensitive = 0 AND id IN ({placeholders})",
             item_columns!()
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -138,23 +138,27 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Every version stamped at or after `since_ms`, oldest first. Live
-    /// sensitive items are excluded; payload-less sensitive tombstones are not.
+    /// Every version stamped at or after `since_ms`, oldest first, sensitive
+    /// items excluded.
     ///
     /// `>=` rather than `>` because the cursor is inclusive — re-sending the
     /// boundary row costs one idempotent upsert, and excluding it loses every
     /// row that shares the boundary millisecond.
     ///
+    /// Note that a tombstone keeps the *item's* `created_at`
+    /// ([`Store::delete`] does not restamp), so deleting an item older than the
+    /// cursor produces a version this query cannot see. Callers pull their
+    /// cursor back rather than this query widening.
     pub fn versions_since(&self, since_ms: i64, limit: i64) -> Result<Vec<StoredItem>, StoreError> {
         self.versions_after(since_ms, None, limit)
     }
 
-    /// Every version strictly after an optional `(created_at, id)` cursor,
-    /// oldest first.
+    /// Every version after the inclusive `created_at` boundary or, when an id
+    /// is present, strictly after the compound `(created_at, id)` keyset.
     ///
-    /// An absent id keeps the inclusive timestamp boundary for callers that
-    /// do not persist a tie-break. A present id makes the pair exclusive, so a
-    /// batch of more than one page sharing a timestamp can drain completely.
+    /// The upload cursor needs the same tie-break as the download cursor. A
+    /// millisecond-only floor cannot drain a full page of rows that share its
+    /// boundary stamp: the next scan reads that first page again forever.
     pub fn versions_after(
         &self,
         since_ms: i64,
@@ -162,35 +166,16 @@ impl Store {
         limit: i64,
     ) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
-        let (sql, params): (&str, Vec<rusqlite::types::Value>) = match after_id {
-            Some(id) => (
-                concat!(
-                    "SELECT ",
-                    item_columns!(),
-                    " FROM clipboard_items \
-                       WHERE (deleted = 1 OR is_sensitive = 0) \
-                         AND (created_at > ?1 OR (created_at = ?1 AND id > ?2)) \
-                       ORDER BY created_at ASC, id ASC LIMIT ?3"
-                ),
-                vec![
-                    since_ms.into(),
-                    rusqlite::types::Value::Text(id.to_owned()),
-                    limit.into(),
-                ],
-            ),
-            None => (
-                concat!(
-                    "SELECT ",
-                    item_columns!(),
-                    " FROM clipboard_items \
-                       WHERE (deleted = 1 OR is_sensitive = 0) AND created_at >= ?1 \
-                       ORDER BY created_at ASC, id ASC LIMIT ?2"
-                ),
-                vec![since_ms.into(), limit.into()],
-            ),
-        };
-        let mut stmt = conn.prepare_cached(sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(params), row_to_item)?;
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ",
+            item_columns!(),
+            " FROM clipboard_items \
+               WHERE (deleted = 1 OR is_sensitive = 0) \
+                 AND (created_at > ?1 \
+                      OR (created_at = ?1 AND (?2 IS NULL OR id > ?2))) \
+               ORDER BY created_at ASC, id ASC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(params![since_ms, after_id, limit], row_to_item)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -202,7 +187,7 @@ impl Store {
     pub fn oldest_version_ms(&self) -> Result<Option<i64>, StoreError> {
         let conn = self.conn()?;
         let oldest: Option<i64> = conn.query_row(
-            "SELECT MIN(created_at) FROM clipboard_items WHERE deleted = 1 OR is_sensitive = 0",
+            "SELECT MIN(created_at) FROM clipboard_items WHERE is_sensitive = 0",
             [],
             |row| row.get(0),
         )?;
@@ -314,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn summaries_exclude_live_sensitive_items_and_include_tombstones() {
+    fn summaries_exclude_sensitive_items_and_include_tombstones() {
         let s = store();
         let plain = s.insert(item("plain", T0)).unwrap();
         let secret = s
@@ -332,7 +317,7 @@ mod tests {
         );
         assert!(
             !ids.contains(&secret.id.as_str()),
-            "a live sensitive item must never be advertised"
+            "a sensitive item must never be advertised"
         );
 
         let tombstone = summaries.iter().find(|v| v.id == gone.id).unwrap();
@@ -344,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn versions_omit_live_sensitive_and_unknown_ids_and_never_duplicate() {
+    fn versions_omit_sensitive_and_unknown_ids_and_never_duplicate() {
         let s = store();
         let plain = s.insert(item("plain", T0)).unwrap();
         let secret = s.insert(sensitive_item("secret", T0 + 60_000)).unwrap();
@@ -361,25 +346,6 @@ mod tests {
         assert_eq!(rows[0].id, plain.id);
         assert_eq!(rows[0].content_ciphertext, b"ct:plain");
         assert!(s.versions(&[]).unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_sensitive_tombstone_is_advertised_and_served_without_a_payload() {
-        let s = store();
-        let secret = s.insert(sensitive_item("secret", T0)).unwrap();
-        assert!(s.delete(&secret.id).unwrap());
-
-        let summaries = s.summaries(100).unwrap();
-        assert!(summaries
-            .iter()
-            .any(|item| item.id == secret.id && item.deleted));
-
-        let rows = s.versions(std::slice::from_ref(&secret.id)).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert!(rows[0].deleted);
-        assert!(rows[0].content_ciphertext.is_empty());
-        assert!(rows[0].nonce.is_empty());
-        assert!(rows[0].content_hash.is_empty());
     }
 
     /// `version` is the only read that returns a tombstone or a flagged row,
@@ -502,18 +468,20 @@ mod tests {
     }
 
     #[test]
-    fn versions_after_drains_a_timestamp_bucket_by_item_id() {
+    fn versions_after_drains_a_same_millisecond_boundary_by_id() {
         let s = store();
-        s.insert(item("a", T0)).unwrap();
-        s.insert(item("b", T0)).unwrap();
-        let all = s.versions_since(T0, 100).unwrap();
-        let first = &all[0].id;
-        let second = &all[1].id;
+        let a = s.insert(item("a", T0)).unwrap();
+        let b = s.insert(item("b", T0)).unwrap();
+        let c = s.insert(item("c", T0)).unwrap();
+        let mut ids = [a.id, b.id, c.id];
+        ids.sort();
 
-        let rows = s.versions_after(T0, Some(first), 100).unwrap();
+        let first = s.versions_after(T0, None, 2).unwrap();
+        assert_eq!(first.len(), 2);
+        let second = s.versions_after(T0, Some(&first[1].id), 2).unwrap();
         assert_eq!(
-            rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
-            [second.as_str()]
+            second.iter().map(|row| &row.id).collect::<Vec<_>>(),
+            [&ids[2]]
         );
     }
 
