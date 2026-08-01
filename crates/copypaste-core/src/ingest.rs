@@ -7,17 +7,16 @@
 //! loop would have collapsed — and a second copy on the Android side would have
 //! been the same defect with a new platform attached.
 //!
-//! Manifest 01's data-loss rules this file is responsible for:
-//!
-//! * **I-33** — a dedup lookup failure falls through to the insert. Storing a
-//!   duplicate is recoverable; dropping a capture is not.
-//! * The refusals are reported, never silent: an over-cap item is
-//!   [`IngestError::TooLarge`], not a discarded capture.
+//! Manifest 01's data-loss rule this file is responsible for: refusals are
+//! reported, never silent. An over-cap item is [`IngestError::TooLarge`], not a
+//! discarded capture. [`Store::insert_or_bump`] owns the only dedup probe; it
+//! exposes no probe-only error that ingest could safely fail open from without
+//! maintaining a second implementation.
 
 use tracing::warn;
 
 use crate::sensitive::Detector;
-use crate::storage::{NewItem, Store, StoreError, StoredItem};
+use crate::storage::{Ingest, NewItem, Store, StoreError, StoredItem};
 use crate::{now_ms, CryptoError, Keyring};
 
 /// What a successful ingest did.
@@ -25,8 +24,8 @@ use crate::{now_ms, CryptoError, Keyring};
 pub enum Ingested {
     /// A new row.
     Stored(StoredItem),
-    /// The same content was already stored inside the dedup window; this is the
-    /// existing row.
+    /// The same content was already stored; this is the existing row after the
+    /// forward-only recency bump.
     Duplicate(StoredItem),
 }
 
@@ -35,6 +34,15 @@ impl Ingested {
     pub fn into_item(self) -> StoredItem {
         match self {
             Ingested::Stored(item) | Ingested::Duplicate(item) => item,
+        }
+    }
+}
+
+impl From<Ingest> for Ingested {
+    fn from(ingest: Ingest) -> Self {
+        match ingest {
+            Ingest::Inserted(item) => Self::Stored(item),
+            Ingest::Bumped(item) => Self::Duplicate(item),
         }
     }
 }
@@ -83,9 +91,8 @@ pub fn ingest(
 /// [`ingest`] with the item's own timestamp, for an import.
 ///
 /// A restored item keeps the moment it was originally captured, which is what
-/// keeps a restored history in order and its ages honest. The dedup window is
-/// applied around *that* stamp, not around now, so importing a file twice
-/// collapses rather than doubling.
+/// keeps a restored history in order and its ages honest. Dedup spans all live
+/// history, so importing a file twice collapses rather than doubling.
 ///
 /// Recording which device an item originated on is deliberately **not** here:
 /// the origin table belongs to whatever owns sync metadata, and a caller with
@@ -164,35 +171,11 @@ pub fn ingest_into_with_capture_context(
         return Err(IngestError::TooLarge);
     }
 
-    let hash = crate::storage::compute_content_hash(content.as_bytes());
     // Classify before dedup. A password-manager capture can be identical to a
     // row first copied from an ordinary app; dedup must promote that row rather
     // than returning it with its old, searchable classification.
     let is_sensitive = sensitive_floor || detector.is_sensitive(content);
-
-    // Manifest 01 I-33: a probe failure must not abort the ingest. Falling
-    // through costs at most a duplicate row; returning here costs the capture.
-    // `find_recent_by_hash` takes an absolute epoch-ms cutoff, not a duration.
-    // Passing the window width itself would compare every row's timestamp
-    // against 60000 ms after 1970 and match the entire history, silently
-    // collapsing all repeats of a value into the first one ever stored.
-    let cutoff_ms = created_at - dedup_window_ms(settings);
-    let recent = match store.find_recent_by_hash(&hash, cutoff_ms) {
-        Ok(found) => found,
-        Err(e) => {
-            warn!(error = ?e, "dedup probe failed; storing the item anyway");
-            None
-        }
-    };
-    if let Some(row) = recent {
-        let row = if is_sensitive {
-            store.promote_to_sensitive(row)?
-        } else {
-            row
-        };
-        enforce_retention(store, settings);
-        return Ok(Ingested::Duplicate(row));
-    }
+    let hash = crate::storage::compute_content_hash(content.as_bytes());
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
     // bind item identity"), and `decrypt` is handed `StoredItem::id` on the way
@@ -204,7 +187,7 @@ pub fn ingest_into_with_capture_context(
     let key = keyring.item_key();
     let (nonce, ciphertext) = crate::encrypt(content.as_bytes(), &key, &item_id)?;
 
-    let stored = store.insert(NewItem {
+    let ingested = store.insert_or_bump(NewItem {
         id: item_id,
         content_ciphertext: ciphertext,
         nonce,
@@ -226,7 +209,7 @@ pub fn ingest_into_with_capture_context(
 
     enforce_retention(store, settings);
 
-    Ok(Ingested::Stored(stored))
+    Ok(ingested.into())
 }
 
 /// Apply every local retention limit after a write, regardless of whether it
@@ -285,33 +268,16 @@ pub fn ingest_binary_into_with_capture_context(
         return Err(IngestError::TooLarge);
     }
 
-    let hash = crate::storage::compute_content_hash(bytes);
-    let recent = match store.find_recent_by_hash(&hash, i64::MIN) {
-        Ok(found) => found,
-        Err(e) => {
-            warn!(error = ?e, "binary dedup probe failed; storing the item anyway");
-            None
-        }
-    };
-    if let Some(row) = recent {
-        let row = if sensitive_floor {
-            store.promote_to_sensitive(row)?
-        } else {
-            row
-        };
-        return Ok(Ingested::Duplicate(row));
-    }
-
     let item_id = crate::binary_item_id(bytes);
     let ciphertext = crate::seal_binary(bytes, &keyring.item_key(), &item_id)?;
-    let stored = store.insert(NewItem {
+    let ingested = store.insert_or_bump(NewItem {
         id: item_id,
         content_ciphertext: ciphertext,
         // A binary envelope contains a nonce per chunk.  An empty row nonce
         // distinguishes it from the text AEAD and is never a fallback path.
         nonce: Vec::new(),
         content_type: content_type.to_owned(),
-        content_hash: hash,
+        content_hash: crate::storage::compute_content_hash(bytes),
         is_sensitive: sensitive_floor,
         search_text: None,
         created_at,
@@ -321,22 +287,16 @@ pub fn ingest_binary_into_with_capture_context(
             .transpose()
             .map_err(|_| IngestError::Empty)?,
     })?;
-    Ok(Ingested::Stored(stored))
-}
 
-/// The dedup window, in milliseconds.
-///
-/// [`crate::storage::DEDUP_WINDOW_MS`] is the default this setting starts at;
-/// the setting is what is in force. Two definitions of "the same thing twice"
-/// is exactly the duplication CLAUDE.md rule 1 is about, so the constant is
-/// referenced only in `ConfigData::default`.
-fn dedup_window_ms(settings: &copypaste_ipc::ConfigData) -> i64 {
-    i64::from(settings.dedup_window_secs) * 1_000
+    enforce_retention(store, settings);
+
+    Ok(ingested.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::test_support::fts_row_count;
     use copypaste_ipc::ConfigData;
 
     const T0: i64 = 1_700_000_000_000;
@@ -367,6 +327,20 @@ mod tests {
                 content,
                 "text",
                 created_at,
+                &self.settings,
+            )
+        }
+
+        fn binary_at(&self, bytes: &[u8], created_at: i64) -> Result<Ingested, IngestError> {
+            ingest_binary_into_with_capture_context(
+                &self.store,
+                &self.keyring,
+                bytes,
+                copypaste_ipc::content_type::IMAGE_PNG,
+                created_at,
+                false,
+                None,
+                None,
                 &self.settings,
             )
         }
@@ -412,23 +386,32 @@ mod tests {
         assert!(f.at(&"x".repeat(16), T0).is_ok());
     }
 
-    /// The `cutoff_ms` argument is an absolute epoch stamp, not a window width.
-    /// Passing the width would compare every row against 60 s after 1970 and
-    /// collapse every repeat of a value into the first one ever stored.
     #[test]
-    fn a_repeat_inside_the_window_deduplicates_and_one_outside_it_does_not() {
+    fn a_week_later_text_recopy_bumps_the_original_to_the_top() {
         let f = fixture();
         let first = f.at("repeated", T0).unwrap().into_item();
+        let other = f.at("other", T0 + 86_400_000).unwrap().into_item();
 
-        let inside = f.at("repeated", T0 + 30_000).unwrap();
-        assert!(matches!(inside, Ingested::Duplicate(_)));
-        assert_eq!(inside.into_item().id, first.id);
+        let recopy = f.at("repeated", T0 + 7 * 86_400_000).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let bumped = recopy.into_item();
+        assert_eq!(bumped.id, first.id);
+        assert_eq!(bumped.created_at, T0 + 7 * 86_400_000);
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert_eq!(f.store.list(2, 0).unwrap()[0].id, first.id);
+        assert!(f.store.get(&other.id).unwrap().is_some());
+    }
 
-        // Past the window the probe misses — and `insert_or_bump` then promotes
-        // the row that already holds this content rather than writing a second.
-        let outside = f.at("repeated", T0 + 120_000).unwrap();
-        assert!(matches!(outside, Ingested::Stored(_)));
-        assert_eq!(outside.into_item().id, first.id);
+    #[test]
+    fn a_minimum_timestamp_import_deduplicates_without_overflow() {
+        let f = fixture();
+        let first = f.at("minimum timestamp", i64::MIN).unwrap().into_item();
+
+        let recopy = f.at("minimum timestamp", i64::MIN).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let bumped = recopy.into_item();
+        assert_eq!(bumped.id, first.id);
+        assert_eq!(bumped.created_at, i64::MIN);
         assert_eq!(f.store.count().unwrap(), 1);
     }
 
@@ -448,6 +431,72 @@ mod tests {
         // ...and it is still stored and still readable: flagging is not
         // deleting (CLAUDE.md rule 4).
         assert_eq!(f.plaintext(&stored), "AKIAIOSFODNN7EXAMPLE");
+    }
+
+    #[test]
+    fn a_sensitive_recopy_promotes_and_unindexes_the_existing_row() {
+        let f = fixture();
+        let first = f.at("ordinary reusable value", T0).unwrap().into_item();
+        assert!(!first.is_sensitive);
+        assert_eq!(fts_row_count(&f.store, &first.id), 1);
+
+        let recopy = ingest_into_with_capture_context(
+            &f.store,
+            &f.detector,
+            &f.keyring,
+            "ordinary reusable value",
+            copypaste_ipc::content_type::TEXT,
+            T0 + 7 * 86_400_000,
+            true,
+            Some("com.1password.1password"),
+            &f.settings,
+        )
+        .unwrap();
+
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let promoted = recopy.into_item();
+        assert_eq!(promoted.id, first.id);
+        assert_eq!(promoted.created_at, T0 + 7 * 86_400_000);
+        assert!(promoted.is_sensitive);
+        assert_eq!(fts_row_count(&f.store, &first.id), 0);
+        assert_eq!(f.plaintext(&promoted), "ordinary reusable value");
+        assert_eq!(f.store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_high_confidence_secret_recopy_restarts_its_ttl() {
+        const SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
+
+        let f = fixture();
+        let first = f.at(SECRET, T0).unwrap().into_item();
+        let recopy = f.at(SECRET, T0 + 25_000).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let bumped = recopy.into_item();
+        assert_eq!(bumped.id, first.id);
+        assert_eq!(bumped.created_at, T0 + 25_000);
+
+        let key = f.keyring.item_key();
+        let removed = crate::sensitive::sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &key,
+            std::time::Duration::from_secs(30),
+            T0 + 30_000,
+        )
+        .unwrap();
+        assert_eq!(removed, 0, "the original deadline must no longer apply");
+        assert!(f.store.get(&first.id).unwrap().is_some());
+
+        let removed = crate::sensitive::sweep_sensitive(
+            &f.store,
+            &f.detector,
+            &key,
+            std::time::Duration::from_secs(30),
+            T0 + 56_000,
+        )
+        .unwrap();
+        assert_eq!(removed, 1);
+        assert!(f.store.get(&first.id).unwrap().is_none());
     }
 
     #[test]
@@ -499,6 +548,78 @@ mod tests {
             .unwrap(),
             bytes
         );
+    }
+
+    #[test]
+    fn a_week_later_binary_recopy_bumps_the_original_to_the_top() {
+        let f = fixture();
+        let bytes = vec![0x89; 128];
+        let first = f.binary_at(&bytes, T0).unwrap().into_item();
+        let other = f
+            .binary_at(&[0x42; 64], T0 + 86_400_000)
+            .unwrap()
+            .into_item();
+
+        let recopy = f.binary_at(&bytes, T0 + 7 * 86_400_000).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        let bumped = recopy.into_item();
+        assert_eq!(bumped.id, first.id);
+        assert_eq!(bumped.id, crate::binary_item_id(&bytes));
+        assert_eq!(bumped.created_at, T0 + 7 * 86_400_000);
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert_eq!(f.store.list(2, 0).unwrap()[0].id, first.id);
+        assert!(f.store.get(&other.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn binary_insert_enforces_the_item_cap_and_keeps_pin_and_newest() {
+        let mut f = fixture();
+        f.settings.history_limit = 2;
+        let pinned = f.binary_at(&[0x11; 32], T0).unwrap().into_item();
+        assert!(f.store.set_pinned(&pinned.id, true).unwrap());
+        let old = f.binary_at(&[0x22; 32], T0 + 1_000).unwrap().into_item();
+        let newest = f.binary_at(&[0x33; 32], T0 + 2_000).unwrap().into_item();
+
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert!(f.store.get(&pinned.id).unwrap().unwrap().pinned);
+        assert!(f.store.get(&old.id).unwrap().is_none());
+        assert!(f.store.get(&newest.id).unwrap().is_some());
+        let page = f.store.list(2, 0).unwrap();
+        assert_eq!(page[0].id, pinned.id);
+        assert_eq!(page[1].id, newest.id);
+    }
+
+    #[test]
+    fn binary_bump_enforces_byte_quota_and_keeps_pin_and_newest() {
+        let mut f = fixture();
+        let pinned = f.binary_at(&[0x11; 32], T0).unwrap().into_item();
+        assert!(f.store.set_pinned(&pinned.id, true).unwrap());
+        let old = f.binary_at(&[0x22; 32], T0 + 1_000).unwrap().into_item();
+        let target = vec![0x33; 32];
+        let newest = f.binary_at(&target, T0 + 2_000).unwrap().into_item();
+
+        f.settings.storage_quota_bytes = 0;
+        let recopy = f.binary_at(&target, T0 + 7 * 86_400_000).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        assert_eq!(recopy.into_item().id, newest.id);
+
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert!(f.store.get(&pinned.id).unwrap().unwrap().pinned);
+        assert!(f.store.get(&old.id).unwrap().is_none());
+        assert!(f.store.get(&newest.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn binary_insert_enforces_age_retention() {
+        let now = crate::now_ms();
+        let mut f = fixture();
+        let old = f.at("old text", now - 10 * 86_400_000).unwrap().into_item();
+
+        f.settings.retention_days = 7;
+        let newest = f.binary_at(&[0x44; 32], now).unwrap().into_item();
+
+        assert!(f.store.get(&old.id).unwrap().is_none());
+        assert!(f.store.get(&newest.id).unwrap().is_some());
     }
 
     #[test]
