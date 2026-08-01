@@ -441,14 +441,15 @@ pub(super) static RULES: &[RuleSpec] = &[
     },
     RuleSpec {
         // ⚠ INERT. **P2 fb3e**, a real FP **with data loss**: legitimately
-        // copied IBANs (invoices, transfers) were auto-wiped. The long-term fix
-        // is a mod-97 validator analogous to Luhn; until then the floor is the
-        // safe fallback. gitleaks ships no PII rules (§8.1.4).
+        // copied IBANs (invoices, transfers) were auto-wiped. Structural and
+        // checksum validation reduces false positives, but a real IBAN is still
+        // user-owned data and must stay below the floor. gitleaks ships no PII
+        // rules (§8.1.4).
         name: "iban",
         category: Category::Financial,
         confidence: 0.65,
-        pattern: r"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4}[0-9]{7}[A-Z0-9]{0,16}\b",
-        validator: Validator::None,
+        pattern: r"(?-u:\b)[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}(?-u:\b)",
+        validator: Validator::Iban,
     },
     RuleSpec {
         // ⚠ INERT. **P2 fb3e**: lowered 0.80 → 0.65 — it also matches dates and

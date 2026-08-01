@@ -8,7 +8,9 @@ use super::normalise::normalise;
 use super::redact::redact_findings;
 use super::rules::RULES;
 use super::spec::{RuleSpec, Validator};
-use super::validators::{luhn_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong};
+use super::validators::{
+    iban_valid, luhn_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong,
+};
 
 /// Regex compilation failures. No variant carries a path or any input text
 /// (CLAUDE.md rule 4).
@@ -172,6 +174,7 @@ impl Rule {
                     caps.get(1).is_some_and(|v| value_is_strong(v.as_str()))
                 }
                 Validator::Luhn => luhn_valid(whole.as_str()),
+                Validator::Iban => iban_valid(whole.as_str()),
                 Validator::SsnStructure => ssn_structure_plausible(whole.as_str()),
                 Validator::PhoneShape => phone_is_formatted(whole.as_str()),
             };
