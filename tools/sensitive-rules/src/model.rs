@@ -202,9 +202,22 @@ pub fn read_selection(root: &Path) -> Result<Selection> {
 
 pub fn load_inputs(root: &Path) -> Result<Inputs> {
     let selection = read_selection(root)?;
-    verify_file(root, &selection.source.vendored_config, &selection.source.config_sha256)?;
-    verify_file(root, &selection.source.vendored_license, &selection.source.license_sha256)?;
-    if selection.source.unsupported_context_decision.trim().is_empty() {
+    verify_file(
+        root,
+        &selection.source.vendored_config,
+        &selection.source.config_sha256,
+    )?;
+    verify_file(
+        root,
+        &selection.source.vendored_license,
+        &selection.source.license_sha256,
+    )?;
+    if selection
+        .source
+        .unsupported_context_decision
+        .trim()
+        .is_empty()
+    {
         bail!("source.unsupported_context_decision must explain path/commit handling");
     }
     if selection.source.regex_dialect_decision.trim().is_empty() {
@@ -220,13 +233,17 @@ pub fn load_inputs(root: &Path) -> Result<Inputs> {
     }
     let config_path = root.join(&selection.source.vendored_config);
     let config_text = fs::read_to_string(&config_path)?;
-    let config: GitleaksConfig = toml::from_str(&config_text)
-        .with_context(|| format!("parse {}", config_path.display()))?;
+    let config: GitleaksConfig =
+        toml::from_str(&config_text).with_context(|| format!("parse {}", config_path.display()))?;
     resolve(selection, config)
 }
 
 fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
-    let by_id: BTreeMap<_, _> = config.rules.iter().map(|rule| (rule.id.as_str(), rule)).collect();
+    let by_id: BTreeMap<_, _> = config
+        .rules
+        .iter()
+        .map(|rule| (rule.id.as_str(), rule))
+        .collect();
     if by_id.len() != config.rules.len() {
         bail!("vendored Gitleaks config contains duplicate rule IDs");
     }
@@ -265,7 +282,10 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
         let pattern = match &selected.pattern_override {
             Some(pattern) => pattern.clone(),
             None if sources.len() == 1 => sources[0].regex.clone().unwrap(),
-            None => bail!("{} merges multiple upstream rules without pattern_override", selected.name),
+            None => bail!(
+                "{} merges multiple upstream rules without pattern_override",
+                selected.name
+            ),
         };
         let entropy = effective_entropy(selected, &sources)?;
         let keywords = selected
@@ -305,7 +325,12 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
     }
 
     for overlay in &selection.overlay {
-        validate_rule(&overlay.name, overlay.confidence, &overlay.pattern, overlay.secret_group)?;
+        validate_rule(
+            &overlay.name,
+            overlay.confidence,
+            &overlay.pattern,
+            overlay.secret_group,
+        )?;
         insert_name(&mut names, &overlay.name)?;
         rules.push(Rule {
             upstream_ids: Vec::new(),
@@ -330,17 +355,51 @@ fn resolve(selection: Selection, config: GitleaksConfig) -> Result<Inputs> {
 }
 
 fn validate_decisions(rule: &SelectedRule) -> Result<()> {
-    require_decision(&rule.name, "pattern", rule.pattern_override.is_some(), &rule.pattern_decision)?;
-    require_decision(&rule.name, "entropy", rule.entropy_override.is_some(), &rule.entropy_decision)?;
-    require_decision(&rule.name, "keywords", rule.keywords_override.is_some(), &rule.keywords_decision)?;
-    if !rule.use_rule_allowlists && rule.allowlist_decision.as_deref().unwrap_or("").trim().is_empty() {
-        bail!("{} disables rule allowlists without allowlist_decision", rule.name);
+    require_decision(
+        &rule.name,
+        "pattern",
+        rule.pattern_override.is_some(),
+        &rule.pattern_decision,
+    )?;
+    require_decision(
+        &rule.name,
+        "entropy",
+        rule.entropy_override.is_some(),
+        &rule.entropy_decision,
+    )?;
+    require_decision(
+        &rule.name,
+        "keywords",
+        rule.keywords_override.is_some(),
+        &rule.keywords_decision,
+    )?;
+    if !rule.use_rule_allowlists
+        && rule
+            .allowlist_decision
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .is_empty()
+    {
+        bail!(
+            "{} disables rule allowlists without allowlist_decision",
+            rule.name
+        );
     }
     Ok(())
 }
 
-fn require_decision(name: &str, field: &str, changed: bool, decision: &Option<String>) -> Result<()> {
-    if changed != decision.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+fn require_decision(
+    name: &str,
+    field: &str,
+    changed: bool,
+    decision: &Option<String>,
+) -> Result<()> {
+    if changed
+        != decision
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    {
         bail!("{name} must pair {field}_override with {field}_decision");
     }
     Ok(())
@@ -354,7 +413,11 @@ fn validate_source_rule(rule: &RawRule) -> Result<()> {
         bail!("selected Gitleaks rule {} requires path semantics", rule.id);
     }
     if !rule.extra.is_empty() {
-        bail!("selected Gitleaks rule {} has unsupported fields: {:?}", rule.id, rule.extra.keys());
+        bail!(
+            "selected Gitleaks rule {} has unsupported fields: {:?}",
+            rule.id,
+            rule.extra.keys()
+        );
     }
     let _ = &rule.tags;
     Ok(())
@@ -366,7 +429,10 @@ fn effective_entropy(selected: &SelectedRule, sources: &[&RawRule]) -> Result<Op
     }
     let first = sources[0].entropy;
     if sources.iter().any(|source| source.entropy != first) {
-        bail!("{} merges differing entropy thresholds without an override", selected.name);
+        bail!(
+            "{} merges differing entropy thresholds without an override",
+            selected.name
+        );
     }
     Ok((first > 0.0).then_some(first))
 }
@@ -389,7 +455,10 @@ fn validate_allowlist_overrides(selected: &SelectedRule, sources: &[&RawRule]) -
         .collect::<Vec<_>>();
     for replacement in &selected.allowlist_regex_overrides {
         if replacement.decision.trim().is_empty() {
-            bail!("{} has an allowlist regex override without a decision", selected.name);
+            bail!(
+                "{} has an allowlist regex override without a decision",
+                selected.name
+            );
         }
         let count = available
             .iter()
@@ -405,10 +474,7 @@ fn validate_allowlist_overrides(selected: &SelectedRule, sources: &[&RawRule]) -
     Ok(())
 }
 
-fn resolve_allowlist(
-    raw: &RawAllowlist,
-    overrides: &[RegexOverride],
-) -> Result<Option<Allowlist>> {
+fn resolve_allowlist(raw: &RawAllowlist, overrides: &[RegexOverride]) -> Result<Option<Allowlist>> {
     if !raw.extra.is_empty() {
         bail!("allowlist has unsupported fields: {:?}", raw.extra.keys());
     }
@@ -434,7 +500,10 @@ fn resolve_allowlist(
             overrides
                 .iter()
                 .find(|replacement| replacement.source == *pattern)
-                .map_or_else(|| pattern.clone(), |replacement| replacement.replacement.clone())
+                .map_or_else(
+                    || pattern.clone(),
+                    |replacement| replacement.replacement.clone(),
+                )
         })
         .collect::<Vec<_>>();
     for pattern in &regexes {
@@ -475,7 +544,10 @@ fn verify_file(root: &Path, relative: &str, expected: &str) -> Result<()> {
     let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
     let actual = sha256(&bytes);
     if actual != expected {
-        bail!("{} SHA-256 mismatch: expected {expected}, got {actual}", path.display());
+        bail!(
+            "{} SHA-256 mismatch: expected {expected}, got {actual}",
+            path.display()
+        );
     }
     Ok(())
 }
@@ -494,7 +566,10 @@ mod tests {
 
     #[test]
     fn pinned_config_exposes_the_global_content_allowlist() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .unwrap();
         let text = fs::read_to_string(root.join("config/gitleaks/gitleaks.toml")).unwrap();
         let config: GitleaksConfig = toml::from_str(&text).unwrap();
         let allowlist = config.allowlist.expect("global allowlist table");

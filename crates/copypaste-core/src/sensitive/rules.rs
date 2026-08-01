@@ -21,8 +21,7 @@ mod tests {
     use crate::sensitive::engine::test_support::{detector, fired};
     use crate::sensitive::finding::AUTOWIPE_CONFIDENCE_FLOOR;
     use crate::sensitive::rules_generated::{
-        GITLEAKS_COMMIT, GITLEAKS_VERSION, SELECTED_GITLEAKS_RULE_IDS,
-        VENDORED_CONFIG_SHA256,
+        GITLEAKS_COMMIT, GITLEAKS_VERSION, SELECTED_GITLEAKS_RULE_IDS, VENDORED_CONFIG_SHA256,
     };
     use crate::sensitive::spec::{AllowlistTarget, Category};
 
@@ -132,7 +131,14 @@ mod tests {
 
     #[test]
     fn local_overlay_rules_have_no_upstream_identity() {
-        for name in ["credit_card", "iban", "ssn_us", "email", "phone_us", "passport"] {
+        for name in [
+            "credit_card",
+            "iban",
+            "ssn_us",
+            "email",
+            "phone_us",
+            "passport",
+        ] {
             assert!(rule(name).upstream_ids.is_empty(), "{name}");
         }
     }

@@ -37,10 +37,8 @@ crates/copypaste-core/src/crypto/keystore/android.rs
 crates/copypaste-core/src/crypto/keystore/mod.rs
 crates/copypaste-core/src/crypto/mod.rs
 crates/copypaste-core/src/ingest.rs
-crates/copypaste-core/src/sensitive/engine.rs
 crates/copypaste-core/src/sensitive/mod.rs
 crates/copypaste-core/src/sensitive/purge.rs
-crates/copypaste-core/src/sensitive/rules.rs
 crates/copypaste-core/src/sensitive/validators.rs
 crates/copypaste-core/src/sensitive/wipe.rs
 crates/copypaste-core/src/storage/connection.rs
