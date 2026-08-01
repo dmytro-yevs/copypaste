@@ -24,32 +24,43 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val state = state(this)
-        if (!state.enabled) {
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-        if (!CaptureNotifications.isPermissionGranted(this)) {
+        // A sticky restart has no Rust runtime or in-memory hand-off queue.
+        // Re-registering the shell listener here would collect plaintext that
+        // cannot reach ingest, while the foreground notification claims the
+        // opposite. Clear the remembered request and say capture stopped.
+        if (intent == null || !state.enabled || !ShizukuClipboard.isListening()) {
             clearState(this)
+            ShizukuClipboard.disarm()
+            if (state.enabled) {
+                CaptureNotifications.postLost(this, state.lostTitle, state.lostBody)
+            }
             stopSelf(startId)
             return START_NOT_STICKY
         }
 
-        val listening = ShizukuClipboard.isListening() || ShizukuClipboard.arm {
-            lost(this, state.lostTitle, state.lostBody)
-        }
-        if (!listening) {
-            lost(this, state.lostTitle, state.lostBody)
+        // The FGS notification is the user's visible evidence that a listener
+        // is alive. Never run an invisible service on Android 13+.
+        if (!CaptureNotifications.canPost(this)) {
+            clearState(this)
+            ShizukuClipboard.disarm()
+            stopSelf(startId)
             return START_NOT_STICKY
         }
-
         CaptureNotifications.ensureChannels(this)
-        val text = intent?.getStringExtra(EXTRA_TEXT) ?: state.text
+        val text = intent.getStringExtra(EXTRA_TEXT) ?: state.text
         startForeground(CaptureNotifications.ONGOING_ID, CaptureNotifications.ongoing(this, text))
         return START_STICKY
     }
 
     override fun onDestroy() {
+        // The callback belongs to this process, not the service object. An
+        // unexpected teardown cannot leave a persisted green state behind.
+        val state = state(this)
+        clearState(this)
         ShizukuClipboard.disarm()
+        if (state.enabled) {
+            CaptureNotifications.postLost(this, state.lostTitle, state.lostBody)
+        }
         super.onDestroy()
     }
 
