@@ -18,8 +18,8 @@
  * the state an unpaired one does, so rendering the two differently would mean
  * inventing a distinction the wire cannot make.
  */
-import { lazy, Suspense, useState } from "react";
-import { KeyRound, Laptop, Link2, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { Laptop, Link2, RefreshCw } from "lucide-react";
 
 import {
   AlertDialog,
@@ -48,13 +48,6 @@ import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
 import type { PeerInfo } from "@/lib/ipc";
 
-const PairCreateDialog = lazy(async () => ({
-  default: (await import("@/components/devices/PairCreateDialog")).PairCreateDialog,
-}));
-const PairAcceptDialog = lazy(async () => ({
-  default: (await import("@/components/devices/PairAcceptDialog")).PairAcceptDialog,
-}));
-
 export function DevicesView() {
   const { t } = useTranslation();
   const peers = usePeers();
@@ -62,8 +55,6 @@ export function DevicesView() {
   const revoke = useRevoke();
   const sync = useSyncNow();
 
-  const [creating, setCreating] = useState(false);
-  const [accepting, setAccepting] = useState(false);
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
   const [health, setHealth] = useState<PeerHealthMap>({});
@@ -97,25 +88,6 @@ export function DevicesView() {
 
         <Button
           size="sm"
-          disabled={full}
-          title={full ? t("devices.cap.hint") : undefined}
-          onClick={() => setCreating(true)}
-        >
-          <KeyRound aria-hidden="true" />
-          {t("devices.actions.pairNew")}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={full}
-          title={full ? t("devices.cap.hint") : undefined}
-          onClick={() => setAccepting(true)}
-        >
-          <Link2 aria-hidden="true" />
-          {t("devices.actions.add")}
-        </Button>
-        <Button
-          size="sm"
           variant="ghost"
           disabled={sync.isPending || list.length === 0}
           onClick={() => runSync(undefined)}
@@ -132,6 +104,9 @@ export function DevicesView() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-s-3">
+        <p role="status" className="mx-auto mb-s-3 max-w-[var(--content-max-width)] rounded-md border border-warn/20 bg-warn/15 px-s-3 py-s-2 text-sm text-warn-strong">
+          {t("devices.pairingUnavailable")}
+        </p>
         {peers.isPending ? (
           <EmptyState
             busy
@@ -152,11 +127,6 @@ export function DevicesView() {
             icon={Laptop}
             title={t("devices.none.title")}
             body={t("devices.none.body")}
-            action={{
-              label: t("devices.actions.pairNew"),
-              onClick: () => setCreating(true),
-              icon: KeyRound,
-            }}
           />
         ) : (
           <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-2">
@@ -198,15 +168,10 @@ export function DevicesView() {
         )}
       </div>
 
-      {creating && (
-        <Suspense fallback={null}>
-          <PairCreateDialog open onOpenChange={setCreating} />
-        </Suspense>
-      )}
-      {accepting && (
-        <Suspense fallback={null}>
-          <PairAcceptDialog open onOpenChange={setAccepting} />
-        </Suspense>
+      {sync.isPending && (
+        <p role="status" aria-live="polite" className="sr-only">
+          {t("devices.actions.syncing")}
+        </p>
       )}
 
       <AlertDialog
