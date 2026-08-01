@@ -250,6 +250,8 @@ export {
 export interface ConfigData {
   readonly poll_interval_ms: number;
   readonly history_limit: number;
+  /** Maximum bytes retained in unpinned live ciphertext. */
+  readonly storage_quota_bytes: number;
   /** `0` disables age-based eviction. */
   readonly retention_days: number;
   readonly dedup_window_secs: number;

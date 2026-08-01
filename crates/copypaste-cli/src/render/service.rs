@@ -43,6 +43,10 @@ pub fn config_text(applied: &ConfigApplied) -> String {
         setting("poll interval", format!("{} ms", config.poll_interval_ms)),
         setting("history limit", format!("{} items", config.history_limit)),
         setting(
+            "storage quota",
+            format!("{} bytes", config.storage_quota_bytes),
+        ),
+        setting(
             "retention",
             match config.retention_days {
                 0 => "off".to_string(),

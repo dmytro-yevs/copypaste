@@ -540,11 +540,13 @@ mod tests {
     fn settings_read_back_with_their_restart_list() {
         let line = r#"{"id":1,"ok":true,"data":{"config":{"poll_interval_ms":250,
             "history_limit":10000,"retention_days":0,"dedup_window_secs":60,
+            "storage_quota_bytes":10737418240,
             "max_item_bytes":4194304,"sensitive_ttl_secs":0,"excluded_app_bundle_ids":[],
             "lan_visibility":true,"sync_enabled":true},"restart_required":["lan_visibility"]}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let applied = expect_config(into_data(response).unwrap()).unwrap();
         assert_eq!(applied.config.poll_interval_ms, 250);
+        assert_eq!(applied.config.storage_quota_bytes, 10 * 1024 * 1024 * 1024);
         assert_eq!(applied.restart_required, ["lan_visibility"]);
     }
 

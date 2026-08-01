@@ -97,6 +97,60 @@ impl Store {
         Ok(removed)
     }
 
+    /// Hard-deletes the oldest unpinned live rows until their ciphertext fits
+    /// within `max_bytes`, while preserving the newest unpinned live row.
+    ///
+    /// The quota covers the bytes SQLite stores for the encrypted payload, not
+    /// FTS plaintext or database pages. Tombstones carry no ciphertext and are
+    /// deliberately retained for sync.
+    pub fn evict_over_byte_cap(&self, max_bytes: u64) -> Result<u64, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let total: i64 = tx.query_row(
+            "SELECT COALESCE(SUM(LENGTH(COALESCE(content_ciphertext, X''))), 0) \
+               FROM clipboard_items WHERE deleted = 0 AND pinned = 0",
+            [],
+            |r| r.get(0),
+        )?;
+        let total = total.max(0) as u64;
+        if total <= max_bytes {
+            return Ok(0);
+        }
+
+        let keep_id: String = tx
+            .query_row(
+                "SELECT id FROM clipboard_items WHERE deleted = 0 AND pinned = 0 \
+                  ORDER BY created_at DESC, id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or_default();
+
+        let excess =
+            i64::try_from(total).unwrap_or(i64::MAX) - i64::try_from(max_bytes).unwrap_or(i64::MAX);
+        let victims: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "WITH ranked AS ( \
+                    SELECT id, \
+                           LENGTH(COALESCE(content_ciphertext, X'')) AS row_bytes, \
+                           SUM(LENGTH(COALESCE(content_ciphertext, X''))) OVER ( \
+                               ORDER BY created_at ASC, id ASC ROWS UNBOUNDED PRECEDING \
+                           ) AS cumulative_bytes \
+                      FROM clipboard_items \
+                     WHERE deleted = 0 AND pinned = 0 AND id <> ?1 \
+                 ) \
+                 SELECT id FROM ranked WHERE cumulative_bytes - row_bytes < ?2",
+            )?;
+            let rows = stmt.query_map(params![keep_id, excess], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        let removed = hard_delete_in_tx(&tx, &victims)?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
     /// Enforces a TTL: hard-deletes unpinned live items created before
     /// `cutoff_ms`. Returns how many were removed.
     ///
@@ -442,6 +496,40 @@ mod tests {
         // Pins alone can hold the store over the cap; they are never evicted.
         assert_eq!(s.evict_over_cap(0).unwrap(), 0);
         assert!(s.get(&ids[0]).unwrap().is_some());
+    }
+
+    #[test]
+    fn byte_eviction_removes_oldest_unpinned_ciphertexts_and_their_fts_rows() {
+        let s = store();
+        let oldest = s.insert(item(&"a".repeat(10), T0)).unwrap();
+        let middle = s.insert(item(&"b".repeat(20), T0 + 60_000)).unwrap();
+        let newest = s.insert(item(&"c".repeat(30), T0 + 120_000)).unwrap();
+
+        assert_eq!(s.evict_over_byte_cap(45).unwrap(), 2);
+        assert!(s.get(&oldest.id).unwrap().is_none());
+        assert!(s.get(&middle.id).unwrap().is_none());
+        assert!(s.get(&newest.id).unwrap().is_some());
+        assert_eq!(fts_row_count(&s, &oldest.id), 0);
+        assert_eq!(fts_row_count(&s, &middle.id), 0);
+        assert_eq!(fts_row_count(&s, &newest.id), 1);
+    }
+
+    #[test]
+    fn byte_eviction_keeps_pins_and_the_newest_unpinned_item_over_quota() {
+        let s = store();
+        let pinned = s.insert(item(&"a".repeat(10), T0)).unwrap();
+        let old = s.insert(item(&"b".repeat(20), T0 + 60_000)).unwrap();
+        let newest = s.insert(item(&"c".repeat(30), T0 + 120_000)).unwrap();
+        assert!(s.set_pinned(&pinned.id, true).unwrap());
+
+        assert_eq!(s.evict_over_byte_cap(40).unwrap(), 1);
+        assert!(s.get(&pinned.id).unwrap().is_some());
+        assert!(s.get(&old.id).unwrap().is_none());
+        assert!(s.get(&newest.id).unwrap().is_some());
+
+        assert_eq!(s.evict_over_byte_cap(1).unwrap(), 0);
+        assert!(s.get(&pinned.id).unwrap().is_some());
+        assert!(s.get(&newest.id).unwrap().is_some());
     }
 
     #[test]

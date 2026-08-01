@@ -50,6 +50,7 @@ pub struct StoreSource {
     detector: Arc<Detector>,
     device_id: String,
     device_name: String,
+    storage_quota_bytes: u64,
     on_applied: Option<Arc<dyn Fn(i64) + Send + Sync>>,
 }
 
@@ -69,6 +70,7 @@ impl StoreSource {
         detector: Arc<Detector>,
         device_id: String,
         device_name: String,
+        storage_quota_bytes: u64,
     ) -> Self {
         Self {
             store,
@@ -76,6 +78,7 @@ impl StoreSource {
             detector,
             device_id,
             device_name,
+            storage_quota_bytes,
             on_applied: None,
         }
     }
@@ -114,6 +117,12 @@ impl StoreSource {
             incoming,
         )?;
         if applied {
+            self.store
+                .evict_over_byte_cap(self.storage_quota_bytes)
+                .map_err(|e| {
+                    warn!(error = ?e, "could not enforce storage quota after a remote merge");
+                    MergeError::Store
+                })?;
             if let Some(hook) = &self.on_applied {
                 hook(incoming.created_at);
             }
@@ -209,6 +218,7 @@ impl SyncSource for StoreSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::test_support::fts_row_count;
     use crate::sync::testkit::{fixture, fixture_named};
     use crate::NewItem;
 
@@ -319,6 +329,48 @@ mod tests {
             !source.apply(item).unwrap(),
             "a replayed version must not be re-applied"
         );
+    }
+
+    #[test]
+    fn remote_merges_enforce_the_byte_quota_without_losing_fts_or_tombstones() {
+        let f = fixture_named("beta");
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            Arc::clone(&f.detector),
+            f.here.clone(),
+            "test-device".to_string(),
+            0,
+        );
+
+        let oldest = peer_item("oldest", "first remote item", 1_000);
+        assert!(source.apply(oldest).unwrap());
+        assert_eq!(fts_row_count(&f.store, "oldest"), 1);
+
+        assert!(source
+            .apply(peer_item("newest", "second remote item", 2_000))
+            .unwrap());
+        assert!(f.store.get("oldest").unwrap().is_none());
+        assert_eq!(fts_row_count(&f.store, "oldest"), 0);
+        assert!(f.store.get("newest").unwrap().is_some());
+
+        assert!(source
+            .apply(peer_item("deleted", "will become a tombstone", 3_000))
+            .unwrap());
+        let live = f.store.version("deleted").unwrap().unwrap();
+        assert!(source
+            .apply(SyncItem {
+                item_id: "deleted".into(),
+                content: String::new(),
+                content_type: "text".into(),
+                created_at: 4_000,
+                deleted: true,
+                content_hash: live.content_hash,
+                origin_device_id: "device-a".into(),
+            })
+            .unwrap());
+        assert!(f.store.version("deleted").unwrap().unwrap().deleted);
+        assert_eq!(fts_row_count(&f.store, "deleted"), 0);
     }
 
     #[test]

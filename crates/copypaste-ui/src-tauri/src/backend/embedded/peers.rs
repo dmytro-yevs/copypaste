@@ -259,6 +259,7 @@ fn source(inner: &Arc<Inner>) -> StoreSource {
         Arc::clone(&inner.detector),
         inner.device_id.clone(),
         inner.device_name.clone(),
+        inner.settings.storage_quota_bytes,
     )
 }
 

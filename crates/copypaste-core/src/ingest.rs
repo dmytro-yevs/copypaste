@@ -152,6 +152,7 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
         }
     };
     if let Some(row) = recent {
+        enforce_retention(store, settings);
         return Ok(Ingested::Duplicate(row));
     }
 
@@ -185,14 +186,22 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
         created_at,
     })?;
 
-    // Best-effort, and deliberately after the insert: the item is already
-    // durable, and a failed sweep must never turn a stored capture into a lost
-    // one.
+    enforce_retention(store, settings);
+
+    Ok(Ingested::Stored(stored))
+}
+
+fn enforce_retention(store: &Store, settings: &copypaste_ipc::ConfigData) {
+    // Best-effort after accepting a capture: a failed sweep must never turn a
+    // stored capture into a lost one.
     if let Err(e) = store.evict_over_cap(u64::from(settings.history_limit)) {
         warn!(error = ?e, "history cap eviction failed");
     }
-    // Age-based retention, disabled by the `0` sentinel. Best-effort and after
-    // the insert, for the same reason the cap sweep is.
+    if let Err(e) = store.evict_over_byte_cap(settings.storage_quota_bytes) {
+        warn!(error = ?e, "storage quota eviction failed");
+    }
+    // Age-based retention, disabled by the `0` sentinel. Best-effort for the
+    // same reason as the cap sweep.
     //
     // Measured from the wall clock, never from `created_at`. `created_at` is
     // caller-supplied and, on the import path, comes straight out of a user's
@@ -206,8 +215,6 @@ pub(crate) fn ingest_into_with_sensitivity_floor(
             warn!(error = ?e, "age-based retention failed");
         }
     }
-
-    Ok(Ingested::Stored(stored))
 }
 
 /// The dedup window, in milliseconds.
@@ -346,6 +353,25 @@ mod tests {
         assert_eq!(f.store.count().unwrap(), 3);
         // The newest survives; the cap never eats the capture that triggered it.
         assert_eq!(f.plaintext(&f.store.list(1, 0).unwrap()[0]), "item-5");
+    }
+
+    #[test]
+    fn a_duplicate_capture_runs_byte_retention_after_a_quota_change() {
+        let mut f = fixture();
+        f.at("older", T0).unwrap();
+        f.at("newer", T0 + 120_000).unwrap();
+
+        // Config validation rejects this value for a user-facing setting; this
+        // direct fixture proves that the duplicate branch actually runs the
+        // retention hook rather than returning before it.
+        f.settings.storage_quota_bytes = 0;
+        assert!(matches!(
+            f.at("newer", T0 + 150_000).unwrap(),
+            Ingested::Duplicate(_)
+        ));
+
+        assert!(f.store.search("older", 10).unwrap().is_empty());
+        assert_eq!(f.plaintext(&f.store.list(1, 0).unwrap()[0]), "newer");
     }
 
     #[test]

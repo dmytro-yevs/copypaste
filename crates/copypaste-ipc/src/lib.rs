@@ -23,7 +23,10 @@ pub mod redact;
 
 pub use paths::{data_dir, database_path, socket_path, v1_data_dir};
 
-pub use config::{ConfigData, ConfigError, ConfigPatch, Liveness};
+pub use config::{
+    ConfigData, ConfigError, ConfigPatch, Liveness, DEFAULT_STORAGE_QUOTA_BYTES,
+    MIN_STORAGE_QUOTA_BYTES,
+};
 pub use error::ErrorCode;
 pub use limits::{
     clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES,
