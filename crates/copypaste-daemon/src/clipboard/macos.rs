@@ -34,6 +34,7 @@
 #![allow(unused_unsafe)]
 
 use objc2::rc::{autoreleasepool, Retained};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use objc2_app_kit::{NSPasteboard, NSWorkspace};
@@ -51,6 +52,7 @@ const UTI_TEXT: &str = "public.utf8-plain-text";
 const UTI_PNG: &str = "public.png";
 const UTI_TIFF: &str = "public.tiff";
 const UTI_FILE_URL: &str = "public.file-url";
+const UTI_LEGACY_FILE_NAMES: &str = "NSFilenamesPboardType";
 /// §3.4 — the three `org.nspasteboard.*` opt-out markers, probed as a set.
 /// `ConcealedType` is how 1Password, Bitwarden, KeePassXC and friends say
 /// "this is a secret, do not persist it". Ignoring these writes users'
@@ -76,6 +78,7 @@ struct Utis {
     tiff: Retained<NSString>,
     image_probe: Retained<NSArray<NSString>>,
     file_url: Retained<NSString>,
+    legacy_file_names: Retained<NSString>,
     markers: Retained<NSArray<NSString>>,
 }
 
@@ -85,6 +88,7 @@ impl Utis {
         let png = NSString::from_str(UTI_PNG);
         let tiff = NSString::from_str(UTI_TIFF);
         let file_url = NSString::from_str(UTI_FILE_URL);
+        let legacy_file_names = NSString::from_str(UTI_LEGACY_FILE_NAMES);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
@@ -98,6 +102,7 @@ impl Utis {
             png,
             tiff,
             file_url,
+            legacy_file_names,
         }
     }
 }
@@ -115,6 +120,46 @@ pub struct MacOsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
     frontmost: Option<(Instant, Option<String>)>,
+}
+
+enum SelectedRepresentation {
+    Data(Retained<NSData>, &'static str),
+    LegacyFileNames(Retained<NSData>),
+}
+
+fn first_absolute_filename_plist(bytes: &[u8]) -> Option<PathBuf> {
+    // `NSFilenamesPboardType` is a binary plist. Reject another encoding rather
+    // than treating arbitrary text as a path, and let parser failures remain a
+    // harmless dropped pasteboard change (CopyPaste-q5ab / I-37).
+    if !bytes.starts_with(b"bplist00") {
+        debug!("legacy filename pasteboard payload was not a binary plist; dropped");
+        return None;
+    }
+    plist::from_bytes::<Vec<String>>(bytes)
+        .ok()?
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_absolute())
+}
+
+fn file_capture(path: PathBuf, app_bundle_id: Option<String>) -> Option<Capture> {
+    if !path.is_absolute() {
+        debug!("pasteboard file path was not absolute; dropped");
+        return None;
+    }
+    let filename = path.file_name()?.to_string_lossy().into_owned();
+    let mime = mime_guess::from_path(&path)
+        .first_raw()
+        .unwrap_or("application/octet-stream");
+    let metadata = copypaste_core::FileMetadata::new(filename, mime)?;
+    Some(Capture {
+        content: String::new(),
+        binary_content: None,
+        file_path: Some(path),
+        file_metadata: Some(metadata),
+        content_type: copypaste_ipc::content_type::FILE.to_string(),
+        app_bundle_id,
+    })
 }
 
 impl MacOsClipboard {
@@ -207,26 +252,38 @@ impl ClipboardSource for MacOsClipboard {
 
             let selected = UTIS.with(|utis| unsafe {
                 if pb.availableTypeFromArray(&utis.text_probe).is_some() {
-                    return pb
-                        .dataForType(&utis.text)
-                        .map(|data| (data, copypaste_ipc::content_type::TEXT));
+                    return pb.dataForType(&utis.text).map(|data| {
+                        SelectedRepresentation::Data(data, copypaste_ipc::content_type::TEXT)
+                    });
                 }
                 // I-12 probes presence before materialising data.  TIFF is
                 // never queried when PNG exists, which preserves I-13.
                 if pb.availableTypeFromArray(&utis.image_probe).is_some() {
                     if let Some(data) = pb.dataForType(&utis.png) {
-                        return Some((data, copypaste_ipc::content_type::IMAGE_PNG));
+                        return Some(SelectedRepresentation::Data(
+                            data,
+                            copypaste_ipc::content_type::IMAGE_PNG,
+                        ));
                     }
-                    return pb
-                        .dataForType(&utis.tiff)
-                        .map(|data| (data, copypaste_ipc::content_type::IMAGE_TIFF));
+                    return pb.dataForType(&utis.tiff).map(|data| {
+                        SelectedRepresentation::Data(data, copypaste_ipc::content_type::IMAGE_TIFF)
+                    });
                 }
                 if let Some(data) = pb.dataForType(&utis.file_url) {
-                    return Some((data, copypaste_ipc::content_type::FILE));
+                    return Some(SelectedRepresentation::Data(
+                        data,
+                        copypaste_ipc::content_type::FILE,
+                    ));
                 }
-                None
+                pb.dataForType(&utis.legacy_file_names)
+                    .map(SelectedRepresentation::LegacyFileNames)
             })?;
-            let (data, content_type) = selected;
+            let (data, content_type, legacy_file_names) = match selected {
+                SelectedRepresentation::Data(data, content_type) => (data, content_type, false),
+                SelectedRepresentation::LegacyFileNames(data) => {
+                    (data, copypaste_ipc::content_type::FILE, true)
+                }
+            };
 
             // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
             // multi-GiB item is a multi-GiB allocation. Check first.
@@ -263,26 +320,18 @@ impl ClipboardSource for MacOsClipboard {
                     app_bundle_id,
                 })
             } else if content_type == copypaste_ipc::content_type::FILE {
-                let Ok(url) = url::Url::parse(&String::from_utf8_lossy(&bytes)) else {
-                    return None;
+                let path = if legacy_file_names {
+                    first_absolute_filename_plist(&bytes)?
+                } else {
+                    let Ok(url) = url::Url::parse(&String::from_utf8_lossy(&bytes)) else {
+                        return None;
+                    };
+                    let Ok(path) = url.to_file_path() else {
+                        return None;
+                    };
+                    path
                 };
-                let Ok(path) = url.to_file_path() else {
-                    return None;
-                };
-                if !path.is_absolute() {
-                    return None;
-                }
-                let filename = path.file_name()?.to_string_lossy().into_owned();
-                let metadata =
-                    copypaste_core::FileMetadata::new(filename, "application/octet-stream")?;
-                Some(Capture {
-                    content: String::new(),
-                    binary_content: None,
-                    file_path: Some(path),
-                    file_metadata: Some(metadata),
-                    content_type: content_type.to_string(),
-                    app_bundle_id,
-                })
+                file_capture(path, app_bundle_id)
             } else {
                 Some(Capture {
                     content: String::new(),
@@ -493,6 +542,40 @@ mod tests {
         autoreleasepool(|_| unsafe {
             let _ = NSPasteboard::generalPasteboard().clearContents();
         });
+    }
+
+    #[test]
+    fn legacy_filenames_binary_plist_uses_the_first_absolute_path() {
+        let mut bytes = Vec::new();
+        plist::to_writer_binary(
+            &mut bytes,
+            &vec!["relative.txt", "/Users/example/Report.pdf", "/ignored.txt"],
+        )
+        .unwrap();
+
+        assert_eq!(
+            first_absolute_filename_plist(&bytes),
+            Some(PathBuf::from("/Users/example/Report.pdf"))
+        );
+    }
+
+    #[test]
+    fn malformed_or_non_binary_legacy_filename_data_is_dropped() {
+        assert!(first_absolute_filename_plist(b"/Users/example/Report.pdf").is_none());
+        assert!(first_absolute_filename_plist(b"bplist00not-a-plist").is_none());
+    }
+
+    #[test]
+    fn file_capture_uses_the_extension_mime_and_never_retains_the_full_path() {
+        let capture = file_capture(PathBuf::from("/Users/example/Report.pdf"), None).unwrap();
+        assert_eq!(
+            capture.file_path,
+            Some(PathBuf::from("/Users/example/Report.pdf"))
+        );
+        assert_eq!(
+            capture.file_metadata,
+            Some(copypaste_core::FileMetadata::new("Report.pdf", "application/pdf").unwrap())
+        );
     }
 
     /// T-21, T-4, I-1, I-2. Also the first question of all: does `changeCount`

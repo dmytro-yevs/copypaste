@@ -120,6 +120,7 @@ impl CloudSource for StoreSource {
                     item_id: row.id,
                     content,
                     content_type: row.content_type,
+                    payload_metadata: row.payload_metadata,
                     created_at: row.created_at,
                     deleted: row.deleted,
                 });
@@ -139,7 +140,7 @@ impl CloudSource for StoreSource {
                     binary_content: (!item.deleted
                         && !copypaste_ipc::content_type::is_text(&item.content_type))
                     .then_some(item.content.as_slice()),
-                    payload_metadata: None,
+                    payload_metadata: item.payload_metadata.as_deref(),
                     content_type: &item.content_type,
                     created_at: item.created_at,
                     deleted: item.deleted,
@@ -341,6 +342,7 @@ mod tests {
                 item_id: "from-a-peer".into(),
                 content: b"arrived over the peer transport".to_vec(),
                 content_type: "text".into(),
+                payload_metadata: None,
                 created_at: old_stamp,
                 deleted: false,
                 origin_device_id: "device-b".into(),
@@ -425,6 +427,7 @@ mod tests {
             item_id: "from-the-cloud".into(),
             content: b"from another device".to_vec(),
             content_type: "text".into(),
+            payload_metadata: None,
             created_at: 1_700_000_000_000,
             deleted: false,
             origin_device_id: "device-a".into(),
@@ -445,6 +448,29 @@ mod tests {
         )
         .expect("the local key must open it");
         assert_eq!(String::from_utf8(plain).unwrap(), "from another device");
+    }
+
+    #[test]
+    fn a_file_versions_metadata_round_trips_between_cloud_and_local_storage() {
+        let (source, state, _dir) = source("file-metadata");
+        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#;
+        source
+            .apply_remote(LocalItem {
+                item_id: "file-from-cloud".into(),
+                content: b"%PDF-binary".to_vec(),
+                content_type: copypaste_ipc::content_type::FILE.into(),
+                payload_metadata: Some(metadata.into()),
+                created_at: 1_700_000_000_000,
+                deleted: false,
+                origin_device_id: "device-a".into(),
+            })
+            .unwrap();
+
+        let row = state.store.get("file-from-cloud").unwrap().unwrap();
+        assert_eq!(row.payload_metadata.as_deref(), Some(metadata));
+        let offered = source.local_changes_since(0).unwrap();
+        assert_eq!(offered[0].payload_metadata.as_deref(), Some(metadata));
+        assert_eq!(offered[0].content, b"%PDF-binary");
     }
 
     /// A round's own upload, echoed back by the account, must be a no-op — and

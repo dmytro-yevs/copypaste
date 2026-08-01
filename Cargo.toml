@@ -63,6 +63,7 @@ argon2 = "0.5"
 base64 = "0.22"
 url = "2"
 plist = "1.10"
+mime_guess = "2"
 # errors, logging, cli, misc
 thiserror = "1"
 anyhow = "1"
