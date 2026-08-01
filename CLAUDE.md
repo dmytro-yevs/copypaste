@@ -340,3 +340,28 @@ Enable the hook once per clone:
 git config core.hooksPath .githooks
 git config commit.template .gitmessage
 ```
+
+## 11. Worktrees
+
+**Choose one task slug and reuse it for the branch and worktree directory.**
+The slug is lowercase kebab-case (`[a-z0-9-]+`) and describes the task. Do not
+replace it with a second alias, a generated number or a date suffix.
+
+- Branch: `codex/<task-slug>`.
+- Directory: `~/.codex/worktrees/<task-slug>/CopyPaste`.
+- The primary checkout stays on `main`; concurrent change work happens in
+  separate worktrees so each task has its own working tree and index.
+- Do not create persistent task worktrees in `/tmp`, inside the repository, or
+  under another naming scheme.
+
+Create a new task worktree from the intended base ref (`main` by default):
+
+```sh
+task_slug=fix-sync-cadence
+git worktree add -b "codex/$task_slug" \
+  "$HOME/.codex/worktrees/$task_slug/CopyPaste" main
+```
+
+Codex app worktrees created before these repository rules are loaded may have a
+generated parent directory. Do not rename them in place; apply the branch rule
+and use this convention for every worktree created explicitly afterward.
