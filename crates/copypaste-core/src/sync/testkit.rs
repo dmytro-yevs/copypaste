@@ -44,7 +44,7 @@ impl Fixture {
             Arc::clone(&self.detector),
             self.here.clone(),
             "test-device".to_string(),
-            copypaste_ipc::DEFAULT_STORAGE_QUOTA_BYTES,
+            copypaste_ipc::ConfigData::default(),
         )
     }
 }
