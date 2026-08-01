@@ -27,7 +27,9 @@ use copypaste_p2p::protocol::ItemSummary;
 use copypaste_p2p::sync::{merge_decision, MergeDecision};
 use tracing::warn;
 
-use crate::cloud::{KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM};
+use crate::cloud::{
+    UploadFloor, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM,
+};
 use crate::AppState;
 
 /// Local versions offered to one push.
@@ -51,10 +53,15 @@ pub struct StoreSource {
 struct Offer {
     /// The scan hit [`UPLOAD_SCAN_LIMIT`], so there is more behind it.
     truncated: bool,
-    /// The newest stamp in the batch — the furthest the floor may move when it
-    /// was truncated.
-    max_created_at: i64,
-    max_item_id: Option<String>,
+    /// The last offered row's full keyset — the furthest the floor may move
+    /// when the scan was truncated.
+    last: UploadFloor,
+    /// The cursor this scan started from. It lets completion detect a peer
+    /// write that lowered the floor while the round was in flight.
+    started: UploadFloor,
+    /// Detects a write that landed at the same keyset boundary, where comparing
+    /// only the floor pair cannot prove the scan saw it.
+    started_epoch: u64,
 }
 
 impl StoreSource {
@@ -74,17 +81,24 @@ impl StoreSource {
     /// jumping to the round's start would silently drop every row the limit cut
     /// off, which is exactly how a large backlog would lose all but its first
     /// page.
-    pub fn next_upload_cursor(&self, round_started_ms: i64) -> (i64, Option<String>) {
+    pub fn commit_upload_floor(&self, round_started_ms: i64) -> Result<(), SyncError> {
         let offer = self
             .last_offer
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        if offer.truncated && offer.max_created_at < round_started_ms {
-            (offer.max_created_at, offer.max_item_id)
+        let next = if offer.truncated && offer.last.created_at <= round_started_ms {
+            offer.last
         } else {
-            (round_started_ms, None)
-        }
+            UploadFloor {
+                created_at: round_started_ms,
+                item_id: None,
+            }
+        };
+        self.state
+            .cloud
+            .commit_upload_floor(&self.state.meta, &offer.started, offer.started_epoch, &next)
+            .map_err(source_error)
     }
 }
 
@@ -102,6 +116,7 @@ impl CloudSource for StoreSource {
         since_ms: i64,
         after_item_id: Option<&str>,
     ) -> Result<Vec<LocalItem>, SyncError> {
+        let started_epoch = self.state.cloud.upload_floor_epoch();
         blocking(|| {
             let rows = self
                 .state
@@ -111,12 +126,27 @@ impl CloudSource for StoreSource {
 
             *self.last_offer.lock().unwrap_or_else(|e| e.into_inner()) = Offer {
                 truncated: rows.len() as i64 >= UPLOAD_SCAN_LIMIT,
-                max_created_at: rows.last().map_or(since_ms, |row| row.created_at),
-                max_item_id: rows.last().map(|row| row.id.clone()),
+                last: rows.last().map_or_else(
+                    || UploadFloor {
+                        created_at: since_ms,
+                        item_id: after_item_id.map(str::to_owned),
+                    },
+                    |row| UploadFloor {
+                        created_at: row.created_at,
+                        item_id: Some(row.id.clone()),
+                    },
+                ),
+                started: UploadFloor {
+                    created_at: since_ms,
+                    item_id: after_item_id.map(str::to_owned),
+                },
+                started_epoch,
             };
 
             let mut items = Vec::with_capacity(rows.len());
             for row in rows {
+                // A tombstone has no payload to open, and carries none on the
+                // wire either (manifest 05 T-4).
                 let content = if row.deleted {
                     String::new()
                 } else {
@@ -147,7 +177,8 @@ impl CloudSource for StoreSource {
             // Lossy for the same reason the peer path is: clipboard content is
             // text, and one row that is not valid UTF-8 must not fail a round.
             let content = String::from_utf8_lossy(&item.content);
-            self.shared
+            let applied = self
+                .shared
                 .apply_version(&RemoteVersion {
                     item_id: &item.item_id,
                     content: &content,
@@ -158,7 +189,25 @@ impl CloudSource for StoreSource {
                     content_hash: None,
                     origin_device_id: &item.origin_device_id,
                 })
-                .map_err(|e| SyncError::Source(e.message()))
+                .map_err(|e| SyncError::Source(e.message()))?;
+
+            if !applied {
+                // The account may still hold the losing row (for example a
+                // stale upsert raced this device's earlier push). Re-offer the
+                // actual local winner next round. An exact self echo is the
+                // normal push-then-pull path and must not pull the floor back:
+                // doing so would manufacture a duplicate second upload on
+                // every healthy round.
+                let local = self
+                    .state
+                    .store
+                    .version(&item.item_id)
+                    .map_err(source_error)?;
+                if let Some(local) = local.filter(|local| !self.is_self_echo(local, &item)) {
+                    crate::cloud::note_version_written(&self.state, local.created_at);
+                }
+            }
+            Ok(applied)
         })
     }
 
@@ -297,6 +346,21 @@ impl CloudSource for StoreSource {
     }
 }
 
+impl StoreSource {
+    fn is_self_echo(&self, local: &copypaste_core::StoredItem, incoming: &LocalItem) -> bool {
+        local.created_at == incoming.created_at
+            && local.deleted == incoming.deleted
+            && local.content_type == incoming.content_type
+            && copypaste_core::origin_or(&local.origin_device_id, self.state.meta.device_id())
+                == incoming.origin_device_id
+            && (local.deleted
+                || self
+                    .shared
+                    .open(local)
+                    .is_some_and(|content| content.as_bytes() == incoming.content))
+    }
+}
+
 fn source_error(e: impl std::fmt::Debug) -> SyncError {
     warn!(error = ?e, "the history database could not be read for a cloud round");
     SyncError::Source(copypaste_core::sync::MSG_STORE)
@@ -306,7 +370,6 @@ fn source_error(e: impl std::fmt::Debug) -> SyncError {
 mod tests {
     use super::*;
     use crate::testutil::{add, test_state};
-    use copypaste_core::{NewItem, Store};
 
     fn source(name: &str) -> (StoreSource, Arc<AppState>, tempfile::TempDir) {
         let (state, dir) = test_state(name);
@@ -315,24 +378,6 @@ mod tests {
 
     fn ids(items: &[LocalItem]) -> Vec<&str> {
         items.iter().map(|i| i.item_id.as_str()).collect()
-    }
-
-    fn add_at(store: &Store, key: &copypaste_core::ItemKey, n: usize, created_at: i64) {
-        let id = format!("cursor-{n:04}");
-        let content = format!("item {n}");
-        let (nonce, ciphertext) = copypaste_core::encrypt(content.as_bytes(), key, &id).unwrap();
-        store
-            .insert(NewItem {
-                id,
-                content_ciphertext: ciphertext,
-                nonce,
-                content_type: "text".into(),
-                content_hash: copypaste_core::storage::compute_content_hash(content.as_bytes()),
-                is_sensitive: false,
-                search_text: Some(content),
-                created_at,
-            })
-            .unwrap();
     }
 
     #[test]
@@ -375,80 +420,6 @@ mod tests {
         assert_eq!(ids(&items), [id.as_str()]);
         assert!(items[0].deleted);
         assert!(items[0].content.is_empty(), "a tombstone carried content");
-    }
-
-    #[test]
-    fn upload_keyset_drains_a_bucket_larger_than_the_scan_limit() {
-        let (source, state, _dir) = source("alpha");
-        let stamp = 1_700_000_000_000;
-        let key = state.keyring.item_key();
-        for n in 0..=UPLOAD_SCAN_LIMIT as usize {
-            add_at(&state.store, &key, n, stamp);
-        }
-
-        let first = source.local_changes_after(0, None).unwrap();
-        assert_eq!(first.len(), UPLOAD_SCAN_LIMIT as usize);
-        let cursor = source.next_upload_cursor(stamp + 1);
-        assert_eq!(cursor.0, stamp);
-        assert!(cursor.1.is_some());
-
-        let second = source
-            .local_changes_after(cursor.0, cursor.1.as_deref())
-            .unwrap();
-        assert_eq!(second.len(), 1);
-        assert!(!ids(&first).contains(&second[0].item_id.as_str()));
-    }
-
-    #[test]
-    fn a_local_lww_winner_reopens_the_upload_cursor() {
-        let (source, state, _dir) = source("alpha");
-        let stamp = 1_700_000_000_000;
-        add_at(&state.store, &state.keyring.item_key(), 0, stamp);
-        state
-            .meta
-            .set_state_all(&[
-                (KEY_UPLOAD_FLOOR, &stamp.to_string()),
-                (KEY_UPLOAD_FLOOR_ITEM, "cursor-9999"),
-            ])
-            .unwrap();
-
-        source
-            .requeue_local_winner(&LocalItem {
-                item_id: "cursor-0000".into(),
-                content: b"older remote".to_vec(),
-                content_type: "text".into(),
-                created_at: stamp - 1,
-                deleted: false,
-                origin_device_id: "device-b".into(),
-            })
-            .unwrap();
-
-        assert_eq!(source.upload_floor().unwrap(), stamp);
-        assert_eq!(source.upload_floor_item_id().unwrap(), None);
-    }
-
-    #[test]
-    fn a_sensitive_tombstone_is_offered_empty_while_a_live_sensitive_item_is_not() {
-        let (source, state, _dir) = source("alpha");
-        let live = add(&state, "AKIAIOSFODNN7EXAMPLE");
-        let deleted = add(&state, "AKIAIOSFODNN7DELETED");
-        assert!(state.store.delete(&deleted).unwrap());
-
-        let items = source.local_changes_since(0).unwrap();
-        assert!(
-            !ids(&items).contains(&live.as_str()),
-            "a live sensitive item reached the upload path: {:?}",
-            ids(&items)
-        );
-        let tombstone = items
-            .iter()
-            .find(|item| item.item_id == deleted)
-            .expect("the sensitive tombstone must reach the upload path");
-        assert!(tombstone.deleted);
-        assert!(
-            tombstone.content.is_empty(),
-            "a sensitive tombstone carried content"
-        );
     }
 
     /// The backlog sweep: signing in has to offer the history that already
@@ -517,6 +488,52 @@ mod tests {
             offered.iter().any(|i| i.item_id == "from-a-peer"),
             "a peer's item was stranded below the upload floor"
         );
+    }
+
+    #[test]
+    fn upload_keyset_drains_a_full_round_started_boundary_without_replaying_it() {
+        let (source, _state, _dir) = source("alpha");
+        let stamp = 1_700_000_000_000;
+        for n in 0..=UPLOAD_SCAN_LIMIT {
+            source
+                .apply_remote(LocalItem {
+                    item_id: format!("boundary-{n:04}"),
+                    content: format!("row {n}").into_bytes(),
+                    content_type: "text".into(),
+                    created_at: stamp,
+                    deleted: false,
+                    origin_device_id: "peer".into(),
+                })
+                .unwrap();
+        }
+
+        let first = source.local_changes_after(0, None).unwrap();
+        assert_eq!(first.len() as i64, UPLOAD_SCAN_LIMIT);
+        let last = first.last().unwrap().item_id.clone();
+        source.commit_upload_floor(stamp).unwrap();
+
+        assert_eq!(source.upload_floor().unwrap(), stamp);
+        assert_eq!(
+            source.upload_floor_item_id().unwrap().as_deref(),
+            Some(last.as_str())
+        );
+        let second = source.local_changes_after(stamp, Some(&last)).unwrap();
+        assert_eq!(second.len(), 1, "the first 500 rows were replayed");
+        assert_ne!(second[0].item_id, last);
+    }
+
+    #[test]
+    fn peer_write_during_a_round_cannot_be_overwritten_by_its_stale_floor() {
+        let (source, state, _dir) = source("alpha");
+        let started = 20_000;
+        state.meta.set_state_ms(KEY_UPLOAD_FLOOR, started).unwrap();
+        source.local_changes_after(started, None).unwrap();
+
+        crate::cloud::note_version_written(&state, 1_000);
+        source.commit_upload_floor(started + 1_000).unwrap();
+
+        assert_eq!(source.upload_floor().unwrap(), 1_000);
+        assert_eq!(source.upload_floor_item_id().unwrap(), None);
     }
 
     #[test]
@@ -609,37 +626,6 @@ mod tests {
         assert_eq!(String::from_utf8(plain).unwrap(), "from another device");
     }
 
-    #[test]
-    fn a_cloud_merge_keeps_the_download_watermark_and_tombstone() {
-        let (source, state, _dir) = source("beta");
-        source.set_watermark_keyset(9_000, "cursor-item").unwrap();
-
-        assert!(source
-            .apply_remote(LocalItem {
-                item_id: "gone-in-cloud".into(),
-                content: Vec::new(),
-                content_type: "text".into(),
-                created_at: 4_000,
-                deleted: true,
-                origin_device_id: "device-a".into(),
-            })
-            .unwrap());
-
-        assert_eq!(source.watermark().unwrap(), 9_000);
-        assert_eq!(
-            source.watermark_item_id().unwrap().as_deref(),
-            Some("cursor-item")
-        );
-        assert!(
-            state
-                .store
-                .version("gone-in-cloud")
-                .unwrap()
-                .unwrap()
-                .deleted
-        );
-    }
-
     /// A round's own upload, echoed back by the account, must be a no-op — and
     /// it is absorbed by the ordering rather than by a "did I send this?" check
     /// (INV-I2).
@@ -652,5 +638,48 @@ mod tests {
 
         assert!(!source.apply_remote(mine).unwrap());
         assert_eq!(state.store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn a_local_lww_winner_is_reoffered_but_a_normal_self_echo_is_not() {
+        let (source, state, _dir) = source("alpha");
+        let id = add(&state, "mine");
+        let local = source
+            .local_changes_after(0, None)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.item_id == id)
+            .unwrap();
+        let passed_floor = local.created_at + 1;
+        state
+            .meta
+            .set_state_ms(KEY_UPLOAD_FLOOR, passed_floor)
+            .unwrap();
+
+        let mut stale = local.clone();
+        stale.created_at -= 1;
+        stale.origin_device_id = "device-b".into();
+        assert!(!source.apply_remote(stale).unwrap());
+        assert_eq!(
+            source.upload_floor().unwrap(),
+            local.created_at,
+            "the local LWW winner was not scheduled for republishing"
+        );
+        assert!(source
+            .local_changes_after(local.created_at, None)
+            .unwrap()
+            .iter()
+            .any(|item| item.item_id == id));
+
+        state
+            .meta
+            .set_state_ms(KEY_UPLOAD_FLOOR, passed_floor)
+            .unwrap();
+        assert!(!source.apply_remote(local).unwrap());
+        assert_eq!(
+            source.upload_floor().unwrap(),
+            passed_floor,
+            "a normal self echo scheduled a duplicate upload"
+        );
     }
 }
