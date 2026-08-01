@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { applyAppearance } from "@/lib/theme";
 import {
   copyItem,
+  copyItemAsPlainText,
   hideWindow,
   listItems,
   setAllowScreenshots,
@@ -101,10 +102,10 @@ export function QuickPasteApp() {
   }, [releaseHiddenCache]);
 
   const copyAndDismiss = useCallback(
-    async (item: Item) => {
+    async (item: Item, plainText = false) => {
       try {
         setCopyError(null);
-        await copyItem(item.id);
+        await (plainText ? copyItemAsPlainText(item.id) : copyItem(item.id));
         // Drop the popup cache before it is hidden. The next invocation always
         // starts from a daemon read, and the Accessory hide path restores the
         // app the user was about to paste into.
@@ -136,7 +137,7 @@ export function QuickPasteApp() {
       const selected = items[current];
       if (selected) {
         event.preventDefault();
-        void copyAndDismiss(selected);
+        void copyAndDismiss(selected, event.altKey);
       }
       return;
     }
@@ -233,10 +234,16 @@ export function QuickPasteApp() {
       </div>
 
       <p aria-live="polite" className="mt-2 text-center text-xs text-muted-foreground">
-        {history.isLoading ? "Loading…" : query ? `${items.length} of ${history.data?.items.length ?? 0}` : `${items.length} items`}
+        {history.isLoading
+          ? "Loading…"
+          : query
+            ? `${items.length} of ${history.data?.items.length ?? 0}`
+            : (history.data?.total ?? 0) > items.length
+              ? `${items.length} of ${history.data?.total}`
+              : `${items.length} items`}
       </p>
       <p className="mt-1 text-center text-xs text-muted-foreground">
-        ↑↓ navigate · ⏎ copy · Esc close
+        ↑↓ navigate · ⌥⏎ plain text · ⏎ copy · Esc close
       </p>
     </main>
   );

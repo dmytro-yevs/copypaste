@@ -348,11 +348,17 @@ fn remember_frontmost_application() {}
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
-fn restore_previous_application() {
-    let pid = previous_application()
+fn take_previous_application() -> Option<i32> {
+    previous_application()
         .lock()
         .ok()
-        .and_then(|mut previous| previous.take());
+        .and_then(|mut previous| previous.take())
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn restore_previous_application() {
+    let pid = take_previous_application();
     let Some(pid) = pid else {
         return;
     };
@@ -407,6 +413,14 @@ mod tests {
     fn hide_on_blur_is_idempotent_after_the_window_is_hidden() {
         assert!(should_hide_on_focus_lost(true));
         assert!(!should_hide_on_focus_lost(false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_prior_application_is_handed_off_only_once() {
+        *previous_application().lock().unwrap() = Some(42);
+        assert_eq!(take_previous_application(), Some(42));
+        assert_eq!(take_previous_application(), None);
     }
 
     #[test]

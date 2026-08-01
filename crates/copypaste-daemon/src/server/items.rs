@@ -126,6 +126,16 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
     Response::ok(id, ResponseData::Item(item))
 }
 
+/// Copy only the item's textual representation.
+///
+/// `Copy` and this verb happen to write the same native payload while v2 only
+/// captures text. Keeping the operation separate is nevertheless essential:
+/// ⌥Enter must remain an explicit plain-text request once richer clipboard
+/// payloads are supported.
+pub(super) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Response {
+    copy(state, id, item_id)
+}
+
 pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
     // Same ingest path as the capture loop: detector, encrypt, dedup, insert,
     // evict. `add` cannot skip the detector — an item entering here is exactly
@@ -467,8 +477,15 @@ mod tests {
         assert!(copy(&state, 3, &added.id).ok);
         assert_eq!(writes.count(), 1);
 
+        assert!(copy_plain_text(&state, 4, &added.id).ok);
+        assert_eq!(
+            writes.count(),
+            2,
+            "plain-text copy did not reach the clipboard"
+        );
+
         // An unknown id is not_found, not an empty success.
-        let missing = get(&state, 4, "00000000-0000-0000-0000-000000000000");
+        let missing = get(&state, 5, "00000000-0000-0000-0000-000000000000");
         assert_eq!(missing.error_code, Some(ErrorCode::NotFound));
     }
 
