@@ -34,13 +34,6 @@ use super::rows::peer_info;
 use super::{Inner, MSG_NO_PEER};
 use crate::backend::{BackendError, Result};
 
-/// What this device tells peers it is called, on first run only.
-///
-/// Cosmetic and peer-visible. Android has no hostname worth reading — it is
-/// `localhost` — and there is no rename screen yet, so this is the honest
-/// placeholder rather than a guess dressed up as a device name.
-const DEVICE_NAME_HINT: &str = "CopyPaste phone";
-
 /// The node, plus the handle that stops its listener.
 pub(super) struct PeerNode {
     node: Arc<Node>,
@@ -59,7 +52,7 @@ impl PeerNode {
         // owns it by value: `PeerStore` is deliberately not `Clone` — two
         // in-memory caches over one file would disagree about which keys the
         // listener accepts.
-        let peers = PeerStore::open(&inner.peers_path)
+        let peers = PeerStore::open(&inner.state.peers_path)
             .map_err(|e| BackendError::internal(&format!("could not open paired devices: {e}")))?;
         let pairing_ids: Vec<String> = peers
             .list()
@@ -68,7 +61,7 @@ impl PeerNode {
             .collect();
         // Never fatal: a network that filters multicast still pairs and still
         // syncs to an explicit address, which is the common case on a phone.
-        let discovery = match Discovery::start(&inner.device_name, &pairing_ids, PORT) {
+        let discovery = match Discovery::start(&inner.state.device_name, &pairing_ids, PORT) {
             Ok(discovery) => Some(discovery),
             Err(e) => {
                 tracing::warn!(error = %e, "could not start discovery; peers must be given an address");
@@ -254,12 +247,12 @@ const PORT: u16 = copypaste_p2p::DEFAULT_PORT;
 /// pool handle, and a source parked on the backend it reads is a cycle.
 fn source(inner: &Arc<Inner>) -> StoreSource {
     StoreSource::new(
-        inner.store.clone(),
-        Arc::clone(&inner.keyring),
-        Arc::clone(&inner.detector),
-        inner.device_id.clone(),
-        inner.device_name.clone(),
-        inner.settings.clone(),
+        inner.state.store.clone(),
+        Arc::clone(&inner.state.keyring),
+        Arc::clone(&inner.state.detector),
+        inner.state.device_id.clone(),
+        inner.state.device_name.clone(),
+        inner.state.settings.clone(),
     )
 }
 
@@ -271,6 +264,7 @@ fn source(inner: &Arc<Inner>) -> StoreSource {
 /// given device. Best-effort: a failure costs a label, not an item.
 fn remember(inner: &Arc<Inner>, outcome: &SyncOutcome) {
     if let Err(e) = inner
+        .state
         .store
         .record_device_name(&outcome.peer_device_id, &outcome.peer_device_name)
     {
@@ -292,11 +286,4 @@ fn failed(error: NodeError) -> BackendError {
         // no path in it.
         e => BackendError::internal(&e.to_string()),
     }
-}
-
-/// The device identity, minted on first run and then reused.
-pub(super) fn identity(store: &copypaste_core::Store) -> Result<copypaste_core::DeviceIdentity> {
-    store
-        .device_identity(DEVICE_NAME_HINT)
-        .map_err(|e| BackendError::internal(&format!("could not resolve this device: {e}")))
 }

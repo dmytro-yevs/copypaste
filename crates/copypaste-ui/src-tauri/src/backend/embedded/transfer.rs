@@ -19,7 +19,13 @@ const MSG_IMPORT_FAILED: &str = "That file couldn't be imported.";
 /// accounting is how the two platforms would come to disagree about what a short
 /// export means (CLAUDE.md rule 1).
 pub(super) fn export(inner: &Inner, limit: u32, include_sensitive: bool) -> Result<ExportData> {
-    copypaste_core::export(&inner.store, &inner.keyring, limit, include_sensitive).map_err(|e| {
+    copypaste_core::export(
+        &inner.state.store,
+        &inner.state.keyring,
+        limit,
+        include_sensitive,
+    )
+    .map_err(|e| {
         tracing::warn!(error = ?e, "an export could not read the history");
         BackendError::internal(MSG_EXPORT_FAILED)
     })
@@ -31,10 +37,10 @@ pub(super) fn export(inner: &Inner, limit: u32, include_sensitive: bool) -> Resu
 /// (manifest 04, PG-26).
 pub(super) fn import(inner: &Inner, items: Vec<ExportItem>) -> Result<ImportData> {
     copypaste_core::import(
-        &inner.store,
-        &inner.detector,
-        &inner.keyring,
-        &inner.settings,
+        &inner.state.store,
+        &inner.state.detector,
+        &inner.state.keyring,
+        &inner.state.settings,
         items,
     )
     .map_err(|e| match e {
