@@ -73,6 +73,12 @@ ndk-context = { version = "0.1", optional = true }
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# AppKit supplies the frontmost-process hand-off after Quick Paste copies an
+# item. Tauri deliberately keeps this platform detail out of its cross-platform
+# window API.
+objc2-app-kit = { workspace = true, features = ["NSRunningApplication", "NSWorkspace", "libc"] }
+
 # ---------------------------------------------------------------------------
 # Android only
 # ---------------------------------------------------------------------------

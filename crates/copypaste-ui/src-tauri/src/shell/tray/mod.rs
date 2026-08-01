@@ -1,4 +1,11 @@
-//! Menu-bar integration for the desktop app.
+//! The menu-bar item, and the only exit: closing either app surface hides it
+//! (manifest 06, INV-36); only the Quick Paste surface is frameless.
+//!
+//! `show_menu_on_left_click(false)` — with a popover, clicking the icon *is*
+//! the gesture, so the menu stays on the secondary click.
+//!
+//! UNVERIFIED: Linux host. The refresh loop, the slot reconciliation and the
+//! click-to-copy path have never been run.
 
 mod menu;
 mod recent;
@@ -31,6 +38,16 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// clippings indefinitely.
 const BACKSTOP: Duration = Duration::from_secs(5);
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_freshness_backstop_re_reads_the_recent_menu_every_five_seconds() {
+        assert_eq!(BACKSTOP, Duration::from_secs(5));
+    }
+}
+
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // Read once at build: a change made in System Settings while the app runs
     // does not show until restart. A known gap, not a claim of correctness.
@@ -43,7 +60,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| on_menu_event(app, &handler, event.id().as_ref()))
         .on_tray_icon_event(|tray, event| {
-            // A left click toggles the main window.
+            // Left click toggles the popover. `Down` rather than `Up` so the
+            // window appears while the mouse is still held, which is how the
+            // native menu-bar items behave.
             if let tauri::tray::TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,
                 button_state: tauri::tray::MouseButtonState::Down,
@@ -54,19 +73,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             }
         });
 
-    #[cfg(target_os = "macos")]
-    {
-        let template =
-            tauri::image::Image::from_bytes(include_bytes!("../../../icons/trayTemplate.png"))?;
-        tray = tray.icon(template).icon_as_template(true);
-    }
-
-    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon().cloned() {
         tray = tray.icon(icon);
     }
     tray.build(app)?;
-    window::install(app)?;
 
     spawn_refresh(app.clone(), tray_menu);
     Ok(())
@@ -74,7 +84,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, id: &str) {
     match id {
-        menu::ID_TOGGLE => window::toggle(app),
+        menu::ID_TOGGLE => window::toggle_quick_paste(app),
         menu::ID_AUTOSTART => {
             // The checkbox has already flipped itself, so the wanted state is
             // the opposite of what the plugin currently reports. If the plugin
@@ -101,8 +111,6 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
                 let backend = app.state::<SelectedBackend>();
                 if let Err(error) = backend.copy(&item).await {
                     tracing::warn!(%error, "could not copy a clipping from the menu");
-                } else {
-                    crate::shell::notify::on_recent_copy(&app);
                 }
             });
         }

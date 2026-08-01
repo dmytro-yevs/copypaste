@@ -1009,6 +1009,7 @@ dependencies = [
  "futures-util",
  "jni",
  "ndk-context",
+ "objc2-app-kit 0.2.2",
  "serde",
  "serde_json",
  "tauri",

@@ -602,6 +602,18 @@ mod tests {
             .await;
         assert!(response.ok, "copy failed: {:?}", response.error);
 
+        // ⌥Enter reaches its own wire verb, even while text is the only
+        // representation v2 captures.
+        let response = client
+            .call(request(
+                41,
+                Method::CopyPlainText {
+                    id: added.id.clone(),
+                },
+            ))
+            .await;
+        assert!(response.ok, "plain-text copy failed: {:?}", response.error);
+
         // pin round-trips through the store.
         let response = client
             .call(request(

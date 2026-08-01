@@ -153,6 +153,7 @@ pub fn run() {
             commands::history::search,
             commands::history::add_item,
             commands::history::copy_item,
+            commands::history::copy_item_as_plain_text,
             commands::history::reveal_item,
             commands::history::delete_item,
             commands::history::delete_all,
@@ -175,6 +176,7 @@ pub fn run() {
             commands::service::start_service,
             commands::service::restart_service,
             commands::service::hide_window,
+            commands::service::show_main_window,
             commands::protection::set_allow_screenshots,
             // the service's own settings
             commands::config::get_config,
