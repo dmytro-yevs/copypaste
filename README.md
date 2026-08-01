@@ -9,11 +9,8 @@ daemon; on Android it links the core in-process
 to an empty history on 2026-07-29; v0.4.1 remains intact at
 `archive/v0.4.1-pre-rewrite` (2,153 commits). v2 reads nothing that version
 wrote and uses a distinct database filename, `copypaste-v2.db`, so an old file
-is never opened — [CLAUDE.md](CLAUDE.md) rule 3 has the reasoning and the one
-obligation it creates. **That obligation is not yet discharged:** the code that
-identifies a v0.4 history exists and nothing on the startup path asks it, so an
-upgrading user still sees an empty history and no explanation
-([`docs/backlog.md`](docs/backlog.md) B-4).
+is never opened. [CLAUDE.md](CLAUDE.md) rule 3 has the reasoning and the one
+obligation it creates.
 
 The rewrite exists because v0.4.1 had grown to ~150k lines of Rust with six
 retry implementations, three rate limiters and three models of one wire
@@ -56,24 +53,11 @@ there rather than being credited to a layer that cannot see it.
 | Packaging and release | `release.yml` builds, signs and smoke-installs the DMG on `macos-14`, but only on a tag — so `codesign`, `hdiutil` and the Tauri bundler never run on a pull request, and the smoke script's app-launch and Keychain-after-resign legs report rather than fail. `brew install --cask` as a user runs it is unexercised; `check.sh` round-trips the generators. |
 | mDNS discovery | This container has no multicast. Discovery is a convenience; an explicit `--addr` always works and is what the demo and the tests use. |
 
-### Outstanding
+### Product limits
 
-**[`docs/backlog.md`](docs/backlog.md) is the list.** Ranked by what a user
-loses, re-checked against the tree. A second inventory of absence here would
-disagree with it within a day; four rewrites of this section were spent
-learning that.
-
-One limit is not on it, because it is the shape of the product rather than work
-not yet done: **text only** — no image, file or rich-text capture, and so no
-frontmost-app attribution, which manifest 07 makes an independent *sensitivity*
-signal rather than metadata.
-
-The [parity audit](docs/rewrite/parity-audit.md), the [UI parity
-audit](docs/rewrite/ui-parity-audit.md), the [security
-review](docs/rewrite/security-review.md) and the [claims
-audit](docs/rewrite/claims-audit.md) are dated documents: each marks its
-findings closed in place and none is rewritten. Read them for the reasoning and
-the backlog for the state.
+CopyPaste is text-only: it does not capture images, files, rich text, or the
+frontmost application. Manifest 07 treats source application as an independent
+sensitivity signal rather than item metadata.
 
 ## Build and run
 
@@ -126,8 +110,8 @@ throughout.
 
 ## Decisions
 
-[`docs/README.md`](docs/README.md) indexes every ADR, audit and study, with the
-question each one settles. Start there rather than here.
+[`docs/README.md`](docs/README.md) indexes decisions, requirements and operating
+guides.
 
 ## Licence
 

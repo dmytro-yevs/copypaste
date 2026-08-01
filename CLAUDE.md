@@ -114,27 +114,43 @@ longer be in the tree.
 - **Fail closed on crypto.** A wrong key, a wrong AAD or a wrong key version
   must produce an authentication failure, never a fallback read.
 
-## 5. File-size budget
+## 5. Module boundaries, not a line-count game
 
-**Target ≤500 source lines per file. Above that, split it.** Tests do not
-count. `scripts/check-file-size.sh` enforces it.
+**A production module owns one responsibility and exposes the smallest API that
+the next layer needs.** A file is not a module boundary if its siblings are
+private implementation fragments behind one `mod.rs`, one service object or one
+catch-all public API. Tests do not count towards size, but they must live beside
+the responsibility they exercise.
 
-The only exemption is one genuinely indivisible responsibility, most often a
-data table, and claiming it takes a line in the module header naming what you
-considered extracting. "It's cohesive" is not an argument: every god file feels
-cohesive to whoever wrote it.
+Before adding a second concern to an existing module, name the two concerns,
+their callers and the dependency direction. If they can change independently,
+they are separate modules. Split by ownership and stable concepts — for example
+wire decoding, persistence, retry policy and orchestration — never merely by
+method order or file length. A façade may compose those modules, but it may not
+re-export their combined internals as a new god API.
+
+The review triggers are deliberately earlier than failure:
+
+- At 300 production lines, state the module's single responsibility and inspect
+  its public surface before adding more.
+- At 500 production lines, extraction is required before the change lands.
+- A module with unrelated callers, bidirectional dependencies, or a public type
+  that coordinates storage, transport and UI is a god module at any length and
+  must be split.
+
+The only exemption to 500 is a genuinely indivisible data table or generated
+binding. It needs a module-header line naming the boundary considered and why
+it cannot be extracted. "It's cohesive" and "the files are small now" are not
+arguments: every god module feels cohesive to its author.
 
 v1 reached ~25 production files over 1000 lines — `daemon/p2p/mod.rs` at 2415,
 `ipc.rs` at ~12,500. Edits carried a blast radius across unrelated concerns and
 cohesive logic stayed buried instead of being reused, which is one of the ways
-the duplication in rule 1 accumulated.
+the duplication in rule 1 accumulated. `scripts/check-file-size.sh` enforces
+the emergency ceiling; review enforces the actual boundary.
 
-**A line count is only a proxy.** Five files behind a `mod.rs` that re-exports
-all of them is the same god module with more filenames. What decides it is the
-public surface and who depends on it, and no script measures that.
-
-Splitting is behaviour-preserving: move a responsibility, keep the public
-surface identical, move each test with the code it exercises, compile and test
+Splitting is behaviour-preserving: define the seam, keep only the intentional
+public surface, move each test with the code it exercises, then compile and test
 after every extraction.
 
 ## 6. A feature is not done until it has a UI

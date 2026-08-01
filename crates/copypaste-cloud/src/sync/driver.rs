@@ -102,7 +102,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         f(&self.lock_session())
     }
 
-    /// Push, then pull, then adjust the idle cadence.
+    /// Push, pull, then publish any local LWW winner the pull re-queued.
     ///
     /// Push first so that a local delete reaches the backend before this device
     /// asks for rows — otherwise a tombstone written a moment ago can be
@@ -116,8 +116,16 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// same way.
     pub async fn sync(&self, source: &dyn CloudSource) -> Result<SyncStats, SyncError> {
         let pushed = self.push(source).await?;
-        let pulled = self.pull(source).await?;
-        let stats = pushed.merge(pulled);
+        let (pulled, republish) = self.pull_with_republish(source).await?;
+        // A backend upsert resolves same-id writes by arrival, while the
+        // devices resolve them by LWW metadata. If pull kept a stronger local
+        // version, its source reopens that upload cursor and this pass makes
+        // the account converge before the round returns.
+        let stats = if republish {
+            pushed.merge(pulled).merge(self.push(source).await?)
+        } else {
+            pushed.merge(pulled)
+        };
 
         self.note_activity(stats.changed());
         Ok(stats)
@@ -150,12 +158,44 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fakes::{allow_everything, driver, FakeAuth, FakeRest};
+    use super::super::fakes::{
+        allow_everything, cloud_row, driver, item, FakeAuth, FakeRest, FakeSource,
+    };
 
     #[test]
     fn the_driver_and_the_guard_redact_their_debug_output() {
         let sync = driver(FakeRest::default(), FakeAuth::default());
         assert_eq!(format!("{sync:?}"), "CloudSync { .. }");
         assert_eq!(format!("{:?}", allow_everything()), "SensitiveGuard { .. }");
+    }
+
+    #[tokio::test]
+    async fn a_local_lww_winner_is_republished_after_pull() {
+        let local = item("shared", 5, "local winner");
+        let source = FakeSource::with_local(local);
+        source.set_upload_floor(6);
+        let sync = driver(
+            FakeRest::seeded(vec![cloud_row("shared", 4, "stale remote")]),
+            FakeAuth::default(),
+        );
+
+        let stats = sync.sync(&source).await.unwrap();
+
+        assert_eq!(stats.uploaded, 1);
+        assert_eq!(sync.rest.rows.lock().unwrap()["shared"].created_at, 5);
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_round_does_not_push_its_rows_twice() {
+        let source = FakeSource::with_outgoing(vec![item("a", 1, "ordinary")]);
+        let sync = driver(FakeRest::default(), FakeAuth::default());
+
+        let stats = sync.sync(&source).await.unwrap();
+
+        assert_eq!(stats.uploaded, 1);
+        assert_eq!(
+            sync.rest.upserts.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
     }
 }

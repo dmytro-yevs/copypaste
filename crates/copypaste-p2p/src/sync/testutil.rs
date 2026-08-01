@@ -111,7 +111,7 @@ impl SyncSource for TestSource {
             .lock()
             .unwrap()
             .values()
-            .filter(|i| !sensitive.contains(&i.item_id))
+            .filter(|i| i.deleted || !sensitive.contains(&i.item_id))
             .map(|i| i.summary())
             .collect();
         v.sort_by(|a, b| a.item_id.cmp(&b.item_id));
@@ -123,8 +123,9 @@ impl SyncSource for TestSource {
         let items = self.items.lock().unwrap();
         let mut out: Vec<_> = ids
             .iter()
-            .filter(|id| !sensitive.contains(*id))
-            .filter_map(|id| items.get(id).cloned())
+            .filter_map(|id| items.get(id))
+            .filter(|item| item.deleted || !sensitive.contains(&item.item_id))
+            .cloned()
             .collect();
         out.extend(self.smuggle.lock().unwrap().iter().cloned());
         Ok(out)
@@ -224,17 +225,29 @@ pub(super) async fn try_session(
     Result<SyncOutcome, SyncError>,
     Result<SyncOutcome, SyncError>,
 ) {
+    try_session_with_listen_addresses(a, b, None, None).await
+}
+
+pub(super) async fn try_session_with_listen_addresses(
+    a: &TestSource,
+    b: &TestSource,
+    a_listen_addr: Option<&str>,
+    b_listen_addr: Option<&str>,
+) -> (
+    Result<SyncOutcome, SyncError>,
+    Result<SyncOutcome, SyncError>,
+) {
     let (ca, cb) = duplex();
     tokio::join!(
         async move {
             let mut ca = ca;
-            let out = run_initiator(&mut ca, a).await;
+            let out = run_initiator(&mut ca, a, a_listen_addr).await;
             drop(ca);
             out
         },
         async move {
             let mut cb = cb;
-            let out = run_responder(&mut cb, b).await;
+            let out = run_responder(&mut cb, b, b_listen_addr).await;
             drop(cb);
             out
         }

@@ -16,12 +16,6 @@ Useful in a report: the affected component (`core`, `daemon`, `cli`, `p2p`,
 platform we ship to — [Unverified](#unverified) is the section to read before
 trusting anything else here.
 
-An adversarial source review of this branch is at
-[`docs/rewrite/security-review.md`](docs/rewrite/security-review.md). It is a
-dated document, not a live one: each finding records its own status in place.
-What is still outstanding is [`docs/backlog.md`](docs/backlog.md), which is
-maintained.
-
 This document describes v2 only. v0.4.1 survives on
 `archive/v0.4.1-pre-rewrite` and differs in ways that matter — most sharply, it
 synced sensitive items and v2 does not.
@@ -196,9 +190,7 @@ that decide whether anything above holds:
 
 ## Controls that are weaker than their names suggest
 
-A list of absences is the most perishable thing this page can carry, so it lives
-in [`docs/backlog.md`](docs/backlog.md), whose §2 is the security tier. Two
-belong here because they change what the rest is worth:
+Two limitations change what the rest is worth:
 
 - **`unpair` is local and unilateral.** It removes this device's half; the other
   device keeps its half until it also unpairs. Nothing revokes a lost device
@@ -229,11 +221,6 @@ build and revoke it on every update. See
   what each rung costs a user are in
   [`docs/rewrite/android-clipboard-access.md`](docs/rewrite/android-clipboard-access.md).
 - Windows and Linux desktop are out of scope.
-- v2 reads nothing written by v0.4.x, and the distinct filename means an older
-  file is never opened or modified. It does **not** yet tell the user it found
-  one: `is_v1_database` is only ever handed `copypaste-v2.db`, and
-  `v1_database_in`, which asks the question that matters, has no caller. An
-  upgrading user sees an empty history and no explanation.
 
 ## Dependency auditing
 

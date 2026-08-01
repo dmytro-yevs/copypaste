@@ -8,6 +8,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
+import { isAndroidPlatform } from "@/lib/platform";
 import { type View, useUi } from "@/store/ui";
 import { StatusChip } from "@/components/shell/StatusChip";
 
@@ -25,24 +26,19 @@ export function Sidebar() {
   const { t } = useTranslation();
   const view = useUi((s) => s.view);
   const setView = useUi((s) => s.setView);
+  const android = isAndroidPlatform();
 
   return (
     <nav
       aria-label={t("nav.primary")}
       className={cn(
         "flex shrink-0 bg-sidebar",
-        "border-t border-sidebar-border sm:border-t-0 sm:border-r",
-        "min-h-[var(--tabbar-h)] pb-[var(--inset-bottom)] sm:min-h-0 sm:pb-0",
-        "sm:w-[var(--sidebar-w)] sm:flex-col sm:gap-s-1 sm:p-s-2",
+        android
+          ? "min-h-[var(--tabbar-h)] border-t border-sidebar-border pb-[var(--inset-bottom)]"
+          : "w-[var(--sidebar-w)] flex-col gap-s-1 border-r border-sidebar-border p-s-2",
       )}
     >
-      <div
-        data-tauri-drag-region
-        aria-hidden="true"
-        className="hidden h-s-6 shrink-0 sm:block"
-      />
-
-      <ul className="flex flex-1 sm:flex-col sm:gap-s-1">
+      <ul className={cn("flex flex-1", !android && "flex-col gap-s-1")}>
         {ITEMS.map(({ view: id, label: key, icon: Icon }) => {
           const active = view === id;
           const label = t(key);
@@ -54,8 +50,10 @@ export function Sidebar() {
                 aria-current={active ? "page" : undefined}
                 title={label}
                 className={cn(
-                  "flex w-full flex-col items-center justify-center gap-0.5 rounded-md px-s-2 py-s-2 text-xs font-medium outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
-                  "min-h-[var(--tap-min)] sm:flex-row sm:justify-start sm:gap-s-2 sm:text-sm",
+                  "flex w-full items-center rounded-md px-s-2 py-s-2 font-medium outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
+                  android
+                    ? "min-h-[var(--tap-min)] flex-col justify-center gap-0.5 text-xs"
+                    : "min-h-[var(--tap-min)] flex-row justify-start gap-s-2 text-sm",
                   active
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-accent hover:text-accent-foreground",
@@ -69,9 +67,11 @@ export function Sidebar() {
         })}
       </ul>
 
-      <div className="mt-auto hidden sm:block">
-        <StatusChip />
-      </div>
+      {!android && (
+        <div className="mt-auto">
+          <StatusChip />
+        </div>
+      )}
     </nav>
   );
 }

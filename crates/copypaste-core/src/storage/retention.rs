@@ -157,25 +157,6 @@ impl Store {
         let rows = stmt.query_map([cutoff_ms], row_to_item)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
-
-    /// Removes rows and their index entries outright.
-    ///
-    /// Crate-private, and the only destructive path that is not driven by a
-    /// count or an age: its one caller is the sensitive sweep, which has already
-    /// proved every id against the auto-wipe floor. A hard delete rather than a
-    /// tombstone because a tombstone would travel — and a secret this device
-    /// decided to wipe must not become a delete event that destroys another
-    /// device's copy on this device's say-so.
-    pub(crate) fn hard_delete(&self, ids: &[String]) -> Result<u64, StoreError> {
-        if ids.is_empty() {
-            return Ok(0);
-        }
-        let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn)?;
-        let removed = hard_delete_in_tx(&tx, ids)?;
-        tx.commit()?;
-        Ok(removed)
-    }
 }
 
 /// Newest live row carrying `content_hash`, at or after `since_ms`.

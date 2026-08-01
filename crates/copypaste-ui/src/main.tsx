@@ -56,6 +56,14 @@ createRoot(root).render(
         position="bottom-right"
         closeButton
         duration={3000}
+        offset="var(--s-4)"
+        mobileOffset={{
+          top: "calc(var(--inset-top) + var(--s-3))",
+          right: "calc(var(--inset-right) + var(--s-3))",
+          bottom:
+            "calc(var(--tabbar-h) + var(--inset-bottom) + var(--s-3))",
+          left: "calc(var(--inset-left) + var(--s-3))",
+        }}
         toastOptions={{ className: "font-sans" }}
       />
     </QueryClientProvider>

@@ -279,6 +279,9 @@ Rules:
   (including `false`), and `pin_order` must serialise as explicit `null` rather
   than being omitted — omission cannot clear a previously-set cloud value.
   (`CopyPaste-vqm0`, `rest/write.rs:27-32, 179-193`.)
+- **T-7 (sensitive tombstones still converge).** A live sensitive payload MUST
+  never be enqueued or serialized for sync. Its payload-less tombstone MUST
+  still travel normally: privacy does not permit a deleted version to diverge.
 
 ### 3.6 What travels with a version
 
@@ -1106,7 +1109,7 @@ test names are given so the original can be consulted.
 | **AT-53 key_version round-trip** | Encrypt under version *v*, send, receive, and decrypt through the **production read path**. Guards against the "every synced item is undecryptable" regression. | `merge.rs:471 wire_round_trip_preserves_key_version_so_receiver_can_decrypt` |
 | **AT-54 undecryptable item is skipped, not stored** | A sync-key-wrapped item that cannot be decrypted is dropped, not persisted as a poison row; the sender re-sends after the key arrives. | `CopyPaste-jww`/`5y4`, `sync_orch/merge/mod.rs:286-301` |
 | **AT-55 sensitive re-detection on receive** | An inbound item whose plaintext looks sensitive gets `is_sensitive` set locally, so auto-wipe TTL applies. | `CopyPaste-kcf`, `sync_orch/merge/tests.rs:192` |
-| **AT-56 sensitive items never leave the device** | Neither the catch-up read nor the backlog sweep enqueues a sensitive item. | `CopyPaste-20yw`, `catchup.rs:141`, `cloud/backlog.rs:302` |
+| **AT-56 sensitive payload suppression and tombstone propagation** | Neither catch-up nor backlog enqueues a live sensitive payload; deleting a sensitive item enqueues its payload-less tombstone and a peer persists it. | `CopyPaste-20yw`, `catchup.rs:141`, `cloud/backlog.rs:302` |
 
 ---
 

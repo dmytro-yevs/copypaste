@@ -35,6 +35,7 @@
 
 use std::path::{Path, PathBuf};
 
+use copypaste_core::{verify_integrity, verify_schema};
 use copypaste_ipc::{BackupData, ErrorCode, Response, ResponseData};
 use rusqlite::Connection;
 use tracing::{info, warn};
@@ -132,7 +133,7 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
     // A leftover from a previous crash is not a reason to refuse.
     remove_database(&staging);
 
-    let outcome = (|| {
+    let outcome: Result<(), &'static str> = (|| {
         // ---- Phase A: validate. Nothing live is touched. -------------------
         std::fs::copy(&src, &staging).map_err(|e| {
             warn!(error = %e, "could not stage the backup");
@@ -144,7 +145,14 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
         swap(state.db_path(), &staging, &key).map_err(|e| {
             warn!(error = ?e, "restore transaction failed; the database is unchanged");
             MSG_RESTORE_FAILED
-        })
+        })?;
+        // A backup can predate a detector rule. Its copied FTS is therefore
+        // untrusted until the current detector has scanned it again.
+        copypaste_core::purge_indexed_secrets(&state.store, &state.detector).map_err(|e| {
+            warn!(error = ?e, "could not purge sensitive restored search entries");
+            MSG_RESTORE_FAILED
+        })?;
+        Ok(())
     })();
 
     remove_database(&staging);
@@ -194,19 +202,16 @@ fn validate(staging: &Path, key: &[u8; 32]) -> Result<(), &'static str> {
         MSG_RESTORE_NOT_A_BACKUP
     })?;
 
-    let integrity: String = conn
-        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
-        .map_err(|e| {
-            warn!(error = %e, "integrity_check failed on the backup");
-            MSG_RESTORE_NOT_A_BACKUP
-        })?;
-    if integrity != "ok" {
-        warn!(result = %integrity, "the backup failed its integrity check");
-        return Err(MSG_RESTORE_NOT_A_BACKUP);
-    }
+    verify_integrity(&conn).map_err(|e| {
+        warn!(error = ?e, "integrity_check failed on the backup");
+        MSG_RESTORE_NOT_A_BACKUP
+    })?;
 
-    // Schema sanity. `user_version` is `rusqlite_migration`'s marker, so a
-    // backup from a newer build is refused here rather than half-read.
+    verify_schema(&conn).map_err(|e| {
+        warn!(error = ?e, "the backup schema does not match this build");
+        MSG_RESTORE_NOT_A_BACKUP
+    })?;
+
     let tables = user_tables(&conn).map_err(|_| MSG_RESTORE_NOT_A_BACKUP)?;
     for required in RESTORED_TABLES {
         if !tables.iter().any(|name| name == required) {
@@ -265,8 +270,7 @@ fn swap(db_path: &Path, staging: &Path, key: &[u8; 32]) -> Result<(), crate::met
     result.map_err(Into::into)
 }
 
-/// User tables, excluding SQLite's own and the shadow tables an fts5 virtual
-/// table creates.
+/// User tables, excluding SQLite's own and the known fts5 shadow tables.
 fn user_tables(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT name FROM sqlite_master \
@@ -276,17 +280,18 @@ fn user_tables(conn: &Connection) -> rusqlite::Result<Vec<String>> {
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<_>>()?;
 
-    // fts5 owns `<name>_data`, `_idx`, `_content`, `_docsize`, `_config`. They
-    // are the virtual table's storage, not tables of ours, and they are
-    // rebuilt by writing through the virtual table.
+    // fts5 owns these five tables. An arbitrary table with the same prefix is
+    // not a shadow table and must remain visible to the unknown-table check.
     Ok(all
         .iter()
-        .filter(|name| {
-            !all.iter()
-                .any(|other| other != *name && name.starts_with(&format!("{other}_")))
-        })
+        .filter(|name| !is_fts_shadow_table(name))
         .cloned()
         .collect())
+}
+
+fn is_fts_shadow_table(name: &str) -> bool {
+    name.strip_prefix("clipboard_fts_")
+        .is_some_and(|suffix| matches!(suffix, "data" | "idx" | "content" | "docsize" | "config"))
 }
 
 /// Where the candidate is staged: beside the database, so the copy and the
@@ -416,6 +421,62 @@ mod tests {
 
         let response = restore_from(&state, &junk, true);
         assert!(!response.ok);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(contents(&state), ["still here"]);
+    }
+
+    #[test]
+    fn a_backup_with_a_different_schema_version_is_refused() {
+        let (state, dir) = test_state("alpha");
+        add(&state, "still here");
+        let backup = dir.path().join("wrong-version.backup");
+        assert!(backup_to(&state, &backup).ok);
+
+        let conn = dbfile::open(&backup, &state.keyring.db_key()).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        drop(conn);
+
+        let response = restore_from(&state, &backup, true);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(contents(&state), ["still here"]);
+    }
+
+    #[test]
+    fn a_backup_with_a_column_type_mismatch_is_refused() {
+        let (state, dir) = test_state("alpha");
+        add(&state, "still here");
+        let backup = dir.path().join("wrong-column-type.backup");
+        assert!(backup_to(&state, &backup).ok);
+
+        let conn = dbfile::open(&backup, &state.keyring.db_key()).unwrap();
+        conn.execute_batch(
+            "DROP TABLE sync_device_name;
+             CREATE TABLE sync_device_name (
+                 device_id BLOB PRIMARY KEY NOT NULL,
+                 name TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let response = restore_from(&state, &backup, true);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(contents(&state), ["still here"]);
+    }
+
+    #[test]
+    fn a_backup_with_an_extra_shadow_looking_table_is_refused() {
+        let (state, dir) = test_state("alpha");
+        add(&state, "still here");
+        let backup = dir.path().join("unknown-table.backup");
+        assert!(backup_to(&state, &backup).ok);
+
+        let conn = dbfile::open(&backup, &state.keyring.db_key()).unwrap();
+        conn.execute("CREATE TABLE clipboard_fts_unrecognised (value TEXT)", [])
+            .unwrap();
+        drop(conn);
+
+        let response = restore_from(&state, &backup, true);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(contents(&state), ["still here"]);
     }

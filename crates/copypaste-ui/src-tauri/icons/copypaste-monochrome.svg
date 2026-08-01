@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" role="img" aria-labelledby="title">
+  <title>CopyPaste menu bar icon</title>
+  <mask id="front" maskUnits="userSpaceOnUse" x="0" y="0" width="44" height="44">
+    <rect width="44" height="44" fill="#FFFFFF"/>
+    <rect x="9.5" y="9.5" width="31" height="32" rx="4.5" fill="#000000"/>
+  </mask>
+  <rect x="5" y="5" width="24" height="30" rx="3.5" fill="none" stroke="currentColor" stroke-width="2" mask="url(#front)"/>
+  <rect x="11" y="11" width="28" height="29" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/>
+  <path d="M16 19h19M16 25h15M16 31h11" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2.2"/>
+</svg>

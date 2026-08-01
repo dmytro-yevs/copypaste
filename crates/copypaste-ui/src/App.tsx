@@ -3,17 +3,13 @@
  * main pane get sibling boundaries, so a crash in a screen cannot take
  * navigation with it (CopyPaste-8ebg.12).
  */
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEventListener } from "usehooks-ts";
 
 import { BannerBar } from "@/components/shell/Banners";
 import { Boundary } from "@/components/shell/Boundary";
 import { Sidebar } from "@/components/shell/Sidebar";
-import { CaptureSetup } from "@/components/capture/CaptureSetup";
-import { DevicesView } from "@/components/devices/DevicesView";
 import { HistoryView } from "@/components/history/HistoryView";
-import { SettingsView } from "@/components/settings/SettingsView";
 import { useCaptureSync } from "@/hooks/useCapture";
 import { useStatus } from "@/hooks/useHistory";
 import { usePush } from "@/hooks/usePush";
@@ -22,13 +18,24 @@ import { legacyHistoryPresent } from "@/lib/banners";
 import { classifyError } from "@/lib/errors";
 import {
   CURRENT_PROTOCOL_VERSION,
-  hideWindow,
   setAllowScreenshots,
 } from "@/lib/ipc";
 import { applyAppearance, subscribeSystemTheme } from "@/lib/theme";
+import { cn } from "@/lib/cn";
+import { isAndroidPlatform } from "@/lib/platform";
 import { selectAppearance, usePrefs } from "@/store/prefs";
 import { useShallow } from "zustand/react/shallow";
 import { useUi } from "@/store/ui";
+
+const DevicesView = lazy(async () => ({
+  default: (await import("@/components/devices/DevicesView")).DevicesView,
+}));
+const SettingsView = lazy(async () => ({
+  default: (await import("@/components/settings/SettingsView")).SettingsView,
+}));
+const CaptureSetup = lazy(async () => ({
+  default: (await import("@/components/capture/CaptureSetup")).CaptureSetup,
+}));
 
 const SCREENS = {
   history: {
@@ -68,28 +75,22 @@ export default function App() {
     void setAllowScreenshots(allowScreenshots).catch(() => {});
   }, [allowScreenshots]);
 
-  // B-20: for a popover summoned by a hotkey, Escape *is* the dismissal.
-  // `defaultPrevented` is the whole test for "something nearer the key already
-  // used it" — Radix's dismissable layer and the search field both set it.
-  useEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
-    // INV-25: through the backend, never `window.hide()`. A build with no
-    // window to hide — the browser, a test — is not a failure.
-    void hideWindow().catch(() => {});
-  });
-
   const statusKind = status.error ? classifyError(status.error) : null;
   const screen = SCREENS[view];
+  const android = isAndroidPlatform();
 
   return (
-    // `flex-col-reverse` puts the nav at the bottom of a phone screen — the
-    // reachable band — while keeping it first in the DOM for reading order.
-    <div className="flex h-full min-h-0 flex-col-reverse bg-background text-foreground sm:flex-row">
+    <div
+      className={cn(
+        "flex h-full min-h-0 bg-background text-foreground",
+        android ? "flex-col-reverse" : "flex-row",
+      )}
+    >
       <Boundary label={t("shell.boundary.navigation")}>
         <Sidebar />
       </Boundary>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         <BannerBar
           conditions={{
             serviceOffline: statusKind === "offline",
@@ -111,9 +112,13 @@ export default function App() {
         <Boundary label={t(screen.label)}>
           {/* `display: contents`: the boundary must not join the flex height
               chain the scroll regions depend on. */}
-          <div className="contents">{screen.render(pushLive)}</div>
+          <Suspense
+            fallback={<div className="flex min-h-0 flex-1" role="status" />}
+          >
+            <div className="contents">{screen.render(pushLive)}</div>
+          </Suspense>
         </Boundary>
-      </div>
+      </main>
     </div>
   );
 }

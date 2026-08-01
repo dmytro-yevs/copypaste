@@ -1,11 +1,4 @@
-//! The menu-bar item, and the only exit: closing the window hides it
-//! (manifest 06, INV-36) and the window has no decorations.
-//!
-//! `show_menu_on_left_click(false)` — with a popover, clicking the icon *is*
-//! the gesture, so the menu stays on the secondary click.
-//!
-//! UNVERIFIED: Linux host. The refresh loop, the slot reconciliation and the
-//! click-to-copy path have never been run.
+//! Menu-bar integration for the desktop app.
 
 mod menu;
 mod recent;
@@ -36,7 +29,7 @@ const DEBOUNCE: Duration = Duration::from_millis(300);
 /// so, and the frontend keeps a slow poll for the same reason. A tray that
 /// stopped updating because it believed it was subscribed would show yesterday's
 /// clippings indefinitely.
-const BACKSTOP: Duration = Duration::from_secs(30);
+const BACKSTOP: Duration = Duration::from_secs(5);
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     // Read once at build: a change made in System Settings while the app runs
@@ -50,23 +43,30 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| on_menu_event(app, &handler, event.id().as_ref()))
         .on_tray_icon_event(|tray, event| {
-            // Left click toggles the popover. `Down` rather than `Up` so the
-            // window appears while the mouse is still held, which is how the
-            // native menu-bar items behave.
+            // A left click toggles the main window.
             if let tauri::tray::TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,
                 button_state: tauri::tray::MouseButtonState::Down,
                 ..
             } = event
             {
-                window::toggle(tray.app_handle());
+                window::toggle_quick_paste(tray.app_handle());
             }
         });
 
+    #[cfg(target_os = "macos")]
+    {
+        let template =
+            tauri::image::Image::from_bytes(include_bytes!("../../../icons/trayTemplate.png"))?;
+        tray = tray.icon(template).icon_as_template(true);
+    }
+
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon().cloned() {
         tray = tray.icon(icon);
     }
     tray.build(app)?;
+    window::install(app)?;
 
     spawn_refresh(app.clone(), tray_menu);
     Ok(())
@@ -101,6 +101,8 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
                 let backend = app.state::<SelectedBackend>();
                 if let Err(error) = backend.copy(&item).await {
                     tracing::warn!(%error, "could not copy a clipping from the menu");
+                } else {
+                    crate::shell::notify::on_recent_copy(&app);
                 }
             });
         }

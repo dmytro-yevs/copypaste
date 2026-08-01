@@ -13,4 +13,6 @@
 @import "./tokens.light.css";
 @import "./accents.dark.css";
 @import "./accents.light.css";
+@import "./swatches.dark.css";
+@import "./swatches.light.css";
 @import "./theme.css";

@@ -141,6 +141,7 @@ mod tests {
             protocol_version: crate::PROTOCOL_VERSION,
             device_id: "device-a".into(),
             device_name: "A".into(),
+            listen_addr: None,
         })
         .await
         .unwrap();

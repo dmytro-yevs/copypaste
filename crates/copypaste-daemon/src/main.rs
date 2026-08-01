@@ -1,26 +1,7 @@
 //! The CopyPaste daemon.
 //!
-//! Three moving parts, wired together here and nowhere else:
-//!
-//! * [`capture`] — polls the clipboard and ingests what it finds,
-//! * [`server`] — answers `copypaste_ipc::Request`s on a `0600` Unix socket,
-//! * [`clipboard`] — the platform pasteboard behind a trait,
-//! * [`p2p`] — peer sync: an inbound listener on its own TCP port, mDNS
-//!   discovery, and the five pairing/sync IPC operations,
-//! * [`cloud`] — cloud sync: the account, the adaptive poll loop, and the four
-//!   cloud IPC operations,
-//! * [`meta`] — this device's identity and item attribution; the sync view both
-//!   transports read and write through is [`copypaste_core::StoreSource`],
-//!   built here by [`sync`].
-//!
-//! Everything they share lives in one [`AppState`], built once here — see
-//! [`state`]. `AppState` is re-exported so its 17 consumers keep naming it
-//! `crate::AppState`; `docs/rewrite/module-audit.md` records the surface split
-//! that re-export defers.
-//!
-//! Note the deliberate absence of `#![forbid(unsafe_code)]` at the crate root:
-//! `clipboard` talks to NSPasteboard through `objc2` and needs `unsafe`. The
-//! other two modules do not use it.
+//! `clipboard` uses `unsafe` for NSPasteboard through `objc2`, so this crate
+//! cannot forbid it globally.
 
 mod cadence;
 mod capture;

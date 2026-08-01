@@ -149,6 +149,9 @@ pub enum StoreError {
     #[error("the database failed its integrity check")]
     IntegrityCheckFailed,
 
+    #[error("the database schema does not match this version")]
+    InvalidSchema,
+
     #[error("item not found")]
     NotFound,
 

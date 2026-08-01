@@ -48,6 +48,8 @@ pub mod backend;
 pub mod capture;
 pub mod commands;
 pub mod model;
+#[cfg(target_os = "android")]
+pub mod pairing_scanner;
 pub mod service;
 pub mod shell;
 
@@ -88,6 +90,7 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(capture::android::init())
+        .plugin(pairing_scanner::plugin())
         // `set_content_protected` is a no-op on Android (tao gates it to macOS
         // and Windows), so INV-35's Android half is `FLAG_SECURE` and needs a
         // Kotlin call to reach it.
@@ -100,13 +103,6 @@ pub fn run() {
 
             #[cfg(not(target_os = "android"))]
             app.manage(capture::desktop::DesktopCapture::default());
-
-            // A menu-bar app, not a windowed one: no Dock icon, no app menu,
-            // and the popover does not steal the active application. Without
-            // this the tray icon and a Dock icon both appear, which is two
-            // entry points to one window.
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             #[cfg(not(target_os = "android"))]
             {
@@ -151,10 +147,6 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|_window, _event| {
-            #[cfg(not(target_os = "android"))]
-            shell::window::on_event(_window, _event);
-        })
         .invoke_handler(tauri::generate_handler![
             // history
             commands::history::list,
@@ -195,6 +187,7 @@ pub fn run() {
             // peers
             commands::peers::pair_create,
             commands::peers::pair_accept,
+            commands::peers::scan_pairing_qr,
             commands::peers::peers,
             commands::peers::unpair,
             commands::peers::revoke,

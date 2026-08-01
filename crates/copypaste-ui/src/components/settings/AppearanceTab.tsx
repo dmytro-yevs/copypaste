@@ -15,7 +15,6 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/i18n";
-import { cn } from "@/lib/cn";
 import { resolveTheme } from "@/lib/theme";
 import { ACCENTS, type Accent, type ThemePref, usePrefs } from "@/store/prefs";
 import { Row } from "@/components/settings/Row";
@@ -105,12 +104,13 @@ export function AppearanceTab() {
                 aria-pressed={selected}
                 aria-label={t(ACCENT_LABEL[option])}
                 title={t(ACCENT_LABEL[option])}
-                data-accent={option}
+                data-swatch={option}
                 onClick={() => set("accent", option)}
-                className={cn(
-                  "flex size-7 items-center justify-center rounded-full bg-brand text-on-brand outline-none transition-transform focus-visible:ring-[3px] focus-visible:ring-ring",
-                  selected ? "scale-110" : "hover:scale-105",
-                )}
+                style={{
+                  backgroundColor: `var(--swatch-${option})`,
+                  color: `var(--on-swatch-${option})`,
+                }}
+                className="flex size-7 items-center justify-center rounded-full outline-none transition-transform hover:scale-105 focus-visible:ring-[3px] focus-visible:ring-ring"
               >
                 {selected && <Check size={14} aria-hidden="true" />}
               </button>

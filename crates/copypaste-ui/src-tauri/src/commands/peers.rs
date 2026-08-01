@@ -69,6 +69,30 @@ pub async fn pair_accept(
     backend.pair_accept(code.trim(), addr.trim()).await
 }
 
+/// Open Android's system-owned QR scanner and return the string it decoded.
+///
+/// The scanner owns camera access, so CopyPaste never requests `CAMERA` and
+/// the untrusted result is validated by the React pairing decoder before it can
+/// reach [`pair_accept`]. macOS uses its in-window scanner instead.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn scan_pairing_qr(
+    scanner: tauri::State<'_, crate::pairing_scanner::AndroidPairingScanner>,
+) -> Result<Option<String>> {
+    scanner.scan().await
+}
+
+/// macOS scans in the WebView so it can use the app's camera entitlement.
+/// Keeping the command present means an unexpected platform check degrades to
+/// the manual-code fallback instead of becoming a missing-command failure.
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn scan_pairing_qr() -> Result<Option<String>> {
+    Err(BackendError::Unsupported(
+        "The native QR scanner is only available on Android.",
+    ))
+}
+
 /// Known devices and when each was last reachable.
 ///
 /// `online: false` means "not seen on the network", never "unreachable" — a

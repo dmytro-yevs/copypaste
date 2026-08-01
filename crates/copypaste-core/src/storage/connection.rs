@@ -54,7 +54,7 @@ const CONNECTION_PRAGMAS: &[&str] = &[
 
 pub(super) fn build_pool(
     manager: SqliteConnectionManager,
-    db_key: [u8; 32],
+    db_key: Zeroizing<[u8; 32]>,
     in_memory: bool,
 ) -> Result<Pool<SqliteConnectionManager>, StoreError> {
     // The key has to live as long as the pool: every connection the pool opens

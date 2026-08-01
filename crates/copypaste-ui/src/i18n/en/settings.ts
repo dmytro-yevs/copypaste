@@ -2,6 +2,12 @@ export const settings = {
   title: "Settings",
   sections: "Settings sections",
 
+  groups: {
+    personal: "Personal",
+    service: "CopyPaste",
+    support: "Support",
+  },
+
   tabs: {
     appearance: "Appearance",
     list: "List",

@@ -59,7 +59,7 @@ mod state;
 mod store;
 mod versions;
 
-pub use dbfile::{attach_key_literal, open_validated, verify_integrity};
+pub use dbfile::{attach_key_literal, open_validated, verify_integrity, verify_schema};
 pub use identity::DeviceIdentity;
 pub use legacy::{is_v1_database, v1_database_in, V1_DATABASE_FILENAME};
 pub use model::{Ingest, NewItem, StoreError, StoredItem};

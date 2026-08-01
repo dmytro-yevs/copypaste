@@ -171,13 +171,48 @@ impl Store {
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
+                    content_hash = CASE WHEN is_sensitive = 1 THEN '' ELSE content_hash END, \
+                    created_at = CASE \
+                        WHEN created_at = 9223372036854775807 THEN created_at \
+                        ELSE MAX(created_at + 1, ?2) \
+                    END, \
                     pinned = 0, pin_order = NULL \
               WHERE id = ?1 AND deleted = 0",
-            [id],
+            params![id, crate::now_ms()],
         )?;
         // Unconditional: this also repairs a stale row left by an earlier
         // partial failure.
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(changed > 0)
+    }
+
+    /// Turn exactly the sensitive version inspected by the auto-wipe into a
+    /// tombstone. The predicates close the select/decrypt/delete race: a pin
+    /// or a re-copy after the sweep selected its candidate must keep the item.
+    pub(crate) fn wipe_sensitive_if_unchanged(
+        &self,
+        id: &str,
+        created_at: i64,
+        content_hash: &str,
+    ) -> Result<bool, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let changed = tx.execute(
+            "UPDATE clipboard_items \
+                SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
+                    content_hash = '', pinned = 0, pin_order = NULL, \
+                    created_at = CASE \
+                        WHEN created_at = 9223372036854775807 THEN created_at \
+                        ELSE MAX(created_at + 1, ?4) \
+                    END \
+              WHERE id = ?1 AND created_at = ?2 AND content_hash = ?3 \
+                AND is_sensitive = 1 AND pinned = 0 AND deleted = 0",
+            params![id, created_at, content_hash, crate::now_ms()],
+        )?;
+        if changed > 0 {
+            tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])?;
+        }
         tx.commit()?;
         Ok(changed > 0)
     }
@@ -193,9 +228,14 @@ impl Store {
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
+                    content_hash = CASE WHEN is_sensitive = 1 THEN '' ELSE content_hash END, \
+                    created_at = CASE \
+                        WHEN created_at = 9223372036854775807 THEN created_at \
+                        ELSE MAX(created_at + 1, ?1) \
+                    END, \
                     pin_order = NULL \
               WHERE deleted = 0 AND pinned = 0",
-            [],
+            [crate::now_ms()],
         )?;
         // Drop index rows for everything that is no longer live, which also
         // sweeps orphans. Pinned rows stay live and keep their entries.

@@ -77,11 +77,15 @@ export const devices = {
   peer: {
     thisDevice: "this device",
     nameHint: "Name reported by the device itself — not verified",
+    nameUnverified: "Device name is self-reported",
     /** `last_seen_ms` is written at the end of a successful session, so it is
      *  a last-*synced* time. Rendering the `0` an uncontacted pairing carries
      *  through a relative formatter read "Last seen 56 years ago". */
     lastSynced: "Last synced {{age}}",
     neverSynced: "Never synced",
+    lastSyncLabel: "Last successful sync",
+    networkLabel: "Network discovery",
+    addressLabel: "Connection address",
     /** `lastSynced` comes from the daemon's own cadence; these two are the runs
      *  this screen started, which is the only place a per-peer outcome exists.
      *  `sent`/`received` are what separates a sync that worked from one that
@@ -93,10 +97,13 @@ export const devices = {
     offline: "Not seen on this network",
     syncOne: "Sync with {{name}} now",
     syncOneHint: "Sync with this device now",
+    syncAction: "Sync now",
     unpairOne: "Unpair {{name}}",
     unpairHint: "Unpair this device",
+    unpairAction: "Unpair",
     revokeOne: "Revoke {{name}}",
     revokeHint: "Cut this device off for good — for a device you no longer have",
+    revokeAction: "Revoke",
   },
 
   /** The lighter of the two. It says what unpairing does *not* cost, because
@@ -147,6 +154,7 @@ export const devices = {
     qrLabel: "Pairing code as a QR code. Scan it with the other device.",
     qrHint:
       "On the other device, choose Devices → Add a device and scan this. It carries the code and the address together.",
+    revealQr: "Reveal QR code",
     codeLabel: "Pairing code",
     codeCameraNote: "(if the other device has no camera)",
     codeHidden: "Pairing code, hidden. Activate reveal to show it.",
@@ -178,7 +186,7 @@ export const devices = {
     rescanning: "Looking…",
     codeLabel: "Pairing code",
     addrLabel: "Address",
-    addrPlaceholder: "192.168.1.24:7420",
+    addrPlaceholder: "192.168.1.24:47654",
     addrHint: "Shown on the other device under the code, as host:port.",
     retryHint:
       "Nothing was changed — check the code and the address and try again.",

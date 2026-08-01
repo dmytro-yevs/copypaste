@@ -30,6 +30,11 @@ object CaptureNotifications {
     /** Lands on the rung 2 screen with the start step selected. */
     const val EXTRA_REARM = "com.copypaste.app.REARM"
 
+    fun isPermissionGranted(context: Context): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)

@@ -27,7 +27,7 @@ mod error;
 mod listen;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use tokio::sync::Semaphore;
 use tracing::{debug, warn};
@@ -78,6 +78,10 @@ pub struct Node {
     discovery: Option<Discovery>,
     /// The port [`listen`] binds, which is what a pairing tells a peer to dial.
     port: u16,
+    /// The address of the listener that is actually running.  A configured
+    /// port is not an endpoint: tests, Android and a failed bind can all have
+    /// a different answer.
+    listen_addr: RwLock<Option<SocketAddr>>,
     sessions: Arc<Semaphore>,
 }
 
@@ -97,6 +101,7 @@ impl Node {
             peers,
             discovery,
             port,
+            listen_addr: RwLock::new(None),
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
         }
     }
@@ -156,7 +161,23 @@ impl Node {
     /// Where a peer should dial this device, when that can be determined.
     #[must_use]
     pub fn listen_addr(&self) -> Option<String> {
-        Some(SocketAddr::new(crate::netif::routable_ip()?, self.port).to_string())
+        self.listen_addr
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(ToString::to_string)
+    }
+
+    pub(crate) fn set_listen_addr(&self, addr: SocketAddr) {
+        let advertised = if addr.ip().is_unspecified() {
+            crate::netif::routable_ip().map(|ip| SocketAddr::new(ip, addr.port()))
+        } else {
+            Some(addr)
+        };
+        *self
+            .listen_addr
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = advertised;
     }
 
     /// Mint a pairing and hand back the code to read out to the other device.

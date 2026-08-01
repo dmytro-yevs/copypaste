@@ -13,19 +13,13 @@ import { memo } from "react";
 import {
   CloudOff,
   Copy,
-  Expand,
-  Eye,
-  EyeOff,
-  LoaderCircle,
   MonitorSmartphone,
   Pin,
-  PinOff,
   ShieldAlert,
-  Trash2,
 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { HistoryRowActions } from "@/components/history/HistoryRowActions";
 import { wontSync } from "@/components/history/origin";
 import { t, useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
@@ -38,6 +32,9 @@ import {
   shortAge,
 } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
+import { isAndroidPlatform } from "@/lib/platform";
+
+const CHECKBOX_ACTION = "size-[var(--sz-iconbtn)]";
 
 /**
  * No relative age: the live region mirrors this on every selection change, and
@@ -82,10 +79,6 @@ interface HistoryRowProps {
   onOpen: (item: Item) => void;
 }
 
-/** 36px under a mouse, 48px under a finger: `--sz-iconbtn` carries the
- *  coarse-pointer floor, so one token moves every target. */
-const ACTION = "size-[var(--sz-iconbtn)]";
-
 function HistoryRowImpl({
   item,
   active,
@@ -111,6 +104,7 @@ function HistoryRowImpl({
   const masked = item.is_sensitive && !revealed;
   const body = revealed ? revealedContent : item.content;
   const stranded = wontSync(item);
+  const android = isAndroidPlatform();
   // Roving: 200 rows must not be 1000 tab stops.
   const tab = active ? 0 : -1;
 
@@ -133,7 +127,7 @@ function HistoryRowImpl({
         <span
           className={cn(
             "-my-[var(--pad-row-y)] flex shrink-0 items-center justify-center",
-            ACTION,
+            CHECKBOX_ACTION,
           )}
         >
           <Checkbox
@@ -166,11 +160,14 @@ function HistoryRowImpl({
           selecting ? "history.row.selectingHint" : "history.row.hint",
         )}
         tabIndex={tab}
-        onClick={() => (selecting ? onToggleChecked(item) : onSelect(item))}
+        onClick={() => {
+          if (selecting) onToggleChecked(item);
+          else onSelect(item);
+        }}
         // No double-click-to-copy while selecting: a second click there means
         // "deselect", and copying on it would put an item on the clipboard the
         // user was in the middle of un-choosing.
-        onDoubleClick={selecting ? undefined : () => onCopy(item)}
+        onDoubleClick={selecting || android ? undefined : () => onCopy(item)}
         className="flex min-w-0 flex-1 flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
       >
         {masked ? (
@@ -240,80 +237,19 @@ function HistoryRowImpl({
           tab stop, and a Delete beside a checkbox is one misclick from
           destroying the wrong thing (§3.1.5). */}
       {!selecting && (
-        <div className="flex shrink-0 items-center gap-0.5">
-          {item.is_sensitive &&
-            (revealed ? (
-              <Button
-                variant="ghost"
-                aria-label={tr("history.row.hide")}
-                title={tr("history.row.hide")}
-                tabIndex={tab}
-                className={ACTION}
-                onClick={onHide}
-              >
-                <EyeOff aria-hidden="true" />
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                aria-label={tr("history.row.sensitiveReveal")}
-                title={tr("history.row.reveal")}
-                tabIndex={tab}
-                className={ACTION}
-                onClick={() => onReveal(item)}
-              >
-                {revealPending ? (
-                  <LoaderCircle aria-hidden="true" className="animate-spin" />
-                ) : (
-                  <Eye aria-hidden="true" />
-                )}
-              </Button>
-            ))}
-          <Button
-            variant="ghost"
-            aria-label={tr("history.row.open")}
-            title={tr("history.row.open")}
-            tabIndex={tab}
-            className={ACTION}
-            onClick={() => onOpen(item)}
-          >
-            <Expand aria-hidden="true" />
-          </Button>
-          <Button
-            variant="ghost"
-            aria-label={tr("history.row.copy")}
-            title={tr("history.row.copy")}
-            tabIndex={tab}
-            className={ACTION}
-            onClick={() => onCopy(item)}
-          >
-            <Copy aria-hidden="true" />
-          </Button>
-          <Button
-            variant="ghost"
-            aria-label={tr(item.pinned ? "history.row.unpin" : "history.row.pin")}
-            title={tr(item.pinned ? "history.row.unpin" : "history.row.pin")}
-            tabIndex={tab}
-            className={ACTION}
-            onClick={() => onTogglePin(item)}
-          >
-            {item.pinned ? (
-              <PinOff aria-hidden="true" />
-            ) : (
-              <Pin aria-hidden="true" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            aria-label={tr("history.row.delete")}
-            title={tr("history.row.delete")}
-            tabIndex={tab}
-            className={cn(ACTION, "hover:text-err-strong")}
-            onClick={() => onDelete(item)}
-          >
-            <Trash2 aria-hidden="true" />
-          </Button>
-        </div>
+        <HistoryRowActions
+          item={item}
+          android={android}
+          active={active}
+          revealed={revealed}
+          revealPending={revealPending}
+          onCopy={onCopy}
+          onTogglePin={onTogglePin}
+          onDelete={onDelete}
+          onReveal={onReveal}
+          onHide={onHide}
+          onOpen={onOpen}
+        />
       )}
     </div>
   );

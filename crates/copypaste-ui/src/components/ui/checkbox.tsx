@@ -12,21 +12,22 @@ function Checkbox({
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        // 16px of ink. The tap target is the `--sz-iconbtn` box the row wraps
-        // this in, so a finger gets 48px without a mouse getting a 48px
-        // checkbox.
-        "peer size-4 shrink-0 rounded-[4px] border shadow-xs transition-shadow outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-        "border-border-strong data-[state=checked]:border-transparent data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
+        "peer group inline-flex size-[var(--tap-min)] shrink-0 items-center justify-center outline-none focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}
     >
-      <CheckboxPrimitive.Indicator
-        data-slot="checkbox-indicator"
-        className="flex items-center justify-center text-current"
+      <span
+        data-slot="checkbox-control"
+        className="flex size-4 items-center justify-center rounded-[4px] border border-border-strong shadow-xs transition-shadow group-data-[state=checked]:border-transparent group-data-[state=checked]:bg-primary group-data-[state=checked]:text-primary-foreground"
       >
-        <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
-      </CheckboxPrimitive.Indicator>
+        <CheckboxPrimitive.Indicator
+          data-slot="checkbox-indicator"
+          className="flex size-full items-center justify-center text-current"
+        >
+          <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
+        </CheckboxPrimitive.Indicator>
+      </span>
     </CheckboxPrimitive.Root>
   );
 }

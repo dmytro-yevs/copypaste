@@ -48,7 +48,7 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-[var(--z-dialog)] grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border border-border bg-card p-6 shadow-3 duration-[var(--dur)] sm:max-w-[var(--modal-w)]",
+          "fixed top-1/2 right-[calc(var(--inset-right)+var(--s-4))] left-[calc(var(--inset-left)+var(--s-4))] z-[var(--z-dialog)] grid max-h-[calc(100dvh-var(--inset-top)-var(--inset-bottom)-var(--s-8))] w-auto translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-6 shadow-3 duration-[var(--dur)] sm:left-1/2 sm:w-full sm:max-w-[var(--modal-w)] sm:translate-x-[-50%]",
           "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className,
         )}
@@ -58,7 +58,7 @@ function DialogContent({
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
-            className="absolute top-4 right-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
+            className="absolute top-[calc(var(--s-4)-(var(--sz-iconbtn)-var(--s-4))/2)] right-[calc(var(--s-4)-(var(--sz-iconbtn)-var(--s-4))/2)] inline-flex size-[var(--sz-iconbtn)] items-center justify-center rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0"
           >
             <XIcon aria-hidden="true" />
             <span className="sr-only">{t("common.close")}</span>

@@ -3,9 +3,13 @@
   "private": true,
   "version": "2.0.0-alpha.1",
   "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "generate:icons": "sh scripts/generate-icons.sh",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run"

@@ -6,7 +6,7 @@
  * anything from what it does receive, and that its accessible name is a fixed
  * string rather than a preview.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -16,6 +16,14 @@ import type { Item } from "@/lib/ipc";
 
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
 const noop = () => {};
+const userAgent = navigator.userAgent;
+
+afterEach(() => {
+  Object.defineProperty(navigator, "userAgent", {
+    configurable: true,
+    value: userAgent,
+  });
+});
 
 const props = {
   active: false,
@@ -212,5 +220,47 @@ describe("selecting is not copying", () => {
     for (const button of screen.getAllByRole("button")) {
       expect(button.tabIndex).toBe(-1);
     }
+  });
+});
+
+describe("Android row actions", () => {
+  it("selects on tap and keeps copying behind an explicit action", async () => {
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (Linux; Android 15)",
+    });
+    const onCopy = vi.fn();
+    const onSelect = vi.fn();
+    const onTogglePin = vi.fn();
+    const clip = item({ content: "mobile clipboard" });
+    const user = userEvent.setup();
+
+    render(
+      <HistoryRow
+        {...props}
+        item={clip}
+        onCopy={onCopy}
+        onSelect={onSelect}
+        onTogglePin={onTogglePin}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /mobile clipboard/ }));
+    expect(onSelect).toHaveBeenCalledWith(clip);
+    expect(onCopy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Item actions" }));
+    expect(screen.getByRole("dialog", { name: "Item actions" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Copy to clipboard" }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(onCopy).toHaveBeenCalledWith(clip);
+
+    await user.click(screen.getByRole("button", { name: "Item actions" }));
+    expect(screen.getByRole("dialog", { name: "Item actions" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show full contents" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Pin item" }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(onTogglePin).toHaveBeenCalledWith(clip);
   });
 });

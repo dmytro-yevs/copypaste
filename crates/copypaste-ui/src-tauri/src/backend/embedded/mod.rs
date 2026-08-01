@@ -44,7 +44,9 @@ mod transfer;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use copypaste_core::{ingest, Detector, IngestError, ItemCursor, Keyring, Store, StoredItem};
+use copypaste_core::{
+    ingest, purge_indexed_secrets, Detector, IngestError, ItemCursor, Keyring, Store, StoredItem,
+};
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
     ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
@@ -75,6 +77,12 @@ const MSG_NO_BACKUP: &str = "Backup and restore aren't available in this build y
 const MSG_NO_REORDER: &str =
     "Reordering pinned items isn't available yet. Pinned items keep the order they \
      were pinned in.";
+
+fn purge_search_index(store: &Store, detector: &Detector) -> Result<()> {
+    purge_indexed_secrets(store, detector)
+        .map_err(|e| BackendError::internal(&format!("could not purge search index: {e}")))?;
+    Ok(())
+}
 
 /// Everything the in-process backend owns. Cheap to clone; `Store` is a
 /// reference-counted pool and the rest is behind an `Arc`.
@@ -157,6 +165,7 @@ impl EmbeddedBackend {
 
         let detector = Detector::new()
             .map_err(|e| BackendError::internal(&format!("could not build the detector: {e}")))?;
+        purge_search_index(&store, &detector)?;
 
         Ok(Self {
             inner: Arc::new(Inner {
@@ -538,6 +547,29 @@ mod tests {
             "there is no capture loop in this build"
         );
         assert_eq!(status.clipboard_backend, BACKEND_NAME);
+    }
+
+    #[test]
+    fn the_embedded_open_purge_removes_previously_indexed_sensitive_text() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = Store::open(&dir.path().join("copypaste-v2.db"), &[7; 32]).unwrap();
+        let text = "mail alice.smith@example.com about it";
+        store
+            .insert(copypaste_core::NewItem {
+                id: "old-sensitive-index-row".to_string(),
+                content_ciphertext: Vec::new(),
+                nonce: Vec::new(),
+                content_type: "text/plain".to_string(),
+                content_hash: "old-sensitive-index-row".to_string(),
+                is_sensitive: false,
+                search_text: Some(text.to_string()),
+                created_at: 1,
+            })
+            .unwrap();
+        assert_eq!(store.search("alice", 10).unwrap().len(), 1);
+
+        purge_search_index(&store, &Detector::new().unwrap()).unwrap();
+        assert!(store.search("alice", 10).unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -19,7 +19,7 @@ copypaste-ipc = { path = "../../copypaste-ipc" }
 # `macos-private-api` is what `"transparent": true` + `macOSPrivateApi` in
 # tauri.conf.json require; without it tauri-build rejects the config. It rules
 # out the Mac App Store, which does not apply — we ship through Homebrew Cask.
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
 # The native save/open panel, used **only from Rust** (`commands::transfer`).
 # Two things follow from that and both are the point: the chosen path never

@@ -2,11 +2,10 @@
 //!
 //! Three rules the session depends on and cannot check for itself:
 //!
-//! * **[`summaries`] never lists a sensitive item.** That is what makes "a
-//!   sensitive item never leaves the device" a property of the protocol:
-//!   `serve_items` refuses anything outside the advertised set, so an item that
-//!   is not in this list cannot be requested out of us. [`fetch`] filters again,
-//!   and the session filters a third time.
+//! * **[`summaries`] never lists a live sensitive item.** A sensitive tombstone
+//!   is listed because it has no payload and is required to delete a stale peer
+//!   copy. `serve_items` refuses anything outside the advertised set, while
+//!   [`fetch`] filters again and the session filters a third time.
 //! * **[`fetch`] returns plaintext**, decrypted under the local item key. The
 //!   sender's ciphertext is useless to a peer — the AEAD binds the item id to a
 //!   key derived from *this* device's secret — so content crosses the Noise
@@ -281,6 +280,28 @@ mod tests {
             source.fetch(&[id]).unwrap().is_empty(),
             "a sensitive item was served on request"
         );
+    }
+
+    #[test]
+    fn a_sensitive_tombstone_is_advertised_and_served_empty() {
+        let f = fixture();
+        let id = add(&f, "secret", "AKIAIOSFODNN7EXAMPLE", 1_000);
+        assert!(f.store.delete(&id).unwrap());
+        let source = f.source();
+
+        assert!(source
+            .summaries()
+            .unwrap()
+            .iter()
+            .any(|summary| summary.item_id == id && summary.deleted));
+        let item = source
+            .fetch(std::slice::from_ref(&id))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert!(item.deleted);
+        assert!(item.content.is_empty());
+        assert!(item.content_hash.is_empty());
     }
 
     #[test]

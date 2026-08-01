@@ -18,7 +18,7 @@
  * the state an unpaired one does, so rendering the two differently would mean
  * inventing a distinction the wire cannot make.
  */
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { KeyRound, Laptop, Link2, RefreshCw } from "lucide-react";
 
 import {
@@ -33,8 +33,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
-import { PairAcceptDialog } from "@/components/devices/PairAcceptDialog";
-import { PairCreateDialog } from "@/components/devices/PairCreateDialog";
 import { PeerRow } from "@/components/devices/PeerRow";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
 import {
@@ -49,6 +47,13 @@ import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
 import type { PeerInfo } from "@/lib/ipc";
+
+const PairCreateDialog = lazy(async () => ({
+  default: (await import("@/components/devices/PairCreateDialog")).PairCreateDialog,
+}));
+const PairAcceptDialog = lazy(async () => ({
+  default: (await import("@/components/devices/PairAcceptDialog")).PairAcceptDialog,
+}));
 
 export function DevicesView() {
   const { t } = useTranslation();
@@ -193,8 +198,16 @@ export function DevicesView() {
         )}
       </div>
 
-      <PairCreateDialog open={creating} onOpenChange={setCreating} />
-      <PairAcceptDialog open={accepting} onOpenChange={setAccepting} />
+      {creating && (
+        <Suspense fallback={null}>
+          <PairCreateDialog open onOpenChange={setCreating} />
+        </Suspense>
+      )}
+      {accepting && (
+        <Suspense fallback={null}>
+          <PairAcceptDialog open onOpenChange={setAccepting} />
+        </Suspense>
+      )}
 
       <AlertDialog
         open={confirmUnpair !== null}

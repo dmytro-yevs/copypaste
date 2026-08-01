@@ -157,6 +157,16 @@ impl FakeSource {
         }
     }
 
+    pub(super) fn with_local(item: LocalItem) -> Self {
+        let mut stored = HashMap::new();
+        stored.insert(item.item_id.clone(), item.clone());
+        Self {
+            outgoing: Mutex::new(vec![item]),
+            stored: Mutex::new(stored),
+            ..Self::default()
+        }
+    }
+
     pub(super) fn get(&self, id: &str) -> Option<LocalItem> {
         self.stored.lock().unwrap().get(id).cloned()
     }
@@ -213,6 +223,19 @@ impl CloudSource for FakeSource {
 
     fn upload_floor(&self) -> Result<i64, SyncError> {
         Ok(*self.floor.lock().unwrap())
+    }
+
+    fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
+        let stored = self.stored.lock().unwrap();
+        let Some(local) = stored.get(&incoming.item_id) else {
+            return Ok(false);
+        };
+        if local.created_at > incoming.created_at {
+            let mut floor = self.floor.lock().unwrap();
+            *floor = (*floor).min(local.created_at);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {

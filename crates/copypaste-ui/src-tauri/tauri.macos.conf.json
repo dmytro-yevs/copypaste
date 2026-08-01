@@ -5,17 +5,17 @@
       {
         "label": "main",
         "title": "CopyPaste",
-        "width": 420,
-        "height": 600,
-        "minWidth": 360,
-        "minHeight": 400,
-        "resizable": false,
-        "alwaysOnTop": true,
-        "decorations": false,
-        "transparent": true,
+        "width": 1100,
+        "height": 760,
+        "minWidth": 760,
+        "minHeight": 560,
+        "resizable": true,
+        "alwaysOnTop": false,
+        "decorations": true,
+        "transparent": false,
         "shadow": true,
         "center": true,
-        "skipTaskbar": true,
+        "skipTaskbar": false,
         "visible": true,
         "dragDropEnabled": false
       }
@@ -27,7 +27,8 @@
       "dmg"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.15"
+      "minimumSystemVersion": "10.15",
+      "infoPlist": "Info.plist"
     }
   }
 }

@@ -136,9 +136,9 @@ mod tests {
     #[test]
     fn a_v0_4_history_beside_the_new_one_is_found() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!legacy_history_present(dir.path()));
+        assert!(!copypaste_core::v1_database_in(dir.path()));
         stage_v1(dir.path());
-        assert!(legacy_history_present(dir.path()));
+        assert!(copypaste_core::v1_database_in(dir.path()));
     }
 
     /// The probe must leave the disk as it found it: a user who downgrades has
@@ -161,7 +161,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = copypaste_core::Keyring::from_secret(&[3u8; 32]).db_key();
         let _store = Store::open(&dir.path().join("copypaste-v2.db"), &key).unwrap();
-        assert!(!legacy_history_present(dir.path()));
+        assert!(!copypaste_core::v1_database_in(dir.path()));
     }
 
     /// Name plus length for everything in the directory, sorted.

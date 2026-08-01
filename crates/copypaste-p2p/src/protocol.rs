@@ -29,6 +29,8 @@
 //! and should skip one item rather than fail a message, so it lives in
 //! [`crate::sync`] (`MAX_FUTURE_SKEW_MS`).
 
+use std::net::SocketAddr;
+
 use serde::{Deserialize, Serialize};
 
 /// Version of the message set. Bumped whenever a change would confuse an older
@@ -75,6 +77,9 @@ pub const MAX_ID_BYTES: usize = 128;
 
 /// Longest human-facing device name. Shown in the UI; not an identifier.
 pub const MAX_DEVICE_NAME_BYTES: usize = 128;
+
+/// Longest numeric `host:port` an authenticated peer may advertise.
+pub const MAX_LISTEN_ADDR_BYTES: usize = 64;
 
 /// Longest content-type string (`text`, `image`, …).
 pub const MAX_CONTENT_TYPE_BYTES: usize = 64;
@@ -152,6 +157,8 @@ pub enum SyncMessage {
         protocol_version: u32,
         device_id: String,
         device_name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        listen_addr: Option<String>,
     },
     Summary {
         items: Vec<ItemSummary>,
@@ -201,6 +208,9 @@ pub enum ProtocolError {
 
     #[error("{field} is empty")]
     FieldEmpty { field: &'static str },
+
+    #[error("hello message carries an invalid listen address")]
+    InvalidListenAddr,
 
     /// Outbound only — inbound negative timestamps are clamped, not rejected.
     #[error("{field} is negative")]
@@ -288,6 +298,7 @@ impl SyncMessage {
                 protocol_version,
                 device_id,
                 device_name,
+                listen_addr,
             } => {
                 // Fail closed, and do it before anything else in the message is
                 // trusted: a differing version means the fields below may not
@@ -300,6 +311,12 @@ impl SyncMessage {
                 }
                 check_id("device_id", device_id)?;
                 check_len("device_name", device_name, MAX_DEVICE_NAME_BYTES)?;
+                if let Some(addr) = listen_addr {
+                    check_len("listen_addr", addr, MAX_LISTEN_ADDR_BYTES)?;
+                    if addr.parse::<SocketAddr>().is_err() {
+                        return Err(ProtocolError::InvalidListenAddr);
+                    }
+                }
             }
 
             Self::Summary { items } => {
@@ -432,6 +449,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "dev-a".into(),
             device_name: "Laptop".into(),
+            listen_addr: None,
         }
     }
 
@@ -619,6 +637,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: String::new(),
                 device_name: "n".into(),
+                listen_addr: None,
             },
         ] {
             assert!(
@@ -652,6 +671,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "d".into(),
             device_name: "x".repeat(MAX_DEVICE_NAME_BYTES + 1),
+            listen_addr: None,
         }
         .validate()
         .unwrap_err();
@@ -659,6 +679,46 @@ mod tests {
             err,
             ProtocolError::FieldTooLong {
                 field: "device_name",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_hello_rejects_a_malformed_or_oversized_listen_address() {
+        let malformed = SyncMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            device_id: "d".into(),
+            device_name: "n".into(),
+            listen_addr: Some("not-an-endpoint".into()),
+        };
+        assert_eq!(malformed.validate(), Err(ProtocolError::InvalidListenAddr));
+
+        let oversized = SyncMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            device_id: "d".into(),
+            device_name: "n".into(),
+            listen_addr: Some("1".repeat(MAX_LISTEN_ADDR_BYTES + 1)),
+        };
+        assert!(matches!(
+            oversized.validate(),
+            Err(ProtocolError::FieldTooLong {
+                field: "listen_addr",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_hello_from_before_endpoint_advertising_still_decodes() {
+        let raw = format!(
+            r#"{{"t":"hello","protocol_version":{PROTOCOL_VERSION},"device_id":"d","device_name":"n"}}"#
+        );
+        let decoded = SyncMessage::decode(raw.as_bytes()).unwrap();
+        assert!(matches!(
+            decoded,
+            SyncMessage::Hello {
+                listen_addr: None,
                 ..
             }
         ));

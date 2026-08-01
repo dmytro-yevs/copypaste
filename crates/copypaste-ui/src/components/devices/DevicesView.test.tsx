@@ -170,6 +170,25 @@ describe("what the row says about sync", () => {
     expect(screen.getByText(/enter it on the other device/i)).toBeTruthy();
   });
 
+  it("labels only the pairing facts supplied by the service", async () => {
+    listPeers.mockResolvedValue([
+      peer({
+        name: "Office Phone",
+        last_addr: "192.168.1.24:47654",
+        last_seen_ms: Date.now(),
+        online: true,
+      }),
+    ]);
+    withUser(<DevicesView />);
+
+    expect(await screen.findByText("Device name is self-reported")).toBeTruthy();
+    expect(screen.getByText("Last successful sync")).toBeTruthy();
+    expect(screen.getByText("Network discovery")).toBeTruthy();
+    expect(screen.getByText("Connection address")).toBeTruthy();
+    expect(screen.getByText("192.168.1.24:47654")).toBeTruthy();
+    expect(screen.queryByText(/trusted|verified mac|android/i)).toBeNull();
+  });
+
   /** A device this one holds no address for is not the same as one that is
    *  merely asleep, and the row has to give the different remedy. */
   it("tells a peer this device cannot dial apart from one that is away", async () => {

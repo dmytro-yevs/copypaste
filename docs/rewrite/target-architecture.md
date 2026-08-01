@@ -192,10 +192,7 @@ the better outcome.
 
 - **v2 must never open, modify, or misreport a v1 file.** The database is
   `copypaste-v2.db`, a distinct filename, so an old file survives a downgrade
-  intact. The *saying so* half is written and unreached: `storage/legacy.rs`
-  identifies a v0.4 schema and `StoreError::LegacyDatabase` carries the
-  sentence, but nothing on the startup path asks the question against a v0.4
-  filename. `docs/backlog.md` B-4.
+  intact. A detected v0.4 history must be surfaced without opening it.
 - **No migration path may be retrofitted casually.** Adding one is a feature to
   decide, and it is materially harder now the v1 formats have left the tree.
 - **Keychain service and account names are fixed strings.** Not for

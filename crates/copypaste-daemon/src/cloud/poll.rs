@@ -14,7 +14,7 @@ use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::cloud::source::StoreSource;
-use crate::cloud::{KEY_LAST_SYNC, KEY_UPLOAD_FLOOR};
+use crate::cloud::{KEY_LAST_SYNC, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM};
 
 use crate::AppState;
 
@@ -80,10 +80,11 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
             if let Err(e) = state.meta.set_state_ms(KEY_LAST_SYNC, at_ms) {
                 warn!(error = ?e, "could not record when the round completed");
             }
-            if let Err(e) = state
-                .meta
-                .set_state_ms(KEY_UPLOAD_FLOOR, source.next_floor(started_ms))
-            {
+            let (floor, item_id) = source.next_upload_cursor(started_ms);
+            if let Err(e) = state.meta.set_state_all(&[
+                (KEY_UPLOAD_FLOOR, &floor.to_string()),
+                (KEY_UPLOAD_FLOOR_ITEM, item_id.as_deref().unwrap_or("")),
+            ]) {
                 warn!(error = ?e, "could not advance the upload floor");
             }
             if stats.applied > 0 {

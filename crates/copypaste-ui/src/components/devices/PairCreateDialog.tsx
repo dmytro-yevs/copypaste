@@ -48,6 +48,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
   const create = usePairCreate();
   const [name, setName] = useState("");
   const [revealed, setRevealed] = useState(false);
+  const [qrRevealed, setQrRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
@@ -57,6 +58,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
     if (!open) {
       create.reset();
       setRevealed(false);
+      setQrRevealed(false);
       setCopied(false);
       setCopyFailed(false);
     }
@@ -70,6 +72,7 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
   function generate() {
     // Re-blur *before* the new code arrives: it is a new credential.
     setRevealed(false);
+    setQrRevealed(false);
     setCopied(false);
     setCopyFailed(false);
     create.mutate(name.trim() || t("devices.create.defaultName"));
@@ -138,16 +141,29 @@ export function PairCreateDialog({ open, onOpenChange }: PairCreateDialogProps) 
           <div className="flex flex-col gap-s-3">
             {pairing.listen_addr !== null && (
               <div className="flex flex-col items-center gap-s-2">
-                <QrCode
-                  value={encodePairing({
-                    code: pairing.code,
-                    addr: pairing.listen_addr,
-                  })}
-                  label={t("devices.create.qrLabel")}
-                />
-                <p className="text-center text-xs text-muted-foreground">
-                  {t("devices.create.qrHint")}
-                </p>
+                {qrRevealed ? (
+                  <>
+                    <QrCode
+                      value={encodePairing({
+                        code: pairing.code,
+                        addr: pairing.listen_addr,
+                      })}
+                      label={t("devices.create.qrLabel")}
+                    />
+                    <p className="text-center text-xs text-muted-foreground">
+                      {t("devices.create.qrHint")}
+                    </p>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setQrRevealed(true)}
+                  >
+                    <Eye aria-hidden="true" />
+                    {t("devices.create.revealQr")}
+                  </Button>
+                )}
               </div>
             )}
 

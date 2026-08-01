@@ -1,4 +1,4 @@
-//! Auto-wipe: deleting a detected secret from history once its TTL has elapsed.
+//! Auto-wipe: removing a detected secret from history once its TTL has elapsed.
 //!
 //! This is the only destructive consumer of [`Severity`], and it is the only
 //! place the confidence floor turns into permission to delete user data
@@ -47,7 +47,7 @@ pub const DEFAULT_SENSITIVE_TTL: Duration = Duration::from_secs(30);
 /// of the user's "turn it off".
 pub const SENSITIVE_TTL_DISABLED: Duration = Duration::ZERO;
 
-/// Delete every sensitive item that is past its TTL and above the auto-wipe
+/// Remove every sensitive item that is past its TTL and above the auto-wipe
 /// floor. Returns how many were removed.
 ///
 /// Run it from a ticker *and* once at startup before the daemon binds its socket
@@ -89,11 +89,17 @@ pub fn sweep_sensitive(
             continue;
         };
         if detector.may_auto_wipe(&text) {
-            victims.push(row.id);
+            victims.push((row.id, row.created_at, row.content_hash));
         }
     }
 
-    let removed = store.hard_delete(&victims)?;
+    // A wiped secret becomes a payload-less tombstone. The sync boundary offers
+    // that tombstone but never a live sensitive row, so a device that already
+    // has an older copy converges on deletion without receiving the secret.
+    let mut removed = 0;
+    for (id, created_at, content_hash) in victims {
+        removed += u64::from(store.wipe_sensitive_if_unchanged(&id, created_at, &content_hash)?);
+    }
     if removed > 0 {
         tracing::info!(removed, "wiped expired sensitive items");
     }
@@ -184,8 +190,11 @@ mod tests {
         .unwrap();
         assert_eq!(removed, 1);
         assert!(f.store.get(&id).unwrap().is_none());
-        // Hard delete: no tombstone is left to travel to another device.
-        assert_eq!(raw_row_count(&f.store, &id), 0);
+        let tombstone = f.store.version(&id).unwrap().expect("tombstone");
+        assert!(tombstone.deleted);
+        assert!(tombstone.content_ciphertext.is_empty());
+        assert!(tombstone.content_hash.is_empty());
+        assert_eq!(raw_row_count(&f.store, &id), 1);
     }
 
     /// `CLAUDE.md` rule 4: detection may flag, but only the high-confidence band
@@ -245,6 +254,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(removed, 0);
+        assert!(f.store.get(&id).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_candidate_pinned_after_selection_is_not_wiped() {
+        let f = fixture();
+        let id = capture(&f, SECRET, T0);
+        let candidate = f.store.version(&id).unwrap().unwrap();
+        assert!(f.store.set_pinned(&id, true).unwrap());
+
+        assert!(!f
+            .store
+            .wipe_sensitive_if_unchanged(&id, candidate.created_at, &candidate.content_hash)
+            .unwrap());
         assert!(f.store.get(&id).unwrap().is_some());
     }
 

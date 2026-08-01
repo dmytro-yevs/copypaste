@@ -34,9 +34,10 @@ use crate::protocol::{
 pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
+    listen_addr: Option<&str>,
 ) -> Result<SyncOutcome, SyncError> {
     let peer = {
-        chan.send(local_hello(source)).await?;
+        chan.send(local_hello(source, listen_addr)).await?;
         recv_hello(chan, source).await?
     };
 
@@ -59,6 +60,7 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
         stats,
         peer_device_id: peer.0,
         peer_device_name: peer.1,
+        peer_listen_addr: peer.2,
     })
 }
 
@@ -70,10 +72,11 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
 pub async fn run_responder<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
+    listen_addr: Option<&str>,
 ) -> Result<SyncOutcome, SyncError> {
     let peer = {
         let peer = recv_hello(chan, source).await?;
-        chan.send(local_hello(source)).await?;
+        chan.send(local_hello(source, listen_addr)).await?;
         peer
     };
 
@@ -96,14 +99,16 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
         stats,
         peer_device_id: peer.0,
         peer_device_name: peer.1,
+        peer_listen_addr: peer.2,
     })
 }
 
-fn local_hello<S: SyncSource>(source: &S) -> SyncMessage {
+fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>) -> SyncMessage {
     SyncMessage::Hello {
         protocol_version: PROTOCOL_VERSION,
         device_id: source.device_id(),
         device_name: source.device_name(),
+        listen_addr: listen_addr.map(str::to_owned),
     }
 }
 
@@ -114,19 +119,24 @@ fn local_hello<S: SyncSource>(source: &S) -> SyncMessage {
 async fn recv_hello<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
-) -> Result<(String, String), SyncError> {
+) -> Result<(String, String, Option<std::net::SocketAddr>), SyncError> {
     let msg = chan.recv().await?;
     msg.validate()?;
     match msg {
         SyncMessage::Hello {
             device_id,
             device_name,
+            listen_addr,
             ..
         } => {
             if device_id == source.device_id() {
                 return Err(SyncError::SelfSync);
             }
-            Ok((device_id, device_name))
+            Ok((
+                device_id,
+                device_name,
+                listen_addr.and_then(|addr| addr.parse().ok()),
+            ))
         }
         other => Err(SyncError::Unexpected {
             expected: "hello",
@@ -352,7 +362,10 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
 mod tests {
     use super::*;
     use crate::protocol::ProtocolError;
-    use crate::sync::testutil::{item, session, tombstone, try_session, ScriptChannel, TestSource};
+    use crate::sync::testutil::{
+        item, session, tombstone, try_session, try_session_with_listen_addresses, ScriptChannel,
+        TestSource,
+    };
 
     #[tokio::test]
     async fn two_divergent_devices_converge() {
@@ -519,6 +532,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_sensitive_tombstone_syncs_empty_while_a_live_secret_is_excluded() {
+        let secret = "previous secret";
+        let a = TestSource::new(
+            "dev-a",
+            vec![
+                item("live-secret", 300, "hunter2", "dev-a"),
+                tombstone("deleted-secret", 200, &content_hash(secret), "dev-a"),
+            ],
+        );
+        a.mark_sensitive("live-secret");
+        a.mark_sensitive("deleted-secret");
+        let b = TestSource::new("dev-b", vec![item("deleted-secret", 100, secret, "dev-a")]);
+
+        let (oa, ob) = session(&a, &b).await;
+
+        assert!(b.get("live-secret").is_none(), "a live secret was synced");
+        let tombstone = b.get("deleted-secret").expect("tombstone was not synced");
+        assert!(tombstone.deleted);
+        assert!(tombstone.content.is_empty(), "tombstone carried content");
+        assert_eq!((oa.stats.sent, ob.stats.received), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn a_completed_session_returns_the_peer_listen_address() {
+        let a = TestSource::new("dev-a", vec![]);
+        let b = TestSource::new("dev-b", vec![]);
+        let (from_a, from_b) = try_session_with_listen_addresses(
+            &a,
+            &b,
+            Some("192.0.2.1:47654"),
+            Some("192.0.2.2:47654"),
+        )
+        .await;
+
+        assert_eq!(
+            from_a.unwrap().peer_listen_addr,
+            Some("192.0.2.2:47654".parse().unwrap())
+        );
+        assert_eq!(
+            from_b.unwrap().peer_listen_addr,
+            Some("192.0.2.1:47654".parse().unwrap())
+        );
+    }
+
+    #[tokio::test]
     async fn an_item_that_was_never_advertised_cannot_be_requested_out() {
         // The protocol-level layer of the same rule: even a peer that already
         // knows the id — because it went sensitive after an earlier session —
@@ -531,6 +589,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                listen_addr: None,
             },
             SyncMessage::Summary { items: vec![] },
             SyncMessage::Request {
@@ -539,7 +598,7 @@ mod tests {
             SyncMessage::Done,
         ]);
 
-        let outcome = run_responder(&mut chan, &a).await.unwrap();
+        let outcome = run_responder(&mut chan, &a, None).await.unwrap();
         assert_eq!(outcome.stats.sent, 0);
         for msg in &chan.sent {
             if let SyncMessage::Items { items } = msg {
@@ -571,6 +630,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                listen_addr: None,
             },
             SyncMessage::Summary { items: vec![] },
             SyncMessage::Items {
@@ -580,7 +640,7 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
         assert!(a.get("pushed").is_none(), "an unrequested item was applied");
         assert_eq!(outcome.stats.received, 0);
         assert_eq!(outcome.stats.skipped, 1);
@@ -600,6 +660,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                listen_addr: None,
             },
             SyncMessage::Summary {
                 items: vec![promised],
@@ -609,7 +670,7 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
         assert!(a.get("x").is_none());
         assert_eq!(outcome.stats.skipped, 1);
     }
@@ -630,6 +691,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                listen_addr: None,
             },
             SyncMessage::Summary {
                 items: vec![promised],
@@ -641,7 +703,7 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
         assert!(a.get("x").is_none(), "a forged content_hash was applied");
         assert_eq!(outcome.stats.received, 0);
         assert_eq!(outcome.stats.skipped, 1);
@@ -660,6 +722,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                listen_addr: None,
             },
             SyncMessage::Summary {
                 items: vec![grave.summary()],
@@ -669,7 +732,7 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
         assert_eq!(outcome.stats.received, 1, "the delete was dropped");
         assert!(a.get("x").is_some_and(|i| i.deleted));
     }
@@ -682,6 +745,7 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
+                listen_addr: None,
             },
             SyncMessage::Summary { items: vec![] },
         ];
@@ -690,7 +754,7 @@ mod tests {
 
         let mut chan = ScriptChannel::new(script);
         assert_eq!(
-            run_initiator(&mut chan, &a).await,
+            run_initiator(&mut chan, &a, None).await,
             Err(SyncError::PeerOverran)
         );
     }
@@ -702,11 +766,12 @@ mod tests {
             protocol_version: PROTOCOL_VERSION + 1,
             device_id: "dev-b".into(),
             device_name: "B".into(),
+            listen_addr: None,
         };
 
         let mut chan = ScriptChannel::new(vec![stale.clone()]);
         assert_eq!(
-            run_initiator(&mut chan, &a).await,
+            run_initiator(&mut chan, &a, None).await,
             Err(SyncError::Protocol(ProtocolError::VersionMismatch {
                 ours: PROTOCOL_VERSION,
                 theirs: PROTOCOL_VERSION + 1,
@@ -715,7 +780,7 @@ mod tests {
 
         let mut chan = ScriptChannel::new(vec![stale]);
         assert!(matches!(
-            run_responder(&mut chan, &a).await,
+            run_responder(&mut chan, &a, None).await,
             Err(SyncError::Protocol(ProtocolError::VersionMismatch { .. }))
         ));
     }
@@ -727,8 +792,12 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             device_id: "dev-a".into(),
             device_name: "me".into(),
+            listen_addr: None,
         }]);
-        assert_eq!(run_initiator(&mut chan, &a).await, Err(SyncError::SelfSync));
+        assert_eq!(
+            run_initiator(&mut chan, &a, None).await,
+            Err(SyncError::SelfSync)
+        );
     }
 
     #[tokio::test]
@@ -736,7 +805,7 @@ mod tests {
         let a = TestSource::new("dev-a", vec![]);
         let mut chan = ScriptChannel::new(vec![SyncMessage::Done]);
         assert_eq!(
-            run_initiator(&mut chan, &a).await,
+            run_initiator(&mut chan, &a, None).await,
             Err(SyncError::Unexpected {
                 expected: "hello",
                 got: "done"

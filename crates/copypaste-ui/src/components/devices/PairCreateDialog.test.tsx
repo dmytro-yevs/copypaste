@@ -29,6 +29,10 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
   };
 });
 
+vi.mock("@/components/devices/QrCode", () => ({
+  QrCode: ({ label }: { label: string }) => <canvas role="img" aria-label={label} />,
+}));
+
 const CODE = "aaaabbbbccccddddeeeeffffgggghhhh";
 
 beforeEach(() => {
@@ -72,5 +76,15 @@ describe("copying the pairing code", () => {
     expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
     // And it must not put the credential anywhere else on the way out.
     expect(alert.textContent).not.toContain(CODE);
+  });
+});
+
+describe("revealing the pairing QR", () => {
+  it("keeps the QR code off screen until the user explicitly reveals it", async () => {
+    const user = await withCode();
+
+    expect(screen.queryByLabelText(/pairing code as a QR code/i)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Reveal QR code" }));
+    expect(screen.getByLabelText(/pairing code as a QR code/i)).toBeTruthy();
   });
 });

@@ -46,12 +46,13 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// [`CloudSync::pull`].
     pub async fn push(&self, source: &dyn CloudSource) -> Result<SyncStats, SyncError> {
         let since = source.upload_floor()?;
+        let after_item_id = source.upload_floor_item_id()?;
         let device_id = source.device_id();
         let mut stats = SyncStats::default();
 
         let mut rows: Vec<CloudItem> = Vec::new();
 
-        for mut item in source.local_changes_since(since)? {
+        for mut item in source.local_changes_after(since, after_item_id.as_deref())? {
             // The gate, before anything is sealed or counted. A sensitive item
             // is not merely withheld from this request — it is never given an
             // opportunity to reach the network at all.

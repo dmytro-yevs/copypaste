@@ -3,8 +3,7 @@
  *
  * Each row here is a different remedy: a code nobody has redeemed, a device
  * this one holds no address for, a device sitting on the network not syncing,
- * and a device that is simply elsewhere were all rendered as one grey dot
- * (`ui-parity-audit.md` finding 4).
+ * and a device that is simply elsewhere were all rendered as one grey dot.
  */
 import { describe, expect, it } from "vitest";
 

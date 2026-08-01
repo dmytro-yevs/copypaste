@@ -167,18 +167,14 @@ pub(super) fn get(state: &AppState, id: u64, item_id: &str) -> Response {
 pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
     // Read first so an unknown id is `not_found` rather than a silent success:
     // a client that deleted nothing needs to know it deleted nothing.
-    let created_at = match state.store.get(item_id) {
+    match state.store.get(item_id) {
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
         Err(e) => return storage_error(id, "get", &e),
-        Ok(Some(row)) => row.created_at,
+        Ok(Some(_)) => {}
     };
 
     match state.store.delete(item_id) {
         Ok(_) => {
-            // A tombstone keeps the item's original `created_at`, so a delete
-            // of anything older than the cloud upload cursor is invisible to it
-            // until the cursor is pulled back.
-            crate::cloud::note_version_written(state, created_at);
             state.note_local_change();
             Response::ok(id, ResponseData::Empty {})
         }
@@ -196,14 +192,6 @@ pub(super) fn delete_all(state: &AppState, id: u64) -> Response {
     match state.store.delete_all() {
         Ok(deleted) => {
             if deleted > 0 {
-                // Every tombstone keeps its item's original stamp, so the cloud
-                // cursor has to be pulled back to the oldest of them for the
-                // clear to propagate at all.
-                match state.store.oldest_version_ms() {
-                    Ok(Some(oldest)) => crate::cloud::note_version_written(state, oldest),
-                    Ok(None) => {}
-                    Err(e) => warn!(error = ?e, "could not reset the cloud upload cursor"),
-                }
                 state.note_local_change();
             }
             Response::ok(id, ResponseData::Count(deleted))
