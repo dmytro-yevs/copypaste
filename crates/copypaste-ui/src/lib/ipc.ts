@@ -24,6 +24,8 @@ export interface Item {
  *  short page and a small history (finding 17). */
 export interface ItemPage {
   readonly items: readonly Item[];
+  /** Full live-history count, so a capped surface never silently truncates. */
+  readonly total: number;
   readonly skipped_undecryptable: number;
   /** Opaque; pass it straight back to `listItems`. `null` is the **only**
    *  end-of-list test — a page shortened by `skipped_undecryptable` rows still
@@ -86,6 +88,12 @@ export function searchItems(query: string, limit: number): Promise<ItemPage> {
 
 export function copyItem(id: string): Promise<Item> {
   return call<Item>("copy_item", { id });
+}
+
+/** Quick Paste's explicit ⌥Enter action. The item stays behind the native
+ * boundary; only its id crosses the WebView bridge. */
+export function copyItemAsPlainText(id: string): Promise<Item> {
+  return call<Item>("copy_item_as_plain_text", { id });
 }
 
 export function addItem(content: string): Promise<Item> {
@@ -199,6 +207,11 @@ export function restartService(): Promise<ServiceState> {
  *  (ADR-0001). */
 export function hideWindow(): Promise<void> {
   return call<void>("hide_window");
+}
+
+/** Show the full application surface from the compact Quick Paste popup. */
+export function showMainWindow(): Promise<void> {
+  return call<void>("show_main_window");
 }
 
 /** INV-35. The window is created protected on both platforms, so this only
