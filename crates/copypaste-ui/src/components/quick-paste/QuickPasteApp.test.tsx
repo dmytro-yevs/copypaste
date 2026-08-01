@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
 import { IpcFailure } from "@/lib/errors";
+import { DEFAULT_PREFS, STORAGE_KEY } from "@/store/prefs";
 import { item, page, withUser } from "@/test/harness";
 
 const copyItem = vi.fn();
@@ -30,6 +31,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
 });
 
 beforeEach(() => {
+  window.localStorage.clear();
   copyItem.mockReset().mockResolvedValue(item());
   copyItemAsPlainText.mockReset().mockResolvedValue(item());
   hideWindow.mockReset().mockResolvedValue(undefined);
@@ -41,6 +43,21 @@ beforeEach(() => {
 });
 
 describe("Quick Paste", () => {
+  it("clamps result previews to the persisted popup line setting", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state: { ...DEFAULT_PREFS, previewLinesPopup: 5 },
+        version: 0,
+      }),
+    );
+    listItems.mockResolvedValue(page([item({ content: "five-line preview" })]));
+    withUser(<QuickPasteApp />);
+
+    const preview = await screen.findByText("five-line preview");
+    expect(preview.getAttribute("style")).toContain("-webkit-line-clamp: 5");
+  });
+
   it("copies the selected item and dismisses only after a successful copy", async () => {
     withUser(<QuickPasteApp />);
 

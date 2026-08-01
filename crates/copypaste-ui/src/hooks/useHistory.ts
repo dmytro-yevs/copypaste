@@ -32,6 +32,7 @@ import {
 } from "@/lib/ipc";
 
 export const HISTORY_KEY = ["history"] as const;
+export const HISTORY_SEARCH_KEY = ["history-search"] as const;
 export const STATUS_KEY = ["status"] as const;
 
 export const historyKey = (query: string) => [...HISTORY_KEY, query] as const;
@@ -101,6 +102,14 @@ export function useHistory(query: string, pushLive = false) {
     // Typing must not blank the list between keystrokes.
     placeholderData: keepPreviousData,
     select: flatten,
+  });
+}
+
+export function useHistorySearch(query: string) {
+  return useQuery({
+    queryKey: [...HISTORY_SEARCH_KEY, query],
+    queryFn: () => searchItems(query, SEARCH_LIMIT),
+    enabled: query.length > 0,
   });
 }
 

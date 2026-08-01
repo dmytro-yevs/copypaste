@@ -27,11 +27,26 @@ export const ACCENTS = APPEARANCE_SERIALIZATION.accents;
 
 export type { Accent, ThemePref };
 
+export const HISTORY_DISPLAY_LIMITS = [
+  100,
+  250,
+  500,
+  1000,
+  2500,
+  5000,
+  10_000,
+  100_000,
+] as const;
+export const UNLIMITED_HISTORY_DISPLAY = 100_000;
+
 export interface Prefs {
   theme: ThemePref;
   accent: Accent;
   translucency: boolean;
   previewLines: number;
+  previewLinesPopup: number;
+  sortByDevice: boolean;
+  historyDisplayLimit: (typeof HISTORY_DISPLAY_LIMITS)[number];
   /** Default on (n9gp). There is deliberately no "Mask sensitive data" toggle
    *  beside it: the bridge drops the plaintext before it crosses into the
    *  WebView, so nothing here *can* unmask an item without asking, and a toggle
@@ -46,6 +61,9 @@ export interface Prefs {
 export const DEFAULT_PREFS: Prefs = {
   ...APPEARANCE_SERIALIZATION.defaults,
   previewLines: DEFAULT_PREVIEW_LINES,
+  previewLinesPopup: 1,
+  sortByDevice: false,
+  historyDisplayLimit: 1000,
   warnBeforeReveal: true,
   allowScreenshots: false,
 };
@@ -57,6 +75,17 @@ export const DEFAULT_PREFS: Prefs = {
  */
 const FIELD = {
   previewLines: z.number().int().min(MIN_PREVIEW_LINES).max(MAX_PREVIEW_LINES),
+  previewLinesPopup: z
+    .number()
+    .int()
+    .min(MIN_PREVIEW_LINES)
+    .max(MAX_PREVIEW_LINES),
+  sortByDevice: z.boolean(),
+  historyDisplayLimit: z
+    .number()
+    .refine((value) =>
+      (HISTORY_DISPLAY_LIMITS as readonly number[]).includes(value),
+    ),
   warnBeforeReveal: z.boolean(),
   allowScreenshots: z.boolean(),
 } as const;

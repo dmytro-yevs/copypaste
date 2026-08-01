@@ -2,13 +2,15 @@
  * A no-op view returns the array it was given: INV-2 says identical data must
  * not produce a new list reference.
  *
- * It operates on the *loaded* set — a sort argument on `Method::List` would put
- * a second ordering where manifest 05 depends on there being one — so a filter
- * can leave matches unpaged, which is what the list's "Load more" control is
- * for.
+ * It operates on the client set — a sort argument on `Method::List` would put
+ * a second ordering where manifest 05 depends on there being one. The history
+ * controller expands that set while search is active.
  */
+import fuzzysort from "fuzzysort";
+
+import { originOf } from "@/components/history/origin";
 import { t } from "@/i18n";
-import { type Kind, kindOf } from "@/lib/format";
+import { type Kind, kindOf, previewOf } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
 
 export type KindFilter = "all" | Kind;
@@ -17,12 +19,29 @@ export type SortOrder = "newest" | "oldest";
 export interface ViewOptions {
   readonly kind: KindFilter;
   readonly sort: SortOrder;
+  readonly device: string;
+  readonly groupByDevice: boolean;
 }
 
-export const DEFAULT_VIEW: ViewOptions = { kind: "all", sort: "newest" };
+export const ALL_DEVICES = "all";
+export const DEFAULT_VIEW: ViewOptions = {
+  kind: "all",
+  sort: "newest",
+  device: ALL_DEVICES,
+  groupByDevice: false,
+};
 
 export function isDefaultView(view: ViewOptions): boolean {
-  return view.kind === DEFAULT_VIEW.kind && view.sort === DEFAULT_VIEW.sort;
+  return (
+    view.kind === DEFAULT_VIEW.kind &&
+    view.sort === DEFAULT_VIEW.sort &&
+    view.device === DEFAULT_VIEW.device &&
+    view.groupByDevice === DEFAULT_VIEW.groupByDevice
+  );
+}
+
+export function isFilteringView(view: ViewOptions): boolean {
+  return view.kind !== "all" || view.device !== ALL_DEVICES;
 }
 
 /** Not every `Kind`: `unknown` is what an item with no content resolves to, so
@@ -75,19 +94,71 @@ export function sortLabel(sort: SortOrder): string {
 export function applyView(
   items: readonly Item[],
   view: ViewOptions,
+  searching = false,
 ): readonly Item[] {
-  if (isDefaultView(view)) return items;
+  if (isDefaultView(view) && !searching) return items;
 
-  const filtered =
+  let filtered =
     view.kind === "all" ? items : items.filter((item) => kindOf(item) === view.kind);
 
-  if (view.sort === "newest") return filtered;
+  if (view.device !== ALL_DEVICES) {
+    filtered = filtered.filter((item) => originOf(item)?.id === view.device);
+  }
 
-  // Copied before sorting: the input is the query cache's array, and sorting it
-  // in place would mutate the object INV-2's identity check is about.
-  // (`toSorted` is ES2023; the target is ES2022.)
-  return [...filtered].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-    return a.created_at - b.created_at;
+  if (searching) return filtered;
+
+  const ordered =
+    view.sort === "newest"
+      ? filtered
+      : [...filtered].sort((a, b) => {
+          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+          return a.created_at - b.created_at;
+        });
+
+  if (!view.groupByDevice) return ordered;
+
+  return [...ordered].sort((a, b) => {
+    const aId = originOf(a)?.id ?? "";
+    const bId = originOf(b)?.id ?? "";
+    if (aId === bId) return 0;
+    return aId.localeCompare(bId);
   });
+}
+
+export function fuzzyItems(
+  items: readonly Item[],
+  query: string,
+): readonly Item[] {
+  const needle = query.trim();
+  if (!needle) return items;
+
+  return items
+    .filter((item) => !item.is_sensitive && item.content !== null)
+    .map((item, index) => ({
+      item,
+      index,
+      match: fuzzysort.single(needle, previewOf(item.content ?? "")),
+    }))
+    .filter(
+      (entry): entry is typeof entry & {
+        match: NonNullable<typeof entry.match>;
+      } =>
+        entry.match !== null,
+    )
+    .sort((a, b) => b.match.score - a.match.score || a.index - b.index)
+    .map((entry) => entry.item);
+}
+
+export function mergeSearchResults(
+  fuzzy: readonly Item[],
+  server: readonly Item[],
+): readonly Item[] {
+  const seen = new Set<string>();
+  const merged: Item[] = [];
+  for (const item of [...fuzzy, ...server]) {
+    if (item.is_sensitive || seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged;
 }
