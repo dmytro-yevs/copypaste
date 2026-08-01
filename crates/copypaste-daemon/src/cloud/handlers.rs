@@ -20,8 +20,8 @@ use copypaste_ipc::{ErrorCode, Response, ResponseData};
 use tracing::{info, warn};
 use zeroize::Zeroizing;
 
+use crate::cloud::{poll, source::StoreSource, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM};
 use crate::AppState;
-use crate::cloud::{KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, poll, source::StoreSource};
 
 const MSG_NOT_CONFIGURED: &str =
     "cloud sync is not configured; the daemon needs a project URL and anon key";

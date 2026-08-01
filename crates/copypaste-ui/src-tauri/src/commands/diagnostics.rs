@@ -14,8 +14,8 @@ use tauri_plugin_fs::{FsExt as _, OpenOptions};
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 use crate::commands::transfer::save_panel_file;
-use crate::service::Supervisor;
 use crate::service::diagnostics::{Diagnostics, HistoryRead};
+use crate::service::Supervisor;
 
 const REPORT_NAME: &str = "copypaste-diagnostics.txt";
 const BUNDLE_NAME: &str = "copypaste-support-bundle.txt";

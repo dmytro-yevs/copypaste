@@ -58,7 +58,8 @@ const MSG_IMPORT_TOO_LARGE: &str = "That export is too large to import safely on
 const MSG_IMPORT_EXPIRED: &str = "That import is no longer available. Choose the file again.";
 const MSG_IMPORT_STATE: &str = "The pending import couldn't be accessed. Choose the file again.";
 const MSG_NOT_WRITTEN: &str = "The export couldn't be written.";
-const MSG_BACKUP_EXISTS: &str = "There is already a file with that name. A backup is never written over an existing \
+const MSG_BACKUP_EXISTS: &str =
+    "There is already a file with that name. A backup is never written over an existing \
      file — choose another name.";
 
 /// A file import must fit comfortably in the UI process. The item-count limit

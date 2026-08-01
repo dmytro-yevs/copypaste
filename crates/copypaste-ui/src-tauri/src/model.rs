@@ -41,7 +41,7 @@
 //! Everything else — copy, delete, pin — travels by id and does its work in the
 //! backend, so the secret never needs to be in the WebView to be *used*.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_ipc::{DiscoveredDevice, ImagePreview, Item, PeerInfo, StatusData, SyncResult};
 use serde::Serialize;
 
@@ -138,6 +138,7 @@ impl UiInstalledSourceApp {
 }
 
 impl UiSourceAppIcon {
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn from_png(png: Vec<u8>, width: u32, height: u32) -> Self {
         Self {
             png_base64: STANDARD.encode(png),

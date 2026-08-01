@@ -17,11 +17,11 @@ use tauri::{Manager, Wry};
 
 use crate::backend::{BackendError, Result};
 
-use super::CaptureControl;
 use super::model::{
     AndroidArmResult, AndroidProbeResult, CaptureModel, CaptureSnapshot, CaptureSource, Clip,
-    LOST_BODY, LOST_TITLE, ReadOutcome, ShizukuProbe,
+    ReadOutcome, ShizukuProbe, LOST_BODY, LOST_TITLE,
 };
+use super::CaptureControl;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +36,11 @@ pub struct AndroidSourceAppIcon {
 pub struct AndroidInstalledSourceApp {
     pub package_id: String,
     pub label: String,
+}
+
+#[derive(Deserialize)]
+struct AndroidInstalledSourceAppsResult {
+    apps: Vec<AndroidInstalledSourceApp>,
 }
 
 #[derive(Serialize)]
@@ -161,7 +166,8 @@ impl AndroidCapture {
     /// Lists user-visible installed applications for the exclusion picker.
     /// Package identity remains the value written to the service config.
     pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
-        self.call("installedSourceApps", (), MSG_BRIDGE)
+        self.call::<_, AndroidInstalledSourceAppsResult>("installedSourceApps", (), MSG_BRIDGE)
+            .map(|result| result.apps)
     }
 }
 

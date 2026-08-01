@@ -176,7 +176,7 @@ object ShizukuClipboard {
     }
 
     /** `null` when the clipboard was empty, unreadable, or not text. */
-    fun pollOnce(): CapturedClip? = try {
+    private fun pollOnce(): CapturedClip? = try {
         val clipboard = clipboardService()
         val clip = invoke(clipboard, "getPrimaryClip")
         clip?.let { value ->

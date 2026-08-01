@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use copypaste_core::{CryptoError, Detector, Keyring, Store, StoreError, purge_indexed_secrets};
+use copypaste_core::{purge_indexed_secrets, CryptoError, Detector, Keyring, Store, StoreError};
 use copypaste_ipc::ErrorCode;
 
 use crate::backend::{BackendError, Result};
@@ -179,7 +179,7 @@ mod tests {
     fn the_embedded_open_purge_removes_previously_indexed_sensitive_text() {
         let dir = tempfile::TempDir::new().unwrap();
         let store = Store::open(&dir.path().join("copypaste-v2.db"), &[7; 32]).unwrap();
-        let text = "mail alice.smith@example.com about it";
+        let text = "AKIAIOSFODNN7EXAMPLE";
         store
             .insert(copypaste_core::NewItem {
                 id: "old-sensitive-index-row".to_string(),
@@ -195,10 +195,10 @@ mod tests {
                 created_at: 1,
             })
             .unwrap();
-        assert_eq!(store.search("alice", 10).unwrap().len(), 1);
+        assert_eq!(store.search("AKIA", 10).unwrap().len(), 1);
 
         purge_search_index(&store, &Detector::new().unwrap());
-        assert!(store.search("alice", 10).unwrap().is_empty());
+        assert!(store.search("AKIA", 10).unwrap().is_empty());
     }
 
     /// A detector update must be applied by the same startup helper Android

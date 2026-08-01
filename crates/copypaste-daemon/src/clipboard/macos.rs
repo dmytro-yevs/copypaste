@@ -33,8 +33,8 @@
 // compiling across binding revisions instead of flipping with each bump.
 #![allow(unused_unsafe)]
 
-use objc2::rc::{Retained, autoreleasepool};
-use std::path::{Path, PathBuf};
+use objc2::rc::{autoreleasepool, Retained};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use objc2_app_kit::{NSPasteboard, NSWorkspace};
@@ -43,6 +43,11 @@ use tracing::{debug, info, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
 use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
+
+#[path = "macos_capture.rs"]
+mod capture;
+
+use capture::{file_capture, first_absolute_filename_plist, Attribution, FrontmostApp};
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
 /// statics: the values are frozen by the OS and by nspasteboard.org, and
@@ -124,77 +129,9 @@ pub struct MacOsClipboard {
     staging: super::file_materialize::StagingArea,
 }
 
-#[derive(Clone)]
-struct FrontmostApp {
-    /// Some foreground helpers do not advertise a bundle identifier even
-    /// though AppKit can still tell us their localized name. Keep the two
-    /// independently so the UI never turns a known source into “Unknown app”.
-    bundle_id: Option<String>,
-    name: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Attribution {
-    Bundle,
-    NameOnly,
-    Unavailable,
-}
-
-impl Attribution {
-    fn from_app(app: Option<&FrontmostApp>) -> Self {
-        match app {
-            Some(FrontmostApp {
-                bundle_id: Some(_), ..
-            }) => Self::Bundle,
-            Some(FrontmostApp { name: Some(_), .. }) => Self::NameOnly,
-            _ => Self::Unavailable,
-        }
-    }
-}
-
 enum SelectedRepresentation {
     Data(Retained<NSData>, &'static str),
     LegacyFileNames(Retained<NSData>),
-}
-
-fn first_absolute_filename_plist(bytes: &[u8]) -> Option<PathBuf> {
-    // `NSFilenamesPboardType` is a binary plist. Reject another encoding rather
-    // than treating arbitrary text as a path, and let parser failures remain a
-    // harmless dropped pasteboard change (CopyPaste-q5ab / I-37).
-    if !bytes.starts_with(b"bplist00") {
-        debug!("legacy filename pasteboard payload was not a binary plist; dropped");
-        return None;
-    }
-    plist::from_bytes::<Vec<String>>(bytes)
-        .ok()?
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|path| path.is_absolute())
-}
-
-fn file_capture(
-    path: PathBuf,
-    app_bundle_id: Option<String>,
-    app_name: Option<String>,
-) -> Option<Capture> {
-    if !path.is_absolute() {
-        debug!("pasteboard file path was not absolute; dropped");
-        return None;
-    }
-    let filename = path.file_name()?.to_string_lossy().into_owned();
-    let mime = mime_guess::from_path(&path)
-        .first_raw()
-        .unwrap_or("application/octet-stream");
-    let metadata = copypaste_core::FileMetadata::new(filename, mime)?;
-    Some(Capture {
-        content: String::new(),
-        binary_content: None,
-        file_path: Some(path),
-        file_metadata: Some(metadata),
-        content_type: copypaste_ipc::content_type::FILE.to_string(),
-        app_bundle_id,
-        app_name,
-    })
 }
 
 impl MacOsClipboard {
@@ -554,6 +491,7 @@ impl MacOsClipboard {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::sync::{Mutex, MutexGuard};
 
     use objc2_foundation::NSData;
@@ -898,11 +836,9 @@ mod tests {
 
         let oversized = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize + 1];
         write_types(&[(UTI_PNG, &oversized)]);
-        assert!(
-            clipboard
-                .poll_with_policy(CapturePolicy::new(&settings))
-                .is_none()
-        );
+        assert!(clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .is_none());
 
         let boundary = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize];
         write_types(&[(UTI_PNG, &boundary)]);

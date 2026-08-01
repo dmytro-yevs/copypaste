@@ -172,15 +172,17 @@ fn parse_advertisement(txt: &TxtProperties, fallback_name: &str) -> Option<Adver
 /// A candidate device from one resolved mDNS service. This deliberately
 /// returns a peer even with no pairing ids: discovery must find a fresh device
 /// before either side has created its first pairing.
-pub(super) fn peer_from_resolved(resolved: &ResolvedService, now_ms: i64) -> Option<DiscoveredPeer> {
-    let Some(advertisement) = parse_advertisement(&resolved.txt_properties, &resolved.fullname)
-    else { return None; };
+pub(super) fn peer_from_resolved(
+    resolved: &ResolvedService,
+    now_ms: i64,
+) -> Option<DiscoveredPeer> {
+    let advertisement = parse_advertisement(&resolved.txt_properties, &resolved.fullname)?;
     if resolved.port == 0 {
         return None;
     }
 
     let addrs: Vec<IpAddr> = resolved.addresses.iter().map(|a| a.to_ip_addr()).collect();
-    let Some(ip) = best_addr(&addrs) else { return None; };
+    let ip = best_addr(&addrs)?;
     let addr = SocketAddr::new(ip, resolved.port);
 
     Some(DiscoveredPeer {

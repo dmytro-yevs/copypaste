@@ -221,7 +221,7 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
 
 #[cfg(test)]
 mod tests {
-    use super::{CapturePolicy, MAX_CAPTURE_BYTES, is_password_manager_app};
+    use super::{is_password_manager_app, CapturePolicy, MAX_CAPTURE_BYTES};
     use copypaste_ipc::ConfigData;
 
     #[test]

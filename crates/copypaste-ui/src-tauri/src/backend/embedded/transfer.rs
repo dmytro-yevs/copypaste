@@ -110,14 +110,12 @@ mod tests {
 
         let listed = backend.list(50, None).await.unwrap();
         assert!(listed.items[0].is_sensitive, "the detector did not re-run");
-        assert!(
-            backend
-                .search("AKIAIOSFODNN7EXAMPLE", 20)
-                .await
-                .unwrap()
-                .items
-                .is_empty()
-        );
+        assert!(backend
+            .search("AKIAIOSFODNN7EXAMPLE", 20)
+            .await
+            .unwrap()
+            .items
+            .is_empty());
     }
 
     /// An empty file is the file answering, not a fault — and it must not read

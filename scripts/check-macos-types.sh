@@ -190,6 +190,8 @@ pub mod notify;
 
 pub mod crypto;
 
+const _: fn(&str) -> bool = clipboard::is_password_manager_app;
+
 mod daemon_state;
 pub use daemon_state::AppState;
 EOF
@@ -225,6 +227,12 @@ impl FileMetadata {
 
 pub fn binary_item_id(_bytes: &[u8]) -> String {
     "00000000-0000-0000-0000-000000000000".to_owned()
+}
+
+pub mod sensitive {
+    pub fn is_password_manager_app(_bundle_id: &str) -> bool {
+        false
+    }
 }
 EOF
 

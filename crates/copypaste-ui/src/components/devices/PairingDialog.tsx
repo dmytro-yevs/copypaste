@@ -325,14 +325,14 @@ function PairingField({
       type="button"
       onClick={onCopy}
       aria-label={`${label}: ${copied ? "Copied" : "Copy"}`}
-      className="group flex min-w-0 items-center gap-s-2 rounded-md border border-border bg-muted px-s-2 py-s-2 text-left transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+      className="group flex min-w-0 items-center gap-s-2 rounded-md border border-border-strong bg-muted px-s-2 py-s-2 text-left transition-colors hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
     >
       <div className="min-w-0 flex-1">
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="mt-0.5 truncate font-mono text-xs text-foreground">{value}</p>
       </div>
       {copied ? (
-        <Check aria-hidden="true" className="size-4 shrink-0 text-primary" />
+        <Check aria-hidden="true" className="size-4 shrink-0 text-brand-2" />
       ) : (
         <Copy aria-hidden="true" className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
       )}
