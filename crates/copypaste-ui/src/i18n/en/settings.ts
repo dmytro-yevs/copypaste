@@ -73,6 +73,8 @@ export const settings = {
     current:
       "Current shortcut: {{accelerator}}. Click and press a new key combination.",
     reset: "Reset to default",
+    saved: "Saved",
+    resetSaved: "Reset to default",
     saveFailed: "The previous shortcut is still in effect.",
     unavailable:
       "This build can't change the shortcut yet — the background service owns it, and the app has no way to ask it to rebind. {{accelerator}} is in effect.",
