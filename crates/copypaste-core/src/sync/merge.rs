@@ -234,10 +234,10 @@ fn apply_remote_version_with_pin_state(
         return Ok(false);
     }
     if !incoming.deleted && incoming.content_type == copypaste_ipc::content_type::FILE {
-        if !incoming
+        if incoming
             .payload_metadata
             .and_then(crate::FileMetadata::from_json)
-            .is_some()
+            .is_none()
         {
             return Ok(false);
         }
