@@ -19,6 +19,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The default local-history budget: 10 GiB.
+pub const DEFAULT_STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+/// The smallest retention budget a user may select: 50 MiB.
+pub const MIN_STORAGE_QUOTA_BYTES: u64 = 50 * 1024 * 1024;
+
+const fn default_storage_quota_bytes() -> u64 {
+    DEFAULT_STORAGE_QUOTA_BYTES
+}
+
 /// Whether a change takes effect on the running daemon.
 ///
 /// Recorded per field in [`ConfigData::field_liveness`] and surfaced by
@@ -44,9 +53,8 @@ pub enum Liveness {
 ///   text-only.
 /// * `relay_url`, `sync_on_wifi_only`, `max_bandwidth_kbps`, `collect_public_ip`
 ///   — no relay and no STUN in v2.
-/// * `sqlite_cache_mb`, `history_limit` (v1's deprecated twin of the byte
-///   quota), `config_version` — implementation detail, dead, and unnecessary
-///   without backward compatibility (CLAUDE.md rule 3).
+/// * `sqlite_cache_mb`, `config_version` — implementation detail, dead, and
+///   unnecessary without backward compatibility (CLAUDE.md rule 3).
 ///
 /// `sound_on_copy` and `notify_on_copy` were absent for the same reason and are
 /// now present: parity finding 18 is built.
@@ -67,6 +75,9 @@ pub struct ConfigData {
     /// How many live items are kept before the oldest unpinned ones are
     /// evicted. **Live.**
     pub history_limit: u32,
+    /// Maximum bytes held by unpinned live ciphertext. **Live.**
+    #[serde(default = "default_storage_quota_bytes")]
+    pub storage_quota_bytes: u64,
     /// Items older than this are evicted. `0` disables age-based retention.
     /// **Live.**
     pub retention_days: u32,
@@ -159,6 +170,7 @@ impl Default for ConfigData {
         Self {
             poll_interval_ms: 500,
             history_limit: 10_000,
+            storage_quota_bytes: DEFAULT_STORAGE_QUOTA_BYTES,
             retention_days: 0,
             dedup_window_secs: 60,
             max_item_bytes: 4 * 1024 * 1024,
@@ -180,6 +192,7 @@ impl Default for ConfigData {
 /// Inclusive bounds, as a pair, so the message and the check cannot disagree.
 const POLL_INTERVAL_MS: (u64, u64) = (100, 60_000);
 const HISTORY_LIMIT: (u32, u32) = (10, 1_000_000);
+const STORAGE_QUOTA_BYTES: (u64, u64) = (MIN_STORAGE_QUOTA_BYTES, u64::MAX);
 const RETENTION_DAYS: (u32, u32) = (0, 3_650);
 const DEDUP_WINDOW_SECS: (u32, u32) = (0, 86_400);
 /// The ceiling is not a free choice: an item a user is allowed to store has to
@@ -233,6 +246,8 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_limit: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_quota_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dedup_window_secs: Option<u32>,
@@ -264,6 +279,9 @@ impl ConfigPatch {
         }
         if let Some(v) = self.history_limit {
             next.history_limit = range("history_limit", v, HISTORY_LIMIT)?;
+        }
+        if let Some(v) = self.storage_quota_bytes {
+            next.storage_quota_bytes = range("storage_quota_bytes", v, STORAGE_QUOTA_BYTES)?;
         }
         if let Some(v) = self.retention_days {
             next.retention_days = range("retention_days", v, RETENTION_DAYS)?;
@@ -315,6 +333,7 @@ impl From<&ConfigData> for ConfigPatch {
         Self {
             poll_interval_ms: Some(c.poll_interval_ms),
             history_limit: Some(c.history_limit),
+            storage_quota_bytes: Some(c.storage_quota_bytes),
             retention_days: Some(c.retention_days),
             dedup_window_secs: Some(c.dedup_window_secs),
             max_item_bytes: Some(c.max_item_bytes),
@@ -351,6 +370,7 @@ impl ConfigData {
         &[
             ("poll_interval_ms", Liveness::Live),
             ("history_limit", Liveness::Live),
+            ("storage_quota_bytes", Liveness::Live),
             ("retention_days", Liveness::Live),
             ("dedup_window_secs", Liveness::Live),
             ("max_item_bytes", Liveness::Live),
@@ -398,6 +418,7 @@ mod tests {
         .unwrap();
         assert_eq!(next.poll_interval_ms, 250);
         assert_eq!(next.history_limit, base.history_limit);
+        assert_eq!(next.storage_quota_bytes, base.storage_quota_bytes);
     }
 
     /// The whole point of validating into a new value: a rejected write must
@@ -428,6 +449,10 @@ mod tests {
             },
             ConfigPatch {
                 history_limit: Some(9),
+                ..Default::default()
+            },
+            ConfigPatch {
+                storage_quota_bytes: Some(MIN_STORAGE_QUOTA_BYTES - 1),
                 ..Default::default()
             },
             ConfigPatch {
@@ -469,6 +494,20 @@ mod tests {
         ] {
             assert!(patch.apply(&base).is_ok(), "{patch:?}");
         }
+    }
+
+    #[test]
+    fn storage_quota_defaults_to_ten_gib_and_rejects_less_than_fifty_mib() {
+        let base = ConfigData::default();
+        assert_eq!(base.storage_quota_bytes, DEFAULT_STORAGE_QUOTA_BYTES);
+
+        let next = ConfigPatch {
+            storage_quota_bytes: Some(MIN_STORAGE_QUOTA_BYTES),
+            ..Default::default()
+        }
+        .apply(&base)
+        .unwrap();
+        assert_eq!(next.storage_quota_bytes, MIN_STORAGE_QUOTA_BYTES);
     }
 
     /// **The assertion whose absence is why this survived.**
@@ -615,5 +654,9 @@ mod tests {
         let config: ConfigData = serde_json::from_str(raw).unwrap();
         assert_eq!(config.poll_interval_ms, 250);
         assert_eq!(config.history_limit, ConfigData::default().history_limit);
+        assert_eq!(
+            config.storage_quota_bytes,
+            ConfigData::default().storage_quota_bytes
+        );
     }
 }
