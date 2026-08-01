@@ -609,6 +609,37 @@ mod tests {
         assert_eq!(String::from_utf8(plain).unwrap(), "from another device");
     }
 
+    #[test]
+    fn a_cloud_merge_keeps_the_download_watermark_and_tombstone() {
+        let (source, state, _dir) = source("beta");
+        source.set_watermark_keyset(9_000, "cursor-item").unwrap();
+
+        assert!(source
+            .apply_remote(LocalItem {
+                item_id: "gone-in-cloud".into(),
+                content: Vec::new(),
+                content_type: "text".into(),
+                created_at: 4_000,
+                deleted: true,
+                origin_device_id: "device-a".into(),
+            })
+            .unwrap());
+
+        assert_eq!(source.watermark().unwrap(), 9_000);
+        assert_eq!(
+            source.watermark_item_id().unwrap().as_deref(),
+            Some("cursor-item")
+        );
+        assert!(
+            state
+                .store
+                .version("gone-in-cloud")
+                .unwrap()
+                .unwrap()
+                .deleted
+        );
+    }
+
     /// A round's own upload, echoed back by the account, must be a no-op — and
     /// it is absorbed by the ordering rather than by a "did I send this?" check
     /// (INV-I2).

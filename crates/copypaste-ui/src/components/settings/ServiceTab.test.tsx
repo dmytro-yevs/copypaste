@@ -35,6 +35,7 @@ function config(over: Partial<ConfigData> = {}): ConfigData {
   return {
     poll_interval_ms: 500,
     history_limit: 10_000,
+    storage_quota_bytes: 10 * 1_073_741_824,
     retention_days: 0,
     dedup_window_secs: 30,
     max_item_bytes: 4 * 1_048_576,
@@ -110,6 +111,16 @@ describe("writing one", () => {
     await user.click(await screen.findByRole("switch", { name: "Notify on capture" }));
     await waitFor(() =>
       expect(setConfig.mock.calls[0]![0]).toEqual({ notify_on_copy: true }),
+    );
+  });
+
+  it("sends the configured storage quota as its own patch", async () => {
+    const { user } = withUser(<ServiceTab />);
+    const quota = await screen.findByRole("combobox", { name: "Storage quota" });
+    await user.selectOptions(quota, String(5 * 1_073_741_824));
+
+    await waitFor(() =>
+      expect(setConfig).toHaveBeenCalledWith({ storage_quota_bytes: 5 * 1_073_741_824 }),
     );
   });
 });

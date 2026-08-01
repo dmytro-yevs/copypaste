@@ -242,6 +242,9 @@ pub(crate) enum ConfigAction {
         /// How many items to keep before evicting the oldest unpinned ones.
         #[arg(long)]
         history_limit: Option<u32>,
+        /// Maximum bytes held by unpinned items. Minimum: 50 MiB.
+        #[arg(long)]
+        storage_quota_bytes: Option<u64>,
         /// Delete items older than this many days. 0 disables it.
         #[arg(long)]
         retention_days: Option<u32>,
@@ -338,6 +341,7 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
     let ConfigAction::Set {
         poll_interval_ms,
         history_limit,
+        storage_quota_bytes,
         retention_days,
         dedup_window_secs,
         max_item_bytes,
@@ -354,6 +358,7 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
     ConfigPatch {
         poll_interval_ms: *poll_interval_ms,
         history_limit: *history_limit,
+        storage_quota_bytes: *storage_quota_bytes,
         retention_days: *retention_days,
         dedup_window_secs: *dedup_window_secs,
         max_item_bytes: *max_item_bytes,

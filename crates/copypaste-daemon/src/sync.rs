@@ -20,6 +20,7 @@ pub fn store_source(state: &Arc<AppState>) -> StoreSource {
         Arc::clone(&state.detector),
         state.meta.device_id().to_string(),
         state.meta.device_name().to_string(),
+        state.settings.get().storage_quota_bytes,
     )
 }
 

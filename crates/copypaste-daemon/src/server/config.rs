@@ -86,6 +86,29 @@ mod tests {
         assert_eq!(state.settings.get().poll_interval_ms, 250);
     }
 
+    #[test]
+    fn storage_quota_is_live_and_persisted() {
+        let (state, _dir) = test_state("alpha");
+        let result = applied(call(
+            &state,
+            Method::SetConfig {
+                patch: ConfigPatch {
+                    storage_quota_bytes: Some(copypaste_ipc::MIN_STORAGE_QUOTA_BYTES),
+                    ..Default::default()
+                },
+            },
+        ));
+        assert_eq!(
+            result.config.storage_quota_bytes,
+            copypaste_ipc::MIN_STORAGE_QUOTA_BYTES
+        );
+        assert!(result.restart_required.is_empty());
+        assert_eq!(
+            state.settings.get().storage_quota_bytes,
+            copypaste_ipc::MIN_STORAGE_QUOTA_BYTES
+        );
+    }
+
     /// The one field that cannot be applied live must say so at the moment it
     /// is changed, not leave the user to notice.
     #[test]
