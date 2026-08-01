@@ -10,7 +10,7 @@
  * Above the list rather than floating over it: a floating bar covers the rows
  * the user is choosing between, and on a phone it lands under the thumb.
  */
-import { Pin, PinOff, Trash2, X } from "lucide-react";
+import { Copy, Pin, PinOff, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/i18n";
@@ -19,6 +19,7 @@ interface BulkBarProps {
   count: number;
   allPinned: boolean;
   busy: boolean;
+  onCopy: () => void;
   onTogglePin: () => void;
   onDelete: () => void;
   onCancel: () => void;
@@ -28,6 +29,7 @@ export function BulkBar({
   count,
   allPinned,
   busy,
+  onCopy,
   onTogglePin,
   onDelete,
   onCancel,
@@ -51,6 +53,16 @@ export function BulkBar({
       </span>
 
       <div className="ml-auto flex items-center gap-s-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={nothing || busy}
+          onClick={onCopy}
+        >
+          <Copy aria-hidden="true" />
+          {t("history.detail.copy")}
+        </Button>
+
         <Button
           variant="outline"
           size="sm"

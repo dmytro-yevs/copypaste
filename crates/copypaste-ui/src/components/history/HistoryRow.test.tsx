@@ -7,7 +7,7 @@
  * string rather than a preview.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
@@ -171,8 +171,8 @@ describe("what the row says about where an item came from", () => {
   });
 });
 
-describe("selecting is not copying", () => {
-  it("selects on a single click and copies nothing", async () => {
+describe("desktop activation", () => {
+  it("selects and copies once on a single click", async () => {
     const onSelect = vi.fn();
     const onCopy = vi.fn();
     const user = userEvent.setup();
@@ -182,16 +182,67 @@ describe("selecting is not copying", () => {
 
     await user.click(screen.getByRole("button", { name: /ordinary clipboard/ }));
     expect(onSelect).toHaveBeenCalledTimes(1);
-    // A click that silently overwrites the system clipboard is a destructive
-    // default; copying needs its own gesture.
-    expect(onCopy).not.toHaveBeenCalled();
+    expect(onCopy).toHaveBeenCalledTimes(1);
   });
 
-  it("copies on a double click", () => {
+  it("does not copy twice when a user double-clicks", async () => {
+    const onSelect = vi.fn();
     const onCopy = vi.fn();
-    render(<HistoryRow {...props} item={item()} onCopy={onCopy} />);
-    fireEvent.doubleClick(screen.getByRole("button", { name: /ordinary clipboard/ }));
+    const user = userEvent.setup();
+    render(
+      <HistoryRow
+        {...props}
+        item={item()}
+        onSelect={onSelect}
+        onCopy={onCopy}
+      />,
+    );
+
+    await user.dblClick(
+      screen.getByRole("button", { name: /ordinary clipboard/ }),
+    );
+    expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onCopy).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects and copies once when the row button is keyboard-activated", async () => {
+    const onSelect = vi.fn();
+    const onCopy = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <HistoryRow
+        {...props}
+        item={item()}
+        active
+        onSelect={onSelect}
+        onCopy={onCopy}
+      />,
+    );
+    screen.getByRole("button", { name: /ordinary clipboard/ }).focus();
+
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(onCopy).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggles selection mode without copying", async () => {
+    const onToggleChecked = vi.fn();
+    const onCopy = vi.fn();
+    const user = userEvent.setup();
+    const clip = item();
+    render(
+      <HistoryRow
+        {...props}
+        item={clip}
+        selecting
+        onToggleChecked={onToggleChecked}
+        onCopy={onCopy}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /ordinary clipboard/ }));
+    expect(onToggleChecked).toHaveBeenCalledWith(clip);
+    expect(onCopy).not.toHaveBeenCalled();
   });
 
   it("gives touch and screen-reader users an explicit Copy control", async () => {
@@ -224,7 +275,7 @@ describe("selecting is not copying", () => {
 });
 
 describe("Android row actions", () => {
-  it("selects on tap and keeps copying behind an explicit action", async () => {
+  it("selects and copies once on tap, while keeping explicit actions", async () => {
     Object.defineProperty(navigator, "userAgent", {
       configurable: true,
       value: "Mozilla/5.0 (Linux; Android 15)",
@@ -247,13 +298,15 @@ describe("Android row actions", () => {
 
     await user.click(screen.getByRole("button", { name: /mobile clipboard/ }));
     expect(onSelect).toHaveBeenCalledWith(clip);
-    expect(onCopy).not.toHaveBeenCalled();
+    expect(onCopy).toHaveBeenCalledTimes(1);
+    expect(onCopy).toHaveBeenLastCalledWith(clip);
 
     await user.click(screen.getByRole("button", { name: "Item actions" }));
     expect(screen.getByRole("dialog", { name: "Item actions" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Copy to clipboard" }));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(onCopy).toHaveBeenCalledWith(clip);
+    expect(onCopy).toHaveBeenCalledTimes(2);
+    expect(onCopy).toHaveBeenLastCalledWith(clip);
 
     await user.click(screen.getByRole("button", { name: "Item actions" }));
     expect(screen.getByRole("dialog", { name: "Item actions" })).toBeTruthy();
