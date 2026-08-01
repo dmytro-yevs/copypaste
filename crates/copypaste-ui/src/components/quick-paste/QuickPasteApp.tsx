@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
+import fuzzysort from "fuzzysort";
 
 import { applyAppearance } from "@/lib/theme";
 import {
@@ -14,7 +15,6 @@ import {
   type ItemPage,
 } from "@/lib/ipc";
 import { classifyError } from "@/lib/errors";
-import { fuzzyMatch } from "@/lib/fuzzy";
 import { readPrefs } from "@/store/prefs";
 
 const LIMIT = 50;
@@ -103,7 +103,7 @@ export function QuickPasteApp() {
     if (needle.length === 0) return all;
 
     return all
-      .map((item, index) => ({ item, index, match: fuzzyMatch(needle, searchLabel(item)) }))
+      .map((item, index) => ({ item, index, match: fuzzysort.single(needle, searchLabel(item)) }))
       .filter((entry): entry is typeof entry & { match: NonNullable<typeof entry.match> } => entry.match !== null)
       .sort((left, right) => right.match.score - left.match.score || left.index - right.index)
       .map(({ item }) => item);
