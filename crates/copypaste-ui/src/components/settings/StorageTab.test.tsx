@@ -15,12 +15,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
 import { StorageTab } from "@/components/settings/StorageTab";
-import type { ExportReport } from "@/lib/ipc";
+import type { ExportReport, ImportPreview } from "@/lib/ipc";
 import { status, withUser } from "@/test/harness";
 
 const getStatus = vi.fn();
 const exportHistory = vi.fn();
-const importHistory = vi.fn();
+const prepareImportHistory = vi.fn();
+const applyImportHistory = vi.fn();
+const cancelImportHistory = vi.fn();
 const backupDatabase = vi.fn();
 const restoreDatabase = vi.fn();
 
@@ -43,7 +45,9 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     ...actual,
     getStatus: () => getStatus(),
     exportHistory: (includeSensitive: boolean) => exportHistory(includeSensitive),
-    importHistory: () => importHistory(),
+    prepareImportHistory: () => prepareImportHistory(),
+    applyImportHistory: (token: string) => applyImportHistory(token),
+    cancelImportHistory: (token: string) => cancelImportHistory(token),
     backupDatabase: () => backupDatabase(),
     restoreDatabase: () => restoreDatabase(),
   };
@@ -59,11 +63,17 @@ function report(over: Partial<ExportReport> = {}): ExportReport {
   };
 }
 
+function preview(over: Partial<ImportPreview> = {}): ImportPreview {
+  return { token: "preview-1", item_count: 4, ...over };
+}
+
 beforeEach(() => {
   toasts.length = 0;
   getStatus.mockReset().mockResolvedValue(status());
   exportHistory.mockReset().mockResolvedValue(report());
-  importHistory.mockReset().mockResolvedValue({ inserted: 3, skipped: 1 });
+  prepareImportHistory.mockReset().mockResolvedValue(preview());
+  applyImportHistory.mockReset().mockResolvedValue({ inserted: 3, skipped: 1 });
+  cancelImportHistory.mockReset().mockResolvedValue(undefined);
   backupDatabase.mockReset().mockResolvedValue(2_500_000);
   restoreDatabase.mockReset().mockResolvedValue(true);
 });
@@ -146,18 +156,81 @@ describe("export", () => {
 });
 
 describe("import", () => {
-  /** "Import" reads as "overwrite". It is not one, and the dialog has to say
-   *  the true thing rather than a scarier one. */
-  it("says nothing already here is deleted", async () => {
+  it("opens the file panel before it asks for confirmation", async () => {
+    prepareImportHistory.mockReturnValue(new Promise(() => {}));
     const { user } = withUser(<StorageTab />);
     await user.click(screen.getByRole("button", { name: "Import…" }));
-    expect(await screen.findByText(/Nothing here is deleted/)).toBeTruthy();
+
+    expect(prepareImportHistory).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(applyImportHistory).not.toHaveBeenCalled();
+  });
+
+  it("previews the validated item count without writing", async () => {
+    prepareImportHistory.mockResolvedValue(preview({ item_count: 17 }));
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: "Import…" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Import 17 items?" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/This will import 17 items from the file/)).toBeTruthy();
+    expect(applyImportHistory).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm or write when the chosen file is invalid", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    prepareImportHistory.mockRejectedValue(
+      new Error("invalid export at /Users/alice/private/broken.json"),
+    );
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: "Import…" }));
+
+    await waitFor(() => expect(toasts).toHaveLength(1));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(applyImportHistory).not.toHaveBeenCalled();
+    expect(toasts[0]).not.toContain("/Users/");
+    expect(document.body.textContent).not.toContain("alice");
+  });
+
+  it("does nothing when the file panel is dismissed", async () => {
+    prepareImportHistory.mockResolvedValue(null);
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: "Import…" }));
+
+    await waitFor(() => expect(prepareImportHistory).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(applyImportHistory).not.toHaveBeenCalled();
+    expect(toasts).toHaveLength(0);
+  });
+
+  it("cancels the prepared import without writing", async () => {
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: "Import…" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(cancelImportHistory).toHaveBeenCalledWith("preview-1"),
+    );
+    expect(applyImportHistory).not.toHaveBeenCalled();
+  });
+
+  it("applies one prepared import exactly once after confirmation", async () => {
+    const { user } = withUser(<StorageTab />);
+    await user.click(screen.getByRole("button", { name: "Import…" }));
+    await user.click(await screen.findByRole("button", { name: "Import" }));
+
+    await waitFor(() =>
+      expect(applyImportHistory).toHaveBeenCalledWith("preview-1"),
+    );
+    expect(applyImportHistory).toHaveBeenCalledTimes(1);
+    expect(cancelImportHistory).not.toHaveBeenCalled();
   });
 
   it("reports what went in and what was already there", async () => {
     const { user } = withUser(<StorageTab />);
     await user.click(screen.getByRole("button", { name: "Import…" }));
-    await user.click(await screen.findByRole("button", { name: "Choose what to import" }));
+    await user.click(await screen.findByRole("button", { name: "Import" }));
     await waitFor(() => expect(toasts).toHaveLength(1));
     expect(toasts[0]).toContain("Imported 3 items");
     expect(toasts[0]).toContain("1 was already here");
