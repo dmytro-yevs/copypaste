@@ -104,9 +104,9 @@ impl CloudSource for StoreSource {
                 // A tombstone has no payload to open, and carries none on the
                 // wire either (manifest 05 T-4).
                 let content = if row.deleted {
-                    String::new()
+                    Vec::new()
                 } else {
-                    match self.shared.open(&row) {
+                    match self.shared.open_bytes(&row) {
                         Some(content) => content,
                         None => continue,
                     }
@@ -118,7 +118,7 @@ impl CloudSource for StoreSource {
                     )
                     .to_string(),
                     item_id: row.id,
-                    content: content.into_bytes(),
+                    content,
                     content_type: row.content_type,
                     created_at: row.created_at,
                     deleted: row.deleted,
@@ -130,13 +130,16 @@ impl CloudSource for StoreSource {
 
     fn apply_remote(&self, item: LocalItem) -> Result<bool, SyncError> {
         blocking(|| {
-            // Lossy for the same reason the peer path is: clipboard content is
-            // text, and one row that is not valid UTF-8 must not fail a round.
-            let content = String::from_utf8_lossy(&item.content);
+            let text = copypaste_ipc::content_type::is_text(&item.content_type)
+                .then(|| String::from_utf8_lossy(&item.content));
             self.shared
                 .apply_version(&RemoteVersion {
                     item_id: &item.item_id,
-                    content: &content,
+                    content: text.as_deref().unwrap_or(""),
+                    binary_content: (!item.deleted
+                        && !copypaste_ipc::content_type::is_text(&item.content_type))
+                    .then_some(item.content.as_slice()),
+                    payload_metadata: None,
                     content_type: &item.content_type,
                     created_at: item.created_at,
                     deleted: item.deleted,

@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 /// Version of the message set. Bumped whenever a change would confuse an older
 /// peer. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
 /// local history at roughly 200 bytes each, about 2 MiB on the wire. A peer
@@ -108,15 +108,31 @@ pub struct ItemSummary {
 /// the compiler cannot.
 #[must_use]
 pub fn content_hash(content: &str) -> String {
+    content_hash_bytes(content.as_bytes())
+}
+
+/// The content-addressed digest of either a UTF-8 or binary payload.
+#[must_use]
+pub fn content_hash_bytes(content: &[u8]) -> String {
     use sha2::{Digest, Sha256};
-    hex::encode(Sha256::digest(content.as_bytes()))
+    hex::encode(Sha256::digest(content))
 }
 
 /// An item being transferred. `content` is plaintext — see the module docs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SyncItem {
     pub item_id: String,
+    /// UTF-8 text payload. Empty for a binary payload or tombstone.
     pub content: String,
+    /// Raw binary payload. JSON serialises this as a byte array rather than
+    /// pretending it is UTF-8/base64 text; old peers fail the protocol-version
+    /// check before they can misinterpret the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub binary_content: Vec<u8>,
+    /// File metadata is structured JSON rather than a source path. It travels
+    /// with the bytes so a receiving device can materialise a safe paste URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_metadata: Option<String>,
     pub content_type: String,
     pub created_at: i64,
     pub deleted: bool,
@@ -325,15 +341,24 @@ impl SyncMessage {
                     check_id("item_id", &i.item_id)?;
                     check_id("origin_device_id", &i.origin_device_id)?;
                     check_len("content_type", &i.content_type, MAX_CONTENT_TYPE_BYTES)?;
+                    if let Some(metadata) = &i.payload_metadata {
+                        check_len("payload_metadata", metadata, 512)?;
+                    }
                     check_len("content_hash", &i.content_hash, MAX_HASH_BYTES)?;
                     check_timestamp(i.created_at)?;
-                    if i.content.len() > MAX_CONTENT_BYTES {
+                    if !i.content.is_empty() && !i.binary_content.is_empty() {
+                        return Err(ProtocolError::Decode(
+                            "item has both text and binary content".into(),
+                        ));
+                    }
+                    let content_len = i.content.len().max(i.binary_content.len());
+                    if content_len > MAX_CONTENT_BYTES {
                         return Err(ProtocolError::ContentTooLarge {
-                            bytes: i.content.len(),
+                            bytes: content_len,
                             max: MAX_CONTENT_BYTES,
                         });
                     }
-                    total = total.saturating_add(i.content.len());
+                    total = total.saturating_add(content_len);
                 }
                 if total > MAX_ITEM_BYTES_PER_MESSAGE {
                     return Err(ProtocolError::BatchTooLarge {
@@ -419,12 +444,36 @@ mod tests {
         SyncItem {
             item_id: id.into(),
             content: content.into(),
+            binary_content: Vec::new(),
+            payload_metadata: None,
             content_type: "text".into(),
             created_at: 1_000,
             deleted: false,
             content_hash: "h".into(),
             origin_device_id: "dev-a".into(),
         }
+    }
+
+    #[test]
+    fn binary_payloads_round_trip_without_a_text_encoding() {
+        let bytes = vec![0, 0xff, 7, 0x80];
+        let message = SyncMessage::Items {
+            items: vec![SyncItem {
+                item_id: "binary".into(),
+                content: String::new(),
+                binary_content: bytes.clone(),
+                payload_metadata: Some(
+                    r#"{\"filename\":\"image.png\",\"mime_type\":\"image/png\"}"#.into(),
+                ),
+                content_type: "image/png".into(),
+                created_at: 1,
+                deleted: false,
+                content_hash: content_hash_bytes(&bytes),
+                origin_device_id: "device-a".into(),
+            }],
+        };
+        let decoded = SyncMessage::decode(&message.encode().unwrap()).unwrap();
+        assert_eq!(decoded, message);
     }
 
     fn hello() -> SyncMessage {

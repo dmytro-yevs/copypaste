@@ -26,9 +26,12 @@ use super::plan::plan;
 use super::{SyncChannel, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
 use crate::protocol::{
-    content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
+    ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
     MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
 };
+
+#[cfg(test)]
+use crate::protocol::content_hash;
 
 /// Runs the initiating half of a session to completion.
 pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
@@ -229,7 +232,14 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
                         stats.skipped += 1;
                         continue;
                     }
-                    if !item.deleted && content_hash(&item.content) != item.content_hash {
+                    let payload = if item.binary_content.is_empty() {
+                        item.content.as_bytes()
+                    } else {
+                        &item.binary_content
+                    };
+                    if !item.deleted
+                        && crate::protocol::content_hash_bytes(payload) != item.content_hash
+                    {
                         // The peer's `content_hash` is comparator key 2. Taking
                         // its word for it lets a hostile peer pick that key
                         // freely — and collide with a targeted item's hash so

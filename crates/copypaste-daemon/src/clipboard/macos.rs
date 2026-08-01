@@ -37,7 +37,7 @@ use objc2::rc::{autoreleasepool, Retained};
 use std::time::{Duration, Instant};
 
 use objc2_app_kit::{NSPasteboard, NSWorkspace};
-use objc2_foundation::{NSArray, NSString};
+use objc2_foundation::{NSArray, NSData, NSString};
 use tracing::{debug, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
@@ -48,6 +48,9 @@ use super::{Capture, CapturePolicy, ClipboardSource, MAX_TEXT_BYTES};
 /// this way the module does not depend on which binding revision exports
 /// which constant.
 const UTI_TEXT: &str = "public.utf8-plain-text";
+const UTI_PNG: &str = "public.png";
+const UTI_TIFF: &str = "public.tiff";
+const UTI_FILE_URL: &str = "public.file-url";
 /// §3.4 — the three `org.nspasteboard.*` opt-out markers, probed as a set.
 /// `ConcealedType` is how 1Password, Bitwarden, KeePassXC and friends say
 /// "this is a secret, do not persist it". Ignoring these writes users'
@@ -69,12 +72,19 @@ const UTI_MARKERS: [&str; 3] = [
 struct Utis {
     text: Retained<NSString>,
     text_probe: Retained<NSArray<NSString>>,
+    png: Retained<NSString>,
+    tiff: Retained<NSString>,
+    image_probe: Retained<NSArray<NSString>>,
+    file_url: Retained<NSString>,
     markers: Retained<NSArray<NSString>>,
 }
 
 impl Utis {
     fn new() -> Self {
         let text = NSString::from_str(UTI_TEXT);
+        let png = NSString::from_str(UTI_PNG);
+        let tiff = NSString::from_str(UTI_TIFF);
+        let file_url = NSString::from_str(UTI_FILE_URL);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
@@ -82,8 +92,12 @@ impl Utis {
         // is not. Taking owned `Retained`s is the supported path for it.
         Self {
             text_probe: NSArray::from_vec(vec![text.clone()]),
+            image_probe: NSArray::from_vec(vec![png.clone(), tiff.clone()]),
             markers: NSArray::from_vec(markers),
             text,
+            png,
+            tiff,
+            file_url,
         }
     }
 }
@@ -191,17 +205,28 @@ impl ClipboardSource for MacOsClipboard {
                 return None;
             }
 
-            // This backend currently supports text capture only. Image and
-            // file payloads need encrypted binary storage and native paste-back;
-            // treating them as base64 or a filesystem path would leak into FTS
-            // and sync, so they are deliberately not materialised.
             let selected = UTIS.with(|utis| unsafe {
                 if pb.availableTypeFromArray(&utis.text_probe).is_some() {
-                    return pb.dataForType(&utis.text);
+                    return pb
+                        .dataForType(&utis.text)
+                        .map(|data| (data, copypaste_ipc::content_type::TEXT));
+                }
+                // I-12 probes presence before materialising data.  TIFF is
+                // never queried when PNG exists, which preserves I-13.
+                if pb.availableTypeFromArray(&utis.image_probe).is_some() {
+                    if let Some(data) = pb.dataForType(&utis.png) {
+                        return Some((data, copypaste_ipc::content_type::IMAGE_PNG));
+                    }
+                    return pb
+                        .dataForType(&utis.tiff)
+                        .map(|data| (data, copypaste_ipc::content_type::IMAGE_TIFF));
+                }
+                if let Some(data) = pb.dataForType(&utis.file_url) {
+                    return Some((data, copypaste_ipc::content_type::FILE));
                 }
                 None
             })?;
-            let data = selected;
+            let (data, content_type) = selected;
 
             // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
             // multi-GiB item is a multi-GiB allocation. Check first.
@@ -224,15 +249,50 @@ impl ClipboardSource for MacOsClipboard {
             // is a third-party app's bug. §3.6's precedent is lossy
             // conversion rather than dropping the user's copy, and I-37
             // forbids panicking on a malformed payload.
-            let content = String::from_utf8_lossy(&bytes).into_owned();
-            if content.is_empty() {
-                return None;
+            if content_type == copypaste_ipc::content_type::TEXT {
+                let content = String::from_utf8_lossy(&bytes).into_owned();
+                if content.is_empty() {
+                    return None;
+                }
+                Some(Capture {
+                    content,
+                    binary_content: None,
+                    file_path: None,
+                    file_metadata: None,
+                    content_type: content_type.to_string(),
+                    app_bundle_id,
+                })
+            } else if content_type == copypaste_ipc::content_type::FILE {
+                let Ok(url) = url::Url::parse(&String::from_utf8_lossy(&bytes)) else {
+                    return None;
+                };
+                let Ok(path) = url.to_file_path() else {
+                    return None;
+                };
+                if !path.is_absolute() {
+                    return None;
+                }
+                let filename = path.file_name()?.to_string_lossy().into_owned();
+                let metadata =
+                    copypaste_core::FileMetadata::new(filename, "application/octet-stream")?;
+                Some(Capture {
+                    content: String::new(),
+                    binary_content: None,
+                    file_path: Some(path),
+                    file_metadata: Some(metadata),
+                    content_type: content_type.to_string(),
+                    app_bundle_id,
+                })
+            } else {
+                Some(Capture {
+                    content: String::new(),
+                    binary_content: Some(bytes),
+                    file_path: None,
+                    file_metadata: None,
+                    content_type: content_type.to_string(),
+                    app_bundle_id,
+                })
             }
-            Some(Capture {
-                content,
-                content_type: copypaste_ipc::content_type::TEXT.to_string(),
-                app_bundle_id,
-            })
         })
     }
 
@@ -275,6 +335,38 @@ impl ClipboardSource for MacOsClipboard {
                     expected = pre + SELF_WRITE_DELTA,
                     actual, "another app wrote to the pasteboard during our write"
                 );
+            }
+            Ok(())
+        })
+    }
+
+    fn set_binary_contents(&mut self, content_type: &str, bytes: &[u8]) -> anyhow::Result<()> {
+        let uti = match content_type {
+            copypaste_ipc::content_type::IMAGE_PNG => UTI_PNG,
+            copypaste_ipc::content_type::IMAGE_TIFF => UTI_TIFF,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "the pasteboard cannot write this binary content type"
+                ))
+            }
+        };
+        autoreleasepool(|_pool| {
+            let pb = unsafe { NSPasteboard::generalPasteboard() };
+            let pre = unsafe { pb.changeCount() } as i64;
+            let data = unsafe {
+                NSData::dataWithBytes_length(bytes.as_ptr().cast_mut().cast(), bytes.len())
+            };
+            let uti = NSString::from_str(uti);
+            self.tracker
+                .sentinel
+                .arm(unsafe { pb.clearContents() } as i64);
+            if !unsafe { pb.setData_forType(Some(&data), &uti) } {
+                self.tracker.sentinel.clear();
+                return Err(anyhow::anyhow!("the pasteboard rejected the binary write"));
+            }
+            let actual = unsafe { pb.changeCount() } as i64;
+            if actual != pre + SELF_WRITE_DELTA {
+                self.tracker.sentinel.clear();
             }
             Ok(())
         })
