@@ -59,7 +59,7 @@ mod tests {
             .and_then(|window| window["contentProtected"].as_bool());
 
         assert_eq!(main_is_protected, Some(true));
-        assert!(super::super::window::QUICK_PASTE_CONFIG.content_protected);
+        const { assert!(super::super::window::QUICK_PASTE_CONFIG.content_protected) }
     }
 }
 
