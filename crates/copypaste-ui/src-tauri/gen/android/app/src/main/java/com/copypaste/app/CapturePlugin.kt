@@ -36,6 +36,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(
             JSObject()
                 .put("probe", probeObject())
+                .put("enabled", captureEnabled())
                 .put("listening", ShizukuClipboard.isListening())
         )
     }
@@ -55,6 +56,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(
                 JSObject()
                     .put("probe", probeObject())
+                    .put("enabled", false)
                     .put("listening", false)
                     .put("outcome", "refused")
                     .put("focused", true)
@@ -68,11 +70,17 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         }
         if (listening) {
             CaptureService.start(activity, "Capturing from every app.", title, body)
+        } else {
+            // A failed re-arm replaces any old listener. Its persisted state
+            // must go too: otherwise a later probe advertises capture that no
+            // longer has a live path into Rust's ingest loop.
+            CaptureService.stop(activity)
         }
 
         invoke.resolve(
             JSObject()
                 .put("probe", probeObject())
+                .put("enabled", listening)
                 .put("listening", listening)
                 // A read taken now happens with the app in front, so Rust will
                 // not count it as proof. It is here to surface an outright
@@ -152,6 +160,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve(
             JSObject()
                 .put("probe", probeObject())
+                .put("enabled", captureEnabled())
                 .put("listening", ShizukuClipboard.isListening())
         )
     }
@@ -164,6 +173,14 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         .put("enabled", CaptureService.isArmed(activity))
         .put("toastSuppressed", ShizukuClipboard.isToastSuppressed(activity))
         .put("rearmRequested", takeRearmRequest())
+
+    /**
+     * `CaptureState` is a request to run, not proof that the listener survived.
+     * The Rust model must only receive `enabled` when the in-process listener
+     * can still hand clips to its drain task.
+     */
+    private fun captureEnabled(): Boolean =
+        CaptureService.isArmed(activity) && ShizukuClipboard.isListening()
 
     /**
      * Without this the loss notification is dropped by the system, which would

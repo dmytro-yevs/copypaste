@@ -12,9 +12,10 @@ import {
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { isUnavailable, toFriendly } from "@/lib/errors";
-import { getShortcut, setShortcut } from "@/lib/ipc";
+import { getDefaultShortcut, getShortcut, setShortcut } from "@/lib/ipc";
 
 const SHORTCUT_KEY = ["shortcut"] as const;
+const DEFAULT_SHORTCUT_KEY = ["default-shortcut"] as const;
 
 function Keycaps({ accelerator }: { accelerator: string }) {
   return (
@@ -36,6 +37,7 @@ export function ShortcutTab() {
   const qc = useQueryClient();
   const [capturing, setCapturing] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [saved, setSaved] = useState<"saved" | "reset" | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const current = useQuery({
@@ -44,13 +46,22 @@ export function ShortcutTab() {
     retry: false,
     staleTime: Infinity,
   });
-
-  const save = useMutation({
-    mutationFn: (accelerator: string) => setShortcut(accelerator),
-    onSuccess: (_data, accelerator) => qc.setQueryData(SHORTCUT_KEY, accelerator),
+  const defaultShortcut = useQuery({
+    queryKey: DEFAULT_SHORTCUT_KEY,
+    queryFn: getDefaultShortcut,
+    retry: false,
+    staleTime: Infinity,
   });
 
-  const bound = current.data ?? DEFAULT_SHORTCUT;
+  const fallback = defaultShortcut.data ?? DEFAULT_SHORTCUT;
+  const bound = current.data ?? fallback;
+  const save = useMutation({
+    mutationFn: (accelerator: string) => setShortcut(accelerator),
+    onSuccess: (_data, accelerator) => {
+      qc.setQueryData(SHORTCUT_KEY, accelerator);
+      setSaved(accelerator === fallback ? "reset" : "saved");
+    },
+  });
   const unavailable =
     (current.error !== null && isUnavailable(current.error)) ||
     (save.error !== null && isUnavailable(save.error));
@@ -76,14 +87,20 @@ export function ShortcutTab() {
         case "accelerator":
           setCapturing(false);
           setRefusal(null);
-          save.mutate(result.value);
+          if (result.value !== bound) save.mutate(result.value);
           return;
       }
     }
 
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [capturing, save]);
+  }, [bound, capturing, save]);
+
+  useEffect(() => {
+    if (saved === null) return;
+    const timeout = window.setTimeout(() => setSaved(null), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [saved]);
 
   // A11Y-13: the raw accelerator, not the glyphs — screen readers handle
   // "CmdOrCtrl+Shift+V" and mangle "⌘⇧V" (CopyPaste-8ebg.53).
@@ -127,8 +144,8 @@ export function ShortcutTab() {
           <Button
             variant="ghost"
             size="sm"
-            disabled={bound === DEFAULT_SHORTCUT || save.isPending}
-            onClick={() => save.mutate(DEFAULT_SHORTCUT)}
+            disabled={bound === fallback || save.isPending}
+            onClick={() => save.mutate(fallback)}
           >
             <RotateCcw aria-hidden="true" />
             {t("settings.shortcut.reset")}
@@ -152,9 +169,15 @@ export function ShortcutTab() {
         </p>
       )}
 
+      {saved !== null && (
+        <p role="status" aria-live="polite" className="border-b border-divider py-s-3 text-sm text-ok-strong">
+          {t(saved === "reset" ? "settings.shortcut.resetSaved" : "settings.shortcut.saved")}
+        </p>
+      )}
+
       {unavailable && (
         <p className="py-s-3 text-sm text-muted-foreground">
-          {t("settings.shortcut.unavailable", { accelerator: DEFAULT_SHORTCUT })}
+          {t("settings.shortcut.unavailable", { accelerator: fallback })}
         </p>
       )}
     </div>
