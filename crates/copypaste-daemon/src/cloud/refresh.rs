@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use backon::{BackoffBuilder, ExponentialBuilder};
+use copypaste_clock::{SystemWallClock, WallClock};
 use copypaste_cloud::auth::{Session, REFRESH_MARGIN_MS};
 use copypaste_cloud::sync::SyncError;
 use tokio::sync::watch;
@@ -110,7 +111,6 @@ trait RefreshTarget: Send + Sync {
 
     fn driver(&self) -> Option<Arc<Self::Driver>>;
     fn session_updates(&self) -> watch::Receiver<u64>;
-    fn now_ms(&self) -> i64;
     fn is_current(&self, driver: &Arc<Self::Driver>) -> bool;
     fn refreshed(&self, driver: &Arc<Self::Driver>);
     fn failed(&self, driver: &Arc<Self::Driver>, message: &'static str);
@@ -126,10 +126,6 @@ impl RefreshTarget for AppState {
 
     fn session_updates(&self) -> watch::Receiver<u64> {
         self.cloud.session_updates()
-    }
-
-    fn now_ms(&self) -> i64 {
-        copypaste_core::now_ms()
     }
 
     fn is_current(&self, driver: &Arc<Self::Driver>) -> bool {
@@ -150,10 +146,14 @@ impl RefreshTarget for AppState {
 }
 
 pub async fn run(state: Arc<AppState>, shutdown: watch::Receiver<bool>) {
-    maintain(state, shutdown).await;
+    maintain(state, SystemWallClock, shutdown).await;
 }
 
-async fn maintain<T: RefreshTarget>(target: Arc<T>, mut shutdown: watch::Receiver<bool>) {
+async fn maintain<T: RefreshTarget, C: WallClock>(
+    target: Arc<T>,
+    clock: C,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let mut session_updates = target.session_updates();
 
     'session: loop {
@@ -175,7 +175,7 @@ async fn maintain<T: RefreshTarget>(target: Arc<T>, mut shutdown: watch::Receive
             continue;
         };
 
-        let delay = driver.next_refresh(target.now_ms());
+        let delay = driver.next_refresh(clock.now_ms());
         tokio::select! {
             biased;
             _ = shutdown.changed() => break,
@@ -327,6 +327,14 @@ mod tests {
         last_error: Mutex<Option<&'static str>>,
     }
 
+    struct FixedWallClock(i64);
+
+    impl WallClock for FixedWallClock {
+        fn now_ms(&self) -> i64 {
+            self.0
+        }
+    }
+
     impl FakeTarget {
         fn new(driver: Arc<FakeDriver>) -> Arc<Self> {
             Arc::new(Self {
@@ -359,10 +367,6 @@ mod tests {
 
         fn session_updates(&self) -> watch::Receiver<u64> {
             self.revision.subscribe()
-        }
-
-        fn now_ms(&self) -> i64 {
-            0
         }
 
         fn is_current(&self, driver: &Arc<Self::Driver>) -> bool {
@@ -479,7 +483,11 @@ mod tests {
         let target = FakeTarget::new(Arc::clone(&driver));
         let mut updates = target.session_updates();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let task = tokio::spawn(maintain(Arc::clone(&target), shutdown_rx));
+        let task = tokio::spawn(maintain(
+            Arc::clone(&target),
+            FixedWallClock(0),
+            shutdown_rx,
+        ));
         tokio::task::yield_now().await;
 
         advance(Duration::from_secs(4)).await;
@@ -514,7 +522,11 @@ mod tests {
         );
         let target = FakeTarget::new(Arc::clone(&driver));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let task = tokio::spawn(maintain(Arc::clone(&target), shutdown_rx));
+        let task = tokio::spawn(maintain(
+            Arc::clone(&target),
+            FixedWallClock(0),
+            shutdown_rx,
+        ));
         tokio::task::yield_now().await;
 
         advance(MIN_REFRESH_INTERVAL).await;
@@ -540,7 +552,11 @@ mod tests {
         let driver = FakeDriver::new(session("dead", 0), [Reply::Err(SyncError::SessionExpired)]);
         let target = FakeTarget::new(Arc::clone(&driver));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let task = tokio::spawn(maintain(Arc::clone(&target), shutdown_rx));
+        let task = tokio::spawn(maintain(
+            Arc::clone(&target),
+            FixedWallClock(0),
+            shutdown_rx,
+        ));
         tokio::task::yield_now().await;
 
         advance(MIN_REFRESH_INTERVAL).await;
@@ -562,7 +578,7 @@ mod tests {
         let driver = FakeDriver::new(session("refresh-1", 0), [Reply::Pending]);
         let target = FakeTarget::new(Arc::clone(&driver));
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let task = tokio::spawn(maintain(target, shutdown_rx));
+        let task = tokio::spawn(maintain(target, FixedWallClock(0), shutdown_rx));
         tokio::task::yield_now().await;
 
         advance(MIN_REFRESH_INTERVAL).await;
