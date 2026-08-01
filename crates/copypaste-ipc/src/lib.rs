@@ -221,7 +221,9 @@ pub enum Method {
     /// an export is a plaintext file that leaves the app's control, so a
     /// detected credential is only ever in one because the user asked twice.
     Export {
+        #[serde(default)]
         limit: u32,
+        #[serde(default)]
         include_sensitive: bool,
     },
     /// Put items back. Each one goes through the same ingest path a capture
@@ -390,16 +392,84 @@ pub struct EventData {
 
 /// One reply. `ok` distinguishes success from failure without inspecting the
 /// payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Response {
     pub id: u64,
     pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<ResponseData>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The machine-readable code when this build recognises it.
     pub error_code: Option<ErrorCode>,
+    /// An unrecognised code exactly as it appeared on the wire.
+    ///
+    /// Kept separate from [`Response::error_code`] so matching known codes stays
+    /// exhaustive while a future daemon can add one without breaking decoding.
+    pub raw_error_code: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ErrorCodeRef<'a> {
+    Known(ErrorCode),
+    Unknown(&'a str),
+}
+
+#[derive(Serialize)]
+struct ResponseRef<'a> {
+    id: u64,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<&'a ResponseData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<ErrorCodeRef<'a>>,
+}
+
+#[derive(Deserialize)]
+struct ResponseOwned {
+    id: u64,
+    ok: bool,
+    data: Option<ResponseData>,
+    error: Option<String>,
+    error_code: Option<String>,
+}
+
+impl Serialize for Response {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ResponseRef {
+            id: self.id,
+            ok: self.ok,
+            data: self.data.as_ref(),
+            error: self.error.as_deref(),
+            error_code: self
+                .raw_error_code
+                .as_deref()
+                .map(ErrorCodeRef::Unknown)
+                .or_else(|| self.error_code.map(ErrorCodeRef::Known)),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Response {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let response = ResponseOwned::deserialize(deserializer)?;
+        let error_code = response.error_code.as_deref().and_then(ErrorCode::parse);
+        let raw_error_code = if error_code.is_none() {
+            response.error_code
+        } else {
+            None
+        };
+        Ok(Self {
+            id: response.id,
+            ok: response.ok,
+            data: response.data,
+            error: response.error,
+            error_code,
+            raw_error_code,
+        })
+    }
 }
 
 impl Response {
@@ -410,6 +480,7 @@ impl Response {
             data: Some(data),
             error: None,
             error_code: None,
+            raw_error_code: None,
         }
     }
 
@@ -425,22 +496,18 @@ impl Response {
             data: None,
             error: Some(message.into()),
             error_code: Some(code),
+            raw_error_code: None,
         }
     }
 }
 
 /// The payload of a successful reply.
 ///
-/// Untagged, so the decoder tries the variants **in declaration order** and
-/// takes the first that fits. Two rules follow from that and neither is
-/// cosmetic:
-///
-/// * A variant whose required fields are a subset of another's must come
-///   *after* it, or it will swallow the richer payload. [`ResponseData::Export`]
-///   is declared before [`ResponseData::Page`] for exactly this reason.
-/// * `Empty {}` matches any JSON object at all, so it stays last.
+/// Every variant is externally tagged on the wire. The wrapper is load-bearing:
+/// an empty array contains no element shape from which a decoder could infer
+/// whether it is a peer list or a sync report.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(rename_all = "snake_case")]
 pub enum ResponseData {
     Status(StatusData),
     Export(ExportData),
@@ -458,8 +525,6 @@ pub enum ResponseData {
     CloudStatus(CloudStatusData),
     CloudSync(CloudSyncData),
     PrivateMode(PrivateModeData),
-    /// Must stay last: an empty struct variant matches any JSON object, so an
-    /// arm below it would never be reached by the untagged decoder.
     Empty {},
 }
 
@@ -510,7 +575,7 @@ mod tests {
     /// "reason unavailable" report.
     #[test]
     fn an_import_reply_without_reason_fields_keeps_its_total() {
-        let older = r#"{"id":1,"ok":true,"data":{"inserted":7,"skipped":2}}"#;
+        let older = r#"{"id":1,"ok":true,"data":{"import":{"inserted":7,"skipped":2}}}"#;
         let response: Response = serde_json::from_str(older).unwrap();
         let Some(ResponseData::Import(imported)) = response.data else {
             panic!("the older import reply decoded as the wrong payload")
@@ -537,10 +602,10 @@ mod tests {
         );
         let json = serde_json::to_value(response).unwrap();
 
-        assert_eq!(json["data"]["inserted"], 4);
-        assert_eq!(json["data"]["skipped"], 6);
-        assert_eq!(json["data"]["skipped_duplicate"], 1);
-        assert_eq!(json["data"]["skipped_empty"], 2);
-        assert_eq!(json["data"]["skipped_too_large"], 3);
+        assert_eq!(json["data"]["import"]["inserted"], 4);
+        assert_eq!(json["data"]["import"]["skipped"], 6);
+        assert_eq!(json["data"]["import"]["skipped_duplicate"], 1);
+        assert_eq!(json["data"]["import"]["skipped_empty"], 2);
+        assert_eq!(json["data"]["import"]["skipped_too_large"], 3);
     }
 }

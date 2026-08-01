@@ -5,9 +5,7 @@
 //! must *render differently* needs a code of its own — text alone is not a
 //! contract, and the sentence is free to be reworded or translated.
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// No such **item**.
@@ -80,6 +78,28 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// Map a wire string to a code this build understands.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "not_found" => Some(Self::NotFound),
+            "invalid_request" => Some(Self::InvalidRequest),
+            "protocol_mismatch" => Some(Self::ProtocolMismatch),
+            "not_ready" => Some(Self::NotReady),
+            "auth_failed" => Some(Self::AuthFailed),
+            "legacy_database" => Some(Self::LegacyDatabase),
+            "key_locked" => Some(Self::KeyLocked),
+            "key_unusable" => Some(Self::KeyUnusable),
+            "pairing_code" => Some(Self::PairingCode),
+            "pairing_address" => Some(Self::PairingAddress),
+            "peer_unreachable" => Some(Self::PeerUnreachable),
+            "pairing_limit" => Some(Self::PairingLimit),
+            "peer_failed" => Some(Self::PeerFailed),
+            "peer_not_found" => Some(Self::PeerNotFound),
+            "internal" => Some(Self::Internal),
+            _ => None,
+        }
+    }
+
     /// Whether repeating the same request could plausibly succeed.
     ///
     /// One answer, next to the taxonomy, because the alternative is each
@@ -139,7 +159,14 @@ mod tests {
             (ErrorCode::Internal, "\"internal\""),
         ] {
             assert_eq!(serde_json::to_string(&code).unwrap(), wire);
+            assert_eq!(ErrorCode::parse(wire.trim_matches('"')), Some(code));
         }
+    }
+
+    #[test]
+    fn unknown_error_codes_are_not_known_codes() {
+        assert_eq!(ErrorCode::parse("future_daemon_state"), None);
+        assert_eq!(ErrorCode::parse("NOT_FOUND"), None);
     }
 
     /// The pair the distinction exists for: the same subsystem, one worth

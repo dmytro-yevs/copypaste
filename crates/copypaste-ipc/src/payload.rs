@@ -1,8 +1,7 @@
 //! The typed payloads a reply can carry.
 //!
-//! Split from the envelope in `lib.rs` only for size; the decode ordering rule
-//! that governs them lives on [`crate::ResponseData`], which is where a reader
-//! deciding where to add a variant will be looking.
+//! Split from the envelope in `lib.rs` only for size. Their distinct wire
+//! wrappers live on [`crate::ResponseData`].
 
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +45,7 @@ pub struct ExportItem {
     /// On import this is a **floor**, never a ceiling: the daemon runs the
     /// detector over the content again and ORs the two, so an edited export
     /// cannot smuggle a credential back in marked clean (manifest 04, PG-26).
+    #[serde(default)]
     pub is_sensitive: bool,
 }
 
@@ -163,9 +163,8 @@ pub struct CloudSyncData {
     /// only reason a client can give for a round that downloaded rows and
     /// applied none of them.
     ///
-    /// `#[serde(default)]` because `ResponseData` is untagged: against a daemon
-    /// built before this field, a required one would make the whole payload
-    /// fail to match `CloudSync` and fall through to `Empty`.
+    /// Additive within v2: a daemon built before this field omits it, so a newer
+    /// client must supply the safe zero value while decoding.
     #[serde(default)]
     pub skipped_forged: u32,
     pub skipped_future: u32,

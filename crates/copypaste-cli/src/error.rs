@@ -34,6 +34,8 @@ pub enum CliError {
     /// failure, which the protocol permits and clients must tolerate.
     Daemon {
         code: Option<ErrorCode>,
+        /// A future daemon code this CLI does not understand, kept verbatim.
+        raw_code: Option<String>,
         message: String,
     },
     /// A client-side problem: a malformed frame, an over-long line, a response
@@ -93,7 +95,17 @@ impl CliError {
             CliError::Daemon {
                 code: Some(ErrorCode::NotFound),
                 message,
+                ..
             } => scrub_paths(message),
+            CliError::Daemon {
+                code: None,
+                raw_code: Some(raw_code),
+                message,
+            } => format!(
+                "error [{}]: {}",
+                scrub_paths(raw_code),
+                scrub_paths(message)
+            ),
             CliError::Daemon { message, .. } => scrub_paths(message),
             CliError::Local(message) => scrub_paths(message),
         }
@@ -136,6 +148,7 @@ mod tests {
         ] {
             let err = CliError::Daemon {
                 code: Some(code),
+                raw_code: None,
                 message: message.into(),
             };
             assert_eq!(err.exit_code(), EXIT_NOT_FOUND, "{code:?}");
@@ -149,6 +162,7 @@ mod tests {
     fn pairing_failures_keep_their_remedy() {
         let err = CliError::Daemon {
             code: Some(ErrorCode::PairingLimit),
+            raw_code: None,
             message: "this device is already paired with as many devices as it can hold; \
                       unpair one first"
                 .into(),
@@ -167,6 +181,7 @@ mod tests {
         ] {
             let err = CliError::Daemon {
                 code: Some(code),
+                raw_code: None,
                 message: "boom".into(),
             };
             assert_eq!(err.exit_code(), EXIT_OTHER, "{code:?}");
@@ -177,6 +192,7 @@ mod tests {
     fn untagged_daemon_failure_exits_three() {
         let err = CliError::Daemon {
             code: None,
+            raw_code: None,
             message: "unknown method".into(),
         };
         assert_eq!(err.exit_code(), EXIT_OTHER);
@@ -198,6 +214,7 @@ mod tests {
     fn protocol_mismatch_message_says_versions_differ() {
         let err = CliError::Daemon {
             code: Some(ErrorCode::ProtocolMismatch),
+            raw_code: None,
             message: "unsupported protocol version 9".into(),
         };
         let msg = err.user_message();
@@ -209,12 +226,27 @@ mod tests {
     fn daemon_supplied_path_is_scrubbed_from_the_user_message() {
         let err = CliError::Daemon {
             code: Some(ErrorCode::Internal),
+            raw_code: None,
             message: "could not open /Users/dmitriy/Library/Application Support/CopyPaste/x.db"
                 .into(),
         };
         let msg = err.user_message();
         assert!(!msg.contains("dmitriy"), "{msg}");
         assert!(msg.contains("<path>"), "{msg}");
+    }
+
+    #[test]
+    fn unknown_daemon_code_is_preserved_and_exits_three() {
+        let err = CliError::Daemon {
+            code: None,
+            raw_code: Some("future_daemon_state".into()),
+            message: "wait for the next release".into(),
+        };
+        assert_eq!(err.exit_code(), EXIT_OTHER);
+        assert_eq!(
+            err.user_message(),
+            "error [future_daemon_state]: wait for the next release"
+        );
     }
 
     #[test]
