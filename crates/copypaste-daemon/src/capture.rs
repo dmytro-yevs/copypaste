@@ -139,12 +139,7 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
         return Ok(());
     };
 
-    match ingest_at(
-        state,
-        &capture.content,
-        &capture.content_type,
-        copypaste_core::now_ms(),
-    ) {
+    match ingest_capture(state, capture, copypaste_core::now_ms()) {
         Ok(Ingested::Stored(item)) => {
             debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
             // Wakes the watchers and pulls both sync loops to their floor, so a
@@ -171,6 +166,29 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
         }
         Err(e) => Err(e),
     }
+}
+
+fn ingest_capture(
+    state: &AppState,
+    capture: crate::clipboard::Capture,
+    created_at: i64,
+) -> Result<Ingested, IngestError> {
+    let settings = state.settings.get().clone();
+    let sensitive_floor = capture
+        .app_bundle_id
+        .as_deref()
+        .is_some_and(crate::clipboard::is_password_manager_app);
+    copypaste_core::ingest_into_with_capture_context(
+        &state.store,
+        &state.detector,
+        &state.keyring,
+        &capture.content,
+        &capture.content_type,
+        created_at,
+        sensitive_floor,
+        capture.app_bundle_id.as_deref(),
+        &settings,
+    )
 }
 
 pub fn ingest(
@@ -315,5 +333,31 @@ mod tests {
                 .is_empty(),
             "sensitive rows never enter sync"
         );
+    }
+
+    #[test]
+    fn credential_store_origin_is_persisted_and_forces_sensitive() {
+        let (state, _dir) = test_state("credential-store-origin");
+        let stored = ingest_capture(
+            &state,
+            crate::clipboard::Capture {
+                content: "xK9mQ3nR7pT2vW5".to_string(),
+                content_type: copypaste_ipc::content_type::TEXT.to_string(),
+                app_bundle_id: Some("COM.1Password.Desktop".to_string()),
+            },
+            copypaste_core::now_ms(),
+        )
+        .unwrap()
+        .into_item();
+        assert!(stored.is_sensitive);
+        assert_eq!(
+            stored.app_bundle_id.as_deref(),
+            Some("COM.1Password.Desktop")
+        );
+        assert!(state
+            .store
+            .search("xK9mQ3nR7pT2vW5", 10)
+            .unwrap()
+            .is_empty());
     }
 }

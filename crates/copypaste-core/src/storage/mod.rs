@@ -111,6 +111,7 @@ pub(crate) mod test_support {
             is_sensitive: false,
             search_text: Some(text.to_string()),
             created_at,
+            app_bundle_id: None,
         }
     }
 

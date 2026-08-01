@@ -90,8 +90,12 @@ CREATE TABLE sync_device_name (
 );
 "#;
 
-static MIGRATIONS: LazyLock<Migrations<'static>> =
-    LazyLock::new(|| Migrations::new(vec![M::up(SCHEMA_V1)]));
+static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
+    Migrations::new(vec![
+        M::up(SCHEMA_V1),
+        M::up("ALTER TABLE clipboard_items ADD COLUMN app_bundle_id TEXT"),
+    ])
+});
 
 /// Runs the ladder. `rusqlite_migration` owns `PRAGMA user_version`; a database
 /// written by a *newer* schema is refused rather than silently downgraded.

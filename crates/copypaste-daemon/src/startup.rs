@@ -21,8 +21,12 @@ use crate::server;
 /// resolvers disagree. `data_dir` is the `--data-dir` case, and on Linux it is
 /// the same directory — which is exactly why v2's *filename* is different.
 pub fn legacy_history_present(data_dir: &std::path::Path) -> bool {
+    legacy_history_present_in(data_dir, copypaste_ipc::v1_data_dir())
+}
+
+fn legacy_history_present_in(data_dir: &std::path::Path, v1_data_dir: Option<PathBuf>) -> bool {
     std::iter::once(data_dir.to_path_buf())
-        .chain(copypaste_ipc::v1_data_dir())
+        .chain(v1_data_dir)
         .any(|dir| copypaste_core::v1_database_in(&dir))
 }
 
@@ -136,9 +140,9 @@ mod tests {
     #[test]
     fn a_v0_4_history_beside_the_new_one_is_found() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!legacy_history_present(dir.path()));
+        assert!(!legacy_history_present_in(dir.path(), None));
         stage_v1(dir.path());
-        assert!(legacy_history_present(dir.path()));
+        assert!(legacy_history_present_in(dir.path(), None));
     }
 
     /// The probe must leave the disk as it found it: a user who downgrades has
@@ -161,7 +165,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let key = copypaste_core::Keyring::from_secret(&[3u8; 32]).db_key();
         let _store = Store::open(&dir.path().join("copypaste-v2.db"), &key).unwrap();
-        assert!(!legacy_history_present(dir.path()));
+        assert!(!legacy_history_present_in(dir.path(), None));
     }
 
     /// Name plus length for everything in the directory, sorted.

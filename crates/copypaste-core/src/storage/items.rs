@@ -68,8 +68,8 @@ impl Store {
         let insert = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0)",
+                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8)",
             params![
                 &id,
                 &item.content_ciphertext,
@@ -78,6 +78,7 @@ impl Store {
                 &item.content_hash,
                 item.is_sensitive,
                 item.created_at,
+                &item.app_bundle_id,
             ],
         );
 
@@ -119,6 +120,7 @@ impl Store {
             // A capture on this device. The empty sentinel rather than a device
             // id the store has no business knowing — see `versions::origin_or`.
             origin_device_id: String::new(),
+            app_bundle_id: item.app_bundle_id,
         }))
     }
 

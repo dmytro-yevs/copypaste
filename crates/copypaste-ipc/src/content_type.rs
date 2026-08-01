@@ -11,11 +11,10 @@
 //!
 //! # Capture and transport vocabulary
 //!
-//! macOS capture emits plain text, PNG/TIFF payloads, and absolute file
-//! references. Rich-text and HTML remain explicit unsupported probes there,
-//! while imported or remote rows may still use either type. Naming every type
-//! here lets clients render such a row honestly instead of showing an image as
-//! mojibake.
+//! The macOS capture backend currently emits plain text only; image and file
+//! payloads wait for encrypted binary storage and native paste-back. Imported
+//! or remote rows may still use every type below. Naming them here lets clients
+//! render such a row honestly instead of showing an image as mojibake.
 
 /// Plain text (`public.utf8-plain-text` on macOS).
 pub const TEXT: &str = "text";

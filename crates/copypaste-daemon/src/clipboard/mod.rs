@@ -40,20 +40,19 @@
 //!   post-stamp (CopyPaste-8yzf) and the reset-on-failure path.
 //! - **I-5 / §3.4** the three `org.nspasteboard.*` opt-out markers, probed
 //!   before any representation is read.
-//! - **§3.9** a short-lived frontmost-app cache, private-mode and app gates;
-//!   excluded and known password-manager apps are acknowledged without
-//!   materialising their clipboard data.
-//! - **I-11..I-14** one representation per change, in the strict order text,
-//!   image (PNG then TIFF), file URL then legacy filename plist.
+//! - **§3.9** a short-lived frontmost-app cache, private-mode and exclusion
+//!   gates; known password-manager origins are persisted as sensitive.
+//! - **I-11** text capture is the only implemented payload path. Image and
+//!   file changes are acknowledged without being materialised until encrypted
+//!   binary storage and native paste-back land together.
 //! - **I-18** `NSData.length` checked before the bytes are copied out.
 //! - **I-39 / §6.5** rejections are counted and readable, not just logged.
 //! - **§3.12** the invariant UTI strings are built once, not once per tick.
 //! - **I-9** no clipboard content, and no paths, in logs or in errors.
 //!
-//! Rich-text UTIs remain explicitly unsupported by the binding manifest: they
-//! are not mistaken for a file or image, and are never allowed to outrank one.
-//! The shared content-type vocabulary nevertheless lets imported and remote
-//! rows retain their declared type.
+//! Rich-text, image and file capture remain deferred. The shared content-type
+//! vocabulary nevertheless lets imported and remote rows retain their declared
+//! type without routing a path or base64 string through text ingest.
 
 mod change;
 mod fake;
@@ -89,25 +88,35 @@ pub use fake::FakeClipboard;
 /// storage layer's gate move together.
 const MAX_TEXT_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
-/// Credential stores are never captured, even if the user has not added their
-/// bundle id to the configurable exclusion list. Their pasteboards often have
-/// an opt-out marker as well, but attribution is a second independent gate.
+/// Credential stores mark a capture sensitive even when its text does not
+/// match a detector rule. Users may still explicitly exclude an app entirely.
 pub(crate) fn is_password_manager_app(bundle_id: &str) -> bool {
+    let bundle_id = bundle_id.to_ascii_lowercase();
     matches!(
-        bundle_id,
+        bundle_id.as_str(),
         "com.1password.1password"
             | "com.agilebits.onepassword7"
             | "com.bitwarden.desktop"
             | "org.keepassxc.keepassxc"
             | "com.dashlane.dashlane"
             | "com.lastpass.lastpass"
-    )
+            | "com.apple.passwords"
+    ) || bundle_id.contains("1password")
+        || bundle_id.contains("bitwarden")
+        || bundle_id.contains("keepass")
+        || bundle_id.contains("dashlane")
+        || bundle_id.contains("lastpass")
+        || bundle_id.contains("protonpass")
+        || bundle_id.contains("proton.pass")
+        || bundle_id.contains("strongbox")
+        || bundle_id.contains("secretive")
+        || bundle_id.contains("keepassium")
 }
 
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capture {
-    /// UTF-8 text, a base64 image payload, or an absolute file reference.
+    /// UTF-8 text captured from the system pasteboard.
     pub content: String,
     /// One of `copypaste_ipc::content_type`.
     pub content_type: String,
@@ -202,7 +211,7 @@ pub fn new_source() -> Box<dyn ClipboardSource> {
 
 #[cfg(test)]
 mod tests {
-    use super::MAX_TEXT_BYTES;
+    use super::{is_password_manager_app, MAX_TEXT_BYTES};
     use copypaste_ipc::{ConfigData, ConfigPatch};
 
     /// §3.10, from the other end: the read gate and the storable maximum were
@@ -225,5 +234,20 @@ mod tests {
     #[test]
     fn the_read_gate_stays_inside_the_wire_contract() {
         const { assert!(MAX_TEXT_BYTES <= copypaste_ipc::MAX_CONTENT_BYTES) };
+    }
+
+    #[test]
+    fn credential_store_match_is_case_insensitive_and_covers_supported_apps() {
+        for bundle_id in [
+            "COM.1PASSWORD.1PASSWORD",
+            "com.apple.Passwords",
+            "com.proton.pass",
+            "com.strongbox.passwordsafe",
+            "com.mortenjust.secretive",
+            "com.keepassium.keepassium",
+        ] {
+            assert!(is_password_manager_app(bundle_id), "{bundle_id}");
+        }
+        assert!(!is_password_manager_app("com.apple.TextEdit"));
     }
 }
