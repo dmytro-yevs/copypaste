@@ -17,6 +17,7 @@ import { ServiceTab } from "@/components/settings/ServiceTab";
 import { ShortcutTab } from "@/components/settings/ShortcutTab";
 import { StorageTab } from "@/components/settings/StorageTab";
 import { SyncTab } from "@/components/settings/SyncTab";
+import { isAndroid } from "@/lib/platform";
 
 const TABS = [
   { value: "appearance", label: "settings.tabs.appearance", render: () => <AppearanceTab /> },
@@ -31,6 +32,9 @@ const TABS = [
 
 export function SettingsView() {
   const { t } = useTranslation();
+  // Android has no global hotkey facility. Hiding the entire tab avoids a
+  // control that can only fail after a user has invested a gesture.
+  const tabs = isAndroid() ? TABS.filter((tab) => tab.value !== "shortcut") : TABS;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -42,14 +46,14 @@ export function SettingsView() {
         <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-3">
           <Tabs defaultValue="appearance">
             <TabsList aria-label={t("settings.sections")}>
-              {TABS.map((tab) => (
+              {tabs.map((tab) => (
                 <TabsTrigger key={tab.value} value={tab.value}>
                   {t(tab.label)}
                 </TabsTrigger>
               ))}
             </TabsList>
 
-            {TABS.map((tab) => (
+            {tabs.map((tab) => (
               <TabsContent key={tab.value} value={tab.value}>
                 {tab.render()}
               </TabsContent>

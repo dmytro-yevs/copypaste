@@ -58,18 +58,10 @@
 //! `RegisterEventHotKey`. The claim "no TCC prompt appears" is inferred from
 //! the API used, not observed.
 
+use std::str::FromStr;
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-/// The default: Cmd+Shift+V. Ordinary key, so Carbon, so no permission.
-///
-/// Deliberately not the system's own Cmd+Shift+V (paste and match style) in
-/// any app that binds it — a global hotkey wins, and that is the trade a
-/// clipboard manager makes. If it proves too costly the answer is to change
-/// this constant, not to reach for a tap.
-pub fn default_shortcut() -> Shortcut {
-    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyV)
-}
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Whether binding `code` avoids the `CGEventTap` path in `global-hotkey`.
 ///
@@ -120,6 +112,53 @@ pub fn register<R: Runtime>(
             }
         })
         .map_err(|_| "That shortcut is already in use by another app.")
+}
+
+/// Validate user input before the old binding is disturbed. Parser details are
+/// deliberately not returned: they are neither actionable nor stable across
+/// plugin upgrades.
+pub fn validate(accelerator: &str) -> std::result::Result<Shortcut, &'static str> {
+    let shortcut = Shortcut::from_str(accelerator)
+        .map_err(|_| "That key combination can't be used as a shortcut.")?;
+    if !is_permission_free(shortcut.key) {
+        return Err(MSG_NEEDS_ACCESSIBILITY);
+    }
+    Ok(shortcut)
+}
+
+pub fn register_text<R: Runtime>(
+    app: &AppHandle<R>,
+    accelerator: &str,
+) -> std::result::Result<(), &'static str> {
+    register(app, validate(accelerator)?)
+}
+
+/// Swap registration transactionally as far as the native API permits. A
+/// rejected new key restores the previous working registration before the
+/// error reaches the UI.
+pub fn replace<R: Runtime>(
+    app: &AppHandle<R>,
+    previous: &str,
+    next: &str,
+) -> std::result::Result<(), &'static str> {
+    let next_shortcut = validate(next)?;
+    if previous == next {
+        return Ok(());
+    }
+
+    let was_registered = app.global_shortcut().is_registered(previous);
+    if was_registered {
+        app.global_shortcut()
+            .unregister(previous)
+            .map_err(|_| "CopyPaste couldn't update the global shortcut.")?;
+    }
+    if let Err(error) = register(app, next_shortcut) {
+        if was_registered {
+            let _ = register_text(app, previous);
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Install the plugin. Separate from [`register`] because the plugin has to be
@@ -176,12 +215,21 @@ mod tests {
     }
 
     #[test]
-    fn the_default_shortcut_is_one_we_are_willing_to_bind() {
-        let shortcut = default_shortcut();
+    fn the_persisted_default_is_one_we_are_willing_to_bind() {
+        let shortcut = validate(crate::shell::shortcut::DEFAULT_SHORTCUT).unwrap();
         assert!(is_permission_free(shortcut.key));
         assert_eq!(shortcut.key, Code::KeyV);
         assert!(shortcut.mods.contains(Modifiers::SUPER));
         assert!(shortcut.mods.contains(Modifiers::SHIFT));
+    }
+
+    #[test]
+    fn frontend_spelling_parses_and_media_keys_do_not() {
+        assert!(validate("CmdOrCtrl+Shift+V").is_ok());
+        assert!(matches!(
+            validate("CmdOrCtrl+MediaPlayPause"),
+            Err(MSG_NEEDS_ACCESSIBILITY)
+        ));
     }
 
     /// The refusal has to explain itself: a user told only "no" would try

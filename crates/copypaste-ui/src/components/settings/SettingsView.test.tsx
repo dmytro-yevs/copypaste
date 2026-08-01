@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
 import { SettingsView } from "@/components/settings/SettingsView";
+import * as platform from "@/lib/platform";
 import { DEFAULT_PREFS, usePrefs } from "@/store/prefs";
 import { status, withClient, withUser } from "@/test/harness";
 
@@ -62,6 +63,12 @@ describe("the tab row (A11Y-6 / AT-18)", () => {
     for (const label of ["Shortcut", "Service", "Sync", "Storage"]) {
       expect(screen.getByRole("tab", { name: label })).toBeTruthy();
     }
+  });
+
+  it("does not render the desktop shortcut control on Android", () => {
+    vi.spyOn(platform, "isAndroid").mockReturnValue(true);
+    withClient(<SettingsView />);
+    expect(screen.queryByRole("tab", { name: "Shortcut" })).toBeNull();
   });
 
   it("wraps rather than scrolling, so nothing hides at 720px (A11Y-15)", () => {

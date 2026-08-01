@@ -36,6 +36,7 @@ pub mod autostart;
 pub mod hotkey;
 pub mod notify;
 pub mod protection;
+pub mod shortcut;
 #[cfg(not(target_os = "android"))]
 pub mod tray;
 pub mod window;

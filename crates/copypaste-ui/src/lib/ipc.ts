@@ -43,12 +43,6 @@ export interface StatusData {
 /** `code` is the Noise pre-shared key in transferable form: anyone holding it
  *  can pair, so it is hidden until revealed, never logged, never toasted, and
  *  never retrievable again after this one response. */
-export interface PairingData {
-  readonly code: string;
-  readonly pairing_id: string;
-  readonly listen_addr: string | null;
-}
-
 export interface PeerInfo {
   readonly pairing_id: string;
   readonly name: string;
@@ -132,14 +126,6 @@ export function listPeers(): Promise<PeerInfo[]> {
   return call<PeerInfo[]>("peers");
 }
 
-export function pairCreate(name: string): Promise<PairingData> {
-  return call<PairingData>("pair_create", { name });
-}
-
-export function pairAccept(code: string, addr: string): Promise<PeerInfo[]> {
-  return call<PeerInfo[]>("pair_accept", { code, addr });
-}
-
 export function unpair(pairingId: string): Promise<void> {
   return call<void>("unpair", { pairingId });
 }
@@ -168,7 +154,7 @@ export function syncNow(pairingId?: string): Promise<SyncResult[]> {
 export interface DiscoveredDevice {
   readonly pairing_id: string;
   readonly name: string;
-  /** `host:port`, ready to hand to `pairAccept`. */
+  /** `host:port`, retained for peer reachability diagnostics. */
   readonly addr: string;
   readonly last_seen_ms: number;
   readonly paired: boolean;
@@ -326,19 +312,17 @@ export function restoreDatabase(): Promise<boolean> {
   return call<boolean>("restore_database");
 }
 
-/** Not routed yet. The default must come from the backend rather than a TS
- *  constant, or the two drift (CopyPaste-sqw0); `DEFAULT_SHORTCUT` in
- *  `lib/accelerator.ts` is the fallback until this exists. */
+/** The default is native-owned so the capture UI cannot drift from the binding
+ * actually registered by the desktop shell. */
 export function getDefaultShortcut(): Promise<string> {
   return call<string>("get_default_shortcut");
 }
 
-/** Not routed yet. */
 export function getShortcut(): Promise<string> {
   return call<string>("get_shortcut");
 }
 
-/** Not routed yet. The bridge refuses the five media keys with a test each;
+/** The bridge refuses the five media keys with a test each;
  *  `captureAccelerator` refuses them here too so the user learns why before
  *  spending a round trip. */
 export function setShortcut(accelerator: string): Promise<void> {

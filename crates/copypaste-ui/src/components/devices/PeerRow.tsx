@@ -88,7 +88,10 @@ export function PeerRow({
   const presence = t(peer.online ? "devices.peer.online" : "devices.peer.offline");
 
   return (
-    <li className="flex flex-col gap-s-2 rounded-xl border border-border bg-card px-s-3 py-s-3">
+    <li
+      className="flex flex-col gap-s-2 rounded-xl border border-border bg-card px-s-3 py-s-3"
+      aria-busy={syncing || unpairing || revoking || undefined}
+    >
       <div className="flex flex-wrap items-center gap-s-3">
         <span
           aria-hidden="true"
@@ -101,6 +104,7 @@ export function PeerRow({
           <span
             className="truncate text-sm font-medium"
             title={t("devices.peer.nameHint")}
+            aria-label={`${peer.name}. ${t("devices.peer.nameHint")}`}
           >
             {peer.name}
           </span>
@@ -120,7 +124,7 @@ export function PeerRow({
           disabled={syncing}
           onClick={() => onSync(peer)}
         >
-          <RefreshCw aria-hidden="true" />
+          <RefreshCw aria-hidden="true" className={cn(syncing && "animate-spin")} />
         </Button>
         <Button
           size="icon-sm"
@@ -156,7 +160,7 @@ export function PeerRow({
 
       {failure ? (
         <div className="flex flex-wrap items-center gap-s-2">
-          <p className="min-w-0 flex-1 text-xs text-err-strong">
+          <p role="status" aria-live="polite" className="min-w-0 flex-1 text-xs text-err-strong">
             {t("devices.peer.failedAt", { age: longAge(failure.at) })} ·{" "}
             {whyItFailed(failure.kind)}
           </p>
@@ -175,7 +179,7 @@ export function PeerRow({
       ) : (
         <>
           {hasHint(state) && (
-            <p className="text-xs text-muted-foreground">
+            <p role="status" aria-live="polite" className="text-xs text-muted-foreground">
               {t(`devices.state.${state}.hint`)}
             </p>
           )}
