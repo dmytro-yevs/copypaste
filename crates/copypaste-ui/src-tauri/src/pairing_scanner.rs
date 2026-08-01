@@ -18,28 +18,22 @@ pub struct AndroidPairingScanner(PluginHandle<Wry>);
 
 impl AndroidPairingScanner {
     pub async fn scan(&self) -> Result<Option<String>> {
-        self.0
+        let result = self
+            .0
             .run_mobile_plugin_async::<ScanResult>("scan", ())
             .await
-            .and_then(|result| match result.error.as_deref() {
-                None => Ok(result.value),
-                Some("camera-permission-denied") => Err(BackendError::Unsupported(
-                    "Camera permission is required to scan a pairing code.",
-                )),
-                Some("scanner-unavailable") => Err(BackendError::Internal(
-                    "CopyPaste couldn't open Android's QR scanner.".to_string(),
-                )),
-                Some(_) => Err(BackendError::Internal(
-                    "CopyPaste couldn't open Android's QR scanner.".to_string(),
-                )),
-            })
             .map_err(|error| {
                 tracing::warn!(%error, "the Android QR scanner plugin failed");
-                match error {
-                    BackendError::Unsupported(_) | BackendError::Internal(_) => error,
-                    _ => BackendError::Internal(MSG_BRIDGE.to_string()),
-                }
-            })
+                BackendError::Internal(MSG_BRIDGE.to_string())
+            })?;
+
+        match result.error.as_deref() {
+            None => Ok(result.value),
+            Some("camera-permission-denied") => Err(BackendError::Unsupported(
+                "Camera permission is required to scan a pairing code.",
+            )),
+            Some(_) => Err(BackendError::Internal(MSG_BRIDGE.to_string())),
+        }
     }
 }
 
