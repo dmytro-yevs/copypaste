@@ -6,10 +6,10 @@
 //!
 //! # Two gates, and both must agree
 //!
-//! A row is deleted only if it was flagged **at capture** (`is_sensitive = 1`,
-//! the inclusive predicate that also keeps it out of the search index) **and**
-//! its plaintext scans as [`Severity::HighConfidence`] **now**. The second gate
-//! reads the row rather than a stamped flag on purpose: `CLAUDE.md` rule 4 puts
+//! A row is deleted only if it was classified **at capture** (`is_sensitive =
+//! 1`) **and** its plaintext scans as [`Severity::HighConfidence`] **now**. The
+//! second gate reads the row rather than a stamped flag on purpose:
+//! `CLAUDE.md` rule 4 puts
 //! data loss above everything, and a persisted "may be deleted" bit written by a
 //! ruleset that has since changed is a decision nobody can review before it
 //! fires. Reading the plaintext also means an item whose confidence has dropped
@@ -132,9 +132,18 @@ mod tests {
     /// Stores `text` the way the ingest path does, so the row is real: sealed
     /// under the item key with the id as AAD, and flagged by the detector.
     fn capture(f: &Fixture, text: &str, created_at: i64) -> String {
+        capture_with_floor(f, text, created_at, false)
+    }
+
+    fn capture_with_floor(
+        f: &Fixture,
+        text: &str,
+        created_at: i64,
+        sensitive_floor: bool,
+    ) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let (nonce, ciphertext) = encrypt(text.as_bytes(), &f.key, &id).expect("seal");
-        let is_sensitive = f.detector.is_sensitive(text);
+        let is_sensitive = sensitive_floor || f.detector.is_sensitive(text);
         // The *surviving* row's id, which is not the candidate's when the
         // capture was a re-copy.
         f.store
@@ -160,8 +169,8 @@ mod tests {
 
     /// Above the floor: a real AWS access key id.
     const SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
-    /// Detected, so kept out of the index — but nowhere near the floor, so it
-    /// must survive the sweep. This is the false-positive case rule 4 is about.
+    /// Detected below the floor and forced sensitive independently. It must
+    /// survive the sweep even when an old or provenance-based flag exists.
     const FLAGGED_ONLY: &str = "please email alice.smith@example.com about it";
 
     #[test]
@@ -204,11 +213,13 @@ mod tests {
     #[test]
     fn a_flagged_item_below_the_floor_is_never_wiped() {
         let f = fixture();
-        let id = capture(&f, FLAGGED_ONLY, T0);
+        let id = capture_with_floor(&f, FLAGGED_ONLY, T0, true);
         assert!(
             f.store.get(&id).unwrap().unwrap().is_sensitive,
             "the fixture must actually be flagged, or this proves nothing"
         );
+        assert!(!f.detector.is_sensitive(FLAGGED_ONLY));
+        assert!(!f.detector.scan_all(FLAGGED_ONLY).is_empty());
 
         let removed = sweep_sensitive(
             &f.store,
