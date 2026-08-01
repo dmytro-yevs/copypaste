@@ -17,12 +17,15 @@ import {
   type ConfigApplied,
   type ConfigPatch,
   type ExportReport,
+  type ImportPreview,
   type ImportReport,
   type ServiceState,
+  applyImportHistory,
   backupDatabase,
+  cancelImportHistory,
   exportHistory,
   getConfig,
-  importHistory,
+  prepareImportHistory,
   restartService,
   restoreDatabase,
   setConfig,
@@ -117,10 +120,13 @@ export function useExportHistory() {
 
 export function useImportHistory() {
   const qc = useQueryClient();
-  return useMutation<ImportReport | null, unknown, void>({
-    mutationFn: () => importHistory(),
+  const prepare = useMutation<ImportPreview | null, unknown, void>({
+    mutationFn: () => prepareImportHistory(),
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+  const apply = useMutation<ImportReport, unknown, string>({
+    mutationFn: (token) => applyImportHistory(token),
     onSuccess: (report) => {
-      if (report === null) return;
       toast.success(
         summarise([
           t("settings.transfer.import.done", { count: report.inserted }),
@@ -134,6 +140,16 @@ export function useImportHistory() {
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
+  const cancel = useMutation<void, unknown, string>({
+    mutationFn: (token) => cancelImportHistory(token),
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+  return {
+    prepare,
+    apply,
+    cancel,
+    isPending: prepare.isPending || apply.isPending,
+  };
 }
 
 /** Reported in megabytes, never in bytes: the number is reassurance that

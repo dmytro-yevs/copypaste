@@ -97,6 +97,7 @@ pub fn run() {
         .on_window_event(shell::window::on_event)
         .setup(|app| {
             app.manage(make_backend(app)?);
+            app.manage(commands::transfer::PendingImportState::default());
             app.manage(Supervisor::default());
             app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
 
@@ -184,7 +185,9 @@ pub fn run() {
             commands::config::set_config,
             // history in and out of a file
             commands::transfer::export_history,
-            commands::transfer::import_history,
+            commands::transfer::prepare_import_history,
+            commands::transfer::apply_import_history,
+            commands::transfer::cancel_import_history,
             commands::transfer::backup_database,
             commands::transfer::restore_database,
             // peers

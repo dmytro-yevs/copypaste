@@ -302,6 +302,13 @@ export interface ImportReport {
   readonly skipped: number;
 }
 
+/** A parsed import waiting for confirmation. The token is opaque and one-use;
+ *  neither it nor the preview can carry a selected path. */
+export interface ImportPreview {
+  readonly token: string;
+  readonly item_count: number;
+}
+
 /** INV-12 held by the shape of the command: the platform's own panel asks and
  *  answers in Rust, so no path is passed in and none comes back. `null` means
  *  the user closed the panel, which is not a failure. */
@@ -311,9 +318,19 @@ export function exportHistory(
   return call<ExportReport | null>("export_history", { includeSensitive });
 }
 
+/** Choose, read and parse only. `null` means the panel was closed. */
+export function prepareImportHistory(): Promise<ImportPreview | null> {
+  return call<ImportPreview | null>("prepare_import_history");
+}
+
 /** Overwrites nothing: every item goes through the same ingest a copy does. */
-export function importHistory(): Promise<ImportReport | null> {
-  return call<ImportReport | null>("import_history");
+export function applyImportHistory(token: string): Promise<ImportReport> {
+  return call<ImportReport>("apply_import_history", { token });
+}
+
+/** Safe to repeat, including after the preview has already been replaced. */
+export function cancelImportHistory(token: string): Promise<void> {
+  return call<void>("cancel_import_history", { token });
 }
 
 /** The size of the backup in bytes, or `null` if the panel was closed. */

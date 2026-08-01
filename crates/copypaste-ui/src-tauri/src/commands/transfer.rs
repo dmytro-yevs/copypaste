@@ -5,9 +5,9 @@
 //!
 //! Every one of these needs a file, and a file needs a path. The path is
 //! obtained here, from the platform's own panel, and used here; the WebView is
-//! given counts and nothing else. That is CLAUDE.md rule 4 held structurally
-//! rather than by remembering: there is no argument for React to pass and no
-//! field for it to render, so no authored string and no error can end up
+//! given counts and an opaque one-use token, never a path. That is CLAUDE.md
+//! rule 4 held structurally rather than by remembering: there is no path field
+//! for React to pass or render, so no authored string and no error can end up
 //! carrying the user's home directory.
 //!
 //! It also keeps the ACL surface at zero. The dialog plugin is called from
@@ -16,9 +16,9 @@
 //!
 //! # Cancelling is not failing
 //!
-//! Each command returns `Option<_>`, and `None` means the user closed the
-//! panel. A dismissed file picker rendered as an error is the shape of bug that
-//! teaches people to ignore error toasts.
+//! Commands that open a panel return `Option<_>`, and `None` means the user
+//! closed it. A dismissed file picker rendered as an error is the shape of bug
+//! that teaches people to ignore error toasts.
 //!
 //! # What the counts are for
 //!
@@ -34,8 +34,9 @@ use std::io::{BufReader, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
-use copypaste_ipc::{ExportData, ImportData};
+use copypaste_ipc::{ExportData, ExportItem, ImportData};
 use serde::Serialize;
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
@@ -54,6 +55,8 @@ const MSG_NO_PLACE: &str =
 const MSG_UNREADABLE: &str = "That file couldn't be read.";
 const MSG_NOT_AN_EXPORT: &str = "That file isn't a CopyPaste export.";
 const MSG_IMPORT_TOO_LARGE: &str = "That export is too large to import safely on this device.";
+const MSG_IMPORT_EXPIRED: &str = "That import is no longer available. Choose the file again.";
+const MSG_IMPORT_STATE: &str = "The pending import couldn't be accessed. Choose the file again.";
 const MSG_NOT_WRITTEN: &str = "The export couldn't be written.";
 const MSG_BACKUP_EXISTS: &str =
     "There is already a file with that name. A backup is never written over an existing \
@@ -87,6 +90,80 @@ impl From<&ExportData> for ExportReport {
     }
 }
 
+/// The only import information the WebView needs before confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ImportPreview {
+    token: String,
+    item_count: u32,
+}
+
+#[derive(Debug)]
+struct PendingImport {
+    token: String,
+    items: Vec<ExportItem>,
+}
+
+/// One bounded, parsed import waiting for an explicit confirmation.
+#[derive(Debug, Default)]
+pub struct PendingImportState {
+    pending: Mutex<Option<PendingImport>>,
+}
+
+impl PendingImportState {
+    fn clear(&self) -> Result<()> {
+        *self
+            .pending
+            .lock()
+            .map_err(|_| BackendError::Internal(MSG_IMPORT_STATE.into()))? = None;
+        Ok(())
+    }
+
+    fn replace(&self, data: ExportData) -> Result<ImportPreview> {
+        let token = uuid::Uuid::new_v4().simple().to_string();
+        let preview = ImportPreview {
+            token: token.clone(),
+            item_count: u32::try_from(data.items.len()).unwrap_or(u32::MAX),
+        };
+        *self
+            .pending
+            .lock()
+            .map_err(|_| BackendError::Internal(MSG_IMPORT_STATE.into()))? = Some(PendingImport {
+            token,
+            items: data.items,
+        });
+        Ok(preview)
+    }
+
+    fn cancel(&self, token: &str) -> Result<()> {
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| BackendError::Internal(MSG_IMPORT_STATE.into()))?;
+        if pending
+            .as_ref()
+            .is_some_and(|candidate| candidate.token == token)
+        {
+            *pending = None;
+        }
+        Ok(())
+    }
+
+    fn take(&self, token: &str) -> Result<Vec<ExportItem>> {
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| BackendError::Internal(MSG_IMPORT_STATE.into()))?;
+        let Some(candidate) = pending.take() else {
+            return Err(BackendError::Invalid(MSG_IMPORT_EXPIRED));
+        };
+        if candidate.token != token {
+            *pending = Some(candidate);
+            return Err(BackendError::Invalid(MSG_IMPORT_EXPIRED));
+        }
+        Ok(candidate.items)
+    }
+}
+
 /// Write history to a file the user picks.
 ///
 /// `include_sensitive` is the second ask. The first is the dialog that offers
@@ -113,23 +190,38 @@ pub async fn export_history<R: Runtime>(
     Ok(Some(ExportReport::from(&data)))
 }
 
-/// Read a file written by an export back into history.
-///
-/// Every item goes through the same ingest a capture does, so the detector runs
-/// again over the plaintext and duplicates collapse. A malformed file is
-/// refused whole, before anything is written.
+/// Choose and parse an export without writing anything.
 #[tauri::command]
-pub async fn import_history<R: Runtime>(
+pub async fn prepare_import_history<R: Runtime>(
     app: AppHandle<R>,
-    backend: State<'_, SelectedBackend>,
-) -> Result<Option<ImportData>> {
+    pending: State<'_, PendingImportState>,
+) -> Result<Option<ImportPreview>> {
+    pending.clear()?;
     let Some(src) = open_panel(&app).await? else {
         return Ok(None);
     };
+    Ok(Some(preview_file(&pending, &src)?))
+}
 
-    let data = read_export(&src)?;
+/// Consume one prepared import and route every item through ordinary ingest.
+#[tauri::command]
+pub async fn apply_import_history(
+    backend: State<'_, SelectedBackend>,
+    pending: State<'_, PendingImportState>,
+    token: String,
+) -> Result<ImportData> {
+    let items = pending.take(&token)?;
+    backend.import(items).await
+}
 
-    Ok(Some(backend.import(data.items).await?))
+/// Drop a prepared import. Repeated and stale cancellations are harmless.
+#[tauri::command]
+pub fn cancel_import_history(pending: State<'_, PendingImportState>, token: String) -> Result<()> {
+    pending.cancel(&token)
+}
+
+fn preview_file(pending: &PendingImportState, src: &Path) -> Result<ImportPreview> {
+    pending.replace(read_export(src)?)
 }
 
 fn read_export(src: &Path) -> Result<ExportData> {
@@ -286,6 +378,9 @@ mod tests {
             MSG_NO_PLACE,
             MSG_UNREADABLE,
             MSG_NOT_AN_EXPORT,
+            MSG_IMPORT_TOO_LARGE,
+            MSG_IMPORT_EXPIRED,
+            MSG_IMPORT_STATE,
             MSG_NOT_WRITTEN,
             MSG_BACKUP_EXISTS,
         ] {
@@ -319,5 +414,71 @@ mod tests {
             read_export(file.path()),
             Err(BackendError::Invalid(MSG_IMPORT_TOO_LARGE))
         ));
+    }
+
+    #[test]
+    fn an_invalid_file_creates_no_confirmation_or_pending_write() {
+        let pending = PendingImportState::default();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), b"not json").unwrap();
+
+        pending.clear().unwrap();
+        assert!(preview_file(&pending, file.path()).is_err());
+        assert!(matches!(
+            pending.take("anything"),
+            Err(BackendError::Invalid(MSG_IMPORT_EXPIRED))
+        ));
+    }
+
+    #[test]
+    fn a_valid_file_previews_its_item_count_without_exposing_contents() {
+        let pending = PendingImportState::default();
+        let file = tempfile::NamedTempFile::new().unwrap();
+        serde_json::to_writer(file.as_file(), &data(3, 0)).unwrap();
+
+        let preview = preview_file(&pending, file.path()).unwrap();
+        assert_eq!(preview.item_count, 3);
+        let json = serde_json::to_string(&preview).unwrap();
+        assert!(!json.contains("clip 0"), "{json}");
+        assert_eq!(pending.take(&preview.token).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn cancelling_is_idempotent_and_releases_the_pending_import() {
+        let pending = PendingImportState::default();
+        let preview = pending.replace(data(1, 0)).unwrap();
+
+        pending.cancel(&preview.token).unwrap();
+        pending.cancel(&preview.token).unwrap();
+        assert!(matches!(
+            pending.take(&preview.token),
+            Err(BackendError::Invalid(MSG_IMPORT_EXPIRED))
+        ));
+    }
+
+    #[test]
+    fn a_confirmation_token_releases_items_exactly_once() {
+        let pending = PendingImportState::default();
+        let preview = pending.replace(data(2, 0)).unwrap();
+
+        assert_eq!(pending.take(&preview.token).unwrap().len(), 2);
+        assert!(matches!(
+            pending.take(&preview.token),
+            Err(BackendError::Invalid(MSG_IMPORT_EXPIRED))
+        ));
+    }
+
+    #[test]
+    fn replacing_a_preview_makes_the_old_token_stale() {
+        let pending = PendingImportState::default();
+        let old = pending.replace(data(1, 0)).unwrap();
+        let current = pending.replace(data(2, 0)).unwrap();
+
+        pending.cancel(&old.token).unwrap();
+        assert!(matches!(
+            pending.take(&old.token),
+            Err(BackendError::Invalid(MSG_IMPORT_EXPIRED))
+        ));
+        assert_eq!(pending.take(&current.token).unwrap().len(), 2);
     }
 }

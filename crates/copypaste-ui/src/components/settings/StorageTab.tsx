@@ -4,8 +4,7 @@
  *
  * * Export is not destructive but it *leaks* — every clip as readable text —
  *   and the opt-in for flagged items sits inside the dialog, the second ask.
- * * Import adds and never replaces, and says so: "import" reads as "overwrite"
- *   to a user who will not press it expecting to lose their history.
+ * * Import parses first, then asks with the real item count before storing.
  * * Restore replaces everything, pinned included, so its action says "Replace".
  *
  * No path enters this component, so none can reach the DOM (INV-12).
@@ -36,8 +35,9 @@ import {
 } from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
+import type { ImportPreview } from "@/lib/ipc";
 
-type Confirming = "none" | "clear" | "export" | "import" | "restore";
+type Confirming = "none" | "clear" | "export" | "restore";
 
 export function StorageTab() {
   const { t } = useTranslation();
@@ -50,6 +50,7 @@ export function StorageTab() {
 
   const [confirming, setConfirming] = useState<Confirming>("none");
   const [includeSensitive, setIncludeSensitive] = useState(false);
+  const [pendingImport, setPendingImport] = useState<ImportPreview | null>(null);
 
   const close = () => setConfirming("none");
 
@@ -93,7 +94,11 @@ export function StorageTab() {
           variant="outline"
           size="sm"
           disabled={importHistory.isPending}
-          onClick={() => setConfirming("import")}
+          onClick={() => {
+            importHistory.prepare.mutate(undefined, {
+              onSuccess: (preview) => setPendingImport(preview),
+            });
+          }}
         >
           <Upload aria-hidden="true" />
           {t("settings.transfer.import.action")}
@@ -209,26 +214,39 @@ export function StorageTab() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirming === "import"} onOpenChange={close}>
+      <AlertDialog
+        open={pendingImport !== null}
+        onOpenChange={(open) => {
+          if (open || pendingImport === null) return;
+          importHistory.cancel.mutate(pendingImport.token);
+          setPendingImport(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {t("settings.transfer.import.dialogTitle")}
+              {t("settings.transfer.import.dialogTitle", {
+                count: pendingImport?.item_count ?? 0,
+              })}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {t("settings.transfer.import.dialogBody")}
+              {t("settings.transfer.import.dialogBody", {
+                count: pendingImport?.item_count ?? 0,
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
+            <Button
+              disabled={importHistory.apply.isPending}
               onClick={() => {
-                importHistory.mutate();
-                close();
+                if (pendingImport === null) return;
+                importHistory.apply.mutate(pendingImport.token);
+                setPendingImport(null);
               }}
             >
               {t("settings.transfer.import.confirm")}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

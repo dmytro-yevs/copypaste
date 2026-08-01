@@ -280,10 +280,13 @@ export const settings = {
       description:
         "Reads an export back in. Items already here are kept — an import adds, it never replaces.",
       action: "Import…",
-      dialogTitle: "Add these clips to this device?",
-      dialogBody:
-        "Every clip is added to the history you already have. Nothing here is deleted. Each one is checked again as it goes in, so anything that looks like a secret is stored as one and repeats collapse into what is already here.",
-      confirm: "Choose what to import",
+      dialogTitle_one: "Import {{count}} item?",
+      dialogTitle_other: "Import {{count}} items?",
+      dialogBody_one:
+        "This will import {{count}} item from the file into your clipboard history. Duplicate items will be skipped. Existing items are not deleted.",
+      dialogBody_other:
+        "This will import {{count}} items from the file into your clipboard history. Duplicate items will be skipped. Existing items are not deleted.",
+      confirm: "Import",
       done_one: "Imported {{count}} item",
       done_other: "Imported {{count}} items",
       alreadyHere_one: "{{count}} was already here",
