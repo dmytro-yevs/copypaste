@@ -11,7 +11,8 @@ use rusqlite::{ErrorCode, Row};
 macro_rules! item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
-         pinned, pin_order, pin_updated_at, is_sensitive, deleted, origin_device_id"
+         pinned, pin_order, pin_updated_at, is_sensitive, deleted, origin_device_id, \
+         app_bundle_id, payload_metadata"
     };
 }
 
@@ -24,7 +25,8 @@ macro_rules! item_columns_ci {
          ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, \
          ci.pin_updated_at AS pin_updated_at, \
          ci.is_sensitive AS is_sensitive, ci.deleted AS deleted, \
-         ci.origin_device_id AS origin_device_id"
+         ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id, \
+         ci.payload_metadata AS payload_metadata"
     };
 }
 
@@ -51,6 +53,10 @@ pub struct NewItem {
     pub search_text: Option<String>,
     /// Milliseconds since the Unix epoch.
     pub created_at: i64,
+    /// Frontmost application at local capture time, if the platform supplied it.
+    pub app_bundle_id: Option<String>,
+    /// JSON-encoded [`crate::FileMetadata`], only for file payloads.
+    pub payload_metadata: Option<String>,
 }
 
 /// What [`super::Store::insert_or_bump`] did with a capture.
@@ -115,6 +121,9 @@ pub struct StoredItem {
     pub deleted: bool,
     /// Empty means "captured on this device" — see [`super::origin_or`].
     pub origin_device_id: String,
+    /// Frontmost application at local capture time. Remote items may not have it.
+    pub app_bundle_id: Option<String>,
+    pub payload_metadata: Option<String>,
 }
 
 /// Storage failures.
@@ -183,6 +192,8 @@ pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
         is_sensitive: row.get("is_sensitive")?,
         deleted: row.get("deleted")?,
         origin_device_id: row.get("origin_device_id")?,
+        app_bundle_id: row.get("app_bundle_id")?,
+        payload_metadata: row.get("payload_metadata")?,
     })
 }
 

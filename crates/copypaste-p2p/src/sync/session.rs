@@ -26,10 +26,13 @@ use super::plan::plan;
 use super::{SyncChannel, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
 use crate::protocol::{
-    content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
+    ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
     MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
     PROTOCOL_VERSION,
 };
+
+#[cfg(test)]
+use crate::protocol::{content_hash, content_hash_bytes};
 
 /// Runs the initiating half of a session to completion.
 pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
@@ -289,7 +292,14 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
                         stats.skipped += 1;
                         continue;
                     }
-                    if !item.deleted && content_hash(&item.content) != item.content_hash {
+                    let payload = if item.binary_content.is_empty() {
+                        item.content.as_bytes()
+                    } else {
+                        &item.binary_content
+                    };
+                    if !item.deleted
+                        && crate::protocol::content_hash_bytes(payload) != item.content_hash
+                    {
                         // The peer's `content_hash` is comparator key 2. Taking
                         // its word for it lets a hostile peer pick that key
                         // freely — and collide with a targeted item's hash so
@@ -372,11 +382,12 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
             if item.deleted {
                 item.content.clear();
             }
-            if item.content.len() > MAX_CONTENT_BYTES {
+            let payload_bytes = item.content.len().saturating_add(item.binary_content.len());
+            if payload_bytes > MAX_CONTENT_BYTES {
                 // Skip the one item rather than failing the session: the rest of
                 // the history is still worth syncing.
                 tracing::warn!(
-                    bytes = item.content.len(),
+                    bytes = payload_bytes,
                     max = MAX_CONTENT_BYTES,
                     "item is too large to send; skipping it"
                 );
@@ -385,7 +396,7 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
 
             if !batch.is_empty()
                 && (batch.len() == MAX_ITEMS_PER_MESSAGE
-                    || batch_bytes + item.content.len() > MAX_ITEM_BYTES_PER_MESSAGE)
+                    || batch_bytes.saturating_add(payload_bytes) > MAX_ITEM_BYTES_PER_MESSAGE)
             {
                 stats.sent += batch.len();
                 chan.send(SyncMessage::Items {
@@ -395,7 +406,7 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
                 batch_bytes = 0;
             }
 
-            batch_bytes += item.content.len();
+            batch_bytes += payload_bytes;
             batch.push(item);
         }
     }
@@ -1011,6 +1022,58 @@ mod tests {
         assert_eq!(oa.stats.sent, 2);
         assert_eq!(ob.stats.received, 2);
         assert_eq!(a.snapshot(), b.snapshot());
+    }
+
+    #[tokio::test]
+    async fn large_binary_items_are_split_before_they_are_sent() {
+        let bytes = vec![7; MAX_ITEM_BYTES_PER_MESSAGE / 2 + 1];
+        let items: Vec<_> = ["binary-a", "binary-b"]
+            .into_iter()
+            .map(|id| SyncItem {
+                item_id: id.into(),
+                content: String::new(),
+                binary_content: bytes.clone(),
+                payload_metadata: None,
+                content_type: "image/png".into(),
+                created_at: 1,
+                deleted: false,
+                content_hash: content_hash_bytes(&bytes),
+                origin_device_id: "dev-a".into(),
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
+            })
+            .collect();
+        let advertised = items
+            .iter()
+            .map(|item| (item.item_id.clone(), item.summary()))
+            .collect();
+        let requested = items.iter().map(|item| item.item_id.clone()).collect();
+        let source = TestSource::new("dev-a", items);
+        let mut channel = ScriptChannel::new(vec![]);
+        let mut stats = SyncStats::default();
+
+        serve_items(&mut channel, &source, &advertised, requested, &mut stats)
+            .await
+            .unwrap();
+
+        let batches: Vec<_> = channel
+            .sent
+            .iter()
+            .filter_map(|message| match message {
+                SyncMessage::Items { items } => Some(items),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(batches.len(), 2);
+        assert!(batches.iter().all(|batch| batch.len() == 1));
+        assert!(batches.iter().all(|batch| {
+            batch
+                .iter()
+                .map(|item| item.content.len() + item.binary_content.len())
+                .sum::<usize>()
+                <= MAX_ITEM_BYTES_PER_MESSAGE
+        }));
     }
 
     #[tokio::test]

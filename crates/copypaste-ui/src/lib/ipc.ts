@@ -40,6 +40,7 @@ export interface StatusData {
   readonly capture_running: boolean;
   /** Surfaced so a fake backend cannot be mistaken for the real pasteboard. */
   readonly clipboard_backend: string;
+  readonly private_mode: boolean;
 }
 
 /** `code` is the Noise pre-shared key in transferable form: anyone holding it
@@ -242,11 +243,9 @@ export {
   captureToastExplanation,
 } from "./ipcCapture";
 
-/** `copypaste_ipc::ConfigData`. `excluded_app_bundle_ids` is carried so the
- *  shape matches the wire and is deliberately offered as no control: the
- *  service stores it but does not yet enforce it, and a switch that does
- *  nothing is worse than none. */
+/** `copypaste_ipc::ConfigData`. */
 export interface ConfigData {
+  readonly private_mode: boolean;
   readonly poll_interval_ms: number;
   readonly history_limit: number;
   /** Maximum bytes retained in unpinned live ciphertext. */

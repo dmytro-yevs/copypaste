@@ -11,12 +11,15 @@ import { listen } from "@tauri-apps/api/event";
 
 import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
 import { PEERS_KEY } from "@/hooks/useDevices";
+import { CONFIG_KEY } from "@/hooks/useServiceConfig";
 import { hasBridge } from "@/lib/ipc";
 
 /** Must match `service::push::EVENT_CHANGED`, which has a test asserting it. */
 export const EVENT_CHANGED = "copypaste://changed";
 /** Must match `service::push::EVENT_PUSH_STATE`. */
 export const EVENT_PUSH_STATE = "copypaste://push-state";
+/** Emitted by the native tray after the daemon persisted its confirmed value. */
+export const EVENT_PRIVATE_MODE_CHANGED = "private-mode-changed";
 
 /** What the bridge sends on a change. Carries no clipboard content: a
  *  subscriber re-reads through the ordinary commands. */
@@ -67,6 +70,12 @@ export function usePush(): boolean {
       // A stream that just came back may have missed changes while it was
       // down, so its return is itself a reason to re-read.
       if (event.payload.live) void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+    }).then(keep);
+
+    void listen<boolean>(EVENT_PRIVATE_MODE_CHANGED, () => {
+      void qc.invalidateQueries({ queryKey: CONFIG_KEY });
+      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void qc.invalidateQueries({ queryKey: STATUS_KEY });
     }).then(keep);
 
     return () => {

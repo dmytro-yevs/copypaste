@@ -29,10 +29,8 @@
 //!
 //! ## What is implemented here
 //!
-//! Text capture only — the MVP's single representation. Frontmost-app
-//! attribution (§3.9), private mode and the app-exclusion gate are *not* in this
-//! module; they are separate work. The pieces that are here are implemented
-//! against the manifest, not approximated:
+//! The capture boundary implements the manifest's privacy and representation
+//! decisions before a payload is copied from the pasteboard:
 //!
 //! - **I-1..I-4** change detection driven by `changeCount`, never by content
 //!   comparison, with the cursor advanced on every drop path.
@@ -42,50 +40,38 @@
 //!   post-stamp (CopyPaste-8yzf) and the reset-on-failure path.
 //! - **I-5 / §3.4** the three `org.nspasteboard.*` opt-out markers, probed
 //!   before any representation is read.
+//! - **§3.9** a short-lived frontmost-app cache, private-mode and exclusion
+//!   gates; known password-manager origins are persisted as sensitive.
+//! - **I-11** text capture is the only implemented payload path. Image and
+//!   file changes are acknowledged without being materialised until encrypted
+//!   binary storage and native paste-back land together.
 //! - **I-18** `NSData.length` checked before the bytes are copied out.
 //! - **I-39 / §6.5** rejections are counted and readable, not just logged.
 //! - **§3.12** the invariant UTI strings are built once, not once per tick.
 //! - **I-9** no clipboard content, and no paths, in logs or in errors.
 //!
-//! ## Image, file and rich-text capture: what is done and what is not
-//!
-//! **Done — the type plumbing.** `copypaste_ipc::content_type` is the one place
-//! the vocabulary is spelled, `Capture::content_type` and the storage column
-//! carry it end to end, `Item::content_type` reaches every client, and a
-//! non-text row already renders as its label rather than as mojibake
-//! (`cli::render::item_preview`). A row of any of these types can already
-//! *arrive* — from a peer, from a cloud account, from an import — and is
-//! stored, listed and excluded from an export with a count (`skipped_non_text`).
-//!
-//! **Not done — the capture path, and it is the larger half.** Nothing below
-//! this line is written, and none of it can be tested on a Linux host:
-//!
-//! * **I-11** representation priority `text > image > file`, chosen once per
-//!   change, with the lower-priority ones dropped rather than queued.
-//! * **I-12/I-13** probing image *presence* with `availableTypeFromArray`
-//!   before any `dataForType`, `public.png` then `public.tiff`. A multi-MB
-//!   image accompanying text must never enter the heap.
-//! * **I-14/§3.6** `public.file-url` — strip the scheme, percent-decode with a
-//!   maintained crate, require absolute; invalid `%` passes through.
-//! * **§3.5 (`CopyPaste-q5ab`)** `NSFilenamesPboardType` is a **binary plist**,
-//!   not a string: read it with a data accessor and parse an array of bare
-//!   POSIX paths. v1 called `stringForType` and stripped `file://`, and every
-//!   file copied from Finder was silently discarded with no error and no log.
-//! * **I-15/I-16/I-19** absolute-path check, the read moved off the reactor,
-//!   and `stat`+`read` in one blocking operation (`CopyPaste-b5iz`, TOCTOU).
-//! * **§3.7/§3.8** promised files stay unsupported; the unsupported-type probe
-//!   is a fixed allowlist logged once per kind.
-//!
-//! And three things outside this module that the capture path would need:
-//! [`Capture::content`] is a `String`, so image bytes have nowhere to go;
-//! `copypaste_core::ingest_into` takes `&str`; and `Item::content` is a
-//! `String` on the wire. Carrying bytes is a change to all three, and it is the
-//! decision that should be taken first — base64 on the JSON wire, a side
-//! channel, or a content-addressed blob beside the database — because the
-//! pasteboard code above is shaped by the answer.
+//! Rich-text, image and file capture remain deferred. The shared content-type
+//! vocabulary nevertheless lets imported and remote rows retain their declared
+//! type without routing a path or base64 string through text ingest.
 
 mod change;
 mod fake;
+mod file_materialize;
+mod format;
+
+/// Decisions that must be made before a clipboard representation is read.
+///
+/// The backend owns the change cursor, so applying these gates here rather
+/// than after `poll` is what acknowledges a skipped value without first
+/// materialising its plaintext.
+#[derive(Debug, Clone, Copy)]
+pub struct CapturePolicy<'a> {
+    pub private_mode: bool,
+    pub excluded_app_bundle_ids: &'a [String],
+    /// The live storage cap. Backends reject before copying more than this
+    /// many bytes (or more than this many encoded bytes for a binary payload).
+    pub max_item_bytes: u64,
+}
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -93,7 +79,7 @@ mod macos;
 #[cfg(not(target_os = "macos"))]
 pub use fake::FakeClipboard;
 
-/// Read gate for text, in bytes.
+/// Absolute read gate, in bytes.
 ///
 /// §4 gives 10 MiB and gives its reason as "kept under the wire-frame cap so a
 /// storable item is always transportable" — the number was v1's *default*
@@ -103,24 +89,60 @@ pub use fake::FakeClipboard;
 /// storage layer's gate move together.
 const MAX_TEXT_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
+/// Credential stores mark a capture sensitive even when its text does not
+/// match a detector rule. Users may still explicitly exclude an app entirely.
+pub(crate) fn is_password_manager_app(bundle_id: &str) -> bool {
+    let bundle_id = bundle_id.to_ascii_lowercase();
+    matches!(
+        bundle_id.as_str(),
+        "com.1password.1password"
+            | "com.agilebits.onepassword7"
+            | "com.bitwarden.desktop"
+            | "org.keepassxc.keepassxc"
+            | "com.dashlane.dashlane"
+            | "com.lastpass.lastpass"
+            | "com.apple.passwords"
+    ) || bundle_id.contains("1password")
+        || bundle_id.contains("bitwarden")
+        || bundle_id.contains("keepass")
+        || bundle_id.contains("dashlane")
+        || bundle_id.contains("lastpass")
+        || bundle_id.contains("protonpass")
+        || bundle_id.contains("proton.pass")
+        || bundle_id.contains("strongbox")
+        || bundle_id.contains("secretive")
+        || bundle_id.contains("keepassium")
+}
+
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capture {
-    /// A `String`, which is why image and file capture is not merely a matter
-    /// of writing the pasteboard code — see the module header.
+    /// UTF-8 text captured from the system pasteboard.
     pub content: String,
-    /// One of `copypaste_ipc::content_type`. Always
-    /// [`copypaste_ipc::content_type::TEXT`] today; the field is typed as the
-    /// shared vocabulary rather than a bare literal so a new representation
-    /// names itself the same way everywhere it travels.
+    /// Raw bytes for image/file capture.  Text stays in `content`; the fields
+    /// are mutually exclusive so no caller can accidentally feed binary to a
+    /// string-only consumer.
+    pub binary_content: Option<Vec<u8>>,
+    /// An absolute local file reference.  The tick opens it on the blocking
+    /// worker; polling itself must never read a file's bytes (manifest 01 I-16).
+    pub file_path: Option<std::path::PathBuf>,
+    pub file_metadata: Option<copypaste_core::FileMetadata>,
+    /// One of `copypaste_ipc::content_type`.
     pub content_type: String,
+    /// The frontmost app at capture time, when the platform could resolve it.
+    pub app_bundle_id: Option<String>,
 }
 
 impl Capture {
+    #[allow(dead_code)]
     fn text(content: String) -> Self {
         Self {
             content,
+            binary_content: None,
+            file_path: None,
+            file_metadata: None,
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
+            app_bundle_id: None,
         }
     }
 }
@@ -132,6 +154,13 @@ pub trait ClipboardSource: Send {
     /// Return `Some(capture)` when the clipboard changed since the last poll.
     /// Must return `None` when nothing changed — the caller polls on a timer.
     fn poll(&mut self) -> Option<Capture>;
+
+    /// Poll with privacy policy. Legacy sources that cannot attribute an app
+    /// retain their ordinary polling semantics; macOS and the drivable fake
+    /// override this to gate before representation extraction.
+    fn poll_with_policy(&mut self, _policy: CapturePolicy<'_>) -> Option<Capture> {
+        self.poll()
+    }
 
     /// Whether [`ClipboardSource::poll`] has anything to report, without
     /// consuming it.
@@ -151,6 +180,21 @@ pub trait ClipboardSource: Send {
     /// Write text to the clipboard. Must suppress the resulting self-write so
     /// the next poll does not re-capture our own content.
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()>;
+
+    /// Write a native binary representation back to the platform pasteboard.
+    /// A backend that cannot do this refuses rather than converting bytes to
+    /// text and corrupting the user's clipboard.
+    fn set_binary_contents(
+        &mut self,
+        _item_id: &str,
+        _content_type: &str,
+        _bytes: &[u8],
+        _metadata: Option<&copypaste_core::FileMetadata>,
+    ) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!(
+            "this clipboard backend cannot write binary content"
+        ))
+    }
 
     /// Identifies the live backend, surfaced over IPC so a demo cannot be
     /// mistaken for the real thing.
@@ -194,7 +238,7 @@ pub fn new_source() -> Box<dyn ClipboardSource> {
 
 #[cfg(test)]
 mod tests {
-    use super::MAX_TEXT_BYTES;
+    use super::{is_password_manager_app, MAX_TEXT_BYTES};
     use copypaste_ipc::{ConfigData, ConfigPatch};
 
     /// §3.10, from the other end: the read gate and the storable maximum were
@@ -217,5 +261,20 @@ mod tests {
     #[test]
     fn the_read_gate_stays_inside_the_wire_contract() {
         const { assert!(MAX_TEXT_BYTES <= copypaste_ipc::MAX_CONTENT_BYTES) };
+    }
+
+    #[test]
+    fn credential_store_match_is_case_insensitive_and_covers_supported_apps() {
+        for bundle_id in [
+            "COM.1PASSWORD.1PASSWORD",
+            "com.apple.Passwords",
+            "com.proton.pass",
+            "com.strongbox.passwordsafe",
+            "com.mortenjust.secretive",
+            "com.keepassium.keepassium",
+        ] {
+            assert!(is_password_manager_app(bundle_id), "{bundle_id}");
+        }
+        assert!(!is_password_manager_app("com.apple.TextEdit"));
     }
 }

@@ -148,9 +148,9 @@ impl CloudSource for StoreSource {
                 // A tombstone has no payload to open, and carries none on the
                 // wire either (manifest 05 T-4).
                 let content = if row.deleted {
-                    String::new()
+                    Vec::new()
                 } else {
-                    match self.shared.open(&row) {
+                    match self.shared.open_bytes(&row) {
                         Some(content) => content,
                         None => continue,
                     }
@@ -162,8 +162,9 @@ impl CloudSource for StoreSource {
                     )
                     .to_string(),
                     item_id: row.id,
-                    content: content.into_bytes(),
+                    content,
                     content_type: row.content_type,
+                    payload_metadata: row.payload_metadata,
                     created_at: row.created_at,
                     deleted: row.deleted,
                 });
@@ -174,14 +175,17 @@ impl CloudSource for StoreSource {
 
     fn apply_remote(&self, item: LocalItem) -> Result<bool, SyncError> {
         blocking(|| {
-            // Lossy for the same reason the peer path is: clipboard content is
-            // text, and one row that is not valid UTF-8 must not fail a round.
-            let content = String::from_utf8_lossy(&item.content);
+            let text = copypaste_ipc::content_type::is_text(&item.content_type)
+                .then(|| String::from_utf8_lossy(&item.content));
             let applied = self
                 .shared
                 .apply_version(&RemoteVersion {
                     item_id: &item.item_id,
-                    content: &content,
+                    content: text.as_deref().unwrap_or(""),
+                    binary_content: (!item.deleted
+                        && !copypaste_ipc::content_type::is_text(&item.content_type))
+                    .then_some(item.content.as_slice()),
+                    payload_metadata: item.payload_metadata.as_deref(),
                     content_type: &item.content_type,
                     created_at: item.created_at,
                     deleted: item.deleted,
@@ -261,12 +265,20 @@ impl CloudSource for StoreSource {
                 created_at: local.created_at,
                 content_hash: local.content_hash.clone(),
                 deleted: local.deleted,
+                origin_device_id: local_origin.to_string(),
+                pinned: local.pinned,
+                pin_order: local.pin_order,
+                pin_updated_at: local.pin_updated_at,
             };
             let remote_version = ItemSummary {
                 item_id: incoming.item_id.clone(),
                 created_at: incoming.created_at,
                 content_hash: remote_hash,
                 deleted: incoming.deleted,
+                origin_device_id: incoming.origin_device_id.clone(),
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
             };
             let same_version = local_version.created_at == remote_version.created_at
                 && local_version.content_hash == remote_version.content_hash
@@ -474,6 +486,7 @@ mod tests {
                 item_id: "from-a-peer".into(),
                 content: b"arrived over the peer transport".to_vec(),
                 content_type: "text".into(),
+                payload_metadata: None,
                 created_at: old_stamp,
                 deleted: false,
                 origin_device_id: "device-b".into(),
@@ -503,6 +516,7 @@ mod tests {
                     created_at: stamp,
                     deleted: false,
                     origin_device_id: "peer".into(),
+                    payload_metadata: None,
                 })
                 .unwrap();
         }
@@ -604,6 +618,7 @@ mod tests {
             item_id: "from-the-cloud".into(),
             content: b"from another device".to_vec(),
             content_type: "text".into(),
+            payload_metadata: None,
             created_at: 1_700_000_000_000,
             deleted: false,
             origin_device_id: "device-a".into(),
@@ -624,6 +639,29 @@ mod tests {
         )
         .expect("the local key must open it");
         assert_eq!(String::from_utf8(plain).unwrap(), "from another device");
+    }
+
+    #[test]
+    fn a_file_versions_metadata_round_trips_between_cloud_and_local_storage() {
+        let (source, state, _dir) = source("file-metadata");
+        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#;
+        source
+            .apply_remote(LocalItem {
+                item_id: "file-from-cloud".into(),
+                content: b"%PDF-binary".to_vec(),
+                content_type: copypaste_ipc::content_type::FILE.into(),
+                payload_metadata: Some(metadata.into()),
+                created_at: 1_700_000_000_000,
+                deleted: false,
+                origin_device_id: "device-a".into(),
+            })
+            .unwrap();
+
+        let row = state.store.get("file-from-cloud").unwrap().unwrap();
+        assert_eq!(row.payload_metadata.as_deref(), Some(metadata));
+        let offered = source.local_changes_since(0).unwrap();
+        assert_eq!(offered[0].payload_metadata.as_deref(), Some(metadata));
+        assert_eq!(offered[0].content, b"%PDF-binary");
     }
 
     /// A round's own upload, echoed back by the account, must be a no-op — and

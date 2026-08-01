@@ -123,6 +123,7 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         // status line that history is growing when it is not.
         capture_running: false,
         clipboard_backend: super::BACKEND_NAME.to_string(),
+        private_mode: false,
         legacy_history_present: legacy_history_present(&inner.data_dir),
         // Android has no daemon poller, but it does run the same startup FTS
         // purge as the daemon. Surface that one counter rather than claiming

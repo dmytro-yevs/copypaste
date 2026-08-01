@@ -41,6 +41,10 @@ pub struct CloudItem {
     #[serde(default, deserialize_with = "null_as_empty")]
     pub nonce: String,
     pub content_type: String,
+    /// File name and MIME metadata in JSON form. It is plaintext metadata, not
+    /// content, and is authenticated with the rest of this row.
+    #[serde(default)]
+    pub payload_metadata: Option<String>,
     /// Version wall clock, ms since epoch. **Not the row's birth time**: it is
     /// the timestamp the poll cursor pages on, so a writer must restamp it on
     /// every mutation. A tombstone that kept the original creation time would
@@ -81,6 +85,7 @@ impl CloudItem {
             ciphertext: BASE64.encode(ciphertext),
             nonce: BASE64.encode(nonce),
             content_type: content_type.into(),
+            payload_metadata: None,
             created_at,
             deleted: false,
             origin_device_id: origin_device_id.into(),
@@ -107,6 +112,7 @@ impl CloudItem {
             ciphertext: ciphertext_b64.into(),
             nonce: nonce_b64.into(),
             content_type: content_type.into(),
+            payload_metadata: None,
             created_at,
             deleted: false,
             origin_device_id: origin_device_id.into(),
@@ -130,6 +136,7 @@ impl CloudItem {
             ciphertext: String::new(),
             nonce: String::new(),
             content_type: content_type.into(),
+            payload_metadata: None,
             created_at,
             deleted: true,
             origin_device_id: origin_device_id.into(),
@@ -175,6 +182,7 @@ impl CloudItem {
             ciphertext: &self.ciphertext,
             nonce: &self.nonce,
             content_type: &self.content_type,
+            payload_metadata: self.payload_metadata.as_deref(),
             created_at: self.created_at,
             deleted: self.deleted,
             origin_device_id: &self.origin_device_id,
@@ -196,6 +204,27 @@ impl CloudItem {
             return Err(RestError::InvalidItem {
                 reason: "a tombstone must not carry ciphertext",
             });
+        }
+        if self.deleted && self.payload_metadata.is_some() {
+            return Err(RestError::InvalidItem {
+                reason: "a tombstone must not carry payload metadata",
+            });
+        }
+        if self.content_type == "file" && !self.deleted && self.payload_metadata.is_none() {
+            return Err(RestError::InvalidItem {
+                reason: "a file item must carry payload metadata",
+            });
+        }
+        if let Some(metadata) = &self.payload_metadata {
+            if self.content_type != "file"
+                || metadata.len() > 1024
+                || !serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(metadata)
+                    .is_ok()
+            {
+                return Err(RestError::InvalidItem {
+                    reason: "payload metadata must be bounded JSON for a file item",
+                });
+            }
         }
         if !self.deleted && self.ciphertext.is_empty() {
             return Err(RestError::InvalidItem {
@@ -326,6 +355,14 @@ mod tests {
         forged_tombstone.deleted = true;
         forged_tombstone.ciphertext = String::new();
         assert!(forged_tombstone.verify(&key()).is_err());
+
+        let mut forged_metadata = row.clone();
+        forged_metadata.payload_metadata =
+            Some(r#"{"filename":"invoice.pdf","mime_type":"application/pdf"}"#.into());
+        assert_eq!(
+            forged_metadata.verify(&key()),
+            Err(CloudCryptoError::SignatureInvalid)
+        );
     }
 
     #[test]
@@ -360,11 +397,21 @@ mod tests {
                 "item_id",
                 "nonce",
                 "origin_device_id",
+                "payload_metadata",
                 "signature",
             ]
         );
         let mut selected: Vec<&str> = SELECT_COLUMNS.split(',').collect();
         selected.sort_unstable();
         assert_eq!(keys, selected, "what we write is what we read back");
+    }
+
+    #[test]
+    fn a_tombstone_cannot_carry_file_metadata() {
+        let mut row = CloudItem::tombstone("a1", "file", 5, "device-a");
+        row.payload_metadata =
+            Some(r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#.into());
+        row.sign(&key());
+        assert!(matches!(row.validate(), Err(RestError::InvalidItem { .. })));
     }
 }
