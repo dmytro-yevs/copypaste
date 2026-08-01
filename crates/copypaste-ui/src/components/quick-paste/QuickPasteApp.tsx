@@ -8,11 +8,13 @@ import {
   listItems,
   restartService,
   setAllowScreenshots,
+  setPinned,
   showMainWindow,
   type Item,
   type ItemPage,
 } from "@/lib/ipc";
 import { classifyError } from "@/lib/errors";
+import { fuzzyMatch } from "@/lib/fuzzy";
 import { readPrefs } from "@/store/prefs";
 
 const LIMIT = 50;
@@ -24,6 +26,10 @@ type HistoryState = {
   isLoading: boolean;
 };
 
+type RetryAction =
+  | { kind: "copy"; item: Item; plainText: boolean }
+  | { kind: "pin"; id: string; pinned: boolean };
+
 declare global {
   interface Window {
     __copypasteFreeMemory?: () => void;
@@ -32,7 +38,17 @@ declare global {
 
 /** What can be searched without making sensitive plaintext reachable. */
 function displayLabel(item: Item): string {
-  return item.is_sensitive ? "Sensitive content" : (item.content ?? "");
+  if (item.is_sensitive) return "Sensitive content";
+  if (item.content_type.toLowerCase().startsWith("image/")) return "Image";
+  if (item.content_type.toLowerCase() === "file") return "File";
+  return item.content ?? "";
+}
+
+function searchLabel(item: Item): string {
+  if (item.is_sensitive) return "••••••••";
+  if (item.content_type.toLowerCase().startsWith("image/")) return "[Image]";
+  if (item.content_type.toLowerCase() === "file") return "[File]";
+  return item.content ?? "";
 }
 
 function nextIndex(current: number, direction: 1 | -1, length: number): number {
@@ -46,18 +62,22 @@ function nextIndex(current: number, direction: 1 | -1, length: number): number {
  */
 export function QuickPasteApp() {
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [copyError, setCopyError] = useState<string | null>(null);
-  const [copyRetry, setCopyRetry] = useState<{ item: Item; plainText: boolean } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [retryAction, setRetryAction] = useState<RetryAction | null>(null);
+  const [pinPendingId, setPinPendingId] = useState<string | null>(null);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryState>({ data: null, error: null, isLoading: true });
+  const keyboardNavigation = useRef(false);
   const lastKeyboardMove = useRef(0);
   const scrolling = useRef(false);
   const scrollIdleTimer = useRef<number | null>(null);
   const hideInFlight = useRef(false);
   const hideGuardTimer = useRef<number | null>(null);
   const requestSequence = useRef(0);
+  const cacheGeneration = useRef(0);
 
   const refreshHistory = useCallback((trigger: RefreshTrigger) => {
     // INV-33: each independent refresh source owns a monotonic sequence. A
@@ -78,12 +98,18 @@ export function QuickPasteApp() {
   }, []);
 
   const items = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = query.trim();
     const all = history.data?.items ?? [];
-    return needle.length === 0
-      ? all
-      : all.filter((item) => displayLabel(item).toLocaleLowerCase().includes(needle));
+    if (needle.length === 0) return all;
+
+    return all
+      .map((item, index) => ({ item, index, match: fuzzyMatch(needle, searchLabel(item)) }))
+      .filter((entry): entry is typeof entry & { match: NonNullable<typeof entry.match> } => entry.match !== null)
+      .sort((left, right) => right.match.score - left.match.score || left.index - right.index)
+      .map(({ item }) => item);
   }, [history.data?.items, query]);
+
+  const selectedIndex = Math.max(0, items.findIndex((item) => item.id === selectedId));
 
   const refreshForShow = useCallback((trigger: Extract<RefreshTrigger, "mount" | "focus">) => {
     const prefs = readPrefs();
@@ -97,10 +123,12 @@ export function QuickPasteApp() {
     // Invalidate an in-flight response before clearing state: a hidden popup
     // must never be repopulated by a request that began while it was visible.
     requestSequence.current += 1;
+    cacheGeneration.current += 1;
     setSelectedId(null);
     setQuery("");
-    setCopyError(null);
-    setCopyRetry(null);
+    setActionError(null);
+    setRetryAction(null);
+    setPinPendingId(null);
     setHistory({ data: null, error: null, isLoading: true });
   }, []);
 
@@ -141,6 +169,13 @@ export function QuickPasteApp() {
     setSelectedId(items[0]?.id ?? null);
   }, [items, selectedId]);
 
+  useEffect(() => {
+    if (!keyboardNavigation.current) return;
+    const row = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
+    row?.scrollIntoView?.({ block: "nearest" });
+    keyboardNavigation.current = false;
+  }, [selectedId, selectedIndex]);
+
   const dismiss = useCallback(() => {
     if (hideInFlight.current) return;
     hideInFlight.current = true;
@@ -171,21 +206,46 @@ export function QuickPasteApp() {
 
   const copyAndDismiss = useCallback(
     async (item: Item, plainText = false) => {
+      const generation = cacheGeneration.current;
       try {
-        setCopyError(null);
-        setCopyRetry(null);
+        setActionError(null);
+        setRetryAction(null);
         await (plainText ? copyItemAsPlainText(item.id) : copyItem(item.id));
         // Drop the popup cache before it is hidden. The next invocation always
         // starts from a daemon read, and the Accessory hide path restores the
         // app the user was about to paste into.
         dismiss();
-      } catch {
+      } catch (error: unknown) {
+        console.error("Quick Paste copy failed", error);
+        if (cacheGeneration.current !== generation) return;
         // Keep the result visible rather than pretending the clipboard changed.
-        setCopyError("Couldn’t copy that item. Try again.");
-        setCopyRetry({ item, plainText });
+        setActionError("Couldn’t copy that item. Try again.");
+        setRetryAction({ kind: "copy", item, plainText });
       }
     },
     [dismiss],
+  );
+
+  const changePin = useCallback(
+    async (id: string, pinned: boolean) => {
+      const generation = cacheGeneration.current;
+      setActionError(null);
+      setRetryAction(null);
+      setPinPendingId(id);
+      try {
+        await setPinned(id, pinned);
+        if (cacheGeneration.current === generation) refreshHistory("retry");
+      } catch (error: unknown) {
+        console.error("Quick Paste pin failed", error);
+        if (cacheGeneration.current === generation) {
+          setActionError(`Couldn’t ${pinned ? "pin" : "unpin"} that item. Try again.`);
+          setRetryAction({ kind: "pin", id, pinned });
+        }
+      } finally {
+        if (cacheGeneration.current === generation) setPinPendingId(null);
+      }
+    },
+    [refreshHistory],
   );
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -199,6 +259,7 @@ export function QuickPasteApp() {
     const current = Math.max(0, items.findIndex((item) => item.id === selectedId));
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
+      keyboardNavigation.current = true;
       lastKeyboardMove.current = Date.now();
       setSelectedId(items[nextIndex(current, event.key === "ArrowDown" ? 1 : -1, items.length)]?.id ?? null);
       return;
@@ -257,20 +318,26 @@ export function QuickPasteApp() {
         <button
           type="button"
           className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onClick={() => void showMainWindow().catch(() => setCopyError("Couldn’t open Settings. Try again."))}
+          onClick={() => void showMainWindow().catch(() => setActionError("Couldn’t open Settings. Try again."))}
         >
           Settings
         </button>
       </div>
 
-      {copyError && (
+      {actionError && (
         <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md bg-err/15 px-3 py-2 text-sm text-err-strong">
-          <span>{copyError}</span>
-          {copyRetry && (
+          <span>{actionError}</span>
+          {retryAction && (
             <button
               type="button"
               className="rounded px-2 py-1 text-xs font-medium hover:bg-destructive-hover hover:text-destructive-foreground"
-              onClick={() => void copyAndDismiss(copyRetry.item, copyRetry.plainText)}
+              onClick={() => {
+                if (retryAction.kind === "copy") {
+                  void copyAndDismiss(retryAction.item, retryAction.plainText);
+                } else {
+                  void changePin(retryAction.id, retryAction.pinned);
+                }
+              }}
             >
               Retry
             </button>
@@ -278,7 +345,7 @@ export function QuickPasteApp() {
         </div>
       )}
 
-      <div role="list" onScroll={noteScroll} className="min-h-0 flex-1 overflow-auto rounded-md">
+      <div ref={listRef} role="list" onScroll={noteScroll} className="min-h-0 flex-1 overflow-auto rounded-md">
         {history.isLoading ? null : historyError === "offline" ? (
           <div className="p-4 text-sm text-muted-foreground">
             <p>Clipboard service offline</p>
@@ -310,20 +377,35 @@ export function QuickPasteApp() {
           </p>
         ) : (
           items.map((item) => (
-            <button
+            <div
               key={item.id}
-              type="button"
               role="listitem"
               aria-current={selectedId === item.id || undefined}
               onMouseEnter={() => selectFromPointer(item.id)}
-              onClick={() => void copyAndDismiss(item)}
-              className={`flex w-full flex-col rounded-md px-3 py-2 text-left text-sm outline-none ${
+              className={`flex w-full items-stretch rounded-md text-sm ${
                 selectedId === item.id ? "bg-accent" : "hover:bg-accent"
               }`}
             >
-              <span className="line-clamp-2 break-words">{displayLabel(item) || "Empty item"}</span>
-              {item.pinned && <span className="mt-1 text-xs text-muted-foreground">Pinned</span>}
-            </button>
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => void copyAndDismiss(item)}
+                className="flex min-w-0 flex-1 flex-col px-3 py-2 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+              >
+                <span className="line-clamp-2 break-words">{displayLabel(item) || "Empty item"}</span>
+                {item.pinned && <span className="mt-1 text-xs text-muted-foreground">Pinned</span>}
+              </button>
+              <button
+                type="button"
+                aria-label={item.pinned ? "Unpin" : "Pin"}
+                title={item.pinned ? "Unpin" : "Pin"}
+                disabled={pinPendingId === item.id}
+                onClick={() => void changePin(item.id, !item.pinned)}
+                className="m-1 shrink-0 self-center rounded px-2 py-1 text-xs font-medium text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring disabled:opacity-50"
+              >
+                {item.pinned ? "Unpin" : "Pin"}
+              </button>
+            </div>
           ))
         )}
       </div>
