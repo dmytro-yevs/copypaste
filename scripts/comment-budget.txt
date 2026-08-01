@@ -50,7 +50,6 @@ crates/copypaste-core/src/storage/mod.rs
 crates/copypaste-core/src/storage/model.rs
 crates/copypaste-core/src/storage/page.rs
 crates/copypaste-core/src/storage/pinning.rs
-crates/copypaste-core/src/storage/retention.rs
 crates/copypaste-core/src/storage/search.rs
 crates/copypaste-core/src/storage/versions.rs
 crates/copypaste-core/src/sync/merge.rs
