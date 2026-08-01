@@ -356,6 +356,7 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         return ConfigPatch::default();
     };
     ConfigPatch {
+        private_mode: None,
         poll_interval_ms: *poll_interval_ms,
         history_limit: *history_limit,
         storage_quota_bytes: *storage_quota_bytes,
@@ -374,5 +375,69 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         sync_enabled: *sync_enabled,
         notify_on_copy: *notify_on_copy,
         sound_on_copy: *sound_on_copy,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_set_maps_every_flag_to_the_patch() {
+        let cli = Cli::try_parse_from([
+            "copypaste",
+            "config",
+            "set",
+            "--poll-interval-ms",
+            "250",
+            "--history-limit",
+            "400",
+            "--storage-quota-bytes",
+            "52428800",
+            "--retention-days",
+            "30",
+            "--dedup-window-secs",
+            "15",
+            "--max-item-bytes",
+            "1048576",
+            "--sensitive-ttl-secs",
+            "60",
+            "--excluded-apps",
+            "com.example.One, , org.example.Two",
+            "--lan-visibility",
+            "true",
+            "--sync-enabled",
+            "false",
+            "--notify-on-copy",
+            "true",
+            "--sound-on-copy",
+            "false",
+        ])
+        .expect("config flags should parse");
+        let Command::Config { action } = cli.command else {
+            panic!("expected config command");
+        };
+
+        assert_eq!(
+            config_patch(&action),
+            ConfigPatch {
+                private_mode: None,
+                poll_interval_ms: Some(250),
+                history_limit: Some(400),
+                storage_quota_bytes: Some(52_428_800),
+                retention_days: Some(30),
+                dedup_window_secs: Some(15),
+                max_item_bytes: Some(1_048_576),
+                sensitive_ttl_secs: Some(60),
+                excluded_app_bundle_ids: Some(vec![
+                    "com.example.One".to_string(),
+                    "org.example.Two".to_string(),
+                ]),
+                lan_visibility: Some(true),
+                sync_enabled: Some(false),
+                notify_on_copy: Some(true),
+                sound_on_copy: Some(false),
+            }
+        );
     }
 }
