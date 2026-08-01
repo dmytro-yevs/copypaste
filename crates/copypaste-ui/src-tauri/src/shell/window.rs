@@ -537,8 +537,10 @@ mod tests {
 
     #[test]
     fn quick_paste_starts_hidden_and_protected() {
-        assert!(!QUICK_PASTE_CONFIG.visible);
-        assert!(QUICK_PASTE_CONFIG.content_protected);
+        const {
+            assert!(!QUICK_PASTE_CONFIG.visible);
+            assert!(QUICK_PASTE_CONFIG.content_protected);
+        }
     }
 
     #[test]
