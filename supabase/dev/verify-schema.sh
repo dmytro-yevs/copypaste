@@ -45,6 +45,14 @@ if [[ "$(id -u)" == "0" ]]; then
     run_as=(runuser -u "$pg_user" --)
 fi
 
+run_pg() {
+    if ((${#run_as[@]})); then
+        "${run_as[@]}" "$@"
+    else
+        "$@"
+    fi
+}
+
 workdir="$(mktemp -d /tmp/copypaste-verify-XXXXXX)"
 datadir="$workdir/data"
 sockdir="$workdir/sock"
@@ -54,22 +62,22 @@ if ((${#run_as[@]})); then
 fi
 
 cleanup() {
-    "${run_as[@]}" "$bindir/pg_ctl" -D "$datadir" -m immediate stop >/dev/null 2>&1 || true
+    run_pg "$bindir/pg_ctl" -D "$datadir" -m immediate stop >/dev/null 2>&1 || true
     rm -rf "$workdir"
 }
 trap cleanup EXIT
 
 echo "verify-schema: initialising a throwaway cluster in $workdir"
-"${run_as[@]}" "$bindir/initdb" -D "$datadir" -U copypaste_verify --auth=trust >"$workdir/initdb.log" 2>&1
+run_pg "$bindir/initdb" -D "$datadir" -U copypaste_verify --auth=trust >"$workdir/initdb.log" 2>&1
 
 # Socket only: no TCP port to collide with anything already running.
 # `wal_level=logical` because the Realtime migration creates a publication, and
 # Supabase's database runs at that level.
-"${run_as[@]}" "$bindir/pg_ctl" -D "$datadir" -l "$workdir/server.log" \
+run_pg "$bindir/pg_ctl" -D "$datadir" -l "$workdir/server.log" \
     -o "-k $sockdir -h '' -c wal_level=logical -c fsync=off -c full_page_writes=off" \
     -w start >/dev/null
 
-psql=("${run_as[@]}" "$bindir/psql" -h "$sockdir" -U copypaste_verify -v ON_ERROR_STOP=1 -X -q)
+psql=(run_pg "$bindir/psql" -h "$sockdir" -U copypaste_verify -v ON_ERROR_STOP=1 -X -q)
 
 "${psql[@]}" -d postgres -c "create database copypaste;" >/dev/null
 db=("${psql[@]}" -d copypaste)
