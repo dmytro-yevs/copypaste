@@ -757,7 +757,7 @@ mod tests {
             "max_text_size_bytes":10485760,"max_image_size_bytes":67108864,
             "max_file_size_bytes":104857600,"max_decoded_image_mb":50,
             "sensitive_ttl_secs":0,"excluded_app_bundle_ids":[],
-            "lan_visibility":true,"sync_enabled":true},"restart_required":["lan_visibility"]}}"#;
+            "lan_visibility":true,"sync_enabled":true},"restart_required":["lan_visibility"]}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let applied = expect_config(into_data(response).unwrap()).unwrap();
         assert_eq!(applied.config.poll_interval_ms, 250);
