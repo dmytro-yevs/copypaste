@@ -102,26 +102,23 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
             subscription = subscribe(&state) => subscription,
         };
 
-        match subscription {
-            Some((subscription, driver, user_id)) => {
-                schedule = policy.build();
-                // Returns when the socket ended for good, or on shutdown.
-                match pump(
-                    &state,
-                    subscription,
-                    driver,
-                    &mut session_updates,
-                    &user_id,
-                    &mut shutdown,
-                )
-                .await
-                {
-                    PumpExit::Shutdown => break,
-                    PumpExit::SessionChanged => continue,
-                    PumpExit::Disconnected => {}
-                }
+        if let Some((subscription, driver, user_id)) = subscription {
+            schedule = policy.build();
+            // Returns when the socket ended for good, or on shutdown.
+            match pump(
+                &state,
+                subscription,
+                driver,
+                &mut session_updates,
+                &user_id,
+                &mut shutdown,
+            )
+            .await
+            {
+                PumpExit::Shutdown => break,
+                PumpExit::SessionChanged => continue,
+                PumpExit::Disconnected => {}
             }
-            None => {}
         }
 
         let Some(delay) = schedule.next() else {

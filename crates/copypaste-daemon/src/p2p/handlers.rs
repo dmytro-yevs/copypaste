@@ -498,11 +498,9 @@ mod tests {
         };
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.error.is_some()));
-        assert!(
-            results
-                .iter()
-                .all(|r| r.error_code == Some(ErrorCode::PeerUnreachable))
-        );
+        assert!(results
+            .iter()
+            .all(|r| r.error_code == Some(ErrorCode::PeerUnreachable)));
     }
 
     /// Every variant the node can produce, with the code it arrives under.
