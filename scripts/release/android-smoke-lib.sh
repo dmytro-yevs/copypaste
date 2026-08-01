@@ -92,6 +92,76 @@ salt_of() { od -An -v -tx1 -N16 "$1" | tr -d ' \n'; }
 
 holds_text() { grep -aqF "$2" "$1"; }
 
+# A source-level guard for the state that Android must never restore without
+# the non-exportable Keystore key that opens it. Prints one line per defect.
+backup_rules_report() {   # <manifest> <Android 11 rules> <Android 12+ rules>
+    python3 - "$@" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+ANDROID = "{http://schemas.android.com/apk/res/android}"
+DOMAINS = (
+    "root", "file", "database", "sharedpref", "external",
+    "device_root", "device_file", "device_database", "device_sharedpref",
+)
+errors = []
+
+def parse(path):
+    try:
+        return ET.parse(path).getroot()
+    except (OSError, ET.ParseError) as error:
+        errors.append(f"{path}: {error}")
+        return None
+
+def require_excludes(root, label):
+    excluded = {
+        node.get("domain")
+        for node in root.findall("exclude")
+        if node.get("path") in (".", "./")
+    }
+    for domain in DOMAINS:
+        if domain not in excluded:
+            errors.append(f"{label} does not exclude {domain} at its root")
+
+manifest = parse(sys.argv[1])
+legacy = parse(sys.argv[2])
+modern = parse(sys.argv[3])
+
+if manifest is not None:
+    app = manifest.find("application")
+    if app is None:
+        errors.append("AndroidManifest.xml has no application")
+    else:
+        expected = {
+            "allowBackup": "false",
+            "fullBackupContent": "@xml/backup_rules",
+            "dataExtractionRules": "@xml/data_extraction_rules",
+        }
+        for name, value in expected.items():
+            if app.get(ANDROID + name) != value:
+                errors.append(f"AndroidManifest.xml {name} must be {value}")
+
+if legacy is not None:
+    if legacy.tag != "full-backup-content":
+        errors.append("backup_rules.xml root is not full-backup-content")
+    else:
+        require_excludes(legacy, "backup_rules.xml")
+
+if modern is not None:
+    if modern.tag != "data-extraction-rules":
+        errors.append("data_extraction_rules.xml root is not data-extraction-rules")
+    else:
+        for section_name in ("cloud-backup", "device-transfer"):
+            section = modern.find(section_name)
+            if section is None:
+                errors.append(f"data_extraction_rules.xml has no {section_name}")
+            else:
+                require_excludes(section, f"data_extraction_rules.xml {section_name}")
+
+print("\n".join(errors))
+PY
+}
+
 # What the WebView is actually showing, read out of the accessibility tree.
 #
 # Chromium exposes the DOM as *children* of the `android.webkit.WebView` node,
@@ -496,6 +566,36 @@ self_test() {
     [[ -n "$(keystore_report "$t/ours-keystore.log")" ]] \
         && ok "our own keystore failure is reported" \
         || bad "our own keystore failure is reported"
+
+    group "self-test: backup exclusions"
+
+    local root manifest legacy modern report
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    manifest="$root/crates/copypaste-ui/src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+    legacy="$root/crates/copypaste-ui/src-tauri/gen/android/app/src/main/res/xml/backup_rules.xml"
+    modern="$root/crates/copypaste-ui/src-tauri/gen/android/app/src/main/res/xml/data_extraction_rules.xml"
+    report="$(backup_rules_report "$manifest" "$legacy" "$modern")"
+    [[ -z "$report" ]] \
+        && ok "both backup formats exclude every CopyPaste storage domain" \
+        || bad "both backup formats exclude every CopyPaste storage domain" "$report"
+
+    sed '/android:dataExtractionRules=/d' "$manifest" > "$t/manifest-no-modern.xml"
+    report="$(backup_rules_report "$t/manifest-no-modern.xml" "$legacy" "$modern")"
+    [[ "$report" == *"dataExtractionRules"* ]] \
+        && ok "a missing Android 12+ manifest reference is reported" \
+        || bad "a missing Android 12+ manifest reference is reported" "$report"
+
+    sed '/domain="database"/d' "$legacy" > "$t/legacy-no-database.xml"
+    report="$(backup_rules_report "$manifest" "$t/legacy-no-database.xml" "$modern")"
+    [[ "$report" == *"backup_rules.xml does not exclude database"* ]] \
+        && ok "a missing Android 11 storage exclusion is reported" \
+        || bad "a missing Android 11 storage exclusion is reported" "$report"
+
+    printf '<data-extraction-rules><cloud-backup/></data-extraction-rules>\n' > "$t/modern-no-transfer.xml"
+    report="$(backup_rules_report "$manifest" "$legacy" "$t/modern-no-transfer.xml")"
+    [[ "$report" == *"data_extraction_rules.xml has no device-transfer"* ]] \
+        && ok "a missing Android 12+ transfer section is reported" \
+        || bad "a missing Android 12+ transfer section is reported" "$report"
 
     group "self-test: database detection"
 

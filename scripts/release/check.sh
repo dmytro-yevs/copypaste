@@ -261,6 +261,8 @@ group "Android scaffold is checked in, not regenerated"
 GEN="crates/copypaste-ui/src-tauri/gen/android"
 for f in settings.gradle build.gradle.kts gradlew app/build.gradle.kts \
          app/src/main/AndroidManifest.xml \
+         app/src/main/res/xml/backup_rules.xml \
+         app/src/main/res/xml/data_extraction_rules.xml \
          app/src/main/aidl/android/content/IOnPrimaryClipChangedListener.aidl \
          buildSrc/src/main/java/com/copypaste/app/kotlin/BuildTask.kt; do
     if git ls-files --error-unmatch "$GEN/$f" >/dev/null 2>&1; then
