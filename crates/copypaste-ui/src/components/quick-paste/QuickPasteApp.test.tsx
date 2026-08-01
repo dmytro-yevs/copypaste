@@ -102,6 +102,16 @@ describe("Quick Paste", () => {
     expect(hideWindow).not.toHaveBeenCalled();
   });
 
+  it("releases the warm popup cache when native hide invokes its memory hook", async () => {
+    withUser(<QuickPasteApp />);
+
+    await screen.findByRole("listitem");
+    expect(window.__copypasteFreeMemory).toEqual(expect.any(Function));
+    window.__copypasteFreeMemory?.();
+
+    await waitFor(() => expect(screen.queryByRole("listitem")).toBeNull());
+  });
+
   it("ignores a delayed response after a newer focus refresh", async () => {
     let resolveMount: ((value: ReturnType<typeof page>) => void) | undefined;
     let resolveFocus: ((value: ReturnType<typeof page>) => void) | undefined;

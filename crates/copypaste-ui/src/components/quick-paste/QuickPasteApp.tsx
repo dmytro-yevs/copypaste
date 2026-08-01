@@ -24,6 +24,12 @@ type HistoryState = {
   isLoading: boolean;
 };
 
+declare global {
+  interface Window {
+    __copypasteFreeMemory?: () => void;
+  }
+}
+
 /** What can be searched without making sensitive plaintext reachable. */
 function displayLabel(item: Item): string {
   return item.is_sensitive ? "Sensitive content" : (item.content ?? "");
@@ -97,6 +103,15 @@ export function QuickPasteApp() {
     setCopyRetry(null);
     setHistory({ data: null, error: null, isLoading: true });
   }, []);
+
+  useEffect(() => {
+    window.__copypasteFreeMemory = releaseHiddenCache;
+    return () => {
+      if (window.__copypasteFreeMemory === releaseHiddenCache) {
+        delete window.__copypasteFreeMemory;
+      }
+    };
+  }, [releaseHiddenCache]);
 
   useEffect(() => {
     refreshForShow("mount");
