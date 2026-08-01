@@ -391,8 +391,8 @@ fn position_under_cursor<R: Runtime>(window: &WebviewWindow<R>) -> bool {
     let physical = cocoa_point_to_physical(
         pointer.x,
         pointer.y,
-        &primary.position(),
-        &primary.size(),
+        primary.position(),
+        primary.size(),
         primary.scale_factor(),
     );
     let monitor = window
@@ -406,8 +406,8 @@ fn position_under_cursor<R: Runtime>(window: &WebviewWindow<R>) -> bool {
     let position = cursor_anchor(
         physical,
         size,
-        &monitor.position(),
-        &monitor.size(),
+        monitor.position(),
+        monitor.size(),
         monitor.scale_factor(),
     );
     window.set_position(position).is_ok()
