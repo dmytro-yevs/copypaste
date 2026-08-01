@@ -127,6 +127,22 @@ for wf, doc in docs.items():
 for a, rs in sorted(refs.items()):
     rec(len(rs) == 1, "{} is pinned to one ref everywhere".format(a), "refs in use: {}".format(sorted(rs)))
 
+# --- dependency review policy ----------------------------------------------
+supply = docs.get("supply-chain.yml") or {}
+review_job = (supply.get("jobs") or {}).get("dependency-review") or {}
+review_steps = [s for s in steps(review_job)
+                if str(s.get("uses") or "").split("@", 1)[0] == "actions/dependency-review-action"]
+rec(len(review_steps) == 1, "supply-chain.yml: dependency-review-action runs exactly once",
+    "found {} matching steps".format(len(review_steps)))
+for review in review_steps:
+    use = str(review.get("uses") or "")
+    ref = use.rsplit("@", 1)[1] if "@" in use else ""
+    rec(re.fullmatch(r"[0-9a-f]{40}", ref) is not None,
+        "supply-chain.yml: dependency-review-action is pinned to a full commit SHA", repr(use))
+    severity = str((review.get("with") or {}).get("fail-on-severity", ""))
+    rec(severity == "low", "supply-chain.yml: dependency review fails on low severity",
+        "fail-on-severity is {!r}".format(severity or None))
+
 # --- the Node a setup-node job actually gets ---------------------------------
 # npm treats an unmet `engines.node` as a warning unless engine-strict is set,
 # so a lockfile can outgrow the runners without anything failing — until the day

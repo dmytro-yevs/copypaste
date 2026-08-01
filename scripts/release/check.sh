@@ -445,14 +445,6 @@ else
     bad "CI gates UI, e2e and design npm vulnerabilities" \
         "expected npm audit after npm ci for all three lockfiles"
 fi
-if grep -q 'actions/dependency-review-action@v4' .github/workflows/supply-chain.yml \
-   && grep -q 'fail-on-severity: low' .github/workflows/supply-chain.yml; then
-    ok "supply-chain reviews changed Maven and Gradle dependencies"
-else
-    bad "supply-chain reviews changed Maven and Gradle dependencies" \
-        "expected dependency-review-action with fail-on-severity: low"
-fi
-
 # dependency-review sees only PR diffs. Dependency-Check runs after the Android
 # build has resolved the actual Gradle graph, including transitive artifacts,
 # on the scheduled emulator workflow as well.
