@@ -66,13 +66,30 @@ pub struct ExportData {
     pub skipped_undecryptable: u32,
 }
 
-/// What an import did. `skipped` counts items the store deduplicated against
-/// something it already held — not failures: a malformed batch is refused
-/// whole, before anything is written.
+/// What an import did.
+///
+/// `skipped` is the compatibility total and is always the sum of the three
+/// reason counts in replies from a current daemon. The reason fields are
+/// additive and default to zero so a current client can still decode a reply
+/// from an earlier v2 daemon. In that case `skipped` can be non-zero while the
+/// reason counts are zero, and the client must describe the reason as
+/// unavailable rather than assuming those rows were duplicates.
+///
+/// A malformed batch is refused whole, before anything is written. These
+/// counts cover only individually recoverable rows inside an accepted batch.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ImportData {
     pub inserted: u32,
     pub skipped: u32,
+    /// Items deduplicated against something the store already held.
+    #[serde(default)]
+    pub skipped_duplicate: u32,
+    /// Empty or whitespace-only items, which the ingest path cannot store.
+    #[serde(default)]
+    pub skipped_empty: u32,
+    /// Items larger than the user's configured per-item size limit.
+    #[serde(default)]
+    pub skipped_too_large: u32,
 }
 
 /// A completed backup. No path: the client supplied it and already knows it,
