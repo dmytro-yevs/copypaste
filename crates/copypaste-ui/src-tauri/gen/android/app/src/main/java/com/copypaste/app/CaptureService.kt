@@ -23,13 +23,48 @@ class CaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // The FGS notification is the user's visible evidence that a listener
+        // is alive. Never arm (or restore) an invisible service on Android 13+.
+        if (!CaptureNotifications.canPost(this)) {
+            CaptureState.clear(this)
+            ShizukuClipboard.disarm()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         CaptureNotifications.ensureChannels(this)
         val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Capturing from every app."
         startForeground(CaptureNotifications.ONGOING_ID, CaptureNotifications.ongoing(this, text))
-        // Restarted after a kill, because the user's expectation is that this
-        // keeps running. It re-arms through the plugin's next probe rather than
-        // arming here: whether the grant survived is not this class's decision.
+
+        // START_STICKY can recreate this service with a null intent after the
+        // app process was reclaimed. The old binder callback died with that
+        // process, so restore only the user's persisted, explicit arm.
+        if (!ShizukuClipboard.isListening()) {
+            val armed = CaptureState.armed(this)
+            if (armed != null) {
+                val restored = ShizukuClipboard.arm {
+                    CaptureState.clear(this)
+                    CaptureNotifications.postLost(this, armed.lostTitle, armed.lostBody)
+                    stopSelf()
+                }
+                if (!restored) {
+                    // Shizuku normally stops at reboot. Keeping the state set
+                    // here would falsely claim a listener will come back.
+                    CaptureState.clear(this)
+                    stopSelf(startId)
+                    return START_NOT_STICKY
+                }
+            }
+        }
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        // The callback belongs to this process, not the service object. Remove
+        // it whenever Android tears the service down so it cannot outlive the
+        // foreground notification. The persisted intent, if any, is retained
+        // for START_STICKY's next service instance.
+        ShizukuClipboard.disarm()
+        super.onDestroy()
     }
 
     companion object {

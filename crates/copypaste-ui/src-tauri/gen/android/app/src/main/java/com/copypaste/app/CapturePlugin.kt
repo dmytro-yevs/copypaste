@@ -46,13 +46,30 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         val title = args.optString("lostTitle", "Background capture stopped.")
         val body = args.optString("lostBody", "")
 
-        ensureNotificationPermission()
+        if (!ensureNotificationPermission()) {
+            // A previously granted notification permission can be revoked in
+            // Settings. Do not leave an old persisted arm claiming it will
+            // restart while the required foreground notification is blocked.
+            CaptureState.clear(activity)
+            ShizukuClipboard.disarm()
+            CaptureService.stop(activity)
+            invoke.resolve(
+                JSObject()
+                    .put("probe", probeObject())
+                    .put("listening", false)
+                    .put("outcome", "refused")
+                    .put("focused", true)
+            )
+            return
+        }
 
         val listening = ShizukuClipboard.arm {
+            CaptureState.clear(activity)
             CaptureNotifications.postLost(activity, title, body)
             CaptureService.stop(activity)
         }
         if (listening) {
+            CaptureState.persistArmed(activity, title, body)
             CaptureService.start(activity, "Capturing from every app.")
         }
 
@@ -71,6 +88,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun disarm(invoke: Invoke) {
         ShizukuClipboard.disarm()
+        CaptureState.clear(activity)
         CaptureService.stop(activity)
         invoke.resolve(JSObject())
     }
@@ -146,6 +164,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         .put("installed", isShizukuInstalled())
         .put("running", ShizukuClipboard.isRunning())
         .put("permission", ShizukuClipboard.hasPermission())
+        .put("enabled", CaptureState.armed(activity) != null)
         .put("toastSuppressed", ShizukuClipboard.isToastSuppressed(activity))
         .put("rearmRequested", takeRearmRequest())
 
@@ -154,13 +173,10 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      * make "background capture stopped" a silent event — the one outcome the
      * whole feature exists to prevent.
      */
-    private fun ensureNotificationPermission() {
-        if (android.os.Build.VERSION.SDK_INT < 33) return
-        val granted = activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4920)
-        }
+    private fun ensureNotificationPermission(): Boolean {
+        if (CaptureNotifications.canPost(activity)) return true
+        activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4920)
+        return false
     }
 
     /**

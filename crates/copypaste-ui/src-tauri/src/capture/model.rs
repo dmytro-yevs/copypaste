@@ -774,7 +774,7 @@ mod tests {
     fn the_kotlin_payloads_deserialise_from_the_json_kotlin_sends() {
         let probe: ShizukuProbe = serde_json::from_str(
             r#"{"supported":true,"installed":true,"running":true,"permission":false,
-                "toastSuppressed":false,"rearmRequested":true}"#,
+                "enabled":true,"toastSuppressed":false,"rearmRequested":true}"#,
         )
         .unwrap();
         assert!(probe.running && !probe.permission && probe.rearm_requested);
