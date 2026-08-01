@@ -13,8 +13,9 @@ use copypaste_ipc::CloudSyncData;
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
+use crate::cloud::refresh::is_terminal_auth_error;
 use crate::cloud::source::StoreSource;
-use crate::cloud::KEY_LAST_SYNC;
+use crate::cloud::{Driver, KEY_LAST_SYNC};
 
 use crate::AppState;
 
@@ -71,7 +72,7 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
 
     // The refresh token rotates on any 401 recovery inside that call, so it is
     // written back whether the round succeeded or not.
-    state.cloud.persist_session(&state.meta);
+    state.cloud.persist_session(&state.meta, &driver);
 
     match &outcome {
         Ok(stats) => {
@@ -100,11 +101,20 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
             // `SyncError`'s payloads are `&'static str`, so this cannot carry a
             // path, a token or row content into a log or onto the wire.
             warn!(error = %e, "cloud sync round failed");
-            state.cloud.note_failure(describe(e));
+            record_failure(state, &driver, e);
         }
     }
 
     Some(outcome.map(to_wire))
+}
+
+fn record_failure(state: &AppState, driver: &Arc<Driver>, error: &SyncError) {
+    let message = describe(error);
+    if is_terminal_auth_error(error) {
+        state.cloud.invalidate_session(&state.meta, driver, message);
+    } else {
+        state.cloud.note_driver_failure(driver, message);
+    }
 }
 
 /// A fixed sentence per failure, for `cloud status` and the CLI.
@@ -144,8 +154,8 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cloud::KEY_UPLOAD_FLOOR;
-    use crate::testutil::test_state;
+    use crate::cloud::{KEY_REFRESH, KEY_SYNC_KEY, KEY_UPLOAD_FLOOR};
+    use crate::testutil::{test_state, test_state_with_cloud};
 
     #[tokio::test]
     async fn a_round_with_nobody_signed_in_does_nothing() {
@@ -222,6 +232,50 @@ mod tests {
             .await
             .expect("the loop must observe shutdown")
             .expect("no panic");
+    }
+
+    #[test]
+    fn a_terminal_refresh_failure_invalidates_the_live_account() {
+        use copypaste_cloud::crypto::derive_sync_key;
+        use copypaste_cloud::CloudConfig;
+
+        let config = CloudConfig {
+            url: "https://example.supabase.co".into(),
+            anon_key: "anon".into(),
+        };
+        let (state, _dir) =
+            test_state_with_cloud("alpha", crate::cloud::Cloud::new(Some(config.clone())));
+        let key = derive_sync_key("correct horse battery staple", "user-1").unwrap();
+        let key_hex = hex::encode(key.to_bytes().as_slice());
+        state.cloud.install(
+            &state,
+            config,
+            "a@example.com".into(),
+            "user-1".into(),
+            key,
+            copypaste_cloud::auth::Session {
+                access_token: "access-1".into(),
+                refresh_token: "refresh-1".into(),
+                user_id: "user-1".into(),
+                expires_at_ms: i64::MAX,
+            },
+        );
+        state.cloud.persist(&state.meta, &key_hex).unwrap();
+        let driver = state.cloud.driver().unwrap();
+        let updates = state.cloud.session_updates();
+
+        record_failure(&state, &driver, &SyncError::SessionExpired);
+
+        let status = state.cloud.status();
+        assert!(!status.signed_in);
+        assert_eq!(status.email, None);
+        assert_eq!(
+            status.last_error.as_deref(),
+            Some("the session expired; sign in again")
+        );
+        assert_eq!(state.meta.state(KEY_REFRESH).unwrap(), None);
+        assert_eq!(state.meta.state(KEY_SYNC_KEY).unwrap(), None);
+        assert!(updates.has_changed().unwrap());
     }
 
     /// The count that says something wrote into the account without the

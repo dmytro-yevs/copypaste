@@ -94,7 +94,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// an attack (INV-N6). If the refresh token itself has aged out, that
     /// surfaces as [`SyncError::SessionExpired`] and the sign-in is the
     /// caller's decision to make.
-    async fn refresh_session(&self) -> Result<(), SyncError> {
+    pub async fn refresh_session(&self) -> Result<(), SyncError> {
         let refresh_token = self.lock_session().refresh_token.clone();
 
         match self.auth.refresh(&refresh_token).await {

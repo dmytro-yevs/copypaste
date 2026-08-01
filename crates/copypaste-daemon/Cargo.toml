@@ -13,6 +13,7 @@ copypaste-cloud = { path = "../copypaste-cloud" }
 tokio.workspace = true
 tokio-util.workspace = true
 futures-util.workspace = true
+backon.workspace = true
 serde.workspace = true
 # `raw_value` so a received sync message can be handed to
 # `SyncMessage::decode` verbatim: the bounds and the timestamp clamp live in
@@ -57,3 +58,4 @@ security-framework.workspace = true
 plist.workspace = true
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
