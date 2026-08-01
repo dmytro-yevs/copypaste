@@ -172,14 +172,20 @@ pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) {
         return;
     }
 
-    hide_quick_paste_window(window);
+    hide_quick_paste_window(window, QuickPasteHideTarget::RestorePreviousApplication);
 }
 
 /// Hide a popup while moving into CopyPaste's main window. Restoring the
 /// previous application here would immediately steal focus back from Settings.
 pub fn hide_window_for_main<R: Runtime>(window: &WebviewWindow<R>) {
-    if !cfg!(target_os = "android") {
-        let _ = window.hide();
+    if cfg!(target_os = "android") {
+        return;
+    }
+    match main_transition_action(window.label()) {
+        MainTransitionAction::HideQuickPaste(target) => hide_quick_paste_window(window, target),
+        MainTransitionAction::HideWindow => {
+            let _ = window.hide();
+        }
     }
 }
 
@@ -198,6 +204,43 @@ enum FocusLossAction {
     HideQuickPasteAndRestorePrior,
 }
 
+/// A close request must follow the same path as Escape, copy, and focus loss.
+/// A direct `Window::hide` skips activation recovery and leaves the warm popup
+/// data in memory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloseRequestAction {
+    HideQuickPaste(QuickPasteHideTarget),
+    HideWindow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MainTransitionAction {
+    HideQuickPaste(QuickPasteHideTarget),
+    HideWindow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuickPasteHideTarget {
+    RestorePreviousApplication,
+    MainWindow,
+}
+
+fn close_request_action(label: &str) -> CloseRequestAction {
+    if label == QUICK_PASTE {
+        CloseRequestAction::HideQuickPaste(QuickPasteHideTarget::RestorePreviousApplication)
+    } else {
+        CloseRequestAction::HideWindow
+    }
+}
+
+fn main_transition_action(label: &str) -> MainTransitionAction {
+    if label == QUICK_PASTE {
+        MainTransitionAction::HideQuickPaste(QuickPasteHideTarget::MainWindow)
+    } else {
+        MainTransitionAction::HideWindow
+    }
+}
+
 fn focus_loss_action(label: &str, visible: bool) -> FocusLossAction {
     if label == QUICK_PASTE && visible {
         FocusLossAction::HideQuickPasteAndRestorePrior
@@ -206,10 +249,10 @@ fn focus_loss_action(label: &str, visible: bool) -> FocusLossAction {
     }
 }
 
-fn hide_after_focus_loss<R: Runtime>(window: &tauri::Window<R>) {
+fn hide_after_window_event<R: Runtime>(window: &tauri::Window<R>, target: QuickPasteHideTarget) {
     if let Some(popup) = quick_paste_window(window.app_handle()) {
         if popup.is_visible().unwrap_or(false) {
-            hide_quick_paste_window(&popup);
+            hide_quick_paste_window(&popup, target);
         }
     }
 }
@@ -226,40 +269,56 @@ fn free_quick_paste_memory<R: Runtime>(window: &WebviewWindow<R>) {
 enum HideStep {
     Accessory,
     Hide,
+    FreeMemory,
     Regular,
 }
 
 #[cfg(test)]
-const NO_PRIOR_APPLICATION_HIDE: [HideStep; 3] =
-    [HideStep::Accessory, HideStep::Hide, HideStep::Regular];
+const NO_PRIOR_APPLICATION_HIDE: [HideStep; 4] = [
+    HideStep::Accessory,
+    HideStep::Hide,
+    HideStep::FreeMemory,
+    HideStep::Regular,
+];
 
 #[cfg(target_os = "macos")]
-fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>) {
-    if has_previous_application() {
-        if window.hide().is_ok() {
-            free_quick_paste_memory(window);
-            restore_previous_application();
+fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickPasteHideTarget) {
+    match target {
+        QuickPasteHideTarget::MainWindow => {
+            if window.hide().is_ok() {
+                free_quick_paste_memory(window);
+            }
         }
-        return;
-    }
+        QuickPasteHideTarget::RestorePreviousApplication => {
+            if has_previous_application() {
+                if window.hide().is_ok() {
+                    free_quick_paste_memory(window);
+                    restore_previous_application();
+                }
+                return;
+            }
 
-    // AT-39 / V-11: no prior app means CopyPaste itself was frontmost. Making
-    // it an Accessory only while the popup disappears prevents macOS from
-    // promoting the main window; Regular is restored immediately so Dock and
-    // Cmd+Tab retain their normal main-app behaviour.
-    let app = window.app_handle();
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-    if window.hide().is_ok() {
-        free_quick_paste_memory(window);
+            // AT-39 / V-11: no prior app means CopyPaste itself was frontmost. Making
+            // it an Accessory only while the popup disappears prevents macOS from
+            // promoting the main window; Regular is restored immediately so Dock and
+            // Cmd+Tab retain their normal main-app behaviour.
+            let app = window.app_handle();
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if window.hide().is_ok() {
+                free_quick_paste_memory(window);
+            }
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        }
     }
-    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
 }
 
 #[cfg(not(target_os = "macos"))]
-fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>) {
+fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>, target: QuickPasteHideTarget) {
     if window.hide().is_ok() {
         free_quick_paste_memory(window);
-        restore_previous_application();
+        if target == QuickPasteHideTarget::RestorePreviousApplication {
+            restore_previous_application();
+        }
     }
 }
 
@@ -379,17 +438,20 @@ pub fn on_event<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEven
     match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            let _ = window.hide();
-            if window.label() == QUICK_PASTE {
-                restore_previous_application();
+            match close_request_action(window.label()) {
+                CloseRequestAction::HideQuickPaste(target) => {
+                    hide_after_window_event(window, target)
+                }
+                CloseRequestAction::HideWindow => {
+                    let _ = window.hide();
+                }
             }
         }
-        tauri::WindowEvent::Focused(false) => {
+        tauri::WindowEvent::Focused(false)
             if focus_loss_action(window.label(), window.is_visible().unwrap_or(false))
-                == FocusLossAction::HideQuickPasteAndRestorePrior
-            {
-                hide_after_focus_loss(window);
-            }
+                == FocusLossAction::HideQuickPasteAndRestorePrior =>
+        {
+            hide_after_window_event(window, QuickPasteHideTarget::RestorePreviousApplication);
         }
         _ => {}
     }
@@ -492,7 +554,42 @@ mod tests {
     fn no_prior_application_hides_between_accessory_and_regular() {
         assert_eq!(
             NO_PRIOR_APPLICATION_HIDE,
-            [HideStep::Accessory, HideStep::Hide, HideStep::Regular]
+            [
+                HideStep::Accessory,
+                HideStep::Hide,
+                HideStep::FreeMemory,
+                HideStep::Regular,
+            ]
+        );
+    }
+
+    #[test]
+    fn settings_hides_the_popup_and_releases_its_cache() {
+        assert_eq!(
+            main_transition_action(QUICK_PASTE),
+            MainTransitionAction::HideQuickPaste(QuickPasteHideTarget::MainWindow)
+        );
+        assert_eq!(
+            main_transition_action(MAIN),
+            MainTransitionAction::HideWindow
+        );
+    }
+
+    #[test]
+    fn close_requested_uses_the_popup_dismiss_lifecycle() {
+        assert_eq!(
+            close_request_action(QUICK_PASTE),
+            CloseRequestAction::HideQuickPaste(QuickPasteHideTarget::RestorePreviousApplication)
+        );
+        assert_eq!(close_request_action(MAIN), CloseRequestAction::HideWindow);
+        assert_eq!(
+            NO_PRIOR_APPLICATION_HIDE,
+            [
+                HideStep::Accessory,
+                HideStep::Hide,
+                HideStep::FreeMemory,
+                HideStep::Regular,
+            ]
         );
     }
 
