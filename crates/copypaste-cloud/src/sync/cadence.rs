@@ -8,6 +8,7 @@
 //! condition.
 
 use std::sync::atomic::Ordering;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use super::driver::CloudSync;
@@ -41,6 +42,73 @@ pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(300);
 /// direction for a caller that has not wired Realtime up yet.
 pub const MAX_POLL_INTERVAL_WITHOUT_PUSH: Duration = Duration::from_secs(10);
 
+/// A round-driven interval that lengthens while idle and resets on activity.
+#[derive(Debug)]
+pub struct AdaptiveCadence {
+    floor: Duration,
+    ceiling: Duration,
+    current: Mutex<Duration>,
+}
+
+impl Default for AdaptiveCadence {
+    fn default() -> Self {
+        Self::new(MIN_POLL_INTERVAL, MAX_POLL_INTERVAL)
+    }
+}
+
+impl AdaptiveCadence {
+    /// Start a cadence at `floor` and cap idle growth at `ceiling`.
+    pub fn new(floor: Duration, ceiling: Duration) -> Self {
+        assert!(
+            floor <= ceiling,
+            "cadence floor must not exceed its ceiling"
+        );
+        Self {
+            floor,
+            ceiling,
+            current: Mutex::new(floor),
+        }
+    }
+
+    /// Return the interval selected for the next round.
+    pub fn interval(&self) -> Duration {
+        *self.lock()
+    }
+
+    /// Record whether the last round observed activity.
+    pub fn note_activity(&self, changed: bool) {
+        self.note_activity_with_ceiling(changed, self.ceiling);
+    }
+
+    fn interval_with_ceiling(&self, ceiling: Duration) -> Duration {
+        self.interval().min(ceiling)
+    }
+
+    fn note_activity_with_ceiling(&self, changed: bool, ceiling: Duration) {
+        assert!(
+            self.floor <= ceiling,
+            "cadence floor must not exceed its ceiling"
+        );
+        let mut current = self.lock();
+        *current = if changed {
+            self.floor
+        } else {
+            current.saturating_mul(2).min(self.ceiling).min(ceiling)
+        };
+    }
+
+    /// Return the cadence to its floor immediately.
+    pub fn reset(&self) {
+        *self.lock() = self.floor;
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Duration> {
+        self.current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// How long to wait before the next [`CloudSync::sync`].
     ///
@@ -51,7 +119,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// it is applied on read as well as on drift, so a channel that just died
     /// shortens the *current* wait rather than the one after it.
     pub fn poll_interval(&self) -> Duration {
-        (*self.lock(&self.idle)).min(self.idle_ceiling())
+        self.cadence.interval_with_ceiling(self.idle_ceiling())
     }
 
     /// Reset the cadence to the floor.
@@ -62,7 +130,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     /// asleep must also interrupt that sleep — resetting the interval a loop is
     /// not reading changes nothing.
     pub fn wake(&self) {
-        *self.lock(&self.idle) = MIN_POLL_INTERVAL;
+        self.cadence.reset();
     }
 
     /// Tell the driver whether a Realtime channel is currently confirmed.
@@ -90,13 +158,8 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     }
 
     pub(super) fn note_activity(&self, changed: bool) {
-        let ceiling = self.idle_ceiling();
-        let mut idle = self.lock(&self.idle);
-        *idle = if changed {
-            MIN_POLL_INTERVAL
-        } else {
-            (*idle * 2).min(ceiling)
-        };
+        self.cadence
+            .note_activity_with_ceiling(changed, self.idle_ceiling());
     }
 }
 
@@ -104,6 +167,51 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 mod tests {
     use super::super::fakes::{cloud_row, driver, FakeAuth, FakeRest, FakeSource};
     use super::*;
+
+    #[test]
+    fn adaptive_cadence_holds_its_boundaries() {
+        let cadence = AdaptiveCadence::new(Duration::from_millis(250), Duration::from_secs(2));
+        assert_eq!(cadence.interval(), Duration::from_millis(250));
+
+        let expected = [500, 1_000, 2_000, 2_000];
+        for millis in expected {
+            cadence.note_activity(false);
+            assert_eq!(cadence.interval(), Duration::from_millis(millis));
+        }
+    }
+
+    #[test]
+    fn adaptive_cadence_resets_after_activity_and_an_explicit_wake() {
+        let cadence = AdaptiveCadence::default();
+        cadence.note_activity(false);
+        cadence.note_activity(false);
+        cadence.note_activity(true);
+        assert_eq!(cadence.interval(), MIN_POLL_INTERVAL);
+
+        cadence.note_activity(false);
+        cadence.reset();
+        assert_eq!(cadence.interval(), MIN_POLL_INTERVAL);
+    }
+
+    #[test]
+    fn a_temporary_ceiling_clamps_without_losing_the_idle_ladder() {
+        let cadence = AdaptiveCadence::default();
+        for _ in 0..8 {
+            cadence.note_activity(false);
+        }
+        assert_eq!(cadence.interval(), MAX_POLL_INTERVAL);
+
+        assert_eq!(
+            cadence.interval_with_ceiling(MAX_POLL_INTERVAL_WITHOUT_PUSH),
+            MAX_POLL_INTERVAL_WITHOUT_PUSH
+        );
+        assert_eq!(cadence.interval(), MAX_POLL_INTERVAL);
+
+        cadence.note_activity_with_ceiling(false, MAX_POLL_INTERVAL_WITHOUT_PUSH);
+        assert_eq!(cadence.interval(), MAX_POLL_INTERVAL_WITHOUT_PUSH);
+        cadence.note_activity(false);
+        assert_eq!(cadence.interval(), Duration::from_secs(20));
+    }
 
     #[tokio::test]
     async fn the_idle_interval_grows_and_is_bounded() {
@@ -115,6 +223,7 @@ mod tests {
 
         let mut previous = sync.poll_interval();
         for _ in 0..20 {
+            assert!(sync.push_channel_live());
             sync.sync(&source).await.unwrap();
             let now = sync.poll_interval();
             assert!(now >= previous, "the idle interval went backwards");

@@ -2,7 +2,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use super::cadence::MIN_POLL_INTERVAL;
+use super::cadence::AdaptiveCadence;
 use super::outcome::{SyncError, SyncStats};
 use super::source::{CloudSource, SensitiveGuard};
 use super::transport::{AuthApi, RestApi};
@@ -18,7 +18,7 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     // A 401 rotates this for every later request; never hold it across an await.
     pub(super) session: Mutex<Session>,
     pub(super) sensitive: SensitiveGuard,
-    pub(super) idle: Mutex<Duration>,
+    pub(super) cadence: AdaptiveCadence,
     pub(super) push_channel: AtomicBool,
     // Tests set this to zero; retry duration math is exercised separately.
     delay_scale: f64,
@@ -49,7 +49,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             config,
             session: Mutex::new(session),
             sensitive,
-            idle: Mutex::new(MIN_POLL_INTERVAL),
+            cadence: AdaptiveCadence::default(),
             push_channel: AtomicBool::new(false),
             delay_scale: 1.0,
         }
@@ -97,10 +97,6 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
     // Panics cannot tear these values; poison must not disable sync permanently.
     pub(super) fn lock_session(&self) -> std::sync::MutexGuard<'_, Session> {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    pub(super) fn lock<'a, T>(&self, m: &'a Mutex<T>) -> std::sync::MutexGuard<'a, T> {
-        m.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
