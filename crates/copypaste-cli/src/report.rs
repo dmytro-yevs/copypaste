@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use copypaste_ipc::{ExportData, ResponseData};
+use copypaste_ipc::{ExportData, ImportData, ResponseData};
 
 use crate::cli::{CloudAction, Command, PairAction};
 use crate::error::CliError;
@@ -134,12 +134,7 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
         }
         Command::Import { .. } => {
             let result = client::expect_import(data)?;
-            out(&format!(
-                "imported {} {}, skipped {} already present",
-                result.inserted,
-                plural(u64::from(result.inserted), "item", "items"),
-                result.skipped
-            ));
+            out(&import_summary(&result));
         }
         Command::Backup { .. } => {
             let backup = client::expect_backup(data)?;
@@ -179,6 +174,64 @@ fn warn_unreadable(skipped: u32) {
     }
 }
 
+fn import_summary(result: &ImportData) -> String {
+    let mut summary = format!(
+        "imported {} {}; skipped {} {}",
+        result.inserted,
+        plural(u64::from(result.inserted), "item", "items"),
+        result.skipped,
+        plural(u64::from(result.skipped), "item", "items")
+    );
+    if result.skipped == 0 {
+        return summary;
+    }
+
+    let mut reasons = Vec::new();
+    if result.skipped_duplicate > 0 {
+        reasons.push(format!(
+            "{} {} already present",
+            result.skipped_duplicate,
+            plural(
+                u64::from(result.skipped_duplicate),
+                "duplicate",
+                "duplicates"
+            )
+        ));
+    }
+    if result.skipped_empty > 0 {
+        reasons.push(format!(
+            "{} empty or invalid {}",
+            result.skipped_empty,
+            plural(u64::from(result.skipped_empty), "item", "items")
+        ));
+    }
+    if result.skipped_too_large > 0 {
+        reasons.push(format!(
+            "{} {} over the size limit",
+            result.skipped_too_large,
+            plural(u64::from(result.skipped_too_large), "item", "items")
+        ));
+    }
+
+    let classified = result
+        .skipped_duplicate
+        .saturating_add(result.skipped_empty)
+        .saturating_add(result.skipped_too_large);
+    let unclassified = result.skipped.saturating_sub(classified);
+    if unclassified > 0 {
+        reasons.push(format!(
+            "{unclassified} {} without a reported reason",
+            plural(u64::from(unclassified), "item", "items")
+        ));
+    }
+
+    if !reasons.is_empty() {
+        summary.push_str(": ");
+        summary.push_str(&reasons.join(", "));
+    }
+    summary
+}
+
 fn encode_export(export: &ExportData) -> Result<String, CliError> {
     serde_json::to_string_pretty(export)
         .map_err(|e| CliError::local(format!("could not render the export: {e}")))
@@ -211,10 +264,69 @@ fn plural(count: u64, one: &'static str, many: &'static str) -> &'static str {
 mod tests {
     use super::*;
 
+    fn import_data(
+        inserted: u32,
+        skipped_duplicate: u32,
+        skipped_empty: u32,
+        skipped_too_large: u32,
+    ) -> ImportData {
+        ImportData {
+            inserted,
+            skipped: skipped_duplicate + skipped_empty + skipped_too_large,
+            skipped_duplicate,
+            skipped_empty,
+            skipped_too_large,
+        }
+    }
+
     #[test]
     fn plurals_agree_with_their_count() {
         assert_eq!(plural(1, "item", "items"), "item");
         assert_eq!(plural(0, "item", "items"), "items");
         assert_eq!(plural(2, "item", "items"), "items");
+    }
+
+    #[test]
+    fn a_mixed_import_names_every_skip_reason_exactly() {
+        assert_eq!(
+            import_summary(&import_data(1, 2, 1, 3)),
+            "imported 1 item; skipped 6 items: 2 duplicates already present, \
+             1 empty or invalid item, 3 items over the size limit"
+        );
+    }
+
+    #[test]
+    fn all_duplicate_over_limit_and_empty_reports_are_exact() {
+        assert_eq!(
+            import_summary(&import_data(0, 2, 0, 0)),
+            "imported 0 items; skipped 2 items: 2 duplicates already present"
+        );
+        assert_eq!(
+            import_summary(&import_data(0, 0, 0, 2)),
+            "imported 0 items; skipped 2 items: 2 items over the size limit"
+        );
+        assert_eq!(
+            import_summary(&import_data(0, 0, 2, 0)),
+            "imported 0 items; skipped 2 items: 2 empty or invalid items"
+        );
+        assert_eq!(
+            import_summary(&import_data(2, 0, 0, 0)),
+            "imported 2 items; skipped 0 items"
+        );
+    }
+
+    #[test]
+    fn an_older_reply_is_not_mislabeled_as_all_duplicates() {
+        let older = ImportData {
+            inserted: 7,
+            skipped: 2,
+            skipped_duplicate: 0,
+            skipped_empty: 0,
+            skipped_too_large: 0,
+        };
+        assert_eq!(
+            import_summary(&older),
+            "imported 7 items; skipped 2 items: 2 items without a reported reason"
+        );
     }
 }
