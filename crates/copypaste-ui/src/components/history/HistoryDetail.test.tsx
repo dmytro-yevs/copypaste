@@ -83,7 +83,7 @@ describe("reading a long clipping", () => {
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByRole("list", { name: "Clipboard history" }).parentElement).toBe(
+    expect(screen.getByRole("list", { name: "Clipboard history" })).toBe(
       document.activeElement,
     );
   });

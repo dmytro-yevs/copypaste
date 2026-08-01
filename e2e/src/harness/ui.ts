@@ -44,13 +44,14 @@ export async function scroller(browser: Browser): Promise<{
   totalSize: number;
 }> {
   return (await browser.execute(function (selector: string) {
-    const list = document.querySelector(selector) as HTMLElement | null;
-    const el = list?.parentElement as HTMLElement;
+    const el = document.querySelector(selector) as HTMLElement;
     return {
       scrollTop: el.scrollTop,
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
-      totalSize: list ? list.getBoundingClientRect().height : NaN,
+      totalSize: el.firstElementChild
+        ? el.firstElementChild.getBoundingClientRect().height
+        : NaN,
     };
   }, HISTORY_LIST)) as {
     scrollTop: number;
@@ -63,8 +64,7 @@ export async function scroller(browser: Browser): Promise<{
 export async function scrollTo(browser: Browser, top: number): Promise<void> {
   await browser.execute(
     function (selector: string, offset: number) {
-      const list = document.querySelector(selector) as HTMLElement | null;
-      const el = list?.parentElement as HTMLElement;
+      const el = document.querySelector(selector) as HTMLElement;
       el.scrollTop = offset;
       el.dispatchEvent(new Event("scroll", { bubbles: true }));
     },
@@ -106,8 +106,7 @@ export async function waitForRows(
 /** Focus the scroll container that owns the list's key handling. */
 export async function focusList(browser: Browser): Promise<void> {
   await browser.execute(function (selector: string) {
-    const list = document.querySelector(selector) as HTMLElement | null;
-    (list?.parentElement as HTMLElement).focus();
+    (document.querySelector(selector) as HTMLElement).focus();
   }, HISTORY_LIST);
 }
 

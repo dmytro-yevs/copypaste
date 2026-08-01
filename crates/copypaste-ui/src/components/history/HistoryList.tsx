@@ -255,18 +255,17 @@ export function HistoryList({
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={listRef}
+        role="list"
+        aria-label={t("history.list.label")}
         tabIndex={0}
         onKeyDown={onKeyDown}
         onScroll={onScroll}
+        data-active-descendant={
+          activeRendered ? `history-row-${activeId}` : undefined
+        }
         className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-s-2 pb-s-2 outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring"
       >
         <div
-          role="list"
-          aria-label={t("history.list.label")}
-          aria-multiselectable={selection.selecting || undefined}
-          data-active-descendant={
-            activeRendered ? `history-row-${activeId}` : undefined
-          }
           className="relative w-full"
           style={{ height: virtualizer.getTotalSize() }}
         >

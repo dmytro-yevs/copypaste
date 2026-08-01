@@ -87,6 +87,24 @@ describe("list semantics", () => {
     expect(screen.getAllByRole("listitem").length).toBeGreaterThan(0);
   });
 
+  it("puts the list name, focus, and scrolling on one element (A11Y-1)", () => {
+    const { listRef } = setup();
+    const list = screen.getByRole("list", { name: "Clipboard history" });
+
+    expect(list).toBe(listRef.current);
+    expect(list.tabIndex).toBe(0);
+    expect(list.className).toContain("overflow-y-auto");
+
+    list.focus();
+    expect(document.activeElement).toBe(list);
+  });
+
+  it("does not put listbox-only selection state on the list (AT-17)", () => {
+    setup(3, { selection: fakeSelection({ selecting: true }) });
+    const list = screen.getByRole("list", { name: "Clipboard history" });
+    expect(list.getAttribute("aria-multiselectable")).toBeNull();
+  });
+
   it("keeps the live region outside the list (A11Y-14)", () => {
     setup();
     const list = screen.getByRole("list", { name: "Clipboard history" });
