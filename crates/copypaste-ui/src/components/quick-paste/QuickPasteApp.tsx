@@ -34,6 +34,10 @@ export function QuickPasteApp() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [visible, setVisible] = useState(document.visibilityState === "visible");
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const lastKeyboardMove = useRef(0);
+  const scrolling = useRef(false);
+  const scrollIdleTimer = useRef<number | null>(null);
 
   const history = useQuery({
     queryKey: ["quick-paste-history"],
@@ -65,6 +69,7 @@ export function QuickPasteApp() {
     setVisible(false);
     setSelectedId(null);
     setQuery("");
+    setCopyError(null);
     queryClient.removeQueries({ queryKey: ["quick-paste-history"] });
   }, [queryClient]);
 
@@ -78,6 +83,7 @@ export function QuickPasteApp() {
     window.addEventListener("blur", releaseHiddenCache);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      if (scrollIdleTimer.current !== null) window.clearTimeout(scrollIdleTimer.current);
       window.removeEventListener("focus", refreshForShow);
       window.removeEventListener("blur", releaseHiddenCache);
       document.removeEventListener("visibilitychange", onVisibility);
@@ -97,14 +103,15 @@ export function QuickPasteApp() {
   const copyAndDismiss = useCallback(
     async (item: Item) => {
       try {
+        setCopyError(null);
         await copyItem(item.id);
         // Drop the popup cache before it is hidden. The next invocation always
         // starts from a daemon read, and the Accessory hide path restores the
         // app the user was about to paste into.
         dismiss();
       } catch {
-        // The compact surface keeps the item visible on failure so the user can
-        // retry instead of pasting a stale clipboard value.
+        // Keep the result visible rather than pretending the clipboard changed.
+        setCopyError("Couldn’t copy that item. Try again.");
       }
     },
     [dismiss],
@@ -121,6 +128,7 @@ export function QuickPasteApp() {
     const current = Math.max(0, items.findIndex((item) => item.id === selectedId));
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
+      lastKeyboardMove.current = Date.now();
       setSelectedId(items[nextIndex(current, event.key === "ArrowDown" ? 1 : -1, items.length)]?.id ?? null);
       return;
     }
@@ -142,6 +150,22 @@ export function QuickPasteApp() {
     }
   };
 
+  const selectFromPointer = (id: string) => {
+    if (scrolling.current || Date.now() - lastKeyboardMove.current < 250) return;
+    setSelectedId(id);
+  };
+
+  const noteScroll = () => {
+    scrolling.current = true;
+    if (scrollIdleTimer.current !== null) window.clearTimeout(scrollIdleTimer.current);
+    scrollIdleTimer.current = window.setTimeout(() => {
+      scrolling.current = false;
+      scrollIdleTimer.current = null;
+    }, 120);
+  };
+
+  const selected = items.find((item) => item.id === selectedId);
+
   return (
     <main
       aria-label="Quick Paste"
@@ -160,16 +184,28 @@ export function QuickPasteApp() {
         <button
           type="button"
           className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onClick={async () => {
-            dismiss();
-            await showMainWindow().catch(() => {});
-          }}
+          onClick={() => void showMainWindow().catch(() => setCopyError("Couldn’t open Settings. Try again."))}
         >
           Settings
         </button>
       </div>
 
-      <div role="list" className="min-h-0 flex-1 overflow-auto rounded-md">
+      {copyError && (
+        <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          <span>{copyError}</span>
+          {selected && (
+            <button
+              type="button"
+              className="rounded px-2 py-1 text-xs font-medium hover:bg-destructive/10"
+              onClick={() => void copyAndDismiss(selected)}
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+
+      <div role="list" onScroll={noteScroll} className="min-h-0 flex-1 overflow-auto rounded-md">
         {history.isLoading ? null : history.isError ? (
           <p className="p-4 text-sm text-muted-foreground">Clipboard service offline</p>
         ) : items.length === 0 ? (
@@ -183,7 +219,7 @@ export function QuickPasteApp() {
               type="button"
               role="listitem"
               aria-current={selectedId === item.id || undefined}
-              onMouseEnter={() => setSelectedId(item.id)}
+              onMouseEnter={() => selectFromPointer(item.id)}
               onClick={() => void copyAndDismiss(item)}
               className={`flex w-full flex-col rounded-md px-3 py-2 text-left text-sm outline-none ${
                 selectedId === item.id ? "bg-accent" : "hover:bg-accent"
@@ -196,7 +232,10 @@ export function QuickPasteApp() {
         )}
       </div>
 
-      <p className="mt-2 text-center text-xs text-muted-foreground">
+      <p aria-live="polite" className="mt-2 text-center text-xs text-muted-foreground">
+        {history.isLoading ? "Loading…" : query ? `${items.length} of ${history.data?.items.length ?? 0}` : `${items.length} items`}
+      </p>
+      <p className="mt-1 text-center text-xs text-muted-foreground">
         ↑↓ navigate · ⏎ copy · Esc close
       </p>
     </main>

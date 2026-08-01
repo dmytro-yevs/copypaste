@@ -20,9 +20,15 @@
 //! and hiding it would leave the user at the launcher with no way back.
 
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
 };
+
+#[cfg(target_os = "macos")]
+use std::sync::{Mutex, OnceLock};
+
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
 
 /// The full application surface. Named in `tauri.conf.json`.
 pub const MAIN: &str = "main";
@@ -56,6 +62,12 @@ pub const QUICK_PASTE_CONFIG: QuickPasteWindowConfig = QuickPasteWindowConfig {
     content_protected: QUICK_PASTE_CONTENT_PROTECTED,
 };
 
+#[cfg(target_os = "macos")]
+fn previous_application() -> &'static Mutex<Option<i32>> {
+    static PREVIOUS_APPLICATION: OnceLock<Mutex<Option<i32>>> = OnceLock::new();
+    PREVIOUS_APPLICATION.get_or_init(|| Mutex::new(None))
+}
+
 const QUICK_PASTE_WIDTH: f64 = 403.0;
 const QUICK_PASTE_HEIGHT: f64 = 624.0;
 
@@ -85,6 +97,15 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.set_focus();
 }
 
+/// Open the main window on its settings route. The event is emitted only after
+/// the window is visible, so its persistent webview cannot miss the request.
+pub fn show_main_settings<R: Runtime>(app: &AppHandle<R>) {
+    show_main(app);
+    if let Some(window) = main_window(app) {
+        let _ = window.emit("open-settings", ());
+    }
+}
+
 /// Lazily create, position and focus the compact Quick Paste surface.
 pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let window = match quick_paste_window(app) {
@@ -97,6 +118,9 @@ pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
             }
         },
     };
+    if !window.is_visible().unwrap_or(false) {
+        remember_frontmost_application();
+    }
     // Positioned before it is shown, so it never appears in one place and
     // jumps to another. Android has no tray to position under, and no
     // `tray_by_id` on `AppHandle` either — the window there is the activity.
@@ -138,6 +162,15 @@ pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) {
         return;
     }
     let _ = window.hide();
+    restore_previous_application();
+}
+
+/// Hide a popup while moving into CopyPaste's main window. Restoring the
+/// previous application here would immediately steal focus back from Settings.
+pub fn hide_window_for_main<R: Runtime>(window: &WebviewWindow<R>) {
+    if !cfg!(target_os = "android") {
+        let _ = window.hide();
+    }
 }
 
 /// Hide Quick Paste through the same policy used by the frontend.
@@ -151,6 +184,10 @@ pub fn hide_quick_paste<R: Runtime>(app: &AppHandle<R>) {
 /// focus hand-off after the popup is already gone.
 const fn should_hide_on_focus_lost(visible: bool) -> bool {
     visible
+}
+
+fn should_hide_on_blur(label: &str, visible: bool) -> bool {
+    label == QUICK_PASTE && should_hide_on_focus_lost(visible)
 }
 
 /// What the hotkey and every tray entry point do.
@@ -269,18 +306,66 @@ pub fn on_event<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEven
     match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            hide_window(window);
+            let _ = window.hide();
+            if window.label() == QUICK_PASTE {
+                restore_previous_application();
+            }
         }
         tauri::WindowEvent::Focused(false) => {
             // A hide can produce a trailing blur. The visibility guard avoids
             // a second hide/focus hand-off racing the first one.
-            if should_hide_on_focus_lost(window.is_visible().unwrap_or(false)) {
-                hide_window(window);
+            if should_hide_on_blur(window.label(), window.is_visible().unwrap_or(false)) {
+                let _ = window.hide();
+                restore_previous_application();
             }
         }
         _ => {}
     }
 }
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn remember_frontmost_application() {
+    // Captured before the popup receives focus. A PID, rather than an Objective-C
+    // object, is retained so this cross-thread window state remains Send + Sync.
+    let Ok(mut previous) = previous_application().lock() else {
+        return;
+    };
+    *previous = None;
+    let current = unsafe { NSRunningApplication::currentApplication().processIdentifier() };
+    let frontmost = unsafe { NSWorkspace::sharedWorkspace().frontmostApplication() };
+    let Some(frontmost) = frontmost else {
+        return;
+    };
+    let pid = unsafe { frontmost.processIdentifier() };
+    if pid != current {
+        *previous = Some(pid);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn remember_frontmost_application() {}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn restore_previous_application() {
+    let pid = previous_application()
+        .lock()
+        .ok()
+        .and_then(|mut previous| previous.take());
+    let Some(pid) = pid else {
+        return;
+    };
+    let Some(application) =
+        (unsafe { NSRunningApplication::runningApplicationWithProcessIdentifier(pid) })
+    else {
+        return;
+    };
+    let _ = unsafe { application.activateWithOptions(NSApplicationActivationOptions::empty()) };
+}
+
+#[cfg(not(target_os = "macos"))]
+fn restore_previous_application() {}
 
 #[cfg(test)]
 mod tests {
@@ -322,6 +407,12 @@ mod tests {
     fn hide_on_blur_is_idempotent_after_the_window_is_hidden() {
         assert!(should_hide_on_focus_lost(true));
         assert!(!should_hide_on_focus_lost(false));
+    }
+
+    #[test]
+    fn blur_closes_only_the_quick_paste_surface() {
+        assert!(should_hide_on_blur(QUICK_PASTE, true));
+        assert!(!should_hide_on_blur(MAIN, true));
     }
 
     #[test]

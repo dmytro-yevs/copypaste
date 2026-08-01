@@ -65,6 +65,7 @@ pub fn hide_window(window: WebviewWindow) {
 
 /// Open the full application surface from Quick Paste's settings affordance.
 #[tauri::command]
-pub fn show_main_window(app: tauri::AppHandle) {
-    crate::shell::window::show_main(&app);
+pub fn show_main_window(app: tauri::AppHandle, window: WebviewWindow) {
+    crate::shell::window::hide_window_for_main(&window);
+    crate::shell::window::show_main_settings(&app);
 }
