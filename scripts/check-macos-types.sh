@@ -64,6 +64,11 @@ bad() {
 }
 group() { printf '\n== %s\n' "$1"; }
 
+replace_in_place() {
+    local expression="$1" file="$2" replacement="$2.tmp"
+    sed "$expression" "$file" > "$replacement" && mv "$replacement" "$file"
+}
+
 CARGO="cargo"
 TOOLCHAIN=""
 if cargo +1.96 --version >/dev/null 2>&1; then
@@ -130,7 +135,7 @@ pin_matches security-framework "$PIN_SECURITY_FRAMEWORK"
 write_harness() {
     local dir="$1"
     rm -rf "$dir"
-    mkdir -p "$dir/src"
+    mkdir -p "$dir/src" "$dir/copypaste-core-stub/src"
 
     cat > "$dir/Cargo.toml" <<EOF
 [package]
@@ -143,14 +148,21 @@ edition = "2021"
 
 [dependencies]
 copypaste-ipc = { path = "$REPO_ROOT/crates/copypaste-ipc" }
+copypaste-core = { path = "copypaste-core-stub" }
+copypaste-macos-keychain = { path = "$REPO_ROOT/crates/copypaste-macos-keychain", features = ["test-readback"] }
 objc2 = "=$PIN_OBJC2"
 objc2-foundation = { version = "=$PIN_OBJC2_FOUNDATION", features = ["NSString", "NSData", "NSArray"] }
-objc2-app-kit = { version = "=$PIN_OBJC2_APP_KIT", features = ["NSPasteboard", "NSPasteboardItem"] }
+objc2-app-kit = { version = "=$PIN_OBJC2_APP_KIT", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication"] }
 security-framework = "=$PIN_SECURITY_FRAMEWORK"
 zeroize = { version = "1.7", features = ["derive"] }
 thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
+rustix = { version = "1", features = ["fs"] }
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+plist = "1.10"
+mime_guess = "2"
 
 [dev-dependencies]
 tempfile = "3"
@@ -181,6 +193,40 @@ pub mod crypto;
 
 mod daemon_state;
 pub use daemon_state::AppState;
+EOF
+
+    cat > "$dir/copypaste-core-stub/Cargo.toml" <<'EOF'
+[package]
+name = "copypaste-core"
+version = "0.0.0"
+edition = "2021"
+EOF
+
+    cat > "$dir/copypaste-core-stub/src/lib.rs" <<'EOF'
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileMetadata {
+    pub filename: String,
+    pub mime_type: String,
+}
+
+impl FileMetadata {
+    pub fn new(filename: impl Into<String>, mime_type: impl Into<String>) -> Option<Self> {
+        let filename = filename.into();
+        let mime_type = mime_type.into();
+        (!filename.is_empty() && !mime_type.is_empty()).then_some(Self {
+            filename,
+            mime_type,
+        })
+    }
+
+    pub fn is_valid(&self) -> bool {
+        Self::new(self.filename.clone(), self.mime_type.clone()).is_some()
+    }
+}
+
+pub fn binary_item_id(_bytes: &[u8]) -> String {
+    "00000000-0000-0000-0000-000000000000".to_owned()
+}
 EOF
 
     cat > "$dir/src/crypto.rs" <<'EOF'
@@ -236,7 +282,8 @@ impl Settings {
 }
 EOF
 
-    sed -i "s|@REPO@|$REPO_ROOT|g" "$dir/src/lib.rs" "$dir/src/crypto.rs"
+    replace_in_place "s|@REPO@|$REPO_ROOT|g" "$dir/src/lib.rs"
+    replace_in_place "s|@REPO@|$REPO_ROOT|g" "$dir/src/crypto.rs"
 }
 
 # Prints the compiler output; returns cargo's status.
@@ -276,7 +323,9 @@ if [[ "${1:-}" == "--self-test" ]]; then
     #    reported against the path in crates/, not against the generated crate.
     probe="$WORK/selftest-stub"
     write_harness "$probe"
-    sed -i 's/KeystoreEntryUnusable(/KeystoreEntryUnusableZZZ(/' "$probe/src/crypto.rs"
+    replace_in_place \
+        's/KeystoreEntryUnusable(/KeystoreEntryUnusableZZZ(/' \
+        "$probe/src/crypto.rs"
     out="$(run_harness "$probe")"
     status=$?
     if [[ "$status" -eq 0 ]]; then
