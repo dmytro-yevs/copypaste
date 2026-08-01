@@ -211,6 +211,12 @@ jobs:
           # here regenerates the Gradle project; see the release job for why.
           npm run tauri -- android build --debug --apk --target x86_64
 
+      - name: Audit resolved Android dependencies
+        working-directory: crates/copypaste-ui/src-tauri/gen/android
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon dependencyCheckAggregate
+
       - name: Locate it and check what it claims
         run: |
           set -euo pipefail

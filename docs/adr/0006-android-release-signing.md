@@ -41,10 +41,17 @@ keystore made for v1 still works:
 | `ANDROID_KEY_ALIAS` | key alias |
 | `ANDROID_KEY_PASSWORD` | key password |
 
-**None of them is set today.** That is a release blocker, not a fallback path:
-the maintainer must configure all four before tagging. The workflow prints the
-SHA-256 of the signing certificate into the run summary. That is the number
-that decides whether the next release can upgrade this one.
+The public SHA-256 certificate fingerprint lives in
+`packaging/android/release-cert.sha256`. The release workflow compares the
+signed APK's `apksigner` value to that file before it uploads the artifact, so
+a changed or accidentally replaced secret cannot create a non-upgradable
+release. The checked-in value is deliberately `UNCONFIGURED` until the durable
+keystore exists; that sentinel blocks publication.
+
+**None of the secrets is set today.** The maintainer must configure all four
+and replace the sentinel before tagging. A key change requires updating this
+public pin in the same reviewed change; it is an upgrade-breaking event, not a
+routine secret rotation.
 
 ## Why not the alternatives
 
@@ -103,4 +110,12 @@ keytool -genkeypair -v \
   -alias copypaste \
   -keyalg RSA -keysize 4096 -validity 10000
 base64 -w0 copypaste-release.jks    # the value for ANDROID_KEYSTORE_BASE64
+```
+
+Record its public certificate fingerprint, without colons or whitespace, in
+`packaging/android/release-cert.sha256` before setting the secrets:
+
+```sh
+keytool -list -v -keystore copypaste-release.jks -alias copypaste \
+  | sed -n 's/.*SHA256: //p'
 ```
