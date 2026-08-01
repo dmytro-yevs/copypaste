@@ -22,7 +22,7 @@ mod report;
 
 use clap::Parser;
 use cli::{config_patch, Cli, CloudAction, Command, ConfigAction, PairAction};
-use copypaste_ipc::{ExportData, Method};
+use copypaste_ipc::{ExportData, Method, Response};
 use error::CliError;
 use std::io::{IsTerminal, Read, Write};
 use std::path::Path;
@@ -165,24 +165,29 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         },
     };
 
-    let response = client::request(method).await?;
+    finish_response(&cli.command, cli.json, client::request(method).await?, out)
+}
 
-    if cli.json {
+fn finish_response(
+    command: &Command,
+    json: bool,
+    response: Response,
+    write_json: impl FnOnce(&str),
+) -> Result<(), CliError> {
+    if json {
         // Printed before the ok/error split so a failing command still yields a
         // machine-readable answer; the exit code below still reflects it.
         let text = serde_json::to_string_pretty(&response)
             .map_err(|e| CliError::local(format!("could not render the reply as JSON: {e}")))?;
-        out(&text);
+        write_json(&text);
     }
 
     let data = client::into_data(response)?;
-    if cli.json {
-        return Ok(());
+    if json {
+        report::apply_side_effects(command, data)
+    } else {
+        report::report(command, data)
     }
-
-    report::report(&cli.command, data)?;
-
-    Ok(())
 }
 
 /// Subscribe and print a line per change until interrupted.
@@ -366,9 +371,36 @@ fn is_affirmative(answer: &str) -> bool {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+    use copypaste_ipc::{ErrorCode, ExportItem, ResponseData};
+    use std::path::PathBuf;
 
     fn parse(args: &[&str]) -> Cli {
         Cli::try_parse_from(args).expect("should parse")
+    }
+
+    fn test_output_path(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "copypaste-cli-{}-{name}-{}.json",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    fn one_item_export() -> ExportData {
+        ExportData {
+            items: vec![ExportItem {
+                content: "hello".to_string(),
+                content_type: "text/plain".to_string(),
+                created_at: 1,
+                pinned: false,
+                is_sensitive: false,
+            }],
+            skipped_non_text: 0,
+            skipped_sensitive: 0,
+            skipped_undecryptable: 0,
+        }
     }
 
     #[test]
@@ -429,6 +461,75 @@ mod tests {
         assert!(parse(&["copypaste", "--json", "list"]).json);
         assert!(!parse(&["copypaste", "list"]).json);
         assert!(parse(&["copypaste", "status", "--json"]).json);
+    }
+
+    #[test]
+    fn json_export_writes_output_and_emits_only_the_response() {
+        let path = test_output_path("json-export");
+        let command = Command::Export {
+            output: Some(path.clone()),
+            limit: 0,
+            include_sensitive: false,
+        };
+        let export = one_item_export();
+        let response = Response::ok(41, ResponseData::Export(export.clone()));
+        let mut emitted = Vec::new();
+
+        finish_response(&command, true, response, |text| {
+            emitted.push(text.to_string())
+        })
+        .expect("JSON export should complete");
+
+        assert_eq!(emitted.len(), 1);
+        let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
+        assert_eq!(machine.id, 41);
+        assert!(machine.ok);
+        let expected_file = format!("{}\n", serde_json::to_string_pretty(&export).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected_file);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn json_only_command_emits_one_typed_response() {
+        let command = Command::Delete {
+            id: "item-1".to_string(),
+        };
+        let response = Response::ok(42, ResponseData::Empty {});
+        let mut emitted = Vec::new();
+
+        finish_response(&command, true, response, |text| {
+            emitted.push(text.to_string())
+        })
+        .expect("JSON command should complete");
+
+        assert_eq!(emitted.len(), 1);
+        let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
+        assert_eq!(machine.id, 42);
+        assert!(machine.ok);
+    }
+
+    #[test]
+    fn json_error_is_emitted_and_prevents_export_file_creation() {
+        let path = test_output_path("json-error");
+        let command = Command::Export {
+            output: Some(path.clone()),
+            limit: 0,
+            include_sensitive: false,
+        };
+        let response = Response::err(43, ErrorCode::NotFound, "nothing to export");
+        let mut emitted = Vec::new();
+
+        let err = finish_response(&command, true, response, |text| {
+            emitted.push(text.to_string())
+        })
+        .expect_err("daemon failure should determine the exit");
+
+        assert_eq!(err.exit_code(), error::EXIT_NOT_FOUND);
+        assert_eq!(emitted.len(), 1);
+        let machine: Response = serde_json::from_str(&emitted[0]).expect("typed response JSON");
+        assert!(!machine.ok);
+        assert_eq!(machine.error_code, Some(ErrorCode::NotFound));
+        assert!(!path.exists());
     }
 
     #[test]
