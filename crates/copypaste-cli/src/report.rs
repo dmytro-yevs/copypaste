@@ -9,11 +9,21 @@
 
 use std::path::Path;
 
-use copypaste_ipc::ResponseData;
+use copypaste_ipc::{ExportData, ResponseData};
 
 use crate::cli::{CloudAction, Command, PairAction};
 use crate::error::CliError;
 use crate::{client, now_ms, out, render};
+
+/// Apply command work that remains necessary when human-readable output is off.
+pub fn apply_side_effects(command: &Command, data: Option<ResponseData>) -> Result<(), CliError> {
+    match command {
+        Command::Export {
+            output: Some(path), ..
+        } => write_export(path, &client::expect_export(data)?),
+        _ => Ok(()),
+    }
+}
 
 /// Print the reply to `command`.
 pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliError> {
@@ -111,14 +121,12 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
         }
         Command::Export { output, .. } => {
             let export = client::expect_export(data)?;
-            let encoded = serde_json::to_string_pretty(&export)
-                .map_err(|e| CliError::local(format!("could not render the export: {e}")))?;
             match output {
                 Some(path) => {
-                    write_export(path, &encoded)?;
+                    write_export(path, &export)?;
                     out(&format!("exported {} items", export.items.len()));
                 }
-                None => out(&encoded),
+                None => out(&encode_export(&export)?),
             }
             // On stderr, so `copypaste export > file` is still exactly the
             // export — and so the warning survives being redirected away.
@@ -171,10 +179,16 @@ fn warn_unreadable(skipped: u32) {
     }
 }
 
-fn write_export(path: &Path, encoded: &str) -> Result<(), CliError> {
+fn encode_export(export: &ExportData) -> Result<String, CliError> {
+    serde_json::to_string_pretty(export)
+        .map_err(|e| CliError::local(format!("could not render the export: {e}")))
+}
+
+fn write_export(path: &Path, export: &ExportData) -> Result<(), CliError> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
+    let encoded = encode_export(export)?;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
