@@ -220,7 +220,11 @@ for p in "Casks/copypaste.rb" "Formula/copypaste-cli.rb"; do
         bad "generated tap contains $p" "found: $(cd "$TAPDIR" && find . -type f | sort | tr '\n' ' ')"
     fi
 done
-check "setup-tap.sh --dry-run"       ./scripts/release/setup-tap.sh --github-user dmytro-yevs --dry-run
+# A maintainer may already have the sibling tap checkout. Dry-run must remain
+# read-only and successful in that ordinary state, otherwise this checker is
+# not repeatable on the machine that publishes releases.
+check "setup-tap.sh --dry-run is idempotent beside an existing tap" \
+    ./scripts/release/setup-tap.sh --github-user dmytro-yevs --dry-run
 reject "setup-tap.sh needs a user"   ./scripts/release/setup-tap.sh --dry-run
 reject "setup-tap.sh rejects a bad tap name" ./scripts/release/setup-tap.sh --github-user dmytro-yevs --tap-name "Bad Name" --dry-run
 
@@ -380,14 +384,24 @@ fi
 group "Both platforms reach one release page"
 # ---------------------------------------------------------------------------
 if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
-    check "publish depends on macos, android and packaging" python3 - <<'PY'
+    check "publish depends on macos, Android artifact smoke and packaging" python3 - <<'PY'
 import sys, yaml
 jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
-missing = [j for j in ("version", "macos", "android", "packaging") if j not in jobs]
+missing = [j for j in ("version", "macos", "android", "android-smoke", "packaging") if j not in jobs]
 assert not missing, f"release.yml has no {missing} job"
 needs = set(jobs["publish"]["needs"])
-for j in ("macos", "android", "packaging"):
+for j in ("macos", "android", "android-smoke", "packaging"):
     assert j in needs, f"publish does not depend on {j}"
+
+smoke = jobs["android-smoke"]
+assert "android" in smoke["needs"], "android-smoke does not wait for Android artifact"
+assert "publish" in str(smoke.get("if", "")), "android-smoke does not run for a publishable release"
+download = [s for s in smoke["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact")]
+assert len(download) == 1 and download[0].get("with", {}).get("name") == "android", \
+    "android-smoke does not download the published Android artifact"
+runner = [s for s in smoke["steps"] if "android-emulator-runner" in str(s.get("uses", ""))]
+assert len(runner) == 1 and "android-smoke-release.sh" in str(runner[0].get("with", {}).get("script", "")), \
+    "android-smoke does not run the release smoke harness"
 PY
 fi
 for pattern in 'dist/\*\.dmg' 'dist/\*\.apk' 'dist/\*\.tar\.gz'; do
@@ -407,6 +421,63 @@ for s in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS AND
         bad "$s is in both the workflow and ADR-0006"
     fi
 done
+
+# A published Android APK must be signed by the durable release key. Unlike the
+# never-published emulator fixture, absence of any secret cannot mint a new key
+# and turn a normal update into an uninstall-and-data-loss event.
+if grep -q 'Android release signing is fail-closed' .github/workflows/release.yml \
+   && ! grep -q 'unstable-key' .github/workflows/release.yml \
+   && ! grep -q 'CopyPaste Unstable Key' .github/workflows/release.yml; then
+    ok "release.yml rejects missing Android signing secrets without an ephemeral-key fallback"
+else
+    bad "release.yml rejects missing Android signing secrets without an ephemeral-key fallback" \
+        "the signing step must fail before artifact upload, not generate an -unstable-key APK"
+fi
+
+# `npm audit` must cover every independently locked Node dependency graph: the
+# app bundle, the WebKit e2e harness and the token/build toolchain.
+if grep -q 'run: npm audit' .github/workflows/ci.yml \
+   && [[ "$(grep -c 'run: npm audit' .github/workflows/browser-webkitgtk.yml)" -ge 2 ]]; then
+    ok "CI gates UI, e2e and design npm vulnerabilities"
+else
+    bad "CI gates UI, e2e and design npm vulnerabilities" \
+        "expected npm audit after npm ci for all three lockfiles"
+fi
+if grep -q 'actions/dependency-review-action@v4' .github/workflows/supply-chain.yml \
+   && grep -q 'fail-on-severity: low' .github/workflows/supply-chain.yml; then
+    ok "supply-chain reviews changed Maven and Gradle dependencies"
+else
+    bad "supply-chain reviews changed Maven and Gradle dependencies" \
+        "expected dependency-review-action with fail-on-severity: low"
+fi
+
+# dependency-review sees only PR diffs. Dependency-Check runs after the Android
+# build has resolved the actual Gradle graph, including transitive artifacts,
+# on the scheduled emulator workflow as well.
+if grep -q 'org.owasp:dependency-check-gradle:12.2.2' crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts \
+   && grep -q 'dependencyCheckAggregate' .github/workflows/android-emulator.yml \
+   && grep -q 'schedule:' .github/workflows/android-emulator.yml; then
+    ok "Android workflow audits the resolved Gradle dependency graph"
+else
+    bad "Android workflow audits the resolved Gradle dependency graph" \
+        "expected OWASP Dependency-Check after the Android build on its schedule"
+fi
+
+if [[ -f packaging/android/release-cert.sha256 ]] \
+   && grep -q 'EXPECTED_CERT_FILE: packaging/android/release-cert.sha256' .github/workflows/release.yml \
+   && grep -q 'APK signer fingerprint does not match' .github/workflows/release.yml; then
+    ok "release.yml pins the Android signing certificate before artifact upload"
+else
+    bad "release.yml pins the Android signing certificate before artifact upload" \
+        "expected a checked-in certificate fingerprint and an apksigner comparison"
+fi
+
+if grep -q 'cargo install tauri-driver --version 2.0.6 --locked' .github/workflows/browser-webkitgtk.yml; then
+    ok "browser workflow pins tauri-driver 2.0.6"
+else
+    bad "browser workflow pins tauri-driver 2.0.6" \
+        "unversioned cargo install makes the browser layer non-reproducible"
+fi
 
 # ADR-0001's premise, asserted rather than trusted. If a signing credential is
 # ever added to the release workflow, this fails and the ADR has to change

@@ -21,10 +21,9 @@ name: Release
 #
 # ANDROID_* is a different matter and is not covered by the paragraph above.
 # Android will not install an unsigned APK at all, so there is no ad-hoc
-# equivalent and no way to defer signing to the device. Those four secrets are
-# optional, none of them is set today, and the fallback is described in ADR-0006
-# — which also explains why the fallback is labelled in the filename rather than
-# passed off as equivalent.
+# equivalent and no way to defer signing to the device. All four release-signing
+# secrets are required: a release without its durable key fails closed before it
+# can upload a non-upgradable artefact. ADR-0006 records that decision.
 #
 # ---------------------------------------------------------------------------
 # UNVERIFIED
@@ -252,11 +251,10 @@ jobs:
   # asserted before it is used, so a scaffold that landed somewhere else fails
   # with a sentence rather than a stack trace.
   #
-  # Signing is ADR-0006. Short version: Android will not install an unsigned
-  # APK, so unlike macOS there is no way to defer signing to the device. Four
-  # optional secrets give a stable release key; without them the APK is signed
-  # with a key generated in this run, which installs fine but cannot upgrade an
-  # existing install — and the filename says so.
+  # Signing is ADR-0006. Android will not install an unsigned APK, and an APK
+  # signed with a per-run key cannot upgrade an existing install. All four
+  # release-key secrets are therefore required; their absence fails this job
+  # before any Android artifact is uploaded or published.
   # ---------------------------------------------------------------------------
   android:
     name: Build Android (universal APK)
@@ -420,6 +418,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          EXPECTED_CERT_FILE: packaging/android/release-cert.sha256
         run: |
           set -euo pipefail
           outputs="crates/copypaste-ui/src-tauri/gen/android/app/build/outputs/apk"
@@ -464,29 +463,31 @@ jobs:
             fi
           fi
 
-          keystore="${RUNNER_TEMP}/release.jks"
-          if [[ -n "${KEYSTORE_BASE64:-}" && -n "${KEYSTORE_PASSWORD:-}" \
-                && -n "${KEY_ALIAS:-}" && -n "${KEY_PASSWORD:-}" ]]; then
-            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
-            suffix=""
-            echo "Signing with the release keystore from repository secrets."
-          else
-            # ADR-0006. This produces an APK that installs and cannot upgrade an
-            # earlier install, and the filename is the only honest place to say
-            # so, because the filename is what survives being downloaded.
-            echo "::warning::no Android release keystore is configured; signing with a throwaway key (ADR-0006)"
-            KEYSTORE_PASSWORD="$(openssl rand -base64 24)"
-            KEY_PASSWORD="$KEYSTORE_PASSWORD"
-            KEY_ALIAS="copypaste-unstable"
-            keytool -genkeypair -v \
-              -keystore "$keystore" -storepass "$KEYSTORE_PASSWORD" \
-              -alias "$KEY_ALIAS" -keypass "$KEY_PASSWORD" \
-              -keyalg RSA -keysize 4096 -validity 10000 \
-              -dname "CN=CopyPaste Unstable Key, O=CopyPaste" >/dev/null
-            suffix="-unstable-key"
+          missing=()
+          [[ -n "${KEYSTORE_BASE64:-}" ]] || missing+=(ANDROID_KEYSTORE_BASE64)
+          [[ -n "${KEYSTORE_PASSWORD:-}" ]] || missing+=(ANDROID_KEYSTORE_PASSWORD)
+          [[ -n "${KEY_ALIAS:-}" ]] || missing+=(ANDROID_KEY_ALIAS)
+          [[ -n "${KEY_PASSWORD:-}" ]] || missing+=(ANDROID_KEY_PASSWORD)
+          if (( ${#missing[@]} )); then
+            echo "::error::Android release signing is fail-closed (ADR-0006): missing ${missing[*]}. No APK will be uploaded or published."
+            exit 1
           fi
 
-          out="dist/CopyPaste-v${VERSION}-android${suffix}.apk"
+          keystore="${RUNNER_TEMP}/release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          echo "Signing with the release keystore from repository secrets."
+
+          [[ -f "$EXPECTED_CERT_FILE" ]] || {
+            echo "::error::$EXPECTED_CERT_FILE is missing; release signer continuity cannot be checked"
+            exit 1
+          }
+          expected_cert="$(tr -d '[:space:]:' < "$EXPECTED_CERT_FILE" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$expected_cert" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::$EXPECTED_CERT_FILE must contain one SHA-256 certificate fingerprint before a release can be published"
+            exit 1
+          fi
+
+          out="dist/CopyPaste-v${VERSION}-android.apk"
           "${tools}/zipalign" -p -f 4 "$unsigned" "${out}.aligned"
           "${tools}/apksigner" sign \
             --ks "$keystore" \
@@ -497,7 +498,24 @@ jobs:
             "${out}.aligned"
           rm -f "${out}.aligned" "$keystore"
 
-          "${tools}/apksigner" verify --verbose --print-certs "$out"
+          signer_report="$("${tools}/apksigner" verify --verbose --print-certs "$out")"
+          printf '%s\n' "$signer_report"
+          mapfile -t signer_certs < <(printf '%s\n' "$signer_report" \
+            | sed -n 's/^Signer #[0-9][0-9]* certificate SHA-256 digest: //p' \
+            | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          if (( ${#signer_certs[@]} != 1 )); then
+            echo "::error::APK must contain exactly one signing certificate"
+            exit 1
+          fi
+          actual_cert="${signer_certs[0]}"
+          if [[ ! "$actual_cert" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::apksigner did not report the SHA-256 certificate fingerprint"
+            exit 1
+          fi
+          if [[ "$actual_cert" != "$expected_cert" ]]; then
+            echo "::error::APK signer fingerprint does not match packaging/android/release-cert.sha256"
+            exit 1
+          fi
           ( cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
           cat "${out}.sha256"
 
@@ -518,10 +536,6 @@ jobs:
               | grep -i 'SHA-256 digest' || true
             echo '```'
             echo
-            if [[ "$apk" == *-unstable-key.apk ]]; then
-              echo 'Signed with a throwaway key: this APK installs, but Android will'
-              echo 'refuse to install it over an earlier CopyPaste. See ADR-0006.'
-            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -531,6 +545,74 @@ jobs:
             dist/*.apk
             dist/*.apk.sha256
           if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Test the signed universal artifact, not a separately assembled emulator
+  # APK. This job downloads exactly what `publish` will later download, checks
+  # its sidecar digest, and installs/runs it through the release smoke harness.
+  # It runs only when a release can be published; a non-publishing dispatch may
+  # still build artifacts without spending an emulator runner.
+  # ---------------------------------------------------------------------------
+  android-smoke:
+    name: Smoke-test published Android APK
+    needs: [version, android]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android
+          path: dist
+
+      - name: Verify the release artifact identity
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          apk="dist/CopyPaste-v${VERSION}-android.apk"
+          sidecar="${apk}.sha256"
+          [[ -f "$apk" ]] || { echo "::error::$apk is missing from the Android artifact"; exit 1; }
+          [[ -f "$sidecar" ]] || { echo "::error::$sidecar is missing from the Android artifact"; exit 1; }
+          ( cd dist && sha256sum --check "$(basename "$sidecar")" )
+          echo "Testing $(sha256sum "$apk" | cut -d' ' -f1)  $(basename "$apk")"
+
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          [[ -e /dev/kvm ]] || { echo "::error::/dev/kvm is absent — this runner cannot accelerate the emulator"; exit 1; }
+
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: "36"
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: ./scripts/release/android-smoke-release.sh
+        env:
+          APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
+          SMOKE_OUT: artifacts/release-android-smoke
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-android-smoke-evidence
+          path: artifacts/release-android-smoke
+          if-no-files-found: warn
           retention-days: 14
 
   # ---------------------------------------------------------------------------
@@ -588,7 +670,7 @@ jobs:
     # android is a hard dependency, not a nice-to-have: ADR-0006 says one
     # release page serves both platforms, and a page that silently serves one is
     # worse than a failed run.
-    needs: [version, macos, android, packaging]
+    needs: [version, macos, android, android-smoke, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
