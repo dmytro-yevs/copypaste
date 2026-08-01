@@ -65,6 +65,11 @@ function TabButton({ tab, desktop }: { tab: SettingsTab; desktop: boolean }) {
 export function SettingsView() {
   const { t } = useTranslation();
   const android = isAndroidPlatform();
+  // The embedded Android backend has no persistent service configuration or
+  // backup/restore. Do not offer controls that can only refuse later.
+  const tabs = android
+    ? TABS.filter((tab) => tab.value !== "service" && tab.value !== "storage")
+    : TABS;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -88,7 +93,7 @@ export function SettingsView() {
               )}
             >
               {android
-                ? TABS.map((tab) => <TabButton key={tab.value} tab={tab} desktop={false} />)
+                ? tabs.map((tab) => <TabButton key={tab.value} tab={tab} desktop={false} />)
                 : GROUPS.map((group) => (
                     <div key={group.label} className="flex flex-col gap-1">
                       <p className="px-s-2 pt-s-1 text-xs font-medium text-muted-foreground">
@@ -103,7 +108,7 @@ export function SettingsView() {
             </TabsList>
 
             <div className="min-w-0 flex-1">
-              {TABS.map((tab) => (
+              {tabs.map((tab) => (
                 <TabsContent key={tab.value} value={tab.value}>
                   {tab.render()}
                 </TabsContent>

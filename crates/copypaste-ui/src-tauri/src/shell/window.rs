@@ -16,6 +16,7 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         hide_on_close(main);
     }
 
+    #[cfg(not(target_os = "android"))]
     if app.get_webview_window(QUICK_PASTE).is_none() {
         let popup =
             WebviewWindowBuilder::new(app, QUICK_PASTE, WebviewUrl::App("index.html".into()))
@@ -54,6 +55,7 @@ pub fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
 
+#[cfg(not(target_os = "android"))]
 fn quick_paste_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(QUICK_PASTE)
 }
@@ -87,6 +89,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Toggle the dedicated Quick Paste popover without changing the document window.
+#[cfg(not(target_os = "android"))]
 pub fn toggle_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = quick_paste_window(app) else {
         return;
@@ -101,6 +104,7 @@ pub fn toggle_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.set_focus();
 }
 
+#[cfg(not(target_os = "android"))]
 fn position_under_tray<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     let Some(tray) = app.tray_by_id("main") else {
         return;

@@ -78,12 +78,6 @@ const MSG_NO_REORDER: &str =
     "Reordering pinned items isn't available yet. Pinned items keep the order they \
      were pinned in.";
 
-fn purge_search_index(store: &Store, detector: &Detector) -> Result<()> {
-    purge_indexed_secrets(store, detector)
-        .map_err(|e| BackendError::internal(&format!("could not purge search index: {e}")))?;
-    Ok(())
-}
-
 /// Everything the in-process backend owns. Cheap to clone; `Store` is a
 /// reference-counted pool and the rest is behind an `Arc`.
 #[derive(Clone)]
@@ -115,6 +109,9 @@ struct Inner {
     /// The defaults, and only the defaults: there is no daemon here and no
     /// config file, so a settings screen on Android will not stick (ADR-0005).
     settings: copypaste_ipc::ConfigData,
+    /// Search-index rows removed by this process's startup purge. Kept so the
+    /// status/diagnostics surface tells the same truth as the daemon does.
+    index_purged: u64,
     /// Writes the system clipboard. Held as a boxed trait object so this file
     /// does not depend on Tauri's plugin types, and so tests can substitute
     /// one — see `Clipboard`.
@@ -165,7 +162,11 @@ impl EmbeddedBackend {
 
         let detector = Detector::new()
             .map_err(|e| BackendError::internal(&format!("could not build the detector: {e}")))?;
-        purge_search_index(&store, &detector)?;
+        // The third enforcement layer: a detector rule can be added after a
+        // row entered FTS. This only removes the plaintext index entry, never
+        // history, so failure is logged rather than preventing the app from
+        // opening the user's clips (the daemon follows the same rule).
+        let index_purged = purge_search_index(&store, &detector);
 
         Ok(Self {
             inner: Arc::new(Inner {
@@ -181,6 +182,7 @@ impl EmbeddedBackend {
                 peers_path: data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
                 node: OnceCell::new(),
                 settings: copypaste_ipc::ConfigData::default(),
+                index_purged,
                 clipboard,
             }),
         })
@@ -211,6 +213,29 @@ impl EmbeddedBackend {
         tokio::task::spawn_blocking(move || f(&inner))
             .await
             .map_err(|_| BackendError::internal("the operation did not complete"))?
+    }
+}
+
+/// The startup repair is deliberately best-effort: losing a stale FTS row is
+/// better than blocking access to the encrypted history if SQLite cannot read
+/// the index. Kept outside `open` so the embedded-specific proof drives the
+/// exact same call that startup does.
+fn purge_search_index(store: &Store, detector: &Detector) -> u64 {
+    match purge_indexed_secrets(store, detector) {
+        Ok(report) => {
+            if report.purged > 0 {
+                tracing::info!(
+                    purged = report.purged,
+                    scanned = report.scanned,
+                    "removed search-index rows the current ruleset calls sensitive"
+                );
+            }
+            report.purged
+        }
+        Err(error) => {
+            tracing::warn!(%error, "the search-index purge did not finish");
+            0
+        }
     }
 }
 
@@ -828,6 +853,44 @@ mod tests {
         // …and it is still the user's data: reachable by id, which is how the
         // reveal gesture gets to it.
         assert!(backend.get(&item.id).await.unwrap().is_sensitive);
+    }
+
+    /// A detector update must be applied by the same startup helper Android
+    /// calls. The fixture is a row written as ordinary by an older ruleset,
+    /// with plaintext deliberately present in FTS.
+    #[tokio::test]
+    async fn the_embedded_startup_purge_removes_a_newly_sensitive_fts_row() {
+        let (backend, _clip, _dir) = backend();
+        let id = "indexed-before-detector-rule";
+        let secret = "AKIAIOSFODNN7EXAMPLE";
+        let (nonce, ciphertext) =
+            copypaste_core::encrypt(secret.as_bytes(), &backend.inner.keyring.item_key(), id)
+                .unwrap();
+        backend
+            .inner
+            .store
+            .insert(copypaste_core::NewItem {
+                id: id.into(),
+                content_ciphertext: ciphertext,
+                nonce,
+                content_type: copypaste_ipc::content_type::TEXT.into(),
+                content_hash: copypaste_core::compute_content_hash(secret.as_bytes()),
+                is_sensitive: false,
+                search_text: Some(secret.into()),
+                created_at: 1_700_000_000_000,
+            })
+            .unwrap();
+        assert_eq!(backend.inner.store.search(secret, 10).unwrap().len(), 1);
+
+        assert_eq!(
+            purge_search_index(&backend.inner.store, &backend.inner.detector),
+            1
+        );
+        assert!(backend.search(secret, 10).await.unwrap().items.is_empty());
+        assert!(
+            backend.get(id).await.is_ok(),
+            "the history item was deleted"
+        );
     }
 
     #[tokio::test]
