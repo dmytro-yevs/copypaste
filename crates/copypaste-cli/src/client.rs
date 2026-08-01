@@ -17,10 +17,12 @@ use copypaste_ipc::{
     Request, Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
+use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::net::UnixStream;
+use tokio::time::{timeout_at, Instant};
 use tokio_util::codec::{Framed, LinesCodec};
 
 /// Port manifest 04 §6.2: `not_ready` is retried with a fixed 500 ms backoff,
@@ -29,6 +31,13 @@ use tokio_util::codec::{Framed, LinesCodec};
 /// worse answer than "try again in a few seconds".
 const NOT_READY_MAX_RETRIES: u32 = 3;
 const NOT_READY_BACKOFF: Duration = Duration::from_millis(500);
+
+/// One end-to-end budget covers connect, write, reply and readiness retries.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// These methods move a bounded but potentially large history on local disk.
+/// 180 seconds matches manifest 04's long client budget for the same methods.
+const TRANSFER_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// A CLI invocation is one command, but a `not_ready` retry reconnects, so ids
 /// still have to differ within the process.
@@ -43,19 +52,19 @@ struct Connection {
 }
 
 impl Connection {
-    async fn open(path: &Path) -> Result<Self, CliError> {
+    async fn open(path: &Path, deadline: Instant) -> Result<Self, CliError> {
         // The path is never surfaced to the user: it discloses the local
         // username (CLAUDE.md rule 4). Every failure here collapses to one
         // pathless variant.
-        let stream = UnixStream::connect(path)
-            .await
+        let stream = before(deadline, UnixStream::connect(path))
+            .await?
             .map_err(|_| CliError::DaemonUnreachable)?;
         Ok(Self {
             framed: Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES)),
         })
     }
 
-    async fn call(&mut self, method: Method) -> Result<Response, CliError> {
+    async fn call(&mut self, method: Method, deadline: Instant) -> Result<Response, CliError> {
         let id = next_id();
         let request = Request {
             id,
@@ -65,12 +74,11 @@ impl Connection {
         let line = serde_json::to_string(&request)
             .map_err(|e| CliError::local(format!("could not encode the request: {e}")))?;
 
-        self.framed
-            .send(line)
-            .await
+        before(deadline, self.framed.send(line))
+            .await?
             .map_err(|_| CliError::DaemonUnreachable)?;
 
-        let line = match self.framed.next().await {
+        let line = match before(deadline, self.framed.next()).await? {
             Some(Ok(line)) => line,
             // A dropped connection with no reply is the daemon's read-timeout
             // behaviour, and is indistinguishable from it having gone away.
@@ -91,6 +99,19 @@ impl Connection {
     }
 }
 
+async fn before<T>(deadline: Instant, future: impl Future<Output = T>) -> Result<T, CliError> {
+    timeout_at(deadline, future)
+        .await
+        .map_err(|_| CliError::DaemonUnreachable)
+}
+
+fn timeout_for(method: &Method) -> Duration {
+    match method {
+        Method::Import { .. } | Method::Backup { .. } | Method::Restore { .. } => TRANSFER_TIMEOUT,
+        _ => REQUEST_TIMEOUT,
+    }
+}
+
 /// Send one request to the running daemon, honouring the `not_ready` retry
 /// contract.
 pub async fn request(method: Method) -> Result<Response, CliError> {
@@ -98,17 +119,27 @@ pub async fn request(method: Method) -> Result<Response, CliError> {
 }
 
 async fn request_at(path: &Path, method: Method) -> Result<Response, CliError> {
+    let timeout = timeout_for(&method);
+    request_at_with_timeout(path, method, timeout).await
+}
+
+async fn request_at_with_timeout(
+    path: &Path,
+    method: Method,
+    timeout: Duration,
+) -> Result<Response, CliError> {
+    let deadline = Instant::now() + timeout;
     let mut attempts = 0;
     loop {
-        let mut connection = Connection::open(path).await?;
-        let response = connection.call(method.clone()).await?;
+        let mut connection = Connection::open(path, deadline).await?;
+        let response = connection.call(method.clone(), deadline).await?;
 
         if response.error_code == Some(ErrorCode::NotReady) && attempts < NOT_READY_MAX_RETRIES {
             attempts += 1;
             // Each retry reconnects: the daemon may close the connection after
             // an error response.
             drop(connection);
-            tokio::time::sleep(NOT_READY_BACKOFF).await;
+            before(deadline, tokio::time::sleep(NOT_READY_BACKOFF)).await?;
             continue;
         }
         return Ok(response);
@@ -122,12 +153,24 @@ async fn request_at(path: &Path, method: Method) -> Result<Response, CliError> {
 /// long as the client wants it to, and mixing it with request/response would
 /// make replies and events ambiguous on one stream.
 pub async fn watch(mut on_event: impl FnMut(EventData) -> bool) -> Result<(), CliError> {
-    let mut connection = Connection::open(&socket_path()).await?;
+    watch_at(&socket_path(), REQUEST_TIMEOUT, &mut on_event).await
+}
+
+async fn watch_at(
+    path: &Path,
+    handshake_timeout: Duration,
+    on_event: &mut impl FnMut(EventData) -> bool,
+) -> Result<(), CliError> {
+    let deadline = Instant::now() + handshake_timeout;
+    let mut connection = Connection::open(path, deadline).await?;
     // The ack proves the daemon subscribed before answering, so nothing that
     // happens after this line is missed.
-    let ack = connection.call(Method::Watch).await?;
+    let ack = connection.call(Method::Watch, deadline).await?;
+    let subscription_id = ack.id;
     into_data(ack)?;
 
+    // The subscription owns no deadline after its acknowledgement. Silence is
+    // normal here; user interruption or the callback ends the stream.
     loop {
         let line = match connection.framed.next().await {
             Some(Ok(line)) => line,
@@ -136,6 +179,12 @@ pub async fn watch(mut on_event: impl FnMut(EventData) -> bool) -> Result<(), Cl
         let response: Response = serde_json::from_str(&line).map_err(|e| {
             CliError::local(format!("could not understand the daemon's reply: {e}"))
         })?;
+        if response.id != subscription_id {
+            return Err(CliError::local(format!(
+                "the daemon answered request {} with a reply for request {}",
+                subscription_id, response.id
+            )));
+        }
         match into_data(response)? {
             Some(ResponseData::Event(event)) => {
                 if !on_event(event) {
@@ -294,48 +343,106 @@ pub fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>, CliErr
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::AsyncWriteExt;
     use tokio::net::UnixListener;
 
-    /// A stub listener that answers a fixed script of replies, one per
-    /// connection. `None` means "accept, read the request, then hang up",
-    /// which is what the daemon does on a read timeout.
-    ///
-    /// This exercises the real codec on both sides, so the framing is covered
-    /// without waiting for the daemon crate.
+    enum StubAction {
+        Reply(String),
+        Close,
+        NeverRead,
+        NeverReply,
+        Partial(String),
+        Watch {
+            ack: String,
+            event: String,
+            event_delay: Duration,
+        },
+    }
+
     struct StubDaemon {
         path: PathBuf,
+        request_ids: Arc<Mutex<Vec<u64>>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    async fn hold<T>(value: T) {
+        std::future::pending::<()>().await;
+        drop(value);
     }
 
     impl StubDaemon {
-        fn start(name: &str, replies: Vec<Option<String>>) -> Self {
+        fn start(name: &str, actions: Vec<StubAction>) -> Self {
             let path = std::env::temp_dir().join(format!(
                 "copypaste-cli-test-{}-{name}.sock",
                 std::process::id()
             ));
             let _ = std::fs::remove_file(&path);
             let listener = UnixListener::bind(&path).expect("bind stub socket");
-            tokio::spawn(async move {
-                for reply in replies {
+            let request_ids = Arc::new(Mutex::new(Vec::new()));
+            let recorded_ids = Arc::clone(&request_ids);
+            let task = tokio::spawn(async move {
+                for action in actions {
                     let Ok((stream, _)) = listener.accept().await else {
                         return;
+                    };
+                    let action = match action {
+                        StubAction::NeverRead => {
+                            hold(stream).await;
+                            return;
+                        }
+                        action => action,
                     };
                     let mut framed = Framed::new(stream, LinesCodec::new());
                     let Some(Ok(line)) = framed.next().await else {
                         return;
                     };
-                    let Some(reply) = reply else { continue };
-                    // Echo the request id back, as the protocol requires.
                     let request: Request = serde_json::from_str(&line).expect("valid request");
-                    let reply = reply.replace("{id}", &request.id.to_string());
-                    let _ = framed.send(reply).await;
+                    recorded_ids.lock().unwrap().push(request.id);
+                    let fill_id = |line: String| line.replace("{id}", &request.id.to_string());
+                    match action {
+                        StubAction::Reply(reply) => {
+                            let _ = framed.send(fill_id(reply)).await;
+                        }
+                        StubAction::Close => {}
+                        StubAction::NeverReply => {
+                            hold(framed).await;
+                            return;
+                        }
+                        StubAction::Partial(partial) => {
+                            let mut stream = framed.into_inner();
+                            let _ = stream.write_all(fill_id(partial).as_bytes()).await;
+                            hold(stream).await;
+                            return;
+                        }
+                        StubAction::Watch {
+                            ack,
+                            event,
+                            event_delay,
+                        } => {
+                            let _ = framed.send(fill_id(ack)).await;
+                            tokio::time::sleep(event_delay).await;
+                            let _ = framed.send(fill_id(event)).await;
+                        }
+                        StubAction::NeverRead => unreachable!(),
+                    }
                 }
             });
-            Self { path }
+            Self {
+                path,
+                request_ids,
+                task,
+            }
+        }
+
+        fn ids(&self) -> Vec<u64> {
+            self.request_ids.lock().unwrap().clone()
         }
     }
 
     impl Drop for StubDaemon {
         fn drop(&mut self) {
+            self.task.abort();
             let _ = std::fs::remove_file(&self.path);
         }
     }
@@ -344,7 +451,7 @@ mod tests {
     async fn a_full_request_response_round_trip_yields_typed_items() {
         let stub = StubDaemon::start(
             "roundtrip",
-            vec![Some(
+            vec![StubAction::Reply(
                 r#"{"id":{id},"ok":true,"data":{"items":[{"id":"a","content":"hi","content_type":"text/plain","created_at":5,"pinned":false,"is_sensitive":false}],"skipped_undecryptable":0}}"#
                     .to_string(),
             )],
@@ -359,8 +466,10 @@ mod tests {
         )
         .await
         .expect("round trip");
+        let response_id = response.id;
         let page = expect_page(into_data(response).unwrap()).unwrap();
         assert_eq!(page.items[0].content, "hi");
+        assert_eq!(stub.ids(), [response_id]);
     }
 
     #[tokio::test]
@@ -374,16 +483,124 @@ mod tests {
 
     #[tokio::test]
     async fn hanging_up_without_answering_is_treated_as_unreachable() {
-        let stub = StubDaemon::start("hangup", vec![None]);
+        let stub = StubDaemon::start("hangup", vec![StubAction::Close]);
         let err = request_at(&stub.path, Method::Status).await.unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
+    }
+
+    fn assert_deadline_error_is_prompt_and_pathless(err: &CliError, started: Instant, path: &Path) {
+        assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let message = err.user_message();
+        assert!(!message.contains(&*path.to_string_lossy()), "{message}");
+        assert!(!message.contains('/'), "{message}");
+    }
+
+    #[tokio::test]
+    async fn an_accepted_socket_that_never_reads_has_a_write_deadline() {
+        let stub = StubDaemon::start("never-read", vec![StubAction::NeverRead]);
+        let started = Instant::now();
+        let err = request_at_with_timeout(
+            &stub.path,
+            Method::Add {
+                content: "x".repeat(512 * 1024),
+            },
+            Duration::from_millis(100),
+        )
+        .await
+        .unwrap_err();
+        assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
+    }
+
+    #[tokio::test]
+    async fn an_accepted_request_that_never_gets_a_reply_has_a_read_deadline() {
+        let stub = StubDaemon::start("never-reply", vec![StubAction::NeverReply]);
+        let started = Instant::now();
+        let err = request_at_with_timeout(&stub.path, Method::Status, Duration::from_millis(100))
+            .await
+            .unwrap_err();
+        assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
+    }
+
+    #[tokio::test]
+    async fn a_partial_reply_without_a_newline_has_a_read_deadline() {
+        let stub = StubDaemon::start(
+            "partial",
+            vec![StubAction::Partial(r#"{"id":{id},"ok":true"#.to_string())],
+        );
+        let started = Instant::now();
+        let err = request_at_with_timeout(&stub.path, Method::Status, Duration::from_millis(100))
+            .await
+            .unwrap_err();
+        assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
+    }
+
+    #[tokio::test]
+    async fn watch_acknowledgement_has_a_deadline() {
+        let stub = StubDaemon::start("watch-no-ack", vec![StubAction::NeverReply]);
+        let started = Instant::now();
+        let mut callback = |_| true;
+        let err = watch_at(&stub.path, Duration::from_millis(100), &mut callback)
+            .await
+            .unwrap_err();
+        assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
+    }
+
+    #[tokio::test]
+    async fn watch_stream_is_unbounded_after_the_acknowledgement() {
+        let stub = StubDaemon::start(
+            "watch-stream",
+            vec![StubAction::Watch {
+                ack: r#"{"id":{id},"ok":true,"data":{}}"#.to_string(),
+                event: r#"{"id":{id},"ok":true,"data":{"event":"items","item_count":7}}"#
+                    .to_string(),
+                event_delay: Duration::from_millis(300),
+            }],
+        );
+        let mut observed = None;
+        let mut callback = |event| {
+            observed = Some(event);
+            false
+        };
+
+        watch_at(&stub.path, Duration::from_millis(150), &mut callback)
+            .await
+            .expect("post-ack silence must not time out");
+        assert_eq!(observed.unwrap().item_count, 7);
+    }
+
+    #[test]
+    fn only_local_history_transfers_receive_the_long_deadline() {
+        for method in [
+            Method::Import { items: Vec::new() },
+            Method::Backup {
+                dest_path: "backup.db".into(),
+            },
+            Method::Restore {
+                src_path: "backup.db".into(),
+                confirm: true,
+            },
+        ] {
+            assert_eq!(timeout_for(&method), TRANSFER_TIMEOUT);
+        }
+        for method in [
+            Method::Status,
+            Method::Export {
+                limit: 0,
+                include_sensitive: false,
+            },
+        ] {
+            assert_eq!(timeout_for(&method), REQUEST_TIMEOUT);
+        }
     }
 
     #[tokio::test]
     async fn a_reply_for_a_different_request_is_rejected() {
         let stub = StubDaemon::start(
             "idmismatch",
-            vec![Some(r#"{"id":999999,"ok":true,"data":{}}"#.to_string())],
+            vec![StubAction::Reply(
+                r#"{"id":999999,"ok":true,"data":{}}"#.to_string(),
+            )],
         );
         let err = request_at(&stub.path, Method::Status).await.unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_OTHER);
@@ -395,11 +612,11 @@ mod tests {
         let stub = StubDaemon::start(
             "notready",
             vec![
-                Some(
+                StubAction::Reply(
                     r#"{"id":{id},"ok":false,"error":"still starting","error_code":"not_ready"}"#
                         .to_string(),
                 ),
-                Some(
+                StubAction::Reply(
                     r#"{"id":{id},"ok":true,"data":{"version":"2.0.0","protocol_version":1,"item_count":0,"capture_running":true,"clipboard_backend":"fake"}}"#
                         .to_string(),
                 ),
@@ -417,7 +634,9 @@ mod tests {
             .to_string();
         let stub = StubDaemon::start(
             "notready-exhausted",
-            vec![Some(reply.clone()); NOT_READY_MAX_RETRIES as usize + 1],
+            (0..=NOT_READY_MAX_RETRIES)
+                .map(|_| StubAction::Reply(reply.clone()))
+                .collect(),
         );
 
         let response = request_at(&stub.path, Method::Status).await.expect("reply");
