@@ -146,6 +146,7 @@ mod tests {
                 },
                 created_at,
                 app_bundle_id: None,
+                payload_metadata: None,
             })
             .expect("insert")
             .id

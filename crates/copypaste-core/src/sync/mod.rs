@@ -19,7 +19,9 @@ mod source;
 #[cfg(test)]
 mod testkit;
 
-pub use merge::{apply_remote_version, open_version, MergeError, RemoteVersion};
+pub use merge::{
+    apply_remote_version, open_version, open_version_bytes, MergeError, RemoteVersion,
+};
 pub use source::StoreSource;
 
 /// Fixed, pathless sentences: these reach a peer's log and a user's screen

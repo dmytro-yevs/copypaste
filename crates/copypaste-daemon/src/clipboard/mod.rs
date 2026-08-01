@@ -118,6 +118,14 @@ pub(crate) fn is_password_manager_app(bundle_id: &str) -> bool {
 pub struct Capture {
     /// UTF-8 text captured from the system pasteboard.
     pub content: String,
+    /// Raw bytes for image/file capture.  Text stays in `content`; the fields
+    /// are mutually exclusive so no caller can accidentally feed binary to a
+    /// string-only consumer.
+    pub binary_content: Option<Vec<u8>>,
+    /// An absolute local file reference.  The tick opens it on the blocking
+    /// worker; polling itself must never read a file's bytes (manifest 01 I-16).
+    pub file_path: Option<std::path::PathBuf>,
+    pub file_metadata: Option<copypaste_core::FileMetadata>,
     /// One of `copypaste_ipc::content_type`.
     pub content_type: String,
     /// The frontmost app at capture time, when the platform could resolve it.
@@ -129,6 +137,9 @@ impl Capture {
     fn text(content: String) -> Self {
         Self {
             content,
+            binary_content: None,
+            file_path: None,
+            file_metadata: None,
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             app_bundle_id: None,
         }
@@ -168,6 +179,15 @@ pub trait ClipboardSource: Send {
     /// Write text to the clipboard. Must suppress the resulting self-write so
     /// the next poll does not re-capture our own content.
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()>;
+
+    /// Write a native binary representation back to the platform pasteboard.
+    /// A backend that cannot do this refuses rather than converting bytes to
+    /// text and corrupting the user's clipboard.
+    fn set_binary_contents(&mut self, _content_type: &str, _bytes: &[u8]) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!(
+            "this clipboard backend cannot write binary content"
+        ))
+    }
 
     /// Identifies the live backend, surfaced over IPC so a demo cannot be
     /// mistaken for the real thing.
