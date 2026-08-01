@@ -44,7 +44,7 @@ pub struct StoreSource {
     detector: Arc<Detector>,
     device_id: String,
     device_name: String,
-    storage_quota_bytes: u64,
+    retention_settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
     on_applied: Option<Arc<dyn Fn(i64) + Send + Sync>>,
 }
 
@@ -64,7 +64,29 @@ impl StoreSource {
         detector: Arc<Detector>,
         device_id: String,
         device_name: String,
-        storage_quota_bytes: u64,
+        settings: copypaste_ipc::ConfigData,
+    ) -> Self {
+        Self::with_retention_settings(
+            store,
+            keyring,
+            detector,
+            device_id,
+            device_name,
+            move || settings.clone(),
+        )
+    }
+
+    /// Build a source whose remote-merge retention policy is read when a
+    /// version arrives. Long-lived peer listeners must not retain a stale
+    /// quota after the user changes it live.
+    #[must_use]
+    pub fn with_retention_settings(
+        store: Store,
+        keyring: Arc<Keyring>,
+        detector: Arc<Detector>,
+        device_id: String,
+        device_name: String,
+        settings: impl Fn() -> copypaste_ipc::ConfigData + Send + Sync + 'static,
     ) -> Self {
         Self {
             store,
@@ -72,7 +94,7 @@ impl StoreSource {
             detector,
             device_id,
             device_name,
-            storage_quota_bytes,
+            retention_settings: Arc::new(settings),
             on_applied: None,
         }
     }
@@ -111,12 +133,7 @@ impl StoreSource {
             incoming,
         )?;
         if applied {
-            self.store
-                .evict_over_byte_cap(self.storage_quota_bytes)
-                .map_err(|e| {
-                    warn!(error = ?e, "could not enforce storage quota after a remote merge");
-                    MergeError::Store
-                })?;
+            crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
             if let Some(hook) = &self.on_applied {
                 hook(incoming.created_at);
             }
@@ -223,11 +240,7 @@ impl SyncSource for StoreSource {
             )
             .map_err(|e| SyncError::Source(e.message().to_string()))?;
             if result.content {
-                self.store
-                    .evict_over_byte_cap(self.storage_quota_bytes)
-                    .map_err(|e| {
-                        store_error(e, "could not enforce storage quota after a P2P merge")
-                    })?;
+                crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
                 if let Some(hook) = &self.on_applied {
                     hook(item.created_at);
                 }
@@ -390,7 +403,10 @@ mod tests {
             Arc::clone(&f.detector),
             f.here.clone(),
             "test-device".to_string(),
-            1,
+            copypaste_ipc::ConfigData {
+                storage_quota_bytes: 1,
+                ..Default::default()
+            },
         );
 
         let oldest = peer_item("oldest", "first remote item", 1_000);
@@ -439,6 +455,44 @@ mod tests {
         let stored = f.store.version("peer-item").unwrap().unwrap();
         assert!(stored.pinned);
         assert_eq!(stored.pin_order, Some(3.0));
+    }
+
+    #[test]
+    fn remote_merges_read_the_current_full_retention_policy() {
+        use std::sync::RwLock;
+
+        let f = fixture_named("beta");
+        let settings = Arc::new(RwLock::new(copypaste_ipc::ConfigData::default()));
+        let source = StoreSource::with_retention_settings(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            Arc::clone(&f.detector),
+            f.here.clone(),
+            "test-device".to_string(),
+            {
+                let settings = Arc::clone(&settings);
+                move || settings.read().unwrap().clone()
+            },
+        );
+
+        assert!(source.apply(peer_item("old", "first", 1_000)).unwrap());
+        settings.write().unwrap().history_limit = 1;
+        assert!(source.apply(peer_item("new", "second", 2_000)).unwrap());
+        assert!(f.store.get("old").unwrap().is_none());
+        assert!(f.store.get("new").unwrap().is_some());
+
+        settings.write().unwrap().retention_days = 1;
+        assert!(source
+            .apply(peer_item(
+                "expired",
+                "expired remote value",
+                crate::now_ms() - 2 * 86_400_000,
+            ))
+            .unwrap());
+        assert!(
+            f.store.get("expired").unwrap().is_none(),
+            "remote writes must enforce the age limit as well as count and bytes"
+        );
     }
 
     #[test]
