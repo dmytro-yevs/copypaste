@@ -1,201 +1,120 @@
-//! A scripted HTTP/1.1 server, so the tests exercise real `reqwest` requests
-//! without touching the network.
+//! Wiremock fixtures shared by the auth and REST tests.
 //!
-//! Shared with [`crate::rest`]'s tests: one stub for the crate, not one per
-//! HTTP client. It lives under `auth` because `auth` is the module `rest`
-//! already depends on, so sharing it here adds no edge that was not there.
+//! Requests are matched and counted by wiremock itself. Tests can also inspect
+//! wiremock's captured [`Request`] values when an assertion is clearer than a
+//! matcher (for example, checking every row in a chunked JSON body).
 
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-
-/// One request as the stub saw it on the wire.
-#[derive(Debug, Clone)]
-pub(crate) struct Captured {
-    pub method: String,
-    /// Path plus query, exactly as sent.
-    pub target: String,
-    pub headers: Vec<(String, String)>,
-    pub body: String,
-}
-
-impl Captured {
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
-    }
-
-    pub fn json(&self) -> serde_json::Value {
-        serde_json::from_str(&self.body).expect("request body should be JSON")
-    }
-}
+use wiremock::matchers::any;
+use wiremock::{Mock, MockBuilder, MockServer, Request, Respond, ResponseTemplate, Times};
 
 /// One scripted response.
 #[derive(Debug, Clone)]
-pub(crate) struct Reply {
-    pub status: u16,
-    pub headers: Vec<(String, String)>,
-    pub body: String,
-}
+pub(crate) struct Reply(ResponseTemplate);
 
 impl Reply {
     pub fn json(status: u16, body: &str) -> Self {
-        Self {
-            status,
-            headers: vec![("content-type".into(), "application/json".into())],
-            body: body.to_string(),
-        }
+        Self(ResponseTemplate::new(status).set_body_raw(body, "application/json"))
     }
 
     pub fn text(status: u16, body: &str) -> Self {
-        Self {
-            status,
-            headers: vec![("content-type".into(), "text/html".into())],
-            body: body.to_string(),
-        }
+        Self(ResponseTemplate::new(status).set_body_raw(body, "text/html"))
     }
 
     pub fn empty(status: u16) -> Self {
-        Self {
-            status,
-            headers: Vec::new(),
-            body: String::new(),
-        }
+        Self(ResponseTemplate::new(status))
     }
 
     pub fn with_header(mut self, name: &str, value: &str) -> Self {
-        self.headers.push((name.to_string(), value.to_string()));
+        self.0 = self.0.insert_header(name, value);
         self
     }
 }
 
+/// A responder that serves the script in order and then repeats its last
+/// response. Repeating the last response lets persistent-failure retry tests
+/// describe the failure once while wiremock still verifies the call count.
+#[derive(Debug)]
+struct SequentialResponder {
+    replies: Vec<ResponseTemplate>,
+    next: AtomicUsize,
+}
+
+impl SequentialResponder {
+    fn new(replies: Vec<Reply>) -> Self {
+        assert!(!replies.is_empty(), "a stub needs at least one reply");
+        Self {
+            replies: replies.into_iter().map(|reply| reply.0).collect(),
+            next: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl Respond for SequentialResponder {
+    fn respond(&self, _request: &Request) -> ResponseTemplate {
+        let index = self.next.fetch_add(1, Ordering::Relaxed);
+        self.replies
+            .get(index)
+            .unwrap_or_else(|| self.replies.last().expect("non-empty response script"))
+            .clone()
+    }
+}
+
 pub(crate) struct Stub {
+    server: MockServer,
     /// Base URL to hand to `CloudConfig::url`.
     pub base_url: String,
-    captured: Arc<Mutex<Vec<Captured>>>,
 }
 
 impl Stub {
-    /// Serve `replies` in order; once exhausted the last one repeats, so a
-    /// test that only cares about the first response need not script the
-    /// retries.
-    pub async fn start(replies: Vec<Reply>) -> Self {
-        assert!(!replies.is_empty(), "a stub needs at least one reply");
-        let listener = TcpListener::bind("127.0.0.1:0")
+    /// Serve every request with the script and verify `expected` calls.
+    pub async fn start<T>(replies: Vec<Reply>, expected: T) -> Self
+    where
+        T: Into<Times>,
+    {
+        Self::start_matching(Mock::given(any()), replies, expected).await
+    }
+
+    /// Serve only requests accepted by `mock` and verify `expected` matches.
+    pub async fn start_matching<T>(mock: MockBuilder, replies: Vec<Reply>, expected: T) -> Self
+    where
+        T: Into<Times>,
+    {
+        let server = MockServer::start().await;
+        mock.respond_with(SequentialResponder::new(replies))
+            .expect(expected)
+            .mount(&server)
+            .await;
+        let base_url = server.uri();
+        Self { server, base_url }
+    }
+
+    pub async fn requests(&self) -> Vec<Request> {
+        self.server
+            .received_requests()
             .await
-            .expect("bind loopback");
-        let addr = listener.local_addr().expect("local addr");
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let sink = Arc::clone(&captured);
-
-        tokio::spawn(async move {
-            let mut served = 0usize;
-            while let Ok((mut socket, _)) = listener.accept().await {
-                let request = match read_request(&mut socket).await {
-                    Some(request) => request,
-                    None => continue,
-                };
-                sink.lock().expect("stub mutex").push(request);
-
-                let reply = replies
-                    .get(served)
-                    .cloned()
-                    .unwrap_or_else(|| replies.last().expect("non-empty").clone());
-                served += 1;
-
-                let mut head = format!(
-                    "HTTP/1.1 {} X\r\ncontent-length: {}\r\nconnection: close\r\n",
-                    reply.status,
-                    reply.body.len()
-                );
-                for (name, value) in &reply.headers {
-                    head.push_str(&format!("{name}: {value}\r\n"));
-                }
-                head.push_str("\r\n");
-                let _ = socket.write_all(head.as_bytes()).await;
-                let _ = socket.write_all(reply.body.as_bytes()).await;
-                let _ = socket.flush().await;
-                let _ = socket.shutdown().await;
-            }
-        });
-
-        Self {
-            base_url: format!("http://{addr}"),
-            captured,
-        }
+            .expect("request recording is enabled")
     }
 
-    pub fn requests(&self) -> Vec<Captured> {
-        self.captured.lock().expect("stub mutex").clone()
-    }
-
-    pub fn request_count(&self) -> usize {
-        self.captured.lock().expect("stub mutex").len()
+    pub async fn request_count(&self) -> usize {
+        self.requests().await.len()
     }
 
     /// The single request the test expected to be made.
-    pub fn only_request(&self) -> Captured {
-        let requests = self.requests();
+    pub async fn only_request(&self) -> Request {
+        let requests = self.requests().await;
         assert_eq!(requests.len(), 1, "expected exactly one request");
         requests.into_iter().next().expect("one request")
     }
 }
 
-async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<Captured> {
-    let mut buffer = Vec::new();
-    let mut chunk = [0u8; 4096];
-
-    let header_end = loop {
-        let read = socket.read(&mut chunk).await.ok()?;
-        if read == 0 {
-            return None;
-        }
-        buffer.extend_from_slice(&chunk[..read]);
-        if let Some(at) = find_double_crlf(&buffer) {
-            break at;
-        }
-    };
-
-    let head = String::from_utf8_lossy(&buffer[..header_end]).to_string();
-    let mut lines = head.split("\r\n");
-    let request_line = lines.next()?;
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next()?.to_string();
-    let target = parts.next()?.to_string();
-
-    let mut headers = Vec::new();
-    for line in lines {
-        if let Some((name, value)) = line.split_once(':') {
-            headers.push((name.trim().to_lowercase(), value.trim().to_string()));
-        }
-    }
-
-    let content_length: usize = headers
-        .iter()
-        .find(|(k, _)| k == "content-length")
-        .and_then(|(_, v)| v.parse().ok())
-        .unwrap_or(0);
-
-    let mut body = buffer[header_end + 4..].to_vec();
-    while body.len() < content_length {
-        let read = socket.read(&mut chunk).await.ok()?;
-        if read == 0 {
-            break;
-        }
-        body.extend_from_slice(&chunk[..read]);
-    }
-
-    Some(Captured {
-        method,
-        target,
-        headers,
-        body: String::from_utf8_lossy(&body).to_string(),
-    })
+pub(crate) fn header<'a>(request: &'a Request, name: &str) -> Option<&'a str> {
+    request.headers.get(name)?.to_str().ok()
 }
 
-fn find_double_crlf(buffer: &[u8]) -> Option<usize> {
-    buffer.windows(4).position(|w| w == b"\r\n\r\n")
+pub(crate) fn json(request: &Request) -> serde_json::Value {
+    request
+        .body_json()
+        .expect("request body should be valid JSON")
 }

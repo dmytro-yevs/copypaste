@@ -24,6 +24,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use url::Url;
 
 use super::event::RealtimeError;
 use super::frame::parse_frame;
@@ -185,17 +186,25 @@ fn confirms_subscription(payload: &Value, user_id: &str) -> Result<(), RealtimeE
 /// A non-`http` scheme is passed through untouched so a `ws://` loopback URL
 /// works in a test harness.
 pub(super) fn websocket_url(base: &str) -> String {
-    let trimmed = base.trim_end_matches('/');
-    let ws_base = if let Some(rest) = trimmed.strip_prefix("https://") {
-        format!("wss://{rest}")
-    } else if let Some(rest) = trimmed.strip_prefix("http://") {
-        format!("ws://{rest}")
-    } else {
-        trimmed.to_owned()
+    let Ok(mut base_url) = Url::parse(base) else {
+        return base.to_owned();
+    };
+    match base_url.scheme() {
+        "https" => base_url
+            .set_scheme("wss")
+            .expect("https and wss are both hierarchical schemes"),
+        "http" => base_url
+            .set_scheme("ws")
+            .expect("http and ws are both hierarchical schemes"),
+        _ => {}
+    }
+    let Ok(mut endpoint) = base_url.join("/realtime/v1/websocket") else {
+        return base.to_owned();
     };
     // `vsn` selects the Phoenix serializer; 1.0.0 is the five-element array
     // this module parses.
-    format!("{ws_base}/realtime/v1/websocket?vsn=1.0.0")
+    endpoint.query_pairs_mut().append_pair("vsn", "1.0.0");
+    endpoint.into()
 }
 
 /// The `sub` claim of a JWT, without verifying it.
@@ -400,6 +409,14 @@ mod tests {
         assert_eq!(
             websocket_url("http://127.0.0.1:54321"),
             "ws://127.0.0.1:54321/realtime/v1/websocket?vsn=1.0.0"
+        );
+        assert_eq!(
+            websocket_url("ws://127.0.0.1:54321/harness/"),
+            "ws://127.0.0.1:54321/realtime/v1/websocket?vsn=1.0.0"
+        );
+        assert_eq!(
+            websocket_url("https://[2001:db8::1]:8443/nested%20base/?apikey=must-go#fragment"),
+            "wss://[2001:db8::1]:8443/realtime/v1/websocket?vsn=1.0.0"
         );
         // The anon key is never in the URL.
         assert!(!websocket_url("https://proj.supabase.co").contains("apikey"));

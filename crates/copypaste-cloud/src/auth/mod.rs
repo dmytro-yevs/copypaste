@@ -70,9 +70,9 @@ pub mod http;
 pub mod session;
 pub mod token;
 
-/// A scripted HTTP/1.1 server, so the tests exercise real `reqwest` requests
-/// without touching the network. `crate::rest`'s tests use it too — one stub
-/// for the crate, not one per client.
+/// Wiremock fixtures, so the tests exercise real `reqwest` requests against a
+/// test-only server. `crate::rest`'s tests use them too — one fixture layer for
+/// the crate, not one per client.
 #[cfg(test)]
 pub(crate) mod stub;
 

@@ -11,6 +11,7 @@ use std::time::Duration;
 use backon::{ExponentialBuilder, Retryable};
 use reqwest::Client;
 use serde_json::json;
+use url::Url;
 
 use super::error::{classify, AuthError, GrantKind};
 use super::http::{now_ms, redact_email, transient_backoff};
@@ -73,7 +74,7 @@ impl SupabaseAuth {
         let body = json!({ "email": email, "password": password });
         let text = self
             .post(
-                &self.endpoint("/auth/v1/signup"),
+                &self.endpoint("/auth/v1/signup", &[]),
                 &body,
                 &self.config.anon_key,
                 GrantKind::SignUp,
@@ -91,7 +92,7 @@ impl SupabaseAuth {
         let body = json!({ "email": email, "password": password });
         let text = self
             .post(
-                &self.endpoint("/auth/v1/token?grant_type=password"),
+                &self.endpoint("/auth/v1/token", &[("grant_type", "password")]),
                 &body,
                 &self.config.anon_key,
                 GrantKind::Password,
@@ -111,7 +112,7 @@ impl SupabaseAuth {
         let body = json!({ "refresh_token": refresh_token });
         let text = self
             .post(
-                &self.endpoint("/auth/v1/token?grant_type=refresh_token"),
+                &self.endpoint("/auth/v1/token", &[("grant_type", "refresh_token")]),
                 &body,
                 &self.config.anon_key,
                 GrantKind::Refresh,
@@ -130,7 +131,7 @@ impl SupabaseAuth {
         let body = json!({});
         match self
             .post(
-                &self.endpoint("/auth/v1/logout"),
+                &self.endpoint("/auth/v1/logout", &[]),
                 &body,
                 access_token,
                 GrantKind::Bearer,
@@ -146,12 +147,19 @@ impl SupabaseAuth {
         }
     }
 
-    fn endpoint(&self, path_and_query: &str) -> String {
-        format!(
-            "{}{}",
-            self.config.url.trim_end_matches('/'),
-            path_and_query
-        )
+    fn endpoint(&self, path: &str, query: &[(&str, &str)]) -> String {
+        let Ok(mut endpoint) = Url::parse(&self.config.url).and_then(|base| base.join(path)) else {
+            // Preserve the existing failure mode for an invalid configuration:
+            // hand the raw value to reqwest, which reports a redacted network
+            // error rather than panicking while constructing the client.
+            return self.config.url.clone();
+        };
+        if !query.is_empty() {
+            endpoint
+                .query_pairs_mut()
+                .extend_pairs(query.iter().copied());
+        }
+        endpoint.into()
     }
 
     /// One request, retried under the shared policy, classified by `grant`.
@@ -200,74 +208,117 @@ impl SupabaseAuth {
 
 #[cfg(test)]
 mod tests {
-    use super::super::stub::{Reply, Stub};
+    use super::super::stub::{header as request_header, json as request_json, Reply, Stub};
     use super::super::testkit::{client, fast_retry, session_body, ANON, INVALID_GRANT};
     use super::*;
+    use wiremock::matchers::{
+        body_json, header as header_match, method, path, query_param, query_param_is_missing,
+    };
+    use wiremock::Mock;
 
     // -- endpoints, headers, bodies ---------------------------------------
 
     #[tokio::test]
     async fn sign_in_posts_the_password_grant_with_both_auth_headers() {
-        let stub = Stub::start(vec![Reply::json(200, &session_body("at", "rt", 3600))]).await;
+        let mock = Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .and(query_param("grant_type", "password"))
+            .and(header_match("apikey", ANON))
+            .and(header_match("authorization", format!("Bearer {ANON}")))
+            .and(body_json(json!({
+                "email": "alice@example.com",
+                "password": "hunter2"
+            })));
+        let stub = Stub::start_matching(
+            mock,
+            vec![Reply::json(200, &session_body("at", "rt", 3600))],
+            1,
+        )
+        .await;
         client(&stub)
             .sign_in("alice@example.com", "hunter2")
             .await
             .expect("sign-in");
 
-        let request = stub.only_request();
-        assert_eq!(request.method, "POST");
-        assert_eq!(request.target, "/auth/v1/token?grant_type=password");
-        assert_eq!(request.header("apikey"), Some(ANON));
+        let request = stub.only_request().await;
+        assert_eq!(request.method.as_str(), "POST");
+        assert_eq!(request.url.path(), "/auth/v1/token");
+        assert_eq!(request.url.query(), Some("grant_type=password"));
+        assert_eq!(request_header(&request, "apikey"), Some(ANON));
         assert_eq!(
-            request.header("authorization"),
+            request_header(&request, "authorization"),
             Some(format!("Bearer {ANON}").as_str())
         );
-        assert_eq!(request.json()["email"], "alice@example.com");
-        assert_eq!(request.json()["password"], "hunter2");
+        assert_eq!(request_json(&request)["email"], "alice@example.com");
+        assert_eq!(request_json(&request)["password"], "hunter2");
     }
 
     #[tokio::test]
     async fn refresh_posts_only_the_refresh_token() {
-        let stub = Stub::start(vec![Reply::json(200, &session_body("at2", "rt2", 3600))]).await;
+        let mock = Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .and(query_param("grant_type", "refresh_token"))
+            .and(body_json(json!({ "refresh_token": "rt1" })));
+        let stub = Stub::start_matching(
+            mock,
+            vec![Reply::json(200, &session_body("at2", "rt2", 3600))],
+            1,
+        )
+        .await;
         client(&stub).refresh("rt1").await.expect("refresh");
 
-        let request = stub.only_request();
-        assert_eq!(request.target, "/auth/v1/token?grant_type=refresh_token");
-        let body = request.json();
+        let request = stub.only_request().await;
+        assert_eq!(request.url.path(), "/auth/v1/token");
+        assert_eq!(request.url.query(), Some("grant_type=refresh_token"));
+        let body = request_json(&request);
         assert_eq!(body["refresh_token"], "rt1");
         assert!(body.get("password").is_none(), "no password on a refresh");
     }
 
     #[tokio::test]
     async fn sign_up_posts_to_the_signup_endpoint() {
-        let stub = Stub::start(vec![Reply::json(200, &session_body("at", "rt", 60))]).await;
+        let mock = Mock::given(method("POST"))
+            .and(path("/auth/v1/signup"))
+            .and(query_param_is_missing("grant_type"));
+        let stub = Stub::start_matching(
+            mock,
+            vec![Reply::json(200, &session_body("at", "rt", 60))],
+            1,
+        )
+        .await;
         client(&stub)
             .sign_up("new@example.com", "pw")
             .await
             .expect("sign-up");
-        assert_eq!(stub.only_request().target, "/auth/v1/signup");
+        let request = stub.only_request().await;
+        assert_eq!(request.url.path(), "/auth/v1/signup");
+        assert!(request.url.query().is_none());
     }
 
     #[tokio::test]
     async fn sign_out_bearers_the_access_token_not_the_anon_key() {
-        let stub = Stub::start(vec![Reply::empty(204)]).await;
+        let mock = Mock::given(method("POST"))
+            .and(path("/auth/v1/logout"))
+            .and(header_match("apikey", ANON))
+            .and(header_match("authorization", "Bearer user-access-token"));
+        let stub = Stub::start_matching(mock, vec![Reply::empty(204)], 1).await;
         client(&stub)
             .sign_out("user-access-token")
             .await
             .expect("sign-out");
 
-        let request = stub.only_request();
-        assert_eq!(request.target, "/auth/v1/logout");
-        assert_eq!(request.header("apikey"), Some(ANON));
+        let request = stub.only_request().await;
+        assert_eq!(request.url.path(), "/auth/v1/logout");
+        assert_eq!(request_header(&request, "apikey"), Some(ANON));
         assert_eq!(
-            request.header("authorization"),
+            request_header(&request, "authorization"),
             Some("Bearer user-access-token")
         );
     }
 
     #[tokio::test]
     async fn sign_out_of_an_already_dead_token_succeeds() {
-        let stub = Stub::start(vec![Reply::json(401, INVALID_GRANT)]).await;
+        let stub = Stub::start(vec![Reply::json(401, INVALID_GRANT)], 1).await;
         client(&stub)
             .sign_out("stale")
             .await
@@ -276,16 +327,27 @@ mod tests {
 
     #[tokio::test]
     async fn a_trailing_slash_on_the_project_url_does_not_double_up() {
-        let stub = Stub::start(vec![Reply::json(200, &session_body("at", "rt", 1))]).await;
+        let stub = Stub::start(vec![Reply::json(200, &session_body("at", "rt", 1))], 1).await;
         let auth = SupabaseAuth::new(CloudConfig {
             url: format!("{}/", stub.base_url),
             anon_key: ANON.to_string(),
         })
         .with_retry_policy(fast_retry());
         auth.sign_in("a@b.co", "x").await.expect("sign-in");
+        let request = stub.only_request().await;
+        assert_eq!(request.url.path(), "/auth/v1/token");
+        assert_eq!(request.url.query(), Some("grant_type=password"));
+    }
+
+    #[test]
+    fn endpoint_join_preserves_ipv6_and_escapes_query_values() {
+        let auth = SupabaseAuth::new(CloudConfig {
+            url: "https://[2001:db8::1]:8443/nested%20base/?stale=true#old".into(),
+            anon_key: ANON.into(),
+        });
         assert_eq!(
-            stub.only_request().target,
-            "/auth/v1/token?grant_type=password"
+            auth.endpoint("/auth/v1/token", &[("grant_type", "refresh token/+")],),
+            "https://[2001:db8::1]:8443/auth/v1/token?grant_type=refresh+token%2F%2B"
         );
     }
 
@@ -293,7 +355,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_session_carries_the_tokens_and_a_computed_expiry() {
-        let stub = Stub::start(vec![Reply::json(200, &session_body("acc", "ref", 3600))]).await;
+        let stub = Stub::start(vec![Reply::json(200, &session_body("acc", "ref", 3600))], 1).await;
         let before = now_ms();
         let session = client(&stub).sign_in("a@b.co", "x").await.expect("sign-in");
 
@@ -308,10 +370,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_signup_awaiting_confirmation_is_not_reported_as_malformed() {
-        let stub = Stub::start(vec![Reply::json(
-            200,
-            r#"{"id":"user-uuid-9","email":"new@example.com","confirmation_sent_at":"2026-07-30T00:00:00Z"}"#,
-        )])
+        let stub = Stub::start(
+            vec![Reply::json(
+                200,
+                r#"{"id":"user-uuid-9","email":"new@example.com","confirmation_sent_at":"2026-07-30T00:00:00Z"}"#,
+            )],
+            1,
+        )
         .await;
         let err = client(&stub)
             .sign_up("new@example.com", "pw")
@@ -325,14 +390,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_2xx_that_is_not_a_session_is_malformed() {
-        let stub = Stub::start(vec![Reply::json(200, r#"{"nonsense":true}"#)]).await;
+        let stub = Stub::start(vec![Reply::json(200, r#"{"nonsense":true}"#)], 1).await;
         let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
         assert!(matches!(err, AuthError::Malformed), "{err:?}");
     }
 
     #[tokio::test]
     async fn a_non_json_2xx_is_malformed_not_a_panic() {
-        let stub = Stub::start(vec![Reply::text(200, "<html>hello</html>")]).await;
+        let stub = Stub::start(vec![Reply::text(200, "<html>hello</html>")], 1).await;
         let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
         assert!(matches!(err, AuthError::Malformed), "{err:?}");
     }

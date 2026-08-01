@@ -135,9 +135,9 @@ fn truncate_body(body: &str) -> String {
 // Tests
 // ---------------------------------------------------------------------------
 //
-// The status rules are asserted through a real `reqwest` round trip against the
-// scripted stub, because the thing under test is what a status *does* to the
-// retry envelope as much as which variant it produces.
+// The status rules are asserted through a real `reqwest` round trip against
+// wiremock, because the thing under test is what a status *does* to the retry
+// envelope as much as which variant it produces.
 
 #[cfg(test)]
 mod tests {
@@ -149,14 +149,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_401_is_distinct_and_is_not_retried() {
-        let stub = Stub::start(vec![Reply::json(401, r#"{"message":"JWT expired"}"#)]).await;
+        let stub = Stub::start(vec![Reply::json(401, r#"{"message":"JWT expired"}"#)], 1).await;
         let err = client(&stub)
             .fetch_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         assert!(matches!(err, RestError::Unauthorized), "{err:?}");
         assert_eq!(
-            stub.request_count(),
+            stub.request_count().await,
             1,
             "the caller refreshes once and retries once; retrying here would spin"
         );
@@ -164,18 +164,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_401_on_the_write_path_is_the_same_error() {
-        let stub = Stub::start(vec![Reply::json(401, "{}")]).await;
+        let stub = Stub::start(vec![Reply::json(401, "{}")], 1).await;
         let err = client(&stub)
             .upsert(TOKEN, &[item("a1")])
             .await
             .unwrap_err();
         assert!(matches!(err, RestError::Unauthorized), "{err:?}");
-        assert_eq!(stub.request_count(), 1);
+        assert_eq!(stub.request_count().await, 1);
     }
 
     #[tokio::test]
     async fn a_403_is_not_confused_with_a_401() {
-        let stub = Stub::start(vec![Reply::json(403, r#"{"message":"RLS"}"#)]).await;
+        let stub = Stub::start(vec![Reply::json(403, r#"{"message":"RLS"}"#)], 1).await;
         let err = client(&stub)
             .fetch_since(TOKEN, 0, None, 10)
             .await
@@ -188,7 +188,11 @@ mod tests {
 
     #[tokio::test]
     async fn a_429_carries_retry_after_and_is_not_slept_on_here() {
-        let stub = Stub::start(vec![Reply::json(429, "{}").with_header("retry-after", "17")]).await;
+        let stub = Stub::start(
+            vec![Reply::json(429, "{}").with_header("retry-after", "17")],
+            1,
+        )
+        .await;
         let err = client(&stub)
             .fetch_since(TOKEN, 0, None, 10)
             .await
@@ -197,12 +201,12 @@ mod tests {
             RestError::RateLimited { retry_after_secs } => assert_eq!(retry_after_secs, Some(17)),
             other => panic!("expected RateLimited, got {other:?}"),
         }
-        assert_eq!(stub.request_count(), 1);
+        assert_eq!(stub.request_count().await, 1);
     }
 
     #[tokio::test]
     async fn a_429_without_a_header_still_says_rate_limited() {
-        let stub = Stub::start(vec![Reply::json(429, "{}")]).await;
+        let stub = Stub::start(vec![Reply::json(429, "{}")], 1).await;
         let err = client(&stub)
             .upsert(TOKEN, &[item("a1")])
             .await
@@ -220,32 +224,35 @@ mod tests {
 
     #[tokio::test]
     async fn a_5xx_is_retried_and_then_succeeds() {
-        let stub = Stub::start(vec![Reply::text(503, "down"), Reply::json(200, "[]")]).await;
+        let stub = Stub::start(vec![Reply::text(503, "down"), Reply::json(200, "[]")], 2).await;
         let rows = client(&stub)
             .fetch_since(TOKEN, 0, None, 10)
             .await
             .expect("fetch");
         assert!(rows.is_empty());
-        assert_eq!(stub.request_count(), 2);
+        assert_eq!(stub.request_count().await, 2);
     }
 
     #[tokio::test]
     async fn a_persistent_5xx_gives_up_with_the_status() {
-        let stub = Stub::start(vec![Reply::text(500, "boom")]).await;
+        let stub = Stub::start(vec![Reply::text(500, "boom")], 1..).await;
         let err = client(&stub)
             .fetch_since(TOKEN, 0, None, 10)
             .await
             .unwrap_err();
         assert!(matches!(err, RestError::Server { status: 500 }), "{err:?}");
-        assert!(stub.request_count() > 1);
+        assert!(stub.request_count().await > 1);
     }
 
     #[tokio::test]
     async fn a_409_says_the_conflict_target_did_not_resolve() {
-        let stub = Stub::start(vec![Reply::json(
-            409,
-            r#"{"code":"23505","message":"duplicate key value violates unique constraint"}"#,
-        )])
+        let stub = Stub::start(
+            vec![Reply::json(
+                409,
+                r#"{"code":"23505","message":"duplicate key value violates unique constraint"}"#,
+            )],
+            1,
+        )
         .await;
         let err = client(&stub)
             .upsert(TOKEN, &[item("a1")])
@@ -255,17 +262,20 @@ mod tests {
             matches!(err, RestError::Rejected { status: 409 }),
             "{err:?}"
         );
-        assert_eq!(stub.request_count(), 1, "a 409 is not transient");
+        assert_eq!(stub.request_count().await, 1, "a 409 is not transient");
     }
 
     // -- no paths, no tokens ------------------------------------------------
 
     #[tokio::test]
     async fn errors_carry_neither_a_path_nor_a_token() {
-        let stub = Stub::start(vec![Reply::json(
-            401,
-            r#"{"message":"failed at /Users/dmytro/copypaste.db with token user-access-token"}"#,
-        )])
+        let stub = Stub::start(
+            vec![Reply::json(
+                401,
+                r#"{"message":"failed at /Users/dmytro/copypaste.db with token user-access-token"}"#,
+            )],
+            1,
+        )
         .await;
         let err = client(&stub)
             .fetch_since(TOKEN, 0, None, 10)
