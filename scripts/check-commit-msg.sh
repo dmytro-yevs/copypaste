@@ -16,7 +16,10 @@ fail() { printf '  ✗ %s\n' "$1" >&2; FAILED=1; }
 FAILED=0
 
 # Strip comments and the diff git appends under --verbose.
-mapfile -t LINES < <(sed -e '/^#/d' -e '/^diff --git /,$d' "$MSG_FILE")
+LINES=()
+while IFS= read -r line; do
+    LINES[${#LINES[@]}]="$line"
+done < <(sed -e '/^#/d' -e '/^diff --git /,$d' "$MSG_FILE")
 
 SUBJECT="${LINES[0]:-}"
 [[ -z "${SUBJECT// }" ]] && { echo "  ✗ empty subject" >&2; exit 1; }
