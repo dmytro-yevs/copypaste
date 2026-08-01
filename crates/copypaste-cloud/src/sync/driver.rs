@@ -1,11 +1,3 @@
-//! The driver value itself: what it holds, how it is assembled, and the one
-//! method that needs both paths at once.
-//!
-//! The push and pull paths, the recovery rules and the cadence are separate
-//! files; each is an `impl` block on this type. What lives here is the state
-//! they share — the session behind its mutex, the key, the guard — and the
-//! ordering constraint between them ([`CloudSync::sync`]).
-
 use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -18,33 +10,17 @@ use crate::auth::Session;
 use crate::crypto::SyncKey;
 use crate::CloudConfig;
 
-/// Push, pull, and the cadence in between.
-///
-/// Generic over the two transports so the recovery rules can be tested against
-/// fakes with no HTTP in the picture; the production instantiation is
-/// `CloudSync<SupabaseRest, SupabaseAuth>`.
 pub struct CloudSync<R: RestApi, A: AuthApi> {
     pub(super) rest: R,
     pub(super) auth: A,
     pub(super) key: SyncKey,
     config: CloudConfig,
-    /// The live session. Behind a mutex because a 401 on any request rotates it
-    /// and every subsequent request must see the new bearer. Never held across
-    /// an await.
+    // A 401 rotates this for every later request; never hold it across an await.
     pub(super) session: Mutex<Session>,
     pub(super) sensitive: SensitiveGuard,
     pub(super) idle: Mutex<Duration>,
-    /// Whether a Realtime channel is currently confirmed joined. Decides the
-    /// idle ceiling: the long one is only honest while something else is
-    /// carrying the latency (see [`super::cadence`]).
     pub(super) push_channel: AtomicBool,
-    /// Scale applied to every retry sleep. `1.0` in production.
-    ///
-    /// The tests set it to zero so the recovery rules can be asserted without
-    /// wall-clock sleeps: the workspace does not enable tokio's `test-util`, so
-    /// the clock cannot be paused. The *duration* the 429 rule computes is
-    /// asserted separately and directly, against
-    /// [`rate_limit_delay`](super::retry::rate_limit_delay), which is pure.
+    // Tests set this to zero; retry duration math is exercised separately.
     delay_scale: f64,
 }
 
@@ -56,9 +32,8 @@ impl<R: RestApi, A: AuthApi> std::fmt::Debug for CloudSync<R, A> {
 }
 
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
-    /// Assemble a driver.
-    ///
-    /// `sensitive` is not optional; see [`SensitiveGuard`].
+    /// Requires a sensitivity gate: live sensitive payloads must never sync
+    /// (manifest 05 T-7).
     pub fn new(
         rest: R,
         auth: A,
@@ -80,47 +55,28 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         }
     }
 
-    /// Retry immediately instead of sleeping. Tests only — see `delay_scale`.
     #[cfg(test)]
     pub(super) fn without_retry_delays(mut self) -> Self {
         self.delay_scale = 0.0;
         self
     }
 
-    /// The deployment this driver talks to.
     pub fn config(&self) -> &CloudConfig {
         &self.config
     }
 
-    /// Read the live session — the access token, and the refresh token as
-    /// rotated by the last refresh.
-    ///
-    /// A borrow rather than a clone, so that persisting the rotated refresh
-    /// token does not require [`Session`] to be `Clone` and does not leave a
-    /// second copy of a bearer lying around for the caller to forget about.
+    /// Borrows the rotated session so callers do not retain another bearer
+    /// copy.
     pub fn inspect_session<T>(&self, f: impl FnOnce(&Session) -> T) -> T {
         f(&self.lock_session())
     }
 
-    /// Push, pull, then publish any local LWW winner the pull re-queued.
-    ///
-    /// Push first so that a local delete reaches the backend before this device
-    /// asks for rows — otherwise a tombstone written a moment ago can be
-    /// shadowed by the live version another device is still serving, and the
-    /// user watches a deleted item come back for one tick.
-    ///
-    /// # Errors
-    ///
-    /// As [`CloudSync::push`] and [`CloudSync::pull`]. A push failure aborts
-    /// before the pull: if the session is dead, the pull would only fail the
-    /// same way.
+    /// Pushes first so a new tombstone cannot be briefly shadowed by a stale
+    /// live row (INV-N2). Retained local LWW winners are then republished
+    /// because backend upserts resolve same-item writes by arrival.
     pub async fn sync(&self, source: &dyn CloudSource) -> Result<SyncStats, SyncError> {
         let pushed = self.push(source).await?;
         let (pulled, republish) = self.pull_with_republish(source).await?;
-        // A backend upsert resolves same-id writes by arrival, while the
-        // devices resolve them by LWW metadata. If pull kept a stronger local
-        // version, its source reopens that upload cursor and this pass makes
-        // the account converge before the round returns.
         let stats = if republish {
             pushed.merge(pulled).merge(self.push(source).await?)
         } else {
@@ -131,15 +87,6 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         Ok(stats)
     }
 
-    // -- lock and sleep helpers ---------------------------------------------
-    //
-    // A poisoned mutex means some other task panicked while holding it. The
-    // data behind it is a session and a duration; neither can be left in a
-    // torn state by a panic, and refusing to sync from then on would be a worse
-    // outcome than continuing.
-
-    /// Sleep for a scaled retry delay. Zero-length sleeps are skipped entirely
-    /// so a test does not pay a scheduler round trip per retry.
     pub(super) async fn wait(&self, delay: Duration) {
         let scaled = delay.mul_f64(self.delay_scale);
         if !scaled.is_zero() {
@@ -147,6 +94,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
         }
     }
 
+    // Panics cannot tear these values; poison must not disable sync permanently.
     pub(super) fn lock_session(&self) -> std::sync::MutexGuard<'_, Session> {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
     }
