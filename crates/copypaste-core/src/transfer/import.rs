@@ -57,6 +57,9 @@ pub fn import(
     let mut result = ImportData {
         inserted: 0,
         skipped: 0,
+        skipped_duplicate: 0,
+        skipped_empty: 0,
+        skipped_too_large: 0,
     };
     let mut pin: Vec<String> = Vec::new();
 
@@ -85,13 +88,21 @@ pub fn import(
             }
             Ok(Ingested::Duplicate(existing)) => {
                 result.skipped += 1;
+                result.skipped_duplicate += 1;
                 if item.pinned {
                     pin.push(existing.id);
                 }
             }
             // Empty and over-size are the two entries worth tolerating: neither
             // can be stored and neither is a reason to lose the other 9 999.
-            Err(IngestError::Empty | IngestError::TooLarge) => result.skipped += 1,
+            Err(IngestError::Empty) => {
+                result.skipped += 1;
+                result.skipped_empty += 1;
+            }
+            Err(IngestError::TooLarge) => {
+                result.skipped += 1;
+                result.skipped_too_large += 1;
+            }
             Err(IngestError::Crypto(e)) => return Err(ImportError::Crypto(e)),
             Err(IngestError::Storage(e)) => return Err(ImportError::Storage(e)),
         }
@@ -109,6 +120,9 @@ pub fn import(
     info!(
         inserted = result.inserted,
         skipped = result.skipped,
+        skipped_duplicate = result.skipped_duplicate,
+        skipped_empty = result.skipped_empty,
+        skipped_too_large = result.skipped_too_large,
         "imported history"
     );
     Ok(result)
@@ -145,6 +159,9 @@ mod tests {
         let result = import_into(&target, exported.items).unwrap();
         assert_eq!(result.inserted, 2);
         assert_eq!(result.skipped, 0);
+        assert_eq!(result.skipped_duplicate, 0);
+        assert_eq!(result.skipped_empty, 0);
+        assert_eq!(result.skipped_too_large, 0);
         assert_eq!(target.contents(), ["first", "second"]);
     }
 
@@ -224,18 +241,54 @@ mod tests {
     /// An entry that cannot be stored at all is counted, not fatal: losing the
     /// rest of the file over one blank line is data loss (CLAUDE.md rule 4).
     #[test]
-    fn an_unstorable_entry_is_skipped_and_the_rest_still_lands() {
+    fn a_mixed_batch_reports_every_skip_reason_and_the_rest_still_lands() {
         let mut f = fixture();
         f.settings.max_item_bytes = 16;
+        import_into(&f, vec![item("already here")]).unwrap();
         let result = import_into(
             &f,
-            vec![item("   "), item(&"x".repeat(17)), item("keeps going")],
+            vec![
+                item("already here"),
+                item("   "),
+                item(&"x".repeat(17)),
+                item("keeps going"),
+            ],
         )
         .unwrap();
 
         assert_eq!(result.inserted, 1);
+        assert_eq!(result.skipped, 3);
+        assert_eq!(result.skipped_duplicate, 1);
+        assert_eq!(result.skipped_empty, 1);
+        assert_eq!(result.skipped_too_large, 1);
+        assert_eq!(f.contents(), ["already here", "keeps going"]);
+    }
+
+    #[test]
+    fn an_all_empty_batch_is_counted_as_empty() {
+        let f = fixture();
+        let result = import_into(&f, vec![item(""), item(" \n\t")]).unwrap();
+
+        assert_eq!(result.inserted, 0);
         assert_eq!(result.skipped, 2);
-        assert_eq!(f.contents(), ["keeps going"]);
+        assert_eq!(result.skipped_duplicate, 0);
+        assert_eq!(result.skipped_empty, 2);
+        assert_eq!(result.skipped_too_large, 0);
+        assert_eq!(f.store.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn an_all_over_limit_batch_is_counted_as_too_large() {
+        let mut f = fixture();
+        f.settings.max_item_bytes = 3;
+        let result = import_into(&f, vec![item("four"), item("five!")]).unwrap();
+
+        assert_eq!(result.inserted, 0);
+        assert_eq!(result.skipped, 2);
+        assert_eq!(result.skipped_duplicate, 0);
+        assert_eq!(result.skipped_empty, 0);
+        assert_eq!(result.skipped_too_large, 2);
+        assert_eq!(f.store.count().unwrap(), 0);
     }
 
     /// Importing the same file twice is one history, not two — the dedup window
@@ -250,6 +303,9 @@ mod tests {
         let again = import_into(&f, batch).unwrap();
         assert_eq!(again.inserted, 0);
         assert_eq!(again.skipped, 2);
+        assert_eq!(again.skipped_duplicate, 2);
+        assert_eq!(again.skipped_empty, 0);
+        assert_eq!(again.skipped_too_large, 0);
         assert_eq!(f.store.count().unwrap(), 2);
     }
 

@@ -503,4 +503,44 @@ mod tests {
         assert!(!status.legacy_history_present);
         assert_eq!(status.counters, DiagnosticCounters::default());
     }
+
+    /// The reason fields were added within protocol v1. A client that speaks
+    /// the same protocol must continue to accept a reply from a daemon built
+    /// before they existed, while retaining the old aggregate for an honest
+    /// "reason unavailable" report.
+    #[test]
+    fn an_import_reply_without_reason_fields_keeps_its_total() {
+        let older = r#"{"id":1,"ok":true,"data":{"inserted":7,"skipped":2}}"#;
+        let response: Response = serde_json::from_str(older).unwrap();
+        let Some(ResponseData::Import(imported)) = response.data else {
+            panic!("the older import reply decoded as the wrong payload")
+        };
+
+        assert_eq!(imported.inserted, 7);
+        assert_eq!(imported.skipped, 2);
+        assert_eq!(imported.skipped_duplicate, 0);
+        assert_eq!(imported.skipped_empty, 0);
+        assert_eq!(imported.skipped_too_large, 0);
+    }
+
+    #[test]
+    fn an_import_reply_serialises_every_skip_reason() {
+        let response = Response::ok(
+            1,
+            ResponseData::Import(ImportData {
+                inserted: 4,
+                skipped: 6,
+                skipped_duplicate: 1,
+                skipped_empty: 2,
+                skipped_too_large: 3,
+            }),
+        );
+        let json = serde_json::to_value(response).unwrap();
+
+        assert_eq!(json["data"]["inserted"], 4);
+        assert_eq!(json["data"]["skipped"], 6);
+        assert_eq!(json["data"]["skipped_duplicate"], 1);
+        assert_eq!(json["data"]["skipped_empty"], 2);
+        assert_eq!(json["data"]["skipped_too_large"], 3);
+    }
 }
