@@ -137,6 +137,12 @@ pub fn apply_remote_version(
     here: &str,
     incoming: &RemoteVersion<'_>,
 ) -> Result<bool, MergeError> {
+    // Binary payload storage and paste-back are not implemented yet. Refusing
+    // the version keeps a string stand-in for an image or file out of both FTS
+    // and every sync transport.
+    if !copypaste_ipc::content_type::is_text(incoming.content_type) {
+        return Ok(false);
+    }
     let local = store.version(incoming.item_id).map_err(|e| {
         warn!(error = ?e, "could not read the local version of an incoming item");
         MergeError::Store
@@ -276,6 +282,18 @@ mod tests {
         );
         // ...and the same version arriving a second time is absorbed.
         assert!(!f.apply(&version("a", "shared text", 1_000)));
+    }
+
+    #[test]
+    fn a_non_text_remote_version_is_refused_before_storage() {
+        let f = fixture();
+        let applied = f.apply(&RemoteVersion {
+            content_type: "image/png",
+            ..version("image", "encoded image stand-in", 1_000)
+        });
+
+        assert!(!applied);
+        assert!(f.store.version("image").unwrap().is_none());
     }
 
     /// The same pair of versions must be decided identically whether the hash
