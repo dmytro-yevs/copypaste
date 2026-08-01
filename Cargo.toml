@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/copypaste-ipc",
+    "crates/copypaste-macos-keychain",
     "crates/copypaste-core",
     "crates/copypaste-p2p",
     "crates/copypaste-cloud",
