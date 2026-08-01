@@ -1,9 +1,9 @@
-//! Crypto: one device secret, one derivation path, one AEAD path.
+//! Crypto: one device secret, one derivation path, maintained AEAD constructions.
 //!
 //! A 32-byte device secret in the OS keystore, HKDF-SHA256 into a db key and an
 //! item key ([`keys`]); item content sealed with XChaCha20-Poly1305 whose AAD
-//! binds the item's logical id, so a ciphertext lifted into another row fails
-//! authentication instead of decrypting.
+//! binds the item's logical id. Binary content uses RustCrypto STREAM over the
+//! same primitive so ordering and the final block are authenticated too.
 //!
 //! No `key_version` dispatch, no trial decryption, no rotation or repair sweep:
 //! v2 does not read v0.4.x data (`CLAUDE.md` rule 3). A version field that only
@@ -17,8 +17,8 @@
 //!   oracle (I-15).
 //! * **AAD binds item identity.** `item_id` is the cross-device logical id, not
 //!   a row primary key (I-6 / §3.3).
-//! * **Fresh OS-CSPRNG nonce per message.** `OsRng`, never a counter, never
-//!   reused (I-11).
+//! * **Fresh OS-CSPRNG nonce per envelope.** STREAM derives each segment nonce
+//!   from its random prefix, position and final-block flag (I-11).
 //! * **Zeroize on drop** for every value holding key material (I-12).
 //! * **Constant-time comparison** of secrets via `subtle` (I-13).
 //! * **No panics on caller-supplied data.** Every failure is a typed `Result`
@@ -31,9 +31,13 @@
 mod aead;
 mod keys;
 mod keystore;
+mod stream;
 
 pub use aead::{decrypt, encrypt, NONCE_LEN, TAG_LEN};
 pub use keys::{ItemKey, Keyring, KEY_LEN};
+pub(crate) use stream::{
+    decryptor as stream_decryptor, encryptor as stream_encryptor, STREAM_NONCE_LEN,
+};
 
 /// Every failure this module can produce.
 ///
