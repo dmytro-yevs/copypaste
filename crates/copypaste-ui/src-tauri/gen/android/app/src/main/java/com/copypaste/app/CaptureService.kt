@@ -93,6 +93,8 @@ class CaptureService : Service() {
             context.stopService(Intent(context, CaptureService::class.java))
         }
 
+        fun isArmed(context: Context): Boolean = state(context).enabled
+
         private fun clearState(context: Context) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         }

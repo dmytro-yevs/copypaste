@@ -124,10 +124,13 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         capture_running: false,
         clipboard_backend: super::BACKEND_NAME.to_string(),
         legacy_history_present: legacy_history_present(&inner.data_dir),
-        // All zero, and honestly so: this build has no capture loop to refuse
-        // or miss anything, and no startup purge. A count it cannot collect is
-        // reported as none rather than left out.
-        counters: copypaste_ipc::DiagnosticCounters::default(),
+        // Android has no daemon poller, but it does run the same startup FTS
+        // purge as the daemon. Surface that one counter rather than claiming
+        // the purge never happened.
+        counters: copypaste_ipc::DiagnosticCounters {
+            index_purged: inner.index_purged,
+            ..Default::default()
+        },
     })
 }
 

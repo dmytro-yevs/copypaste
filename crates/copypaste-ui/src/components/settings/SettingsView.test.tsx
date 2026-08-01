@@ -91,6 +91,13 @@ describe("the settings navigation", () => {
     expect(list.className).toContain("w-full");
     expect(screen.queryByText("Personal")).toBeNull();
   });
+
+  it("does not offer service or storage controls Android cannot honour", () => {
+    setUserAgent("Mozilla/5.0 (Linux; Android 15)");
+    withClient(<SettingsView />);
+    expect(screen.queryByRole("tab", { name: "Service" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Storage" })).toBeNull();
+  });
 });
 
 describe("appearance", () => {

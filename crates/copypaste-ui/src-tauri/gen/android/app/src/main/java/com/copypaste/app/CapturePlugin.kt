@@ -47,6 +47,11 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         val body = args.optString("lostBody", "")
 
         if (!ensureNotificationPermission()) {
+            // A grant can be revoked in Settings after a successful arm. Do
+            // not leave the persisted foreground-service intent claiming it
+            // can restart without the notification that makes it visible.
+            ShizukuClipboard.disarm()
+            CaptureService.stop(activity)
             invoke.resolve(
                 JSObject()
                     .put("probe", probeObject())
@@ -156,6 +161,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         .put("installed", isShizukuInstalled())
         .put("running", ShizukuClipboard.isRunning())
         .put("permission", ShizukuClipboard.hasPermission())
+        .put("enabled", CaptureService.isArmed(activity))
         .put("toastSuppressed", ShizukuClipboard.isToastSuppressed(activity))
         .put("rearmRequested", takeRearmRequest())
 
