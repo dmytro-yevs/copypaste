@@ -2,11 +2,19 @@ use copypaste_ipc::{ConfigData, ExportItem, ImportData};
 use tracing::{info, warn};
 
 use crate::storage::{Store, StoreError};
-use crate::{ingest_into, CryptoError, Detector, IngestError, Ingested, Keyring};
+use crate::{
+    ingest::ingest_into_with_sensitivity_floor, now_ms, CryptoError, Detector, IngestError,
+    Ingested, Keyring,
+};
 
 /// Ceiling on one import batch. The IPC frame cap bounds the bytes; this bounds
 /// the work, so a single request cannot hold the database mutex for minutes.
 pub const MAX_IMPORT_ITEMS: usize = 10_000;
+
+/// Imported timestamps beyond this are untrusted metadata, not a future event.
+/// Keeping one would make a version that P2P and cloud correctly refuse become
+/// permanently local-only.
+const MAX_IMPORT_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// Import failures.
 ///
@@ -56,13 +64,17 @@ pub fn import(
         // `ingest_into` recomputes sensitivity from the plaintext and takes the
         // item's own `created_at`, so a restored history keeps its order and a
         // file imported twice collapses rather than doubling.
-        match ingest_into(
+        let created_at = item
+            .created_at
+            .min(now_ms().saturating_add(MAX_IMPORT_FUTURE_SKEW_MS));
+        match ingest_into_with_sensitivity_floor(
             store,
             detector,
             keyring,
             &item.content,
             &item.content_type,
-            item.created_at,
+            created_at,
+            item.is_sensitive,
             settings,
         ) {
             Ok(Ingested::Stored(stored)) => {
@@ -156,17 +168,28 @@ mod tests {
         );
     }
 
-    /// The flag is a floor and not a ceiling in the other direction too: an item
-    /// the file calls sensitive but the detector clears is stored as ordinary,
-    /// which is what keeps a re-import of an `include_sensitive` export usable.
+    /// An exported sensitive classification remains binding even if the current
+    /// detector no longer recognises the text.
     #[test]
-    fn the_files_flag_never_stands_in_for_the_detector() {
+    fn an_exported_sensitive_item_never_reaches_fts() {
         let f = fixture();
         let mut claimed = item("just a note");
         claimed.is_sensitive = true;
         import_into(&f, vec![claimed]).unwrap();
 
-        assert!(!f.store.list(10, 0).unwrap().remove(0).is_sensitive);
+        assert!(f.store.list(10, 0).unwrap().remove(0).is_sensitive);
+        assert!(f.store.search("note", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_far_future_import_stamp_is_clamped_before_sync_can_refuse_it() {
+        let f = fixture();
+        let mut future = item("ordinary note");
+        future.created_at = now_ms().saturating_add(MAX_IMPORT_FUTURE_SKEW_MS * 2);
+        import_into(&f, vec![future]).unwrap();
+
+        let created_at = f.store.list(10, 0).unwrap().remove(0).created_at;
+        assert!(created_at <= now_ms().saturating_add(MAX_IMPORT_FUTURE_SKEW_MS));
     }
 
     #[test]
