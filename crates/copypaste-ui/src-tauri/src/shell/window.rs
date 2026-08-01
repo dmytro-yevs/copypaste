@@ -10,10 +10,10 @@
 //! Android compiles this shared module, but [`hide_window`] is a no-op there:
 //! hiding the sole activity strands the user at the launcher.
 
-use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime, WebviewWindow};
+
+#[cfg(not(target_os = "android"))]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 #[cfg(target_os = "macos")]
 use std::sync::{Mutex, OnceLock};
@@ -59,7 +59,9 @@ fn previous_application() -> &'static Mutex<Option<i32>> {
     PREVIOUS_APPLICATION.get_or_init(|| Mutex::new(None))
 }
 
+#[cfg(not(target_os = "android"))]
 const QUICK_PASTE_WIDTH: f64 = 403.0;
+#[cfg(not(target_os = "android"))]
 const QUICK_PASTE_HEIGHT: f64 = 624.0;
 
 /// Gap between the menu bar and the top of the popover, in physical pixels at
@@ -98,6 +100,7 @@ pub fn show_main_settings<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Lazily create, position and focus the compact Quick Paste surface.
+#[cfg(not(target_os = "android"))]
 pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let window = match quick_paste_window(app) {
         Some(window) => window,
@@ -123,25 +126,27 @@ pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     let _ = window.set_focus();
 }
 
+#[cfg(target_os = "android")]
+pub fn show_quick_paste<R: Runtime>(_app: &AppHandle<R>) {}
+
+#[cfg(not(target_os = "android"))]
 fn create_quick_paste<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>> {
-    let builder = WebviewWindowBuilder::new(
+    WebviewWindowBuilder::new(
         app,
         QUICK_PASTE_CONFIG.label,
         WebviewUrl::App(QUICK_PASTE_CONFIG.route.into()),
     )
     .title("Quick Paste")
     .inner_size(QUICK_PASTE_WIDTH, QUICK_PASTE_HEIGHT)
-    .resizable(false);
-    #[cfg(not(target_os = "android"))]
-    let builder = builder.always_on_top(true);
-    builder
-        .decorations(false)
-        .transparent(true)
-        .shadow(true)
-        .skip_taskbar(true)
-        .visible(QUICK_PASTE_CONFIG.visible)
-        .content_protected(QUICK_PASTE_CONFIG.content_protected)
-        .build()
+    .resizable(false)
+    .always_on_top(true)
+    .decorations(false)
+    .transparent(true)
+    .shadow(true)
+    .skip_taskbar(true)
+    .visible(QUICK_PASTE_CONFIG.visible)
+    .content_protected(QUICK_PASTE_CONFIG.content_protected)
+    .build()
 }
 
 /// Hide whichever app surface issued the command.
