@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use security_framework::base::Error as SecurityFrameworkError;
+use security_framework::passwords::{generic_password, PasswordOptions};
 use zeroize::Zeroizing;
 
 use super::super::keys::random_secret;
@@ -26,7 +27,8 @@ const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 /// what I-10's frozen service/account pair requires, since scoping the account
 /// name to a path would rename it.
 pub(super) fn load(_data_dir: &Path) -> Result<Lookup, CryptoError> {
-    match security_framework::passwords::get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT) {
+    let options = PasswordOptions::new_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT);
+    match generic_password(options) {
         Ok(bytes) => {
             // Zeroize the Keychain-returned buffer even on the error path
             // (I-12, audit MED #4).
@@ -79,7 +81,7 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use security_framework::passwords::{
-        delete_generic_password, get_generic_password, set_generic_password,
+        delete_generic_password, generic_password, set_generic_password, PasswordOptions,
     };
 
     use super::super::{load_or_create_secret, SECRET_FILE_NAME};
@@ -132,6 +134,13 @@ mod tests {
         }
     }
 
+    fn stored_secret() -> Result<Vec<u8>, SecurityFrameworkError> {
+        generic_password(PasswordOptions::new_generic_password(
+            KEYSTORE_SERVICE,
+            KEYSTORE_ACCOUNT,
+        ))
+    }
+
     fn assert_device_only_attributes() {
         let attributes = copypaste_macos_keychain::generic_password_security_attributes(
             KEYSTORE_SERVICE,
@@ -179,8 +188,8 @@ mod tests {
             0,
             "the data directory should be untouched by a Keychain-backed secret"
         );
-        let stored = get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT)
-            .expect("the secret must be readable straight out of the Keychain");
+        let stored =
+            stored_secret().expect("the secret must be readable straight out of the Keychain");
         assert_eq!(stored.as_slice(), minted.as_slice());
         assert_device_only_attributes();
 
@@ -205,10 +214,7 @@ mod tests {
         let replacement = [7; KEY_LEN];
         store_device_secret(&replacement).expect("the legacy item must update in place");
 
-        assert_eq!(
-            get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT).unwrap(),
-            replacement
-        );
+        assert_eq!(stored_secret().unwrap(), replacement);
         assert_device_only_attributes();
 
         clear_entry();
@@ -266,7 +272,7 @@ mod tests {
             "an unusable entry must not be minted over"
         );
         assert_eq!(
-            get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT).unwrap(),
+            stored_secret().unwrap(),
             b"short".to_vec(),
             "the stored entry was overwritten"
         );
@@ -301,7 +307,7 @@ mod tests {
             "expected KeystoreUnavailable, got {err:?}"
         );
         assert!(
-            get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT).is_err(),
+            stored_secret().is_err(),
             "a secret was minted into the Keychain anyway"
         );
     }
