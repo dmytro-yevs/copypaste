@@ -225,14 +225,15 @@ pub trait ClipboardSource: Send {
 }
 
 /// macOS -> `NSPasteboard`. Everything else -> the fake.
-pub fn new_source() -> Box<dyn ClipboardSource> {
+pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn ClipboardSource>> {
     #[cfg(target_os = "macos")]
     {
-        Box::new(macos::MacOsClipboard::new())
+        Ok(Box::new(macos::MacOsClipboard::new(data_dir)?))
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Box::new(FakeClipboard::new())
+        let _ = data_dir;
+        Ok(Box::new(FakeClipboard::new()))
     }
 }
 

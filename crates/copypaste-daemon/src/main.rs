@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => tracing::warn!(error = %e, "the search-index purge did not finish"),
     }
 
-    let source = clipboard::new_source();
+    let source = clipboard::new_source(&data_dir).context("initialize the clipboard backend")?;
 
     // Peer sync. The identity is minted in the database the store just
     // migrated, so it must come second; the peer file and discovery do not
