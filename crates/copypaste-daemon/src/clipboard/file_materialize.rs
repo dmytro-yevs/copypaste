@@ -507,7 +507,7 @@ mod tests {
         let data_dir = tempfile::tempdir().unwrap();
         let staging = StagingArea::with_timing(
             data_dir.path(),
-            Duration::from_millis(120),
+            Duration::from_secs(60),
             Duration::from_millis(10),
         )
         .unwrap();
@@ -522,6 +522,7 @@ mod tests {
 
         assert_eq!(receiver.join().unwrap().unwrap(), b"received later");
         assert!(path.exists());
+        set_modified(&path, SystemTime::now() - Duration::from_secs(61));
         let deadline = SystemTime::now() + Duration::from_secs(2);
         while path.exists() && SystemTime::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
