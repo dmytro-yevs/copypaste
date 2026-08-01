@@ -4,8 +4,9 @@
 # The debug leg proves the stack: the Android Keystore, SQLCipher, both rung 0
 # doorways all the way into the database. It cannot prove the *artefact*.
 # `run-as` needs a debuggable package and R8 runs only on the release build
-# type, so the two cannot be the same APK, and the shipped one had never been
-# executed.
+# type, so the two cannot be the same APK. The scheduled Android workflow uses
+# a never-published signed fixture; release.yml invokes this same harness
+# against the exact signed universal artifact before publication.
 #
 # R8 is the reason this leg exists. `CapturePlugin` is resolved by reflection
 # from a package and a class name held in Rust — `PLUGIN_PACKAGE` and

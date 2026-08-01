@@ -54,14 +54,18 @@ echo "    directory : $TAP_DIR"
 echo "    dry run   : $([[ $DRY_RUN -eq 1 ]] && echo yes || echo no)"
 echo
 
+if [[ $DRY_RUN -eq 1 ]]; then
+    if [[ -e "$TAP_DIR" ]]; then
+        echo "[dry-run] $TAP_DIR already exists; no files would be changed"
+    else
+        echo "[dry-run] would create $TAP_DIR/{Casks,Formula,README.md} and git init"
+    fi
+    exit 0
+fi
+
 if [[ -e "$TAP_DIR" ]]; then
     echo "ERROR: $TAP_DIR already exists. Remove it or choose another --tap-name." >&2
     exit 1
-fi
-
-if [[ $DRY_RUN -eq 1 ]]; then
-    echo "[dry-run] would create $TAP_DIR/{Casks,Formula,README.md} and git init"
-    exit 0
 fi
 
 mkdir -p "$TAP_DIR/Casks" "$TAP_DIR/Formula"
