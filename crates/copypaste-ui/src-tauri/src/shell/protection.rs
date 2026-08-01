@@ -23,11 +23,43 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, allow_screenshots: bool) {
 
 #[cfg(not(target_os = "android"))]
 fn set<R: Runtime>(app: &AppHandle<R>, protect: bool) {
-    let Some(window) = super::window::main_window(app) else {
-        return;
-    };
-    if let Err(error) = window.set_content_protected(protect) {
-        tracing::warn!(%error, "screen-capture protection could not be changed");
+    for window in [
+        super::window::main_window(app),
+        super::window::quick_paste_window(app),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Err(error) = window.set_content_protected(protect) {
+            tracing::warn!(%error, "screen-capture protection could not be changed");
+        }
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod tests {
+    use serde_json::Value;
+
+    #[test]
+    fn the_preference_is_applied_to_both_desktop_surfaces() {
+        let labels = [
+            super::super::window::MAIN,
+            super::super::window::QUICK_PASTE,
+        ];
+        assert_eq!(labels, ["main", "quick-paste"]);
+    }
+
+    #[test]
+    fn protection_is_enabled_before_the_first_frame_on_every_desktop_surface() {
+        let config: Value = serde_json::from_str(include_str!("../../tauri.conf.json"))
+            .expect("the Tauri configuration is valid JSON");
+        let main_is_protected = config["app"]["windows"]
+            .as_array()
+            .and_then(|windows| windows.iter().find(|window| window["label"] == "main"))
+            .and_then(|window| window["contentProtected"].as_bool());
+
+        assert_eq!(main_is_protected, Some(true));
+        assert!(super::super::window::QUICK_PASTE_CONFIG.content_protected);
     }
 }
 
