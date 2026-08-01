@@ -172,7 +172,16 @@ fn warn_unreadable(skipped: u32) {
 }
 
 fn write_export(path: &Path, encoded: &str) -> Result<(), CliError> {
-    std::fs::write(path, format!("{encoded}\n"))
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| CliError::local(format!("could not create the export: {e}")))?;
+    file.write_all(format!("{encoded}\n").as_bytes())
         .map_err(|e| CliError::local(format!("could not write the export: {e}")))
 }
 

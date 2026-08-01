@@ -100,6 +100,32 @@ pub fn ingest_into(
     created_at: i64,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    ingest_into_with_sensitivity_floor(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        false,
+        settings,
+    )
+}
+
+/// [`ingest_into`] with a persisted sensitive classification that may only
+/// make the result stricter. Backups are evidence that a prior detector found
+/// a secret; a newer detector failing to recognise it must not re-index it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn ingest_into_with_sensitivity_floor(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
     }
@@ -129,7 +155,7 @@ pub fn ingest_into(
         return Ok(Ingested::Duplicate(row));
     }
 
-    let is_sensitive = detector.is_sensitive(content);
+    let is_sensitive = sensitive_floor || detector.is_sensitive(content);
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
     // bind item identity"), and `decrypt` is handed `StoredItem::id` on the way
