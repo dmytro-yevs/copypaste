@@ -43,12 +43,38 @@ pub(super) enum Validator {
     PhoneShape,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Generated selections may use AND even when the current pin does not.
+pub(super) enum AllowlistCondition {
+    Any,
+    All,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AllowlistTarget {
+    Secret,
+    Match,
+    Line,
+}
+
+pub(super) struct AllowlistSpec {
+    pub(super) condition: AllowlistCondition,
+    pub(super) target: AllowlistTarget,
+    pub(super) regexes: &'static [&'static str],
+    pub(super) stopwords: &'static [&'static str],
+}
+
 pub(super) struct RuleSpec {
+    pub(super) upstream_ids: &'static [&'static str],
     pub(super) name: &'static str,
     pub(super) category: Category,
     pub(super) confidence: f32,
     pub(super) pattern: &'static str,
     pub(super) validator: Validator,
+    pub(super) secret_group: usize,
+    pub(super) entropy: Option<f64>,
+    pub(super) keywords: &'static [&'static str],
+    pub(super) allowlists: &'static [AllowlistSpec],
 }
 
 impl RuleSpec {

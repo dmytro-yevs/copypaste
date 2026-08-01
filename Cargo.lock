@@ -1040,6 +1040,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "copypaste-sensitive-rules"
+version = "2.0.0-alpha.1"
+dependencies = [
+ "anyhow",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "sha2",
+ "tokio",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "copypaste-ui"
 version = "2.0.0-alpha.1"
 dependencies = [

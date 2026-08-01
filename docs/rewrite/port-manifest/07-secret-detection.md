@@ -829,6 +829,25 @@ hand-authored regexes. Mapping below is against gitleaks' default
    `Audit MED #*` note in §3 records a real production miss or a real deletion
    of user data. Carry the *reasons* forward even when the regex is replaced.
 
+### 8.2 v2 vendored source
+
+The v2 rules are generated from Gitleaks `v8.30.1`, commit
+`83d9cd684c87d95d656c1458ef04895a7f1cbd8e`. The exact default config is
+vendored at `config/gitleaks/gitleaks.toml` with SHA-256
+`e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf`;
+the adjacent upstream license is MIT. `config/sensitive-rules.toml` is the
+review boundary: it lists only selected upstream IDs and records every regex,
+entropy, keyword or allowlist override needed by this manifest.
+
+Normal builds and tests never download. The explicit maintenance path is
+`cargo run -p copypaste-sensitive-rules -- update`, then `generate`, then
+`check`. The in-process engine applies selected upstream keywords, entropy,
+stopwords, secret/match/line regex allowlists and `gitleaks:allow`. Repository
+path and commit allowlists have no clipboard equivalent and are rejected or
+omitted according to the reviewed decision in the selection file. The global
+repository allowlist is not applied because it suppresses binding synthetic
+true-positive fixtures; relevant per-rule content allowlists remain enabled.
+
 ---
 
 ## 9. Acceptance tests to re-create
