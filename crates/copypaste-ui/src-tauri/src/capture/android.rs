@@ -18,8 +18,8 @@ use tauri::{Manager, Wry};
 use crate::backend::{BackendError, Result};
 
 use super::model::{
-    CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome, ShizukuProbe, LOST_BODY,
-    LOST_TITLE,
+    AndroidArmResult, AndroidProbeResult, CaptureModel, CaptureSnapshot, CaptureSource, Clip,
+    ReadOutcome, LOST_BODY, LOST_TITLE,
 };
 use super::CaptureControl;
 
@@ -78,18 +78,6 @@ struct SuppressArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ArmResult {
-    probe: ShizukuProbe,
-    enabled: bool,
-    listening: bool,
-    outcome: ReadOutcome,
-    /// Whether our window had focus for the read `arm` took. Almost always
-    /// true, and the reason that read is not treated as proof.
-    focused: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct ReadResult {
     outcome: ReadOutcome,
     text: Option<String>,
@@ -109,16 +97,6 @@ struct DrainResult {
     /// recipient — still fires first; this only bounds how long the in-app
     /// state can disagree with it.
     probe: ShizukuProbe,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProbeResult {
-    probe: ShizukuProbe,
-    /// Kotlin persists the user's explicit arm across a START_STICKY process
-    /// restart. This is intent, not proof that a listener is still alive.
-    enabled: bool,
-    listening: bool,
 }
 
 impl AndroidCapture {
@@ -152,7 +130,7 @@ impl CaptureControl for AndroidCapture {
     }
 
     fn refresh(&self) -> CaptureSnapshot {
-        match self.call::<_, ProbeResult>("probe", (), MSG_BRIDGE) {
+        match self.call::<_, AndroidProbeResult>("probe", (), MSG_BRIDGE) {
             Ok(result) => self.with(|model| {
                 model.set_probe(result.probe);
                 model.set_enabled(result.enabled);
@@ -171,11 +149,11 @@ impl CaptureControl for AndroidCapture {
             lost_title: LOST_TITLE,
             lost_body: LOST_BODY,
         };
-        let result: ArmResult = self.call("arm", args, MSG_ARM)?;
+        let result: AndroidArmResult = self.call("arm", args, MSG_ARM)?;
         Ok(self.with(|model| {
-            model.set_enabled(result.enabled);
-            model.set_probe(result.probe);
-            model.record_armed(result.listening);
+            model.set_enabled(result.status.enabled);
+            model.set_probe(result.status.probe);
+            model.record_armed(result.status.listening);
             model.record_read(result.outcome, result.focused, copypaste_core::now_ms());
             model.snapshot()
         }))
@@ -240,7 +218,7 @@ impl CaptureControl for AndroidCapture {
             model.authorise_toast(suppressed, acknowledged, copypaste_core::now_ms())
         })
         .map_err(BackendError::Invalid)?;
-        let result: ProbeResult =
+        let result: AndroidProbeResult =
             self.call("setToastSuppressed", SuppressArgs { suppressed }, MSG_TOAST)?;
         Ok(self.with(|model| {
             // The probe is re-read rather than assumed: the write goes through
