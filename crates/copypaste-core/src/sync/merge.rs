@@ -8,7 +8,7 @@
 
 use copypaste_p2p::protocol::ItemSummary;
 use copypaste_p2p::sync::{merge_decision, MergeDecision};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use super::{MSG_ENCRYPT, MSG_STORE};
 use crate::sensitive::Detector;
@@ -96,34 +96,6 @@ impl MergeError {
     }
 }
 
-/// A pin outranks another device's delete.
-///
-/// `Store::delete_all` — the local "clear history" gesture — deliberately spares
-/// pinned rows, with `delete_all_leaves_pinned_items_intact` pinning that
-/// behaviour. Without this check the two paths disagree: clearing history on one
-/// device tombstones its unpinned rows, those tombstones travel, and every
-/// *pinned* item on every paired device is destroyed by them. Rule 4 puts data
-/// loss above everything, and a pin is the most explicit "keep this" a user can
-/// give.
-///
-/// The cost, stated rather than hidden: the two devices then disagree about the
-/// item — live and pinned here, gone there. That divergence is stable rather
-/// than oscillating (the refusal never produces a *newer* version to push back)
-/// and it is resolvable by an ordinary gesture: unpin, and the next round takes
-/// the delete. A deleted item that cannot be brought back is not resolvable by
-/// anything.
-///
-/// This is not the manifest's rule, and the difference is deliberate.
-/// Manifest 05 §3.6 treats `pinned` as an ordinary LWW field that travels on the
-/// wire, so a remote delete arriving with a later stamp legitimately carried the
-/// writer's pin state with it. v2 does not sync pin state at all — it is local,
-/// and `Store::upsert` keeps it that way — so a remote delete cannot have known
-/// about this pin, and honouring it would be acting on information the sender
-/// never had.
-fn refuses_delete(local: &StoredItem, incoming: &RemoteVersion<'_>) -> bool {
-    incoming.deleted && local.pinned && !local.deleted
-}
-
 /// Merge one remote version into the local history. `Ok(false)` means the local
 /// copy won — which is what makes replaying a session or a page a no-op.
 ///
@@ -136,6 +108,39 @@ pub fn apply_remote_version(
     detector: &Detector,
     here: &str,
     incoming: &RemoteVersion<'_>,
+) -> Result<bool, MergeError> {
+    apply_remote_version_with_pin_state(store, keyring, detector, here, incoming, None)
+}
+
+/// P2P's version of [`apply_remote_version`]. Pin state is authenticated by
+/// the Noise record that carried the item, so a winning P2P version replaces it
+/// wholesale; cloud calls the public function above and keeps it local.
+pub fn apply_remote_p2p_version(
+    store: &Store,
+    keyring: &Keyring,
+    detector: &Detector,
+    here: &str,
+    incoming: &RemoteVersion<'_>,
+    pinned: bool,
+    pin_order: Option<f64>,
+) -> Result<bool, MergeError> {
+    apply_remote_version_with_pin_state(
+        store,
+        keyring,
+        detector,
+        here,
+        incoming,
+        Some((pinned, pin_order)),
+    )
+}
+
+fn apply_remote_version_with_pin_state(
+    store: &Store,
+    keyring: &Keyring,
+    detector: &Detector,
+    here: &str,
+    incoming: &RemoteVersion<'_>,
+    pin_state: Option<(bool, Option<f64>)>,
 ) -> Result<bool, MergeError> {
     let local = store.version(incoming.item_id).map_err(|e| {
         warn!(error = ?e, "could not read the local version of an incoming item");
@@ -166,6 +171,9 @@ pub fn apply_remote_version(
         created_at: incoming.created_at,
         deleted: incoming.deleted,
         content_hash: content_hash.to_string(),
+        origin_device_id: incoming.origin_device_id.to_string(),
+        pinned: pin_state.is_some_and(|state| state.0),
+        pin_order: pin_state.and_then(|state| state.1),
     };
 
     if let Some(local) = &local {
@@ -174,6 +182,9 @@ pub fn apply_remote_version(
             created_at: local.created_at,
             deleted: local.deleted,
             content_hash: local.content_hash.clone(),
+            origin_device_id: origin_or(&local.origin_device_id, here).to_string(),
+            pinned: local.pinned,
+            pin_order: local.pin_order,
         };
         if merge_decision(
             &mine,
@@ -183,13 +194,6 @@ pub fn apply_remote_version(
         ) == MergeDecision::KeepLocal
         {
             debug!(id = %incoming.item_id, "local version wins; not applying");
-            return Ok(false);
-        }
-        if refuses_delete(local, incoming) {
-            info!(
-                id = %incoming.item_id,
-                "not deleting a pinned item on another device's say-so; unpin it to allow that"
-            );
             return Ok(false);
         }
     }
@@ -215,6 +219,14 @@ pub fn apply_remote_version(
         Some((nonce, ciphertext)) => (Some(nonce.as_slice()), Some(ciphertext.as_slice())),
         None => (None, None),
     };
+    // The P2P wire always supplies both fields. Cloud deliberately does not
+    // carry pin state, so its `None` preserves the receiver's local choice.
+    let (pinned, pin_order) = match pin_state {
+        Some(pin_state) => pin_state,
+        None => local
+            .as_ref()
+            .map_or((false, None), |item| (item.pinned, item.pin_order)),
+    };
 
     let stored = store
         .upsert(&IncomingItem {
@@ -227,6 +239,8 @@ pub fn apply_remote_version(
             deleted: incoming.deleted,
             is_sensitive,
             origin_device_id: incoming.origin_device_id,
+            pinned,
+            pin_order,
             search_text: if is_sensitive || incoming.deleted {
                 None
             } else {
@@ -257,6 +271,24 @@ mod tests {
                 &self.detector,
                 &self.here,
                 incoming,
+            )
+            .expect("merge")
+        }
+
+        fn apply_p2p(
+            &self,
+            incoming: &RemoteVersion<'_>,
+            pinned: bool,
+            pin_order: Option<f64>,
+        ) -> bool {
+            apply_remote_p2p_version(
+                &self.store,
+                &self.keyring,
+                &self.detector,
+                &self.here,
+                incoming,
+                pinned,
+                pin_order,
             )
             .expect("merge")
         }
@@ -415,46 +447,42 @@ mod tests {
         assert!(f.store.get("never-seen").unwrap().is_none());
     }
 
-    /// The sync-path mirror of `delete_all_leaves_pinned_items_intact`: one
-    /// device running `clear` must not destroy another device's pinned items.
+    /// P2P carries unpin state with the delete, so a later remote version
+    /// replaces a local pin rather than leaving two devices permanently apart.
     #[test]
-    fn a_remote_delete_does_not_destroy_a_pinned_item() {
+    fn a_p2p_delete_replaces_a_pinned_item() {
         let f = fixture();
         f.apply(&version("keeper", "worth keeping", 1_000));
         assert!(f.store.set_pinned("keeper", true).unwrap());
+        let stamp = f.store.version("keeper").unwrap().unwrap().created_at + 1;
 
-        let applied = f.apply(&RemoteVersion {
-            content: "",
-            deleted: true,
-            // Later than the version it deletes, so the ordering alone would
-            // take it: only the pin stops this.
-            ..version("keeper", "", 9_000)
-        });
+        let applied = f.apply_p2p(
+            &RemoteVersion {
+                content: "",
+                deleted: true,
+                ..version("keeper", "", stamp)
+            },
+            false,
+            None,
+        );
 
-        assert!(!applied, "a remote delete beat an explicit local keep");
-        let row = f.store.get("keeper").unwrap().expect("still live");
-        assert!(row.pinned, "the pin was cleared by a refused delete");
-
-        // Unpinning is what allows it, and the delete is still there to be
-        // taken on the next round rather than being lost.
-        assert!(f.store.set_pinned("keeper", false).unwrap());
-        assert!(f.apply(&RemoteVersion {
-            content: "",
-            deleted: true,
-            ..version("keeper", "", 9_000)
-        }));
+        assert!(applied, "the newer P2P delete was not applied");
         assert!(f.store.get("keeper").unwrap().is_none());
+        let row = f.store.version("keeper").unwrap().unwrap();
+        assert!(!row.pinned);
+        assert_eq!(row.pin_order, None);
     }
 
-    /// The refusal is about *deletes*: an ordinary newer version still lands,
-    /// and the pin survives it (`Store::upsert` keeps pin state local).
+    /// Cloud omits pin state deliberately, so the shared merge preserves the
+    /// receiver's local pin while still accepting a newer content version.
     #[test]
-    fn a_pin_does_not_block_an_ordinary_update() {
+    fn a_cloud_update_keeps_its_local_pin() {
         let f = fixture();
         f.apply(&version("keeper", "first", 1_000));
         f.store.set_pinned("keeper", true).unwrap();
+        let stamp = f.store.version("keeper").unwrap().unwrap().created_at + 1;
 
-        assert!(f.apply(&version("keeper", "second", 9_000)));
+        assert!(f.apply(&version("keeper", "second", stamp)));
         assert!(f.store.get("keeper").unwrap().unwrap().pinned);
     }
 

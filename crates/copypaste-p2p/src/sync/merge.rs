@@ -39,13 +39,9 @@
 //!   by dedup), so a delete of an unmodified item ties its own live version on
 //!   keys 1 and 2, and without key 3 the winner would be whichever device id
 //!   sorts higher. That resurrects deletes (INV-N2, `CopyPaste-ojhe`).
-//! * **One comparator on both sides of the session.** An [`ItemSummary`] does
-//!   not carry `origin_device_id`, so the *planning* half sees only keys 1-3.
-//!   If `deleted` sat below the origin, planner and applier could reach
-//!   different answers for the same pair and the two devices would never
-//!   converge. Above it, key 4 is consulted only when two versions are
-//!   identical in time, content and state — nothing to transfer, nothing to
-//!   disagree about (manifest 05 INV-C2, the bug two comparators produce).
+//! * **One comparator on both sides of the session.** [`ItemSummary`] carries
+//!   every merge key, including `origin_device_id`, so planning and applying
+//!   cannot choose different winners for an origin-only conflict.
 
 use crate::protocol::ItemSummary;
 
@@ -85,17 +81,16 @@ pub fn merge_decision(
         .unwrap_or(MergeDecision::KeepLocal)
 }
 
-/// The same comparator over the keys a summary carries.
-///
-/// A summary has no `origin_device_id`, so the fourth key is neutralised by
-/// passing the same value on both sides. Not a second comparator — it is
-/// [`merge_decision`] with one input held equal, which is why the two can never
-/// drift apart (manifest 05 §7.2: if two shapes are needed, define one in terms
-/// of the other). A `KeepLocal` from tying all three visible keys means the two
-/// versions hold the same content at the same instant in the same state, so
-/// there is nothing worth transferring whatever the origins say.
+/// The same comparator over a summary. Not a second comparator — it delegates
+/// to [`merge_decision`] with the complete metadata, which keeps planning and
+/// apply decisions identical (manifest 05 INV-C2).
 pub fn merge_decision_by_summary(local: &ItemSummary, remote: &ItemSummary) -> MergeDecision {
-    merge_decision(local, "", remote, "")
+    merge_decision(
+        local,
+        &local.origin_device_id,
+        remote,
+        &remote.origin_device_id,
+    )
 }
 
 #[cfg(test)]
@@ -174,11 +169,15 @@ mod tests {
     fn summary_comparator_agrees_with_the_full_one() {
         // The equivalence that stops the two shapes drifting apart (§7.2).
         let space = decision_space();
-        for (x, _) in &space {
-            for (y, _) in &space {
+        for (x, xo) in &space {
+            for (y, yo) in &space {
+                let mut x = x.clone();
+                x.origin_device_id = xo.clone();
+                let mut y = y.clone();
+                y.origin_device_id = yo.clone();
                 assert_eq!(
-                    merge_decision_by_summary(x, y),
-                    merge_decision(x, "same", y, "same"),
+                    merge_decision_by_summary(&x, &y),
+                    merge_decision(&x, xo, &y, yo),
                     "summary comparator diverged"
                 );
             }

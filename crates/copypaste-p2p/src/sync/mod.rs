@@ -2,8 +2,8 @@
 //!
 //! The comparator is the one piece both devices must agree on exactly, so it
 //! lives alone in [`merge`] and is tested over its whole decision space.
-//! [`plan`] sees only [`ItemSummary`](crate::protocol::ItemSummary)s, so it can
-//! evaluate three of the comparator's four keys; defining
+//! [`plan`] sees [`ItemSummary`](crate::protocol::ItemSummary)s containing every
+//! comparator key; defining
 //! [`merge_decision_by_summary`] *in terms of* [`merge_decision`] is what stops
 //! the planning half and the applying half reaching different answers
 //! (manifest 05 INV-C2).
