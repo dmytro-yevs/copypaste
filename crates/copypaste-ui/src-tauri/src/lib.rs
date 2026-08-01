@@ -103,12 +103,10 @@ pub fn run() {
             #[cfg(not(target_os = "android"))]
             app.manage(capture::desktop::DesktopCapture::default());
 
-            // A menu-bar app, not a windowed one: no Dock icon, no app menu,
-            // and the popover does not steal the active application. Without
-            // this the tray icon and a Dock icon both appear, which is two
-            // entry points to one window.
+            // The main window has normal macOS app identity. Quick Paste uses
+            // Accessory only while dismissing without a prior app (AT-39).
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(tauri::ActivationPolicy::Regular);
 
             #[cfg(not(target_os = "android"))]
             {
@@ -271,18 +269,45 @@ impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn app_assembly_registers_the_window_lifecycle_policy() {
-        let production_source = include_str!("lib.rs")
+    fn production_source() -> &'static str {
+        include_str!("lib.rs")
             .split_once("\n#[cfg(test)]\nmod tests")
             .expect("the test module follows production assembly")
-            .0;
-        let compact_source = production_source.split_whitespace().collect::<String>();
+            .0
+    }
+
+    #[test]
+    fn app_assembly_registers_the_window_lifecycle_policy() {
+        let compact_source = production_source().split_whitespace().collect::<String>();
         let registration = [".on_window_", "event(shell::window::on_", "event)"].concat();
 
         assert!(
             compact_source.contains(&registration),
             "the app builder must register shell::window::on_event"
         );
+    }
+
+    #[test]
+    fn app_assembly_starts_with_regular_macos_identity() {
+        let production_source = production_source();
+
+        assert!(production_source
+            .contains("app.set_activation_policy(tauri::ActivationPolicy::Regular);"));
+        assert!(!production_source.contains("ActivationPolicy::Accessory"));
+    }
+
+    #[test]
+    fn macos_main_window_preserves_defaults_at_binding_minimum() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.macos.conf.json"))
+                .expect("the macOS Tauri config is valid JSON");
+        let main = &config["app"]["windows"][0];
+
+        assert_eq!(main["label"], "main");
+        assert_eq!(main["width"], 1100);
+        assert_eq!(main["height"], 760);
+        assert_eq!(main["minWidth"], 720);
+        assert_eq!(main["minHeight"], 460);
+        assert_eq!(main["skipTaskbar"], false);
     }
 }
