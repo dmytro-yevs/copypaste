@@ -1,7 +1,7 @@
 //! Where the device secret lives, per platform.
 //!
 //! Three backends — `macos.rs`, `android.rs`, `file.rs` — selected by the
-//! target alone, behind one entry point, [`load_or_create_secret`].
+//! target alone, behind the load/create policy in this module.
 //!
 //! # The rule every backend obeys
 //!
@@ -14,7 +14,8 @@
 //!
 //! The mint *decision* is taken here rather than in each backend, so there is
 //! one copy of it instead of three — and so the F-11 guard in
-//! [`load_or_create_secret`] cannot be forgotten by a backend added later.
+//! [`finish_load_or_create_secret`] cannot be forgotten by a backend added
+//! later.
 
 use std::path::Path;
 
@@ -70,10 +71,18 @@ mod backend;
 #[allow(dead_code)]
 mod android;
 
-/// Read the device secret for the history in `data_dir`, minting one only if
-/// there is unambiguously none and nothing it could orphan.
-pub(super) fn load_or_create_secret(data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
-    match backend::load(data_dir)? {
+/// Read the backend without making a mint decision.
+pub(super) fn lookup_secret(data_dir: &Path) -> Result<Lookup, CryptoError> {
+    backend::load(data_dir)
+}
+
+/// Finish a successful lookup, minting only if it was unambiguously absent and
+/// nothing exists that a new secret could orphan.
+pub(super) fn finish_load_or_create_secret(
+    data_dir: &Path,
+    lookup: Lookup,
+) -> Result<DeviceSecret, CryptoError> {
+    match lookup {
         Lookup::Found(secret) => Ok(secret),
         // Security review F-11. `--data-dir` relocates the database, and the
         // file backend's secret travels with it; a keystore-backed secret does
@@ -87,6 +96,14 @@ pub(super) fn load_or_create_secret(data_dir: &Path) -> Result<DeviceSecret, Cry
         )),
         Lookup::Absent => backend::create(data_dir),
     }
+}
+
+/// Read the device secret for the history in `data_dir`, minting one only if
+/// there is unambiguously none and nothing it could orphan.
+#[cfg(any(not(target_os = "macos"), test))]
+pub(super) fn load_or_create_secret(data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
+    let lookup = lookup_secret(data_dir)?;
+    finish_load_or_create_secret(data_dir, lookup)
 }
 
 /// Whether `data_dir` already holds a v2 history database.
