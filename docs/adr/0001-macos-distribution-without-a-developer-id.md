@@ -11,6 +11,12 @@ a self-signed certificate generated on the user's own machine**, is distributed
 through **our own Homebrew tap** rather than `homebrew/cask`, and **requires no
 TCC permission of any kind**.
 
+This Homebrew Cask path is the project's only macOS distribution model. Code,
+CI, and release tooling must not require an Apple Developer Team ID, Developer
+ID, notarisation credentials, or Mac App Store distribution. Replacing this
+model requires a new explicit owner decision; it is not an implementation
+choice.
+
 The install-time re-signing was added on 2026-07-30 and is described in "The
 third path", below. It changes nothing a user sees today, because the app asks
 for no permission. It exists so that auto-paste — the one feature that would

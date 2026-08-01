@@ -670,8 +670,8 @@ macOS Keychain generic-password items, all under one service
 | `com.copypaste.daemon` | `cloud-sync-key` | 32-byte passphrase-derived sync key |
 | `com.copypaste.daemon` | `supabase-password` | Supabase GoTrue account password (UTF-8) |
 
-Write attributes (all secret writes go through one helper,
-`keychain/secure_write.rs:39-80`, **CopyPaste-nkro**):
+The v1 implementation used these write attributes
+(`keychain/secure_write.rs:39-80`, **CopyPaste-nkro**):
 
 * `kSecAttrAccessControl` = `SecAccessControl` with
   `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` — the only protection class
@@ -679,6 +679,13 @@ Write attributes (all secret writes go through one helper,
 * `kSecAttrSynchronizable` = `false` (defence-in-depth duplicate).
 * On `errSecDuplicateItem`, fall back to `SecItemUpdate` with the same
   access-control attribute (upgrades legacy items in place).
+
+These attributes are reference-only in v2. ADR-0001 makes a self-signed
+Homebrew Cask the only macOS distribution model, and ADR-0009 records that
+`SecAccessControl` failed with `errSecMissingEntitlement` without Apple-managed
+provisioning. v2 therefore uses a traditional login-Keychain generic password;
+the frozen service/account identifiers and fail-closed read behaviour remain
+binding.
 
 File-store fallback (`daemon/src/keychain/file_store.rs`):
 
