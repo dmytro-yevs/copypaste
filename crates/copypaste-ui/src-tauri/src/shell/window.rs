@@ -161,8 +161,12 @@ pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) {
     if cfg!(target_os = "android") {
         return;
     }
-    let _ = window.hide();
-    restore_previous_application();
+    // Both a root blur and the native focus event can request this path. The
+    // first one hides the popup; the second sees it already hidden and must
+    // not reactivate the prior application a second time (V-12).
+    if window.is_visible().unwrap_or(true) && window.hide().is_ok() {
+        restore_previous_application();
+    }
 }
 
 /// Hide a popup while moving into CopyPaste's main window. Restoring the
@@ -182,12 +186,24 @@ pub fn hide_quick_paste<R: Runtime>(app: &AppHandle<R>) {
 
 /// A hide produces a trailing blur on macOS. It must not trigger a second
 /// focus hand-off after the popup is already gone.
-const fn should_hide_on_focus_lost(visible: bool) -> bool {
-    visible
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusLossAction {
+    Ignore,
+    HideQuickPasteAndRestorePrior,
 }
 
-fn should_hide_on_blur(label: &str, visible: bool) -> bool {
-    label == QUICK_PASTE && should_hide_on_focus_lost(visible)
+const fn focus_loss_action(label: &str, visible: bool) -> FocusLossAction {
+    if label == QUICK_PASTE && visible {
+        FocusLossAction::HideQuickPasteAndRestorePrior
+    } else {
+        FocusLossAction::Ignore
+    }
+}
+
+fn hide_after_focus_loss<R: Runtime>(window: &tauri::Window<R>) {
+    if window.is_visible().unwrap_or(false) && window.hide().is_ok() {
+        restore_previous_application();
+    }
 }
 
 /// What the hotkey and every tray entry point do.
@@ -312,11 +328,10 @@ pub fn on_event<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEven
             }
         }
         tauri::WindowEvent::Focused(false) => {
-            // A hide can produce a trailing blur. The visibility guard avoids
-            // a second hide/focus hand-off racing the first one.
-            if should_hide_on_blur(window.label(), window.is_visible().unwrap_or(false)) {
-                let _ = window.hide();
-                restore_previous_application();
+            if focus_loss_action(window.label(), window.is_visible().unwrap_or(false))
+                == FocusLossAction::HideQuickPasteAndRestorePrior
+            {
+                hide_after_focus_loss(window);
             }
         }
         _ => {}
@@ -410,23 +425,41 @@ mod tests {
     }
 
     #[test]
-    fn hide_on_blur_is_idempotent_after_the_window_is_hidden() {
-        assert!(should_hide_on_focus_lost(true));
-        assert!(!should_hide_on_focus_lost(false));
-    }
+    fn blur_event_sequence_hides_only_popup_and_restores_once() {
+        let actions = [
+            focus_loss_action(QUICK_PASTE, true),
+            // macOS delivers a trailing Focused(false) after `hide`.
+            focus_loss_action(QUICK_PASTE, false),
+            focus_loss_action(MAIN, true),
+        ];
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn a_prior_application_is_handed_off_only_once() {
-        *previous_application().lock().unwrap() = Some(42);
-        assert_eq!(take_previous_application(), Some(42));
-        assert_eq!(take_previous_application(), None);
-    }
+        assert_eq!(
+            actions,
+            [
+                FocusLossAction::HideQuickPasteAndRestorePrior,
+                FocusLossAction::Ignore,
+                FocusLossAction::Ignore,
+            ]
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .filter(|action| **action == FocusLossAction::HideQuickPasteAndRestorePrior)
+                .count(),
+            1
+        );
 
-    #[test]
-    fn blur_closes_only_the_quick_paste_surface() {
-        assert!(should_hide_on_blur(QUICK_PASTE, true));
-        assert!(!should_hide_on_blur(MAIN, true));
+        #[cfg(target_os = "macos")]
+        {
+            *previous_application().lock().unwrap() = Some(42);
+            let restored = actions
+                .iter()
+                .filter(|action| **action == FocusLossAction::HideQuickPasteAndRestorePrior)
+                .filter_map(|_| take_previous_application())
+                .collect::<Vec<_>>();
+            assert_eq!(restored, [42]);
+            assert_eq!(take_previous_application(), None);
+        }
     }
 
     #[test]

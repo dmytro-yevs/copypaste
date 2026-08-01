@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
+import { IpcFailure } from "@/lib/errors";
 import { item, page, withUser } from "@/test/harness";
 
 const copyItem = vi.fn();
@@ -10,6 +11,7 @@ const hideWindow = vi.fn();
 const listItems = vi.fn();
 const setAllowScreenshots = vi.fn();
 const showMainWindow = vi.fn();
+const restartService = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -21,6 +23,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     listItems: (...args: unknown[]) => listItems(...args),
     setAllowScreenshots: (...args: unknown[]) => setAllowScreenshots(...args),
     showMainWindow: () => showMainWindow(),
+    restartService: () => restartService(),
   };
 });
 
@@ -31,6 +34,7 @@ beforeEach(() => {
   listItems.mockReset().mockResolvedValue(page([item()]));
   setAllowScreenshots.mockReset().mockResolvedValue(undefined);
   showMainWindow.mockReset().mockResolvedValue(undefined);
+  restartService.mockReset().mockResolvedValue({ state: "running", version: "2.0.0", matches_app: true, ours: true });
 });
 
 describe("Quick Paste", () => {
@@ -94,5 +98,69 @@ describe("Quick Paste", () => {
     fireEvent.keyDown(screen.getByRole("main"), { key: "Enter" });
 
     await waitFor(() => expect(copyItem).toHaveBeenCalledWith("last"));
+  });
+
+  it("keeps the Cmd quick-paste hint and action out of a search", async () => {
+    const { user } = withUser(<QuickPasteApp />);
+
+    await screen.findByRole("listitem");
+    expect(screen.getByText(/⌘1–9 quick paste/)).not.toBeNull();
+    await user.type(screen.getByRole("textbox", { name: "Search clipboard history" }), "entry");
+    expect(screen.queryByText(/⌘1–9 quick paste/)).toBeNull();
+    fireEvent.keyDown(screen.getByRole("main"), { key: "1", metaKey: true });
+    expect(copyItem).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByRole("textbox", { name: "Search clipboard history" }));
+    fireEvent.keyDown(screen.getByRole("main"), { key: "1", metaKey: true });
+    await waitFor(() => expect(copyItem).toHaveBeenCalledWith("row-1"));
+  });
+
+  it("names the query in the no-match state", async () => {
+    const { user } = withUser(<QuickPasteApp />);
+
+    await screen.findByRole("listitem");
+    await user.type(screen.getByRole("textbox", { name: "Search clipboard history" }), "missing");
+
+    expect(await screen.findByText("No matches for “missing”")).not.toBeNull();
+  });
+
+  it("offers Restart only when the clipboard service is offline", async () => {
+    listItems.mockRejectedValue(new IpcFailure("offline"));
+    const { user } = withUser(<QuickPasteApp />);
+
+    expect(await screen.findByText("Clipboard service offline")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Restart" }));
+    await waitFor(() => expect(restartService).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows startup without a misleading recovery action", async () => {
+    listItems.mockRejectedValue(new IpcFailure("not_ready"));
+    withUser(<QuickPasteApp />);
+
+    expect(await screen.findByText("Starting up…")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /restart|try again/i })).toBeNull();
+  });
+
+  it("offers retry for an unexpected history failure", async () => {
+    listItems.mockRejectedValueOnce(new Error("unexpected")).mockResolvedValueOnce(page([item()]));
+    const { user } = withUser(<QuickPasteApp />);
+
+    expect(await screen.findByText("Something went wrong")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("listitem");
+    expect(listItems).toHaveBeenCalledTimes(2);
+  });
+
+  it("closes only when focus leaves the popup root and debounces the blur", async () => {
+    withUser(<QuickPasteApp />);
+    const root = screen.getByRole("main");
+    const settings = screen.getByRole("button", { name: "Settings" });
+
+    fireEvent.blur(root, { relatedTarget: settings });
+    expect(hideWindow).not.toHaveBeenCalled();
+
+    fireEvent.blur(root, { relatedTarget: document.body });
+    fireEvent.blur(root, { relatedTarget: document.body });
+    await waitFor(() => expect(hideWindow).toHaveBeenCalledTimes(1));
   });
 });

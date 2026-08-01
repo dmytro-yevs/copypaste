@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { applyAppearance } from "@/lib/theme";
@@ -7,10 +7,12 @@ import {
   copyItemAsPlainText,
   hideWindow,
   listItems,
+  restartService,
   setAllowScreenshots,
   showMainWindow,
   type Item,
 } from "@/lib/ipc";
+import { classifyError } from "@/lib/errors";
 import { readPrefs } from "@/store/prefs";
 
 const LIMIT = 50;
@@ -36,9 +38,12 @@ export function QuickPasteApp() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [visible, setVisible] = useState(document.visibilityState === "visible");
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const lastKeyboardMove = useRef(0);
   const scrolling = useRef(false);
   const scrollIdleTimer = useRef<number | null>(null);
+  const hideInFlight = useRef(false);
+  const hideGuardTimer = useRef<number | null>(null);
 
   const history = useQuery({
     queryKey: ["quick-paste-history"],
@@ -85,6 +90,7 @@ export function QuickPasteApp() {
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       if (scrollIdleTimer.current !== null) window.clearTimeout(scrollIdleTimer.current);
+      if (hideGuardTimer.current !== null) window.clearTimeout(hideGuardTimer.current);
       window.removeEventListener("focus", refreshForShow);
       window.removeEventListener("blur", releaseHiddenCache);
       document.removeEventListener("visibilitychange", onVisibility);
@@ -97,9 +103,32 @@ export function QuickPasteApp() {
   }, [items, selectedId]);
 
   const dismiss = useCallback(() => {
+    if (hideInFlight.current) return;
+    hideInFlight.current = true;
     releaseHiddenCache();
     void hideWindow().catch(() => {});
+    hideGuardTimer.current = window.setTimeout(() => {
+      hideInFlight.current = false;
+      hideGuardTimer.current = null;
+    }, 100);
   }, [releaseHiddenCache]);
+
+  const dismissOnRootBlur = (event: FocusEvent<HTMLElement>) => {
+    // React bubbles blur. Moving from the field to Settings is still inside
+    // the popup; only focus leaving the root is a dismissal.
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    dismiss();
+  };
+
+  const restart = async () => {
+    setRecoveryError(null);
+    try {
+      await restartService();
+      await history.refetch();
+    } catch {
+      setRecoveryError("Couldn’t restart the clipboard service. Try again.");
+    }
+  };
 
   const copyAndDismiss = useCallback(
     async (item: Item, plainText = false) => {
@@ -141,7 +170,7 @@ export function QuickPasteApp() {
       }
       return;
     }
-    if ((event.metaKey || event.ctrlKey) && query.length === 0) {
+    if ((event.metaKey || event.ctrlKey) && query.trim().length === 0) {
       const slot = Number.parseInt(event.key, 10) - 1;
       const item = Number.isInteger(slot) && slot >= 0 && slot < 9 ? items[slot] : undefined;
       if (item) {
@@ -166,12 +195,15 @@ export function QuickPasteApp() {
   };
 
   const selected = items.find((item) => item.id === selectedId);
+  const historyError = history.error ? classifyError(history.error) : null;
+  const searching = query.trim().length > 0;
 
   return (
     <main
       aria-label="Quick Paste"
       className="flex h-full min-h-0 flex-col rounded-xl border border-border bg-background p-3 text-foreground shadow-lg"
       onKeyDown={onKeyDown}
+      onBlur={dismissOnRootBlur}
     >
       <div className="mb-2 flex items-center gap-2">
         <input
@@ -207,11 +239,34 @@ export function QuickPasteApp() {
       )}
 
       <div role="list" onScroll={noteScroll} className="min-h-0 flex-1 overflow-auto rounded-md">
-        {history.isLoading ? null : history.isError ? (
-          <p className="p-4 text-sm text-muted-foreground">Clipboard service offline</p>
+        {history.isLoading ? null : historyError === "offline" ? (
+          <div className="p-4 text-sm text-muted-foreground">
+            <p>Clipboard service offline</p>
+            <button
+              type="button"
+              className="mt-2 rounded px-2 py-1 text-xs font-medium hover:bg-accent hover:text-foreground"
+              onClick={() => void restart()}
+            >
+              Restart
+            </button>
+            {recoveryError && <p role="alert" className="mt-2 text-destructive">{recoveryError}</p>}
+          </div>
+        ) : historyError === "not_ready" ? (
+          <p className="p-4 text-sm text-muted-foreground">Starting up…</p>
+        ) : history.isError ? (
+          <div className="p-4 text-sm text-muted-foreground">
+            <p>Something went wrong</p>
+            <button
+              type="button"
+              className="mt-2 rounded px-2 py-1 text-xs font-medium hover:bg-accent hover:text-foreground"
+              onClick={() => void history.refetch()}
+            >
+              Try again
+            </button>
+          </div>
         ) : items.length === 0 ? (
           <p className="p-4 text-sm text-muted-foreground">
-            {query ? "No matches" : "Nothing copied yet"}
+            {searching ? `No matches for “${query}”` : "Nothing copied yet"}
           </p>
         ) : (
           items.map((item) => (
@@ -236,14 +291,16 @@ export function QuickPasteApp() {
       <p aria-live="polite" className="mt-2 text-center text-xs text-muted-foreground">
         {history.isLoading
           ? "Loading…"
-          : query
+          : searching
             ? `${items.length} of ${history.data?.items.length ?? 0}`
             : (history.data?.total ?? 0) > items.length
               ? `${items.length} of ${history.data?.total}`
               : `${items.length} items`}
       </p>
       <p className="mt-1 text-center text-xs text-muted-foreground">
-        ↑↓ navigate · ⌥⏎ plain text · ⏎ copy · Esc close
+        ↑↓ navigate
+        {!searching && " · ⌘1–9 quick paste"}
+        {" · ⌥⏎ plain text · ⏎ copy · Esc close"}
       </p>
     </main>
   );
