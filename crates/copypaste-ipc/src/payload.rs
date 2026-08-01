@@ -57,8 +57,7 @@ pub struct ExportItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportData {
     pub items: Vec<ExportItem>,
-    /// Items whose `content_type` is not text. v2 captures text only, but a
-    /// peer or the cloud can deliver something else.
+    /// Items whose `content_type` is not text.
     pub skipped_non_text: u32,
     /// Items the detector flagged, withheld because `include_sensitive` was
     /// false.

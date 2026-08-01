@@ -167,7 +167,7 @@ pub fn ingest_into_with_capture_context(
     }
     // Refusing a capture is data loss, so the cap has to be a *user's* number
     // rather than a compiled-in one — and the refusal is reported, not silent.
-    if content.len() as u64 > settings.max_item_bytes {
+    if content.len() as u64 > settings.capture_limit_bytes(content_type) {
         return Err(IngestError::TooLarge);
     }
 
@@ -264,7 +264,7 @@ pub fn ingest_binary_into_with_capture_context(
     if copypaste_ipc::content_type::is_text(content_type) {
         return Err(IngestError::Empty);
     }
-    if bytes.len() as u64 > settings.max_item_bytes {
+    if bytes.len() as u64 > settings.capture_limit_bytes(content_type) {
         return Err(IngestError::TooLarge);
     }
 
@@ -376,14 +376,77 @@ mod tests {
     /// Over the user's cap is a *reported* refusal: a silent drop is a lost
     /// capture the user cannot tell from a broken daemon.
     #[test]
-    fn an_item_over_the_configured_cap_is_refused() {
+    fn text_uses_the_text_cap_and_accepts_its_boundary() {
         let mut f = fixture();
-        f.settings.max_item_bytes = 16;
+        f.settings.max_text_size_bytes = 16;
+        f.settings.max_image_size_bytes = 32;
+        f.settings.max_file_size_bytes = 48;
         assert!(matches!(
             f.at(&"x".repeat(17), T0),
             Err(IngestError::TooLarge)
         ));
         assert!(f.at(&"x".repeat(16), T0).is_ok());
+    }
+
+    #[test]
+    fn image_and_file_payloads_use_their_own_caps() {
+        let mut f = fixture();
+        f.settings.max_text_size_bytes = 4;
+        f.settings.max_image_size_bytes = 8;
+        f.settings.max_file_size_bytes = 12;
+
+        assert!(ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &[1; 8],
+            copypaste_ipc::content_type::IMAGE_PNG,
+            T0,
+            false,
+            None,
+            None,
+            &f.settings,
+        )
+        .is_ok());
+        assert!(matches!(
+            ingest_binary_into_with_capture_context(
+                &f.store,
+                &f.keyring,
+                &[2; 9],
+                copypaste_ipc::content_type::IMAGE_TIFF,
+                T0 + 1,
+                false,
+                None,
+                None,
+                &f.settings,
+            ),
+            Err(IngestError::TooLarge)
+        ));
+        assert!(ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &[3; 12],
+            copypaste_ipc::content_type::FILE,
+            T0 + 2,
+            false,
+            None,
+            None,
+            &f.settings,
+        )
+        .is_ok());
+        assert!(matches!(
+            ingest_binary_into_with_capture_context(
+                &f.store,
+                &f.keyring,
+                &[4; 13],
+                copypaste_ipc::content_type::FILE,
+                T0 + 3,
+                false,
+                None,
+                None,
+                &f.settings,
+            ),
+            Err(IngestError::TooLarge)
+        ));
     }
 
     #[test]

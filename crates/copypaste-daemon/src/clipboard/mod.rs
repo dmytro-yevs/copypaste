@@ -42,17 +42,14 @@
 //!   before any representation is read.
 //! - **§3.9** a short-lived frontmost-app cache, private-mode and exclusion
 //!   gates; known password-manager origins are persisted as sensitive.
-//! - **I-11** text capture is the only implemented payload path. Image and
-//!   file changes are acknowledged without being materialised until encrypted
-//!   binary storage and native paste-back land together.
+//! - **I-11** one representation is selected in text, image, file order.
 //! - **I-18** `NSData.length` checked before the bytes are copied out.
 //! - **I-39 / §6.5** rejections are counted and readable, not just logged.
 //! - **§3.12** the invariant UTI strings are built once, not once per tick.
 //! - **I-9** no clipboard content, and no paths, in logs or in errors.
 //!
-//! Rich-text, image and file capture remain deferred. The shared content-type
-//! vocabulary nevertheless lets imported and remote rows retain their declared
-//! type without routing a path or base64 string through text ingest.
+//! The shared content-type vocabulary keeps captured, imported, and remote rows
+//! on the same dispatch without routing a path or base64 string through text ingest.
 
 mod change;
 mod fake;

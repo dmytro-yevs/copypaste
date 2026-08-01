@@ -243,7 +243,7 @@ mod tests {
     #[test]
     fn a_mixed_batch_reports_every_skip_reason_and_the_rest_still_lands() {
         let mut f = fixture();
-        f.settings.max_item_bytes = 16;
+        f.settings.max_text_size_bytes = 16;
         import_into(&f, vec![item("already here")]).unwrap();
         let result = import_into(
             &f,

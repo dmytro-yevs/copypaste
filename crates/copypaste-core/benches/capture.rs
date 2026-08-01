@@ -22,9 +22,8 @@ mod support;
 use support::{clipping, detector, fill, keyring, row, T0};
 
 /// Sizes, the history each is measured against, and how many samples are
-/// affordable. 4 MiB is `ConfigData::max_item_bytes`; a store of 10 000 of
-/// those does not exist, so the cap case is measured against a short history
-/// and labelled as such.
+/// affordable. A store of 10 000 four-MiB items does not exist, so the cap case
+/// is measured against a short history and labelled as such.
 const CASES: [(&str, usize, usize, usize); 3] = [
     ("256B", 256, 10_000, 100),
     ("64KiB", 64 * 1024, 10_000, 50),

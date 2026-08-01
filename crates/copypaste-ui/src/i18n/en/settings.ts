@@ -184,10 +184,32 @@ export const settings = {
       description:
         "Copying the same thing twice inside this window keeps one entry and moves it back to the top. Off keeps every copy as its own entry, so copying one thing repeatedly fills the history with it.",
     },
-    maxItem: {
-      title: "Ignore copies larger than",
+    maxText: {
+      title: "Ignore text larger than",
       description:
-        "Anything bigger is not captured at all, and you are not told at the time — the Diagnostics tab counts them. For scale: a page of text is a few kilobytes, and a megabyte is a long document.",
+        "Text above this size is not captured. The Diagnostics tab counts each refusal. Minimum: 64 KB; default: 10 MB.",
+    },
+    maxImage: {
+      title: "Ignore images larger than",
+      description:
+        "Encoded image data above this size is not captured. The Diagnostics tab counts each refusal. Minimum: 1 MB; default: 64 MB.",
+    },
+    maxFile: {
+      title: "Ignore files larger than",
+      description:
+        "Files above this size are not captured. The hard maximum and default are 100 MB; files above 8 MB remain local and are not synced.",
+    },
+    maxDecodedImage: {
+      title: "Decoded image memory limit",
+      description:
+        "Compressed images can expand sharply in memory. Images whose decoded bitmap exceeds this live safety budget are refused. Default: 50 MB.",
+    },
+    validation: {
+      poll: "Choose an interval from 100 ms through 5000 ms.",
+      text: "Choose a text limit of at least 64 KB.",
+      image: "Choose an image limit of at least 1 MB.",
+      file: "Choose a file limit from 1 MB through 100 MB.",
+      decodedImage: "Choose a decoded image budget of at least 1 MB.",
     },
 
     sensitive: {
