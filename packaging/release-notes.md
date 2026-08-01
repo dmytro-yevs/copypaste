@@ -24,10 +24,10 @@ See [ADR-0001](https://github.com/dmytro-yevs/copypaste/blob/main/docs/adr/0001-
 for the reasoning and for what it costs: the app deliberately requires no
 Accessibility or Input Monitoring permission.
 
-**Android.** Android will warn that this app comes from an unknown developer. If
-the filename ends in `-unstable-key`, Android will also refuse to install it
-over an earlier CopyPaste — uninstall the old version first, which deletes its
-clipboard history. See
+**Android.** Android will warn that this app comes from an unknown developer.
+Every published APK is signed with the durable release key; the release fails
+closed if that key is unavailable. The signed universal APK is installed and
+smoke-tested on an emulator before publication. See
 [ADR-0006](https://github.com/dmytro-yevs/copypaste/blob/main/docs/adr/0006-android-release-signing.md).
 
 macOS builds are Apple Silicon only. Verify what you downloaded against the
@@ -36,6 +36,7 @@ macOS builds are Apple Silicon only. Verify what you downloaded against the
 ## Not verified on real hardware
 
 This project is developed on Linux. The macOS clipboard backend, the Keychain
-device-secret store, the install-time signing path, the Android build and the
-app itself have been compiled but never observed running on a Mac or on a
-phone. Treat this as an alpha in the literal sense.
+device-secret store and the install-time signing path have been compiled but
+never observed running on a user's Mac or phone. On a publishable tag, the
+signed universal Android APK is installed and smoke-tested on an emulator before
+publication. Treat this as an alpha in the literal sense.
