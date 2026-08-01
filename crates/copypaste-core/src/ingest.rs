@@ -174,7 +174,7 @@ pub fn ingest_into_with_capture_context(
     // Classify before dedup. A password-manager capture can be identical to a
     // row first copied from an ordinary app; dedup must promote that row rather
     // than returning it with its old, searchable classification.
-    let is_sensitive = sensitive_floor || detector.is_sensitive(content);
+    let is_sensitive = sensitive_floor || detector.may_auto_wipe(content);
     let hash = crate::storage::compute_content_hash(content.as_bytes());
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
@@ -434,11 +434,59 @@ mod tests {
     }
 
     #[test]
+    fn inert_findings_remain_detected_searchable_and_unclassified() {
+        let f = fixture();
+        let text = "Send to alice@example.com from 192.168.1.100:8080";
+        let findings = f.detector.scan_all(text);
+        assert!(findings.iter().any(|finding| finding.rule == "email"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "ip_with_port"));
+        assert!(findings
+            .iter()
+            .all(|finding| finding.severity == crate::sensitive::Severity::Flag));
+
+        let stored = f.at(text, T0).unwrap().into_item();
+        assert!(!stored.is_sensitive);
+        assert_eq!(fts_row_count(&f.store, &stored.id), 1);
+        assert_eq!(f.store.search("alice", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn embedded_high_match_classifies_the_whole_item_but_keeps_low_findings() {
+        let f = fixture();
+        let text = "mail alice@example.com token AKIAIOSFODNN7EXAMPLE";
+        let findings = f.detector.scan_all(text);
+        assert_eq!(findings.len(), 2);
+        assert!(findings.iter().any(|finding| finding.rule == "email"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "aws_access_key"));
+
+        let stored = f.at(text, T0).unwrap().into_item();
+        assert!(stored.is_sensitive);
+        assert_eq!(fts_row_count(&f.store, &stored.id), 0);
+        assert!(f.store.search("alice", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn embedded_luhn_valid_card_authorises_sensitive_classification() {
+        let f = fixture();
+        let text = "please charge 4111 1111 1111 1111 today";
+        let stored = f.at(text, T0).unwrap().into_item();
+
+        assert!(stored.is_sensitive);
+        assert_eq!(fts_row_count(&f.store, &stored.id), 0);
+        assert!(f.store.search("charge", 10).unwrap().is_empty());
+    }
+
+    #[test]
     fn a_sensitive_recopy_promotes_and_unindexes_the_existing_row() {
         let f = fixture();
         let first = f.at("ordinary reusable value", T0).unwrap().into_item();
         assert!(!first.is_sensitive);
         assert_eq!(fts_row_count(&f.store, &first.id), 1);
+        assert!(f.detector.scan("ordinary reusable value").is_none());
 
         let recopy = ingest_into_with_capture_context(
             &f.store,
