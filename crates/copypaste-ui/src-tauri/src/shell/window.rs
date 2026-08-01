@@ -153,10 +153,9 @@ fn create_quick_paste<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWi
 
 /// Hide whichever app surface issued the command.
 ///
-/// macOS's Accessory activation policy keeps the app out of the frontmost-app
-/// chain. Consequently hiding a focused CopyPaste window gives focus back to
-/// the application that was active before Quick Paste opened; we deliberately
-/// do not activate the main window on this path.
+/// A Quick Paste hide gives focus back to the application that was active
+/// before it opened; we deliberately do not activate the main window on this
+/// path.
 pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) {
     if cfg!(target_os = "android") {
         return;
@@ -164,9 +163,16 @@ pub fn hide_window<R: Runtime>(window: &WebviewWindow<R>) {
     // Both a root blur and the native focus event can request this path. The
     // first one hides the popup; the second sees it already hidden and must
     // not reactivate the prior application a second time (V-12).
-    if window.is_visible().unwrap_or(true) && window.hide().is_ok() {
-        restore_previous_application();
+    if !window.is_visible().unwrap_or(true) {
+        return;
     }
+
+    if window.label() != QUICK_PASTE {
+        let _ = window.hide();
+        return;
+    }
+
+    hide_quick_paste_window(window);
 }
 
 /// Hide a popup while moving into CopyPaste's main window. Restoring the
@@ -201,7 +207,58 @@ fn focus_loss_action(label: &str, visible: bool) -> FocusLossAction {
 }
 
 fn hide_after_focus_loss<R: Runtime>(window: &tauri::Window<R>) {
-    if window.is_visible().unwrap_or(false) && window.hide().is_ok() {
+    if let Some(popup) = quick_paste_window(window.app_handle()) {
+        if popup.is_visible().unwrap_or(false) {
+            hide_quick_paste_window(&popup);
+        }
+    }
+}
+
+/// The popup retains its WebView to avoid reparsing the bundle. Its image cache
+/// and item list must not survive a hide (AT-44), so ask the dedicated surface
+/// to release them after native visibility changes.
+fn free_quick_paste_memory<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.eval("window.__copypasteFreeMemory?.()");
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HideStep {
+    Accessory,
+    Hide,
+    Regular,
+}
+
+#[cfg(test)]
+const NO_PRIOR_APPLICATION_HIDE: [HideStep; 3] =
+    [HideStep::Accessory, HideStep::Hide, HideStep::Regular];
+
+#[cfg(target_os = "macos")]
+fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>) {
+    if has_previous_application() {
+        if window.hide().is_ok() {
+            free_quick_paste_memory(window);
+            restore_previous_application();
+        }
+        return;
+    }
+
+    // AT-39 / V-11: no prior app means CopyPaste itself was frontmost. Making
+    // it an Accessory only while the popup disappears prevents macOS from
+    // promoting the main window; Regular is restored immediately so Dock and
+    // Cmd+Tab retain their normal main-app behaviour.
+    let app = window.app_handle();
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    if window.hide().is_ok() {
+        free_quick_paste_memory(window);
+    }
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_quick_paste_window<R: Runtime>(window: &WebviewWindow<R>) {
+    if window.hide().is_ok() {
+        free_quick_paste_memory(window);
         restore_previous_application();
     }
 }
@@ -371,6 +428,13 @@ fn take_previous_application() -> Option<i32> {
 }
 
 #[cfg(target_os = "macos")]
+fn has_previous_application() -> bool {
+    previous_application()
+        .lock()
+        .is_ok_and(|previous| previous.is_some())
+}
+
+#[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 fn restore_previous_application() {
     let pid = take_previous_application();
@@ -422,6 +486,14 @@ mod tests {
     fn quick_paste_starts_hidden_and_protected() {
         assert!(!QUICK_PASTE_CONFIG.visible);
         assert!(QUICK_PASTE_CONFIG.content_protected);
+    }
+
+    #[test]
+    fn no_prior_application_hides_between_accessory_and_regular() {
+        assert_eq!(
+            NO_PRIOR_APPLICATION_HIDE,
+            [HideStep::Accessory, HideStep::Hide, HideStep::Regular]
+        );
     }
 
     #[test]
