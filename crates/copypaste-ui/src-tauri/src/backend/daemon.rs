@@ -247,6 +247,13 @@ impl Backend for DaemonBackend {
         expect_item(self.call(Method::Copy { id: id.to_string() }).await?)
     }
 
+    async fn copy_as_plain_text(&self, id: &str) -> Result<Item> {
+        expect_item(
+            self.call(Method::CopyPlainText { id: id.to_string() })
+                .await?,
+        )
+    }
+
     async fn delete(&self, id: &str) -> Result<()> {
         self.call(Method::Delete { id: id.to_string() }).await?;
         Ok(())

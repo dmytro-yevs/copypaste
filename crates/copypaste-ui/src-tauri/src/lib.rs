@@ -161,6 +161,7 @@ pub fn run() {
             commands::history::search,
             commands::history::add_item,
             commands::history::copy_item,
+            commands::history::copy_item_as_plain_text,
             commands::history::reveal_item,
             commands::history::delete_item,
             commands::history::delete_all,
