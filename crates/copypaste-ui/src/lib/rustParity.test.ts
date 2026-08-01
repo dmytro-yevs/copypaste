@@ -17,6 +17,7 @@ import { EVENT_CAPTURE_STATE, EVENT_CAPTURED } from "@/hooks/useCapture";
 import { EVENT_CHANGED, EVENT_PUSH_STATE } from "@/hooks/usePush";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import { PAGE_SIZE, SEARCH_LIMIT } from "@/lib/layout";
+import { DEFAULT_SHORTCUT } from "@/lib/accelerator";
 
 // jsdom serves `import.meta.url` over http, so the crates directory is reached
 // from the vitest root instead.
@@ -27,6 +28,7 @@ const IPC_LIMITS = "copypaste-ipc/src/limits.rs";
 const P2P_PEERS = "copypaste-p2p/src/peers/mod.rs";
 const PUSH = "copypaste-ui/src-tauri/src/service/push.rs";
 const INTAKE = "copypaste-ui/src-tauri/src/capture/intake.rs";
+const SHORTCUT = "copypaste-ui/src-tauri/src/shell/shortcut.rs";
 
 function rust(file: string): string {
   return readFileSync(path.join(CRATES, file), "utf8");
@@ -63,6 +65,10 @@ test(`CURRENT_PROTOCOL_VERSION matches PROTOCOL_VERSION in ${IPC_LIB}`, () => {
 
 test(`MAX_PAIRINGS matches ${P2P_PEERS}`, () => {
   expect(MAX_PAIRINGS).toBe(number(P2P_PEERS, "MAX_PAIRINGS"));
+});
+
+test(`DEFAULT_SHORTCUT matches ${SHORTCUT}`, () => {
+  expect(DEFAULT_SHORTCUT).toBe(value(SHORTCUT, "DEFAULT_SHORTCUT").replaceAll('"', ""));
 });
 
 describe("event names the frontend listens for", () => {
