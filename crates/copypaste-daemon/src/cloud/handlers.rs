@@ -15,12 +15,12 @@ use std::sync::Arc;
 
 use copypaste_cloud::auth::{AuthError, SupabaseAuth};
 use copypaste_cloud::crypto::derive_sync_key;
-use copypaste_cloud::sync::SyncError;
+use copypaste_cloud::sync::{CloudSource, SyncError};
 use copypaste_ipc::{ErrorCode, Response, ResponseData};
 use tracing::{info, warn};
 use zeroize::Zeroizing;
 
-use crate::cloud::{poll, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK};
+use crate::cloud::{poll, source::StoreSource, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM};
 use crate::AppState;
 
 const MSG_NOT_CONFIGURED: &str =
@@ -100,13 +100,13 @@ pub async fn sign_in(
     // history: keeping them would skip every row written before now. Signing
     // back into the *same* account keeps the download watermark, so a
     // re-sign-in is not a full re-download.
-    let switched = crate::cloud::Cloud::stored_user_id(&state.meta).as_deref() != Some(&user_id);
-    if switched {
-        if let Err(e) = state.meta.set_state_ms(KEY_WATERMARK, 0) {
+    let switched = match prepare_download_cursor(state, &user_id) {
+        Ok(switched) => switched,
+        Err(e) => {
             warn!(error = ?e, "could not reset the download cursor");
             return Response::err(id, ErrorCode::Internal, MSG_STORE);
         }
-    }
+    };
     // Always: signing in is what triggers the backlog sweep, or only future
     // captures ever reach the backend (manifest 05 §4.9, BUG C2).
     if let Err(e) = state
@@ -134,6 +134,14 @@ pub async fn sign_in(
     info!(switched_account = switched, "signed in to a sync account");
     state.cloud.wake();
     Response::ok(id, ResponseData::CloudStatus(state.cloud.status()))
+}
+
+fn prepare_download_cursor(state: &Arc<AppState>, user_id: &str) -> Result<bool, SyncError> {
+    let switched = crate::cloud::Cloud::stored_user_id(&state.meta).as_deref() != Some(user_id);
+    if switched {
+        StoreSource::new(Arc::clone(state)).set_watermark(0)?;
+    }
+    Ok(switched)
 }
 
 /// Map a GoTrue failure onto a fixed sentence and a code.
@@ -204,9 +212,50 @@ fn sync_error_code(error: &SyncError) -> ErrorCode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cloud::Cloud;
-    use crate::testutil::{test_state, test_state_with_cloud};
-    use copypaste_cloud::CloudConfig;
+    use crate::cloud::{Cloud, KEY_USER_ID, KEY_WATERMARK, KEY_WATERMARK_ITEM};
+    use crate::testutil::{reopen, test_state, test_state_with_cloud};
+    use copypaste_cloud::auth::Session;
+    use copypaste_cloud::crypto::encrypt_row;
+    use copypaste_cloud::rest::CloudItem;
+    use copypaste_cloud::sync::{
+        AuthApi, AuthFault, CloudSync, RestApi, SensitiveGuard, TransportFault,
+    };
+    use copypaste_cloud::{CloudConfig, SyncKey};
+
+    struct BoundaryRest(Vec<CloudItem>);
+
+    impl RestApi for BoundaryRest {
+        async fn fetch_since(
+            &self,
+            _token: &str,
+            since_ms: i64,
+            after_item_id: Option<&str>,
+            limit: u32,
+        ) -> Result<Vec<CloudItem>, TransportFault> {
+            Ok(self
+                .0
+                .iter()
+                .filter(|row| match after_item_id {
+                    Some(item_id) => (row.created_at, row.item_id.as_str()) > (since_ms, item_id),
+                    None => row.created_at >= since_ms,
+                })
+                .take(limit as usize)
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert(&self, _token: &str, _items: &[CloudItem]) -> Result<(), TransportFault> {
+            Ok(())
+        }
+    }
+
+    struct NoRefresh;
+
+    impl AuthApi for NoRefresh {
+        async fn refresh(&self, _refresh_token: &str) -> Result<Session, AuthFault> {
+            panic!("the unexpired test session must not refresh")
+        }
+    }
 
     /// A URL that resolves nowhere: these tests assert the paths that never
     /// reach the network, and the one that does must fail rather than hang.
@@ -215,6 +264,84 @@ mod tests {
             url: "http://127.0.0.1:1".into(),
             anon_key: "anon".into(),
         }
+    }
+
+    fn row_at_zero(key: &SyncKey) -> CloudItem {
+        let (nonce, ciphertext) = encrypt_row(b"first item", key, "a").unwrap();
+        let mut row = CloudItem {
+            item_id: "a".into(),
+            ciphertext,
+            nonce,
+            content_type: "text".into(),
+            payload_metadata: None,
+            created_at: 0,
+            deleted: false,
+            origin_device_id: "other-device".into(),
+            signature: String::new(),
+        };
+        row.sign(key);
+        row
+    }
+
+    fn pull_driver(row: CloudItem, key: SyncKey) -> CloudSync<BoundaryRest, NoRefresh> {
+        CloudSync::new(
+            BoundaryRest(vec![row]),
+            NoRefresh,
+            key,
+            config(),
+            Session {
+                access_token: "token".into(),
+                refresh_token: "refresh".into(),
+                user_id: "new-account".into(),
+                expires_at_ms: i64::MAX,
+            },
+            SensitiveGuard::new(|_| false),
+        )
+    }
+
+    #[test]
+    fn first_sign_in_clears_both_halves_of_a_persisted_cursor() {
+        let (state, dir) = test_state("alpha");
+        state
+            .meta
+            .set_state_all(&[(KEY_WATERMARK, "5000"), (KEY_WATERMARK_ITEM, "z")])
+            .unwrap();
+        drop(state);
+
+        let (state, _dir) = reopen(dir, Cloud::new(None), "alpha");
+        assert!(prepare_download_cursor(&state, "new-account").unwrap());
+        assert_eq!(state.meta.state_ms(KEY_WATERMARK).unwrap(), 0);
+        assert_eq!(state.meta.state(KEY_WATERMARK_ITEM).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn account_switch_pulls_zero_timestamp_item_after_persisted_cursor() {
+        let (state, dir) = test_state("alpha");
+        state
+            .meta
+            .set_state_all(&[
+                (KEY_USER_ID, "old-account"),
+                (KEY_WATERMARK, "5000"),
+                (KEY_WATERMARK_ITEM, "z"),
+            ])
+            .unwrap();
+        drop(state);
+
+        let (state, _dir) = reopen(dir, Cloud::new(None), "alpha");
+        let source = StoreSource::new(Arc::clone(&state));
+        assert_eq!(source.watermark().unwrap(), 5_000);
+        assert_eq!(source.watermark_item_id().unwrap().as_deref(), Some("z"));
+
+        let key = SyncKey::from_bytes([7; 32]);
+        let driver = pull_driver(row_at_zero(&key), key);
+        assert!(prepare_download_cursor(&state, "new-account").unwrap());
+        assert_eq!(source.watermark().unwrap(), 0);
+        assert_eq!(source.watermark_item_id().unwrap(), None);
+
+        let stats = driver.pull(&source).await.unwrap();
+        assert_eq!(stats.downloaded, 1);
+        assert_eq!(stats.applied, 1);
+        assert_eq!(state.store.version("a").unwrap().unwrap().created_at, 0);
     }
 
     #[tokio::test]
