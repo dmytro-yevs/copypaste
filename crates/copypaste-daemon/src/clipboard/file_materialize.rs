@@ -297,6 +297,9 @@ fn is_older_than(stat: &rustix::fs::Stat, now: SystemTime, max_age: Duration) ->
         return false;
     };
     let modified_secs = stat.st_mtime;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let modified_nanos = i64::try_from(stat.st_mtime_nsec).unwrap_or(i64::MAX);
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     let modified_nanos = stat.st_mtime_nsec;
     let cutoff_secs = i64::try_from(cutoff.as_secs()).unwrap_or(i64::MAX);
     let cutoff_nanos = i64::from(cutoff.subsec_nanos());
