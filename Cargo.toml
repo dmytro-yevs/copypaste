@@ -75,6 +75,7 @@ uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
 regex = "1.10"
 unicode-normalization = "0.1"
+iban_validate = "=5.0.1"
 directories = "5"
 # flock(2) for the socket-bind critical section (CopyPaste-ah1m). rustix rather
 # than a libc call: it is already in the tree, is maintained, and covers macOS

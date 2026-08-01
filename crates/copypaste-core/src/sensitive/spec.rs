@@ -33,6 +33,8 @@ pub(super) enum Validator {
     ValueStrength,
     /// Luhn checksum over the digit run (§5.4).
     Luhn,
+    /// Registered country structure and checksum for an IBAN (§8.1.4).
+    Iban,
     /// SSN group-structure check (§4.2 — "the correct fix is the structural
     /// validator").
     SsnStructure,
