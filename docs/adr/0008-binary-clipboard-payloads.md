@@ -1,16 +1,18 @@
-# ADR-0008 — Binary clipboard payloads are encrypted chunks
+# ADR-0008 — Binary clipboard payloads use RustCrypto STREAM
 
 **Status:** accepted · 2026-08-01
 
-Image and file clipboard values are raw bytes, never text stand-ins.  The
-store keeps one self-describing encrypted chunk envelope per item; its id is
-derived from SHA-256 of the raw bytes, and its header records the byte length,
-full digest and chunk count.  Every chunk has its own fresh XChaCha nonce and
-is authenticated against the item id and chunk index.
+Image and file clipboard values are raw bytes, never text stand-ins. The store
+keeps one content-addressed encrypted envelope per item. Format version 3 has a
+64-byte header: `CPB2`, version, total plaintext length, SHA-256 digest and the
+19-byte nonce prefix required by `StreamBE32<XChaCha20Poly1305>`.
 
-`chacha20poly1305` is already the maintained AEAD dependency.  Its stream
-adapter cannot bind the persisted content id and per-chunk index in the AAD
-format needed by this store, so this small envelope composes the existing
-one-shot AEAD rather than adding a second crypto stack.  Binary rows never
-receive FTS text, and transports carry decoded bytes under an explicit binary
-encoding rather than reinterpreting them as UTF-8.
+`EncryptorBE32` and `DecryptorBE32` authenticate position and the final-block
+flag. The item id and complete header are AAD for every segment, which also
+binds total length and digest. Segment boundaries are implicit from the fixed
+chunk size and authenticated total length, so the body is only ciphertext and
+Poly1305 tags. v2 does not retain a decoder for the obsolete manual framing.
+
+`ItemKey` exposes no reusable raw bytes: a crypto-internal constructor builds
+the STREAM objects. Binary rows never enter FTS, and transports carry decoded
+bytes under an explicit binary encoding rather than treating them as UTF-8.

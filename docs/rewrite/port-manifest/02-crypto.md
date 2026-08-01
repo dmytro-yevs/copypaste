@@ -1022,61 +1022,29 @@ of these. Deleting them cannot break a single existing install.
 
 ### 6.2 Custom chunked framing duplicates `aead::stream` (STREAM)
 
-**Claim verified.** `crypto/chunks.rs` hand-rolls the STREAM construction:
-per-chunk AEAD, a sequence counter, and a last-block flag, all bound as
-associated data. `chacha20poly1305` 0.10.1 is already in the dependency tree and
-ships `aead::stream` behind the `stream` feature (currently not enabled).
-`StreamBE32<XChaCha20Poly1305>` gives:
+**Claim verified and applied in v2.** `chacha20poly1305` 0.10.1 is already the
+maintained AEAD dependency, with its `stream` feature enabled. The binary
+envelope uses `EncryptorBE32` / `DecryptorBE32` over `XChaCha20Poly1305`:
 
-* a 19-byte nonce **prefix** (24 − 4 counter − 1 last-block byte), generated once
-  per stream instead of a 24-byte random nonce per chunk;
-* a 32-bit BE position counter and a last-block flag folded into the nonce, which
-  is exactly what `chunk_index` / `is_final` are doing in the AAD today;
-* ordering, truncation, reordering, and duplication resistance **by construction**,
-  removing the need for the four hand-written structural checks in
-  `decrypt_chunks` (`chunks.rs:163-187`);
-* per-chunk AAD still available via `Payload`, so `file_id` binding survives.
+* one fresh 19-byte OS-CSPRNG nonce prefix per stream;
+* a 32-bit BE position counter and final-block flag folded into each segment
+  nonce, providing ordering, truncation, reordering and duplication resistance;
+* the logical item id plus the complete envelope header as AAD for every
+  segment, binding the total plaintext length and SHA-256 digest too.
 
-Two properties the current format has that STREAM does **not** give for free, and
-which must be re-established deliberately if the format changes:
+The 64-byte format-version-3 header is:
 
-1. **`total_chunks` binding.** Today every chunk's AAD carries `total_chunks`, so
-   any change to the stream length invalidates all surviving chunks. STREAM binds
-   only position + last-block. The last-block flag is the property that actually
-   matters (truncation resistance); `total_chunks` is redundant with it. If you
-   want belt-and-braces, put the count in the *container header* and pass it as
-   first-chunk AAD.
-2. **`file_id` binding.** Must be passed explicitly as per-chunk AAD; it is not
-   part of STREAM.
+```
+CPB2 || version || total_len || digest || stream_nonce
+```
 
-**Migration implication — this is the expensive one.** The chunk format is a
-**persisted on-disk format**, not a transient wire format. Every image, file, and
-thumbnail in every existing user's `clipboard_items.content` is a
-`CHUNK_FORMAT_V1` container. Switching to STREAM changes:
+Fixed plaintext chunk size plus authenticated total length makes per-segment
+lengths and a stored chunk count redundant, so the body is only the concatenated
+STREAM ciphertext segments and their Poly1305 tags.
 
-* the AAD (no more 41-byte `CHUNK_FORMAT_V1\0` prefix),
-* the nonce derivation (deterministic prefix+counter instead of 24 random bytes
-  per chunk),
-* the per-chunk record layout (no per-chunk nonce field).
-
-Recommended path:
-
-1. Keep a **read-only** `CHUNK_FORMAT_V1` decoder in the rewrite, permanently.
-   It is ~60 lines (`chunks.rs:50-59` + `image/blob.rs:48-109`) and it is the
-   only thing standing between existing users and unreadable images.
-2. Introduce `CHUNK_FORMAT_V2` = STREAM, distinguished by the **existing version
-   byte** at offset 0 of every wire record — the format was designed for exactly
-   this and the reader already rejects unknown versions (`blob.rs:84-89`).
-3. Re-encode lazily on read, or via a background sweep modelled on
-   `migration_v4` (page by `rowid`, one row per autocommit transaction,
-   `INTER_BATCH_SLEEP` between pages, resumable via a predicate rather than a
-   progress cursor — see I-26).
-4. Do **not** bump `key_version` for this; it tracks the HKDF generation, not the
-   framing. Add a separate discriminator or rely on the wire version byte.
-
-Net assessment: worth doing, but it is a data migration, not a refactor. If the
-rewrite is time-boxed, porting `CHUNK_FORMAT_V1` verbatim is the safe choice and
-the STREAM switch can be a later, independently-shippable change.
+`CHUNK_FORMAT_V1` remains factual reference material, not a v2 migration
+obligation: the rewrite deliberately does not read v0.4.x data. The obsolete
+manual encoder and decoder are absent rather than retained beside STREAM.
 
 ### 6.3 OPAQUE / `opaque-ke` is heavier than the pairing problem requires
 
