@@ -192,7 +192,7 @@ enum FocusLossAction {
     HideQuickPasteAndRestorePrior,
 }
 
-const fn focus_loss_action(label: &str, visible: bool) -> FocusLossAction {
+fn focus_loss_action(label: &str, visible: bool) -> FocusLossAction {
     if label == QUICK_PASTE && visible {
         FocusLossAction::HideQuickPasteAndRestorePrior
     } else {

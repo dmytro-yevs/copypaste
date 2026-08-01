@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { applyAppearance } from "@/lib/theme";
 import {
@@ -11,11 +10,19 @@ import {
   setAllowScreenshots,
   showMainWindow,
   type Item,
+  type ItemPage,
 } from "@/lib/ipc";
 import { classifyError } from "@/lib/errors";
 import { readPrefs } from "@/store/prefs";
 
 const LIMIT = 50;
+type RefreshTrigger = "mount" | "focus" | "poll" | "retry";
+
+type HistoryState = {
+  data: ItemPage | null;
+  error: unknown;
+  isLoading: boolean;
+};
 
 /** What can be searched without making sensitive plaintext reachable. */
 function displayLabel(item: Item): string {
@@ -32,27 +39,37 @@ function nextIndex(current: number, direction: 1 | -1, length: number): number {
  * shown, so a warm WebView cannot show a stale clipboard list.
  */
 export function QuickPasteApp() {
-  const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [visible, setVisible] = useState(document.visibilityState === "visible");
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [copyRetry, setCopyRetry] = useState<{ item: Item; plainText: boolean } | null>(null);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryState>({ data: null, error: null, isLoading: true });
   const lastKeyboardMove = useRef(0);
   const scrolling = useRef(false);
   const scrollIdleTimer = useRef<number | null>(null);
   const hideInFlight = useRef(false);
   const hideGuardTimer = useRef<number | null>(null);
+  const requestSequence = useRef(0);
 
-  const history = useQuery({
-    queryKey: ["quick-paste-history"],
-    queryFn: () => listItems(LIMIT, null),
-    enabled: visible,
-    refetchInterval: 3000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-  });
+  const refreshHistory = useCallback((trigger: RefreshTrigger) => {
+    // INV-33: each independent refresh source owns a monotonic sequence. A
+    // delayed older daemon response must not overwrite newer popup contents.
+    void trigger;
+    const sequence = ++requestSequence.current;
+    setHistory((current) => ({ ...current, error: null, isLoading: current.data === null }));
+    void listItems(LIMIT, null).then(
+      (data) => {
+        if (sequence !== requestSequence.current) return;
+        setHistory({ data, error: null, isLoading: false });
+      },
+      (error: unknown) => {
+        if (sequence !== requestSequence.current) return;
+        setHistory((current) => ({ ...current, error, isLoading: false }));
+      },
+    );
+  }, []);
 
   const items = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -62,40 +79,47 @@ export function QuickPasteApp() {
       : all.filter((item) => displayLabel(item).toLocaleLowerCase().includes(needle));
   }, [history.data?.items, query]);
 
-  const refreshForShow = useCallback(() => {
+  const refreshForShow = useCallback((trigger: Extract<RefreshTrigger, "mount" | "focus">) => {
     const prefs = readPrefs();
     applyAppearance(prefs);
     void setAllowScreenshots(prefs.allowScreenshots).catch(() => {});
-    setVisible(true);
-    void queryClient.invalidateQueries({ queryKey: ["quick-paste-history"] });
+    refreshHistory(trigger);
     window.setTimeout(() => searchRef.current?.focus(), 50);
-  }, [queryClient]);
+  }, [refreshHistory]);
 
   const releaseHiddenCache = useCallback(() => {
-    setVisible(false);
+    // Invalidate an in-flight response before clearing state: a hidden popup
+    // must never be repopulated by a request that began while it was visible.
+    requestSequence.current += 1;
     setSelectedId(null);
     setQuery("");
     setCopyError(null);
-    queryClient.removeQueries({ queryKey: ["quick-paste-history"] });
-  }, [queryClient]);
+    setCopyRetry(null);
+    setHistory({ data: null, error: null, isLoading: true });
+  }, []);
 
   useEffect(() => {
-    refreshForShow();
+    refreshForShow("mount");
     const onVisibility = () => {
-      if (document.visibilityState === "visible") refreshForShow();
+      if (document.visibilityState === "visible") refreshForShow("focus");
       else releaseHiddenCache();
     };
-    window.addEventListener("focus", refreshForShow);
+    const onFocus = () => refreshForShow("focus");
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === "visible") refreshHistory("poll");
+    }, 3000);
+    window.addEventListener("focus", onFocus);
     window.addEventListener("blur", releaseHiddenCache);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       if (scrollIdleTimer.current !== null) window.clearTimeout(scrollIdleTimer.current);
       if (hideGuardTimer.current !== null) window.clearTimeout(hideGuardTimer.current);
-      window.removeEventListener("focus", refreshForShow);
+      window.clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
       window.removeEventListener("blur", releaseHiddenCache);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [refreshForShow, releaseHiddenCache]);
+  }, [refreshForShow, refreshHistory, releaseHiddenCache]);
 
   useEffect(() => {
     if (items.some((item) => item.id === selectedId)) return;
@@ -124,7 +148,7 @@ export function QuickPasteApp() {
     setRecoveryError(null);
     try {
       await restartService();
-      await history.refetch();
+      refreshHistory("retry");
     } catch {
       setRecoveryError("Couldn’t restart the clipboard service. Try again.");
     }
@@ -134,6 +158,7 @@ export function QuickPasteApp() {
     async (item: Item, plainText = false) => {
       try {
         setCopyError(null);
+        setCopyRetry(null);
         await (plainText ? copyItemAsPlainText(item.id) : copyItem(item.id));
         // Drop the popup cache before it is hidden. The next invocation always
         // starts from a daemon read, and the Accessory hide path restores the
@@ -142,6 +167,7 @@ export function QuickPasteApp() {
       } catch {
         // Keep the result visible rather than pretending the clipboard changed.
         setCopyError("Couldn’t copy that item. Try again.");
+        setCopyRetry({ item, plainText });
       }
     },
     [dismiss],
@@ -194,7 +220,6 @@ export function QuickPasteApp() {
     }, 120);
   };
 
-  const selected = items.find((item) => item.id === selectedId);
   const historyError = history.error ? classifyError(history.error) : null;
   const searching = query.trim().length > 0;
 
@@ -226,11 +251,11 @@ export function QuickPasteApp() {
       {copyError && (
         <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
           <span>{copyError}</span>
-          {selected && (
+          {copyRetry && (
             <button
               type="button"
               className="rounded px-2 py-1 text-xs font-medium hover:bg-destructive/10"
-              onClick={() => void copyAndDismiss(selected)}
+              onClick={() => void copyAndDismiss(copyRetry.item, copyRetry.plainText)}
             >
               Retry
             </button>
@@ -253,13 +278,13 @@ export function QuickPasteApp() {
           </div>
         ) : historyError === "not_ready" ? (
           <p className="p-4 text-sm text-muted-foreground">Starting up…</p>
-        ) : history.isError ? (
+        ) : history.error ? (
           <div className="p-4 text-sm text-muted-foreground">
             <p>Something went wrong</p>
             <button
               type="button"
               className="mt-2 rounded px-2 py-1 text-xs font-medium hover:bg-accent hover:text-foreground"
-              onClick={() => void history.refetch()}
+              onClick={() => refreshHistory("retry")}
             >
               Try again
             </button>
