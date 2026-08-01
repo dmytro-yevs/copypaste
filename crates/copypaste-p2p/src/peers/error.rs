@@ -17,12 +17,6 @@ pub enum PeerStoreError {
     #[error("the paired-devices file is damaged")]
     Corrupt,
 
-    /// Written by a different version; v2 shares no formats with v0.4.x. The
-    /// daemon should say exactly that — the old pairings are still on disk and
-    /// still readable by the old build, and v2 needs the devices paired again.
-    #[error("the paired-devices file was written by a different version of CopyPaste")]
-    Legacy,
-
     /// A peer record failed validation.
     #[error("peer record is invalid: {0}")]
     Invalid(&'static str),
@@ -52,9 +46,8 @@ mod tests {
     #[test]
     fn error_messages_contain_no_paths() {
         let errors = [
-            PeerStoreError::Io(std::io::Error::other("/home/someone/peers-v2.json")),
+            PeerStoreError::Io(std::io::Error::other("/home/someone/peers.json")),
             PeerStoreError::Corrupt,
-            PeerStoreError::Legacy,
             PeerStoreError::Invalid("pairing id is empty"),
             PeerStoreError::Revoked,
             PeerStoreError::TooManyPairings,

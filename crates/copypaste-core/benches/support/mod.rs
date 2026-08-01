@@ -60,6 +60,7 @@ pub fn row(keyring: &Keyring, text: &str, created_at: i64) -> NewItem {
         search_text: Some(text.to_string()),
         created_at,
         app_bundle_id: None,
+        app_name: None,
         payload_metadata: None,
     }
 }

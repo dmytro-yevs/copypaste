@@ -4,6 +4,18 @@ export const settings = {
   title: "Settings",
   sections: "Settings sections",
 
+  search: {
+    label: "Search settings",
+    placeholder: "Search settings",
+    clear: "Clear search",
+    results: "Settings search results",
+    opened: "Opened {{title}}.",
+    empty: {
+      title: "No settings found",
+      body: "Try a broader term, such as “clipboard”, “sync” or “privacy”.",
+    },
+  },
+
   groups: {
     personal: "Personal",
     service: "CopyPaste",
@@ -27,12 +39,13 @@ export const settings = {
       system: "System",
       dark: "Dark",
       light: "Light",
-      resolves: "Currently resolves to {{theme}}.",
-      override: "Overrides the system appearance for CopyPaste only.",
+      resolves: "Using {{theme}} now.",
+      override: "Choose a theme just for CopyPaste.",
     },
     accent: {
       title: "Accent",
-      description: "Tints selection, focus rings and primary buttons.",
+      description: "Colors buttons, selection and focus.",
+      system: "System accent",
       indigo: "Indigo",
       blue: "Blue",
       teal: "Teal",
@@ -42,46 +55,39 @@ export const settings = {
     },
     translucency: {
       title: "Translucency",
-      description:
-        "Frost the window chrome over what is behind it. Turned off automatically when the system asks for reduced transparency.",
+      description: "Controls how much of the macOS window shows through.",
     },
   },
 
   list: {
     previewLines: {
       title: "Preview lines",
-      description:
-        "How many lines of a clip each row shows. Every row reserves this much space whether it fills it or not, so the list never overlaps itself.",
+      description: "Sets the preview height for each history item.",
       value_one: "{{count}} line",
       value_other: "{{count}} lines",
     },
     groupByDevice: {
       title: "Group by device",
-      description:
-        "Keep clips from the same origin device together. The History toolbar controls the same setting.",
+      description: "Keeps items from the same device together.",
     },
     popupPreviewLines: {
       title: "Quick Paste preview lines",
-      description:
-        "How many lines each Quick Paste result may show, independently of the main list.",
+      description: "Sets the preview height in Quick Paste.",
       value_one: "{{count}} line",
       value_other: "{{count}} lines",
     },
     historyDisplayLimit: {
       title: "History display limit",
-      description:
-        "Limits only what the app renders. It does not delete stored clipboard items.",
+      description: "Only limits what is shown; it never deletes history.",
       unlimited: "Unlimited",
     },
     warnBeforeReveal: {
       title: "Warn before revealing",
-      description:
-        "Ask for confirmation before showing an item that looks like a password, key or token. Revealed items hide themselves again after 10 seconds, and whenever this window loses focus.",
+      description: "Ask before showing detected secrets. They hide after 10 seconds or when CopyPaste loses focus.",
     },
     allowScreenshots: {
       title: "Allow screenshots",
-      description:
-        "CopyPaste is hidden from screenshots, screen recordings and shared screens, and on a phone from the app switcher's preview too. Turn this on to let them through — for a demo, or a support call.",
+      description: "Lets CopyPaste appear in captures and app previews.",
       /** Shown only while the protection is off, because that is when it is a
        *  fact about the screen rather than a hypothetical. */
       warning:
@@ -102,8 +108,7 @@ export const settings = {
     saved: "Saved",
     resetSaved: "Reset to default",
     saveFailed: "The previous shortcut is still in effect.",
-    unavailable:
-      "This build can't change the shortcut yet — the background service owns it, and the app has no way to ask it to rebind. {{accelerator}} is in effect.",
+    unavailable: "Shortcut settings are unavailable. {{accelerator}} remains active.",
     refusal: {
       mediaKeys:
         "Media keys can't be used: binding one needs macOS Accessibility permission, and CopyPaste loses that permission every time it updates. Pick another key.",
@@ -115,39 +120,29 @@ export const settings = {
   sync: {
     paired: {
       title: "Paired devices",
-      description:
-        "Sync is peer-to-peer and end-to-end encrypted: devices exchange history directly, and nothing passes through a server.",
+      description: "Syncs directly between devices with end-to-end encryption.",
       none: "None",
       count: "{{n}} paired",
       manage: "Manage devices",
     },
     now: {
       title: "Sync now",
-      description:
-        "Runs a sync with every paired device. Devices also sync on their own when they see each other.",
+      description: "Syncs every paired device now.",
       action: "Sync now",
       pending: "Syncing…",
     },
     cloud: {
       title: "Cloud sync",
-      description:
-        "Not in this build. The service has no cloud-account command for the app to call, so signing in would be a form with nothing behind it.",
       badge: "Unavailable",
     },
-    unavailable:
-      "Device sync isn't available in this build — pairing runs in the background service, which this build doesn't reach.",
   },
 
   service: settingsService,
 
   transfer: {
-    unavailable:
-      "This build can't move history in or out — that runs in the background service, which this build doesn't reach.",
-
     export: {
       title: "Export history",
-      description:
-        "Writes your clips out as readable text you can keep or move elsewhere. Anything that can read what you write is able to read your history.",
+      description: "Saves readable text; anyone with the file can read it.",
       action: "Export…",
       dialogTitle: "Export your clipboard history?",
       dialogBody:
@@ -168,8 +163,7 @@ export const settings = {
 
     import: {
       title: "Import history",
-      description:
-        "Reads an export back in. Items already here are kept — an import adds, it never replaces.",
+      description: "Adds an export without replacing existing history.",
       action: "Import…",
       dialogTitle_one: "Import {{count}} item?",
       dialogTitle_other: "Import {{count}} items?",
@@ -186,15 +180,14 @@ export const settings = {
 
     backup: {
       title: "Back up history",
-      description:
-        "Writes an encrypted copy of everything, readable only by this device. A backup is never written over something that already exists, so give it a new name.",
+      description: "Saves an encrypted copy for this device without overwriting backups.",
       action: "Back up…",
       done: "Backed up — {{megabytes}} MB",
     },
 
     restore: {
       title: "Restore from a backup",
-      description: "Replaces everything on this device with a backup's contents.",
+      description: "Replaces all local history. This cannot be undone.",
       action: "Restore…",
       dialogTitle: "Replace this device's history?",
       dialogBody:
@@ -209,103 +202,91 @@ export const settings = {
   storage: {
     stored: {
       title: "Items stored",
-      description: "Held by the background service for this device.",
+      description: "Saved on this device.",
     },
     clear: {
       title: "Clear history",
-      description:
-        "Deletes every unpinned item on this device. Pinned items are kept, and paired devices keep their own copies.",
+      description: "Deletes unpinned items here; pins and other devices are kept.",
       action: "Clear history",
     },
   },
 
   diagnostics: {
     loading: "Reading the service…",
-    unavailable:
-      "This build has nothing to diagnose — it runs everything in the app, with no background service to report on.",
-    refresh: "Refresh",
+    unavailable: "Diagnostics are unavailable.",
 
     running: {
       title: "What is running",
       service: {
-        title: "Background service",
+        title: "Clipboard service",
         running: "Running",
         stopped: "Stopped",
         notInstalled: "Not installed",
         unhealthy: "Answering, but unreadable",
         version: "CopyPaste {{version}}",
         mismatch: "A different version from this app.",
-        adopted: "Started outside this app, so this app can't restart it.",
       },
       capture: {
         title: "Clipboard capture",
         running: "Running",
         stopped: "Stopped",
-        description:
-          "Whether the service is watching the clipboard. Stopped means nothing new is being saved.",
+        description: "Stopped means new copies are not saved.",
       },
       backend: {
         title: "Clipboard backend",
-        description:
-          "Which clipboard the service reads. A test backend means this build is not touching your real one.",
+        description: "Shows the clipboard source. A test source is not your real clipboard.",
+      },
+      history: {
+        title: "History access",
+        description: "Checks that saved items can be read.",
+        readable: "Readable",
+        failed: "Failed ({{code}})",
       },
       protocol: {
         title: "App and service agree",
         yes: "Yes",
         no: "No",
-        description:
-          "They have to speak the same version of the same protocol. When they don't, most things stop working at once.",
+        description: "They must match for CopyPaste to work.",
       },
       started: {
         title: "Started",
-        description:
-          "How long ago the service last started. Every count below is measured from then.",
+        description: "Counts below start from this time.",
         unknown: "Not running",
       },
     },
 
     dropped: {
       title: "What has been dropped or refused",
-      description:
-        "None of these was an error the service could show you at the time. They are counted from the moment it started and reset when it restarts.",
+      description: "Counts reset whenever the service restarts.",
       tooLarge: {
         title: "Copies refused for being too large",
-        description:
-          "Over the size limit on the Service tab, so they were never saved. Raising that limit is what changes this.",
+        description: "They exceeded the capture size limit and were not saved.",
       },
       missed: {
         title: "Copies replaced before they could be read",
-        description:
-          "Something was copied and then replaced faster than the service checks. Checking more often on the Service tab reduces it; it can never reach zero.",
+        description: "They changed before CopyPaste could read them.",
       },
       swept: {
         title: "Detected secrets deleted automatically",
-        description:
-          "Removed by the auto-delete setting on the Service tab. Deletions are permanent, and this is the only record that they happened.",
+        description: "Auto-deleted by your secret-retention setting. This cannot be undone.",
       },
       purged: {
         title: "Search entries removed at startup",
-        description:
-          "Entries for items the current rules read as a secret. The items themselves were kept; only their searchability was removed.",
-      },
-      legacy: {
-        title: "A CopyPaste 0.4 history is on this device",
-        description:
-          "This version cannot read it and has not opened or changed it. Going back to 0.4 finds it exactly as it was.",
-        present: "Present",
+        description: "The items remain, but they are no longer searchable.",
       },
     },
 
     report: {
       title: "Report",
-      description:
-        "Everything above, as one block to paste into a bug report. It is generated by the service, shown here exactly as it will be copied.",
+      description: "A support-ready summary of the current service state.",
       /** Rule 4, stated where the user decides whether to paste it: this is the
        *  promise the panel is making, so it goes beside the button. */
-      safety:
-        "It carries no clipping and nothing that names you — no folders, no account names, nothing you have copied.",
-      copy: "Copy report",
-      copied: "Report copied",
+      safety: "It never includes copied content, paths or account names.",
+      copy: "Copy diagnostics",
+      copied: "Diagnostics copied",
+      export: "Export support bundle",
+      exporting: "Exporting support bundle…",
+      exported: "Support bundle exported",
       empty: "Nothing to report yet.",
     },
 
@@ -319,36 +300,33 @@ export const settings = {
   about: {
     app: {
       title: "This app",
-      description:
-        "The build you are looking at. The background service below updates separately and can be a different version.",
+      description: "The app and service can have different versions.",
       version: "CopyPaste {{version}}",
     },
     service: {
-      title: "Background service",
+      title: "Clipboard service",
       connecting: "Connecting…",
       version: "CopyPaste {{version}}",
     },
     capture: {
       title: "Clipboard capture",
-      description:
-        "Whether the service is watching the system clipboard right now.",
+      description: "Shows whether new copies are being saved.",
       running: "Running",
       paused: "Paused",
     },
     backend: {
       title: "Clipboard backend",
-      description:
-        "Which clipboard the service is reading. A test backend means this build is not touching your real clipboard.",
+      description: "A test source is not your real clipboard.",
     },
     protocol: {
       title: "IPC protocol",
-      description: "The app and the service have to agree on this.",
+      description: "The app and service versions must match.",
       value: "v{{version}}",
       mismatch: "· app speaks v{{version}}",
     },
     items: {
       title: "Items stored",
-      description: "Everything the service is holding for this device.",
+      description: "Saved on this device.",
     },
     links: {
       title: "Links",
@@ -357,8 +335,7 @@ export const settings = {
     },
     reset: {
       title: "Reset preferences",
-      description:
-        "Puts theme, accent and list settings back to their defaults. Your clipboard history is not touched.",
+      description: "Restores appearance and list defaults. History stays intact.",
       action: "Reset preferences",
     },
   },

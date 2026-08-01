@@ -1,11 +1,5 @@
-/**
- * Capture state where the history is, not in a diagnostics screen (§5 rule 1):
- * v1 buried it, and users found out nothing had been saved by going looking for
- * something that was not there.
- *
- * The dot is decorative and the snapshot's sentence carries the state, so the
- * strip survives colour being removed (A11Y-10).
- */
+/** Abnormal capture states stay visible beside History; healthy capture is
+ * surfaced only in contextual Service and Diagnostics views. */
 import { Button } from "@/components/ui/button";
 import { useCaptureState } from "@/hooks/useCapture";
 import { useTranslation } from "@/i18n";
@@ -18,18 +12,17 @@ export function CaptureStatus() {
   const capture = useCaptureState();
   const setView = useUi((s) => s.setView);
 
-  // Nothing is rendered until something is known. A strip that guessed while
-  // the answer was in flight would be the optimistic report CopyPaste-qzhu
-  // removed, in a smaller costume.
+  // Never guess while the answer is in flight, and never show a static success
+  // strip for normal capture.
   const snapshot = capture.data;
-  if (snapshot === undefined) return null;
+  if (snapshot === undefined || toneOf(snapshot.health) === "ok") return null;
 
   const summary = snapshot.detail
     ? `${snapshot.headline} ${snapshot.detail}`
     : snapshot.headline;
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-panel px-s-3 py-s-1">
+    <div className="chrome flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider px-s-3 py-s-1">
       <div
         role="status"
         aria-label={t("capture.status.label", { summary })}

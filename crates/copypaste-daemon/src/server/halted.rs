@@ -20,14 +20,14 @@
 
 use std::sync::Arc;
 
-use copypaste_ipc::{ErrorCode, Method, Request, Response, ResponseData, MAX_FRAME_BYTES};
+use copypaste_ipc::{ErrorCode, MAX_FRAME_BYTES, Method, Request, Response, ResponseData};
 use futures_util::StreamExt;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{Semaphore, watch};
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tracing::{debug, warn};
 
-use super::listener::{send, MAX_CONCURRENT_CONNECTIONS, READ_TIMEOUT};
+use super::listener::{MAX_CONCURRENT_CONNECTIONS, READ_TIMEOUT, send};
 
 /// Accept connections and refuse each one, until told to stop.
 pub async fn serve(
@@ -115,8 +115,8 @@ async fn refuse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::messages::{Refusal, MSG_LEGACY_DATABASE};
-    use copypaste_core::StoreError;
+    use crate::server::messages::{MSG_KEY_LOCKED, Refusal};
+    use copypaste_core::CryptoError;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     /// Round-trip one request against a halted daemon on a real socket.
@@ -125,7 +125,9 @@ mod tests {
         let path = dir.path().join("daemon.sock");
         let listener = UnixListener::bind(&path).unwrap();
         let stop = watch::channel(false).0;
-        let refusal = StoreError::LegacyDatabase.refusal().unwrap();
+        let refusal = CryptoError::KeystoreUnavailable("locked")
+            .refusal()
+            .unwrap();
         let server = tokio::spawn(serve(listener, refusal, stop.clone()));
 
         let stream = tokio::net::UnixStream::connect(&path).await.unwrap();
@@ -146,8 +148,8 @@ mod tests {
         let response = ask(r#"{"id":7,"method":"list","params":{"limit":50}}"#).await;
         assert_eq!(response.id, 7);
         assert!(!response.ok);
-        assert_eq!(response.error_code, Some(ErrorCode::LegacyDatabase));
-        assert_eq!(response.error.as_deref(), Some(MSG_LEGACY_DATABASE));
+        assert_eq!(response.error_code, Some(ErrorCode::KeyLocked));
+        assert_eq!(response.error.as_deref(), Some(MSG_KEY_LOCKED));
     }
 
     /// `Status` is how a client asks what state the daemon is in, so answering
@@ -157,13 +159,13 @@ mod tests {
     async fn status_is_refused_too_rather_than_reporting_health() {
         let response = ask(r#"{"id":1,"method":"status"}"#).await;
         assert!(!response.ok);
-        assert_eq!(response.error_code, Some(ErrorCode::LegacyDatabase));
+        assert_eq!(response.error_code, Some(ErrorCode::KeyLocked));
     }
 
     #[tokio::test]
     async fn a_malformed_line_hears_the_same_condition() {
         let response = ask("not json at all").await;
-        assert_eq!(response.error_code, Some(ErrorCode::LegacyDatabase));
+        assert_eq!(response.error_code, Some(ErrorCode::KeyLocked));
     }
 
     /// The one verb that still works, and the reason the socket is safe to
@@ -176,7 +178,9 @@ mod tests {
         let stop = watch::channel(false).0;
         let server = tokio::spawn(serve(
             listener,
-            StoreError::LegacyDatabase.refusal().unwrap(),
+            CryptoError::KeystoreUnavailable("locked")
+                .refusal()
+                .unwrap(),
             stop.clone(),
         ));
 

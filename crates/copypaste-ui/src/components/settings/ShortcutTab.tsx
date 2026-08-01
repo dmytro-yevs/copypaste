@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCcw, TriangleAlert } from "lucide-react";
 
@@ -39,6 +39,7 @@ export function ShortcutTab() {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [saved, setSaved] = useState<"saved" | "reset" | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const resetTooltipId = useId();
 
   const current = useQuery({
     queryKey: SHORTCUT_KEY,
@@ -114,7 +115,7 @@ export function ShortcutTab() {
         title={t("settings.shortcut.title")}
         description={t("settings.shortcut.description")}
       >
-        <div className="flex flex-col items-end gap-s-2">
+        <div className="flex items-center gap-s-2">
           <button
             ref={buttonRef}
             type="button"
@@ -126,7 +127,7 @@ export function ShortcutTab() {
             }}
             onBlur={() => setCapturing(false)}
             className={cn(
-              "flex h-10 min-w-[160px] items-center justify-center gap-2 rounded-md border px-s-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring",
+              "flex h-[var(--tap-min)] min-w-[160px] items-center justify-center gap-2 rounded-md border px-s-3 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring",
               capturing
                 ? "border-ring bg-selected"
                 : "border-border-strong bg-background hover:bg-accent",
@@ -141,15 +142,25 @@ export function ShortcutTab() {
             )}
           </button>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={bound === fallback || save.isPending}
-            onClick={() => save.mutate(fallback)}
-          >
-            <RotateCcw aria-hidden="true" />
-            {t("settings.shortcut.reset")}
-          </Button>
+          <div className="group relative">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("settings.shortcut.reset")}
+              aria-describedby={resetTooltipId}
+              disabled={bound === fallback || save.isPending}
+              onClick={() => save.mutate(fallback)}
+            >
+              <RotateCcw aria-hidden="true" />
+            </Button>
+            <span
+              id={resetTooltipId}
+              role="tooltip"
+              className="pointer-events-none invisible absolute bottom-[calc(100%+var(--s-2))] left-1/2 z-[var(--z-popover)] -translate-x-1/2 whitespace-nowrap rounded-md border border-border-strong bg-popover px-s-2 py-s-1 text-xs text-popover-foreground opacity-0 shadow-lg transition-opacity duration-[var(--dur-fast)] group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 motion-reduce:transition-none"
+            >
+              {t("settings.shortcut.reset")}
+            </span>
+          </div>
         </div>
       </Row>
 

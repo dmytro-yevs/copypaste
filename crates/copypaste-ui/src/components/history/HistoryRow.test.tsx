@@ -9,10 +9,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { CSSProperties } from "react";
 
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
+import { absoluteTime } from "@/lib/format";
+import { imagePreviewHeight } from "@/lib/layout";
 import { item } from "@/test/harness";
 import type { Item } from "@/lib/ipc";
+
+// Thumbnail decoding has its own contract tests. Here the row tests the
+// layout contract: image rows keep the leading type icon and pass the image
+// preview height through to the body preview.
+vi.mock("@/components/history/HistoryImagePreview", () => ({
+  HistoryImagePreview: ({ style }: { style?: CSSProperties }) => (
+    <span data-testid="image-preview" aria-hidden="true" style={style} />
+  ),
+}));
 
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
 const noop = () => {};
@@ -40,17 +52,21 @@ const props = {
   onTogglePin: noop,
   onDelete: noop,
   onReveal: noop,
-  onHide: noop,
   onOpen: noop,
 };
 
 describe("a sensitive item", () => {
-  it("renders a placeholder and no content", () => {
+  it("renders a masked preview and no content", () => {
     const { container } = render(
       <HistoryRow {...props} item={item({ is_sensitive: true })} />,
     );
-    expect(container.textContent).toContain("Sensitive content hidden");
+    expect(
+      screen.getByRole("button", {
+        name: "Sensitive item, hidden — activate to reveal",
+      }),
+    ).toBeTruthy();
     expect(container.textContent).not.toContain(SECRET);
+    expect(container.querySelector("[aria-hidden='true'].flex.flex-col")).toBeTruthy();
   });
 
   it("labels the row without quoting anything about it", () => {
@@ -61,20 +77,23 @@ describe("a sensitive item", () => {
     expect(rowLabel(secret)).not.toContain(SECRET);
   });
 
-  it("offers reveal as a real button with a name", () => {
+  it("reveals directly from the masked row without copying it", () => {
     const onReveal = vi.fn();
+    const onCopy = vi.fn();
     render(
       <HistoryRow
         {...props}
         item={item({ is_sensitive: true })}
         onReveal={onReveal}
+        onCopy={onCopy}
       />,
     );
     const button = screen.getByRole("button", {
-      name: "Sensitive content hidden — activate to reveal",
+      name: "Sensitive item, hidden — activate to reveal",
     });
     button.click();
     expect(onReveal).toHaveBeenCalledTimes(1);
+    expect(onCopy).not.toHaveBeenCalled();
   });
 
   it("shows the plaintext only while it is the revealed row", () => {
@@ -105,6 +124,54 @@ describe("an ordinary item", () => {
   it("renders its content", () => {
     render(<HistoryRow {...props} item={item({ content: "visible text" })} />);
     expect(screen.getByText(/visible text/)).toBeTruthy();
+  });
+
+  it("shows the clip type as an icon, then source app and copied time below content", () => {
+    const { container } = render(
+      <HistoryRow
+        {...props}
+        item={item({
+          content_type: "image/png",
+          source_app_bundle_id: "com.google.Chrome",
+        })}
+      />,
+    );
+
+    expect(screen.getByTitle("Image")).toBeTruthy();
+    expect(screen.queryByText("Image")).toBeNull();
+    expect(screen.getByText("Google Chrome")).toBeTruthy();
+    const time = container.querySelector("button time");
+    expect(time?.textContent).toMatch(/\d+[mhdw]|now/);
+    expect(time?.className).not.toContain("md:block");
+  });
+
+  it("keeps the image type icon in the leading slot and its preview in the row body", () => {
+    render(
+      <HistoryRow
+        {...props}
+        item={item({ content_type: "image/png", source_app_bundle_id: "com.google.Chrome" })}
+      />,
+    );
+
+    const icon = document.querySelector("span[role='img'][title='Image']");
+    const body = screen.getByRole("button", { name: "Image" });
+    expect(icon?.parentElement).not.toBe(body);
+    expect(body.querySelector("[data-testid='image-preview']")).toBeTruthy();
+  });
+
+  it("allows an image preview to use 3.75× the configured text-preview height", () => {
+    const { container } = render(
+      <HistoryRow
+        {...props}
+        previewLines={4}
+        item={item({ content_type: "image/png" })}
+      />,
+    );
+
+    const preview = container.querySelector("[data-testid='image-preview']");
+    expect((preview as HTMLElement | null)?.style.maxHeight).toBe(
+      `${imagePreviewHeight(4)}px`,
+    );
   });
 
   it("clamps the preview to the configured number of lines", () => {
@@ -264,6 +331,22 @@ describe("desktop activation", () => {
     for (const button of screen.getAllByRole("button")) {
       expect(button.tabIndex).toBe(0);
     }
+  });
+
+  it("toggles copied time to the exact local time without copying the item", async () => {
+    const onCopy = vi.fn();
+    const clip = item({ created_at: new Date("2026-08-01T20:35:24Z").valueOf() });
+    const user = userEvent.setup();
+    render(<HistoryRow {...props} item={clip} active onCopy={onCopy} />);
+
+    const time = screen.getByRole("button", { name: /Activate to show exact time/ });
+    await user.click(time);
+
+    expect(time.textContent).toBe(absoluteTime(clip.created_at));
+    expect(time.getAttribute("aria-pressed")).toBe("true");
+    expect(onCopy).not.toHaveBeenCalled();
+    await user.click(time);
+    expect(time.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("keeps unselected rows out of the tab order", () => {

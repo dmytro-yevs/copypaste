@@ -749,19 +749,23 @@ mod tests {
         assert_eq!(next.excluded_app_bundle_ids, ["com.1password.1password"]);
 
         for list in [vec![String::new()], vec!["x".repeat(300)]] {
-            assert!(ConfigPatch {
-                excluded_app_bundle_ids: Some(list),
+            assert!(
+                ConfigPatch {
+                    excluded_app_bundle_ids: Some(list),
+                    ..Default::default()
+                }
+                .apply(&base)
+                .is_err()
+            );
+        }
+        assert!(
+            ConfigPatch {
+                excluded_app_bundle_ids: Some(vec!["com.a".to_string(); MAX_EXCLUSIONS + 1]),
                 ..Default::default()
             }
             .apply(&base)
-            .is_err());
-        }
-        assert!(ConfigPatch {
-            excluded_app_bundle_ids: Some(vec!["com.a".to_string(); MAX_EXCLUSIONS + 1]),
-            ..Default::default()
-        }
-        .apply(&base)
-        .is_err());
+            .is_err()
+        );
     }
 
     /// CLAUDE.md rule 4: a settings error is shown to a user, and the config
@@ -814,11 +818,13 @@ mod tests {
 
     #[test]
     fn a_restart_is_reported_only_for_the_fields_that_need_one() {
-        assert!(ConfigData::restart_required_by(&ConfigPatch {
-            max_decoded_image_mb: Some(25),
-            ..Default::default()
-        })
-        .is_empty());
+        assert!(
+            ConfigData::restart_required_by(&ConfigPatch {
+                max_decoded_image_mb: Some(25),
+                ..Default::default()
+            })
+            .is_empty()
+        );
         assert_eq!(
             ConfigData::restart_required_by(&ConfigPatch {
                 lan_visibility: Some(false),

@@ -4,8 +4,13 @@
  * generated from the same appearance serialization contract used here.
  */
 import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
+import {
+  persist,
+  createJSONStorage,
+  type StateStorage,
+} from "zustand/middleware";
 import { z } from "zod";
+import { LazyStore } from "@tauri-apps/plugin-store";
 
 import {
   APPEARANCE_SERIALIZATION,
@@ -13,19 +18,25 @@ import {
   unwrapPersistedPrefs,
   type Accent,
   type ThemePref,
+  type Translucency,
 } from "@/lib/appearancePrefs";
 import {
   DEFAULT_PREVIEW_LINES,
   MAX_PREVIEW_LINES,
   MIN_PREVIEW_LINES,
 } from "@/lib/layout";
+import { hasBridge } from "@/lib/ipcCall";
 
 export const STORAGE_KEY = APPEARANCE_SERIALIZATION.storageKey;
+const NATIVE_PREFERENCES_FILE = "preferences.json";
+const nativePreferences = new LazyStore(NATIVE_PREFERENCES_FILE, {
+  autoSave: false,
+});
 
 export const THEMES = APPEARANCE_SERIALIZATION.themes;
 export const ACCENTS = APPEARANCE_SERIALIZATION.accents;
 
-export type { Accent, ThemePref };
+export type { Accent, ThemePref, Translucency };
 
 export const HISTORY_DISPLAY_LIMITS = [
   100,
@@ -42,7 +53,7 @@ export const UNLIMITED_HISTORY_DISPLAY = 100_000;
 export interface Prefs {
   theme: ThemePref;
   accent: Accent;
-  translucency: boolean;
+  translucency: Translucency;
   previewLines: number;
   previewLinesPopup: number;
   sortByDevice: boolean;
@@ -142,7 +153,7 @@ export function readPrefs(): Prefs {
 
 /** Private mode, a full quota and a disabled store all land here, and none of
  *  them may take the window down. */
-const safeStorage = {
+const browserStorage = {
   getItem(name: string): string | null {
     try {
       return window.localStorage.getItem(name);
@@ -166,6 +177,50 @@ const safeStorage = {
   },
 };
 
+/** Android WebView storage may be evicted with its WebView profile. */
+const durableStorage: StateStorage<unknown> = {
+  async getItem(name) {
+    if (!hasBridge()) return browserStorage.getItem(name);
+
+    try {
+      const stored = await nativePreferences.get<string>(name);
+      if (stored !== undefined) return stored;
+
+      const browserValue = browserStorage.getItem(name);
+      if (browserValue !== null) {
+        await nativePreferences.set(name, browserValue);
+        await nativePreferences.save();
+      }
+      return browserValue;
+    } catch {
+      console.warn("[copypaste] durable preferences could not be read; using browser storage");
+      return browserStorage.getItem(name);
+    }
+  },
+  async setItem(name, value) {
+    browserStorage.setItem(name, value);
+    if (!hasBridge()) return;
+
+    try {
+      await nativePreferences.set(name, value);
+      await nativePreferences.save();
+    } catch {
+      console.warn("[copypaste] durable preferences could not be saved");
+    }
+  },
+  async removeItem(name) {
+    browserStorage.removeItem(name);
+    if (!hasBridge()) return;
+
+    try {
+      await nativePreferences.delete(name);
+      await nativePreferences.save();
+    } catch {
+      console.warn("[copypaste] durable preferences could not be removed");
+    }
+  },
+};
+
 interface PrefsStore extends Prefs {
   set<K extends keyof Prefs>(key: K, value: Prefs[K]): void;
   reset(): void;
@@ -180,7 +235,7 @@ export const usePrefs = create<PrefsStore>()(
     }),
     {
       name: STORAGE_KEY,
-      storage: createJSONStorage(() => safeStorage),
+      storage: createJSONStorage(() => durableStorage),
       partialize: (state) =>
         // Built from the known key list so an action can never be persisted,
         // and so a key removed from `Prefs` stops being written on the next

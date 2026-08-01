@@ -17,7 +17,6 @@ use rusqlite::Connection;
 use zeroize::Zeroizing;
 
 use super::connection::{apply_connection_pragmas, apply_key, validate_key};
-use super::legacy::is_v1_database;
 use super::model::StoreError;
 
 /// Open `path` with `db_key` and prove the key works before returning.
@@ -29,12 +28,7 @@ use super::model::StoreError;
 /// candidate file is inspected as it stands, and a file this build has never
 /// seen is refused rather than upgraded in place.
 ///
-/// The v0.4.x check runs *before* the key is applied, so a file identified as an
-/// old history is refused without this build ever having opened it.
 pub fn open_validated(path: &Path, db_key: &[u8; 32]) -> Result<Connection, StoreError> {
-    if is_v1_database(path) {
-        return Err(StoreError::LegacyDatabase);
-    }
     let conn = Connection::open(path)?;
     apply_key(&conn, db_key)?;
     validate_key(&conn)?;

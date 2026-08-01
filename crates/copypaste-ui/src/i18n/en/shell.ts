@@ -9,22 +9,17 @@ export const shell = {
   banner: {
     serviceOffline:
       "Background service not running — nothing is being recorded.",
-    legacyDatabase:
-      "This device's clipboard history was written by CopyPaste 0.4 — this version can't read it, and hasn't changed it.",
     keyUnusable:
       "This device's encryption key can't be used, so its clipboard history can't be unlocked. Nothing here can recover it.",
     protocolMismatch:
       "CopyPaste and the background service are on incompatible versions (service protocol v{{protocol}}). Restart both to resolve.",
     capturePaused:
       "The clipboard service is running but is not recording — copied items will not appear here.",
-    /** Not "can't read it" alone: the news is that nothing was thrown away.
-     *  An empty list after an upgrade reads as data loss otherwise. */
-    legacyHistory:
-      "Your CopyPaste 0.4 history is still on this device, unchanged. This version can't read it, so it has started a new one.",
   },
 
   status: {
     label: "Sync: {{state}}. {{detail}}",
+    openService: "Open service settings",
     synced: "Synced",
     syncing: "Syncing",
     idle: "Idle",
@@ -44,17 +39,14 @@ export const shell = {
       peerNeverSynced: "No peer sync yet",
       stalled_one: "{{count}} peer not syncing",
       stalled_other: "{{count}} peers not syncing",
-      cloudUnavailable: "Cloud sync unavailable in this build",
     },
   },
 
   service: {
-    recheck: "Check again",
+    diagnostics: "Open diagnostics",
     outOfDate: {
       title: "The background service is out of date",
-      ours: "A different version of the background service is running. Restart it to pick up this update.",
-      theirs:
-        "A different version of the background service is running, and it was started by something else — CopyPaste can't stop it. Quit it, then restart.",
+      body: "The clipboard service has a different version. Quit and reopen CopyPaste to update it.",
       restart: "Restart the service",
       restarting: "Restarting…",
     },
@@ -64,9 +56,13 @@ export const shell = {
     },
     stopped: {
       title: "The clipboard service isn't running",
-      body: "CopyPaste records your clipboard from a small background service. It isn't running, so nothing is being saved right now.",
+      body: "CopyPaste saves new clipboard items through its background service. Start it to resume capture.",
       start: "Start the service",
       starting: "Starting…",
+    },
+    webPreview: {
+      title: "This is the web preview",
+      body: "Clipboard history is available in the native CopyPaste window, not in a browser tab.",
     },
   },
 } as const;

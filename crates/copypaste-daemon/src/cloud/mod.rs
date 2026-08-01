@@ -29,11 +29,11 @@ use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard};
 use copypaste_cloud::{CloudConfig, SyncKey};
 use copypaste_ipc::CloudStatusData;
-use tokio::sync::{watch, Notify};
+use tokio::sync::{Notify, watch};
 use tracing::{info, warn};
 
-use crate::meta::Meta;
 use crate::AppState;
+use crate::meta::Meta;
 
 pub use poll::run;
 

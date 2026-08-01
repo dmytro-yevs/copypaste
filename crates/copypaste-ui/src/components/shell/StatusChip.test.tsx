@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { configure, screen } from "@testing-library/react";
+import { configure, screen, waitFor } from "@testing-library/react";
 
 import { StatusChip } from "@/components/shell/StatusChip";
 import { IpcFailure } from "@/lib/errors";
-import { peer, status, withClient } from "@/test/harness";
+import { useUi } from "@/store/ui";
+import { peer, status, withClient, withUser } from "@/test/harness";
 
 const getStatus = vi.fn();
 const listPeers = vi.fn();
@@ -24,16 +25,16 @@ beforeEach(() => {
   listPeers.mockReset().mockResolvedValue([
     peer({ last_seen_ms: Date.now(), online: true }),
   ]);
+  useUi.setState({ view: "history", settingsTab: null });
 });
 
 describe("sync status", () => {
-  it("reports peer and cloud state in the visible and accessible tooltip", async () => {
+  it("reports peer state in the visible and accessible tooltip", async () => {
     withClient(<StatusChip />);
 
     const chip = await screen.findByRole("status", { name: /sync: synced/i });
     expect(chip.getAttribute("title")).toMatch(/1 paired device/i);
     expect(chip.getAttribute("title")).toMatch(/last peer sync just now/i);
-    expect(chip.getAttribute("title")).toMatch(/cloud sync unavailable in this build/i);
 
     const tooltip = screen.getByRole("tooltip", { hidden: true });
     expect(chip.getAttribute("aria-describedby")).toBe(tooltip.id);
@@ -61,8 +62,24 @@ describe("sync status", () => {
     expect(chip.getAttribute("aria-label")).toMatch(
       /background service unreachable/i,
     );
-    expect(chip.getAttribute("aria-label")).toMatch(
-      /cloud sync unavailable in this build/i,
-    );
+  });
+
+  it("makes persistent service trouble a compact route to recovery", async () => {
+    getStatus.mockRejectedValue(new IpcFailure("offline", true));
+    listPeers.mockResolvedValue([]);
+    const { user } = withUser(<StatusChip />);
+
+    const chip = await screen.findByRole("status", { name: /sync: offline/i });
+    const action = screen.getByRole("button", { name: /open service settings/i });
+    expect(chip.querySelector("button")?.className).toContain("rounded-full");
+
+    await user.click(action);
+    expect(useUi.getState().view).toBe("settings");
+    expect(useUi.getState().settingsTab).toBe("service");
+  });
+
+  it("does not add an Android floating status affordance while healthy", async () => {
+    withClient(<StatusChip attentionOnly />);
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 });

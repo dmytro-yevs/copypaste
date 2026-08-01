@@ -16,7 +16,8 @@
 use tauri::State;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
-use crate::model::{UiItem, UiPage};
+use crate::model::{UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon};
+use crate::source_app_icon::SourceAppIconCache;
 
 type Result<T> = std::result::Result<T, BackendError>;
 
@@ -36,9 +37,17 @@ pub async fn list(
     limit: u32,
     cursor: Option<String>,
 ) -> Result<UiPage> {
-    let page = backend.list(limit, cursor.as_deref()).await?;
-    let total = backend.status().await?.item_count;
-    Ok(UiPage::with_total(page, total))
+    list_page(&*backend, limit, cursor.as_deref()).await
+}
+
+/// Load a page without making a second, unrelated round trip for its count.
+///
+/// A page that was already read must remain readable when a daemon restart
+/// races the old count request. The live status query owns the global count;
+/// [`UiPage::from`] supplies the loaded-page count for the compact Quick Paste
+/// surface until its next refresh.
+async fn list_page(backend: &impl Backend, limit: u32, cursor: Option<&str>) -> Result<UiPage> {
+    Ok(backend.list(limit, cursor).await?.into())
 }
 
 /// Full-text search. Sensitive items are never indexed and never returned, so
@@ -99,6 +108,69 @@ pub async fn reveal_item(backend: State<'_, SelectedBackend>, id: String) -> Res
     Ok(backend.get(&id).await?.content)
 }
 
+/// A lazy thumbnail for an image row. This cannot return a sensitive image:
+/// the backend refuses it before any bytes cross into the WebView.
+#[tauri::command]
+pub async fn get_image_preview(
+    backend: State<'_, SelectedBackend>,
+    id: String,
+) -> Result<UiImagePreview> {
+    Ok(backend.image_preview(&id).await?.into())
+}
+
+/// Resolve the captured source application's icon without exposing an app path
+/// to the WebView. A missing or unqueryable app is a normal fallback state.
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn get_source_app_icon(
+    bundle_id: String,
+    cache: State<'_, SourceAppIconCache>,
+) -> Option<UiSourceAppIcon> {
+    cache.resolve_desktop(&bundle_id)
+}
+
+/// Android-only installed application catalogue used by Settings → Service.
+/// Desktop keeps its existing history/manual bundle-id workflow because macOS
+/// does not expose the same installed-package catalogue to a sandboxed app.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn list_installed_source_apps(
+    capture: State<'_, crate::capture::SelectedCapture>,
+) -> Result<Vec<UiInstalledSourceApp>> {
+    capture.installed_source_apps().map(|apps| {
+        apps.into_iter()
+            .map(|app| UiInstalledSourceApp::new(app.package_id, app.label))
+            .collect()
+    })
+}
+
+/// The command is registered on both platforms so the shared frontend keeps a
+/// single IPC surface. It is intentionally empty on desktop, where settings
+/// retains its bundle-id/manual flow instead of pretending macOS has Android's
+/// package catalogue.
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn list_installed_source_apps() -> Result<Vec<UiInstalledSourceApp>> {
+    Ok(Vec::new())
+}
+
+/// Android resolves package icons through the application PackageManager.
+/// Devices or package-visibility policies that cannot query the source simply
+/// retain the semantic icon already rendered by the view.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn get_source_app_icon(
+    bundle_id: String,
+    cache: State<'_, SourceAppIconCache>,
+    capture: State<'_, crate::capture::SelectedCapture>,
+) -> Option<UiSourceAppIcon> {
+    cache.resolve_with(&bundle_id, |package_id| {
+        capture
+            .source_app_icon(package_id)
+            .and_then(|icon| UiSourceAppIcon::from_base64(icon.png_base64, icon.width, icon.height))
+    })
+}
+
 /// `true` once the backend has confirmed the row is gone. An unknown id is a
 /// not-found failure, not a quiet `false`.
 #[tauri::command]
@@ -151,6 +223,7 @@ pub async fn reorder_pinned(backend: State<'_, SelectedBackend>, ids: Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::{Page, testing::FakeBackend};
 
     /// `add_item` rejects blank content before spending a round trip, and the
     /// message it uses is one a user can act on.
@@ -160,5 +233,16 @@ mod tests {
         let shown = err.to_string();
         assert!(shown.ends_with('.'), "not a sentence: {shown}");
         assert!(!shown.contains('/'), "{shown}");
+    }
+
+    #[tokio::test]
+    async fn a_loaded_page_survives_an_independent_status_failure() {
+        let backend = FakeBackend::failing().with_page(Page::default());
+
+        // `FakeBackend::failing` rejects `status`. Listing must not depend on
+        // it: the status query is separate and a daemon can restart between
+        // two socket connections.
+        let page = list_page(&backend, 50, None).await.unwrap();
+        assert!(page.items().is_empty());
     }
 }

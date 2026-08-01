@@ -18,8 +18,8 @@
  * the state an unpaired one does, so rendering the two differently would mean
  * inventing a distinction the wire cannot make.
  */
-import { useState } from "react";
-import { Laptop, Link2, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Laptop, Link2, LoaderCircle, QrCode, RefreshCw, TriangleAlert } from "lucide-react";
 
 import {
   AlertDialog,
@@ -34,8 +34,10 @@ import {
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/EmptyState";
+import { StateNotice } from "@/components/StateNotice";
 import { PeerRow } from "@/components/devices/PeerRow";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
+import { PairingDialog } from "@/components/devices/PairingDialog";
 import {
   MAX_PAIRINGS,
   type PeerHealthMap,
@@ -57,6 +59,7 @@ import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
+import { useUi } from "@/store/ui";
 
 export function DevicesView() {
   const { t } = useTranslation();
@@ -70,14 +73,32 @@ export function DevicesView() {
 
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
+  const [pairingOpen, setPairingOpen] = useState(false);
+  const [pairingFlow, setPairingFlow] = useState<"create" | "join">("join");
+  const [pairingAddress, setPairingAddress] = useState<string | null>(null);
   const [health, setHealth] = useState<PeerHealthMap>({});
+  const pairingUri = useUi((state) => state.pairingUri);
+  const setPairingUri = useUi((state) => state.setPairingUri);
+
+  useEffect(() => {
+    if (pairingUri) {
+      setPairingFlow("join");
+      setPairingOpen(true);
+    }
+  }, [pairingUri]);
 
   const errorKind = peers.error ? classifyError(peers.error) : null;
   const ownErrorKind = own.error ? classifyError(own.error) : null;
   const discoveredErrorKind = discovered.error
     ? classifyError(discovered.error)
     : null;
-  const list = peers.data ?? [];
+  // A pairing generated here is only an inbound credential until another
+  // device redeems it. Older services could expose that placeholder as "This
+  // device"; never offer destructive peer actions for it while the service
+  // upgrades and removes the stale record.
+  const list = (peers.data ?? []).filter(
+    (peer) => peer.name !== t("devices.own.name"),
+  );
   const nearby = discovered.data ?? [];
   const full = atPairingCap(list.length);
   const online = list.filter((peer) => peer.online).length;
@@ -88,13 +109,19 @@ export function DevicesView() {
         setHealth((previous) => noteSync(previous, results)),
     });
 
+  function openPairing(flow: "create" | "join", address: string | null = null) {
+    setPairingFlow(flow);
+    setPairingAddress(address);
+    setPairingOpen(true);
+  }
+
   if (errorKind === "offline" || ownErrorKind === "offline") {
     return <ServiceOffline />;
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider bg-panel px-s-3 py-s-2">
+      <header className="chrome flex shrink-0 flex-wrap items-center gap-s-2 border-b border-divider px-s-3 py-s-2">
         <h1 className="mr-auto text-sm font-semibold">{t("devices.title")}</h1>
 
         <Button
@@ -112,14 +139,18 @@ export function DevicesView() {
             sync.isPending ? "devices.actions.syncing" : "devices.actions.syncAll",
           )}
         </Button>
+        <Button size="sm" variant="outline" onClick={() => openPairing("join")} disabled={full}>
+          <Link2 aria-hidden="true" />
+          {t("devices.pairing.joinAction")}
+        </Button>
+        <Button size="sm" onClick={() => openPairing("create")} disabled={full}>
+          <QrCode aria-hidden="true" />
+          {t("devices.pairing.createAction")}
+        </Button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-s-3">
-        <p role="status" className="mx-auto mb-s-3 max-w-[var(--content-max-width)] rounded-md border border-warn/20 bg-warn/15 px-s-3 py-s-2 text-sm text-warn-strong">
-          {t("devices.pairingUnavailable")}
-        </p>
-
-        <div className="mx-auto flex max-w-[var(--content-max-width)] flex-col gap-s-4">
+        <div className="flex w-full flex-col gap-s-4">
           <section aria-labelledby="own-device-heading" className="flex flex-col gap-s-2">
             <h2 id="own-device-heading" className="text-sm font-semibold">
               {t("devices.own.heading")}
@@ -226,7 +257,6 @@ export function DevicesView() {
               <EmptyState
                 icon={Link2}
                 title={t("devices.unavailable.title")}
-                body={t("devices.unavailable.body")}
               />
             ) : errorKind !== null ? (
               <EmptyState
@@ -234,12 +264,13 @@ export function DevicesView() {
                 body={friendlyError(errorKind)}
                 action={{
                   label: t("common.tryAgain"),
+                  icon: RefreshCw,
                   onClick: () => void peers.refetch(),
                 }}
               />
             ) : list.length === 0 ? (
-              <EmptyState
-                icon={Laptop}
+              <StateNotice
+                icon={Link2}
                 title={t("devices.none.title")}
                 body={t("devices.none.body")}
               />
@@ -304,25 +335,40 @@ export function DevicesView() {
             </div>
 
             {discovered.isPending ? (
-              <p role="status" aria-busy="true" className="rounded-xl border border-border bg-card p-s-3 text-sm text-muted-foreground">
-                {t("devices.discovered.loading")}
-              </p>
+              <StateNotice
+                icon={LoaderCircle}
+                busy
+                tone="info"
+                title={t("devices.discovered.loading")}
+              />
             ) : discoveredErrorKind !== null ? (
-              <p role="status" className="rounded-xl border border-border bg-card p-s-3 text-sm text-muted-foreground">
-                {t(
+              <StateNotice
+                icon={TriangleAlert}
+                tone={discoveredErrorKind === "unavailable" ? "attention" : "danger"}
+                title={t(
                   discoveredErrorKind === "unavailable"
                     ? "devices.discovered.unavailable"
                     : "devices.discovered.failed",
                 )}
-              </p>
+                action={
+                  discoveredErrorKind === "unavailable"
+                    ? undefined
+                    : {
+                        label: t("common.tryAgain"),
+                        icon: RefreshCw,
+                        onClick: () => discovered.refetch(),
+                      }
+                }
+              />
             ) : nearby.length === 0 ? (
-              <p className="rounded-xl border border-border bg-card p-s-3 text-sm text-muted-foreground">
-                {t("devices.discovered.none")}
-              </p>
+              <StateNotice
+                icon={Link2}
+                title={t("devices.discovered.none")}
+              />
             ) : (
               <ul aria-label={t("devices.discovered.listLabel")} className="flex flex-col gap-s-2">
                 {nearby.map((device) => (
-                  <li key={device.pairing_id} className="rounded-xl border border-border bg-card p-s-3">
+                  <li key={device.discovery_id} className="rounded-xl border border-border bg-card p-s-3">
                     <div className="flex min-w-0 items-start gap-s-3">
                       <span
                         aria-hidden="true"
@@ -357,6 +403,19 @@ export function DevicesView() {
                         <dd className="mt-0.5 font-medium">{longAge(device.last_seen_ms)}</dd>
                       </div>
                     </dl>
+                    {!device.paired && (
+                      <div className="mt-s-3 flex justify-end">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={full}
+                          onClick={() => openPairing("join", device.addr)}
+                        >
+                          <Link2 aria-hidden="true" />
+                          {t("devices.pairing.joinAction")}
+                        </Button>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -414,6 +473,14 @@ export function DevicesView() {
           revoke.mutate(peer);
           setConfirmRevoke(null);
         }}
+      />
+      <PairingDialog
+        open={pairingOpen}
+        onOpenChange={setPairingOpen}
+        flow={pairingFlow}
+        initialAddress={pairingAddress}
+        incomingUri={pairingUri}
+        onIncomingUsed={() => setPairingUri(null)}
       />
     </div>
   );

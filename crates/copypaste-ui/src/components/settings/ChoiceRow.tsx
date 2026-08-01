@@ -7,6 +7,7 @@ import { useTranslation } from "@/i18n";
 import { Row } from "@/components/settings/Row";
 import type { Choice } from "@/components/settings/serviceChoices";
 import { valuesWith } from "@/components/settings/serviceChoices";
+import { NativeSelect } from "@/components/ui/native-select";
 
 interface ChoiceRowProps {
   title: string;
@@ -61,12 +62,12 @@ export function ChoiceRow({
         </>
       }
     >
-      <select
+      <NativeSelect
         aria-label={title}
         aria-describedby={descriptionId}
         aria-invalid={invalid || undefined}
         aria-errormessage={invalid ? errorId : undefined}
-        className="h-9 min-w-[9rem] rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-w-[9rem]"
         disabled={disabled}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -76,7 +77,7 @@ export function ChoiceRow({
             {t(`settings.service.units.${choice.unit}`, { count: choice.count })}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </Row>
   );
 }

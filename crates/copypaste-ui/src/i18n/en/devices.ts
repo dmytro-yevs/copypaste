@@ -1,14 +1,37 @@
 export const devices = {
   title: "Devices",
 
-  /** Existing pairings remain manageable, but a new one must not be offered
-   * before the protocol can bind a SAS decision on both devices. */
-  pairingUnavailable:
-    "Pairing new devices is temporarily unavailable while CopyPaste adds verified security-code confirmation. Your existing devices can still sync, unpair and revoke here.",
+  pairing: {
+    action: "Pair device",
+    createAction: "Show code",
+    joinAction: "Join device",
+    title: "Pair a device",
+    intro: "Pair devices only when you can verify the security code on both screens.",
+    create: "Show a code",
+    createHint: "Display a QR code and a pairing code for the other device.",
+    join: "Join with a code",
+    joinHint: "Scan a QR code on Android, or paste the code and address.",
+    showTitle: "Scan this on the other device",
+    showBody: "This pairing code is secret. It is shown once, so finish pairing before closing this window.",
+    joinTitle: "Join another device",
+    joinBody: "Scan its QR code or enter the displayed pairing code and address.",
+    scan: "Scan QR code",
+    code: "Pairing code",
+    address: "Connection address",
+    securityCode: "Security code",
+    securityCodePlaceholder: "Six characters",
+    verifyBody: "Compare the six-character security code with the other device before accepting the pairing.",
+    verifyJoinBody: "Enter the six-character security code shown on the device that created this pairing. Only confirm when they match.",
+    verifyConfirm: "I compared the security code on both devices.",
+    creating: "Creating a pairing code…",
+    copyDetails: "Copy pairing details",
+    pasteDetails: "Paste pairing details",
+    confirm: "Verify and pair",
+    joined: "Device paired and ready to sync.",
+  },
 
   unavailable: {
-    title: "Device sync isn't available in this build",
-    body: "Pairing runs in the background service, which this build doesn't reach yet. Everything else on this device works normally.",
+    title: "Device sync unavailable",
   },
 
   actions: {
@@ -24,7 +47,7 @@ export const devices = {
     loading: "Checking this device…",
     checking: "Checking",
     unavailableLabel: "Unavailable",
-    unavailable: "This device's details are temporarily unavailable.",
+    unavailable: "Device details are unavailable.",
     version: "App version",
     history: "Local history",
     items_one: "{{count}} item",
@@ -49,8 +72,7 @@ export const devices = {
     refresh: "Refresh",
     refreshLabel: "Refresh devices discovered on this network",
     loading: "Looking for devices on this network…",
-    unavailable:
-      "Network discovery isn't available in this build. Existing paired devices can still sync by their saved address.",
+    unavailable: "Network discovery is unavailable.",
     failed: "Devices on this network couldn't be checked. Try Refresh.",
     none: "No devices found on the network yet.",
     listLabel: "Devices discovered on this network",
@@ -64,7 +86,7 @@ export const devices = {
   failed: { title: "Couldn't load your devices" },
   none: {
     title: "No other devices paired",
-    body: "No other devices are paired. Creating a new pairing is temporarily unavailable while verified security-code confirmation is completed.",
+    body: "Pair another Mac or Android device to keep its clipboard history in sync.",
   },
 
   /** The cap is a refusal, never an eviction, so the only remedy is one the

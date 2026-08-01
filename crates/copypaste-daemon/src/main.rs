@@ -30,14 +30,12 @@ use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 use tracing::{info, warn};
 
-use crate::cli::{cloud_config, Args};
+use crate::cli::{Args, cloud_config};
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::settings::Settings;
-use crate::startup::{
-    halt_or_fail, init_tracing, legacy_history_present, relocate, remove_socket, wait_for_shutdown,
-};
+use crate::startup::{halt_or_fail, relocate, remove_socket, wait_for_shutdown};
 
 pub use crate::state::AppState;
 
@@ -46,8 +44,8 @@ pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    initialize_macos_workspace();
     let args = Args::parse();
-    init_tracing();
 
     // `--data-dir` moves both defaults; an explicit `COPYPASTE_SOCKET` still
     // wins so every process can name the same isolated instance.
@@ -70,6 +68,11 @@ async fn main() -> anyhow::Result<()> {
         .to_path_buf();
     let peers_path = data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME);
     std::fs::create_dir_all(&data_dir).context("create the data directory")?;
+    let _runtime_log = copypaste_runtime_log::init(
+        &data_dir.join("logs"),
+        copypaste_runtime_log::Process::Daemon,
+    )
+    .context("initialize runtime logging")?;
 
     if !args.foreground {
         warn!(
@@ -79,22 +82,12 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // Before the store is opened, so the answer describes the disk as the user
-    // left it rather than as this run has already changed it: `Store::open`
-    // creates `copypaste-v2.db` on a first run, and on Linux that is the same
-    // directory the probe reads.
-    let legacy_history = legacy_history_present(&data_dir);
-    if legacy_history {
-        info!("a CopyPaste 0.4 history is present; it has not been opened or changed");
-    }
-
     // Order matters: the keyring unlocks the database key, the database is
     // opened with it, and neither the socket nor the capture loop exists until
     // both succeeded. A daemon that cannot store what it captures should not
     // start capturing.
     //
-    // The two failures with a fixed sentence — a v0.4 history, a device key
-    // that cannot be used — do not exit here. Exiting leaves the app with no
+    // A device key failure with a fixed sentence does not exit here. Exiting leaves the app with no
     // socket to ask, so it reports the service as merely down and offers to
     // start it again; see `server::halted`.
     let keyring = match Keyring::load_or_create(&data_dir) {
@@ -189,7 +182,6 @@ async fn main() -> anyhow::Result<()> {
         settings,
         db_path.clone(),
     ));
-    state.set_legacy_history_present(legacy_history);
     state.set_index_purged(index_purged);
     state.set_ready(true);
     let cloud_signed_in = state.cloud.restore(&state);
@@ -277,3 +269,20 @@ async fn main() -> anyhow::Result<()> {
     remove_socket(&socket_path);
     Ok(())
 }
+
+/// A daemon is a plain process, unlike the Tauri app. AppKit must be loaded
+/// before `NSWorkspace` can report the foreground process for capture source
+/// attribution.
+#[cfg(target_os = "macos")]
+fn initialize_macos_workspace() {
+    use objc2_app_kit::NSApplicationLoad;
+
+    if !unsafe { NSApplicationLoad() }.as_bool() {
+        warn!(
+            "macOS workspace services could not initialize; source application attribution may be unavailable"
+        );
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn initialize_macos_workspace() {}

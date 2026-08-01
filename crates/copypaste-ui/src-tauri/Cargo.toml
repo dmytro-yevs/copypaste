@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+# Tauri invokes `cargo run --no-default-features`; keep that command pinned to
+# the app now that the development-only bridge is a second binary.
+default-run = "copypaste-ui"
 
 [lib]
 name = "copypaste_ui_lib"
@@ -27,6 +30,10 @@ tauri-plugin-clipboard-manager = "2"
 # 4); and no capability entry is needed, because the ACL gates the JS bridge and
 # nothing here calls the plugin from JS.
 tauri-plugin-dialog = "2"
+# The dialog returns Android `content://` URIs. The same maintained Tauri
+# plugin opens both those URIs and desktop paths without revealing either to
+# the WebView.
+tauri-plugin-fs = "2"
 # Posting to the notification centre needs an application bundle, which the
 # daemon does not have — so the capture notification is the app's job and the
 # daemon only reports `EventData::captured` (parity 18, backlog B-18). Driven
@@ -41,11 +48,15 @@ tokio-util.workspace = true
 futures-util = { workspace = true, features = ["sink"] }
 serde.workspace = true
 serde_json.workspace = true
+base64.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+copypaste-runtime-log = { path = "../../copypaste-runtime-log" }
 uuid.workspace = true
 tempfile.workspace = true
 ts-rs = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
 
 # The in-process backend's crates. Optional here so the Android code path can be
 # type-checked on a Linux host with `--features embedded-backend`; the target
@@ -60,6 +71,9 @@ copypaste-p2p = { path = "../../copypaste-p2p", optional = true }
 # type-check that file here. See ADR-0003 for why Tauri does not do this itself.
 jni = { version = "0.21", optional = true }
 ndk-context = { version = "0.1", optional = true }
+tauri-plugin-store = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-opener = "2.5.4"
 
 # ---------------------------------------------------------------------------
 # Desktop only
@@ -80,7 +94,15 @@ tauri-plugin-autostart = "2"
 # AppKit supplies the frontmost-process hand-off after Quick Paste copies an
 # item. Tauri deliberately keeps this platform detail out of its cross-platform
 # window API.
-objc2-app-kit = { workspace = true, features = ["NSRunningApplication", "NSWorkspace", "libc"] }
+objc2-app-kit = { workspace = true, features = ["NSEvent", "NSRunningApplication", "NSWorkspace", "NSColor", "NSColorSpace", "libc"] }
+objc2.workspace = true
+objc2-foundation.workspace = true
+# Tauri's tray hook exposes tray-icon's objc2 0.6 AppKit objects. Keep this
+# narrow alias beside the older capture bindings until they can move together.
+objc2-menu = { package = "objc2", version = "0.6.4" }
+# Application icons are resolved from a captured bundle identifier and
+# immediately converted to a bounded PNG. No icon path reaches the WebView.
+copypaste-core = { path = "../../copypaste-core" }
 
 # ---------------------------------------------------------------------------
 # Android only
@@ -99,6 +121,14 @@ ndk-context = "0.1"
 # dead text on every machine the project is actually built on.
 embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:jni", "dep:ndk-context"]
 typescript = ["dep:ts-rs", "copypaste-ipc/typescript"]
+# Never enabled by Tauri or Android builds. This exists solely for the local
+# browser preview, which cannot speak the daemon's private Unix socket.
+dev-web-bridge = ["dep:axum", "dep:tower-http"]
+
+[[bin]]
+name = "copypaste-web-bridge"
+path = "src/bin/copypaste-web-bridge.rs"
+required-features = ["dev-web-bridge"]
 
 [[example]]
 name = "generate-typescript"

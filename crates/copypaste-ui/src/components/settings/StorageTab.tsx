@@ -10,7 +10,7 @@
  * No path enters this component, so none can reach the DOM (INV-12).
  */
 import { useState } from "react";
-import { Archive, Download, RotateCcw, Trash2, Upload } from "lucide-react";
+import { Archive, Download, RotateCcw, Trash2, Upload, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -161,7 +161,10 @@ export function StorageTab() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>
+              <X aria-hidden="true" />
+              {t("common.cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
@@ -169,6 +172,7 @@ export function StorageTab() {
                 close();
               }}
             >
+              <Trash2 aria-hidden="true" />
               {t("history.clear.action")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -201,13 +205,17 @@ export function StorageTab() {
             </p>
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>
+              <X aria-hidden="true" />
+              {t("common.cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 exportHistory.mutate(includeSensitive);
                 close();
               }}
             >
+              <Download aria-hidden="true" />
               {t("settings.transfer.export.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -236,7 +244,10 @@ export function StorageTab() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>
+              <X aria-hidden="true" />
+              {t("common.cancel")}
+            </AlertDialogCancel>
             <Button
               disabled={importHistory.apply.isPending}
               onClick={() => {
@@ -245,6 +256,7 @@ export function StorageTab() {
                 setPendingImport(null);
               }}
             >
+              <Upload aria-hidden="true" />
               {t("settings.transfer.import.confirm")}
             </Button>
           </AlertDialogFooter>
@@ -265,7 +277,10 @@ export function StorageTab() {
             {t("settings.transfer.restore.dialogSafety")}
           </p>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogCancel>
+              <X aria-hidden="true" />
+              {t("common.cancel")}
+            </AlertDialogCancel>
             <AlertDialogAction
               className={cn(buttonVariants({ variant: "destructive" }))}
               onClick={() => {
@@ -273,6 +288,7 @@ export function StorageTab() {
                 close();
               }}
             >
+              <RotateCcw aria-hidden="true" />
               {t("settings.transfer.restore.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>

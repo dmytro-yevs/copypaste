@@ -1,6 +1,5 @@
 export const settingsService = {
-  unavailable:
-    "This build can't change the background service's settings — it has no service to change them on, and runs on the defaults shown here.",
+  unavailable: "Service settings are unavailable.",
   loading: "Reading the service's settings…",
 
   /** Eleven settings covering four unrelated things read as one long list, and
@@ -8,8 +7,7 @@ export const settingsService = {
   groups: {
     capture: {
       title: "What gets captured",
-      description:
-        "Anything refused here is never saved, and the counts are on the Diagnostics tab.",
+      description: "Anything refused here is not saved.",
     },
     keeping: {
       title: "What gets kept",
@@ -27,8 +25,8 @@ export const settingsService = {
   liveness: {
     needsRestart: "Needs a restart",
     needsRestartWhy:
-      "The service announces itself when it starts, so this takes effect the next time it does. It is saved either way.",
-    pending: "Saved. It takes effect when the background service restarts.",
+      "This takes effect after the service restarts.",
+    pending: "Saved. It takes effect after the service restarts.",
     restart: "Restart the service",
     restarting: "Restarting…",
     restarted: "The background service was restarted",
@@ -36,53 +34,59 @@ export const settingsService = {
 
   poll: {
     title: "Check the clipboard every",
-    description:
-      "How often the service looks for something new. Checking less often uses less power; anything you copy and replace faster than this is missed, and counted on the Diagnostics tab.",
+    description: "Shorter intervals use more power and catch faster copies.",
   },
   privateMode: {
     title: "Private mode",
-    description:
-      "Pause clipboard recording until you turn it off. This stays on after CopyPaste restarts.",
+    description: "Pauses recording until you turn it off.",
+  },
+  exclusions: {
+    title: "Exclude apps from capture",
+    description: "Matching apps are never read or saved. Unknown apps are skipped while this list is not empty.",
+    androidLimitation: "An exclusion applies when the active Android capture method reports the source app. CopyPaste does not request Usage Access or Accessibility for this.",
+    inputLabel: "App bundle or package ID",
+    placeholder: "com.example.app",
+    searchInstalled: "Search installed apps",
+    appsUnavailable: "Installed apps couldn't be read.",
+    noInstalledMatches: "No installed apps match.",
+    add: "Add app",
+    remove: "Remove {{id}}",
+    seen: "Apps seen in this history",
+    noMatches: "No matching app was seen.",
+    invalid: "Enter a bundle or package ID, such as com.example.app.",
+    exists: "That app is already excluded.",
   },
   historyLimit: {
     title: "Keep at most",
-    description:
-      "When history passes this, the oldest unpinned items are dropped. Pinned items are never dropped.",
+    description: "Drops the oldest unpinned items when the limit is reached.",
   },
   storageQuota: {
     title: "Storage quota",
-    description:
-      "When unpinned clips exceed this size, the oldest are dropped. Pinned clips and the newest unpinned clip are kept.",
+    description: "Drops the oldest unpinned items when this size is reached.",
   },
   retention: {
     title: "Drop items older than",
-    description:
-      "Items past this age are deleted whether or not history is full. Pinned items are kept. Never means age alone never deletes anything — the limit above still does.",
+    description: "Deletes unpinned items older than this age.",
   },
   dedup: {
     title: "Treat a repeat as the same item for",
-    description:
-      "Copying the same thing twice inside this window keeps one entry and moves it back to the top. Off keeps every copy as its own entry, so copying one thing repeatedly fills the history with it.",
+    description: "Repeated copies update one item instead of adding another.",
   },
   maxText: {
     title: "Ignore text larger than",
-    description:
-      "Text above this configured size is not captured. Minimum: 64 KB; configured default: 10 MB. This build's storage and transport safety ceiling makes the effective limit at most 4 MiB.",
+    description: "Larger text is not captured.",
   },
   maxImage: {
     title: "Ignore images larger than",
-    description:
-      "Encoded image data above this configured size is not captured. Minimum: 1 MB; configured default: 64 MB. This build's storage and transport safety ceiling makes the effective limit at most 4 MiB.",
+    description: "Larger images are not captured.",
   },
   maxFile: {
     title: "Ignore files larger than",
-    description:
-      "Files above this configured size are not captured. The configured hard maximum and default are 100 MB. This build's storage and transport safety ceiling makes the effective limit at most 4 MiB.",
+    description: "Larger files are not captured; effective limit is 4 MiB.",
   },
   maxDecodedImage: {
     title: "Decoded image memory limit",
-    description:
-      "Compressed images can expand sharply in memory. Images whose decoded bitmap exceeds this live safety budget are refused. Default: 50 MB.",
+    description: "Prevents large images from exhausting memory.",
   },
   validation: {
     poll: "Choose an interval from 100 ms through 5000 ms.",
@@ -94,38 +98,34 @@ export const settingsService = {
 
   sensitive: {
     title: "Delete detected secrets after",
-    description:
-      "Items the detector reads as a password, key or token are deleted this long after they are copied. Off by default.",
+    description: "Deletes detected passwords, keys and tokens after this time.",
     /** Rule 4: auto-deletion is unrecoverable, so turning it on says so at
      *  the control rather than in a manual. */
     warning:
-      "While this is on, anything the detector flags is deleted without asking, and a wrongly flagged item goes with it. Nothing that is deleted can be brought back.",
+      "Detected secrets are deleted without asking and cannot be recovered.",
     /** Was "the service doesn't report when this runs". It does now — the
      *  change event carries the count — so the warning names where the
      *  running total is instead of admitting there isn't one. */
     announced:
-      "Each deletion is announced as it happens, and the running total is on the Diagnostics tab.",
+      "Each deletion is announced and counted in Diagnostics.",
     off: "Off — flagged items are kept until you delete them.",
   },
 
   notify: {
     title: "Notify on capture",
-    description:
-      "Post a notification when something is captured while CopyPaste is in the background.",
+    description: "Only when CopyPaste is in the background.",
   },
   sound: {
     title: "Sound on capture",
-    description: "Play a short sound when something is captured.",
+    description: "Plays when a new item is captured.",
   },
   lan: {
     title: "Visible on this network",
-    description:
-      "Lets paired devices find this one by name instead of by address. Turning it off does not unpair anything, and does not stop syncing with a device that already knows where this one is.",
+    description: "Lets paired devices find this one on the local network.",
   },
   syncEnabled: {
     title: "Sync with paired devices",
-    description:
-      "The master switch. With this off, nothing is sent to or accepted from any device, and pairings are kept.",
+    description: "Stops syncing without removing pairings.",
   },
 
   units: {

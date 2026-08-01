@@ -17,6 +17,7 @@
         "label": "main",
         "title": "CopyPaste",
         "visible": true,
+        "transparent": true,
         "dragDropEnabled": false,
         "contentProtected": true
       }
@@ -44,6 +45,19 @@
         "form-action": ["'none'"],
         "frame-ancestors": ["'none'"]
       }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["copypaste"]
+      },
+      "mobile": [
+        {
+          "scheme": ["copypaste"],
+          "appLink": false
+        }
+      ]
     }
   },
   "bundle": {

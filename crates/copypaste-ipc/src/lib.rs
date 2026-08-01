@@ -22,23 +22,23 @@ pub mod payload;
 pub mod redact;
 mod response;
 
-pub use paths::{data_dir, database_path, socket_path, v1_data_dir};
+pub use paths::{data_dir, database_path, socket_path};
 
 pub use config::{
-    ConfigData, ConfigError, ConfigPatch, Liveness, DEFAULT_STORAGE_QUOTA_BYTES,
+    ConfigData, ConfigError, ConfigPatch, DEFAULT_STORAGE_QUOTA_BYTES, Liveness,
     MAX_DECODED_IMAGE_MB, MAX_FILE_SIZE_BYTES, MAX_IMAGE_SIZE_BYTES, MAX_TEXT_SIZE_BYTES,
     MIN_DECODED_IMAGE_MB, MIN_FILE_SIZE_BYTES, MIN_IMAGE_SIZE_BYTES, MIN_STORAGE_QUOTA_BYTES,
     MIN_TEXT_SIZE_BYTES, POLL_INTERVAL_MAX_MS, POLL_INTERVAL_MIN_MS,
 };
 pub use error::ErrorCode;
 pub use limits::{
-    clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES,
-    MAX_PAGE, MAX_PAGE_CONTENT_BYTES,
+    DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, MAX_CONTENT_BYTES, MAX_FRAME_BYTES, MAX_PAGE,
+    MAX_PAGE_CONTENT_BYTES, clamp_page,
 };
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
-    DiscoveredDevice, ExportData, ExportItem, ImportData, Item, ItemPage, PairingData, PeerInfo,
-    PrivateModeData, StatusData, SyncResult,
+    DiscoveredDevice, ExportData, ExportItem, ImagePreview, ImportData, Item, ItemPage,
+    PairingData, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
@@ -132,6 +132,13 @@ pub enum Method {
     /// implement reveal at all. Deciding whether to render it is the client's,
     /// and a client should require an explicit gesture.
     Get {
+        id: String,
+    },
+    /// A decoded, bounded PNG thumbnail for a non-sensitive image item.
+    ///
+    /// Kept separate from `List` so a long history never decrypts or transfers
+    /// image bytes until a row actually becomes visible.
+    ImagePreview {
         id: String,
     },
     /// Add an item directly, bypassing clipboard capture. Used by tests, by
@@ -330,40 +337,13 @@ pub enum Method {
 mod tests {
     use super::*;
 
-    /// v0.4's directory is a *different question* from v2's, which is the whole
-    /// reason this function exists rather than a reuse of [`data_dir`].
+    /// Optional status fields preserve protocol-v1 decoding across releases.
     #[test]
-    fn the_v0_4_directory_is_resolved_where_v0_4_put_it() {
-        let v1 = v1_data_dir().expect("a home directory in the test environment");
-        assert!(v1.is_absolute(), "{}", v1.display());
-
-        #[cfg(target_os = "macos")]
-        {
-            assert!(
-                v1.ends_with("Library/Application Support/CopyPaste"),
-                "{v1:?}"
-            );
-            // If these ever coincided, CLAUDE.md rule 3's "never touch the old
-            // file" would rest on the filename alone.
-            assert_ne!(v1, data_dir());
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            // v0.4.x and `ProjectDirs` agree here; the *filename* is what keeps
-            // the two histories apart, and `database_path` is why.
-            assert!(v1.ends_with("copypaste"), "{v1:?}");
-            assert_eq!(v1, data_dir());
-        }
-    }
-
-    /// A daemon built before the field omits it, and a client built after must
-    /// still decode that reply rather than treating a status as malformed.
-    #[test]
-    fn a_status_without_the_legacy_flag_decodes_as_absent() {
+    fn a_status_without_optional_fields_decodes_with_defaults() {
         let older = r#"{"version":"2.0.0-alpha.1","protocol_version":1,"item_count":3,
                         "capture_running":true,"clipboard_backend":"fake"}"#;
         let status: StatusData = serde_json::from_str(older).unwrap();
-        assert!(!status.legacy_history_present);
+        assert!(!status.private_mode);
         assert_eq!(status.counters, DiagnosticCounters::default());
     }
 

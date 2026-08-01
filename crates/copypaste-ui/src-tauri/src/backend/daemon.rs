@@ -29,9 +29,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use copypaste_ipc::{
-    socket_path, BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData,
-    ExportItem, ImportData, Item, Method, PairingData, PeerInfo, Request, Response, ResponseData,
-    StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
+    ImagePreview, ImportData, Item, MAX_FRAME_BYTES, Method, PROTOCOL_VERSION, PairingData,
+    PeerInfo, Request, Response, ResponseData, StatusData, SyncResult, socket_path,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::UnixStream;
@@ -45,8 +45,7 @@ use super::{Backend, BackendError, Page, Result};
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Why `reorder_pinned` refuses. See the method for the full argument.
-const MSG_NO_REORDER: &str =
-    "Reordering pinned items isn't available yet. Pinned items keep the order they \
+const MSG_NO_REORDER: &str = "Reordering pinned items isn't available yet. Pinned items keep the order they \
      were pinned in.";
 
 /// Talks to the daemon. Holds nothing, so it is trivially `Send + Sync`.
@@ -132,6 +131,13 @@ fn expect_item(data: Option<ResponseData>) -> Result<Item> {
     match data {
         Some(ResponseData::Item(item)) => Ok(item),
         _ => Err(BackendError::wrong_shape("an item")),
+    }
+}
+
+fn expect_image_preview(data: Option<ResponseData>) -> Result<ImagePreview> {
+    match data {
+        Some(ResponseData::ImagePreview(preview)) => Ok(preview),
+        _ => Err(BackendError::wrong_shape("an image preview")),
     }
 }
 
@@ -239,6 +245,13 @@ impl Backend for DaemonBackend {
     /// gesture that promised only to show it.
     async fn get(&self, id: &str) -> Result<Item> {
         expect_item(self.call(Method::Get { id: id.to_string() }).await?)
+    }
+
+    async fn image_preview(&self, id: &str) -> Result<ImagePreview> {
+        expect_image_preview(
+            self.call(Method::ImagePreview { id: id.to_string() })
+                .await?,
+        )
     }
 
     async fn copy(&self, id: &str) -> Result<Item> {
@@ -495,10 +508,10 @@ mod tests {
 
     #[test]
     fn a_wrong_shape_is_reported_rather_than_silently_defaulted() {
-        assert!(expect_page(
-            into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).unwrap()
-        )
-        .is_err());
+        assert!(
+            expect_page(into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).unwrap())
+                .is_err()
+        );
     }
 
     #[test]
@@ -656,15 +669,17 @@ mod tests {
         );
         assert_eq!(applied.restart_required, ["lan_visibility"]);
 
-        assert!(expect_config(
-            into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"config":{"config":{},"restart_required":[]}}}"#
-            ))
+        assert!(
+            expect_config(
+                into_data(parse(
+                    r#"{"id":1,"ok":true,"data":{"config":{"config":{},"restart_required":[]}}}"#
+                ))
+                .unwrap()
+            )
             .unwrap()
-        )
-        .unwrap()
-        .restart_required
-        .is_empty());
+            .restart_required
+            .is_empty()
+        );
     }
 
     /// The export wrapper keeps its item array distinct from a history page.

@@ -21,17 +21,17 @@ pub mod poll;
 
 use std::sync::Arc;
 
+use copypaste_p2p::Node;
 use copypaste_p2p::discovery::{DiscoveredPeer, Discovery};
 use copypaste_p2p::peers::PeerStore;
 use copypaste_p2p::sync::SyncOutcome;
-use copypaste_p2p::Node;
 use tokio::net::TcpListener;
-use tokio::sync::{watch, Notify};
+use tokio::sync::{Notify, watch};
 use tracing::warn;
 
+use crate::AppState;
 use crate::cadence::Idle;
 use crate::sync::peer_source;
-use crate::AppState;
 
 pub use copypaste_p2p::node::bind;
 

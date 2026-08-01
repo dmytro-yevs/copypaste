@@ -9,11 +9,11 @@
 use std::path::Path;
 
 use security_framework::base::Error as SecurityFrameworkError;
-use security_framework::passwords::{generic_password, set_generic_password, PasswordOptions};
+use security_framework::passwords::{PasswordOptions, generic_password, set_generic_password};
 use zeroize::Zeroizing;
 
 use super::super::keys::random_secret;
-use super::{CryptoError, DeviceSecret, Lookup, KEYSTORE_ACCOUNT, KEYSTORE_SERVICE, KEY_LEN};
+use super::{CryptoError, DeviceSecret, KEY_LEN, KEYSTORE_ACCOUNT, KEYSTORE_SERVICE, Lookup};
 
 /// `errSecItemNotFound`. The *only* status that means "no entry exists" and so
 /// the only one that can lead to a fresh device secret (port manifest 02,
@@ -75,10 +75,10 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use security_framework::passwords::{
-        delete_generic_password, generic_password, set_generic_password, PasswordOptions,
+        PasswordOptions, delete_generic_password, generic_password, set_generic_password,
     };
 
-    use super::super::{load_or_create_secret, SECRET_FILE_NAME};
+    use super::super::{SECRET_FILE_NAME, load_or_create_secret};
     use super::*;
 
     /// Set only where the Keychain is disposable. CI creates a throwaway

@@ -6,8 +6,8 @@
  * this?" — the question About exists for (ui-parity 8, B-21).
  *
  * The links are asserted by `href` and by `target`, which is all a jsdom test
- * can see. Whether either one reaches a browser on macOS or Android is
- * NOT VERIFIED IN CI, and cannot be until an external opener is registered.
+ * can see. `tauri-plugin-opener` owns opening the target in a real app; jsdom
+ * cannot observe the platform browser.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
@@ -77,9 +77,7 @@ describe("the external links", () => {
     }
   });
 
-  /** There is no privacy document to link — the only one in the tree is about
-   *  cloud sync, which this build has no account for. A link labelled privacy
-   *  that resolves to nothing is worse than no link. */
+  /** A privacy link that resolves to nothing is worse than no link. */
   it("offers no privacy link", async () => {
     withClient(<AboutTab />);
     await screen.findAllByRole("link");

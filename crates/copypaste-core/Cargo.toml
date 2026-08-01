@@ -42,6 +42,7 @@ hex.workspace = true
 regex.workspace = true
 unicode-normalization.workspace = true
 iban_validate.workspace = true
+image.workspace = true
 
 # Declared here as well as in the Android target table below, and optional only
 # here: that is what lets `--features android-keystore-typecheck` compile the

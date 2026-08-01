@@ -8,9 +8,9 @@ export type ConfigPatch = { private_mode?: boolean | null, poll_interval_ms?: nu
 
 export type DiagnosticCounters = { rejected_too_large: number, lost_intermediates: number, sensitive_swept: number, index_purged: number, uptime_secs: number, };
 
-export type DiscoveredDevice = { pairing_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, };
+export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, };
 
-export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "legacy_database" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_not_found" | "internal";
+export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_not_found" | "internal";
 
 export type ExportReport = { exported: number, skipped_sensitive: number, skipped_non_text: number, skipped_undecryptable: number, };
 
@@ -18,7 +18,13 @@ export type ImportData = { inserted: number, skipped: number, skipped_duplicate:
 
 export type ImportPreview = { token: string, item_count: number, };
 
-export type Item = { id: string, content: string | null, content_type: string, created_at: number, pinned: boolean, is_sensitive: boolean, origin_device_id: string, origin_device_name: string | null, too_large_to_sync: boolean, };
+export type ImagePreview = { png_base64: string, width: number, height: number, };
+
+export type SourceAppIcon = { png_base64: string, width: number, height: number, };
+
+export type InstalledSourceApp = { package_id: string, label: string, };
+
+export type Item = { id: string, content: string | null, content_type: string, created_at: number, pinned: boolean, is_sensitive: boolean, origin_device_id: string, origin_device_name: string | null, source_app_bundle_id: string | null, source_app_name: string | null, too_large_to_sync: boolean, };
 
 export type ItemPage = { items: Array<Item>, total: number, skipped_undecryptable: number, next_cursor: string | null, };
 
@@ -28,7 +34,7 @@ export type PeerInfo = { pairing_id: string, name: string, last_addr: string | n
 
 export type ServiceState = { "state": "running", version: string, matches_app: boolean, ours: boolean, } | { "state": "unhealthy" } | { "state": "stopped" } | { "state": "not_installed" };
 
-export type StatusData = { version: string, protocol_version: number, item_count: number, capture_running: boolean, clipboard_backend: string, private_mode: boolean, legacy_history_present: boolean, counters: DiagnosticCounters, };
+export type StatusData = { version: string, protocol_version: number, item_count: number, capture_running: boolean, clipboard_backend: string, private_mode: boolean, counters: DiagnosticCounters, };
 
 export type SyncResult = { pairing_id: string, name: string, sent: number, received: number, error: UiError | null, };
 

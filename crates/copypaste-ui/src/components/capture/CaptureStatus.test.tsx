@@ -72,13 +72,12 @@ describe("the strip", () => {
     expect(container.textContent).toBe("");
   });
 
-  /** macOS has no ladder, so there is nothing behind a setup button. */
-  it("offers no setup on a platform with no ladder", async () => {
+  it("does not show a persistent success strip while capture is healthy", async () => {
     captureState.mockResolvedValue(
       captureSnapshot({ rung: "desktop", headline: "Capturing everything you copy." }),
     );
-    withUser(<CaptureStatus />);
-    await screen.findByText("Capturing everything you copy.");
-    expect(screen.queryByRole("button", { name: /set up/i })).toBeNull();
+    const { container } = withUser(<CaptureStatus />);
+    await waitFor(() => expect(captureState).toHaveBeenCalled());
+    expect(container.textContent).toBe("");
   });
 });

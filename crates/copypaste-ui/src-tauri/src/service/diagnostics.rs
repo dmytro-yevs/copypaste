@@ -10,7 +10,7 @@
 //! [`Diagnostics`] can carry any, because there is no field one could travel
 //! in. The shape enforces it; the tests only prove it did not regress.
 
-use copypaste_ipc::{redact::scrub_paths, StatusData, PROTOCOL_VERSION};
+use copypaste_ipc::{PROTOCOL_VERSION, StatusData, redact::scrub_paths};
 use serde::Serialize;
 
 use super::ServiceState;
@@ -30,8 +30,22 @@ pub struct Diagnostics {
     /// `None` when the service did not answer — which is itself the answer, and
     /// why the panel must not require it.
     pub status: Option<StatusData>,
+    /// Whether the history query the app uses can read a page right now.
+    ///
+    /// `code` is the stable UI error code, never a daemon message. The latter
+    /// can contain implementation detail and is not useful in a support
+    /// report.
+    pub history_read: HistoryRead,
     /// Ready to paste. Redacted; never rebuilt in the frontend.
     pub report: String,
+}
+
+/// Result of a one-item history read made while collecting diagnostics.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum HistoryRead {
+    Readable,
+    Failed { code: String },
 }
 
 impl Diagnostics {
@@ -42,14 +56,18 @@ impl Diagnostics {
     /// leave a path on the screen and in the screenshot attached to the same
     /// issue. Both free-text fields go through the one redactor here, which is
     /// also why nothing downstream needs to remember to.
-    pub fn new(service: ServiceState, status: Option<StatusData>) -> Self {
+    pub fn new(
+        service: ServiceState,
+        status: Option<StatusData>,
+        history_read: HistoryRead,
+    ) -> Self {
         let service = scrub_service(service);
         let status = status.map(|mut status| {
             status.version = safe_value(&status.version);
             status.clipboard_backend = safe_value(&status.clipboard_backend);
             status
         });
-        let report = report(&service, status.as_ref());
+        let report = report(&service, status.as_ref(), &history_read);
         Self {
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             app_protocol_version: PROTOCOL_VERSION,
@@ -57,6 +75,7 @@ impl Diagnostics {
             arch: std::env::consts::ARCH.to_string(),
             service,
             status,
+            history_read,
             report,
         }
     }
@@ -108,7 +127,11 @@ fn safe_value(value: &str) -> String {
 /// Not prose and not translated. It is a dump for whoever is helping, in the
 /// same category as a version string, and it has to be built where the redactor
 /// is.
-fn report(service: &ServiceState, status: Option<&StatusData>) -> String {
+fn report(
+    service: &ServiceState,
+    status: Option<&StatusData>,
+    history_read: &HistoryRead,
+) -> String {
     let mut out = String::from("CopyPaste diagnostics\n");
     line(&mut out, "app", env!("CARGO_PKG_VERSION"));
     line(
@@ -117,6 +140,10 @@ fn report(service: &ServiceState, status: Option<&StatusData>) -> String {
         &format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
     );
     line(&mut out, "service", &service_line(service));
+    match history_read {
+        HistoryRead::Readable => line(&mut out, "history-read", "readable"),
+        HistoryRead::Failed { code } => line(&mut out, "history-read", &format!("failed ({code})")),
+    }
 
     let Some(status) = status else {
         // Stated rather than omitted: a report that simply stops is
@@ -142,10 +169,6 @@ fn report(service: &ServiceState, status: Option<&StatusData>) -> String {
     );
     line(&mut out, "backend", &status.clipboard_backend);
     line(&mut out, "items", &status.item_count.to_string());
-    if status.legacy_history_present {
-        line(&mut out, "legacy-history", "present, unopened");
-    }
-
     let c = &status.counters;
     line(&mut out, "uptime-secs", &c.uptime_secs.to_string());
     line(
@@ -217,7 +240,6 @@ mod tests {
             capture_running: true,
             clipboard_backend: "macos-pasteboard".into(),
             private_mode: false,
-            legacy_history_present: true,
             counters: DiagnosticCounters {
                 rejected_too_large: 3,
                 lost_intermediates: 1,
@@ -239,7 +261,7 @@ mod tests {
     /// Always through [`Diagnostics::new`], never the private builder: the
     /// sanitising step is part of what is under test.
     fn report_of(service: ServiceState, status: Option<StatusData>) -> String {
-        Diagnostics::new(service, status).report
+        Diagnostics::new(service, status, HistoryRead::Readable).report
     }
 
     #[test]
@@ -254,7 +276,6 @@ mod tests {
             "missed-changes: 1",
             "secrets-auto-deleted: 2",
             "index-rows-purged: 5",
-            "legacy-history: present",
         ] {
             assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
         }
@@ -295,7 +316,12 @@ mod tests {
             ours: true,
         };
 
-        let json = serde_json::to_string(&Diagnostics::new(service, Some(leaky))).unwrap();
+        let json = serde_json::to_string(&Diagnostics::new(
+            service,
+            Some(leaky),
+            HistoryRead::Readable,
+        ))
+        .unwrap();
         assert!(!json.contains("dmytro"), "username leaked:\n{json}");
         assert!(!json.contains(".sock"), "socket path leaked:\n{json}");
         assert!(!json.contains("/Users/"), "path leaked:\n{json}");
@@ -311,12 +337,12 @@ mod tests {
             "app",
             "platform",
             "service",
+            "history-read",
             "status",
             "protocol",
             "capture",
             "backend",
             "items",
-            "legacy-history",
             "uptime-secs",
             "refused-too-large",
             "missed-changes",
@@ -380,5 +406,18 @@ mod tests {
         );
         assert!(text.contains("different version"), "{text}");
         assert!(text.contains("adopted"), "{text}");
+    }
+
+    #[test]
+    fn the_report_includes_only_the_stable_history_error_code() {
+        let text = Diagnostics::new(
+            running(),
+            Some(status()),
+            HistoryRead::Failed {
+                code: "internal".into(),
+            },
+        )
+        .report;
+        assert!(text.contains("history-read: failed (internal)"), "{text}");
     }
 }

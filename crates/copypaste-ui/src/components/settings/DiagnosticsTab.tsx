@@ -6,14 +6,17 @@
  * No clipping: every number below is a count, which is what makes a copy button
  * safe to offer at all.
  */
-import { ClipboardCopy, RotateCw } from "lucide-react";
+import { LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import { useState } from "react";
 
+import { StateNotice } from "@/components/StateNotice";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RuntimeLogViewer } from "@/components/diagnostics/RuntimeLogViewer";
+import { SupportReportActions } from "@/components/diagnostics/SupportReportActions";
 import { Row } from "@/components/settings/Row";
 import { Section } from "@/components/settings/Section";
 import {
-  useCopyReport,
   useDiagnostics,
   useSweepNotices,
 } from "@/hooks/useDiagnostics";
@@ -33,32 +36,60 @@ const REAL_BACKENDS = /pasteboard|nspasteboard|system/i;
 export function DiagnosticsTab() {
   const { t } = useTranslation();
   const query = useDiagnostics();
+  const [tab, setTab] = useState("overview");
   useSweepNotices();
 
   if (query.error !== null && isUnavailable(query.error)) {
     return (
-      <p className="py-s-3 text-sm text-muted-foreground">
-        {t("settings.diagnostics.unavailable")}
-      </p>
+      <StateNotice
+        icon={TriangleAlert}
+        tone="attention"
+        title={t("settings.diagnostics.unavailable")}
+      />
     );
   }
 
   const data = query.data;
   if (data === undefined) {
     return (
-      <p className="py-s-3 text-sm text-muted-foreground">
-        {query.error !== null
-          ? t("errors.offline")
-          : t("settings.diagnostics.loading")}
-      </p>
+      <StateNotice
+        icon={query.error !== null ? TriangleAlert : LoaderCircle}
+        busy={query.error === null}
+        tone={query.error !== null ? "danger" : "info"}
+        title={
+          query.error !== null
+            ? t("errors.offline")
+            : t("settings.diagnostics.loading")
+        }
+        action={
+          query.error !== null
+            ? {
+                label: t("common.tryAgain"),
+                icon: RefreshCw,
+                onClick: () => void query.refetch(),
+              }
+            : undefined
+        }
+      />
     );
   }
 
   return (
-    <div className="flex flex-col gap-s-4">
+    <Tabs value={tab} onValueChange={setTab} className="flex min-h-full flex-col gap-s-4">
+      <TabsList
+        aria-label="Diagnostics views"
+        equalWidth
+        className="w-fit max-w-full self-center"
+      >
+        <TabsTrigger value="overview">Overview</TabsTrigger>
+        <TabsTrigger value="events">Runtime events</TabsTrigger>
+      </TabsList>
+      <TabsContent value="overview">
+        <div className="flex flex-col gap-s-4">
       <Section title={t("settings.diagnostics.running.title")}>
         <ServiceRow data={data} />
         <CaptureRows status={data.status} />
+        <HistoryReadRow historyRead={data.history_read} />
         <ProtocolRow data={data} />
         <StartedRow counters={data.status?.counters} />
       </Section>
@@ -70,11 +101,37 @@ export function DiagnosticsTab() {
         <DroppedRows status={data.status} />
       </Section>
 
-      <ReportSection
-        report={data.report}
-        onRefresh={() => void query.refetch()}
-      />
-    </div>
+      <ReportSection report={data.report} />
+        </div>
+      </TabsContent>
+      <TabsContent value="events" className="flex min-h-0 flex-1">
+        <RuntimeLogViewer />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function HistoryReadRow({
+  historyRead,
+}: {
+  historyRead: Diagnostics["history_read"];
+}) {
+  const { t } = useTranslation();
+  const readable = historyRead.state === "readable";
+
+  return (
+    <Row
+      title={t("settings.diagnostics.running.history.title")}
+      description={t("settings.diagnostics.running.history.description")}
+    >
+      <Badge variant={readable ? "ok" : "error"}>
+        {readable
+          ? t("settings.diagnostics.running.history.readable")
+          : t("settings.diagnostics.running.history.failed", {
+              code: historyRead.code,
+            })}
+      </Badge>
+    </Row>
   );
 }
 
@@ -99,9 +156,6 @@ function ServiceRow({ data }: { data: Diagnostics }) {
   if (service.state === "running") {
     if (!service.matches_app) {
       notes.push(t("settings.diagnostics.running.service.mismatch"));
-    }
-    if (!service.ours) {
-      notes.push(t("settings.diagnostics.running.service.adopted"));
     }
   }
 
@@ -229,16 +283,6 @@ function DroppedRows({ status }: { status: DiagnosticsStatus | null }) {
       <CountRow name="missed" count={c.lost_intermediates} />
       <CountRow name="swept" count={c.sensitive_swept} />
       <CountRow name="purged" count={c.index_purged} />
-      {status.legacy_history_present && (
-        <Row
-          title={t("settings.diagnostics.dropped.legacy.title")}
-          description={t("settings.diagnostics.dropped.legacy.description")}
-        >
-          <Badge variant="info">
-            {t("settings.diagnostics.dropped.legacy.present")}
-          </Badge>
-        </Row>
-      )}
     </>
   );
 }
@@ -275,15 +319,8 @@ function CountRow({
 /** The report is shown before it is copied: a user about to paste something
  *  into a public issue is entitled to read it first, and showing it is the only
  *  honest way to make the claim printed beside the button. */
-function ReportSection({
-  report,
-  onRefresh,
-}: {
-  report: string;
-  onRefresh: () => void;
-}) {
+function ReportSection({ report }: { report: string }) {
   const { t } = useTranslation();
-  const copy = useCopyReport();
   const empty = report.trim() === "";
 
   return (
@@ -297,20 +334,7 @@ function ReportSection({
       <p className="pb-s-2 text-xs text-muted-foreground">
         {t("settings.diagnostics.report.safety")}
       </p>
-      <div className="flex flex-wrap items-center gap-s-2">
-        <Button
-          size="sm"
-          disabled={copy.isPending || empty}
-          onClick={() => copy.mutate(report)}
-        >
-          <ClipboardCopy aria-hidden="true" />
-          {t("settings.diagnostics.report.copy")}
-        </Button>
-        <Button variant="outline" size="sm" onClick={onRefresh}>
-          <RotateCw aria-hidden="true" />
-          {t("settings.diagnostics.refresh")}
-        </Button>
-      </div>
+      <SupportReportActions report={empty ? undefined : report} compact />
     </Section>
   );
 }

@@ -16,9 +16,7 @@ Useful in a report: the affected component (`core`, `daemon`, `cli`, `p2p`,
 platform we ship to — [Unverified](#unverified) is the section to read before
 trusting anything else here.
 
-This document describes v2 only. v0.4.1 survives on
-`archive/v0.4.1-pre-rewrite` and differs in ways that matter — most sharply, it
-synced sensitive items and v2 does not.
+This document describes the current CopyPaste security model.
 
 ## At rest
 
@@ -73,8 +71,7 @@ What follows from a match:
   authorises the wipe below, and a re-derived one would be a deletion nobody
   reviewed.
 - **It never leaves the device.** Peer sync does not list it and cloud sync
-  refuses to upload it. This inverts v1, which synced sensitive items encrypted
-  and left the receiver to re-evaluate.
+  refuses to upload it.
 - **Automatic deletion exists and is off** — `sensitive_ttl_secs` defaults to
   `0`. Switched on, a flagged item is hard-deleted once its TTL elapses, but
   only if it was flagged at capture *and* its plaintext still scans as high
@@ -164,12 +161,10 @@ persisted" rather than "not in memory".
 
 What leaves the device is gated twice — the outbound query never lists a
 sensitive row, and the driver re-checks each item against the same detector
-before sealing it (manifest 05 AT-56: v1 had one enforcement point and it had a
-hole).
+before sealing it.
 
-Against v1's account-less relay this is a real regression in metadata privacy,
-taken deliberately: the backend now sees an account email, device ids, content
-types, payload sizes and timestamps. Content stays end-to-end encrypted.
+The backend sees an account email, device ids, content types, payload sizes and
+timestamps. Content stays end-to-end encrypted.
 
 ## Unverified
 

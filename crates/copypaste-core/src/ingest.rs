@@ -17,7 +17,7 @@ use tracing::warn;
 
 use crate::sensitive::Detector;
 use crate::storage::{Ingest, NewItem, Store, StoreError, StoredItem};
-use crate::{now_ms, CryptoError, Keyring};
+use crate::{CryptoError, Keyring, now_ms};
 
 /// What a successful ingest did.
 #[derive(Debug)]
@@ -162,6 +162,36 @@ pub fn ingest_into_with_capture_context(
     app_bundle_id: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    ingest_into_with_capture_source(
+        store,
+        detector,
+        keyring,
+        content,
+        content_type,
+        created_at,
+        sensitive_floor,
+        app_bundle_id,
+        None,
+        settings,
+    )
+}
+
+/// Ingest a locally captured value with a platform-resolved application id and
+/// display name. The name is cosmetic only; decisions continue to key on the
+/// stable id.
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_into_with_capture_source(
+    store: &Store,
+    detector: &Detector,
+    keyring: &Keyring,
+    content: &str,
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
     if content.trim().is_empty() {
         return Err(IngestError::Empty);
     }
@@ -204,6 +234,7 @@ pub fn ingest_into_with_capture_context(
         },
         created_at,
         app_bundle_id: app_bundle_id.map(str::to_owned),
+        app_name: app_name.map(str::to_owned),
         payload_metadata: None,
     })?;
 
@@ -258,6 +289,34 @@ pub fn ingest_binary_into_with_capture_context(
     payload_metadata: Option<&crate::FileMetadata>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
+    ingest_binary_into_with_capture_source(
+        store,
+        keyring,
+        bytes,
+        content_type,
+        created_at,
+        sensitive_floor,
+        app_bundle_id,
+        None,
+        payload_metadata,
+        settings,
+    )
+}
+
+/// Binary counterpart of [`ingest_into_with_capture_source`].
+#[allow(clippy::too_many_arguments)]
+pub fn ingest_binary_into_with_capture_source(
+    store: &Store,
+    keyring: &Keyring,
+    bytes: &[u8],
+    content_type: &str,
+    created_at: i64,
+    sensitive_floor: bool,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+    payload_metadata: Option<&crate::FileMetadata>,
+    settings: &copypaste_ipc::ConfigData,
+) -> Result<Ingested, IngestError> {
     if bytes.is_empty() {
         return Err(IngestError::Empty);
     }
@@ -282,6 +341,7 @@ pub fn ingest_binary_into_with_capture_context(
         search_text: None,
         created_at,
         app_bundle_id: app_bundle_id.map(str::to_owned),
+        app_name: app_name.map(str::to_owned),
         payload_metadata: payload_metadata
             .map(serde_json::to_string)
             .transpose()
@@ -395,18 +455,20 @@ mod tests {
         f.settings.max_image_size_bytes = 8;
         f.settings.max_file_size_bytes = 12;
 
-        assert!(ingest_binary_into_with_capture_context(
-            &f.store,
-            &f.keyring,
-            &[1; 8],
-            copypaste_ipc::content_type::IMAGE_PNG,
-            T0,
-            false,
-            None,
-            None,
-            &f.settings,
-        )
-        .is_ok());
+        assert!(
+            ingest_binary_into_with_capture_context(
+                &f.store,
+                &f.keyring,
+                &[1; 8],
+                copypaste_ipc::content_type::IMAGE_PNG,
+                T0,
+                false,
+                None,
+                None,
+                &f.settings,
+            )
+            .is_ok()
+        );
         assert!(matches!(
             ingest_binary_into_with_capture_context(
                 &f.store,
@@ -421,18 +483,20 @@ mod tests {
             ),
             Err(IngestError::TooLarge)
         ));
-        assert!(ingest_binary_into_with_capture_context(
-            &f.store,
-            &f.keyring,
-            &[3; 12],
-            copypaste_ipc::content_type::FILE,
-            T0 + 2,
-            false,
-            None,
-            None,
-            &f.settings,
-        )
-        .is_ok());
+        assert!(
+            ingest_binary_into_with_capture_context(
+                &f.store,
+                &f.keyring,
+                &[3; 12],
+                copypaste_ipc::content_type::FILE,
+                T0 + 2,
+                false,
+                None,
+                None,
+                &f.settings,
+            )
+            .is_ok()
+        );
         assert!(matches!(
             ingest_binary_into_with_capture_context(
                 &f.store,
@@ -486,11 +550,12 @@ mod tests {
         let stored = f.at("AKIAIOSFODNN7EXAMPLE", T0).unwrap().into_item();
 
         assert!(stored.is_sensitive);
-        assert!(f
-            .store
-            .search("AKIAIOSFODNN7EXAMPLE", 10)
-            .unwrap()
-            .is_empty());
+        assert!(
+            f.store
+                .search("AKIAIOSFODNN7EXAMPLE", 10)
+                .unwrap()
+                .is_empty()
+        );
         // ...and it is still stored and still readable: flagging is not
         // deleting (CLAUDE.md rule 4).
         assert_eq!(f.plaintext(&stored), "AKIAIOSFODNN7EXAMPLE");
@@ -502,12 +567,16 @@ mod tests {
         let text = "Send to alice@example.com from 192.168.1.100:8080";
         let findings = f.detector.scan_all(text);
         assert!(findings.iter().any(|finding| finding.rule == "email"));
-        assert!(findings
-            .iter()
-            .any(|finding| finding.rule == "ip_with_port"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.severity == crate::sensitive::Severity::Flag));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "ip_with_port")
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.severity == crate::sensitive::Severity::Flag)
+        );
 
         let stored = f.at(text, T0).unwrap().into_item();
         assert!(!stored.is_sensitive);
@@ -522,9 +591,11 @@ mod tests {
         let findings = f.detector.scan_all(text);
         assert_eq!(findings.len(), 2);
         assert!(findings.iter().any(|finding| finding.rule == "email"));
-        assert!(findings
-            .iter()
-            .any(|finding| finding.rule == "aws_access_key"));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "aws_access_key")
+        );
 
         let stored = f.at(text, T0).unwrap().into_item();
         assert!(stored.is_sensitive);

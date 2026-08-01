@@ -2,13 +2,11 @@ import { useState } from "react";
 import {
   Copy,
   Expand,
-  Eye,
-  EyeOff,
-  LoaderCircle,
   MoreHorizontal,
   Pin,
   PinOff,
   Trash2,
+  X,
 } from "lucide-react";
 
 import {
@@ -30,13 +28,9 @@ interface HistoryRowActionsProps {
   item: Item;
   android: boolean;
   active: boolean;
-  revealed: boolean;
-  revealPending: boolean;
   onCopy: (item: Item) => void;
   onTogglePin: (item: Item) => void;
   onDelete: (item: Item) => void;
-  onReveal: (item: Item) => void;
-  onHide: () => void;
   onOpen: (item: Item) => void;
 }
 
@@ -44,13 +38,9 @@ export function HistoryRowActions({
   item,
   android,
   active,
-  revealed,
-  revealPending,
   onCopy,
   onTogglePin,
   onDelete,
-  onReveal,
-  onHide,
   onOpen,
 }: HistoryRowActionsProps) {
   const { t } = useTranslation();
@@ -84,31 +74,6 @@ export function HistoryRowActions({
             <DialogTitle>{t("history.row.actions")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-1">
-            {item.is_sensitive &&
-              (revealed ? (
-                <Button
-                  variant="ghost"
-                  className="justify-start"
-                  onClick={() => run(onHide)}
-                >
-                  <EyeOff aria-hidden="true" />
-                  {t("history.row.hide")}
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  className="justify-start"
-                  disabled={revealPending}
-                  onClick={() => run(() => onReveal(item))}
-                >
-                  {revealPending ? (
-                    <LoaderCircle aria-hidden="true" className="animate-spin" />
-                  ) : (
-                    <Eye aria-hidden="true" />
-                  )}
-                  {t("history.row.reveal")}
-                </Button>
-              ))}
             <Button
               variant="ghost"
               className="justify-start"
@@ -144,7 +109,10 @@ export function HistoryRowActions({
           </div>
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline">{t("common.cancel")}</Button>
+              <Button variant="outline">
+                <X aria-hidden="true" />
+                {t("common.cancel")}
+              </Button>
             </DialogClose>
           </DialogFooter>
         </DialogContent>
@@ -154,34 +122,6 @@ export function HistoryRowActions({
 
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      {item.is_sensitive &&
-        (revealed ? (
-          <Button
-            variant="ghost"
-            aria-label={t("history.row.hide")}
-            title={t("history.row.hide")}
-            tabIndex={tabIndex}
-            className={ACTION}
-            onClick={onHide}
-          >
-            <EyeOff aria-hidden="true" />
-          </Button>
-        ) : (
-          <Button
-            variant="ghost"
-            aria-label={t("history.row.sensitiveReveal")}
-            title={t("history.row.reveal")}
-            tabIndex={tabIndex}
-            className={ACTION}
-            onClick={() => onReveal(item)}
-          >
-            {revealPending ? (
-              <LoaderCircle aria-hidden="true" className="animate-spin" />
-            ) : (
-              <Eye aria-hidden="true" />
-            )}
-          </Button>
-        ))}
       <Button
         variant="ghost"
         aria-label={t("history.row.open")}

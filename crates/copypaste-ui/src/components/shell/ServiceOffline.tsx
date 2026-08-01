@@ -8,23 +8,32 @@
  */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PlugZap, RefreshCw, TriangleAlert } from "lucide-react";
+import { AppWindow, Play, PlugZap, Stethoscope, TriangleAlert } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/EmptyState";
 import { useTranslation } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
-import { type ServiceState, restartService, serviceState, startService } from "@/lib/ipc";
+import {
+  type ServiceState,
+  hasBridge,
+  restartService,
+  serviceState,
+  startService,
+} from "@/lib/ipc";
+import { useUi } from "@/store/ui";
 
 export const SERVICE_KEY = ["service"] as const;
 
 /** Probed rather than polled: the history query's own failure is what brings
  *  this screen up, and a second timer against a service that is down adds
  *  traffic without adding information. */
-export function useServiceState() {
+export function useServiceState(enabled = true) {
   return useQuery<ServiceState>({
     queryKey: SERVICE_KEY,
     queryFn: serviceState,
+    enabled,
     retry: false,
   });
 }
@@ -32,20 +41,36 @@ export function useServiceState() {
 export function ServiceOffline() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const service = useServiceState();
+  const bridge = hasBridge();
+  const service = useServiceState(bridge);
+  const setView = useUi((state) => state.setView);
+  const setSettingsTab = useUi((state) => state.setSettingsTab);
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+
+  // The Vite URL is useful for styling the React app, but it is not the
+  // CopyPaste application: only Tauri injects the native command bridge.
+  // Calling the normal recovery actions here can never reach the daemon and
+  // incorrectly tells a developer that their background service is broken.
+  if (!bridge) {
+    return (
+      <EmptyState
+        icon={AppWindow}
+        tone="info"
+        title={t("shell.service.webPreview.title")}
+        body={t("shell.service.webPreview.body")}
+      />
+    );
+  }
 
   async function run(action: () => Promise<ServiceState>) {
     setBusy(true);
-    setFailure(null);
     try {
       await action();
       await qc.invalidateQueries();
     } catch (raw) {
-      // Classified, never rendered raw (INV-12). The bridge's sentences are
-      // already user-facing and already path-free.
-      setFailure(toFriendly(raw));
+      // A failed retry does not change the blocking state already described by
+      // this screen. Report it as a transient, path-safe bottom notification.
+      toast.error(toFriendly(raw), { id: "service-recovery" });
     } finally {
       // INV-30: released whatever happened.
       setBusy(false);
@@ -63,20 +88,29 @@ export function ServiceOffline() {
         icon={TriangleAlert}
         busy={busy}
         title={t("shell.service.outOfDate.title")}
-        body={t(
+        body={t("shell.service.outOfDate.body")}
+        action={
           state.ours
-            ? "shell.service.outOfDate.ours"
-            : "shell.service.outOfDate.theirs",
-        )}
-        action={{
-          label: t(
-            busy
-              ? "shell.service.outOfDate.restarting"
-              : "shell.service.outOfDate.restart",
-          ),
-          onClick: () => void run(restartService),
-        }}
-        secondary={<Failure message={failure} />}
+            ? {
+                label: t(
+                  busy
+                    ? "shell.service.outOfDate.restarting"
+                    : "shell.service.outOfDate.restart",
+                ),
+                icon: Play,
+                onClick: () => void run(restartService),
+              }
+            : undefined
+        }
+        secondary={
+          <DiagnosticsLink
+            onClick={() => {
+              setSettingsTab("diagnostics");
+              setView("settings");
+            }}
+          />
+        }
+        secondaryPlacement="attached"
       />
     );
   }
@@ -87,7 +121,15 @@ export function ServiceOffline() {
         icon={TriangleAlert}
         title={t("shell.service.notInstalled.title")}
         body={t("shell.service.notInstalled.body")}
-        secondary={<Recheck onClick={() => void qc.invalidateQueries()} />}
+        secondary={
+          <DiagnosticsLink
+            onClick={() => {
+              setSettingsTab("diagnostics");
+              setView("settings");
+            }}
+          />
+        }
+        secondaryPlacement="attached"
       />
     );
   }
@@ -98,37 +140,32 @@ export function ServiceOffline() {
       busy={busy}
       title={t("shell.service.stopped.title")}
       body={t("shell.service.stopped.body")}
-      action={{
+        action={{
         label: t(
           busy ? "shell.service.stopped.starting" : "shell.service.stopped.start",
-        ),
-        onClick: () => void run(startService),
+          ),
+          icon: Play,
+          onClick: () => void run(startService),
       }}
-      secondary={
-        <div className="flex flex-col items-center gap-s-2">
-          <Failure message={failure} />
-          <Recheck onClick={() => void qc.invalidateQueries()} />
-        </div>
-      }
-    />
+        secondary={
+          <DiagnosticsLink
+          onClick={() => {
+            setSettingsTab("diagnostics");
+            setView("settings");
+          }}
+          />
+        }
+        secondaryPlacement="attached"
+      />
   );
 }
 
-function Failure({ message }: { message: string | null }) {
-  if (message === null) return null;
-  return (
-    <p role="alert" className="text-xs text-err-strong">
-      {message}
-    </p>
-  );
-}
-
-function Recheck({ onClick }: { onClick: () => void }) {
+function DiagnosticsLink({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation();
   return (
-    <Button variant="ghost" size="sm" onClick={onClick}>
-      <RefreshCw aria-hidden="true" />
-      {t("shell.service.recheck")}
+    <Button variant="link" size="sm" onClick={onClick}>
+      <Stethoscope aria-hidden="true" />
+      {t("shell.service.diagnostics")}
     </Button>
   );
 }

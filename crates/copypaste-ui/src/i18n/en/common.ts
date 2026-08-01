@@ -15,6 +15,9 @@ export const common = {
    *  (A11Y-3). */
   replace: "Replace",
   continue: "Continue",
+  back: "Back",
+  done: "Done",
+  copy: "Copy",
 } as const;
 
 export const nav = {
@@ -28,19 +31,15 @@ export const nav = {
  *  the daemon's own text never reaches a user (INV-12), so there is exactly one
  *  authored message per kind and nothing to double-wrap. */
 export const errors = {
-  offline: "The background service is not running.",
+  offline: "The clipboard service is not running.",
   not_ready:
     "The clipboard service is initializing. This will only take a moment.",
   protocol_mismatch:
-    "CopyPaste and the background service are on incompatible versions. Restart both to resolve.",
+    "CopyPaste and the clipboard service are on incompatible versions. Restart both to resolve.",
   not_found: "That item is no longer in your clipboard history.",
-  invalid_request: "The background service rejected that request.",
-  unavailable: "This build of CopyPaste cannot do that yet.",
+  invalid_request: "CopyPaste couldn't complete that action. Try again.",
+  unavailable: "That action is unavailable.",
   auth_failed: "Sign in again, then check the account details and try once more.",
-  /** Says "unchanged" rather than only "can't read": the reassuring half is the
-   *  half a user cannot work out for themselves (CLAUDE.md rule 3). */
-  legacy_database:
-    "This clipboard history was written by CopyPaste 0.4. This version can't read it, and hasn't changed it.",
   key_locked:
     "CopyPaste couldn't reach this device's key store, so your history stayed locked.",
   key_unusable:
@@ -61,6 +60,6 @@ export const errors = {
    *  clipping (post-merge review, finding 4). */
   peer_not_found:
     "That device is no longer paired with this one. Refresh the device list to see what's still paired.",
-  internal: "The background service returned an error.",
-  unknown: "The background service returned an error.",
+  internal: "The clipboard service returned an error.",
+  unknown: "The clipboard service returned an error.",
 } as const;

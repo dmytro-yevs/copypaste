@@ -23,6 +23,7 @@ const searchItems = vi.fn();
 const getStatus = vi.fn();
 const copyItem = vi.fn();
 const revealItem = vi.fn();
+const getImagePreview = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -33,6 +34,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     getStatus: () => getStatus(),
     copyItem: (...a: unknown[]) => copyItem(...a),
     revealItem: (...a: unknown[]) => revealItem(...a),
+    getImagePreview: (...a: unknown[]) => getImagePreview(...a),
   };
 });
 
@@ -42,6 +44,11 @@ beforeEach(() => {
   getStatus.mockReset().mockResolvedValue(status());
   copyItem.mockReset().mockResolvedValue(item());
   revealItem.mockReset().mockResolvedValue(SECRET);
+  getImagePreview.mockReset().mockResolvedValue({
+    png_base64: "iVBORw0KGgo=",
+    width: 1,
+    height: 1,
+  });
   useUi.setState({ query: "", activeId: null });
   usePrefs.setState({ warnBeforeReveal: false });
 });
@@ -104,14 +111,22 @@ describe("a sensitive item in the detail view", () => {
   it("withholds it exactly as the row does", async () => {
     const { user } = withUser(<HistoryView />);
     const dialog = await open(user);
-    expect(dialog.textContent).toContain("Sensitive content hidden");
+    expect(
+      within(dialog).getByRole("button", {
+        name: "Sensitive content hidden — activate to reveal",
+      }),
+    ).toBeTruthy();
     expect(dialog.textContent).not.toContain(SECRET);
   });
 
   it("reveals through the same fetch the row uses, and re-masks when it ends", async () => {
     const { user } = withUser(<HistoryView />);
     const dialog = await open(user);
-    await user.click(within(dialog).getByRole("button", { name: /reveal/i }));
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Sensitive content hidden — activate to reveal",
+      }),
+    );
 
     await waitFor(() =>
       expect(
@@ -124,20 +139,56 @@ describe("a sensitive item in the detail view", () => {
     // the view holds no copy of it to show afterwards.
     window.dispatchEvent(new Event("blur"));
     await waitFor(() => expect(screen.queryAllByText(SECRET)).toHaveLength(0));
-    expect(screen.getByRole("dialog").textContent).toContain(
-      "Sensitive content hidden",
-    );
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Sensitive content hidden — activate to reveal",
+      }),
+    ).toBeTruthy();
   });
 
   it("asks first when the warning preference is on", async () => {
     usePrefs.setState({ warnBeforeReveal: true });
     const { user } = withUser(<HistoryView />);
     const dialog = await open(user);
-    await user.click(within(dialog).getByRole("button", { name: /reveal/i }));
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Sensitive content hidden — activate to reveal",
+      }),
+    );
 
     const confirm = await screen.findByRole("alertdialog");
     expect(confirm.textContent).toContain("Reveal sensitive content?");
     expect(revealItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("an image item in the detail view", () => {
+  beforeEach(() => {
+    const createObjectURL = vi.fn(() => "blob:image-preview");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    listItems.mockResolvedValue(
+      page([item({ id: "image", content: "[image]", content_type: "image/png" })]),
+    );
+  });
+
+  it("uses the bounded image preview instead of rendering the binary placeholder", async () => {
+    const { user } = withUser(<HistoryView />);
+    const dialog = await open(user);
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole("region", { name: "Image preview" }).querySelector("img")).toBeTruthy(),
+    );
+    expect(dialog.textContent).not.toContain("[image]");
+    expect(getImagePreview).toHaveBeenCalledWith("image");
+  });
+
+  it("copies the original image item rather than its preview", async () => {
+    const { user } = withUser(<HistoryView />);
+    const dialog = await open(user);
+    await user.click(within(dialog).getByRole("button", { name: "Copy image" }));
+
+    await waitFor(() => expect(copyItem).toHaveBeenCalledWith("image"));
   });
 });
 

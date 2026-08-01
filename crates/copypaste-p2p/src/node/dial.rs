@@ -40,6 +40,16 @@ impl Node {
         let token = PairingToken::parse(code).map_err(|_| NodeError::BadCode)?;
         let pairing_id = token.pairing_id();
 
+        // A code this node minted is deliberately present only as an inbound
+        // credential. Entering it back into the same device cannot create a
+        // peer; discard the pending credential so it cannot leave a phantom
+        // self-device behind.
+        if self.peers().pending_until(&pairing_id).is_some() {
+            self.peers().remove(&pairing_id).map_err(store_error)?;
+            self.republish();
+            return Err(NodeError::SelfPairing);
+        }
+
         // Checked before dialling as well as at the write. The write is the
         // authority, but finding out after a full sync round that the pairing
         // cannot be stored would mean this device had already sent its history
@@ -61,6 +71,10 @@ impl Node {
         let outcome = self.run_session(session, source).await.inspect_err(|_| {
             warn!(%pairing_id, "pairing session failed; not storing the peer");
         })?;
+
+        if outcome.peer_device_id == source.device_id() {
+            return Err(NodeError::SelfPairing);
+        }
 
         let peer = Peer {
             pairing_id: pairing_id.clone(),
@@ -104,6 +118,10 @@ impl Node {
         };
 
         let outcome = self.run_session(session, source).await?;
+        if outcome.peer_device_id == source.device_id() {
+            self.unpair(&peer.pairing_id)?;
+            return Err(NodeError::SelfPairing);
+        }
         self.touch_peer(
             peer,
             outcome.peer_listen_addr.or(Some(addr)),
@@ -190,6 +208,23 @@ mod tests {
             .expect_err("a malformed code must be refused");
         assert_eq!(err, NodeError::BadCode);
         assert_eq!(node.peers().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn entering_our_own_pending_code_removes_it_without_dialling() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let source = TestSource::new("me", Vec::new());
+        let pairing = node.pair_create("other device").expect("mint pairing");
+
+        let err = node
+            .pair_accept(&pairing.code, "127.0.0.1:1", &source)
+            .await
+            .expect_err("a device must not pair with itself");
+
+        assert_eq!(err, NodeError::SelfPairing);
+        assert!(node.peers().get(&pairing.pairing_id).is_none());
+        assert!(node.peers().psks().is_empty());
     }
 
     /// A well-formed code for a device that is not listening must not leave a

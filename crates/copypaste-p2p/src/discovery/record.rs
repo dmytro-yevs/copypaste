@@ -35,6 +35,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 
 use mdns_sd::{ResolvedService, ServiceInfo, TxtProperties};
+use sha2::{Digest, Sha256};
 use tracing::debug;
 
 use super::names::{
@@ -168,33 +169,34 @@ fn parse_advertisement(txt: &TxtProperties, fallback_name: &str) -> Option<Adver
     Some(Advertisement { name, pairing_ids })
 }
 
-/// One [`DiscoveredPeer`] per pairing id the service claims, so `find` is a
-/// direct lookup.
-pub(super) fn peers_from_resolved(resolved: &ResolvedService, now_ms: i64) -> Vec<DiscoveredPeer> {
+/// A candidate device from one resolved mDNS service. This deliberately
+/// returns a peer even with no pairing ids: discovery must find a fresh device
+/// before either side has created its first pairing.
+pub(super) fn peer_from_resolved(resolved: &ResolvedService, now_ms: i64) -> Option<DiscoveredPeer> {
     let Some(advertisement) = parse_advertisement(&resolved.txt_properties, &resolved.fullname)
-    else {
-        return Vec::new();
-    };
+    else { return None; };
     if resolved.port == 0 {
-        return Vec::new();
+        return None;
     }
 
     let addrs: Vec<IpAddr> = resolved.addresses.iter().map(|a| a.to_ip_addr()).collect();
-    let Some(ip) = best_addr(&addrs) else {
-        return Vec::new();
-    };
+    let Some(ip) = best_addr(&addrs) else { return None; };
     let addr = SocketAddr::new(ip, resolved.port);
 
-    advertisement
-        .pairing_ids
-        .into_iter()
-        .map(|pairing_id| DiscoveredPeer {
-            pairing_id,
-            name: advertisement.name.clone(),
-            addr,
-            last_seen_ms: now_ms,
-        })
-        .collect()
+    Some(DiscoveredPeer {
+        discovery_id: discovery_id(&resolved.fullname),
+        pairing_ids: advertisement.pairing_ids,
+        name: advertisement.name,
+        addr,
+        last_seen_ms: now_ms,
+    })
+}
+
+/// Keeps the mDNS fullname (which is attacker-controlled and can be long) out
+/// of the UI/IPC surface while remaining stable for this advertisement.
+fn discovery_id(fullname: &str) -> String {
+    let digest = Sha256::digest(fullname.as_bytes());
+    hex::encode(&digest[..16])
 }
 
 /// Prefer a routable IPv4 address: it is the one most likely to connect, and

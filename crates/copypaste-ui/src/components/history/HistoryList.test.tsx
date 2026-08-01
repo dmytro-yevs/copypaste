@@ -50,7 +50,6 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
     revealPendingId: null,
     previewLines: 2,
     onReveal: vi.fn(),
-    onHide: vi.fn(),
     onCopy,
     onQuickCopy,
     onTogglePin: vi.fn(),

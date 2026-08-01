@@ -16,7 +16,10 @@ const WEEK = 7 * DAY;
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const ABSOLUTE = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
-  timeStyle: "short",
+  // The compact age is only a scanning aid. When a person asks for the
+  // timestamp, show the locally-formatted time precisely enough to correlate
+  // it with an event in another app or device.
+  timeStyle: "medium",
 });
 
 /** Compact age for the row's meta line: "now", "4m", "2h", "3d", "6w". */
@@ -62,6 +65,8 @@ export function truncate(text: string, max: number): string {
  *  token, and an unrecognised kind renders as `unknown` rather than blank. */
 export type Kind =
   | "secret"
+  | "image"
+  | "file"
   | "url"
   | "mail"
   | "path"
@@ -90,6 +95,15 @@ export function kindOf(item: Item): Kind {
   if (item.content === null) return "unknown";
 
   const declared = item.content_type.toLowerCase();
+  if (declared.startsWith("image/")) return "image";
+  if (
+    declared.startsWith("application/") &&
+    !declared.includes("json") &&
+    !declared.includes("code")
+  ) {
+    return "file";
+  }
+  if (declared.startsWith("file/") || declared.includes("file")) return "file";
   if (declared.includes("json")) return "json";
   if (declared.includes("url") || declared.includes("uri")) return "url";
   if (declared.includes("code")) return "code";
@@ -116,6 +130,8 @@ export function kindOf(item: Item): Kind {
  *  lookup rather than an interpolation. */
 export const KIND_TEXT_CLASS: Record<Kind, string> = {
   secret: "text-c-secret",
+  image: "text-c-image",
+  file: "text-c-file",
   url: "text-c-url",
   mail: "text-c-mail",
   path: "text-c-path",

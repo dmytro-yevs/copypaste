@@ -9,15 +9,16 @@
  * is that interface, and the note names where the deletions are reported.
  */
 import { useState } from "react";
-import { RotateCw } from "lucide-react";
+import { LoaderCircle, RotateCw, TriangleAlert } from "lucide-react";
 
+import { StateNotice } from "@/components/StateNotice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ChoiceRow } from "@/components/settings/ChoiceRow";
 import { Row } from "@/components/settings/Row";
 import { Section } from "@/components/settings/Section";
+import { SourceExclusions } from "@/components/settings/SourceExclusions";
 import {
   DEDUP_WINDOW_SECS,
   HISTORY_LIMIT,
@@ -42,10 +43,12 @@ import {
   useServiceConfig,
   useSetServiceConfig,
 } from "@/hooks/useServiceConfig";
+import { useCaptureMutation, useCaptureState } from "@/hooks/useCapture";
 import { useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
+import { primaryOf } from "@/lib/capture";
 import { isUnavailable } from "@/lib/errors";
-import type { ConfigPatch } from "@/lib/ipc";
+import { captureArm, captureRefresh, captureSetEnabled, type ConfigPatch } from "@/lib/ipc";
 
 /** The field `ConfigData::field_liveness` marks `NeedsRestart`. Named rather
  *  than inferred from an empty list: the badge has to be on the row before
@@ -70,20 +73,36 @@ export function ServiceTab() {
 
   if (config.error !== null && isUnavailable(config.error)) {
     return (
-      <p className="py-s-3 text-sm text-muted-foreground">
-        {t("settings.service.unavailable")}
-      </p>
+      <StateNotice
+        icon={TriangleAlert}
+        tone="attention"
+        title={t("settings.service.unavailable")}
+      />
     );
   }
 
   const data = config.data?.config;
   if (data === undefined) {
     return (
-      <p className="py-s-3 text-sm text-muted-foreground">
-        {config.error !== null
-          ? t("errors.offline")
-          : t("settings.service.loading")}
-      </p>
+      <StateNotice
+        icon={config.error !== null ? TriangleAlert : LoaderCircle}
+        busy={config.error === null}
+        tone={config.error !== null ? "danger" : "info"}
+        title={
+          config.error !== null
+            ? t("errors.offline")
+            : t("settings.service.loading")
+        }
+        action={
+          config.error !== null
+            ? {
+                label: t("common.tryAgain"),
+                icon: RotateCw,
+                onClick: () => void config.refetch(),
+              }
+            : undefined
+        }
+      />
     );
   }
 
@@ -94,6 +113,7 @@ export function ServiceTab() {
 
   return (
     <div className="flex flex-col gap-s-4">
+      <CaptureControls />
       <Section
         title={t("settings.service.groups.capture.title")}
         description={t("settings.service.groups.capture.description")}
@@ -183,6 +203,12 @@ export function ServiceTab() {
             message: t("settings.service.validation.decodedImage"),
           }}
           onChange={(max_decoded_image_mb) => apply({ max_decoded_image_mb })}
+        />
+
+        <SourceExclusions
+          ids={data.excluded_app_bundle_ids}
+          disabled={busy}
+          onChange={(excluded_app_bundle_ids) => apply({ excluded_app_bundle_ids })}
         />
       </Section>
 
@@ -309,6 +335,79 @@ export function ServiceTab() {
   );
 }
 
+/**
+ * Background capture belongs in Service on both platforms.  The Android
+ * setup route remains available for its permission ladder, but this row is
+ * where a user can see and change the live capture state without having to
+ * hunt for a platform-specific screen.
+ */
+function CaptureControls() {
+  const { t } = useTranslation();
+  const capture = useCaptureState();
+  const run = useCaptureMutation();
+  const snapshot = capture.data;
+
+  if (snapshot === undefined) {
+    return (
+      <Section title={t("capture.title")}>
+        <Row title={t("capture.loading.title")}>
+          <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" />
+        </Row>
+      </Section>
+    );
+  }
+
+  const primary = primaryOf(snapshot.nextStep);
+  const canToggle = snapshot.rung !== "desktop" && snapshot.shizuku.supported;
+  const enabled = snapshot.health.state !== "disabled";
+  const action =
+    primary === "none"
+      ? undefined
+      : () =>
+          run.mutate(
+            primary === "recheck" ? () => captureRefresh() : () => captureArm(),
+          );
+  const actionLabel =
+    primary === "arm"
+      ? t("capture.setup.action.arm")
+      : primary === "permission"
+        ? t("capture.setup.action.permission")
+        : t("capture.setup.action.checkAgain");
+
+  return (
+    <Section title={t("capture.title")}>
+      <Row title={snapshot.headline} description={snapshot.detail ?? undefined}>
+        {action ? (
+          <Button disabled={run.isPending} onClick={action}>
+            <RotateCw
+              aria-hidden="true"
+              className={run.isPending ? "animate-spin motion-reduce:animate-none" : undefined}
+            />
+            {run.isPending ? t("capture.setup.action.busy") : actionLabel}
+          </Button>
+        ) : (
+          <Badge variant={snapshot.health.state === "working" ? "ok" : "secondary"}>
+            {snapshot.health.state === "working" ? "On" : "Off"}
+          </Badge>
+        )}
+      </Row>
+      {canToggle && (
+        <Row
+          title={t("capture.setup.enable.title")}
+          description={t("capture.setup.enable.body")}
+        >
+          <Switch
+            aria-label={t("capture.setup.enable.title")}
+            checked={enabled}
+            disabled={run.isPending}
+            onCheckedChange={(next) => run.mutate(() => captureSetEnabled(next))}
+          />
+        </Row>
+      )}
+    </Section>
+  );
+}
+
 interface SwitchRowProps {
   title: string;
   description: string;
@@ -330,19 +429,15 @@ function SwitchRow({
   note,
   onChange,
 }: SwitchRowProps) {
-  const { t } = useTranslation();
   return (
     <Row title={title} description={description} badge={badge} note={note}>
-      <div className="flex items-center gap-s-2">
-        <Switch
-          id={id}
-          aria-label={title}
-          checked={checked}
-          disabled={disabled}
-          onCheckedChange={onChange}
-        />
-        <Label htmlFor={id}>{t(checked ? "common.on" : "common.off")}</Label>
-      </div>
+      <Switch
+        id={id}
+        aria-label={title}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+      />
     </Row>
   );
 }

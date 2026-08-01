@@ -24,6 +24,9 @@ const rescanDiscovered = vi.fn();
 const unpair = vi.fn();
 const revokeDevice = vi.fn();
 const syncNow = vi.fn();
+const createPairing = vi.fn();
+const acceptPairing = vi.fn();
+const readPairingText = vi.fn();
 
 configure({ asyncUtilTimeout: 15_000 });
 vi.setConfig({ testTimeout: 20_000 });
@@ -39,6 +42,9 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     unpair: (pairingId: string) => unpair(pairingId),
     revokeDevice: (pairingId: string) => revokeDevice(pairingId),
     syncNow: (pairingId?: string) => syncNow(pairingId),
+    createPairing: (name: string) => createPairing(name),
+    acceptPairing: (code: string, addr: string) => acceptPairing(code, addr),
+    readPairingText: () => readPairingText(),
   };
 });
 
@@ -52,6 +58,15 @@ beforeEach(() => {
   unpair.mockReset().mockResolvedValue(undefined);
   revokeDevice.mockReset().mockResolvedValue(undefined);
   syncNow.mockReset().mockResolvedValue([]);
+  createPairing.mockReset().mockResolvedValue({
+    code: "pairing-code",
+    pairing_id: "ABC123pairing",
+    listen_addr: "192.168.1.2:7420",
+  });
+  acceptPairing.mockReset().mockResolvedValue([]);
+  readPairingText.mockReset().mockResolvedValue(
+    "copypaste://pair?code=pairing-code&id=ABC123pairing&addr=192.168.1.2%3A7420",
+  );
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -131,14 +146,27 @@ describe("cutting a device off", () => {
 });
 
 describe("pairing availability", () => {
-  it("does not offer an unbound pairing ceremony or credential-copy path", async () => {
-    withUser(<DevicesView />);
+  it("opens a verified QR and manual pairing ceremony", async () => {
+    const { user } = withUser(<DevicesView />);
 
-    expect((await screen.findByText(/verified security-code confirmation/i)).textContent).toMatch(
-      /verified security-code confirmation/i,
-    );
-    expect(screen.queryByRole("button", { name: /pair a new device|add a device/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /copy code/i })).toBeNull();
+    await user.click(await screen.findByRole("button", { name: /show code/i }));
+    await screen.findByRole("dialog");
+    await waitFor(() => expect(createPairing).toHaveBeenCalledWith("This device"));
+    expect(await screen.findByText("pairing-code")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /copy pairing details/i })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(await screen.findByRole("button", { name: /join device/i }));
+    const joinBody = screen.getByRole("region", { name: "Join another device" });
+    expect(joinBody.className).toContain("min-h-0");
+    expect(joinBody.className).toContain("overflow-y-auto");
+    await user.click(await screen.findByRole("button", { name: /paste pairing details/i }));
+    expect((screen.getByLabelText("Pairing code") as HTMLInputElement).value).toBe("pairing-code");
+    expect((screen.getByLabelText("Connection address") as HTMLInputElement).value).toBe("192.168.1.2:7420");
+    expect((screen.getByLabelText("Security code") as HTMLInputElement).value).toBe("ABC123");
+    expect((screen.getByRole("button", { name: /verify and pair/i }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("checkbox"));
+    expect((screen.getByRole("button", { name: /verify and pair/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("marks device-reported names as unverified for assistive technology", async () => {
@@ -150,6 +178,31 @@ describe("pairing availability", () => {
 });
 
 describe("the supported device surfaces", () => {
+  it("keeps the device header in the shared chrome surface", async () => {
+    withUser(<DevicesView />);
+
+    const title = await screen.findByRole("heading", { name: "Devices" });
+    expect(title.closest("header")?.classList.contains("chrome")).toBe(true);
+  });
+
+  it("never renders peer actions for this device's stale pairing placeholder", async () => {
+    listPeers.mockResolvedValue([
+      peer({ pairing_id: "self-pairing", name: "This device" }),
+    ]);
+    withUser(<DevicesView />);
+
+    expect(await screen.findByText("No other devices paired")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: /sync with this device now/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /unpair this device/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /revoke this device/i }),
+    ).toBeNull();
+  });
+
   it("shows this device from the status fields the app already exposes", async () => {
     withUser(<DevicesView />);
 
@@ -173,17 +226,17 @@ describe("the supported device surfaces", () => {
     await waitFor(() => expect(rescanDiscovered).toHaveBeenCalledOnce());
   });
 
-  it("shows discovered details as unverified without restoring Pair/Add", async () => {
+  it("offers a safe join flow for an unpaired discovered device", async () => {
     listDiscovered.mockResolvedValue([
       {
-        pairing_id: "nearby-1",
+        discovery_id: "nearby-1",
         name: "Nearby Phone",
         addr: "192.168.1.55:7420",
         last_seen_ms: Date.now(),
         paired: false,
       },
     ]);
-    withUser(<DevicesView />);
+    const { user } = withUser(<DevicesView />);
 
     expect(
       await screen.findByLabelText(
@@ -191,9 +244,11 @@ describe("the supported device surfaces", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("192.168.1.55:7420")).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: /pair a new device|add a device|pair nearby/i }),
-    ).toBeNull();
+    const join = screen.getAllByRole("button", { name: /join device/i });
+    expect(join).toHaveLength(2);
+    await user.click(join[1]);
+    const address = await screen.findByLabelText("Connection address");
+    expect((address as HTMLInputElement).value).toBe("192.168.1.55:7420");
   });
 });
 

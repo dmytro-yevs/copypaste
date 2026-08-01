@@ -18,7 +18,6 @@ const FRIENDLY = {
   invalid_request: "errors.invalid_request",
   unavailable: "errors.unavailable",
   auth_failed: "errors.auth_failed",
-  legacy_database: "errors.legacy_database",
   key_locked: "errors.key_locked",
   key_unusable: "errors.key_unusable",
   pairing_code: "errors.pairing_code",
@@ -92,7 +91,7 @@ export function ipcFailure(raw: unknown): IpcFailure {
   // value itself.
   console.error("[copypaste] malformed IPC failure");
 
-  // A malformed/legacy rejection has no trustworthy retry policy. Keeping the
+  // A malformed rejection has no trustworthy retry policy. Keeping the
   // historical unknown retry action is safe and does not reconstruct a code.
   return new IpcFailure("unknown", true);
 }

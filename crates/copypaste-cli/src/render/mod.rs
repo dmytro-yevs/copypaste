@@ -228,11 +228,11 @@ pub fn discovered_table(devices: &[DiscoveredDevice], now_ms: i64, empty: &str) 
     let mut table = Table::new();
     table.load_preset(presets::UTF8_HORIZONTAL_ONLY);
     table.set_content_arrangement(ContentArrangement::Disabled);
-    table.set_header(vec!["PAIRING ID", "NAME", "ADDRESS", "SEEN", "STATUS"]);
+    table.set_header(vec!["DISCOVERY ID", "NAME", "ADDRESS", "SEEN", "STATUS"]);
 
     for device in devices {
         table.add_row(vec![
-            device.pairing_id.clone(),
+            device.discovery_id.clone(),
             // Advertised by whoever is on the network, so it is truncated and
             // stripped like any other untrusted string and never used as an
             // identity.
@@ -319,6 +319,8 @@ mod tests {
             is_sensitive: false,
             origin_device_id: "9e1d0000-0000-4000-8000-00000000000a".into(),
             origin_device_name: Some("This Mac".into()),
+            source_app_bundle_id: None,
+            source_app_name: None,
             too_large_to_sync: false,
         }
     }

@@ -3,8 +3,8 @@
 use crate::config::ConfigData;
 use crate::error::ErrorCode;
 use crate::payload::{
-    BackupData, CloudStatusData, CloudSyncData, DiscoveredData, ExportData, ImportData, Item,
-    ItemPage, PairingData, PeerInfo, PrivateModeData, StatusData, SyncResult,
+    BackupData, CloudStatusData, CloudSyncData, DiscoveredData, ExportData, ImagePreview,
+    ImportData, Item, ItemPage, PairingData, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -185,6 +185,7 @@ pub enum ResponseData {
     Event(EventData),
     Page(ItemPage),
     Item(Item),
+    ImagePreview(ImagePreview),
     Count(u64),
     Pairing(PairingData),
     Peers(Vec<PeerInfo>),

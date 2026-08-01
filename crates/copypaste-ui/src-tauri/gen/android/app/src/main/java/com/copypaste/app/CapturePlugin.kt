@@ -1,8 +1,15 @@
 package com.copypaste.app
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
+import android.util.Base64
 import android.webkit.WebView
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
@@ -22,6 +29,8 @@ import app.tauri.plugin.Plugin
  */
 @TauriPlugin
 class CapturePlugin(private val activity: Activity) : Plugin(activity) {
+    private var pendingArm: PendingArm? = null
+    private var pendingShizukuArm: PendingArm? = null
 
     override fun load(webView: WebView) {
         super.load(webView)
@@ -42,32 +51,118 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun sourceAppIcon(invoke: Invoke) {
+        val packageId = invoke.getArgs().optString("packageId", "")
+        val icon = try {
+            val app = activity.applicationContext
+            val drawable = app.packageManager.getApplicationIcon(packageId)
+            iconPng(drawable)
+        } catch (_: Exception) {
+            null
+        }
+        invoke.resolve(icon ?: JSObject())
+    }
+
+    /**
+     * Enumerate launchable installed apps for the Settings exclusion picker.
+     * The package id is the only stable identity Rust persists; this layer only
+     * resolves labels and does not decide capture policy.
+     */
+    @Command
+    fun installedSourceApps(invoke: Invoke) {
+        val packageManager = activity.packageManager
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        val apps = packageManager.queryIntentActivities(intent, 0)
+            .asSequence()
+            .mapNotNull { info -> installedApp(info) }
+            .filter { app -> app.packageId != activity.packageName }
+            .distinctBy { app -> app.packageId }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { app -> app.label })
+            .toList()
+
+        val result = JSArray()
+        apps.forEach { app ->
+            result.put(JSObject().put("packageId", app.packageId).put("label", app.label))
+        }
+        invoke.resolve(result)
+    }
+
+    private fun installedApp(info: ResolveInfo): InstalledApp? {
+        val activityInfo = info.activityInfo ?: return null
+        val packageId = activityInfo.packageName.takeIf { it.isNotBlank() } ?: return null
+        val label = info.loadLabel(activity.packageManager).toString().trim().ifBlank { packageId }
+        return InstalledApp(packageId, label)
+    }
+
+    private data class InstalledApp(val packageId: String, val label: String)
+
+    private fun iconPng(drawable: Drawable): JSObject? {
+        val density = activity.resources.displayMetrics.density
+        val edge = (48 * density).toInt().coerceIn(32, 144)
+        val bitmap = Bitmap.createBitmap(edge, edge, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, edge, edge)
+        drawable.draw(canvas)
+        val output = java.io.ByteArrayOutputStream()
+        if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) return null
+        val bytes = output.toByteArray()
+        if (bytes.size > 512 * 1024) return null
+        return JSObject()
+            .put("pngBase64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            .put("width", edge)
+            .put("height", edge)
+    }
+
+    @Command
     fun arm(invoke: Invoke) {
         val args = invoke.getArgs()
         val title = args.optString("lostTitle", "Background capture stopped.")
         val body = args.optString("lostBody", "")
 
-        if (!ensureNotificationPermission()) {
-            // A grant can be revoked in Settings after a successful arm. Do
-            // not leave the persisted foreground-service intent claiming it
-            // can restart without the notification that makes it visible.
-            ShizukuClipboard.disarm()
-            CaptureService.stop(activity)
-            invoke.resolve(
-                JSObject()
-                    .put("probe", probeObject())
-                    .put("enabled", false)
-                    .put("listening", false)
-                    .put("outcome", "refused")
-                    .put("focused", true)
-                    .put("notificationPermission", false)
+        if (!CaptureNotifications.isPermissionGranted(activity)) {
+            // The permission result is asynchronous. Keep this exact request
+            // pending so a granted dialog continues the user's original arm,
+            // instead of making the control look as though it did nothing.
+            pendingArm = PendingArm(invoke, title, body)
+            active = this@CapturePlugin
+            activity.requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                NOTIFICATION_PERMISSION_REQUEST,
             )
             return
         }
 
-        val listening = ShizukuClipboard.arm {
+        finishArm(invoke, title, body)
+    }
+
+    private fun finishArm(invoke: Invoke, title: String, body: String) {
+        if (ShizukuClipboard.isRunning() && !ShizukuClipboard.hasPermission()) {
+            active = this@CapturePlugin
+            val pending = PendingArm(invoke, title, body)
+            pendingShizukuArm = pending
+            if (!ShizukuClipboard.requestPermission()) {
+                pendingShizukuArm = null
+                active = null
+                resolveArm(invoke, false)
+                return
+            }
+            activity.window.decorView.postDelayed(
+                {
+                    if (pendingShizukuArm === pending) {
+                        pendingShizukuArm = null
+                        active = null
+                        resolveArm(pending.invoke, false)
+                    }
+                },
+                SHIZUKU_PERMISSION_TIMEOUT_MS,
+            )
+            return
+        }
+        val listening = ShizukuClipboard.arm(activity) {
             CaptureService.lost(activity, title, body)
         }
+        pendingShizukuArm = null
+        if (pendingArm === null) active = null
         if (listening) {
             CaptureService.start(activity, "Capturing from every app.", title, body)
         } else {
@@ -77,6 +172,10 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             CaptureService.stop(activity)
         }
 
+        resolveArm(invoke, listening)
+    }
+
+    private fun resolveArm(invoke: Invoke, listening: Boolean) {
         invoke.resolve(
             JSObject()
                 .put("probe", probeObject())
@@ -87,7 +186,32 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
                 // refusal early rather than to claim success.
                 .put("outcome", if (listening) ShizukuClipboard.readOutcome() else "refused")
                 .put("focused", true)
-                .put("notificationPermission", true)
+            .put("notificationPermission", true)
+        )
+    }
+
+    private fun onNotificationPermissionResult(granted: Boolean) {
+        val pending = pendingArm ?: return
+        pendingArm = null
+        active = null
+        if (granted) {
+            finishArm(pending.invoke, pending.title, pending.body)
+            return
+        }
+
+        // A grant can be revoked in Settings after a successful arm. Do not
+        // leave the persisted foreground-service intent claiming it can
+        // restart without the notification that makes it visible.
+        ShizukuClipboard.disarm()
+        CaptureService.stop(activity)
+        pending.invoke.resolve(
+            JSObject()
+                .put("probe", probeObject())
+                .put("enabled", false)
+                .put("listening", false)
+                .put("outcome", "refused")
+                .put("focused", true)
+                .put("notificationPermission", false)
         )
     }
 
@@ -141,6 +265,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
                     .put("text", it.text)
                     .put("source", it.source)
                     .put("atMs", it.atMs)
+                    .put("sourceAppBundleId", it.sourceAppBundleId)
+                    .put("sourceAppName", it.sourceAppName)
             )
         }
         invoke.resolve(
@@ -187,14 +313,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
      * make "background capture stopped" a silent event — the one outcome the
      * whole feature exists to prevent.
      */
-    private fun ensureNotificationPermission(): Boolean {
-        val granted = CaptureNotifications.isPermissionGranted(activity)
-        if (!granted) {
-            activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 4920)
-        }
-        return granted
-    }
-
     /**
      * Read once and clear, so the frontend opens the rung 2 screen exactly on
      * the probe that follows the notification tap and not on every one after.
@@ -214,6 +332,42 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     companion object {
+        private const val NOTIFICATION_PERMISSION_REQUEST = 4920
+        private const val SHIZUKU_PERMISSION_REQUEST = 4919
+        private const val SHIZUKU_PERMISSION_TIMEOUT_MS = 30_000L
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+        private var active: CapturePlugin? = null
+
+        init {
+            Shizuku.addRequestPermissionResultListener { requestCode, result ->
+                if (requestCode != SHIZUKU_PERMISSION_REQUEST) return@addRequestPermissionResultListener
+                active?.onShizukuPermissionResult(
+                    result == PackageManager.PERMISSION_GRANTED,
+                )
+            }
+        }
+
+        fun onRequestPermissionsResult(requestCode: Int, granted: Boolean) {
+            if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+                active?.onNotificationPermissionResult(granted)
+            }
+        }
     }
+
+    private fun onShizukuPermissionResult(granted: Boolean) {
+        val pending = pendingShizukuArm ?: return
+        pendingShizukuArm = null
+        if (granted) {
+            finishArm(pending.invoke, pending.title, pending.body)
+            return
+        }
+        active = null
+        resolveArm(pending.invoke, false)
+    }
+
+    private data class PendingArm(
+        val invoke: Invoke,
+        val title: String,
+        val body: String,
+    )
 }

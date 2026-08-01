@@ -9,8 +9,8 @@ use std::sync::Mutex;
 
 use crate::backend::{BackendError, Result};
 
-use super::model::{CaptureModel, CaptureSnapshot, CaptureSource, Clip};
 use super::CaptureControl;
+use super::model::{CaptureModel, CaptureSnapshot, CaptureSource, Clip};
 
 /// Why every mutating operation refuses here.
 ///

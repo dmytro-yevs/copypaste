@@ -161,6 +161,7 @@ mod tests {
                 },
                 created_at,
                 app_bundle_id: None,
+                app_name: None,
                 payload_metadata: None,
             })
             .expect("insert")

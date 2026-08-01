@@ -8,7 +8,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, RotateCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,13 +25,10 @@ const REPO = "https://github.com/dmytro-yevs/copypaste";
 
 /**
  * Release notes, not a changelog file: nothing in the tree generates one, and
- * `release.yml` publishes notes to that page on every tag. No privacy link,
- * because the only privacy document is about cloud sync, which this build has
- * no account for.
+ * `release.yml` publishes notes to that page on every tag.
  *
- * **Unverified:** no external opener is registered in `src-tauri`, so these do
- * nothing on macOS or Android yet. `target="_blank"` is what keeps that a dead
- * link rather than a navigation replacing the app with a web page.
+ * `tauri-plugin-opener` handles the `_blank` targets through the platform's
+ * default browser, so the WebView is never replaced by a web page.
  */
 const LINKS = [
   { key: "repository", href: REPO },
@@ -166,6 +163,7 @@ export function AboutTab() {
         description={t("settings.about.reset.description")}
       >
         <Button variant="outline" size="sm" onClick={resetPrefs}>
+          <RotateCcw aria-hidden="true" />
           {t("settings.about.reset.action")}
         </Button>
       </Row>

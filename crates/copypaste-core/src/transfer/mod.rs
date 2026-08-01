@@ -34,7 +34,7 @@ mod export;
 mod import;
 
 pub use export::export;
-pub use import::{import, ImportError, MAX_IMPORT_ITEMS};
+pub use import::{ImportError, MAX_IMPORT_ITEMS, import};
 
 #[cfg(test)]
 mod testkit;

@@ -114,6 +114,12 @@ async fn serve_peer<S, F>(
 
     match outcome {
         Ok(Ok(outcome)) => {
+            if outcome.peer_device_id == source.device_id() {
+                if let Err(error) = node.unpair(&pairing_id) {
+                    warn!(%pairing_id, %error, "could not remove a self-pairing");
+                }
+                return;
+            }
             info!(
                 %pairing_id,
                 sent = outcome.stats.sent,

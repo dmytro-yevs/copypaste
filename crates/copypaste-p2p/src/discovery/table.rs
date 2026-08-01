@@ -24,9 +24,12 @@ pub const MAX_PEERS: usize = 256;
 /// "trusted" — trust comes only from having been paired.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredPeer {
-    /// From the TXT record; may be unknown to us, and is unverified until the
-    /// Noise handshake succeeds.
-    pub pairing_id: String,
+    /// Opaque identifier for one mDNS service. It is for list de-duplication
+    /// only; trust still comes exclusively from the Noise handshake.
+    pub discovery_id: String,
+    /// Pairings this device says it can accept. A fresh device has none and
+    /// must still be discoverable so the user can start a pairing ceremony.
+    pub pairing_ids: Vec<String>,
     /// Display name the peer advertised. Untrusted, unvalidated beyond length
     /// and control-character stripping — never use it as an identity.
     pub name: String,
@@ -34,10 +37,9 @@ pub struct DiscoveredPeer {
     pub last_seen_ms: i64,
 }
 
-/// Keyed by `(service fullname, pairing id)`: one device may hold several
-/// pairings, and two devices may legitimately claim the same pairing id
-/// (a reinstall, a device that moved networks) without evicting each other.
-type PeerKey = (String, String);
+/// Keyed by service fullname. One resolved service is one candidate device,
+/// regardless of how many pairings it advertises.
+type PeerKey = String;
 
 #[derive(Debug)]
 pub(super) struct PeerTable {
@@ -61,17 +63,14 @@ impl PeerTable {
         }
     }
 
-    pub(super) fn observe(&mut self, fullname: &str, peers: Vec<DiscoveredPeer>, now_ms: i64) {
+    pub(super) fn observe(&mut self, fullname: &str, peer: DiscoveredPeer, now_ms: i64) {
         self.prune(now_ms);
-        for peer in peers {
-            self.entries
-                .insert((fullname.to_string(), peer.pairing_id.clone()), peer);
-        }
+        self.entries.insert(fullname.to_string(), peer);
         self.enforce_cap();
     }
 
     pub(super) fn remove_service(&mut self, fullname: &str) {
-        self.entries.retain(|(service, _), _| service != fullname);
+        self.entries.retain(|service, _| service != fullname);
     }
 
     fn prune(&mut self, now_ms: i64) {
@@ -106,8 +105,8 @@ impl PeerTable {
         self.prune(now_ms);
         let mut peers: Vec<DiscoveredPeer> = self.entries.values().cloned().collect();
         peers.sort_by(|a, b| {
-            a.pairing_id
-                .cmp(&b.pairing_id)
+            a.discovery_id
+                .cmp(&b.discovery_id)
                 .then_with(|| a.addr.cmp(&b.addr))
         });
         peers
@@ -117,7 +116,7 @@ impl PeerTable {
         self.prune(now_ms);
         self.entries
             .values()
-            .filter(|peer| peer.pairing_id == pairing_id)
+            .filter(|peer| peer.pairing_ids.iter().any(|id| id == pairing_id))
             .max_by(|a, b| {
                 a.last_seen_ms
                     .cmp(&b.last_seen_ms)
@@ -138,7 +137,8 @@ mod tests {
 
     fn peer(pairing_id: &str, last_seen_ms: i64) -> DiscoveredPeer {
         DiscoveredPeer {
-            pairing_id: pairing_id.to_string(),
+            discovery_id: format!("device-{pairing_id}"),
+            pairing_ids: vec![pairing_id.to_string()],
             name: "peer".to_string(),
             addr: SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
@@ -155,7 +155,7 @@ mod tests {
         let mut table = PeerTable::new(1_000, MAX_PEERS);
         table.observe(
             "a._copypaste._tcp.local.",
-            vec![peer("fresh", 10_000)],
+            peer("fresh", 10_000),
             10_000,
         );
         assert_eq!(table.snapshot(10_500).len(), 1);
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn a_clock_that_steps_backwards_expires_rather_than_strands() {
         let mut table = PeerTable::new(1_000, MAX_PEERS);
-        table.observe("a._copypaste._tcp.local.", vec![peer("x", 10_000)], 10_000);
+        table.observe("a._copypaste._tcp.local.", peer("x", 10_000), 10_000);
         // saturating_sub floors at 0, which is inside the TTL, so the entry
         // survives one backwards step instead of being pinned forever.
         assert_eq!(table.snapshot(0).len(), 1);
@@ -179,12 +179,12 @@ mod tests {
     fn a_departing_peer_is_removed_immediately() {
         let mut table = PeerTable::default();
         let now = now_ms();
-        table.observe("gone._copypaste._tcp.local.", vec![peer("x", now)], now);
-        table.observe("here._copypaste._tcp.local.", vec![peer("y", now)], now);
+        table.observe("gone._copypaste._tcp.local.", peer("x", now), now);
+        table.observe("here._copypaste._tcp.local.", peer("y", now), now);
         table.remove_service("gone._copypaste._tcp.local.");
         let remaining = table.snapshot(now);
         assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].pairing_id, "y");
+        assert_eq!(remaining[0].pairing_ids, ["y"]);
     }
 
     #[test]
@@ -193,11 +193,20 @@ mod tests {
         let now = now_ms();
         table.observe(
             "laptop._copypaste._tcp.local.",
-            vec![peer("a", now), peer("b", now)],
+            DiscoveredPeer {
+                discovery_id: "laptop".into(),
+                pairing_ids: vec!["a".into(), "b".into()],
+                name: "peer".into(),
+                addr: std::net::SocketAddr::new(
+                    std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 2)),
+                    crate::DEFAULT_PORT,
+                ),
+                last_seen_ms: now,
+            },
             now,
         );
-        assert_eq!(table.snapshot(now).len(), 2);
-        assert_eq!(table.find("a", now).unwrap().pairing_id, "a");
+        assert_eq!(table.snapshot(now).len(), 1);
+        assert_eq!(table.find("a", now).unwrap().discovery_id, "laptop");
     }
 
     #[test]
@@ -206,10 +215,10 @@ mod tests {
         let now = now_ms();
         table.observe(
             "old._copypaste._tcp.local.",
-            vec![peer("dup", now - 5_000)],
+            peer("dup", now - 5_000),
             now,
         );
-        table.observe("new._copypaste._tcp.local.", vec![peer("dup", now)], now);
+        table.observe("new._copypaste._tcp.local.", peer("dup", now), now);
         assert_eq!(table.find("dup", now).unwrap().last_seen_ms, now);
     }
 
@@ -221,7 +230,7 @@ mod tests {
         for i in 0..500 {
             table.observe(
                 &format!("flood-{i}._copypaste._tcp.local."),
-                vec![peer(&format!("id-{i}"), 1_000 + i as i64)],
+                peer(&format!("id-{i}"), 1_000 + i as i64),
                 1_000 + i as i64,
             );
             assert!(table.entries.len() <= 8);
@@ -236,7 +245,7 @@ mod tests {
         let mut clock = 1_000i64;
         table.observe(
             "real._copypaste._tcp.local.",
-            vec![peer("real", clock)],
+            peer("real", clock),
             clock,
         );
 
@@ -245,12 +254,12 @@ mod tests {
             // The real peer keeps refreshing, as a live device does.
             table.observe(
                 "real._copypaste._tcp.local.",
-                vec![peer("real", clock)],
+                peer("real", clock),
                 clock,
             );
             table.observe(
                 &format!("flood-{i}._copypaste._tcp.local."),
-                vec![peer(&format!("junk-{i}"), clock)],
+                peer(&format!("junk-{i}"), clock),
                 clock,
             );
         }

@@ -292,13 +292,9 @@ fi
 # ---------------------------------------------------------------------------
 group "A re-signed binary and the Keychain (REPORTED)"
 # ---------------------------------------------------------------------------
-# Port manifest 02 §3.8 records that v1 used the Keychain only under a stable
-# Developer ID, and the file store otherwise, because an ad-hoc signature's
-# designated requirement is its cdhash — which changes on every build, so the
-# ACL on the item no longer matches and macOS raises a prompt. v2 uses the
-# Keychain unconditionally and ADR-0001 signs ad-hoc. If that combination is
-# broken, every update leaves a user unable to open their history, and this is
-# where it shows: re-sign the daemon, changing its cdhash, and read again.
+# An ad-hoc signature's designated requirement is its cdhash — which changes on
+# every build, so a Keychain ACL can stop matching and macOS can raise a prompt.
+# This check re-signs the daemon and reads again to catch that failure.
 codesign --force --sign - --identifier com.copypaste.copypaste-daemon --timestamp=none \
     "$APP/Contents/MacOS/copypaste-daemon" >/dev/null 2>&1
 "$APP/Contents/MacOS/copypaste-daemon" --foreground >"$LOGS/resigned.log" 2>&1 &

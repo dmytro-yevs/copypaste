@@ -28,8 +28,11 @@ export function Row({
   children,
 }: RowProps) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-s-3 border-b border-divider py-s-3 last:border-b-0">
-      <div className="flex min-w-[200px] max-w-[380px] flex-1 flex-col gap-s-1">
+    <div
+      data-settings-search-target={`row:${title}`}
+      className="relative flex flex-wrap items-start justify-between gap-s-3 px-s-3 py-s-3 last:after:hidden after:absolute after:right-s-3 after:bottom-0 after:left-s-3 after:h-px after:bg-divider"
+    >
+      <div className="flex min-w-0 max-w-[380px] flex-1 flex-col gap-s-1 sm:min-w-[200px]">
         <span className="flex flex-wrap items-center gap-s-2 text-sm font-medium">
           {title}
           {badge}
@@ -41,7 +44,7 @@ export function Row({
         )}
         {note}
       </div>
-      <div className="flex shrink-0 items-center">{children}</div>
+      <div className="flex min-w-0 shrink-0 items-center max-sm:w-full max-sm:justify-end">{children}</div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 //! Platform shell integration: desktop tray, shortcuts and launch-at-login;
 //! window, notification and screen-protection helpers on every platform.
 
+pub mod appearance;
 #[cfg(not(target_os = "android"))]
 pub mod autostart;
 #[cfg(not(target_os = "android"))]

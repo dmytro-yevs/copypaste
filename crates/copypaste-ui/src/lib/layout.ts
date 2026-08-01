@@ -16,9 +16,9 @@ export const TITLE_LINE_PX = 21;
 
 /** `--fs-xs` 12px × `--lh-normal` 1.5, and the gap above it. */
 export const META_LINE_PX = 18;
-export const META_MARGIN_PX = 4;
+export const META_MARGIN_PX = 8;
 
-/** 21 + 4 + 18 + 20 = 63. Guarantees a strictly positive gap to the next row. */
+/** 21 + 8 + 18 + 20 = 67. Guarantees a strictly positive gap to the next row. */
 export const SINGLE_LINE_FLOOR =
   TITLE_LINE_PX + META_MARGIN_PX + META_LINE_PX + ROW_PAD_V;
 
@@ -26,6 +26,12 @@ export const SINGLE_LINE_FLOOR =
 export const MIN_PREVIEW_LINES = 1;
 export const MAX_PREVIEW_LINES = 6;
 export const DEFAULT_PREVIEW_LINES = 2;
+
+/** Images use the same row composition as text, but can use more vertical
+ * room so a copied screenshot remains recognizable. */
+// 3.75 is 1.5× the previous 2.5× cap. Keep this single shared cap so History
+// and Quick Paste reserve identical virtual space on every platform.
+export const IMAGE_PREVIEW_HEIGHT_MULTIPLIER = 3.75;
 
 /** A function of the *setting*, never of the item (INV-5). Lowering it shrinks
  *  total height below the scroll offset, which is what INV-6's clamp is for. */
@@ -35,6 +41,33 @@ export function rowHeight(previewLines: number): number {
     Math.max(MIN_PREVIEW_LINES, Math.round(previewLines)),
   );
   return SINGLE_LINE_FLOOR + (lines - 1) * TITLE_LINE_PX;
+}
+
+/**
+ * The preview itself occupies the same vertical space as the configured text
+ * lines. Metadata keeps its own reserved line below it, so image rows and text
+ * rows always fit the same virtualized height.
+ */
+export function rowPreviewHeight(previewLines: number): number {
+  const lines = Math.min(
+    MAX_PREVIEW_LINES,
+    Math.max(MIN_PREVIEW_LINES, Math.round(previewLines)),
+  );
+  return lines * TITLE_LINE_PX;
+}
+
+/** The maximum rendered height of an image preview for a given line setting. */
+export function imagePreviewHeight(previewLines: number): number {
+  return rowPreviewHeight(previewLines) * IMAGE_PREVIEW_HEIGHT_MULTIPLIER;
+}
+
+/**
+ * Image rows reserve the image cap, metadata, and the same vertical padding as
+ * every other row. This keeps virtualized offsets correct without measuring
+ * image content at runtime.
+ */
+export function imageRowHeight(previewLines: number): number {
+  return imagePreviewHeight(previewLines) + META_MARGIN_PX + META_LINE_PX + ROW_PAD_V;
 }
 
 /** §5.2: 240px above and below. TanStack counts rows, so convert. */

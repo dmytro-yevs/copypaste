@@ -11,6 +11,9 @@
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-set-focus",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:event:default",
+    "deep-link:default",
+    "store:default"
   ]
 }

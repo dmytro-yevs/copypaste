@@ -26,6 +26,24 @@ class NoopResizeObserver implements ResizeObserver {
 
 vi.stubGlobal("ResizeObserver", NoopResizeObserver);
 
+const storage = new Map<string, string>();
+const localStorageStub: Storage = {
+  get length() {
+    return storage.size;
+  },
+  clear: () => storage.clear(),
+  getItem: (key) => storage.get(key) ?? null,
+  key: (index) => [...storage.keys()][index] ?? null,
+  removeItem: (key) => storage.delete(key),
+  setItem: (key, value) => storage.set(key, String(value)),
+};
+
+Object.defineProperty(window, "localStorage", {
+  configurable: true,
+  value: localStorageStub,
+});
+vi.stubGlobal("localStorage", localStorageStub);
+
 for (const [property, value] of [
   ["clientHeight", VIEWPORT_PX],
   ["clientWidth", VIEWPORT_PX],

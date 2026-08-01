@@ -12,6 +12,9 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    environmentOptions: {
+      jsdom: { url: "http://localhost" },
+    },
     globals: false,
     include: ["src/**/*.test.{ts,tsx}"],
     // jsdom has no layout and no ResizeObserver; see the file for what is

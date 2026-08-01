@@ -10,7 +10,7 @@
 use copypaste_ipc::{ErrorCode, ExportItem, Response, ResponseData};
 use tracing::warn;
 
-use super::messages::{storage_error, MSG_ENCRYPT, MSG_IMPORT_EMPTY, MSG_IMPORT_TOO_MANY};
+use super::messages::{MSG_ENCRYPT, MSG_IMPORT_EMPTY, MSG_IMPORT_TOO_MANY, storage_error};
 use crate::AppState;
 
 pub(super) fn export(state: &AppState, id: u64, limit: u32, include_sensitive: bool) -> Response {
@@ -110,9 +110,11 @@ mod tests {
         let data = export_of(&state, false);
         assert_eq!(data.items.len(), 1);
         assert_eq!(data.skipped_sensitive, 1);
-        assert!(!serde_json::to_string(&data)
-            .unwrap()
-            .contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(
+            !serde_json::to_string(&data)
+                .unwrap()
+                .contains("AKIAIOSFODNN7EXAMPLE")
+        );
         assert_eq!(export_of(&state, true).items.len(), 2);
     }
 

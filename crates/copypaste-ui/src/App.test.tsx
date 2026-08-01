@@ -19,6 +19,22 @@ describe("desktop shell", () => {
     );
   });
 
+  it("uses the desktop-only ambient surface treatment", () => {
+    const { container } = withUser(<App />);
+
+    expect(container.firstElementChild?.classList.contains("app-surface--desktop")).toBe(true);
+  });
+
+  it("keeps desktop navigation items in a compact group", () => {
+    withUser(<App />);
+
+    const navigation = screen.getByRole("navigation", { name: "Primary" });
+    const items = screen.getAllByRole("listitem");
+
+    expect(navigation.querySelector("ul")?.className).toContain("shrink-0");
+    expect(items.every((item) => !item.classList.contains("flex-1"))).toBe(true);
+  });
+
   it("loads an inactive screen when its navigation item is selected", async () => {
     const { user } = withUser(<App />);
 

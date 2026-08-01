@@ -25,11 +25,11 @@
 use copypaste_ipc::{EventData, Response, ResponseData};
 use futures_util::StreamExt;
 use tokio::net::unix::OwnedWriteHalf;
-use tokio::sync::broadcast::{error::RecvError, Receiver};
+use tokio::sync::broadcast::{Receiver, error::RecvError};
 use tokio::sync::watch;
 use tracing::debug;
 
-use super::listener::{send, Reader};
+use super::listener::{Reader, send};
 
 /// Send events until the client hangs up or the daemon stops.
 ///

@@ -4,7 +4,7 @@
 use tauri::{AppHandle, State};
 
 use crate::backend::BackendError;
-use crate::shell::shortcut::{ShortcutSettings, DEFAULT_SHORTCUT};
+use crate::shell::shortcut::{DEFAULT_SHORTCUT, ShortcutSettings};
 
 type Result<T> = std::result::Result<T, BackendError>;
 

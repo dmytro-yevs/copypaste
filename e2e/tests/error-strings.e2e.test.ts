@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { execa } from "execa";
@@ -126,54 +126,6 @@ describe("a startup failure no retry can clear", () => {
       expectNoFilesystemPath(message, daemon.dataHome);
     } finally {
       await halted?.stop();
-      await daemon.stop();
-    }
-  }, 120_000);
-});
-
-/**
- * CLAUDE.md rule 3's second obligation, end to end: a daemon that meets a
- * CopyPaste 0.4 history **starts anyway** and **says so**.
- *
- * Both halves are the test. Blocking would take a working v2 away from a user
- * who is content to start fresh; staying silent is the upgrade the post-merge
- * review found — a fresh empty history and no explanation, which reads as data
- * loss.
- */
-describe("a CopyPaste 0.4 history on the device", () => {
-  test("is found, reported, and left exactly as it was", async () => {
-    const daemon = await startDaemon();
-    try {
-      const dataDir = dataDirOf(daemon.dataHome);
-      const legacy = path.join(dataDir, "clipboard.db");
-
-      // An encrypted v0.4 file cannot be staged — v2 cannot derive v1's key —
-      // so stage the one thing that is observable about one: SQLCipher-shaped
-      // bytes under v0.4's filename, which is the branch
-      // `copypaste_core::storage::legacy` identifies by name.
-      writeFileSync(legacy, Buffer.alloc(3 * 4096, 0x5a));
-      const before = statSync(legacy);
-
-      await daemon.restart();
-
-      const status = await daemon.cli(["status"]);
-      expect(status.exitCode).toBe(0);
-      expect(status.stdout).toMatch(/CopyPaste 0\.4/);
-      expect(status.stdout).toMatch(/not changed it/);
-      expectNoFilesystemPath(status.stdout, daemon.dataHome);
-
-      // A v0.4 history is a notice, not a refusal: v2 still works.
-      await daemon.add("captured after the upgrade");
-      expect((await daemon.items()).length).toBeGreaterThan(0);
-
-      // And the old file is as it was — not grown, not restamped, and with no
-      // journal or WAL beside it. A downgrade has to find it intact.
-      const after = statSync(legacy);
-      expect(after.size).toBe(before.size);
-      expect(after.mtimeMs).toBe(before.mtimeMs);
-      expect(existsSync(`${legacy}-wal`)).toBe(false);
-      expect(existsSync(`${legacy}-journal`)).toBe(false);
-    } finally {
       await daemon.stop();
     }
   }, 120_000);

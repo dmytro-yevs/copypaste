@@ -19,11 +19,15 @@ import { screen, waitFor } from "@testing-library/react";
 import { ServiceTab } from "@/components/settings/ServiceTab";
 import { IpcFailure } from "@/lib/errors";
 import type { ConfigApplied, ConfigData, ConfigPatch } from "@/lib/ipc";
-import { status, withUser } from "@/test/harness";
+import { captureSnapshot, status, withUser } from "@/test/harness";
 
 const getConfig = vi.fn();
 const setConfig = vi.fn();
 const getStatus = vi.fn();
+const captureState = vi.fn();
+const captureArm = vi.fn();
+const captureRefresh = vi.fn();
+const captureSetEnabled = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -32,6 +36,10 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     getConfig: () => getConfig(),
     setConfig: (patch: ConfigPatch) => setConfig(patch),
     getStatus: () => getStatus(),
+    captureState: () => captureState(),
+    captureArm: () => captureArm(),
+    captureRefresh: () => captureRefresh(),
+    captureSetEnabled: (enabled: boolean) => captureSetEnabled(enabled),
   };
 });
 
@@ -66,11 +74,20 @@ beforeEach(() => {
   getConfig.mockReset().mockResolvedValue(applied());
   setConfig.mockReset().mockImplementation(() => Promise.resolve(applied()));
   getStatus.mockReset().mockResolvedValue(status());
+  captureState.mockReset().mockResolvedValue(captureSnapshot());
+  captureArm.mockReset().mockResolvedValue(captureSnapshot());
+  captureRefresh.mockReset().mockResolvedValue(captureSnapshot());
+  captureSetEnabled.mockReset().mockResolvedValue(captureSnapshot());
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("reading the service's settings", () => {
+  it("shows the live capture state in Service", async () => {
+    withUser(<ServiceTab />);
+    expect(await screen.findByText("Capturing from every app.")).toBeTruthy();
+  });
+
   it("shows the value the service reported, not a guess", async () => {
     getConfig.mockResolvedValue(applied({ poll_interval_ms: 2000 }));
     withUser(<ServiceTab />);
@@ -108,7 +125,7 @@ describe("reading the service's settings", () => {
     }
   });
 
-  it("associates each payload control with its visible help", async () => {
+  it("associates each payload control with concise visible help", async () => {
     withUser(<ServiceTab />);
     const file = await screen.findByRole("combobox", {
       name: "Ignore files larger than",
@@ -116,18 +133,53 @@ describe("reading the service's settings", () => {
     const helpId = file.getAttribute("aria-describedby");
     expect(helpId).toBeTruthy();
     expect(document.getElementById(helpId!)?.textContent).toContain(
-      "effective limit at most 4 MiB",
+      "effective limit is 4 MiB",
     );
   });
 
-  it("says so plainly on a build that has no service to configure", async () => {
+  it("shows a concise unavailable state when service settings cannot load", async () => {
     getConfig.mockRejectedValue(new IpcFailure("unavailable", false));
     withUser(<ServiceTab />);
-    expect(await screen.findByText(/can't change the background service/)).toBeTruthy();
+    expect(await screen.findByText("Service settings are unavailable.")).toBeTruthy();
   });
 });
 
 describe("writing one", () => {
+  it("can turn Android capture off from Service", async () => {
+    const { user } = withUser(<ServiceTab />);
+    await user.click(await screen.findByRole("switch", { name: "Capture from other apps" }));
+    await waitFor(() => expect(captureSetEnabled).toHaveBeenCalledWith(false));
+  });
+
+  it("adds a validated source-app exclusion as its own persisted patch", async () => {
+    const { user } = withUser(<ServiceTab />);
+    const appId = await screen.findByRole("textbox", {
+      name: "App bundle or package ID",
+    });
+    await user.type(appId, "com.example.private-app");
+    await user.click(screen.getByRole("button", { name: "Add app" }));
+
+    await waitFor(() =>
+      expect(setConfig).toHaveBeenCalledWith({
+        excluded_app_bundle_ids: ["com.example.private-app"],
+      }),
+    );
+  });
+
+  it("refuses a source-app exclusion that is not a bundle or package ID", async () => {
+    const { user } = withUser(<ServiceTab />);
+    const appId = await screen.findByRole("textbox", {
+      name: "App bundle or package ID",
+    });
+    await user.type(appId, "not an app id");
+    await user.click(screen.getByRole("button", { name: "Add app" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Enter a bundle or package ID",
+    );
+    expect(setConfig).not.toHaveBeenCalled();
+  });
+
   it("sends a patch naming only the field that changed", async () => {
     const { user } = withUser(<ServiceTab />);
     const dedup = await screen.findByRole("combobox", {
@@ -262,9 +314,7 @@ describe("the sensitive-content sweep", () => {
     getConfig.mockResolvedValue(applied({ sensitive_ttl_secs: 30 }));
     withUser(<ServiceTab />);
     expect(
-      await screen.findByText(
-        /deleted without asking.*Nothing that is deleted can be brought back/s,
-      ),
+      await screen.findByText(/deleted without asking and cannot be recovered/i),
     ).toBeTruthy();
   });
 
@@ -275,7 +325,7 @@ describe("the sensitive-content sweep", () => {
     getConfig.mockResolvedValue(applied({ sensitive_ttl_secs: 30 }));
     withUser(<ServiceTab />);
     expect(
-      await screen.findByText(/announced as it happens.*Diagnostics tab/s),
+      await screen.findByText(/announced and counted in Diagnostics/i),
     ).toBeTruthy();
   });
 

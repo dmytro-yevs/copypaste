@@ -10,7 +10,6 @@ import { toast } from "sonner";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
-import { truncate } from "@/lib/format";
 import { UNDO_WINDOW_MS } from "@/lib/layout";
 import { type Item, deleteItem } from "@/lib/ipc";
 import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
@@ -78,13 +77,6 @@ export function useDeferredDelete() {
         setTimeout(() => void commit(item.id), UNDO_WINDOW_MS),
       );
       toast(t("history.toast.deleted"), {
-        // A sensitive item has no content on this side of the bridge (INV-10),
-        // so there is nothing to leak into a toast; anything else is truncated
-        // to 40 characters (§3.1.8) and passed as a value, never as a template.
-        description:
-          item.content === null
-            ? t("history.toast.deletedSensitive")
-            : truncate(item.content, 40),
         duration: UNDO_WINDOW_MS,
         action: { label: t("history.toast.undo"), onClick: () => undo(item.id) },
       });

@@ -53,7 +53,7 @@ pub fn open_version_bytes(keyring: &Keyring, row: &StoredItem) -> Option<Vec<u8>
     }
 }
 
-/// Open a text version for the legacy P2P wire.  Binary callers must use
+/// Open a text version for the P2P wire. Binary callers must use
 /// [`open_version_bytes`] so arbitrary bytes can never be lossily stringified.
 #[must_use]
 pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Option<String> {
@@ -734,6 +734,7 @@ mod tests {
                 search_text: None,
                 created_at: 1_000,
                 app_bundle_id: None,
+                app_name: None,
                 payload_metadata: None,
             })
             .unwrap();

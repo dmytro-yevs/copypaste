@@ -11,12 +11,17 @@
 import { useSyncExternalStore } from "react";
 import { Check } from "lucide-react";
 
-import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/i18n";
 import { resolveTheme } from "@/lib/theme";
-import { ACCENTS, type Accent, type ThemePref, usePrefs } from "@/store/prefs";
+import { isAndroidPlatform } from "@/lib/platform";
+import {
+  ACCENTS,
+  type Accent,
+  type ThemePref,
+  usePrefs,
+} from "@/store/prefs";
 import { Row } from "@/components/settings/Row";
 
 const THEME_OPTIONS = [
@@ -26,6 +31,7 @@ const THEME_OPTIONS = [
 ] as const satisfies ReadonlyArray<{ value: ThemePref; label: string }>;
 
 const ACCENT_LABEL = {
+  system: "settings.appearance.accent.system",
   indigo: "settings.appearance.accent.indigo",
   blue: "settings.appearance.accent.blue",
   teal: "settings.appearance.accent.teal",
@@ -33,6 +39,8 @@ const ACCENT_LABEL = {
   amber: "settings.appearance.accent.amber",
   rose: "settings.appearance.accent.rose",
 } as const satisfies Record<Accent, string>;
+
+const ACCENT_CONTROL_CLASS = "flex h-7 shrink-0 items-center justify-center rounded-full outline-none transition-transform hover:scale-105 focus-visible:ring-[3px] focus-visible:ring-ring";
 
 /** Subscribe to the OS appearance so the "resolves to" hint is live. */
 function useSystemTheme(): "dark" | "light" {
@@ -55,6 +63,7 @@ export function AppearanceTab() {
   const translucency = usePrefs((s) => s.translucency);
   const set = usePrefs((s) => s.set);
   const system = useSystemTheme();
+  const supportsWindowTranslucency = !isAndroidPlatform();
 
   return (
     <div className="flex flex-col">
@@ -75,6 +84,7 @@ export function AppearanceTab() {
         <ToggleGroup
           type="single"
           value={theme}
+          equalWidth
           aria-label={t("settings.appearance.theme.title")}
           onValueChange={(value) => value && set("theme", value as ThemePref)}
         >
@@ -107,11 +117,20 @@ export function AppearanceTab() {
                 data-swatch={option}
                 onClick={() => set("accent", option)}
                 style={{
-                  backgroundColor: `var(--swatch-${option})`,
-                  color: `var(--on-swatch-${option})`,
+                  backgroundColor:
+                    option === "system"
+                      ? "var(--system-accent-preview, var(--swatch-indigo))"
+                      : `var(--swatch-${option})`,
+                  color:
+                    option === "system"
+                      ? "var(--system-on-accent, var(--on-swatch-indigo))"
+                      : `var(--on-swatch-${option})`,
                 }}
-                className="flex size-7 items-center justify-center rounded-full outline-none transition-transform hover:scale-105 focus-visible:ring-[3px] focus-visible:ring-ring"
+                className={`${ACCENT_CONTROL_CLASS} ${
+                  option === "system" ? "gap-1 px-2 text-xs font-medium" : "size-7"
+                }`}
               >
+                {option === "system" && <span>System</span>}
                 {selected && <Check size={14} aria-hidden="true" />}
               </button>
             );
@@ -119,21 +138,26 @@ export function AppearanceTab() {
         </div>
       </Row>
 
-      <Row
-        title={t("settings.appearance.translucency.title")}
-        description={t("settings.appearance.translucency.description")}
-      >
-        <div className="flex items-center gap-s-2">
-          <Switch
-            id="translucency"
-            checked={translucency}
-            onCheckedChange={(value) => set("translucency", value)}
-          />
-          <Label htmlFor="translucency">
-            {t(translucency ? "common.on" : "common.off")}
-          </Label>
-        </div>
-      </Row>
+      {supportsWindowTranslucency && (
+        <Row
+          title={t("settings.appearance.translucency.title")}
+          description={t("settings.appearance.translucency.description")}
+        >
+          <div className="flex w-[220px] items-center gap-s-3 max-sm:w-full">
+            <Slider
+              aria-label={t("settings.appearance.translucency.title")}
+              value={[translucency]}
+              min={0}
+              max={100}
+              step={5}
+              onValueChange={([value]) => value !== undefined && set("translucency", value)}
+            />
+            <output className="w-10 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              {translucency}%
+            </output>
+          </div>
+        </Row>
+      )}
     </div>
   );
 }

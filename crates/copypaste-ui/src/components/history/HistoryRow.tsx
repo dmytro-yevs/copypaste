@@ -2,9 +2,8 @@
  * INV-10: a sensitive item's plaintext is *absent*, not blurred, and the
  * accessible name is a fixed string (AT-13).
  *
- * A click or tap selects and copies (§3.1.5). Repeated click detail is ignored
- * so a desktop double-click cannot issue the copy twice. Actions stay visible
- * because Android has no hover.
+ * A click or tap selects and copies an ordinary item (§3.1.5). A protected
+ * item reveals in the same place; its plaintext remains absent until then.
  *
  * The body button and the action buttons are siblings, never nested — nesting
  * is the `nested-interactive` violation INV-8 is about.
@@ -12,25 +11,31 @@
 import { memo } from "react";
 import {
   CloudOff,
-  Copy,
+  LoaderCircle,
   MonitorSmartphone,
   Pin,
   ShieldAlert,
 } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
+import { HistoryImagePreview } from "@/components/history/HistoryImagePreview";
+import { SourceAppIcon } from "@/components/history/SourceAppIcon";
+import { TimestampToggle } from "@/components/history/TimestampToggle";
 import { HistoryRowActions } from "@/components/history/HistoryRowActions";
 import { wontSync } from "@/components/history/origin";
+import {
+  clipSourceMetadata,
+  clipTypeMetadata,
+} from "@/components/history/clipMetadata";
 import { t, useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import {
   KIND_TEXT_CLASS,
   MONO_KINDS,
-  absoluteTime,
   kindOf,
   previewOf,
-  shortAge,
 } from "@/lib/format";
+import { imagePreviewHeight } from "@/lib/layout";
 import type { Item } from "@/lib/ipc";
 import { isAndroidPlatform } from "@/lib/platform";
 
@@ -48,6 +53,8 @@ export function rowLabel(item: Item, origin: string | null = null): string {
     ? t("history.row.sensitiveName")
     : item.content === null
       ? t("history.row.empty")
+      : item.content_type.toLowerCase().startsWith("image/")
+        ? "Image"
       : previewOf(item.content);
   const named = item.pinned ? `${t("history.row.pinnedPrefix")} ${body}` : body;
 
@@ -75,7 +82,6 @@ interface HistoryRowProps {
   onTogglePin: (item: Item) => void;
   onDelete: (item: Item) => void;
   onReveal: (item: Item) => void;
-  onHide: () => void;
   onOpen: (item: Item) => void;
 }
 
@@ -95,11 +101,16 @@ function HistoryRowImpl({
   onTogglePin,
   onDelete,
   onReveal,
-  onHide,
   onOpen,
 }: HistoryRowProps) {
   const { t: tr } = useTranslation();
   const kind = kindOf(item);
+  const isImage = kind === "image";
+  const imageHeight = imagePreviewHeight(previewLines);
+  const type = clipTypeMetadata(kind);
+  const source = clipSourceMetadata(item);
+  const TypeIcon = type.Icon;
+  const SourceIcon = source.Icon;
   const revealed = revealedContent !== null;
   const masked = item.is_sensitive && !revealed;
   const body = revealed ? revealedContent : item.content;
@@ -111,7 +122,8 @@ function HistoryRowImpl({
   return (
     <div
       className={cn(
-        "group relative flex h-full items-start gap-[var(--gap-row)] overflow-hidden rounded-lg px-[var(--pad-row-x)] py-[var(--pad-row-y)] transition-colors duration-[var(--dur-fast)]",
+        "group relative flex items-start gap-[var(--gap-row)] overflow-hidden rounded-lg px-[var(--pad-row-x)] py-[var(--pad-row-y)] transition-colors duration-[var(--dur-fast)]",
+        android ? "min-h-full" : "h-full",
         "hover:bg-accent",
         (active || flashing) && "bg-selected",
         // Selection is carried by the edge, not the fill: --selected differs
@@ -139,49 +151,77 @@ function HistoryRowImpl({
         </span>
       ) : (
         <span
-          aria-hidden="true"
+          aria-label={type.label}
+          role="img"
+          title={type.label}
           className={cn(
             "mt-px flex size-[var(--icon-lg)] shrink-0 items-center justify-center",
             KIND_TEXT_CLASS[kind],
           )}
         >
-          {item.is_sensitive ? (
+          {item.is_sensitive && !revealPending ? (
             <ShieldAlert size={14} />
+          ) : revealPending ? (
+            <LoaderCircle size={14} className="animate-spin" />
           ) : (
-            <Copy size={14} strokeWidth={1.75} />
+            <TypeIcon size={14} strokeWidth={1.75} />
           )}
         </span>
       )}
 
-      <button
-        type="button"
-        aria-label={rowLabel(item, origin)}
-        title={tr(
-          selecting
-            ? "history.row.selectingHint"
-            : android
-              ? "history.row.tapHint"
-              : "history.row.copy",
-        )}
-        tabIndex={tab}
-        onClick={(event) => {
-          if (event.detail > 1) return;
-          if (selecting) {
-            onToggleChecked(item);
-          } else {
-            onSelect(item);
-            onCopy(item);
-          }
-        }}
-        className="flex min-w-0 flex-1 flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
-      >
+      <div className="flex min-w-0 flex-1 flex-col items-start">
+        <button
+          type="button"
+          aria-label={rowLabel(item, origin)}
+          title={tr(
+            selecting
+              ? "history.row.selectingHint"
+              : masked
+                ? "history.row.reveal"
+                : android
+                ? "history.row.tapHint"
+                : "history.row.copy",
+          )}
+          tabIndex={tab}
+          aria-busy={masked && revealPending ? true : undefined}
+          onClick={(event) => {
+            if (event.detail > 1) return;
+            if (selecting) {
+              onToggleChecked(item);
+            } else if (masked && !revealPending) {
+              // A protected preview is a direct interaction, not a detour into
+              // an action menu. The reveal hook still applies the optional
+              // confirmation and drops plaintext on blur/timeout.
+              onReveal(item);
+            } else {
+              onSelect(item);
+              onCopy(item);
+            }
+          }}
+          className="flex min-w-0 self-stretch flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+        >
         {masked ? (
-          // Not a blur: a blur says the content is present behind a filter,
-          // which for a screenshot or a shoulder is both a lie and a leak.
-          <span className="flex items-center gap-2 rounded-sm border border-withheld-border bg-withheld px-2 py-0.5 text-sm text-withheld-fg">
-            <ShieldAlert size={12} aria-hidden="true" />
-            {tr("history.row.sensitivePlaceholder")}
+          <span
+            aria-hidden="true"
+            className="flex min-h-5 w-full flex-col justify-center gap-1 py-0.5"
+          >
+            {Array.from({ length: previewLines }, (_, line) => (
+              <span
+                key={line}
+                className="h-2.5 rounded-full bg-withheld-fg/25"
+                style={{ width: `${line === 0 ? 86 : 42 + ((line * 19) % 39)}%` }}
+              />
+            ))}
           </span>
+        ) : isImage ? (
+          <HistoryImagePreview
+            id={item.id}
+            className="max-w-full self-start"
+            // Android rows grow to the image's available width. The history
+            // virtualizer measures that rendered row after the thumbnail
+            // arrives, rather than clipping a portrait image to a desktop cap.
+            style={android ? { maxWidth: "100%" } : { maxHeight: imageHeight }}
+          />
         ) : (
           <span
             className={cn(
@@ -198,22 +238,27 @@ function HistoryRowImpl({
           </span>
         )}
 
-        <span className="mt-1 flex h-[18px] items-center gap-2 text-xs text-muted-foreground">
-          <time
-            dateTime={new Date(item.created_at).toISOString()}
-            title={absoluteTime(item.created_at)}
+        </button>
+        <span className="mt-2 flex h-[18px] min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
+          <span
+            className={cn(
+              "flex min-w-0 items-center gap-1 rounded-full bg-elevated px-1.5 py-px",
+              !source.available && "text-faint",
+            )}
+            title={source.label}
           >
-            {shortAge(item.created_at)}
-          </time>
+            <SourceAppIcon
+              bundleId={item.source_app_bundle_id}
+              Fallback={SourceIcon}
+              className="size-4"
+            />
+            <span className="truncate">{source.label}</span>
+          </span>
+          <TimestampToggle createdAt={item.created_at} tabIndex={tab} />
           {item.pinned && (
             <span className="flex items-center gap-0.5 text-brand-2">
               <Pin size={10} aria-hidden="true" />
               {tr("history.row.pinnedBadge")}
-            </span>
-          )}
-          {item.is_sensitive && (
-            <span className="text-c-secret">
-              {tr("history.row.sensitiveBadge")}
             </span>
           )}
           {origin !== null && (
@@ -235,7 +280,7 @@ function HistoryRowImpl({
             </span>
           )}
         </span>
-      </button>
+      </div>
 
       {/* Not rendered in selection mode, not merely hidden with a class: a
           `display: none` button is still in the accessibility tree and still a
@@ -246,13 +291,9 @@ function HistoryRowImpl({
           item={item}
           android={android}
           active={active}
-          revealed={revealed}
-          revealPending={revealPending}
           onCopy={onCopy}
           onTogglePin={onTogglePin}
           onDelete={onDelete}
-          onReveal={onReveal}
-          onHide={onHide}
           onOpen={onOpen}
         />
       )}

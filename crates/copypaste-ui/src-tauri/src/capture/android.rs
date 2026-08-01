@@ -17,11 +17,32 @@ use tauri::{Manager, Wry};
 
 use crate::backend::{BackendError, Result};
 
+use super::CaptureControl;
 use super::model::{
     AndroidArmResult, AndroidProbeResult, CaptureModel, CaptureSnapshot, CaptureSource, Clip,
-    ReadOutcome, ShizukuProbe, LOST_BODY, LOST_TITLE,
+    LOST_BODY, LOST_TITLE, ReadOutcome, ShizukuProbe,
 };
-use super::CaptureControl;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AndroidSourceAppIcon {
+    pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AndroidInstalledSourceApp {
+    pub package_id: String,
+    pub label: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SourceAppIconArgs<'a> {
+    package_id: &'a str,
+}
 
 /// Must match `applicationId` in the generated Gradle project and the package
 /// of `gen/android/app/src/main/java/com/copypaste/app/CapturePlugin.kt`.
@@ -122,6 +143,26 @@ impl AndroidCapture {
     fn with<T>(&self, f: impl FnOnce(&mut CaptureModel) -> T) -> T {
         f(&mut self.model.lock().expect("capture model"))
     }
+
+    pub fn source_app_icon(&self, package_id: &str) -> Option<AndroidSourceAppIcon> {
+        match self.call(
+            "sourceAppIcon",
+            SourceAppIconArgs { package_id },
+            MSG_BRIDGE,
+        ) {
+            Ok(icon) => icon,
+            Err(error) => {
+                tracing::debug!(%error, "Android source app icon is unavailable");
+                None
+            }
+        }
+    }
+
+    /// Lists user-visible installed applications for the exclusion picker.
+    /// Package identity remains the value written to the service config.
+    pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
+        self.call("installedSourceApps", (), MSG_BRIDGE)
+    }
 }
 
 impl CaptureControl for AndroidCapture {
@@ -176,6 +217,8 @@ impl CaptureControl for AndroidCapture {
             text,
             source,
             at_ms: result.at_ms,
+            source_app_bundle_id: None,
+            source_app_name: None,
         }))
     }
 

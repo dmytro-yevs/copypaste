@@ -1,8 +1,7 @@
 //! The clipboard source port — the seam v1 never had.
 //!
 //! Port manifest 01 (`docs/rewrite/port-manifest/01-clipboard-capture.md`) is
-//! binding in full for this subsystem; dropping v0.4.x compatibility does not
-//! touch it, because it describes macOS behaviour rather than our formats.
+//! binding in full for this subsystem because it describes macOS behaviour.
 //!
 //! Its own top finding (§6.7) is that v1's monitor called
 //! `NSPasteboard.generalPasteboard` directly, so roughly two thirds of the
@@ -91,28 +90,7 @@ const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 
 /// Credential stores mark a capture sensitive even when its text does not
 /// match a detector rule. Users may still explicitly exclude an app entirely.
-pub(crate) fn is_password_manager_app(bundle_id: &str) -> bool {
-    let bundle_id = bundle_id.to_ascii_lowercase();
-    matches!(
-        bundle_id.as_str(),
-        "com.1password.1password"
-            | "com.agilebits.onepassword7"
-            | "com.bitwarden.desktop"
-            | "org.keepassxc.keepassxc"
-            | "com.dashlane.dashlane"
-            | "com.lastpass.lastpass"
-            | "com.apple.passwords"
-    ) || bundle_id.contains("1password")
-        || bundle_id.contains("bitwarden")
-        || bundle_id.contains("keepass")
-        || bundle_id.contains("dashlane")
-        || bundle_id.contains("lastpass")
-        || bundle_id.contains("protonpass")
-        || bundle_id.contains("proton.pass")
-        || bundle_id.contains("strongbox")
-        || bundle_id.contains("secretive")
-        || bundle_id.contains("keepassium")
-}
+pub(crate) use copypaste_core::sensitive::is_password_manager_app;
 
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +109,9 @@ pub struct Capture {
     pub content_type: String,
     /// The frontmost app at capture time, when the platform could resolve it.
     pub app_bundle_id: Option<String>,
+    /// Display name reported by the originating platform. This is metadata,
+    /// never a value inferred from a bundle/package identifier.
+    pub app_name: Option<String>,
 }
 
 impl Capture {
@@ -143,6 +124,7 @@ impl Capture {
             file_metadata: None,
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             app_bundle_id: None,
+            app_name: None,
         }
     }
 }
@@ -239,7 +221,7 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
 
 #[cfg(test)]
 mod tests {
-    use super::{is_password_manager_app, CapturePolicy, MAX_CAPTURE_BYTES};
+    use super::{CapturePolicy, MAX_CAPTURE_BYTES, is_password_manager_app};
     use copypaste_ipc::ConfigData;
 
     #[test]

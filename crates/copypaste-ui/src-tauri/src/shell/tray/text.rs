@@ -6,8 +6,11 @@
 //! live in i18n" from being a claim nothing checks.
 
 pub const SHOW: &str = "Show CopyPaste";
-pub const OPEN_AT_LOGIN: &str = "Open at Login";
-pub const PRIVATE_MODE: &str = "Private Mode";
+pub const SETTINGS: &str = "Open Settings";
+pub const OPEN_AT_LOGIN_ON: &str = "Open at Login — On";
+pub const OPEN_AT_LOGIN_OFF: &str = "Open at Login — Off";
+pub const PRIVATE_MODE_ON: &str = "Private Mode — On";
+pub const PRIVATE_MODE_OFF: &str = "Private Mode — Off";
 pub const QUIT: &str = "Quit CopyPaste";
 
 pub const RECENT: &str = "Recent clippings";
@@ -22,8 +25,11 @@ pub const STATUS_OFFLINE: &str = "Background service not running";
 #[cfg(test)]
 const CATALOGUE: &[(&str, &str)] = &[
     ("show", SHOW),
-    ("openAtLogin", OPEN_AT_LOGIN),
-    ("privateMode", PRIVATE_MODE),
+    ("settings", SETTINGS),
+    ("openAtLoginOn", OPEN_AT_LOGIN_ON),
+    ("openAtLoginOff", OPEN_AT_LOGIN_OFF),
+    ("privateModeOn", PRIVATE_MODE_ON),
+    ("privateModeOff", PRIVATE_MODE_OFF),
     ("quit", QUIT),
     ("recent", RECENT),
     ("recentEmpty", RECENT_EMPTY),

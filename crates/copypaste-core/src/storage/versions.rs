@@ -233,11 +233,11 @@ impl Store {
     /// Store the version a session decided should win.
     ///
     /// The one write the insert-only API cannot express, and the only path that
-    /// may overwrite an existing row. `Ok(false)` means the store refused it,
-    /// which happens for exactly one reason: the dedup index already holds a
-    /// *different* id with this content in the same bucket. Refusing is the
-    /// safe direction — the content is already on this device under another id
-    /// — and the caller reports it as skipped rather than failing the session.
+    /// may overwrite an existing row. `Ok(false)` means the store refused it
+    /// because the dedup index already holds a different id from the same
+    /// origin with this content in the same bucket. Different origins remain
+    /// separate items: collapsing them would leave replicas with incompatible
+    /// item ids and make later deletes diverge.
     ///
     /// P2P carries pin state as ordinary version metadata. The incoming value
     /// replaces the local one wholesale, including an explicit `NULL` order on

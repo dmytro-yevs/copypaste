@@ -399,9 +399,9 @@ pub(super) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{all_rules, detector, fired, rep, BENIGN_CORPUS};
+    use super::test_support::{BENIGN_CORPUS, all_rules, detector, fired, rep};
     use super::*;
-    use crate::sensitive::finding::{Severity, AUTOWIPE_CONFIDENCE_FLOOR};
+    use crate::sensitive::finding::{AUTOWIPE_CONFIDENCE_FLOOR, Severity};
 
     // -- §9.1 true positives ------------------------------------------------
 
@@ -848,9 +848,11 @@ mod tests {
 
         assert_eq!(findings.len(), 2);
         assert!(findings.iter().any(|finding| finding.rule == "email"));
-        assert!(findings
-            .iter()
-            .any(|finding| finding.rule == "aws_access_key"));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "aws_access_key")
+        );
         assert!(det.may_auto_wipe(text));
         assert!(!det.may_auto_wipe("mail alice@example.com"));
         assert!(det.is_sensitive(text));

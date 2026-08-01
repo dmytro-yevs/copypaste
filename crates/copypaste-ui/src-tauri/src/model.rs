@@ -41,7 +41,8 @@
 //! Everything else — copy, delete, pin — travels by id and does its work in the
 //! backend, so the secret never needs to be in the WebView to be *used*.
 
-use copypaste_ipc::{DiscoveredDevice, Item, PeerInfo, StatusData, SyncResult};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use copypaste_ipc::{DiscoveredDevice, ImagePreview, Item, PeerInfo, StatusData, SyncResult};
 use serde::Serialize;
 
 use crate::backend::UiError;
@@ -68,10 +69,113 @@ pub struct UiItem {
     /// rule 5 turns a gap in the history from a mystery into an explanation.
     origin_device_id: String,
     origin_device_name: Option<String>,
+    /// Cosmetic local source attribution. The webview receives only a bundle
+    /// identifier, never an arbitrary filesystem icon path.
+    source_app_bundle_id: Option<String>,
+    /// Display label resolved by the platform for the captured source app.
+    /// It is cosmetic; identities and exclusion rules always use the id.
+    source_app_name: Option<String>,
     /// Cloud sync will not carry this item. Passed through so the row can say
     /// so before the first attempt rather than after it silently never arrives
     /// (`CopyPaste-f72f`).
     too_large_to_sync: bool,
+}
+
+/// A thumbnail produced on demand from a non-sensitive image item.
+///
+/// The field is base64 rather than a path or an original payload; React turns
+/// it into a short-lived Blob URL and revokes it when the virtual row leaves.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(rename = "ImagePreview", export_to = "ipc.ts")
+)]
+pub struct UiImagePreview {
+    png_base64: String,
+    width: u32,
+    height: u32,
+}
+
+/// A bounded PNG icon for the application that created a captured clip.
+///
+/// The native resolver accepts only a captured bundle/package identifier and
+/// returns bytes, never an application path. The WebView receives a transient
+/// Blob URL just as it does for history image previews.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(rename = "SourceAppIcon", export_to = "ipc.ts")
+)]
+pub struct UiSourceAppIcon {
+    png_base64: String,
+    width: u32,
+    height: u32,
+}
+
+/// An application the Android user can select as a capture exclusion.
+///
+/// The package id is the persisted identity. The display name is resolved by
+/// Android's PackageManager only for this picker, so no local paths cross into
+/// the WebView.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(rename = "InstalledSourceApp", export_to = "ipc.ts")
+)]
+pub struct UiInstalledSourceApp {
+    package_id: String,
+    label: String,
+}
+
+impl UiInstalledSourceApp {
+    #[cfg(target_os = "android")]
+    pub(crate) fn new(package_id: String, label: String) -> Self {
+        Self { package_id, label }
+    }
+}
+
+impl UiSourceAppIcon {
+    pub(crate) fn from_png(png: Vec<u8>, width: u32, height: u32) -> Self {
+        Self {
+            png_base64: STANDARD.encode(png),
+            width,
+            height,
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn from_base64(png_base64: String, width: u32, height: u32) -> Option<Self> {
+        const MAX_ICON_EDGE: u32 = 384;
+        const MAX_ICON_BYTES: usize = 512 * 1024;
+        let png = STANDARD.decode(&png_base64).ok()?;
+        if png.len() > MAX_ICON_BYTES
+            || width == 0
+            || height == 0
+            || width > MAX_ICON_EDGE
+            || height > MAX_ICON_EDGE
+            || !png.starts_with(b"\x89PNG\r\n\x1a\n")
+        {
+            return None;
+        }
+        Some(Self {
+            png_base64,
+            width,
+            height,
+        })
+    }
+}
+
+impl From<ImagePreview> for UiImagePreview {
+    fn from(preview: ImagePreview) -> Self {
+        Self {
+            png_base64: preview.png_base64,
+            width: preview.width,
+            height: preview.height,
+        }
+    }
 }
 
 impl From<Item> for UiItem {
@@ -93,6 +197,8 @@ impl From<Item> for UiItem {
             is_sensitive: item.is_sensitive,
             origin_device_id: item.origin_device_id,
             origin_device_name: item.origin_device_name,
+            source_app_bundle_id: item.source_app_bundle_id,
+            source_app_name: item.source_app_name,
             too_large_to_sync: item.too_large_to_sync,
         }
     }
@@ -233,6 +339,8 @@ mod tests {
             is_sensitive,
             origin_device_id: "device-1".into(),
             origin_device_name: Some("Mac".into()),
+            source_app_bundle_id: Some("com.apple.Safari".into()),
+            source_app_name: Some("Safari".into()),
             too_large_to_sync: false,
         }
     }

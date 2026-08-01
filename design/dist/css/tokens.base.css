@@ -79,6 +79,7 @@
   --main-min-h: 460px;
   --popover-w: 380px;
   --sidebar-w: 200px;
+  --sidebar-half-w: 100px;
   --tabbar-h: 56px;
   --content-max-width: 640px;
   --modal-w: 400px;
@@ -96,6 +97,7 @@
   --z-popover: 80;
   --frost-filter: none;
   --chrome-bg: var(--panel);
+  --app-bg: var(--bg);
   --scrim-blur: none;
 }
 
@@ -126,6 +128,7 @@
   :root[data-translucency="on"] {
     --frost-filter: saturate(180%) blur(20px);
     --chrome-bg: color-mix(in oklab, var(--panel) 72%, transparent);
+    --app-bg: color-mix(in oklab, var(--bg) 84%, transparent);
     --scrim-blur: blur(2px);
   }
 
@@ -134,6 +137,7 @@
     :root[data-translucency="on"] {
       --frost-filter: none;
       --chrome-bg: var(--panel);
+      --app-bg: var(--bg);
       --scrim-blur: none;
     }
   }

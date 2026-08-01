@@ -11,6 +11,9 @@ import { useUi } from "@/store/ui";
 const listItems = vi.fn();
 const searchItems = vi.fn();
 const getStatus = vi.fn();
+const toastError = vi.fn();
+
+vi.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => toastError(...args) } }));
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -33,6 +36,7 @@ beforeEach(() => {
   listItems.mockReset();
   searchItems.mockReset().mockResolvedValue(page([]));
   getStatus.mockReset().mockResolvedValue(status());
+  toastError.mockReset();
   useUi.setState({ query: "", activeId: null });
   usePrefs.getState().reset();
 });
@@ -87,5 +91,19 @@ describe("display preference binding", () => {
 
     usePrefs.getState().set("sortByDevice", true);
     await waitFor(() => expect(result.current.view.groupByDevice).toBe(true));
+  });
+});
+
+describe("retry feedback", () => {
+  it("announces a retry failure instead of failing silently", async () => {
+    listItems.mockRejectedValue({ code: "offline", retryable: true });
+    const { result } = renderHook(() => useHistoryController(false), {
+      wrapper: wrapper(),
+    });
+    await waitFor(() => expect(result.current.errorKind).toBe("offline"));
+
+    await result.current.retry();
+
+    expect(toastError).toHaveBeenCalledWith(expect.any(String), { id: "history-retry" });
   });
 });

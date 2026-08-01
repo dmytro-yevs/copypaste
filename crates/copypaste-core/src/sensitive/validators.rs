@@ -128,11 +128,7 @@ pub(super) fn luhn_valid(candidate: &str) -> bool {
         .map(|(i, &d)| {
             if i % 2 == 1 {
                 let doubled = d * 2;
-                if doubled > 9 {
-                    doubled - 9
-                } else {
-                    doubled
-                }
+                if doubled > 9 { doubled - 9 } else { doubled }
             } else {
                 d
             }
@@ -176,8 +172,8 @@ pub(super) fn phone_is_formatted(matched: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sensitive::engine::test_support::{all_rules, detector, fired, rep};
     use crate::sensitive::Severity;
+    use crate::sensitive::engine::test_support::{all_rules, detector, fired, rep};
 
     #[test]
     fn value_strength_follows_the_manifest_criteria() {

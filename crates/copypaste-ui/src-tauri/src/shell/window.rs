@@ -19,7 +19,7 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+use objc2_app_kit::{NSApplicationActivationOptions, NSEvent, NSRunningApplication, NSWorkspace};
 
 /// The full application surface. Named in `tauri.conf.json`.
 pub const MAIN: &str = "main";
@@ -72,6 +72,12 @@ const GAP_PX: f64 = 6.0;
 /// against the side of a display.
 const EDGE_INSET_PX: f64 = 8.0;
 
+/// The pointer should not land inside Quick Paste when it opens. Apart from
+/// being visually surprising, opening underneath a held click turns that click
+/// into an accidental row selection on some macOS versions.
+#[cfg(target_os = "macos")]
+const CURSOR_GAP_PX: f64 = 14.0;
+
 pub fn main_window<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
     app.get_webview_window(MAIN)
 }
@@ -95,6 +101,9 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
 pub fn show_main_settings<R: Runtime>(app: &AppHandle<R>) {
     show_main(app);
     if let Some(window) = main_window(app) {
+        let _ = window.eval(
+            "window.__copypasteRequestedView = 'settings'; window.dispatchEvent(new Event('copypaste:open-settings'));",
+        );
         let _ = window.emit("open-settings", ());
     }
 }
@@ -115,10 +124,14 @@ pub fn show_quick_paste<R: Runtime>(app: &AppHandle<R>) {
     if !window.is_visible().unwrap_or(false) {
         remember_frontmost_application();
     }
-    // Positioned before it is shown, so it never appears in one place and
-    // jumps to another. Android has no tray to position under, and no
-    // `tray_by_id` on `AppHandle` either — the window there is the activity.
-    #[cfg(not(target_os = "android"))]
+    // Position before showing it to avoid a visible jump. macOS has a pointer
+    // location, so Quick Paste opens beside it; other desktop targets keep the
+    // tray-anchor fallback.
+    #[cfg(target_os = "macos")]
+    if !position_under_cursor(&window) {
+        position_under_tray(app, &window);
+    }
+    #[cfg(not(target_os = "macos"))]
     position_under_tray(app, &window);
     let _ = window.show();
     // Focus is what makes the search field live. Requested after `show`
@@ -366,6 +379,78 @@ fn position_under_tray<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>
     let scale = monitor.scale_factor();
     let position = anchor(icon, size, monitor.position(), monitor.size(), scale);
     let _ = window.set_position(position);
+}
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn position_under_cursor<R: Runtime>(window: &WebviewWindow<R>) -> bool {
+    let pointer = unsafe { NSEvent::mouseLocation() };
+    let Ok(Some(primary)) = window.primary_monitor() else {
+        return false;
+    };
+    let physical = cocoa_point_to_physical(
+        pointer.x,
+        pointer.y,
+        &primary.position(),
+        &primary.size(),
+        primary.scale_factor(),
+    );
+    let monitor = window
+        .monitor_from_point(f64::from(physical.x), f64::from(physical.y))
+        .ok()
+        .flatten()
+        .unwrap_or(primary);
+    let Ok(size) = window.outer_size() else {
+        return false;
+    };
+    let position = cursor_anchor(
+        physical,
+        size,
+        &monitor.position(),
+        &monitor.size(),
+        monitor.scale_factor(),
+    );
+    window.set_position(position).is_ok()
+}
+
+/// Place Quick Paste to the right and a little below the pointer. The same
+/// bounds as the tray anchor apply, which makes this safe at every display edge
+/// and on monitors with a negative origin.
+#[cfg(target_os = "macos")]
+fn cursor_anchor(
+    pointer: PhysicalPosition<i32>,
+    window: PhysicalSize<u32>,
+    monitor_position: &PhysicalPosition<i32>,
+    monitor_size: &PhysicalSize<u32>,
+    scale: f64,
+) -> PhysicalPosition<i32> {
+    let width = f64::from(window.width);
+    let height = f64::from(window.height);
+    let inset = EDGE_INSET_PX * scale;
+    let gap = CURSOR_GAP_PX * scale;
+
+    let left = f64::from(monitor_position.x) + inset;
+    let right = f64::from(monitor_position.x) + f64::from(monitor_size.width) - width - inset;
+    let top = f64::from(monitor_position.y) + inset;
+    let bottom = f64::from(monitor_position.y) + f64::from(monitor_size.height) - height - inset;
+
+    let x = (f64::from(pointer.x) + gap).max(left).min(right.max(left));
+    let y = (f64::from(pointer.y) + gap).max(top).min(bottom.max(top));
+    PhysicalPosition::new(x.round() as i32, y.round() as i32)
+}
+
+#[cfg(target_os = "macos")]
+fn cocoa_point_to_physical(
+    x: f64,
+    y: f64,
+    monitor_position: &PhysicalPosition<i32>,
+    monitor_size: &PhysicalSize<u32>,
+    scale: f64,
+) -> PhysicalPosition<i32> {
+    PhysicalPosition::new(
+        (x * scale).round() as i32,
+        (f64::from(monitor_position.y) + f64::from(monitor_size.height) - y * scale).round() as i32,
+    )
 }
 
 /// A tray icon's screen rectangle, in physical pixels.
@@ -641,6 +726,34 @@ mod tests {
         let at = anchor(icon, WINDOW, &pos, &size, 1.0);
         assert_eq!(at.x, 700 - 210);
         assert_eq!(at.y, 24 + GAP_PX as i32);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cocoa_cursor_is_flipped_into_tauri_screen_coordinates() {
+        let (pos, size) = primary();
+        let cursor = cocoa_point_to_physical(320.0, 180.0, &pos, &size, 2.0);
+        assert_eq!(cursor, PhysicalPosition::new(640, 540));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn quick_paste_opens_to_the_right_of_the_cursor() {
+        let (pos, size) = primary();
+        let at = cursor_anchor(PhysicalPosition::new(420, 180), WINDOW, &pos, &size, 1.0);
+        assert_eq!(
+            at,
+            PhysicalPosition::new(420 + CURSOR_GAP_PX as i32, 180 + CURSOR_GAP_PX as i32)
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cursor_anchor_clamps_when_the_pointer_is_near_the_bottom_right_corner() {
+        let (pos, size) = primary();
+        let at = cursor_anchor(PhysicalPosition::new(1438, 898), WINDOW, &pos, &size, 1.0);
+        assert_eq!(at.x, 1440 - WINDOW.width as i32 - EDGE_INSET_PX as i32);
+        assert_eq!(at.y, 900 - WINDOW.height as i32 - EDGE_INSET_PX as i32);
     }
 
     /// The menu bar is at the right-hand end of the screen, which is where a

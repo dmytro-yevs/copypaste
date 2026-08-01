@@ -8,109 +8,26 @@
  * (AT-25). No banner text is ever derived from an error object (INV-12).
  */
 import { t } from "@/i18n";
-import type { StatusData } from "@/lib/ipc";
-
-export type BannerSeverity = "error" | "warning" | "info";
 
 export interface Banner {
-  readonly id:
-    | "service-offline"
-    | "history-unreadable"
-    | "protocol-mismatch"
-    | "capture-paused"
-    | "legacy-history";
-  readonly severity: BannerSeverity;
+  readonly id: "history-unreadable";
   readonly message: string;
-  /** P0 conditions cannot be dismissed: the user cannot act on the app at all
-   *  while they hold. */
-  readonly dismissible: boolean;
-  /** One way out, or none — never two (manifest §3.4.2). */
-  readonly action?: "retry";
 }
 
 export interface BannerConditions {
-  serviceOffline: boolean;
   /** In the shell rather than on History alone: with no readable history,
    *  Devices and Settings fail too, and a user standing on either would see
    *  three unexplained failures instead of one explained one. */
-  historyUnreadable: "legacy_database" | "key_unusable" | null;
-  /** The version the daemon reports, when it differs from ours. */
-  protocolMismatch: number | null;
-  capturePaused: boolean;
-  /** `StatusData::legacy_history_present`: a 0.4 history is on this device and
-   *  this version has started a new one. Nothing is broken, so it is last and
-   *  dismissible; without it an empty history after an upgrade reads as data
-   *  thrown away (CLAUDE.md rule 3). */
-  legacyHistory: boolean;
-  dismissed: readonly string[];
+  historyUnreadable: "key_unusable" | null;
 }
 
-export function legacyHistoryPresent(status: StatusData | null | undefined): boolean {
-  return status?.legacy_history_present === true;
-}
-
-/** Ordered by priority. The first match whose id is not dismissed wins. */
+/** This state has no recovery action and cannot be dismissed. */
 export function pickBanner(conditions: BannerConditions): Banner | null {
-  const candidates: Banner[] = [];
-
-  if (conditions.serviceOffline) {
-    candidates.push({
-      id: "service-offline",
-      severity: "error",
-      message: t("shell.banner.serviceOffline"),
-      dismissible: false,
-    });
-  }
-
   if (conditions.historyUnreadable !== null) {
-    candidates.push({
+    return {
       id: "history-unreadable",
-      severity: "error",
-      message:
-        conditions.historyUnreadable === "legacy_database"
-          ? t("shell.banner.legacyDatabase")
-          : t("shell.banner.keyUnusable"),
-      // And no action: there is no way out of either of these, and a banner
-      // offers one way out or none.
-      dismissible: false,
-    });
-  }
-
-  if (conditions.protocolMismatch !== null) {
-    candidates.push({
-      id: "protocol-mismatch",
-      severity: "warning",
-      message: t("shell.banner.protocolMismatch", {
-        protocol: conditions.protocolMismatch,
-      }),
-      dismissible: true,
-    });
-  }
-
-  if (conditions.capturePaused) {
-    candidates.push({
-      id: "capture-paused",
-      severity: "warning",
-      message: t("shell.banner.capturePaused"),
-      dismissible: true,
-      action: "retry",
-    });
-  }
-
-  if (conditions.legacyHistory) {
-    candidates.push({
-      id: "legacy-history",
-      severity: "info",
-      message: t("shell.banner.legacyHistory"),
-      dismissible: true,
-    });
-  }
-
-  for (const candidate of candidates) {
-    if (candidate.dismissible && conditions.dismissed.includes(candidate.id)) {
-      continue;
-    }
-    return candidate;
+      message: t("shell.banner.keyUnusable"),
+    };
   }
   return null;
 }

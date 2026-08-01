@@ -18,7 +18,11 @@ import {
   ROW_PAD_V,
   SINGLE_LINE_FLOOR,
   TITLE_LINE_PX,
+  IMAGE_PREVIEW_HEIGHT_MULTIPLIER,
+  imagePreviewHeight,
+  imageRowHeight,
   overscanRows,
+  rowPreviewHeight,
   rowHeight,
 } from "./layout";
 
@@ -57,6 +61,19 @@ describe("row height reserves the full preview cap", () => {
     // no future edit can make the reservation content-dependent without
     // changing this call site.
     expect(rowHeight.length).toBe(1);
+  });
+});
+
+describe("image preview height", () => {
+  it("uses a 3.75× cap while reserving a matching virtual row height", () => {
+    for (let lines = MIN_PREVIEW_LINES; lines <= MAX_PREVIEW_LINES; lines++) {
+      expect(imagePreviewHeight(lines)).toBe(
+        rowPreviewHeight(lines) * IMAGE_PREVIEW_HEIGHT_MULTIPLIER,
+      );
+      expect(imageRowHeight(lines)).toBe(
+        imagePreviewHeight(lines) + META_MARGIN_PX + META_LINE_PX + ROW_PAD_V,
+      );
+    }
   });
 });
 

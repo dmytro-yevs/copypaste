@@ -14,12 +14,12 @@
 
 mod error;
 
-pub(crate) use error::is_not_a_database;
 pub use error::MetaError;
+pub(crate) use error::is_not_a_database;
 
 use std::collections::HashMap;
 
-use copypaste_core::{origin_or, Store, StoredItem};
+use copypaste_core::{Store, StoredItem, origin_or};
 
 /// Where one item came from, as a user reads it.
 ///
@@ -179,24 +179,26 @@ mod tests {
     fn a_peer_item_reports_the_peer_and_its_name_once_that_name_is_known() {
         let (state, _dir) = test_state("alpha");
         let source = crate::sync::store_source(&state);
-        assert!(copypaste_p2p::sync::SyncSource::apply(
-            &source,
-            copypaste_p2p::protocol::SyncItem {
-                item_id: "theirs".into(),
-                content: "from the phone".into(),
-                binary_content: Vec::new(),
-                payload_metadata: None,
-                content_type: "text".into(),
-                created_at: 1_000,
-                deleted: false,
-                content_hash: "hash-theirs".into(),
-                origin_device_id: "device-b".into(),
-                pinned: false,
-                pin_order: None,
-                pin_updated_at: 0,
-            }
-        )
-        .unwrap());
+        assert!(
+            copypaste_p2p::sync::SyncSource::apply(
+                &source,
+                copypaste_p2p::protocol::SyncItem {
+                    item_id: "theirs".into(),
+                    content: "from the phone".into(),
+                    binary_content: Vec::new(),
+                    payload_metadata: None,
+                    content_type: "text".into(),
+                    created_at: 1_000,
+                    deleted: false,
+                    content_hash: "hash-theirs".into(),
+                    origin_device_id: "device-b".into(),
+                    pinned: false,
+                    pin_order: None,
+                    pin_updated_at: 0,
+                }
+            )
+            .unwrap()
+        );
         let row = state.store.version("theirs").unwrap().unwrap();
 
         let origin = state.meta.origin_of(&row).unwrap();

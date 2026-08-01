@@ -5,7 +5,6 @@ import { BulkBar } from "@/components/history/BulkBar";
 import { HistoryContentState } from "@/components/history/HistoryContentState";
 import { HistoryDetail } from "@/components/history/HistoryDetail";
 import { HistoryDialogs } from "@/components/history/HistoryDialogs";
-import { QuickHint } from "@/components/history/QuickHint";
 import { RevealNotice } from "@/components/history/RevealNotice";
 import { SearchBar } from "@/components/history/SearchBar";
 import { SkippedNotice } from "@/components/history/SkippedNotice";
@@ -28,6 +27,7 @@ interface HistoryViewProps {
 export function HistoryView({ pushLive = false }: HistoryViewProps) {
   const activeId = useUi((s) => s.activeId);
   const setActiveId = useUi((s) => s.setActiveId);
+  const setView = useUi((s) => s.setView);
   const previewLines = usePrefs((s) => s.previewLines);
 
   const searchRef = useRef<HTMLInputElement>(null);
@@ -180,14 +180,15 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       <HistoryContentState
         loading={history.loading}
         errorKind={history.errorKind}
-        errorRetryable={history.errorRetryable}
         searching={history.searching}
         filtered={history.filtered}
         privateMode={status.data?.private_mode === true}
+        capturePaused={status.data?.capture_running === false}
         query={history.query}
         hasMore={history.hasMore}
         onLoadMore={history.loadMore}
         onRetry={history.retry}
+        onOpenCapture={() => setView("capture")}
         list={{
           items,
           activeId,
@@ -202,7 +203,6 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
           hasMore: history.hasMore,
           loadingMore: history.loadingMore,
           onReveal: reveal.request,
-          onHide: reveal.hide,
           onCopy: copy.mutate,
           onQuickCopy: quickCopy,
           onTogglePin: pin.mutate,
@@ -213,9 +213,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         }}
       />
 
-      <QuickHint searching={history.searching} />
-
-      <RevealNotice message={reveal.error} onDismiss={reveal.hide} />
+      <RevealNotice message={reveal.error} />
 
       <HistoryDetail
         item={detail?.item ?? null}

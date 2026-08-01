@@ -2,10 +2,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "sonner";
 
 import App from "@/App";
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
+import { AppToaster } from "@/components/shell/AppToaster";
 import { IpcFailure } from "@/lib/errors";
 import { isQuickPasteSurface } from "@/surface";
 import "@/index.css";
@@ -51,25 +51,7 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       {isQuickPaste ? <QuickPasteApp /> : <App />}
-      {!isQuickPaste && (
-        // One app-level stack. Bottom-right, not centred: centring bled into
-        // the sidebar footer at narrow widths (manifest §3.7). Quick Paste is
-        // its own compact surface and deliberately does not mount this shell.
-        <Toaster
-          position="bottom-right"
-          closeButton
-          duration={3000}
-          offset="var(--s-4)"
-          mobileOffset={{
-            top: "calc(var(--inset-top) + var(--s-3))",
-            right: "calc(var(--inset-right) + var(--s-3))",
-            bottom:
-              "calc(var(--tabbar-h) + var(--inset-bottom) + var(--s-3))",
-            left: "calc(var(--inset-left) + var(--s-3))",
-          }}
-          toastOptions={{ className: "font-sans" }}
-        />
-      )}
+      <AppToaster />
     </QueryClientProvider>
   </StrictMode>,
 );

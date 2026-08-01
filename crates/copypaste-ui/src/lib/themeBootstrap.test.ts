@@ -96,7 +96,7 @@ describe("first-frame ordering (INV-22 / AT-49)", () => {
 
     setMatchMedia(false);
     const dataset = runBootstrap({
-      state: { theme: "light", accent: "amber", translucency: true },
+      state: { theme: "light", accent: "amber", translucency: 65 },
       version: 0,
     });
     expect(dataset).toMatchObject({
@@ -116,6 +116,8 @@ describe("bootstrap/runtime schema parity", () => {
       undefined,
       ...APPEARANCE_SERIALIZATION.themes.map((theme) => ({ state: { theme }, version: 0 })),
       ...APPEARANCE_SERIALIZATION.accents.map((accent) => ({ accent })),
+      { translucency: 0 },
+      { translucency: 65 },
       { translucency: true },
       { translucency: false },
       { state: { theme: "chartreuse", accent: "teal", translucency: 1 }, version: 0 },
@@ -142,6 +144,12 @@ describe("bootstrap/runtime schema parity", () => {
         translucency: translucencyAttribute(runtime.translucency),
       });
     }
+  });
+
+  it("sets translucency CSS variables before the first app render", () => {
+    runBootstrap({ state: { translucency: 50 }, version: 0 });
+    expect(document.documentElement.style.getPropertyValue("--translucency-blur")).toBe("10px");
+    expect(document.documentElement.style.getPropertyValue("--translucency-app-opacity")).toBe("92%");
   });
 
   it("resolves system appearance synchronously and survives unavailable state", () => {

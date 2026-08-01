@@ -29,6 +29,17 @@ pub struct ItemPage {
     pub next_cursor: Option<String>,
 }
 
+/// A bounded PNG thumbnail generated from a stored image on demand.
+///
+/// The original encrypted clipboard payload never crosses the UI boundary.
+/// `png_base64` is only a small, decoded preview suitable for an `<img>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImagePreview {
+    pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// One item in an export, and the unit an import consumes.
 ///
 /// Deliberately not [`Item`]: an item's id is bound into its ciphertext as
@@ -109,12 +120,15 @@ pub struct DiscoveredData {
 ///
 /// Presence is not trust: everything here is what an unauthenticated mDNS
 /// record claimed, and only the Noise handshake proves any of it. `paired` is
-/// resolved locally by looking the pairing id up in this device's own list.
+/// resolved locally by comparing advertised pairing ids with this device's
+/// own pairing list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DiscoveredDevice {
-    pub pairing_id: String,
+    /// Opaque mDNS candidate id. This is not a pairing credential or a device
+    /// identity; it only de-duplicates announcements in the client.
+    pub discovery_id: String,
     pub name: String,
     /// `host:port` to hand to `pair accept`.
     pub addr: String,
@@ -275,27 +289,6 @@ pub struct StatusData {
     #[serde(default)]
     pub private_mode: bool,
 
-    /// A CopyPaste 0.4 history is on this device, unread and unaltered.
-    ///
-    /// The whole of CLAUDE.md rule 3's second obligation depends on this
-    /// crossing the wire. The daemon *works* — v2 starts a new history and the
-    /// old one is untouched — so this is not a failure and has no error code;
-    /// what it is, is the difference between "your clipboard history vanished"
-    /// and "your clipboard history is still there and this version cannot read
-    /// it". Without it a client has no way to tell an empty history from an
-    /// unreadable one, and the upgrade looks like data loss.
-    ///
-    /// Decided once, at startup, by a read-only probe: re-probing on every
-    /// status poll would open a SQLite connection every few seconds against a
-    /// file this build has promised not to touch. It therefore goes stale if
-    /// the old history is removed while the daemon runs, which costs a restart
-    /// and no data.
-    ///
-    /// `#[serde(default)]` so a client built before this field decodes a reply
-    /// that has it — an unknown field is ignored, a missing one is not.
-    #[serde(default)]
-    pub legacy_history_present: bool,
-
     /// What has been refused, missed or deleted since the daemon started.
     ///
     /// On `status` rather than behind a method of its own because every one of
@@ -354,6 +347,18 @@ pub struct Item {
     /// devices may well report the same name.
     #[serde(default)]
     pub origin_device_name: Option<String>,
+
+    /// Application bundle that owned the foreground clipboard when this item
+    /// was captured. This is local, cosmetic attribution, so synced items may
+    /// not have one and clients must use a neutral fallback in that case.
+    #[serde(default)]
+    pub source_app_bundle_id: Option<String>,
+
+    /// Platform-resolved display name for [`Self::source_app_bundle_id`].
+    /// Cosmetic only: application identity and exclusion rules use the stable
+    /// bundle/package id, never this mutable label.
+    #[serde(default)]
+    pub source_app_name: Option<String>,
 
     /// This item is larger than cloud sync will carry, so it will never reach
     /// another device through an account.

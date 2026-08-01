@@ -28,12 +28,23 @@ object ClipQueue {
     @Volatile
     var rustIsUp = false
 
-    data class Clip(val text: String, val source: String, val atMs: Long)
+    data class Clip(
+        val text: String,
+        val source: String,
+        val atMs: Long,
+        val sourceAppBundleId: String?,
+        val sourceAppName: String?,
+    )
 
     @Synchronized
-    fun offer(text: String, source: String) {
+    fun offer(
+        text: String,
+        source: String,
+        sourceAppBundleId: String? = null,
+        sourceAppName: String? = null,
+    ) {
         if (text.isBlank()) return
-        queue.addLast(Clip(text, source, System.currentTimeMillis()))
+        queue.addLast(Clip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName))
         while (queue.size > CAPACITY) {
             queue.removeFirst()
             dropped++

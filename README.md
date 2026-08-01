@@ -5,17 +5,8 @@ on both platforms, over a shared Rust core. On desktop the app talks to a local
 daemon; on Android it links the core in-process
 ([ADR-0003](docs/adr/0003-one-command-surface-two-backends.md)).
 
-**v2.0.0-alpha.1, on `main`, unaudited.** The v2 rewrite now lives on `main`,
-which was reset to an empty history on 2026-07-29; v0.4.1 remains intact at
-`archive/v0.4.1-pre-rewrite` (2,153 commits). v2 reads nothing that version
-wrote and uses a distinct database filename, `copypaste-v2.db`, so an old file
-is never opened. [CLAUDE.md](CLAUDE.md) rule 3 has the reasoning and the one
-obligation it creates.
-
-The rewrite exists because v0.4.1 had grown to ~150k lines of Rust with six
-retry implementations, three rate limiters and three models of one wire
-contract. v2 inverts the norm that produced them: **a dependency is the default,
-and hand-rolling needs a written reason.**
+**2.0.0-alpha.1, on `main`, unaudited.** CopyPaste is under active development.
+Dependencies are the default; hand-rolled infrastructure needs a written reason.
 
 ## Status
 
@@ -95,17 +86,67 @@ names the live backend, so a demo cannot be mistaken for the real thing.
 
 `e2e/README.md` covers the browser-layer suite and what the host needs for it.
 
+### Run the app while developing
+
+`npm run dev` is a **web-only UI preview**. It deliberately has no Tauri IPC,
+macOS clipboard service, Keychain, tray, or Android backend, so its offline and
+empty-history states are expected. Use it only for layout work that does not
+need native behaviour.
+
+For a browser preview against a local macOS daemon, use the development-only
+adapter instead:
+
+```sh
+cd crates/copypaste-ui
+npm run dev:web:daemon
+```
+
+It starts a daemon and a loopback-only bridge on an ephemeral port. The bridge
+creates a one-run bearer token, allows requests only from Vite's
+`http://localhost:1420` origin, and exposes only the safe history/status/
+settings/peer actions needed by the preview. It is not compiled into Tauri,
+release, or Android builds. The adapter deliberately refuses sensitive-item
+reveal, raw clipboard reads, file panels, and every production-only native
+command.
+
+On macOS, this starts a debug daemon, records its structured events locally,
+and opens the Tauri app against that daemon:
+
+```sh
+cd crates/copypaste-ui
+npm run dev:native
+```
+
+The command builds the daemon first, writes one JSON-lines session log under
+`target/copypaste-dev/`, then stops only the daemon it started when the native
+app exits. Set `COPYPASTE_DEV_RUST_LOG=copypaste_daemon=info` for quieter logs.
+This is developer-only output; the in-app diagnostic export is a separate,
+redacted support artifact and must never contain clipboard contents or local
+paths.
+
+Android has no daemon: it runs the shared core in the app process. With an
+Android SDK/NDK and an emulator or device attached through `adb`, run:
+
+```sh
+cd crates/copypaste-ui
+npm run dev:android
+```
+
+For Android platform logs, use the package PID so unrelated device logs do not
+get mixed in:
+
+```sh
+adb logcat --pid="$(adb shell pidof -s com.copypaste.app)"
+```
+
 ## The specification
 
-`docs/rewrite/port-manifest/` is harvested from v0.4.1 and its tests: ~500
-acceptance tests and 200+ recovered bug ids. A subsystem is not done until its
-manifest's tests pass.
+`docs/rewrite/port-manifest/` contains ~500 acceptance tests and 200+ recovered
+bug ids. A subsystem is not done until its manifest's tests pass.
 
 Read [`port-manifest/README.md`](docs/rewrite/port-manifest/README.md) first. It
-records, per manifest, which sections still bind and which became reference
-material: dropping backward compatibility retired the *formats*, and rejecting
-v1's design retired the *visuals*. Behaviour — platform quirks, security
-properties, the accessibility contract, the detection ruleset — binds
+records, per manifest, which sections bind. Platform quirks, security
+properties, the accessibility contract and the detection ruleset bind
 throughout.
 
 ## Decisions

@@ -296,7 +296,7 @@ run_harness() {
 group "copypaste-ipc, checked directly (no stub)"
 # ---------------------------------------------------------------------------
 # Pure Rust all the way down, so the real crate compiles for Darwin as it is.
-# This is what covers `paths.rs`'s v1_data_dir branch and its test.
+# This verifies the shared IPC crate for Darwin.
 if out="$($CARGO check -p copypaste-ipc --all-targets --target "$TARGET" --locked 2>&1)"; then
     ok "copypaste-ipc compiles for $TARGET"
 else

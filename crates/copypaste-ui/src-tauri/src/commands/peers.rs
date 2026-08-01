@@ -25,8 +25,45 @@ use tauri::State;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 use crate::model::{UiDiscovered, UiPeer, UiSyncResult};
+use copypaste_ipc::PairingData;
 
 type Result<T> = std::result::Result<T, BackendError>;
+
+/// Create a one-time pairing credential for another device.
+#[tauri::command]
+pub async fn pair_create(backend: State<'_, SelectedBackend>, name: String) -> Result<PairingData> {
+    backend.pair_create(name.trim()).await
+}
+
+/// Confirm a pairing credential with the device that created it.
+#[tauri::command]
+pub async fn pair_accept(
+    backend: State<'_, SelectedBackend>,
+    code: String,
+    addr: String,
+) -> Result<Vec<UiPeer>> {
+    backend
+        .pair_accept(code.trim(), addr.trim())
+        .await
+        .map(|peers| peers.into_iter().map(UiPeer::from).collect())
+}
+
+/// Open Android's QR scanner. Desktop still supports pasting the same QR text.
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn scan_pairing_qr(
+    scanner: State<'_, crate::pairing_scanner::AndroidPairingScanner>,
+) -> Result<Option<String>> {
+    scanner.scan().await
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub async fn scan_pairing_qr() -> Result<Option<String>> {
+    Err(BackendError::Unsupported(
+        "QR scanning is available on Android. Paste the pairing code on this device.".into(),
+    ))
+}
 
 /// Known devices and when each was last reachable.
 ///

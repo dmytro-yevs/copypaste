@@ -8,10 +8,13 @@
 import {
   APPEARANCE_SERIALIZATION,
   translucencyAttribute,
+  translucencyStyle,
   type Accent,
   type ThemePref,
+  type Translucency,
 } from "@/lib/appearancePrefs";
 import type { Prefs } from "@/store/prefs";
+import { applyNativeAppearance, applySystemAccent } from "@/lib/nativeAppearance";
 
 export type ResolvedTheme = "dark" | "light";
 
@@ -32,13 +35,36 @@ export function resolveTheme(pref: ThemePref): ResolvedTheme {
 export function applyAppearance(prefs: {
   theme: ThemePref;
   accent: Accent;
-  translucency: boolean;
+  translucency: Translucency;
 }): void {
   const root = document.documentElement;
-  root.dataset.theme = resolveTheme(prefs.theme);
+  const theme = resolveTheme(prefs.theme);
+  root.dataset.theme = theme;
   root.dataset.themePref = prefs.theme;
   root.dataset.accent = prefs.accent;
+  if (prefs.accent === "system") {
+    void applySystemAccent();
+  } else {
+    clearSystemAccent(root);
+  }
   root.dataset.translucency = translucencyAttribute(prefs.translucency);
+  for (const [name, value] of Object.entries(translucencyStyle(prefs.translucency))) {
+    root.style.setProperty(name, value);
+  }
+  applyNativeAppearance(theme);
+}
+
+function clearSystemAccent(root: HTMLElement): void {
+  for (const name of [
+    "--accent",
+    "--accent-2",
+    "--on-accent",
+    "--accent-away",
+    "--system-accent-preview",
+    "--system-on-accent",
+  ]) {
+    root.style.removeProperty(name);
+  }
 }
 
 let subscribed = false;

@@ -14,8 +14,7 @@
 # had never been measured outside Rust, so "it passes" said nothing about it.
 # `.test.` and `.spec.` files are excluded the way Rust test modules are.
 #
-# Advisory, not a gate. v1 rejected a hard CI line-count check because it
-# forces artificial splits; the number is here to make the backlog visible.
+# Advisory, not a gate. The number is here to make the backlog visible.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

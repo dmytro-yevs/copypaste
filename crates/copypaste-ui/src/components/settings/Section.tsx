@@ -11,7 +11,7 @@ interface SectionProps {
 
 export function Section({ title, description, children }: SectionProps) {
   return (
-    <section className="flex flex-col">
+    <section data-settings-search-target={`section:${title}`} className="flex flex-col">
       <h2 className="pt-s-2 text-sm font-semibold">{title}</h2>
       {description !== undefined && (
         <p className="py-s-1 text-xs text-muted-foreground">{description}</p>
