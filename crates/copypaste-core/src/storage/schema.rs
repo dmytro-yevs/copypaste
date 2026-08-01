@@ -66,6 +66,13 @@ CREATE INDEX idx_items_evictable
     ON clipboard_items(created_at, id)
     WHERE deleted = 0 AND pinned = 0;
 
+-- The byte quota's hot gate reads only this expression and its partial
+-- predicate. Keeping ciphertext out of the table scan avoids touching every
+-- encrypted payload on each accepted capture.
+CREATE INDEX idx_items_unpinned_bytes
+    ON clipboard_items(LENGTH(COALESCE(content_ciphertext, X'')))
+    WHERE deleted = 0 AND pinned = 0;
+
 -- External-content mode is NOT used: there is no cascade from clipboard_items,
 -- so every delete path must remove the FTS row explicitly, in the same
 -- transaction as the row change.
