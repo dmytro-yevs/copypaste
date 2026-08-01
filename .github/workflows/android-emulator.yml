@@ -211,6 +211,14 @@ jobs:
           # here regenerates the Gradle project; see the release job for why.
           npm run tauri -- android build --debug --apk --target x86_64
 
+      - name: Restore OWASP vulnerability database
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.gradle/dependency-check-data
+          key: dependency-check-12-${{ runner.os }}-${{ hashFiles('crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts') }}
+          restore-keys: |
+            dependency-check-12-${{ runner.os }}-
+
       - name: Audit resolved Android dependencies
         working-directory: crates/copypaste-ui/src-tauri/gen/android
         run: |
