@@ -1,7 +1,4 @@
-/**
- * INV-22 — the persisted appearance is applied to `<html>` at module scope,
- * before `createRoot().render`, so there is no default-theme flash.
- */
+/** INV-22 — the external bootstrap applies appearance before this module. */
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,12 +7,12 @@ import { Toaster } from "sonner";
 import App from "@/App";
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
 import { IpcFailure } from "@/lib/errors";
-import { applyAppearance } from "@/lib/theme";
-import { readPrefs } from "@/store/prefs";
 import { isQuickPasteSurface } from "@/surface";
 import "@/index.css";
 
-applyAppearance(readPrefs());
+if (document.documentElement.dataset.themeBootstrapped !== "1") {
+  console.warn("[copypaste] appearance bootstrap did not run before the app module");
+}
 
 /**
  * INV-34 — `not_ready` is the one condition worth retrying: the service is up

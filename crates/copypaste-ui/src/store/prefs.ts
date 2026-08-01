@@ -1,26 +1,31 @@
 /**
  * INV-21: an invalid `theme` must not discard a valid `accent`, so every field
- * is parsed independently. INV-22: `readPrefs` is synchronous so `main.tsx` can
- * set the `<html>` attributes before first paint — AT-54 exists because v1 kept
- * a second copy of the schema in a pre-paint script and it drifted.
+ * is parsed independently. INV-22: the external pre-paint bootstrap is
+ * generated from the same appearance serialization contract used here.
  */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import { z } from "zod";
 
 import {
+  APPEARANCE_SERIALIZATION,
+  parseAppearanceFields,
+  unwrapPersistedPrefs,
+  type Accent,
+  type ThemePref,
+} from "@/lib/appearancePrefs";
+import {
   DEFAULT_PREVIEW_LINES,
   MAX_PREVIEW_LINES,
   MIN_PREVIEW_LINES,
 } from "@/lib/layout";
 
-export const STORAGE_KEY = "copypaste.prefs";
+export const STORAGE_KEY = APPEARANCE_SERIALIZATION.storageKey;
 
-export const THEMES = ["system", "dark", "light"] as const;
-export const ACCENTS = ["indigo", "blue", "teal", "green", "amber", "rose"] as const;
+export const THEMES = APPEARANCE_SERIALIZATION.themes;
+export const ACCENTS = APPEARANCE_SERIALIZATION.accents;
 
-export type ThemePref = (typeof THEMES)[number];
-export type Accent = (typeof ACCENTS)[number];
+export type { Accent, ThemePref };
 
 export interface Prefs {
   theme: ThemePref;
@@ -39,9 +44,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  theme: "system",
-  accent: "indigo",
-  translucency: false,
+  ...APPEARANCE_SERIALIZATION.defaults,
   previewLines: DEFAULT_PREVIEW_LINES,
   warnBeforeReveal: true,
   allowScreenshots: false,
@@ -53,9 +56,6 @@ export const DEFAULT_PREFS: Prefs = {
  * cannot tell that apart from an absent one.
  */
 const FIELD = {
-  theme: z.enum(THEMES),
-  accent: z.enum(ACCENTS),
-  translucency: z.boolean(),
   previewLines: z.number().int().min(MIN_PREVIEW_LINES).max(MAX_PREVIEW_LINES),
   warnBeforeReveal: z.boolean(),
   allowScreenshots: z.boolean(),
@@ -72,9 +72,18 @@ export function parsePrefs(raw: unknown): Prefs {
   }
 
   const source = raw as Record<string, unknown>;
-  const out = { ...DEFAULT_PREFS };
+  const appearance = parseAppearanceFields(
+    source,
+    APPEARANCE_SERIALIZATION,
+    (key) => {
+      console.warn(
+        `[copypaste] preference "${key}" was invalid and has been reset to its default`,
+      );
+    },
+  );
+  const out = { ...DEFAULT_PREFS, ...appearance };
 
-  for (const key of Object.keys(FIELD) as Array<keyof Prefs>) {
+  for (const key of Object.keys(FIELD) as Array<keyof typeof FIELD>) {
     if (!(key in source)) continue; // absent -> silent default
     const result = FIELD[key].safeParse(source[key]);
     if (result.success) {
@@ -95,11 +104,7 @@ export function readPrefs(): Prefs {
     if (stored === null) return { ...DEFAULT_PREFS };
     // zustand/persist wraps state as { state, version }.
     const parsed: unknown = JSON.parse(stored);
-    const inner =
-      typeof parsed === "object" && parsed !== null && "state" in parsed
-        ? (parsed as { state: unknown }).state
-        : parsed;
-    return parsePrefs(inner);
+    return parsePrefs(unwrapPersistedPrefs(parsed));
   } catch {
     console.warn("[copypaste] preferences could not be read; using defaults");
     return { ...DEFAULT_PREFS };
