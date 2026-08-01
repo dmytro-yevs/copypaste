@@ -1,17 +1,21 @@
 //! Encrypted, content-addressed binary clipboard payloads.
 
+use chacha20poly1305::aead::Payload;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::crypto::{NONCE_LEN, TAG_LEN};
-use crate::{decrypt, encrypt, CryptoError, ItemKey};
+use crate::crypto::{stream_decryptor, stream_encryptor, STREAM_NONCE_LEN, TAG_LEN};
+use crate::{CryptoError, ItemKey};
 
 const MAGIC: &[u8; 4] = b"CPB2";
-const VERSION: u8 = 2;
+const VERSION: u8 = 3;
 /// Keeps one decoded payload bounded while permitting images and files above a
 /// single transport frame to be stored locally.
 pub const CHUNK_BYTES: usize = 512 * 1024;
-const HEADER_BYTES: usize = 4 + 1 + 8 + 4 + 32;
+const STREAM_NONCE_OFFSET: usize = 4 + 1 + 8 + 32;
+const HEADER_BYTES: usize = STREAM_NONCE_OFFSET + STREAM_NONCE_LEN;
+const AAD_PREFIX: &[u8] = b"copypaste/v2/binary-stream|";
 /// Binary capture is bounded by the same ceiling that storage and every sync
 /// transport enforce.  This header is untrusted until every chunk authenticates,
 /// so it must not be able to request an arbitrary allocation.
@@ -86,55 +90,84 @@ pub fn metadata(bytes: &[u8]) -> BinaryMetadata {
     }
 }
 
-fn header(bytes: &[u8], meta: &BinaryMetadata) -> [u8; HEADER_BYTES] {
+fn header(
+    bytes: &[u8],
+    meta: &BinaryMetadata,
+    stream_nonce: &[u8; STREAM_NONCE_LEN],
+) -> [u8; HEADER_BYTES] {
     let mut header = [0; HEADER_BYTES];
     header[..4].copy_from_slice(MAGIC);
     header[4] = VERSION;
     header[5..13].copy_from_slice(&meta.byte_len.to_be_bytes());
-    header[13..17].copy_from_slice(&meta.chunk_count.to_be_bytes());
-    header[17..].copy_from_slice(&Sha256::digest(bytes));
+    header[13..STREAM_NONCE_OFFSET].copy_from_slice(&Sha256::digest(bytes));
+    header[STREAM_NONCE_OFFSET..].copy_from_slice(stream_nonce);
     header
 }
 
-/// RustCrypto STREAM requires raw key access, which `ItemKey` deliberately
-/// withholds here. Bind its total, position and final-block properties through
-/// the public item-AEAD AAD instead of widening the key boundary.
-fn chunk_aad_prefix(id: &str, header: &[u8; HEADER_BYTES]) -> String {
-    format!("binary:v2|{}:{}|{}", id.len(), id, hex::encode(header))
+fn stream_aad(id: &str, header: &[u8; HEADER_BYTES]) -> Vec<u8> {
+    let id = id.as_bytes();
+    let mut aad = Vec::with_capacity(AAD_PREFIX.len() + 24 + id.len() + header.len());
+    aad.extend_from_slice(AAD_PREFIX);
+    aad.extend_from_slice(id.len().to_string().as_bytes());
+    aad.push(b':');
+    aad.extend_from_slice(id);
+    aad.extend_from_slice(header);
+    aad
 }
 
-fn chunk_aad(prefix: &str, index: u32, is_final: bool) -> String {
-    format!("{prefix}|{index}|{}", u8::from(is_final))
-}
-
-/// Seal bytes into header-, position- and final-block-authenticated chunks.
+/// Seal bytes with RustCrypto STREAM, binding the item id and envelope header.
 pub fn seal(bytes: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoError> {
     if bytes.len() as u64 > MAX_BINARY_BYTES {
         return Err(CryptoError::AuthFailed);
     }
     let meta = metadata(bytes);
-    let header = header(bytes, &meta);
-    let aad_prefix = chunk_aad_prefix(id, &header);
-    let mut out = Vec::with_capacity(bytes.len().saturating_add(HEADER_BYTES));
+    let mut stream_nonce = [0u8; STREAM_NONCE_LEN];
+    OsRng.fill_bytes(&mut stream_nonce);
+    let header = header(bytes, &meta, &stream_nonce);
+    let aad = stream_aad(id, &header);
+    let tag_bytes = (meta.chunk_count as usize).saturating_mul(TAG_LEN);
+    let mut out = Vec::with_capacity(
+        bytes
+            .len()
+            .saturating_add(HEADER_BYTES)
+            .saturating_add(tag_bytes),
+    );
     out.extend_from_slice(&header);
 
-    for index in 0..meta.chunk_count {
-        let start = (index as usize)
+    let mut stream = stream_encryptor(key, &stream_nonce);
+    let final_index = meta.chunk_count as usize - 1;
+    for index in 0..final_index {
+        let start = index
             .checked_mul(CHUNK_BYTES)
             .ok_or(CryptoError::Internal("binary chunk offset overflow"))?;
-        let end = start.saturating_add(CHUNK_BYTES).min(bytes.len());
+        let end = start
+            .checked_add(CHUNK_BYTES)
+            .ok_or(CryptoError::Internal("binary chunk offset overflow"))?;
         let chunk = bytes
             .get(start..end)
             .ok_or(CryptoError::Internal("binary chunk range is invalid"))?;
-        let is_final = index + 1 == meta.chunk_count;
-        let aad = chunk_aad(&aad_prefix, index, is_final);
-        let (nonce, ciphertext) = encrypt(chunk, key, &aad)?;
-        let ciphertext_len = u32::try_from(ciphertext.len())
-            .map_err(|_| CryptoError::Internal("binary chunk ciphertext is too large"))?;
-        out.extend_from_slice(&nonce);
-        out.extend_from_slice(&ciphertext_len.to_be_bytes());
+        let ciphertext = stream
+            .encrypt_next(Payload {
+                msg: chunk,
+                aad: &aad,
+            })
+            .map_err(|_| CryptoError::Internal("STREAM rejected the binary chunk"))?;
         out.extend_from_slice(&ciphertext);
     }
+
+    let final_start = final_index
+        .checked_mul(CHUNK_BYTES)
+        .ok_or(CryptoError::Internal("binary chunk offset overflow"))?;
+    let final_chunk = bytes
+        .get(final_start..)
+        .ok_or(CryptoError::Internal("binary chunk range is invalid"))?;
+    let ciphertext = stream
+        .encrypt_last(Payload {
+            msg: final_chunk,
+            aad: &aad,
+        })
+        .map_err(|_| CryptoError::Internal("STREAM rejected the binary chunk"))?;
+    out.extend_from_slice(&ciphertext);
     Ok(out)
 }
 
@@ -148,68 +181,73 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoE
             .try_into()
             .map_err(|_| CryptoError::AuthFailed)?,
     );
-    let chunk_count = u32::from_be_bytes(
-        envelope[13..17]
-            .try_into()
-            .map_err(|_| CryptoError::AuthFailed)?,
-    );
     if byte_len > MAX_BINARY_BYTES {
         return Err(CryptoError::AuthFailed);
     }
-    let expected_chunks = byte_len.div_ceil(CHUNK_BYTES as u64);
-    if expected_chunks.max(1) != u64::from(chunk_count) {
+    let chunk_count = usize::try_from(byte_len.div_ceil(CHUNK_BYTES as u64).max(1))
+        .map_err(|_| CryptoError::AuthFailed)?;
+    let plain_len = usize::try_from(byte_len).map_err(|_| CryptoError::AuthFailed)?;
+    let expected_envelope_len = plain_len
+        .checked_add(HEADER_BYTES)
+        .and_then(|len| len.checked_add(chunk_count.checked_mul(TAG_LEN)?))
+        .ok_or(CryptoError::AuthFailed)?;
+    if envelope.len() != expected_envelope_len {
         return Err(CryptoError::AuthFailed);
     }
-    let expected_hash = &envelope[17..49];
+    let expected_hash = &envelope[13..STREAM_NONCE_OFFSET];
     let header: &[u8; HEADER_BYTES] = envelope[..HEADER_BYTES]
         .try_into()
         .map_err(|_| CryptoError::AuthFailed)?;
-    let aad_prefix = chunk_aad_prefix(id, header);
+    let stream_nonce: &[u8; STREAM_NONCE_LEN] = envelope[STREAM_NONCE_OFFSET..HEADER_BYTES]
+        .try_into()
+        .map_err(|_| CryptoError::AuthFailed)?;
+    let aad = stream_aad(id, header);
+    let mut stream = stream_decryptor(key, stream_nonce);
     let mut offset = HEADER_BYTES;
-    // Do not reserve from the peer-controlled `byte_len`.  Every append below
-    // follows successful AEAD verification of one structurally-bounded chunk.
     let mut plain = Vec::new();
-    for index in 0..chunk_count as usize {
-        let end_nonce = offset
-            .checked_add(NONCE_LEN)
+    for _ in 0..chunk_count - 1 {
+        let end = offset
+            .checked_add(CHUNK_BYTES + TAG_LEN)
             .ok_or(CryptoError::AuthFailed)?;
-        let end_len = end_nonce.checked_add(4).ok_or(CryptoError::AuthFailed)?;
-        if end_len > envelope.len() {
-            return Err(CryptoError::AuthFailed);
-        }
-        let size = u32::from_be_bytes(
-            envelope[end_nonce..end_len]
-                .try_into()
-                .map_err(|_| CryptoError::AuthFailed)?,
-        ) as usize;
-        let remaining = byte_len
-            .checked_sub((index as u64) * CHUNK_BYTES as u64)
-            .ok_or(CryptoError::AuthFailed)?;
-        let chunk_plain_len = remaining.min(CHUNK_BYTES as u64) as usize;
-        if size != chunk_plain_len.saturating_add(TAG_LEN) {
-            return Err(CryptoError::AuthFailed);
-        }
-        let end_chunk = end_len.checked_add(size).ok_or(CryptoError::AuthFailed)?;
-        if end_chunk > envelope.len() {
-            return Err(CryptoError::AuthFailed);
-        }
-        let is_final = index + 1 == chunk_count as usize;
-        let aad = chunk_aad(&aad_prefix, index as u32, is_final);
-        let decoded = decrypt(
-            &envelope[end_len..end_chunk],
-            &envelope[offset..end_nonce],
-            key,
-            &aad,
-        )?;
-        if decoded.len() != chunk_plain_len {
+        let ciphertext = envelope.get(offset..end).ok_or(CryptoError::AuthFailed)?;
+        let decoded = stream
+            .decrypt_next(Payload {
+                msg: ciphertext,
+                aad: &aad,
+            })
+            .map_err(|_| CryptoError::AuthFailed)?;
+        if decoded.len() != CHUNK_BYTES {
             return Err(CryptoError::AuthFailed);
         }
         plain.extend_from_slice(&decoded);
-        offset = end_chunk;
+        offset = end;
     }
+
+    let final_plain_len = plain_len
+        .checked_sub((chunk_count - 1).saturating_mul(CHUNK_BYTES))
+        .ok_or(CryptoError::AuthFailed)?;
+    let final_ciphertext_len = final_plain_len
+        .checked_add(TAG_LEN)
+        .ok_or(CryptoError::AuthFailed)?;
+    let end = offset
+        .checked_add(final_ciphertext_len)
+        .ok_or(CryptoError::AuthFailed)?;
+    let ciphertext = envelope.get(offset..end).ok_or(CryptoError::AuthFailed)?;
+    let decoded = stream
+        .decrypt_last(Payload {
+            msg: ciphertext,
+            aad: &aad,
+        })
+        .map_err(|_| CryptoError::AuthFailed)?;
+    if decoded.len() != final_plain_len {
+        return Err(CryptoError::AuthFailed);
+    }
+    plain.extend_from_slice(&decoded);
+    offset = end;
+    let actual_hash: [u8; 32] = Sha256::digest(&plain).into();
     if offset != envelope.len()
         || plain.len() as u64 != byte_len
-        || Sha256::digest(&plain).as_slice() != expected_hash
+        || actual_hash.as_slice() != expected_hash
     {
         return Err(CryptoError::AuthFailed);
     }
@@ -227,14 +265,17 @@ mod tests {
     }
 
     fn chunk_records(envelope: &[u8]) -> Vec<Range<usize>> {
-        let count = u32::from_be_bytes(envelope[13..17].try_into().unwrap());
-        let mut records = Vec::with_capacity(count as usize);
+        let byte_len = u64::from_be_bytes(envelope[5..13].try_into().unwrap()) as usize;
+        let count = byte_len.div_ceil(CHUNK_BYTES).max(1);
+        let mut records = Vec::with_capacity(count);
         let mut offset = HEADER_BYTES;
-        for _ in 0..count {
-            let len_offset = offset + NONCE_LEN;
-            let size = u32::from_be_bytes(envelope[len_offset..len_offset + 4].try_into().unwrap())
-                as usize;
-            let end = len_offset + 4 + size;
+        for index in 0..count {
+            let plaintext_len = if index + 1 == count {
+                byte_len - index * CHUNK_BYTES
+            } else {
+                CHUNK_BYTES
+            };
+            let end = offset + plaintext_len + TAG_LEN;
             records.push(offset..end);
             offset = end;
         }
@@ -270,12 +311,15 @@ mod tests {
     }
 
     #[test]
-    fn sealing_cannot_exceed_the_envelope_opening_bound() {
-        let bytes = vec![0; MAX_BINARY_BYTES as usize + 1];
+    fn maximum_payload_round_trips_and_one_extra_byte_is_rejected() {
         let key = Keyring::from_secret(&[9; 32]).item_key();
-        let id = item_id(&bytes);
+        let maximum = vec![0; MAX_BINARY_BYTES as usize];
+        let sealed = seal(&maximum, &key, "maximum").unwrap();
+        assert_eq!(open(&sealed, &key, "maximum").unwrap(), maximum);
+
+        let bytes = vec![0; MAX_BINARY_BYTES as usize + 1];
         assert!(matches!(
-            seal(&bytes, &key, &id),
+            seal(&bytes, &key, "too-large"),
             Err(CryptoError::AuthFailed)
         ));
     }
@@ -304,7 +348,10 @@ mod tests {
         let first = chunk_records(&sealed)[0].clone();
         let mut forged = sealed[..first.end].to_vec();
         let prefix_meta = metadata(&known_prefix);
-        forged[..HEADER_BYTES].copy_from_slice(&header(&known_prefix, &prefix_meta));
+        let nonce = sealed[STREAM_NONCE_OFFSET..HEADER_BYTES]
+            .try_into()
+            .unwrap();
+        forged[..HEADER_BYTES].copy_from_slice(&header(&known_prefix, &prefix_meta, nonce));
 
         assert_auth_failed(open(&forged, &key, id));
     }
@@ -393,6 +440,35 @@ mod tests {
     }
 
     #[test]
+    fn truncation_and_trailing_bytes_fail_authentication() {
+        let bytes = vec![0x44; CHUNK_BYTES + 23];
+        let key = Keyring::from_secret(&[13; 32]).item_key();
+        let sealed = seal(&bytes, &key, "bounded").unwrap();
+
+        assert_auth_failed(open(&sealed[..sealed.len() - 1], &key, "bounded"));
+        let mut trailing = sealed;
+        trailing.push(0);
+        assert_auth_failed(open(&trailing, &key, "bounded"));
+    }
+
+    #[test]
+    fn stream_envelope_has_only_header_ciphertext_and_tags() {
+        let bytes = vec![0x21; CHUNK_BYTES + 3];
+        let key = Keyring::from_secret(&[14; 32]).item_key();
+        let sealed = seal(&bytes, &key, "minimal").unwrap();
+        let resealed = seal(&bytes, &key, "minimal").unwrap();
+
+        assert_eq!(&sealed[..4], MAGIC);
+        assert_eq!(sealed[4], VERSION);
+        assert_eq!(HEADER_BYTES, 64);
+        assert_eq!(sealed.len(), HEADER_BYTES + bytes.len() + 2 * TAG_LEN);
+        assert_ne!(
+            &sealed[STREAM_NONCE_OFFSET..HEADER_BYTES],
+            &resealed[STREAM_NONCE_OFFSET..HEADER_BYTES]
+        );
+    }
+
+    #[test]
     fn transport_metadata_rejects_a_path_even_after_deserializing() {
         assert!(FileMetadata::from_json(
             r#"{"filename":"../private.txt","mime_type":"text/plain"}"#
@@ -406,8 +482,8 @@ mod tests {
         let mut envelope = Vec::from(MAGIC.as_slice());
         envelope.push(VERSION);
         envelope.extend_from_slice(&u64::MAX.to_be_bytes());
-        envelope.extend_from_slice(&u32::MAX.to_be_bytes());
         envelope.extend_from_slice(&[0; 32]);
+        envelope.extend_from_slice(&[0; STREAM_NONCE_LEN]);
 
         assert!(matches!(
             open(&envelope, &key, "binary-id"),
@@ -416,16 +492,13 @@ mod tests {
     }
 
     #[test]
-    fn a_header_with_an_impossible_chunk_count_fails_closed() {
+    fn obsolete_manual_format_version_is_rejected() {
         let key = Keyring::from_secret(&[8; 32]).item_key();
-        let mut envelope = Vec::from(MAGIC.as_slice());
-        envelope.push(VERSION);
-        envelope.extend_from_slice(&1u64.to_be_bytes());
-        envelope.extend_from_slice(&0u32.to_be_bytes());
-        envelope.extend_from_slice(&[0; 32]);
+        let mut envelope = seal(b"old framing is not supported", &key, "version").unwrap();
+        envelope[4] = 2;
 
         assert!(matches!(
-            open(&envelope, &key, "binary-id"),
+            open(&envelope, &key, "version"),
             Err(CryptoError::AuthFailed)
         ));
     }
