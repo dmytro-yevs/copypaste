@@ -218,8 +218,8 @@ impl CloudItem {
         if let Some(metadata) = &self.payload_metadata {
             if self.content_type != "file"
                 || metadata.len() > 1024
-                || !serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(metadata)
-                    .is_ok()
+                || serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(metadata)
+                    .is_err()
             {
                 return Err(RestError::InvalidItem {
                     reason: "payload metadata must be bounded JSON for a file item",
