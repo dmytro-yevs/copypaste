@@ -43,7 +43,6 @@ Everything else under `app/src/main/java/com/copypaste/app/` and the one
 
 The Kotlin holds no policy — see
 [ADR-0005](../../../../docs/adr/0005-android-capture-in-rust-kotlin-reports.md).
-It has never been compiled: this project's host has no Android SDK. The first
-build will find things, and
-[docs/rewrite/android-spike.md](../../../../docs/rewrite/android-spike.md) lists
-them in the order to expect.
+The release build is run through `npm run tauri -- android build --apk`; it
+uses this tracked project directly and does not regenerate it. Device-level
+Shizuku behaviour is additionally exercised by the Android emulator smoke job.
