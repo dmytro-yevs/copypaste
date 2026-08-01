@@ -151,6 +151,32 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn pin_metadata_round_trips_inside_the_authenticated_noise_record() {
+        let (mut a, mut b) = pair().await;
+        a.send(SyncMessage::Items {
+            items: vec![crate::protocol::SyncItem {
+                item_id: "item".into(),
+                content: "shared".into(),
+                content_type: "text".into(),
+                created_at: 1,
+                deleted: false,
+                content_hash: crate::protocol::content_hash("shared"),
+                origin_device_id: "device-a".into(),
+                pinned: true,
+                pin_order: Some(7.0),
+            }],
+        })
+        .await
+        .unwrap();
+
+        let SyncMessage::Items { items } = b.recv().await.unwrap() else {
+            panic!("wrong message kind");
+        };
+        assert!(items[0].pinned);
+        assert_eq!(items[0].pin_order, Some(7.0));
+    }
+
     /// The case the sync author warned about: the far half aborts without a
     /// goodbye. The near half must fail, not wait forever.
     #[tokio::test]
@@ -202,6 +228,8 @@ mod tests {
             deleted: false,
             content_hash: "h".into(),
             origin_device_id: "d".into(),
+            pinned: false,
+            pin_order: None,
         })
         .take(crate::protocol::MAX_ITEMS_PER_MESSAGE + 1)
         .collect();
