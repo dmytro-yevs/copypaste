@@ -25,6 +25,12 @@ apply(plugin = "org.owasp.dependencycheck")
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     failBuildOnCVSS = 0.0F
     format = ReportGenerator.Format.ALL.toString()
+    data.directory = "${System.getProperty("user.home")}/.gradle/dependency-check-data"
+    nvd {
+        delay = 16000
+        maxRetryCount = 20
+        validForHours = 24
+    }
 }
 
 tasks.register("clean").configure {
