@@ -14,13 +14,14 @@ use crate::AppState;
 
 /// A source over this daemon's history.
 pub fn store_source(state: &Arc<AppState>) -> StoreSource {
-    StoreSource::new(
+    let settings = Arc::clone(state);
+    StoreSource::with_retention_settings(
         state.store.clone(),
         Arc::clone(&state.keyring),
         Arc::clone(&state.detector),
         state.meta.device_id().to_string(),
         state.meta.device_name().to_string(),
-        state.settings.get().storage_quota_bytes,
+        move || settings.settings.get().clone(),
     )
 }
 
