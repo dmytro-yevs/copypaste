@@ -1,13 +1,15 @@
 //! One compiled ruleset feeds span detection, compatibility labelling,
 //! redaction, and the high-confidence whole-item gate.
 
-use regex::{Regex, RegexSet, RegexSetBuilder};
+use std::collections::HashMap;
+
+use regex::{Captures, Regex, RegexSet, RegexSetBuilder};
 
 use super::finding::{Finding, Severity, SpannedFinding};
 use super::normalise::normalise;
 use super::redact::redact_findings;
-use super::rules::RULES;
-use super::spec::{RuleSpec, Validator};
+use super::rules::{GLOBAL_ALLOWLISTS, RULES};
+use super::spec::{AllowlistCondition, AllowlistSpec, AllowlistTarget, RuleSpec, Validator};
 use super::validators::{
     iban_valid, luhn_valid, phone_is_formatted, ssn_structure_plausible, value_is_strong,
 };
@@ -26,6 +28,13 @@ pub enum DetectorError {
     /// The combined prefilter failed to compile.
     #[error("the sensitive-content rule set failed to compile")]
     RuleSet(#[source] regex::Error),
+    /// A selected upstream allowlist failed to compile.
+    #[error("sensitive-content allowlist for `{rule}` failed to compile")]
+    Allowlist {
+        rule: &'static str,
+        #[source]
+        source: regex::Error,
+    },
 }
 
 /// Lazy-DFA cache ceiling for the prefilter, and the difference between the
@@ -40,9 +49,10 @@ pub enum DetectorError {
 /// to grow. The cache is allocated on demand, so this is a ceiling and not a
 /// cost.
 const PREFILTER_DFA_SIZE_LIMIT: usize = 8 * 1024 * 1024;
+const PREFILTER_COMPILED_SIZE_LIMIT: usize = 32 * 1024 * 1024;
 
-/// The compiled ruleset. Construct **once** and share it: `new()` compiles ~42
-/// regexes plus the prefilter, and this runs on the clipboard hot path
+/// The compiled ruleset. Construct **once** and share it: `new()` compiles the
+/// generated regexes plus the prefilter, and this runs on the clipboard hot path
 /// (`CopyPaste-mnte`: v1 built the detector once per history page).
 pub struct Detector {
     /// Prefilter. One pass says which rules can possibly match; only those
@@ -54,6 +64,7 @@ pub struct Detector {
     /// degrade-to-empty mechanism to hold this invariant; here it is
     /// structural, §7.6).
     rules: Vec<Rule>,
+    global_allowlists: Vec<CompiledAllowlist>,
 }
 
 impl Detector {
@@ -66,13 +77,28 @@ impl Detector {
                 rule: spec.name,
                 source,
             })?;
-            rules.push(Rule { spec, regex });
+            rules.push(Rule {
+                spec,
+                regex,
+                keywords: spec
+                    .keywords
+                    .iter()
+                    .map(|keyword| keyword.to_lowercase())
+                    .collect(),
+                allowlists: compile_allowlists(spec.name, spec.allowlists)?,
+            });
         }
         let set = RegexSetBuilder::new(RULES.iter().map(|r| r.pattern))
+            .size_limit(PREFILTER_COMPILED_SIZE_LIMIT)
             .dfa_size_limit(PREFILTER_DFA_SIZE_LIMIT)
             .build()
             .map_err(DetectorError::RuleSet)?;
-        Ok(Self { set, rules })
+        let global_allowlists = compile_allowlists("global", GLOBAL_ALLOWLISTS)?;
+        Ok(Self {
+            set,
+            rules,
+            global_allowlists,
+        })
     }
 
     /// All validated matches in NFKC-normalised UTF-8 byte order.
@@ -97,9 +123,13 @@ impl Detector {
 
     fn scan_normalised(&self, text: &str) -> Vec<SpannedFinding> {
         let mut findings = Vec::new();
+        let lowered = text.to_lowercase();
         for idx in self.set.matches(text) {
             let rule = &self.rules[idx];
-            for (start, end) in rule.spans(text) {
+            if !rule.keyword_matches(&lowered) {
+                continue;
+            }
+            for (start, end) in rule.spans(text, &self.global_allowlists) {
                 findings.push(SpannedFinding::new(rule.spec.finding(), start, end));
             }
         }
@@ -158,16 +188,19 @@ fn compare_rank(a: &SpannedFinding, b: &SpannedFinding) -> std::cmp::Ordering {
 struct Rule {
     spec: &'static RuleSpec,
     regex: Regex,
+    keywords: Vec<String>,
+    allowlists: Vec<CompiledAllowlist>,
 }
 
 impl Rule {
     /// Every match that passes this rule's validator. No separate fast path:
     /// v1's `RegexSet` shortcut skipped the value-strength validator and needed
     /// a bespoke `generic_password_kv` case to compensate (§5.3).
-    fn spans(&self, text: &str) -> Vec<(usize, usize)> {
+    fn spans(&self, text: &str, global_allowlists: &[CompiledAllowlist]) -> Vec<(usize, usize)> {
         let mut spans = Vec::new();
         for caps in self.regex.captures_iter(text) {
             let Some(whole) = caps.get(0) else { continue };
+            let secret = secret(&caps, self.spec.secret_group, whole.as_str());
             let ok = match self.spec.validator {
                 Validator::None => true,
                 Validator::ValueStrength => {
@@ -178,12 +211,134 @@ impl Rule {
                 Validator::SsnStructure => ssn_structure_plausible(whole.as_str()),
                 Validator::PhoneShape => phone_is_formatted(whole.as_str()),
             };
-            if ok {
+            if !ok {
+                continue;
+            }
+            if self
+                .spec
+                .entropy
+                .is_some_and(|minimum| shannon_entropy(secret) <= minimum)
+            {
+                continue;
+            }
+            let line = line_containing(text, whole.start(), whole.end());
+            if !self.spec.upstream_ids.is_empty() && line.contains("gitleaks:allow") {
+                continue;
+            }
+            let globally_allowed = !self.spec.upstream_ids.is_empty()
+                && is_allowed(global_allowlists, secret, whole.as_str(), line);
+            if !globally_allowed
+                && !is_allowed(&self.allowlists, secret, whole.as_str(), line)
+            {
                 spans.push((whole.start(), whole.end()));
             }
         }
         spans
     }
+
+    fn keyword_matches(&self, lowered_text: &str) -> bool {
+        self.keywords.is_empty()
+            || self
+                .keywords
+                .iter()
+                .any(|keyword| lowered_text.contains(keyword))
+    }
+}
+
+struct CompiledAllowlist {
+    condition: AllowlistCondition,
+    target: AllowlistTarget,
+    regexes: Vec<Regex>,
+    stopwords: Vec<String>,
+}
+
+fn compile_allowlists(
+    rule: &'static str,
+    specs: &'static [AllowlistSpec],
+) -> Result<Vec<CompiledAllowlist>, DetectorError> {
+    specs
+        .iter()
+        .map(|spec| {
+            let regexes = spec
+                .regexes
+                .iter()
+                .map(|pattern| {
+                    Regex::new(pattern)
+                        .map_err(|source| DetectorError::Allowlist { rule, source })
+                })
+                .collect::<Result<_, _>>()?;
+            Ok(CompiledAllowlist {
+                condition: spec.condition,
+                target: spec.target,
+                regexes,
+                stopwords: spec
+                    .stopwords
+                    .iter()
+                    .map(|word| word.to_lowercase())
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+fn secret<'a>(caps: &'a Captures<'a>, group: usize, whole: &'a str) -> &'a str {
+    if group == 0 {
+        return whole;
+    }
+    caps.get(group).map_or(whole, |matched| matched.as_str())
+}
+
+fn shannon_entropy(value: &str) -> f64 {
+    let mut counts = HashMap::new();
+    let mut length = 0_u32;
+    for character in value.chars() {
+        *counts.entry(character).or_insert(0_u32) += 1;
+        length += 1;
+    }
+    if length == 0 {
+        return 0.0;
+    }
+    counts.values().fold(0.0, |entropy, count| {
+        let frequency = f64::from(*count) / f64::from(length);
+        entropy - frequency * frequency.log2()
+    })
+}
+
+fn line_containing(text: &str, start: usize, end: usize) -> &str {
+    let line_start = text[..start].rfind('\n').map_or(0, |index| index + 1);
+    let line_end = text[end..]
+        .find('\n')
+        .map_or(text.len(), |index| end + index);
+    &text[line_start..line_end]
+}
+
+fn is_allowed(
+    allowlists: &[CompiledAllowlist],
+    secret: &str,
+    matched: &str,
+    line: &str,
+) -> bool {
+    allowlists.iter().any(|allowlist| {
+        let target = match allowlist.target {
+            AllowlistTarget::Secret => secret,
+            AllowlistTarget::Match => matched,
+            AllowlistTarget::Line => line,
+        };
+        let regex_match = (!allowlist.regexes.is_empty())
+            .then(|| allowlist.regexes.iter().any(|regex| regex.is_match(target)));
+        let lowered_secret = secret.to_lowercase();
+        let stopword_match = (!allowlist.stopwords.is_empty()).then(|| {
+            allowlist
+                .stopwords
+                .iter()
+                .any(|word| lowered_secret.contains(word))
+        });
+        let mut checks = [regex_match, stopword_match].into_iter().flatten();
+        match allowlist.condition {
+            AllowlistCondition::Any => checks.any(|matched| matched),
+            AllowlistCondition::All => checks.all(|matched| matched),
+        }
+    })
 }
 
 /// Fixtures and helpers shared by every test module under `sensitive`. Here
@@ -624,6 +779,56 @@ mod tests {
         let uuid = "550e8400-e29b-41d4-a716-446655440000";
         assert!(!det.is_sensitive(uuid));
         assert!(det.is_sensitive(&format!("heroku config: {uuid}")));
+    }
+
+    #[test]
+    fn upstream_entropy_and_content_allowlists_filter_candidates() {
+        let det = detector();
+        assert!(!fired(
+            &det,
+            "credential = aaaaaaaaaaaa",
+            "generic_api_key"
+        ));
+        assert!(fired(
+            &det,
+            "credential = aB3dE5gH7jK9",
+            "generic_api_key"
+        ));
+        assert!(!fired(
+            &det,
+            "credential = about7X9kLmPq",
+            "generic_api_key"
+        ));
+        assert!(!fired(
+            &det,
+            "credential = AbCdEfGhIjKl",
+            "generic_api_key"
+        ));
+        assert!(!fired(
+            &det,
+            "credential=abc123XYZ987 --mount=type=secret,",
+            "generic_api_key"
+        ));
+        assert!(!fired(
+            &det,
+            "AIzaSyabcdefghijklmnopqrstuvwxyz1234567",
+            "google_api_key"
+        ));
+    }
+
+    #[test]
+    fn inline_suppression_applies_only_to_upstream_backed_rules() {
+        let det = detector();
+        assert!(!fired(
+            &det,
+            "credential=abc123XYZ987 # gitleaks:allow",
+            "generic_api_key"
+        ));
+        assert!(fired(
+            &det,
+            "alice@example.com # gitleaks:allow",
+            "email"
+        ));
     }
 
     /// §7.2: rank by confidence, not by declaration index. v1 returned the

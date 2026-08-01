@@ -23,6 +23,7 @@ mod normalise;
 mod purge;
 mod redact;
 mod rules;
+mod rules_generated;
 mod spec;
 mod validators;
 mod wipe;
