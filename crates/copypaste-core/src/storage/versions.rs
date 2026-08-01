@@ -104,14 +104,15 @@ impl Store {
 
     /// Everything eligible to sync, newest first, tombstones included.
     ///
-    /// **Sensitive items are excluded here and nowhere else matters more.**
-    /// This is the query that decides what may leave the device.
+    /// Live sensitive items are excluded here and nowhere else matters more.
+    /// Their payload-less tombstones remain eligible so auto-wipe converges on
+    /// peers without disclosing the secret.
     pub fn summaries(&self, limit: i64) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(
             "SELECT id, created_at, content_hash, deleted, origin_device_id, pinned, pin_order, pin_updated_at \
                FROM clipboard_items \
-              WHERE is_sensitive = 0 \
+              WHERE deleted = 1 OR is_sensitive = 0 \
               ORDER BY created_at DESC, id DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit], |row| {
@@ -144,9 +145,9 @@ impl Store {
         Ok(stmt.query_row([id], row_to_item).optional()?)
     }
 
-    /// The rows behind a request, still encrypted. Sensitive items are omitted,
-    /// and so are ids that do not exist — a session promises the caller a
-    /// subset, never an error.
+    /// The rows behind a request, still encrypted. Live sensitive items and
+    /// unknown ids are omitted; sensitive tombstones are included because they
+    /// carry no payload and are the delete protocol's only data.
     pub fn versions(&self, ids: &[String]) -> Result<Vec<StoredItem>, StoreError> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -163,7 +164,8 @@ impl Store {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT {} FROM clipboard_items WHERE is_sensitive = 0 AND id IN ({placeholders})",
+            "SELECT {} FROM clipboard_items \
+              WHERE (deleted = 1 OR is_sensitive = 0) AND id IN ({placeholders})",
             item_columns!()
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -220,7 +222,7 @@ impl Store {
     pub fn oldest_version_ms(&self) -> Result<Option<i64>, StoreError> {
         let conn = self.conn()?;
         let oldest: Option<i64> = conn.query_row(
-            "SELECT MIN(created_at) FROM clipboard_items WHERE is_sensitive = 0",
+            "SELECT MIN(created_at) FROM clipboard_items WHERE deleted = 1 OR is_sensitive = 0",
             [],
             |row| row.get(0),
         )?;
@@ -383,6 +385,25 @@ mod tests {
         assert_eq!(rows[0].id, plain.id);
         assert_eq!(rows[0].content_ciphertext, b"ct:plain");
         assert!(s.versions(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_sensitive_tombstone_is_advertised_and_served_without_a_payload() {
+        let s = store();
+        let secret = s.insert(sensitive_item("secret", T0)).unwrap();
+        assert!(s.delete(&secret.id).unwrap());
+
+        let summaries = s.summaries(100).unwrap();
+        assert!(summaries
+            .iter()
+            .any(|item| item.id == secret.id && item.deleted));
+
+        let rows = s.versions(std::slice::from_ref(&secret.id)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].deleted);
+        assert!(rows[0].content_ciphertext.is_empty());
+        assert!(rows[0].nonce.is_empty());
+        assert!(rows[0].content_hash.is_empty());
     }
 
     /// `version` is the only read that returns a tombstone or a flagged row,
