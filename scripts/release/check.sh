@@ -435,9 +435,7 @@ else
 fi
 
 # `npm audit` must cover every independently locked Node dependency graph: the
-# app bundle, the WebKit e2e harness and the token/build toolchain. Maven/Gradle
-# coordinates do not have npm lockfiles, so dependency-review-action evaluates
-# those changed manifests on pull requests as well.
+# app bundle, the WebKit e2e harness and the token/build toolchain.
 if grep -q 'run: npm audit' .github/workflows/ci.yml \
    && [[ "$(grep -c 'run: npm audit' .github/workflows/browser-webkitgtk.yml)" -ge 2 ]]; then
     ok "CI gates UI, e2e and design npm vulnerabilities"
@@ -451,6 +449,27 @@ if grep -q 'actions/dependency-review-action@v4' .github/workflows/supply-chain.
 else
     bad "supply-chain reviews changed Maven and Gradle dependencies" \
         "expected dependency-review-action with fail-on-severity: low"
+fi
+
+# dependency-review sees only PR diffs. Dependency-Check runs after the Android
+# build has resolved the actual Gradle graph, including transitive artifacts,
+# on the scheduled emulator workflow as well.
+if grep -q 'org.owasp:dependency-check-gradle:12.2.2' crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts \
+   && grep -q 'dependencyCheckAggregate' .github/workflows/android-emulator.yml \
+   && grep -q 'schedule:' .github/workflows/android-emulator.yml; then
+    ok "Android workflow audits the resolved Gradle dependency graph"
+else
+    bad "Android workflow audits the resolved Gradle dependency graph" \
+        "expected OWASP Dependency-Check after the Android build on its schedule"
+fi
+
+if [[ -f packaging/android/release-cert.sha256 ]] \
+   && grep -q 'EXPECTED_CERT_FILE: packaging/android/release-cert.sha256' .github/workflows/release.yml \
+   && grep -q 'APK signer fingerprint does not match' .github/workflows/release.yml; then
+    ok "release.yml pins the Android signing certificate before artifact upload"
+else
+    bad "release.yml pins the Android signing certificate before artifact upload" \
+        "expected a checked-in certificate fingerprint and an apksigner comparison"
 fi
 
 if grep -q 'cargo install tauri-driver --version 2.0.6 --locked' .github/workflows/browser-webkitgtk.yml; then
