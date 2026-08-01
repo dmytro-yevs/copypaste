@@ -21,6 +21,7 @@ import {
   unsettledFailure,
 } from "@/components/devices/peerState";
 import { t as translate, useTranslation } from "@/i18n";
+import { cn } from "@/lib/cn";
 import { type ErrorKind, friendlyError, isRetryable } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";

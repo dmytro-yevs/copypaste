@@ -11,6 +11,7 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "isolatedModules": true,
+    "types": ["node"],
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": { "@/*": ["./src/*"] }

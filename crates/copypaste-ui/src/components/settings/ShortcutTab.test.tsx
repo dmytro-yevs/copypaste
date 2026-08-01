@@ -47,6 +47,6 @@ describe("desktop shortcut settings", () => {
     await waitFor(() =>
       expect(setShortcut).toHaveBeenCalledWith("CmdOrCtrl+Shift+V"),
     );
-    expect(await screen.findByRole("status")).toHaveTextContent("Reset to default");
+    expect((await screen.findByRole("status")).textContent).toContain("Reset to default");
   });
 });

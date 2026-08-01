@@ -88,6 +88,8 @@ pub const MSG_NEEDS_ACCESSIBILITY: &str =
     "Media keys can't be used as the shortcut: macOS would ask for Accessibility \
      access, and CopyPaste would lose it on every update. Pick another key.";
 
+pub const MSG_NEEDS_MODIFIER: &str = "Choose a key combination with Cmd, Ctrl, Option, or Shift.";
+
 /// Register the app's global shortcut.
 ///
 /// Returns `Err` for a shortcut this app refuses to bind, or one the OS refused
@@ -120,6 +122,9 @@ pub fn register<R: Runtime>(
 pub fn validate(accelerator: &str) -> std::result::Result<Shortcut, &'static str> {
     let shortcut = Shortcut::from_str(accelerator)
         .map_err(|_| "That key combination can't be used as a shortcut.")?;
+    if shortcut.mods.is_empty() {
+        return Err(MSG_NEEDS_MODIFIER);
+    }
     if !is_permission_free(shortcut.key) {
         return Err(MSG_NEEDS_ACCESSIBILITY);
     }
@@ -226,6 +231,8 @@ mod tests {
     #[test]
     fn frontend_spelling_parses_and_media_keys_do_not() {
         assert!(validate("CmdOrCtrl+Shift+V").is_ok());
+        assert_eq!(validate("V"), Err(MSG_NEEDS_MODIFIER));
+        assert!(validate("Alt+V").is_ok());
         assert!(matches!(
             validate("CmdOrCtrl+MediaPlayPause"),
             Err(MSG_NEEDS_ACCESSIBILITY)
