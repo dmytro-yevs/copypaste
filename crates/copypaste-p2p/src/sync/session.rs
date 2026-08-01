@@ -27,7 +27,8 @@ use super::{SyncChannel, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
 use crate::protocol::{
     content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
-    MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
+    MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+    PROTOCOL_VERSION,
 };
 
 /// Runs the initiating half of a session to completion.
@@ -41,8 +42,7 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
         recv_hello(chan, source).await?
     };
 
-    let advertised = advertise(chan, source).await?;
-    let remote = recv_summary(chan).await?;
+    let (advertised, remote) = exchange_summaries_initiator(chan, source).await?;
 
     let mut stats = SyncStats::default();
     let wanted = plan(&advertised, &remote, now_ms(), &mut stats);
@@ -80,8 +80,7 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
         peer
     };
 
-    let remote = recv_summary(chan).await?;
-    let advertised = advertise(chan, source).await?;
+    let (advertised, remote) = exchange_summaries_responder(chan, source).await?;
 
     let mut stats = SyncStats::default();
 
@@ -145,46 +144,97 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
     }
 }
 
-/// Sends our summary and returns exactly what was advertised, keyed by id. The
-/// map is the session's authority on what we may serve — nothing outside it, so
-/// a sensitive item can never be requested out of us — and on what the peer's
-/// summary is compared against.
-async fn advertise<C: SyncChannel, S: SyncSource>(
+/// Reads exactly one authenticated summary page.
+async fn recv_summary_page<C: SyncChannel>(
     chan: &mut C,
-    source: &S,
-) -> Result<HashMap<String, ItemSummary>, SyncError> {
-    let mut items = source.summaries()?;
-
-    if items.len() > MAX_SUMMARIES_PER_MESSAGE {
-        // Newest first, then truncate: the newest entries are what a user is
-        // waiting for, and the remainder goes in the next session. Sessions
-        // repeat, so this delays convergence rather than preventing it.
-        tracing::warn!(
-            count = items.len(),
-            max = MAX_SUMMARIES_PER_MESSAGE,
-            "more items than one summary message holds; advertising the newest"
-        );
-        items.sort_unstable_by_key(|s| std::cmp::Reverse(s.created_at));
-        items.truncate(MAX_SUMMARIES_PER_MESSAGE);
-    }
-
-    chan.send(SyncMessage::Summary {
-        items: items.clone(),
-    })
-    .await?;
-
-    Ok(items.into_iter().map(|s| (s.item_id.clone(), s)).collect())
-}
-
-async fn recv_summary<C: SyncChannel>(chan: &mut C) -> Result<Vec<ItemSummary>, SyncError> {
+) -> Result<(Vec<ItemSummary>, bool), SyncError> {
     let msg = chan.recv().await?;
     msg.validate()?;
     match msg {
-        SyncMessage::Summary { items } => Ok(items),
+        SyncMessage::Summary { items, more } => Ok((items, more)),
         other => Err(SyncError::Unexpected {
             expected: "summary",
             got: other.kind(),
         }),
+    }
+}
+
+fn summary_pages<S: SyncSource>(
+    source: &S,
+) -> Result<(HashMap<String, ItemSummary>, Vec<Vec<ItemSummary>>), SyncError> {
+    let items = source.summaries()?;
+    if items.len() > MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION {
+        return Err(SyncError::TooManySummaryPages);
+    }
+    let advertised = items
+        .iter()
+        .cloned()
+        .map(|summary| (summary.item_id.clone(), summary))
+        .collect();
+    let mut pages: Vec<Vec<ItemSummary>> = items
+        .chunks(MAX_SUMMARIES_PER_MESSAGE)
+        .map(<[ItemSummary]>::to_vec)
+        .collect();
+    if pages.is_empty() {
+        pages.push(Vec::new());
+    }
+    Ok((advertised, pages))
+}
+
+/// Exchanges every summary page in lock-step. The old implementation sent just
+/// the newest 10,000 entries, permanently hiding older history because every
+/// later round repeated that same page. A `more` marker makes the page boundary
+/// explicit, while the lock-step exchange keeps either side from filling a
+/// bounded channel before it reads the other side's history.
+async fn exchange_summaries_initiator<C: SyncChannel, S: SyncSource>(
+    chan: &mut C,
+    source: &S,
+) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
+    let (advertised, pages) = summary_pages(source)?;
+    let mut remote = Vec::new();
+    let mut page = 0;
+    loop {
+        let more = page + 1 < pages.len();
+        chan.send(SyncMessage::Summary {
+            items: pages.get(page).cloned().unwrap_or_default(),
+            more,
+        })
+        .await?;
+        let (items, peer_more) = recv_summary_page(chan).await?;
+        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
+            return Err(SyncError::TooManySummaryPages);
+        }
+        remote.extend(items);
+        if !more && !peer_more {
+            return Ok((advertised, remote));
+        }
+        page += 1;
+    }
+}
+
+async fn exchange_summaries_responder<C: SyncChannel, S: SyncSource>(
+    chan: &mut C,
+    source: &S,
+) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
+    let (advertised, pages) = summary_pages(source)?;
+    let mut remote = Vec::new();
+    let mut page = 0;
+    loop {
+        let (items, peer_more) = recv_summary_page(chan).await?;
+        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
+            return Err(SyncError::TooManySummaryPages);
+        }
+        remote.extend(items);
+        let more = page + 1 < pages.len();
+        chan.send(SyncMessage::Summary {
+            items: pages.get(page).cloned().unwrap_or_default(),
+            more,
+        })
+        .await?;
+        if !more && !peer_more {
+            return Ok((advertised, remote));
+        }
+        page += 1;
     }
 }
 
@@ -361,7 +411,9 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::ProtocolError;
+    use crate::protocol::{
+        ProtocolError, MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+    };
     use crate::sync::testutil::{
         item, session, tombstone, try_session, try_session_with_listen_addresses, ScriptChannel,
         TestSource,
@@ -395,6 +447,77 @@ mod tests {
         assert_eq!(oa.stats.sent, 1);
         assert_eq!(ob.stats.received, 1);
         assert_eq!(ob.stats.sent, 1);
+    }
+
+    #[tokio::test]
+    async fn a_history_larger_than_one_summary_page_eventually_converges() {
+        let history: Vec<_> = (0..=MAX_SUMMARIES_PER_MESSAGE)
+            .map(|n| item(&format!("history-{n:05}"), n as i64, "archived", "dev-a"))
+            .collect();
+        let a = TestSource::new("dev-a", history);
+        let b = TestSource::new("dev-b", vec![]);
+
+        // Requests are deliberately bounded at 1,000 items, so drain enough
+        // complete sessions to cover every wanted page. The oldest item is the
+        // regression: it used to be absent from every summary forever.
+        for _ in 0..=MAX_SUMMARIES_PER_MESSAGE.div_ceil(MAX_REQUEST_IDS_PER_MESSAGE) {
+            session(&a, &b).await;
+        }
+
+        assert_eq!(a.snapshot(), b.snapshot());
+        assert!(
+            b.get("history-00000").is_some(),
+            "old history was never advertised"
+        );
+        assert_eq!(b.snapshot().len(), MAX_SUMMARIES_PER_MESSAGE + 1);
+    }
+
+    #[tokio::test]
+    async fn an_origin_only_conflict_converges_during_planning() {
+        let a = TestSource::new("dev-a", vec![item("x", 100, "same", "dev-a")]);
+        let b = TestSource::new("dev-b", vec![item("x", 100, "same", "dev-z")]);
+
+        session(&a, &b).await;
+
+        assert_eq!(a.snapshot(), b.snapshot());
+        assert_eq!(a.get("x").unwrap().origin_device_id, "dev-z");
+    }
+
+    #[tokio::test]
+    async fn pin_order_conflicts_converge_as_authenticated_version_state() {
+        let mut a_item = item("x", 100, "same", "dev-a");
+        a_item.pinned = true;
+        a_item.pin_order = Some(2.0);
+        let mut b_item = item("x", 100, "same", "dev-z");
+        b_item.pinned = true;
+        b_item.pin_order = Some(1.0);
+        let a = TestSource::new("dev-a", vec![a_item]);
+        let b = TestSource::new("dev-b", vec![b_item]);
+
+        session(&a, &b).await;
+
+        assert_eq!(a.snapshot(), b.snapshot());
+        let winner = a.get("x").unwrap();
+        assert!(winner.pinned);
+        assert_eq!(winner.pin_order, Some(1.0));
+        assert_eq!(winner.origin_device_id, "dev-z");
+    }
+
+    #[tokio::test]
+    async fn a_newer_p2p_unpin_clears_the_remote_order() {
+        let mut pinned = item("x", 100, "same", "dev-a");
+        pinned.pinned = true;
+        pinned.pin_order = Some(4.0);
+        let unpinned = item("x", 200, "same", "dev-b");
+        let a = TestSource::new("dev-a", vec![pinned]);
+        let b = TestSource::new("dev-b", vec![unpinned]);
+
+        session(&a, &b).await;
+
+        assert_eq!(a.snapshot(), b.snapshot());
+        let winner = a.get("x").unwrap();
+        assert!(!winner.pinned);
+        assert_eq!(winner.pin_order, None);
     }
 
     #[tokio::test]
@@ -591,7 +714,10 @@ mod tests {
                 device_name: "B".into(),
                 listen_addr: None,
             },
-            SyncMessage::Summary { items: vec![] },
+            SyncMessage::Summary {
+                items: vec![],
+                more: false,
+            },
             SyncMessage::Request {
                 item_ids: vec!["secret".into()],
             },
@@ -632,7 +758,10 @@ mod tests {
                 device_name: "B".into(),
                 listen_addr: None,
             },
-            SyncMessage::Summary { items: vec![] },
+            SyncMessage::Summary {
+                items: vec![],
+                more: false,
+            },
             SyncMessage::Items {
                 items: vec![item("pushed", 100, "unasked for", "dev-b")],
             },
@@ -664,6 +793,7 @@ mod tests {
             },
             SyncMessage::Summary {
                 items: vec![promised],
+                more: false,
             },
             SyncMessage::Items { items: vec![lying] },
             SyncMessage::Done,
@@ -695,6 +825,7 @@ mod tests {
             },
             SyncMessage::Summary {
                 items: vec![promised],
+                more: false,
             },
             SyncMessage::Items {
                 items: vec![forged],
@@ -726,6 +857,7 @@ mod tests {
             },
             SyncMessage::Summary {
                 items: vec![grave.summary()],
+                more: false,
             },
             SyncMessage::Items { items: vec![grave] },
             SyncMessage::Done,
@@ -747,7 +879,10 @@ mod tests {
                 device_name: "B".into(),
                 listen_addr: None,
             },
-            SyncMessage::Summary { items: vec![] },
+            SyncMessage::Summary {
+                items: vec![],
+                more: false,
+            },
         ];
         // Nothing was wanted, so any stream of items is already an overrun.
         script.extend(std::iter::repeat_with(|| SyncMessage::Items { items: vec![] }).take(64));
@@ -756,6 +891,28 @@ mod tests {
         assert_eq!(
             run_initiator(&mut chan, &a, None).await,
             Err(SyncError::PeerOverran)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_peer_cannot_keep_the_summary_stream_open_forever() {
+        let a = TestSource::new("dev-a", vec![]);
+        let mut script = vec![SyncMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            device_id: "dev-b".into(),
+            device_name: "B".into(),
+            listen_addr: None,
+        }];
+        script.extend(
+            (0..=MAX_SUMMARY_PAGES_PER_SESSION).map(|_| SyncMessage::Summary {
+                items: vec![],
+                more: true,
+            }),
+        );
+        let mut chan = ScriptChannel::new(script);
+        assert_eq!(
+            run_initiator(&mut chan, &a, None).await,
+            Err(SyncError::TooManySummaryPages)
         );
     }
 

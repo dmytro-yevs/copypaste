@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{merge_decision_by_summary, MergeDecision, SyncStats};
+use super::{merge_decision_by_summary, pin_state_wins, MergeDecision, SyncStats};
 use crate::protocol::{ItemSummary, MAX_REQUEST_IDS_PER_MESSAGE};
 
 /// How far into the future a peer's `created_at` may be before we refuse that
@@ -48,7 +48,9 @@ pub(super) fn plan(
 
         let take = match local.get(&r.item_id) {
             None => true,
-            Some(l) => merge_decision_by_summary(l, r) == MergeDecision::TakeRemote,
+            Some(l) => {
+                merge_decision_by_summary(l, r) == MergeDecision::TakeRemote || pin_state_wins(l, r)
+            }
         };
 
         if !take {

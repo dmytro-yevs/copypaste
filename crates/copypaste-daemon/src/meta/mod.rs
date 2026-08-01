@@ -189,6 +189,9 @@ mod tests {
                 deleted: false,
                 content_hash: "hash-theirs".into(),
                 origin_device_id: "device-b".into(),
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
             }
         )
         .unwrap());
