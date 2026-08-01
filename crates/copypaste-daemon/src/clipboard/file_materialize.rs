@@ -9,13 +9,19 @@ use copypaste_core::FileMetadata;
 /// never persisted or reported; the metadata has only a validated basename.
 pub(super) fn materialize(
     root: &Path,
-    item_id: &str,
     bytes: &[u8],
     metadata: &FileMetadata,
 ) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(root)?;
     set_private_dir(root)?;
-    let target = root.join(format!("{item_id}-{}", metadata.filename));
+    // `item_id` may have crossed P2P before it reaches paste-back.  The
+    // materialised filename is derived locally from the verified bytes instead
+    // of trusting that remote identifier as a path component.
+    let target = root.join(format!(
+        "{}-{}",
+        copypaste_core::binary_item_id(bytes),
+        metadata.filename
+    ));
     if target.exists() {
         return Ok(target);
     }
@@ -57,11 +63,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn materialized_file_is_private_and_never_uses_a_source_path() {
+    fn materialized_file_is_private_and_never_uses_an_untrusted_id() {
         let root = tempfile::tempdir().unwrap();
         let metadata = FileMetadata::new("report.pdf", "application/pdf").unwrap();
-        let path = materialize(root.path(), "content-id", b"bytes", &metadata).unwrap();
-        assert_eq!(path.file_name().unwrap(), "content-id-report.pdf");
+        let path = materialize(root.path(), b"bytes", &metadata).unwrap();
+        assert_eq!(
+            path.file_name().unwrap().to_string_lossy(),
+            format!("{}-report.pdf", copypaste_core::binary_item_id(b"bytes"))
+        );
         assert_eq!(std::fs::read(&path).unwrap(), b"bytes");
         #[cfg(unix)]
         {
@@ -71,5 +80,18 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn a_remote_traversal_id_cannot_escape_the_materialization_root() {
+        let root = tempfile::tempdir().unwrap();
+        let metadata = FileMetadata::new("report.pdf", "application/pdf").unwrap();
+        let remote_item_id = "../../outside";
+        // P2P item ids are deliberately absent from this API: regardless of
+        // what a peer supplied, only the locally-derived content id is used.
+        let path = materialize(root.path(), b"bytes", &metadata).unwrap();
+        assert!(path.starts_with(root.path()));
+        assert_ne!(path.file_name().unwrap().to_string_lossy(), remote_item_id);
+        assert!(!root.path().join("report.pdf").exists());
     }
 }
