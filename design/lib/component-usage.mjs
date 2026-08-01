@@ -121,7 +121,7 @@ export const ALPHA_UTILITIES = [
     covered: 'the --ok-strong on a 15% --ok tint pairs',
   },
   { util: 'bg-warn/15', where: 'Badge warn, Banners, HistoryView', covered: 'the --warn-strong tint pairs' },
-  { util: 'bg-err/15', where: 'Badge error, Banners, PairAcceptDialog', covered: 'the --err-strong tint pairs' },
+  { util: 'bg-err/15', where: 'Badge error, Banners, PairAcceptDialog, QuickPasteApp', covered: 'the --err-strong tint pairs' },
   { util: 'bg-info/15', where: 'Badge info', covered: 'the --info-strong tint pairs' },
   {
     util: 'border-warn/20',
@@ -143,26 +143,11 @@ export const ALPHA_UTILITIES = [
  */
 export const EXEMPTIONS = [
   {
-    rule: 'blur-over-clipboard-content',
-    files: ['components/devices/PairCreateDialog.tsx'],
-    why:
-      'The pairing code is a credential the user asks to see, not clipboard content the bridge ' +
-      'withheld. Manifest 06 requires it blurred by default and re-blurred before a regenerate ' +
-      'lands (INV-13, AT-35, CopyPaste-1jms.2 / v5a / crh3.21).',
-  },
-  {
     rule: 'no-blur-token',
     token: 'scrim-blur',
     why:
       'A modal scrim over the whole app, not a mask over a preview. It obscures nothing that is ' +
       'meant to be read, and prefers-reduced-transparency turns it off.',
-  },
-  {
-    rule: 'literal-colour',
-    files: ['components/devices/QrCode.tsx'],
-    why:
-      'Pure black on pure white. A QR is decoded by a camera against a fixed threshold, not read ' +
-      'by a person, so the palette does not apply and following [data-theme] would break scans.',
   },
   {
     rule: 'coarse-pointer-set',

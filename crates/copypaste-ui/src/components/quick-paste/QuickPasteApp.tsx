@@ -264,12 +264,12 @@ export function QuickPasteApp() {
       </div>
 
       {copyError && (
-        <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div role="alert" className="mb-2 flex items-center justify-between gap-2 rounded-md bg-err/15 px-3 py-2 text-sm text-err-strong">
           <span>{copyError}</span>
           {copyRetry && (
             <button
               type="button"
-              className="rounded px-2 py-1 text-xs font-medium hover:bg-destructive/10"
+              className="rounded px-2 py-1 text-xs font-medium hover:bg-destructive-hover hover:text-destructive-foreground"
               onClick={() => void copyAndDismiss(copyRetry.item, copyRetry.plainText)}
             >
               Retry
