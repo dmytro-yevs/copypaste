@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use security_framework::base::Error as SecurityFrameworkError;
 use zeroize::Zeroizing;
 
 use super::super::keys::random_secret;
@@ -44,13 +45,19 @@ pub(super) fn load(_data_dir: &Path) -> Result<Lookup, CryptoError> {
 
 pub(super) fn create(_data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
     let secret = Zeroizing::new(random_secret());
-    security_framework::passwords::set_generic_password(
+    store_device_secret(&secret)
+        .map_err(|_| CryptoError::KeystoreUnavailable("could not write to the keychain"))?;
+    Ok(secret)
+}
+
+/// CopyPaste-nkro: add and update both apply the attributes that keep the
+/// device secret off iCloud Keychain and out of device backups.
+fn store_device_secret(secret: &[u8; KEY_LEN]) -> Result<(), SecurityFrameworkError> {
+    copypaste_macos_keychain::set_generic_password_locked_down(
         KEYSTORE_SERVICE,
         KEYSTORE_ACCOUNT,
-        secret.as_ref(),
+        secret,
     )
-    .map_err(|_| CryptoError::KeystoreUnavailable("could not write to the keychain"))?;
-    Ok(secret)
 }
 
 // ---------------------------------------------------------------------------
@@ -125,6 +132,22 @@ mod tests {
         }
     }
 
+    fn assert_device_only_attributes() {
+        let attributes = copypaste_macos_keychain::generic_password_security_attributes(
+            KEYSTORE_SERVICE,
+            KEYSTORE_ACCOUNT,
+        )
+        .expect("the device secret security attributes must be readable");
+        assert!(
+            attributes.when_unlocked_this_device_only,
+            "accessibility is not WhenUnlockedThisDeviceOnly"
+        );
+        assert!(
+            !attributes.synchronizable,
+            "the device secret is synchronizable"
+        );
+    }
+
     fn like_the_real_database(dir: &Path) -> std::path::PathBuf {
         let name = copypaste_ipc::database_path();
         dir.join(name.file_name().expect("the database path has a filename"))
@@ -159,9 +182,34 @@ mod tests {
         let stored = get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT)
             .expect("the secret must be readable straight out of the Keychain");
         assert_eq!(stored.as_slice(), minted.as_slice());
+        assert_device_only_attributes();
 
         let reopened = load_or_create_secret(dir.path()).expect("a second run must read it back");
         assert_eq!(*reopened, *minted, "a second run minted a different secret");
+
+        clear_entry();
+    }
+
+    /// CopyPaste-nkro: the duplicate path must upgrade a legacy item rather
+    /// than changing only its bytes and retaining the default accessibility.
+    #[test]
+    #[ignore = "writes to the real macOS Keychain"]
+    fn a_duplicate_write_updates_data_and_security_attributes() {
+        let _lock = serialised();
+        if !disposable_keychain() {
+            return;
+        }
+        clear_entry();
+        set_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT, &[3; KEY_LEN]).unwrap();
+
+        let replacement = [7; KEY_LEN];
+        store_device_secret(&replacement).expect("the legacy item must update in place");
+
+        assert_eq!(
+            get_generic_password(KEYSTORE_SERVICE, KEYSTORE_ACCOUNT).unwrap(),
+            replacement
+        );
+        assert_device_only_attributes();
 
         clear_entry();
     }

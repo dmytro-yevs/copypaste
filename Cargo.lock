@@ -906,6 +906,7 @@ dependencies = [
  "android-native-keyring-store",
  "chacha20poly1305",
  "copypaste-ipc",
+ "copypaste-macos-keychain",
  "copypaste-p2p",
  "criterion",
  "hex",
@@ -976,6 +977,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "copypaste-macos-keychain"
+version = "2.0.0-alpha.1"
+dependencies = [
+ "core-foundation 0.9.4",
+ "security-framework",
+ "security-framework-sys",
 ]
 
 [[package]]
