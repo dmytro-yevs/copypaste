@@ -10,6 +10,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="$(mktemp -d)"
 export XDG_DATA_HOME="$DATA_DIR"
+export COPYPASTE_EPHEMERAL_KEY=1
+export COPYPASTE_SOCKET="$DATA_DIR/daemon.sock"
 
 # Prefer the pinned toolchain, fall back to whatever `cargo` resolves to.
 #
@@ -39,7 +41,7 @@ DAEMON="$ROOT/target/release/copypaste-daemon"
 CLI="$ROOT/target/release/copypaste"
 
 step "Starting daemon"
-"$DAEMON" --foreground &
+"$DAEMON" --foreground --data-dir "$DATA_DIR" &
 DAEMON_PID=$!
 for _ in $(seq 1 50); do
     "$CLI" status >/dev/null 2>&1 && break
