@@ -25,12 +25,15 @@ use super::store::Store;
 /// `copypaste_p2p::protocol::MAX_SUMMARIES_PER_MESSAGE` of these, and reading
 /// every ciphertext to compare four scalars would hold the whole history in
 /// memory to answer "what has changed".
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Version {
     pub id: String,
     pub created_at: i64,
     pub content_hash: String,
     pub deleted: bool,
+    pub pinned: bool,
+    pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
     /// Empty means "captured on this device" — see [`origin_or`].
     pub origin_device_id: String,
 }
@@ -47,6 +50,10 @@ pub struct IncomingItem<'a> {
     pub deleted: bool,
     pub is_sensitive: bool,
     pub origin_device_id: &'a str,
+    /// P2P pin state. `None` is the explicit unpinned order.
+    pub pinned: bool,
+    pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
     /// Plaintext for the search index. Ignored when the item is sensitive or a
     /// tombstone — the write-time layer of "sensitive items are never indexed".
     pub search_text: Option<&'a str>,
@@ -70,6 +77,29 @@ pub fn origin_or<'a>(stored: &'a str, here: &'a str) -> &'a str {
 }
 
 impl Store {
+    /// Apply a P2P pin-state version without touching the content version.
+    ///
+    /// Cloud rows deliberately have no pin metadata. Keeping this write
+    /// separate prevents a local pin from re-uploading older content.
+    pub fn apply_pin_state(
+        &self,
+        id: &str,
+        pinned: bool,
+        pin_order: Option<f64>,
+        pin_updated_at: i64,
+    ) -> Result<bool, StoreError> {
+        let mut conn = self.conn()?;
+        let tx = write_tx(&mut conn)?;
+        let written = tx.execute(
+            "UPDATE clipboard_items \
+                SET pinned = ?2, pin_order = ?3, pin_updated_at = ?4 \
+              WHERE id = ?1 AND deleted = 0",
+            params![id, pinned, pin_order, pin_updated_at],
+        )?;
+        tx.commit()?;
+        Ok(written != 0)
+    }
+
     /// Everything eligible to sync, newest first, tombstones included.
     ///
     /// Live sensitive items are excluded here and nowhere else matters more.
@@ -78,7 +108,7 @@ impl Store {
     pub fn summaries(&self, limit: i64) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(
-            "SELECT id, created_at, content_hash, deleted, origin_device_id \
+            "SELECT id, created_at, content_hash, deleted, origin_device_id, pinned, pin_order, pin_updated_at \
                FROM clipboard_items \
               WHERE deleted = 1 OR is_sensitive = 0 \
               ORDER BY created_at DESC, id DESC LIMIT ?1",
@@ -90,6 +120,9 @@ impl Store {
                 content_hash: row.get(2)?,
                 deleted: row.get::<_, i64>(3)? != 0,
                 origin_device_id: row.get(4)?,
+                pinned: row.get(5)?,
+                pin_order: row.get(6)?,
+                pin_updated_at: row.get(7)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -218,26 +251,23 @@ impl Store {
     /// safe direction — the content is already on this device under another id
     /// — and the caller reports it as skipped rather than failing the session.
     ///
-    /// What it preserves deliberately: `pinned` and `pin_order` are local
-    /// decisions that never come off the wire, so an incoming version keeps
-    /// whatever pin this device has.
-    ///
-    /// A tombstone clears them, matching [`Store::delete`] — and that is safe
-    /// only because a tombstone for a *pinned* row never reaches here.
-    /// `copypaste_core::sync` refuses it, so that one device clearing its
-    /// history cannot destroy every other device's pinned items; the reasoning
-    /// is there, with the merge policy it belongs to. What is left here is
-    /// hygiene: a row that has become a tombstone has no content, so it has
-    /// nothing to be pinned to.
+    /// P2P carries pin state as ordinary version metadata. The incoming value
+    /// replaces the local one wholesale, including an explicit `NULL` order on
+    /// unpin, because OR-merging pin state leaves replicas permanently apart.
     pub fn upsert(&self, incoming: &IncomingItem<'_>) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
+        let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
+            (false, None, 0)
+        } else {
+            (incoming.pinned, incoming.pin_order, incoming.pin_updated_at)
+        };
 
         let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted, origin_device_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, ?8, ?9) \
+                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  nonce              = excluded.nonce, \
@@ -247,8 +277,9 @@ impl Store {
                  created_at         = excluded.created_at, \
                  deleted            = excluded.deleted, \
                  origin_device_id   = excluded.origin_device_id, \
-                 pinned    = CASE WHEN excluded.deleted = 1 THEN 0 ELSE clipboard_items.pinned END, \
-                 pin_order = CASE WHEN excluded.deleted = 1 THEN NULL ELSE clipboard_items.pin_order END",
+                 pinned             = excluded.pinned, \
+                 pin_order          = excluded.pin_order, \
+                 pin_updated_at     = excluded.pin_updated_at",
             params![
                 incoming.id,
                 incoming.content_ciphertext,
@@ -256,6 +287,9 @@ impl Store {
                 incoming.content_type,
                 incoming.content_hash,
                 incoming.is_sensitive,
+                pinned,
+                pin_order,
+                pin_updated_at,
                 incoming.created_at,
                 incoming.deleted,
                 incoming.origin_device_id,
@@ -309,6 +343,9 @@ mod tests {
             deleted: false,
             is_sensitive: false,
             origin_device_id: "device-a",
+            pinned: false,
+            pin_order: None,
+            pin_updated_at: 0,
             search_text: Some("remote text"),
         }
     }
@@ -462,14 +499,35 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_is_local_and_survives_an_incoming_version() {
+    fn an_incoming_version_replaces_pin_state() {
         let s = store();
         let kept = s.insert(item("kept", T0)).unwrap();
         s.set_pinned(&kept.id, true).unwrap();
 
         s.upsert(&incoming(&kept.id, "hash-newer", T0 + 900_000))
             .unwrap();
-        assert!(s.get(&kept.id).unwrap().unwrap().pinned);
+        let row = s.get(&kept.id).unwrap().unwrap();
+        assert!(!row.pinned);
+        assert_eq!(row.pin_order, None);
+    }
+
+    #[test]
+    fn tombstones_clear_pin_metadata_even_if_the_caller_supplies_it() {
+        let s = store();
+        let doomed = s.insert(item("doomed", T0)).unwrap();
+        s.upsert(&IncomingItem {
+            deleted: true,
+            pinned: true,
+            pin_order: Some(99.0),
+            pin_updated_at: T0 + 1,
+            ..incoming(&doomed.id, "gone", T0 + 1)
+        })
+        .unwrap();
+        let row = s.version(&doomed.id).unwrap().unwrap();
+        assert!(row.deleted);
+        assert!(!row.pinned);
+        assert_eq!(row.pin_order, None);
+        assert_eq!(row.pin_updated_at, 0);
     }
 
     #[test]

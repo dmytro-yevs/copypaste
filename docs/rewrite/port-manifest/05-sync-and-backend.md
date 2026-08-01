@@ -332,20 +332,19 @@ Local-only, must NOT travel: the row PK (R-ID-2), the image thumbnail
 > not an LWW *version* on the cloud path at all — a cloud row that wins the merge
 > does not carry pin state with it, so the receiver keeps its own.
 >
-> There is now a third thing to carry: `pinned` and `pin_order` would be merge
-> inputs, so they must go under the row signature (§5.3) in the same change. A
-> merge key outside the signature is a merge key an account-password holder can
-> forge, and "unpin the row you want to delete" is a particularly cheap forgery.
+> **P2P implementation, 2026-08-01.** `ItemSummary` and `SyncItem` carry
+> `origin_device_id`, `pinned`, and `pin_order` (explicit `null` on unpin).
+> Summary planning consequently sees the complete LWW order, and a winning P2P
+> version replaces pin state wholesale. The fields are authenticated by the
+> paired Noise transport record that contains the JSON message; a peer cannot
+> alter any one of them without invalidating that record. Local pin, unpin, and
+> reorder operations advance the version stamp before their next advertisement.
 >
-> What it entangles: the daemon **refuses a remote delete of a pinned row**
-> precisely because pin state does not sync — without that refusal, a device that
-> cannot see the pin would delete a row the user had pinned, and data loss is the
-> worst outcome (`CLAUDE.md` rule 4). The two decisions stand or fall together.
-> Carrying pin state means revisiting that refusal in the same change: it is
-> three fields (`pinned`, `pin_order` as explicit `null` per T-6, and both on
-> `LocalItem`), a column pair and a migration, and a `CloudSource` that can read
-> and write them — none of it hard, all of it across two crates and the
-> deployment. Until that happens, neither half may be changed alone.
+> The earlier pinned-delete refusal is therefore not used on P2P: a remote
+> delete carries its own unpinned state and participates in ordinary LWW. The
+> cloud divergence remains deliberate: CloudItem still does not carry pin state,
+> and its merge input preserves the receiver's local pin/order rather than
+> manufacturing a cloud value or extending the cloud row signature piecemeal.
 
 ### 3.7 Merge pseudocode (transport-agnostic)
 

@@ -19,31 +19,35 @@ impl Store {
     pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        let exists: Option<i64> = tx
+        let previous_stamp: Option<i64> = tx
             .query_row(
-                "SELECT 1 FROM clipboard_items WHERE id = ?1 AND deleted = 0",
+                "SELECT pin_updated_at FROM clipboard_items WHERE id = ?1 AND deleted = 0",
                 [id],
                 |r| r.get(0),
             )
             .optional()?;
-        if exists.is_none() {
+        let Some(previous_stamp) = previous_stamp else {
             return Ok(false);
-        }
+        };
+        // Pin state is a P2P-only version. Cloud does not carry pin metadata,
+        // so touching the content stamp here could upload stale content.
+        let version_stamp = previous_stamp.saturating_add(1).max(crate::now_ms());
         if pinned {
             tx.execute(
                 "UPDATE clipboard_items \
                     SET pinned = 1, \
+                        pin_updated_at = ?2, \
                         pin_order = (SELECT COALESCE(MAX(pin_order), 0) + 1 \
                                        FROM clipboard_items \
                                       WHERE pinned = 1 AND deleted = 0) \
                   WHERE id = ?1 AND deleted = 0 AND pinned = 0",
-                [id],
+                params![id, version_stamp],
             )?;
         } else {
             tx.execute(
-                "UPDATE clipboard_items SET pinned = 0, pin_order = NULL \
+                "UPDATE clipboard_items SET pinned = 0, pin_order = NULL, pin_updated_at = ?2 \
                   WHERE id = ?1 AND deleted = 0",
-                [id],
+                params![id, version_stamp],
             )?;
         }
         tx.commit()?;
@@ -75,32 +79,34 @@ impl Store {
 
         // The pinned set as it stands now, in its current order. Read inside
         // the transaction so the unnamed tail cannot move underneath us.
-        let current: Vec<String> = {
+        let current: Vec<(String, i64)> = {
             let mut stmt = tx.prepare(
-                "SELECT id FROM clipboard_items \
+                "SELECT id, pin_updated_at FROM clipboard_items \
                   WHERE pinned = 1 AND deleted = 0 \
                   ORDER BY pin_order ASC, created_at DESC, id DESC",
             )?;
             let mut rows = stmt.query([])?;
             let mut out = Vec::new();
             while let Some(row) = rows.next()? {
-                out.push(row.get(0)?);
+                out.push((row.get(0)?, row.get(1)?));
             }
             out
         };
 
         // Named-and-still-pinned first, in the caller's order, deduplicated;
         // then everything else, in the order it already had.
-        let mut ordered: Vec<&String> = Vec::with_capacity(current.len());
+        let mut ordered: Vec<&(String, i64)> = Vec::with_capacity(current.len());
         for id in ids {
-            if current.contains(id) && !ordered.contains(&id) {
-                ordered.push(id);
+            if let Some(item) = current.iter().find(|(current_id, _)| current_id == id) {
+                if !ordered.contains(&item) {
+                    ordered.push(item);
+                }
             }
         }
         let named = ordered.len();
-        for id in &current {
-            if !ordered.contains(&id) {
-                ordered.push(id);
+        for item in &current {
+            if !ordered.contains(&item) {
+                ordered.push(item);
             }
         }
 
@@ -109,11 +115,12 @@ impl Store {
         let mut renumbered = 0u64;
         {
             let mut stmt = tx.prepare(
-                "UPDATE clipboard_items SET pin_order = ?2 \
+                "UPDATE clipboard_items SET pin_order = ?2, pin_updated_at = ?3 \
                   WHERE id = ?1 AND pinned = 1 AND deleted = 0",
             )?;
-            for (index, id) in ordered.iter().enumerate() {
-                renumbered += stmt.execute(params![id, (index + 1) as f64])? as u64;
+            for (index, (id, previous_stamp)) in ordered.iter().enumerate() {
+                let version_stamp = previous_stamp.saturating_add(1).max(crate::now_ms());
+                renumbered += stmt.execute(params![id, (index + 1) as f64, version_stamp])? as u64;
             }
         }
         tx.commit()?;
@@ -220,5 +227,25 @@ mod tests {
         let order = pinned_order(&s);
         assert_eq!(order.last().unwrap(), &latecomer);
         assert_eq!(order.len(), 4);
+    }
+
+    #[test]
+    fn pin_actions_do_not_restamp_the_cloud_content_version() {
+        let s = store();
+        let first = s.insert(item("first", T0)).unwrap().id;
+        let second_stamp = T0 + 60_000;
+        let second = s.insert(item("second", second_stamp)).unwrap().id;
+
+        assert!(s.set_pinned(&first, true).unwrap());
+        assert!(s.set_pinned(&second, true).unwrap());
+        s.reorder_pinned(&[second.clone(), first.clone()]).unwrap();
+        assert!(s.set_pinned(&first, false).unwrap());
+
+        let first = s.version(&first).unwrap().unwrap();
+        let second = s.version(&second).unwrap().unwrap();
+        assert_eq!(first.created_at, T0);
+        assert_eq!(second.created_at, second_stamp);
+        assert!(first.pin_updated_at > 0);
+        assert!(second.pin_updated_at > 0);
     }
 }

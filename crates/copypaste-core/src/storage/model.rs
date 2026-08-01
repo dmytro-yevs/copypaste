@@ -11,7 +11,7 @@ use rusqlite::{ErrorCode, Row};
 macro_rules! item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
-         pinned, is_sensitive, deleted, origin_device_id"
+         pinned, pin_order, pin_updated_at, is_sensitive, deleted, origin_device_id"
     };
 }
 
@@ -21,7 +21,8 @@ macro_rules! item_columns_ci {
     () => {
         "ci.id AS id, ci.content_ciphertext AS content_ciphertext, ci.nonce AS nonce, \
          ci.content_type AS content_type, ci.content_hash AS content_hash, \
-         ci.created_at AS created_at, ci.pinned AS pinned, \
+         ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, \
+         ci.pin_updated_at AS pin_updated_at, \
          ci.is_sensitive AS is_sensitive, ci.deleted AS deleted, \
          ci.origin_device_id AS origin_device_id"
     };
@@ -53,7 +54,7 @@ pub struct NewItem {
 }
 
 /// What [`super::Store::insert_or_bump`] did with a capture.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Ingest {
     /// The content was new to this device's history.
     Inserted(StoredItem),
@@ -92,7 +93,7 @@ impl Ingest {
 /// (`created_at`, `content_hash`, `deleted`, `origin_device_id`) are all here
 /// so that one row type answers both questions; carrying them in a second view
 /// on a second connection is what `crate::sync` was extracted from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StoredItem {
     pub id: String,
     /// Empty on a tombstone: the soft delete wiped the payload.
@@ -106,6 +107,8 @@ pub struct StoredItem {
     pub content_hash: String,
     pub created_at: i64,
     pub pinned: bool,
+    pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
     pub is_sensitive: bool,
     /// A tombstone. `Store::get` and `Store::list` never return one; the sync
     /// reads in [`super::versions`] do, because a delete is a version.
@@ -175,6 +178,8 @@ pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
         content_hash: row.get("content_hash")?,
         created_at: row.get("created_at")?,
         pinned: row.get("pinned")?,
+        pin_order: row.get("pin_order")?,
+        pin_updated_at: row.get("pin_updated_at")?,
         is_sensitive: row.get("is_sensitive")?,
         deleted: row.get("deleted")?,
         origin_device_id: row.get("origin_device_id")?,

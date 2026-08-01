@@ -20,23 +20,18 @@
 
 use std::sync::Arc;
 
-use copypaste_p2p::protocol::{ItemSummary, SyncItem, MAX_SUMMARIES_PER_MESSAGE};
+use copypaste_p2p::protocol::{ItemSummary, SyncItem};
 use copypaste_p2p::sync::{SyncError, SyncSource};
 use tracing::warn;
 
-use super::merge::{apply_remote_version, open_version, MergeError, RemoteVersion};
+use super::merge::{
+    apply_remote_p2p_version_with_pin_stamp, apply_remote_version, open_version, MergeError,
+    RemoteVersion,
+};
 use super::MSG_STORE;
 use crate::sensitive::Detector;
 use crate::storage::{origin_or, Store, StoredItem};
 use crate::Keyring;
-
-/// Ceiling on how many summaries one session advertises.
-///
-/// `sync::advertise` truncates to `MAX_SUMMARIES_PER_MESSAGE` itself, so this
-/// exists to bound the *query*, not the message: without it a history at the
-/// 10 000-item cap plus its tombstones would be read out of SQLite in full only
-/// to be thrown away.
-const SUMMARY_LIMIT: i64 = MAX_SUMMARIES_PER_MESSAGE as i64;
 
 /// A [`SyncSource`] over a [`Store`].
 ///
@@ -145,6 +140,9 @@ impl StoreSource {
             deleted: row.deleted,
             content_hash: row.content_hash,
             origin_device_id: origin_or(&row.origin_device_id, &self.device_id).to_string(),
+            pinned: row.pinned,
+            pin_order: row.pin_order,
+            pin_updated_at: row.pin_updated_at,
             item_id: row.id,
         })
     }
@@ -168,7 +166,7 @@ impl SyncSource for StoreSource {
         super::blocking(|| {
             let rows = self
                 .store
-                .summaries(SUMMARY_LIMIT)
+                .summaries(i64::MAX)
                 .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
             Ok(rows
                 .into_iter()
@@ -177,6 +175,11 @@ impl SyncSource for StoreSource {
                     created_at: version.created_at,
                     deleted: version.deleted,
                     content_hash: version.content_hash,
+                    origin_device_id: origin_or(&version.origin_device_id, &self.device_id)
+                        .to_string(),
+                    pinned: version.pinned,
+                    pin_order: version.pin_order,
+                    pin_updated_at: version.pin_updated_at,
                 })
                 .collect())
         })
@@ -197,19 +200,34 @@ impl SyncSource for StoreSource {
 
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
         super::blocking(|| {
-            self.apply_version(&RemoteVersion {
-                item_id: &item.item_id,
-                content: &item.content,
-                content_type: &item.content_type,
-                created_at: item.created_at,
-                deleted: item.deleted,
-                // The peer protocol carries the sender's hash, and a
-                // tombstone's hash is the deleted item's — so it is passed
-                // through rather than recomputed from the empty content.
-                content_hash: Some(&item.content_hash),
-                origin_device_id: &item.origin_device_id,
-            })
-            .map_err(|e| SyncError::Source(e.message().to_string()))
+            let result = apply_remote_p2p_version_with_pin_stamp(
+                &self.store,
+                &self.keyring,
+                &self.detector,
+                &self.device_id,
+                &RemoteVersion {
+                    item_id: &item.item_id,
+                    content: &item.content,
+                    content_type: &item.content_type,
+                    created_at: item.created_at,
+                    deleted: item.deleted,
+                    // The peer protocol carries the sender's hash, and a
+                    // tombstone's hash is the deleted item's — so it is passed
+                    // through rather than recomputed from the empty content.
+                    content_hash: Some(&item.content_hash),
+                    origin_device_id: &item.origin_device_id,
+                },
+                item.pinned,
+                item.pin_order,
+                item.pin_updated_at,
+            )
+            .map_err(|e| SyncError::Source(e.message().to_string()))?;
+            if result.content {
+                if let Some(hook) = &self.on_applied {
+                    hook(item.created_at);
+                }
+            }
+            Ok(result.any())
         })
     }
 }
@@ -253,6 +271,9 @@ mod tests {
             deleted: false,
             content_hash: crate::storage::compute_content_hash(content.as_bytes()),
             origin_device_id: "device-a".into(),
+            pinned: false,
+            pin_order: None,
+            pin_updated_at: 0,
         }
     }
 
@@ -274,6 +295,9 @@ mod tests {
             "an unstamped origin must leave the device as this device's"
         );
         assert_eq!(items[0].content_hash, summaries[0].content_hash);
+        assert_eq!(summaries[0].origin_device_id, source.device_id());
+        assert!(!summaries[0].pinned);
+        assert_eq!(summaries[0].pin_order, None);
     }
 
     #[test]
@@ -388,10 +412,28 @@ mod tests {
                 deleted: true,
                 content_hash: live.content_hash,
                 origin_device_id: "device-a".into(),
+                pinned: false,
+                pin_order: None,
+                pin_updated_at: 0,
             })
             .unwrap());
         assert!(f.store.version("deleted").unwrap().unwrap().deleted);
         assert_eq!(fts_row_count(&f.store, "deleted"), 0);
+    }
+
+    #[test]
+    fn a_p2p_pin_and_order_replace_the_local_state() {
+        let f = fixture_named("beta");
+        let source = f.source();
+        let mut remote = peer_item("peer-item", "pinned elsewhere", 1_700_000_000_000);
+        remote.pinned = true;
+        remote.pin_order = Some(3.0);
+
+        assert!(source.apply(remote).unwrap());
+
+        let stored = f.store.version("peer-item").unwrap().unwrap();
+        assert!(stored.pinned);
+        assert_eq!(stored.pin_order, Some(3.0));
     }
 
     #[test]

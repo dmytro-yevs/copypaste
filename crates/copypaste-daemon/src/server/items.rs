@@ -368,6 +368,8 @@ mod tests {
             content_hash: String::new(),
             created_at: 0,
             pinned: false,
+            pin_order: None,
+            pin_updated_at: 0,
             is_sensitive: false,
             deleted: false,
             origin_device_id: String::new(),
