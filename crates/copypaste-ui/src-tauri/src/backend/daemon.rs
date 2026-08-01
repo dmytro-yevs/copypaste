@@ -107,6 +107,15 @@ pub(super) fn into_data(response: Response) -> Result<Option<ResponseData>> {
     if response.ok {
         return Ok(response.data);
     }
+    if let Some(raw_code) = response.raw_error_code.as_deref() {
+        let message = response
+            .error
+            .as_deref()
+            .unwrap_or("The daemon reported a failure but gave no reason.");
+        return Err(BackendError::from_daemon(&format!(
+            "{message} (error code: {raw_code})"
+        )));
+    }
     Err(BackendError::from_code(
         response.error_code,
         response.error.as_deref(),
@@ -190,11 +199,8 @@ fn expect_backup(data: Option<ResponseData>) -> Result<BackupData> {
     }
 }
 
-/// `ResponseData` is `#[serde(untagged)]`, so a bare `Count` deserialises as
-/// the first variant that fits. `Count(u64)` is unambiguous among the current
-/// variants, but the fallback keeps a reply the daemon sent as `Empty {}` from
-/// becoming a shape error — `clear` reporting "0 deleted" is right, and
-/// refusing to render a successful clear is not.
+/// The fallback keeps an acknowledged clear from becoming a shape error:
+/// `clear` reporting "0 deleted" is right when the daemon omitted a count.
 fn expect_count(data: Option<ResponseData>) -> Result<u64> {
     match data {
         Some(ResponseData::Count(count)) => Ok(count),
@@ -484,9 +490,9 @@ mod tests {
     fn items_deserialise_into_the_shared_wire_type() {
         let page = expect_page(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"items":[{"id":"a","content":"hi",
+                r#"{"id":1,"ok":true,"data":{"page":{"items":[{"id":"a","content":"hi",
                    "content_type":"text/plain","created_at":5,"pinned":true,
-                   "is_sensitive":false}],"skipped_undecryptable":0}}"#,
+                   "is_sensitive":false}],"skipped_undecryptable":0}}}"#,
             ))
             .unwrap(),
         )
@@ -497,12 +503,24 @@ mod tests {
 
     #[test]
     fn a_wrong_shape_is_reported_rather_than_silently_defaulted() {
-        assert!(expect_page(into_data(parse(r#"{"id":1,"ok":true,"data":{}}"#)).unwrap()).is_err());
+        assert!(expect_page(
+            into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).unwrap()
+        )
+        .is_err());
     }
 
     #[test]
     fn an_untagged_failure_still_becomes_an_error() {
         assert!(into_data(parse(r#"{"id":1,"ok":false,"error":"unknown method"}"#)).is_err());
+    }
+
+    #[test]
+    fn an_unknown_error_code_survives_the_daemon_boundary() {
+        let error = into_data(parse(
+            r#"{"id":1,"ok":false,"error":"new refusal","error_code":"future_daemon_state"}"#,
+        ))
+        .unwrap_err();
+        assert!(error.to_string().contains("future_daemon_state"), "{error}");
     }
 
     #[test]
@@ -518,8 +536,8 @@ mod tests {
     fn peers_and_pairings_deserialise() {
         let peers = expect_peers(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":[{"pairing_id":"p1","name":"laptop",
-                   "last_addr":"10.0.0.2:47654","last_seen_ms":5,"online":true}]}"#,
+                r#"{"id":1,"ok":true,"data":{"peers":[{"pairing_id":"p1","name":"laptop",
+                   "last_addr":"10.0.0.2:47654","last_seen_ms":5,"online":true}]}}"#,
             ))
             .unwrap(),
         )
@@ -529,7 +547,7 @@ mod tests {
 
         let pairing = expect_pairing(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"code":"ABC-DEF","pairing_id":"p1","listen_addr":"10.0.0.1:47654"}}"#,
+                r#"{"id":1,"ok":true,"data":{"pairing":{"code":"ABC-DEF","pairing_id":"p1","listen_addr":"10.0.0.1:47654"}}}"#,
             ))
             .unwrap(),
         )
@@ -541,9 +559,9 @@ mod tests {
     fn a_sync_report_deserialises_including_a_per_peer_failure() {
         let results = expect_sync(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":[{"pairing_id":"p1","name":"phone","sent":2,
+                r#"{"id":1,"ok":true,"data":{"sync":[{"pairing_id":"p1","name":"phone","sent":2,
                    "received":3,"error":null},{"pairing_id":"p2","name":"laptop","sent":0,
-                   "received":0,"error":"unreachable"}]}"#,
+                   "received":0,"error":"unreachable"}]}}"#,
             ))
             .unwrap(),
         )
@@ -557,11 +575,13 @@ mod tests {
     #[test]
     fn clear_accepts_both_a_count_and_an_empty_reply() {
         assert_eq!(
-            expect_count(into_data(parse(r#"{"id":1,"ok":true,"data":7}"#)).unwrap()).unwrap(),
+            expect_count(into_data(parse(r#"{"id":1,"ok":true,"data":{"count":7}}"#)).unwrap())
+                .unwrap(),
             7
         );
         assert_eq!(
-            expect_count(into_data(parse(r#"{"id":1,"ok":true,"data":{}}"#)).unwrap()).unwrap(),
+            expect_count(into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).unwrap())
+                .unwrap(),
             0
         );
     }
@@ -601,7 +621,7 @@ mod tests {
     fn a_page_carries_the_count_of_rows_that_would_not_open() {
         let page = expect_page(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":3}}"#,
+                r#"{"id":1,"ok":true,"data":{"page":{"items":[],"skipped_undecryptable":3}}}"#,
             ))
             .unwrap(),
         )
@@ -610,13 +630,11 @@ mod tests {
         assert_eq!(page.skipped_undecryptable, 3);
     }
 
-    /// The untagged decoder takes the first variant that fits, so a page must
-    /// not arrive as `Empty {}`. `ResponseData` documents the ordering rule;
-    /// this is the client-side guard that it still holds.
+    /// The page wrapper must remain distinct from an empty acknowledgement.
     #[test]
     fn a_page_does_not_decode_as_the_empty_variant() {
         let data = into_data(parse(
-            r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":0}}"#,
+            r#"{"id":1,"ok":true,"data":{"page":{"items":[],"skipped_undecryptable":0}}}"#,
         ))
         .unwrap();
         assert!(matches!(data, Some(ResponseData::Page(_))), "{data:?}");
@@ -630,8 +648,8 @@ mod tests {
     fn settings_decode_with_the_fields_that_are_waiting_on_a_restart() {
         let applied = expect_config(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"config":{"poll_interval_ms":250},
-                   "restart_required":["lan_visibility"]}}"#,
+                r#"{"id":1,"ok":true,"data":{"config":{"config":{"poll_interval_ms":250},
+                   "restart_required":["lan_visibility"]}}}"#,
             ))
             .unwrap(),
         )
@@ -647,7 +665,7 @@ mod tests {
 
         assert!(expect_config(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"config":{},"restart_required":[]}}"#
+                r#"{"id":1,"ok":true,"data":{"config":{"config":{},"restart_required":[]}}}"#
             ))
             .unwrap()
         )
@@ -656,18 +674,14 @@ mod tests {
         .is_empty());
     }
 
-    /// The untagged decoder takes the first variant that fits, and an export's
-    /// fields are a superset of a page's. `ResponseData` declares `Export`
-    /// first for exactly that reason; this is the client-side guard that it
-    /// still holds, because the failure is silent — an export would arrive as
-    /// a page with its three skip counts gone.
+    /// The export wrapper keeps its item array distinct from a history page.
     #[test]
     fn an_export_does_not_decode_as_a_page() {
         let export = expect_export(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"items":[{"content":"hi","content_type":"text/plain",
+                r#"{"id":1,"ok":true,"data":{"export":{"items":[{"content":"hi","content_type":"text/plain",
                    "created_at":5,"pinned":false,"is_sensitive":false}],"skipped_non_text":1,
-                   "skipped_sensitive":2,"skipped_undecryptable":3}}"#,
+                   "skipped_sensitive":2,"skipped_undecryptable":3}}}"#,
             ))
             .unwrap(),
         )
@@ -680,7 +694,7 @@ mod tests {
     fn an_import_report_and_a_backup_report_decode_as_themselves() {
         let imported = expect_import(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"inserted":7,"skipped":2}}"#,
+                r#"{"id":1,"ok":true,"data":{"import":{"inserted":7,"skipped":2}}}"#,
             ))
             .unwrap(),
         )
@@ -689,7 +703,10 @@ mod tests {
 
         assert_eq!(
             expect_backup(
-                into_data(parse(r#"{"id":1,"ok":true,"data":{"size_bytes":4096}}"#)).unwrap()
+                into_data(parse(
+                    r#"{"id":1,"ok":true,"data":{"backup":{"size_bytes":4096}}}"#
+                ))
+                .unwrap()
             )
             .unwrap()
             .size_bytes,
@@ -701,7 +718,7 @@ mod tests {
     /// as done rather than as a reply of the wrong shape.
     #[test]
     fn a_restore_succeeds_on_an_empty_reply() {
-        assert!(into_data(parse(r#"{"id":1,"ok":true,"data":{}}"#)).is_ok());
+        assert!(into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).is_ok());
     }
 
     #[test]

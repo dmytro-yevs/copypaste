@@ -206,6 +206,7 @@ pub fn into_data(response: Response) -> Result<Option<ResponseData>, CliError> {
     }
     Err(CliError::Daemon {
         code: response.error_code,
+        raw_code: response.raw_error_code,
         message: response
             .error
             .unwrap_or_else(|| "the daemon reported a failure but gave no reason".to_string()),
@@ -330,11 +331,6 @@ pub fn expect_cloud_sync(data: Option<ResponseData>) -> Result<CloudSyncData, Cl
 pub fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>, CliError> {
     match data {
         Some(ResponseData::Sync(results)) => Ok(results),
-        // `Peers` is the first array-shaped variant, so an *empty* JSON array
-        // decodes as one before it ever reaches `Sync`. That is a property of
-        // the untagged wire encoding, not a daemon bug, so "no peers to sync
-        // with" is accepted here rather than reported as a shape error.
-        Some(ResponseData::Peers(peers)) if peers.is_empty() => Ok(Vec::new()),
         _ => Err(shape_error("sync results")),
     }
 }
@@ -452,7 +448,7 @@ mod tests {
         let stub = StubDaemon::start(
             "roundtrip",
             vec![StubAction::Reply(
-                r#"{"id":{id},"ok":true,"data":{"items":[{"id":"a","content":"hi","content_type":"text/plain","created_at":5,"pinned":false,"is_sensitive":false}],"skipped_undecryptable":0}}"#
+                r#"{"id":{id},"ok":true,"data":{"page":{"items":[{"id":"a","content":"hi","content_type":"text/plain","created_at":5,"pinned":false,"is_sensitive":false}],"skipped_undecryptable":0}}}"#
                     .to_string(),
             )],
         );
@@ -599,7 +595,7 @@ mod tests {
         let stub = StubDaemon::start(
             "idmismatch",
             vec![StubAction::Reply(
-                r#"{"id":999999,"ok":true,"data":{}}"#.to_string(),
+                r#"{"id":999999,"ok":true,"data":{"empty":{}}}"#.to_string(),
             )],
         );
         let err = request_at(&stub.path, Method::Status).await.unwrap_err();
@@ -617,7 +613,7 @@ mod tests {
                         .to_string(),
                 ),
                 StubAction::Reply(
-                    r#"{"id":{id},"ok":true,"data":{"version":"2.0.0","protocol_version":1,"item_count":0,"capture_running":true,"clipboard_backend":"fake"}}"#
+                    r#"{"id":{id},"ok":true,"data":{"status":{"version":"2.0.0","protocol_version":1,"item_count":0,"capture_running":true,"clipboard_backend":"fake"}}}"#
                         .to_string(),
                 ),
             ],
@@ -687,9 +683,9 @@ mod tests {
 
     #[test]
     fn item_pages_deserialise_into_typed_items_and_a_skip_count() {
-        let line = r#"{"id":1,"ok":true,"data":{"items":[{"id":"a","content":"hi",
+        let line = r#"{"id":1,"ok":true,"data":{"page":{"items":[{"id":"a","content":"hi",
             "content_type":"text/plain","created_at":5,"pinned":true,"is_sensitive":false}],
-            "skipped_undecryptable":3}}"#;
+            "skipped_undecryptable":3}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let page = expect_page(into_data(response).unwrap()).unwrap();
         assert_eq!(page.items.len(), 1);
@@ -707,8 +703,8 @@ mod tests {
     /// early and hide the rest of the history.
     #[test]
     fn a_page_marker_survives_the_decode() {
-        let line = r#"{"id":1,"ok":true,"data":{"items":[],
-            "skipped_undecryptable":0,"next_cursor":"7b22"}}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"page":{"items":[],
+            "skipped_undecryptable":0,"next_cursor":"7b22"}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let page = expect_page(into_data(response).unwrap()).unwrap();
         assert_eq!(page.next_cursor.as_deref(), Some("7b22"));
@@ -717,7 +713,7 @@ mod tests {
     #[test]
     fn an_empty_page_is_not_a_shape_error() {
         let response: Response = serde_json::from_str(
-            r#"{"id":1,"ok":true,"data":{"items":[],"skipped_undecryptable":0}}"#,
+            r#"{"id":1,"ok":true,"data":{"page":{"items":[],"skipped_undecryptable":0}}}"#,
         )
         .unwrap();
         assert!(expect_page(into_data(response).unwrap())
@@ -726,13 +722,11 @@ mod tests {
             .is_empty());
     }
 
-    /// The untagged decoder tries variants in order, and an export's payload is
-    /// a superset of a page's. `Export` is declared first for exactly this
-    /// reason, and this is the test that fails if the order is changed.
+    /// The export wrapper keeps its item array distinct from a history page.
     #[test]
     fn an_export_does_not_decode_as_a_page() {
-        let line = r#"{"id":1,"ok":true,"data":{"items":[],"skipped_non_text":1,
-            "skipped_sensitive":2,"skipped_undecryptable":3}}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"export":{"items":[],"skipped_non_text":1,
+            "skipped_sensitive":2,"skipped_undecryptable":3}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let export = expect_export(into_data(response).unwrap()).unwrap();
         assert_eq!(
@@ -747,8 +741,8 @@ mod tests {
 
     #[test]
     fn discovered_devices_read_back_as_devices() {
-        let line = r#"{"id":1,"ok":true,"data":{"devices":[{"pairing_id":"abc","name":"phone",
-            "addr":"192.168.1.9:47654","last_seen_ms":5,"paired":false}]}}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"discovered":{"devices":[{"pairing_id":"abc","name":"phone",
+            "addr":"192.168.1.9:47654","last_seen_ms":5,"paired":false}]}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let found = expect_discovered(into_data(response).unwrap()).unwrap();
         assert_eq!(found.devices.len(), 1);
@@ -757,11 +751,11 @@ mod tests {
 
     #[test]
     fn settings_read_back_with_their_restart_list() {
-        let line = r#"{"id":1,"ok":true,"data":{"config":{"poll_interval_ms":250,
+        let line = r#"{"id":1,"ok":true,"data":{"config":{"config":{"poll_interval_ms":250,
             "history_limit":10000,"retention_days":0,"dedup_window_secs":60,
             "storage_quota_bytes":10737418240,
             "max_item_bytes":4194304,"sensitive_ttl_secs":0,"excluded_app_bundle_ids":[],
-            "lan_visibility":true,"sync_enabled":true},"restart_required":["lan_visibility"]}}"#;
+            "lan_visibility":true,"sync_enabled":true},"restart_required":["lan_visibility"]}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let applied = expect_config(into_data(response).unwrap()).unwrap();
         assert_eq!(applied.config.poll_interval_ms, 250);
@@ -771,8 +765,8 @@ mod tests {
 
     #[test]
     fn status_deserialises_into_typed_status() {
-        let line = r#"{"id":1,"ok":true,"data":{"version":"2.0.0","protocol_version":1,
-            "item_count":3,"capture_running":true,"clipboard_backend":"macos"}}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"status":{"version":"2.0.0","protocol_version":1,
+            "item_count":3,"capture_running":true,"clipboard_backend":"macos"}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let status = expect_status(into_data(response).unwrap()).unwrap();
         assert_eq!(status.item_count, 3);
@@ -781,14 +775,16 @@ mod tests {
 
     #[test]
     fn a_count_payload_reads_back_as_a_count() {
-        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":9}"#).unwrap();
+        let response: Response =
+            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"count":9}}"#).unwrap();
         let data = into_data(response).unwrap();
         assert_eq!(optional_count(&data), Some(9));
     }
 
     #[test]
     fn an_empty_payload_carries_neither_item_nor_count() {
-        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":{}}"#).unwrap();
+        let response: Response =
+            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#).unwrap();
         let data = into_data(response).unwrap();
         assert!(optional_item(&data).is_none());
         assert!(optional_count(&data).is_none());
@@ -811,16 +807,31 @@ mod tests {
     }
 
     #[test]
+    fn a_future_error_code_is_kept_and_reported() {
+        let line = r#"{"id":1,"ok":false,"error":"new refusal",
+            "error_code":"future_daemon_state"}"#;
+        let response: Response = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            response.raw_error_code.as_deref(),
+            Some("future_daemon_state")
+        );
+        let err = into_data(response).unwrap_err();
+        assert_eq!(err.exit_code(), crate::error::EXIT_OTHER);
+        assert!(err.user_message().contains("future_daemon_state"), "{err}");
+    }
+
+    #[test]
     fn a_wrong_shape_is_reported_rather_than_silently_defaulted() {
         // v1 would have produced an empty list here via unwrap_or_default.
-        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":{}}"#).unwrap();
+        let response: Response =
+            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#).unwrap();
         assert!(expect_page(into_data(response).unwrap()).is_err());
     }
 
     #[test]
     fn a_pairing_payload_reads_back_as_a_pairing() {
-        let line = r#"{"id":1,"ok":true,"data":{"code":"ABCD-EFGH",
-            "pairing_id":"0123456789abcdef","listen_addr":"192.168.1.24:47654"}}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"pairing":{"code":"ABCD-EFGH",
+            "pairing_id":"0123456789abcdef","listen_addr":"192.168.1.24:47654"}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let pairing = expect_pairing(into_data(response).unwrap()).unwrap();
         assert_eq!(pairing.code, "ABCD-EFGH");
@@ -829,8 +840,8 @@ mod tests {
 
     #[test]
     fn a_peer_list_reads_back_as_peers_and_not_as_items() {
-        let line = r#"{"id":1,"ok":true,"data":[{"pairing_id":"abc","name":"phone",
-            "last_addr":null,"last_seen_ms":0,"online":true}]}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"peers":[{"pairing_id":"abc","name":"phone",
+            "last_addr":null,"last_seen_ms":0,"online":true}]}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let peers = expect_peers(into_data(response).unwrap()).unwrap();
         assert_eq!(peers.len(), 1);
@@ -840,8 +851,8 @@ mod tests {
 
     #[test]
     fn sync_results_read_back_as_sync_results() {
-        let line = r#"{"id":1,"ok":true,"data":[{"pairing_id":"abc","name":"phone",
-            "sent":2,"received":3,"error":null}]}"#;
+        let line = r#"{"id":1,"ok":true,"data":{"sync":[{"pairing_id":"abc","name":"phone",
+            "sent":2,"received":3,"error":null}]}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let results = expect_sync(into_data(response).unwrap()).unwrap();
         assert_eq!(results[0].sent, 2);
@@ -849,19 +860,26 @@ mod tests {
         assert!(results[0].error.is_none());
     }
 
-    /// An empty JSON array cannot be told apart from an empty item list in an
-    /// untagged union, so "no peers" must not read as a protocol error.
+    /// Empty arrays retain the response variant named by their wrapper.
     #[test]
-    fn an_empty_list_is_no_peers_and_no_sync_results() {
-        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":[]}"#).unwrap();
+    fn empty_peer_and_sync_lists_stay_distinct() {
+        let response: Response =
+            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"peers":[]}}"#).unwrap();
         let data = into_data(response).unwrap();
         assert!(expect_peers(data.clone()).unwrap().is_empty());
-        assert!(expect_sync(data).unwrap().is_empty());
+        assert!(expect_sync(data).is_err());
+
+        let response: Response =
+            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"sync":[]}}"#).unwrap();
+        let data = into_data(response).unwrap();
+        assert!(expect_sync(data.clone()).unwrap().is_empty());
+        assert!(expect_peers(data).is_err());
     }
 
     #[test]
     fn a_wrongly_shaped_peer_reply_is_still_reported() {
-        let response: Response = serde_json::from_str(r#"{"id":1,"ok":true,"data":9}"#).unwrap();
+        let response: Response =
+            serde_json::from_str(r#"{"id":1,"ok":true,"data":{"count":9}}"#).unwrap();
         assert!(expect_peers(into_data(response).unwrap()).is_err());
     }
 
