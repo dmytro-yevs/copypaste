@@ -34,7 +34,8 @@ export type Unit =
   | "days"
   | "items"
   | "kilobytes"
-  | "megabytes";
+  | "megabytes"
+  | "gigabytes";
 
 export interface Choice {
   readonly value: number;
@@ -58,6 +59,11 @@ const megabytes = (mb: number): Choice => ({
   value: mb * 1_048_576,
   unit: "megabytes",
   count: mb,
+});
+const gigabytes = (gb: number): Choice => ({
+  value: gb * 1_073_741_824,
+  unit: "gigabytes",
+  count: gb,
 });
 const kilobytes = (kb: number): Choice => ({
   value: kb * 1_024,
@@ -85,6 +91,15 @@ export const HISTORY_LIMIT: readonly Choice[] = [
   items(5000),
   items(10000),
   items(50000),
+];
+
+/** Starts at the service's 50 MiB minimum and includes the 10 GiB default. */
+export const STORAGE_QUOTA_BYTES: readonly Choice[] = [
+  megabytes(50),
+  gigabytes(1),
+  gigabytes(5),
+  gigabytes(10),
+  gigabytes(50),
 ];
 
 export const RETENTION_DAYS: readonly Choice[] = [

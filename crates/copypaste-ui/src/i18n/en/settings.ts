@@ -115,7 +115,7 @@ export const settings = {
       "This build can't change the background service's settings — it has no service to change them on, and runs on the defaults shown here.",
     loading: "Reading the service's settings…",
 
-    /** Nine settings covering four unrelated things read as one long list, and
+    /** Eleven settings covering four unrelated things read as one long list, and
      *  a user looking for any one of them read all nine. */
     groups: {
       capture: {
@@ -155,6 +155,11 @@ export const settings = {
       title: "Keep at most",
       description:
         "When history passes this, the oldest unpinned items are dropped. Pinned items are never dropped.",
+    },
+    storageQuota: {
+      title: "Storage quota",
+      description:
+        "When unpinned clips exceed this size, the oldest are dropped. Pinned clips and the newest unpinned clip are kept.",
     },
     retention: {
       title: "Drop items older than",
@@ -223,6 +228,7 @@ export const settings = {
       items_other: "{{count}} items",
       kilobytes: "{{count}} KB",
       megabytes: "{{count}} MB",
+      gigabytes: "{{count}} GB",
       never: "Never",
       /** A value the service accepts that this screen does not offer — set
        *  from the CLI. Shown as itself rather than snapped to a neighbour. */
