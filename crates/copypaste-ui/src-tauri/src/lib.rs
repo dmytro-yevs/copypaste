@@ -137,7 +137,7 @@ pub fn run() {
 
             // The change stream, for as long as the app runs. Falls back to
             // the frontend's poll whenever it is not delivering (finding 15).
-            service::push::spawn(app.handle().clone());
+            app.manage(service::push::spawn(app.handle().clone()));
 
             // Moves what the platform captured into the database. Inert on the
             // desktop, where the daemon is the thing doing the capturing.
@@ -208,6 +208,9 @@ pub fn run() {
             // and a cancelled quit that had already killed the daemon would
             // leave a running app with no history.
             if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(push) = app.try_state::<service::push::PushMonitor>() {
+                    push.stop();
+                }
                 if let Some(supervisor) = app.try_state::<Supervisor>() {
                     supervisor.stop();
                 }
