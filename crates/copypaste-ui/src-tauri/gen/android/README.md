@@ -44,5 +44,7 @@ Everything else under `app/src/main/java/com/copypaste/app/` and the one
 The Kotlin holds no policy — see
 [ADR-0005](../../../../docs/adr/0005-android-capture-in-rust-kotlin-reports.md).
 The release build is run through `npm run tauri -- android build --apk`; it
-uses this tracked project directly and does not regenerate it. Device-level
-Shizuku behaviour is additionally exercised by the Android emulator smoke job.
+uses this tracked project directly and does not regenerate it. The Android
+emulator smoke job does not exercise rung 2: a stock emulator cannot perform
+Shizuku's required wireless-debugging pairing. The device checklist in
+`docs/rewrite/android-spike.md` remains the required verification for that path.
