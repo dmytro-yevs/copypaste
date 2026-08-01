@@ -937,6 +937,7 @@ name = "copypaste-daemon"
 version = "2.0.0-alpha.1"
 dependencies = [
  "anyhow",
+ "backon",
  "base64 0.22.1",
  "clap",
  "copypaste-cloud",

@@ -225,6 +225,7 @@ async fn main() -> anyhow::Result<()> {
         ))
     });
     let cloud_task = tokio::spawn(cloud::run(Arc::clone(&state), shutdown_rx.clone()));
+    let refresh_task = tokio::spawn(cloud::refresh::run(Arc::clone(&state), shutdown_rx.clone()));
     // The push half of cloud sync. Without it the five-minute idle ceiling in
     // `copypaste_cloud::sync::cadence` has nothing behind it: that ceiling is
     // justified in its own doc comment by realtime existing, and the poll is
@@ -259,6 +260,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if let Err(e) = cloud_task.await {
         warn!(error = ?e, "cloud sync loop did not shut down cleanly");
+    }
+    if let Err(e) = refresh_task.await {
+        warn!(error = ?e, "cloud refresh loop did not shut down cleanly");
     }
     if let Err(e) = realtime_task.await {
         warn!(error = ?e, "cloud realtime loop did not shut down cleanly");
