@@ -2,8 +2,9 @@
 //!
 //! One client builder and one row builder, so that the request-shape tests and
 //! the status-handling tests are asserting against the same client rather than
-//! two subtly different ones. The scripted server itself is
-//! [`crate::auth::stub`] — one stub for the crate, not one per HTTP client.
+//! two subtly different ones. The wiremock fixture itself is
+//! [`crate::auth::stub`] — one fixture layer for the crate, not one per HTTP
+//! client.
 
 use std::time::Duration;
 
@@ -13,6 +14,7 @@ use super::{CloudItem, SupabaseRest};
 use crate::auth::stub::Stub;
 use crate::crypto::{derive_sync_key, SyncKey, KEY_LEN};
 use crate::CloudConfig;
+use url::{form_urlencoded, Url};
 
 pub(super) const ANON: &str = "anon-key-abc";
 pub(super) const TOKEN: &str = "user-access-token";
@@ -58,39 +60,15 @@ pub(super) fn item(id: &str) -> CloudItem {
     row
 }
 
-/// Split a captured `?a=b&c=d` target into pairs, percent-decoded enough for
-/// assertions to read naturally.
-pub(super) fn query_pairs(target: &str) -> Vec<(String, String)> {
-    let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
-    query
-        .split('&')
-        .filter(|p| !p.is_empty())
-        .map(|pair| {
-            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-            (percent_decode(k), percent_decode(v))
+/// Decode a captured query with the same WHATWG form rules used by `url`.
+pub(super) fn query_pairs(url: &Url) -> Vec<(String, String)> {
+    url.query()
+        .map(|query| {
+            form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .collect()
         })
-        .collect()
-}
-
-fn percent_decode(text: &str) -> String {
-    let bytes = text.replace('+', " ").into_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"),
-                16,
-            ) {
-                out.push(byte);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).to_string()
+        .unwrap_or_default()
 }
 
 pub(super) fn value_of(pairs: &[(String, String)], key: &str) -> String {

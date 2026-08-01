@@ -162,9 +162,9 @@ pub(super) async fn classify(response: Response, grant: GrantKind) -> Result<Str
 // Tests
 // ---------------------------------------------------------------------------
 //
-// Asserted through a real `reqwest` round trip against the scripted stub: the
-// rule under test is what a status does to the *caller*, which includes whether
-// the request was retried at all.
+// Asserted through a real `reqwest` round trip against wiremock: the rule under
+// test is what a status does to the *caller*, which includes whether the request
+// was retried at all.
 
 #[cfg(test)]
 mod tests {
@@ -178,7 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_grant_on_the_password_grant_is_bad_credentials() {
-        let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)]).await;
+        let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)], 1).await;
         let err = client(&stub)
             .sign_in("alice@example.com", "wrong")
             .await
@@ -191,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_same_body_on_the_refresh_grant_is_an_expired_session() {
-        let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)]).await;
+        let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)], 1).await;
         let err = client(&stub)
             .refresh("dead-refresh-token")
             .await
@@ -205,11 +205,11 @@ mod tests {
     #[tokio::test]
     async fn the_disambiguation_holds_for_422_and_401_too() {
         for status in [422, 401] {
-            let stub = Stub::start(vec![Reply::json(status, INVALID_GRANT)]).await;
+            let stub = Stub::start(vec![Reply::json(status, INVALID_GRANT)], 1).await;
             let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
             assert!(matches!(err, AuthError::InvalidCredentials), "{status}");
 
-            let stub = Stub::start(vec![Reply::json(status, INVALID_GRANT)]).await;
+            let stub = Stub::start(vec![Reply::json(status, INVALID_GRANT)], 1).await;
             let err = client(&stub).refresh("t").await.unwrap_err();
             assert!(matches!(err, AuthError::SessionExpired), "{status}");
         }
@@ -217,19 +217,25 @@ mod tests {
 
     #[tokio::test]
     async fn a_grant_failure_is_not_retried() {
-        let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)]).await;
+        let stub = Stub::start(vec![Reply::json(400, INVALID_GRANT)], 1).await;
         let _ = client(&stub).sign_in("a@b.co", "x").await;
-        assert_eq!(stub.request_count(), 1, "a wrong password is permanent");
+        assert_eq!(
+            stub.request_count().await,
+            1,
+            "a wrong password is permanent"
+        );
     }
 
     // -- 429 ---------------------------------------------------------------
 
     #[tokio::test]
     async fn a_429_surfaces_retry_after_in_seconds() {
-        let stub =
-            Stub::start(vec![Reply::json(429, r#"{"message":"too many requests"}"#)
-                .with_header("retry-after", "42")])
-            .await;
+        let stub = Stub::start(
+            vec![Reply::json(429, r#"{"message":"too many requests"}"#)
+                .with_header("retry-after", "42")],
+            1,
+        )
+        .await;
         let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
         match err {
             AuthError::RateLimited { retry_after_secs } => {
@@ -237,12 +243,16 @@ mod tests {
             }
             other => panic!("expected RateLimited, got {other:?}"),
         }
-        assert_eq!(stub.request_count(), 1, "a 429 must not be retried here");
+        assert_eq!(
+            stub.request_count().await,
+            1,
+            "a 429 must not be retried here"
+        );
     }
 
     #[tokio::test]
     async fn a_429_without_the_header_still_reports_rate_limiting() {
-        let stub = Stub::start(vec![Reply::json(429, "{}")]).await;
+        let stub = Stub::start(vec![Reply::json(429, "{}")], 1).await;
         let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
         assert!(
             matches!(
@@ -259,30 +269,39 @@ mod tests {
 
     #[tokio::test]
     async fn a_5xx_is_transient_and_is_retried() {
-        let stub = Stub::start(vec![
-            Reply::text(502, "<html>bad gateway</html>"),
-            Reply::json(200, &session_body("at", "rt", 60)),
-        ])
+        let stub = Stub::start(
+            vec![
+                Reply::text(502, "<html>bad gateway</html>"),
+                Reply::json(200, &session_body("at", "rt", 60)),
+            ],
+            2,
+        )
         .await;
         let session = client(&stub).sign_in("a@b.co", "x").await.expect("sign-in");
         assert_eq!(session.access_token, "at");
-        assert_eq!(stub.request_count(), 2);
+        assert_eq!(stub.request_count().await, 2);
     }
 
     #[tokio::test]
     async fn a_permanent_5xx_gives_up_and_reports_the_status() {
-        let stub = Stub::start(vec![Reply::text(503, "down")]).await;
+        let stub = Stub::start(vec![Reply::text(503, "down")], 1..).await;
         let err = client(&stub).sign_in("a@b.co", "x").await.unwrap_err();
         assert!(matches!(err, AuthError::Server { status: 503 }), "{err:?}");
-        assert!(stub.request_count() > 1, "a 5xx should have been retried");
+        assert!(
+            stub.request_count().await > 1,
+            "a 5xx should have been retried"
+        );
     }
 
     #[tokio::test]
     async fn a_signup_rejection_is_neither_bad_credentials_nor_a_server_fault() {
-        let stub = Stub::start(vec![Reply::json(
-            422,
-            r#"{"code":422,"msg":"User already registered"}"#,
-        )])
+        let stub = Stub::start(
+            vec![Reply::json(
+                422,
+                r#"{"code":422,"msg":"User already registered"}"#,
+            )],
+            1,
+        )
         .await;
         let err = client(&stub)
             .sign_up("taken@example.com", "pw")
