@@ -34,7 +34,7 @@
 #![allow(unused_unsafe)]
 
 use objc2::rc::{autoreleasepool, Retained};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use objc2_app_kit::{NSPasteboard, NSWorkspace};
@@ -120,6 +120,7 @@ pub struct MacOsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
     frontmost: Option<(Instant, Option<String>)>,
+    staging: super::file_materialize::StagingArea,
 }
 
 enum SelectedRepresentation {
@@ -163,12 +164,13 @@ fn file_capture(path: PathBuf, app_bundle_id: Option<String>) -> Option<Capture>
 }
 
 impl MacOsClipboard {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(data_dir: &Path) -> std::io::Result<Self> {
+        Ok(Self {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
             frontmost: None,
-        }
+            staging: super::file_materialize::StagingArea::new(data_dir)?,
+        })
     }
 }
 
@@ -409,8 +411,7 @@ impl ClipboardSource for MacOsClipboard {
         let file_url = if content_type == copypaste_ipc::content_type::FILE {
             let metadata =
                 metadata.ok_or_else(|| anyhow::anyhow!("file metadata is unavailable"))?;
-            let root = copypaste_ipc::data_dir().join("paste-files");
-            let path = super::file_materialize::materialize(&root, bytes, metadata)?;
+            let path = self.staging.materialize(bytes, metadata)?;
             Some(
                 url::Url::from_file_path(path)
                     .map_err(|_| anyhow::anyhow!("could not materialize file paste"))?,
@@ -504,6 +505,12 @@ mod tests {
         PASTEBOARD.lock().unwrap_or_else(|held| held.into_inner())
     }
 
+    fn test_clipboard() -> (tempfile::TempDir, MacOsClipboard) {
+        let data_dir = tempfile::tempdir().unwrap();
+        let clipboard = MacOsClipboard::new(data_dir.path()).unwrap();
+        (data_dir, clipboard)
+    }
+
     fn change_count() -> i64 {
         autoreleasepool(|_| unsafe { NSPasteboard::generalPasteboard().changeCount() as i64 })
     }
@@ -578,13 +585,47 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn file_write_uses_the_active_data_directory_and_preserves_the_filename() {
+        let _lock = serialised();
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut clipboard = MacOsClipboard::new(data_dir.path()).unwrap();
+        let metadata =
+            copypaste_core::FileMetadata::new("Résumé 2026.pdf", "application/pdf").unwrap();
+
+        clipboard
+            .set_binary_contents(
+                "untrusted-remote-id",
+                copypaste_ipc::content_type::FILE,
+                b"decrypted file bytes",
+                Some(&metadata),
+            )
+            .unwrap();
+
+        let path = autoreleasepool(|_| unsafe {
+            let bytes = UTIS.with(|utis| {
+                NSPasteboard::generalPasteboard()
+                    .dataForType(&utis.file_url)
+                    .expect("the file URL was not put on the pasteboard")
+                    .bytes()
+                    .to_vec()
+            });
+            let url = url::Url::parse(&String::from_utf8(bytes).unwrap()).unwrap();
+            url.to_file_path().unwrap()
+        });
+        assert!(path.starts_with(data_dir.path().join("paste-files")));
+        assert_eq!(path.file_name().unwrap(), "Résumé 2026.pdf");
+        assert_eq!(std::fs::read(path).unwrap(), b"decrypted file bytes");
+    }
+
     /// T-21, T-4, I-1, I-2. Also the first question of all: does `changeCount`
     /// move on a headless runner?
     #[test]
     #[ignore = "drives the real NSPasteboard"]
     fn a_change_by_another_app_is_captured_exactly_once() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
 
         let before = change_count();
         write_text("copypaste — a check ✓");
@@ -622,7 +663,7 @@ mod tests {
     #[ignore = "drives the real NSPasteboard"]
     fn a_self_write_moves_the_count_by_the_predicted_delta() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
         write_text("something copied earlier");
         let _ = clipboard.poll();
 
@@ -648,7 +689,7 @@ mod tests {
     #[ignore = "drives the real NSPasteboard"]
     fn our_own_write_is_suppressed_and_the_next_genuine_copy_is_not() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
         write_text("something copied earlier");
         let _ = clipboard.poll();
 
@@ -683,7 +724,7 @@ mod tests {
     #[ignore = "drives the real NSPasteboard"]
     fn a_burst_reports_its_losses_and_still_returns_the_survivor() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
         write_text("seed");
         let _ = clipboard.poll();
 
@@ -716,7 +757,7 @@ mod tests {
     #[ignore = "drives the real NSPasteboard"]
     fn every_opt_out_marker_drops_the_change_and_advances_the_cursor() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
 
         for marker in UTI_MARKERS {
             // Empty content, which is how the convention is written in the
@@ -753,7 +794,7 @@ mod tests {
     #[ignore = "drives the real NSPasteboard"]
     fn text_over_the_cap_is_rejected_and_counted_and_the_boundary_is_kept() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
 
         let oversized = vec![b'a'; MAX_TEXT_BYTES + 1];
         write_types(&[(UTI_TEXT, &oversized)]);
@@ -779,7 +820,7 @@ mod tests {
     #[ignore = "drives the real NSPasteboard"]
     fn a_cleared_pasteboard_yields_nothing_and_keeps_polling() {
         let _lock = serialised();
-        let mut clipboard = MacOsClipboard::new();
+        let (_data_dir, mut clipboard) = test_clipboard();
         write_text("before the clear");
         let _ = clipboard.poll();
 
