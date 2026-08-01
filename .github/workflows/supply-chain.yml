@@ -40,6 +40,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  dependency-review:
+    name: dependency review (npm, Maven and Gradle)
+    # GitHub resolves the dependency graph for the changed manifests, including
+    # Gradle/Maven coordinates that have no npm-style lockfile. This is the
+    # change-time gate complementing the scheduled Rust advisory checks below.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/dependency-review-action@v4
+        with:
+          # A dependency with any known vulnerability requires an explicit
+          # update or an approved exception; do not hide low-severity findings.
+          fail-on-severity: low
+
   deny:
     name: cargo-deny (${{ matrix.check }})
     runs-on: ubuntu-latest
