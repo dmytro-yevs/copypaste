@@ -34,12 +34,12 @@ use serde::{Deserialize, Serialize};
 /// Version of the message set. Bumped whenever a change would confuse an older
 /// peer. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
-/// local history at roughly 200 bytes each, about 2 MiB on the wire. A peer
-/// with more syncs its newest 10,000 items now and the rest next session;
-/// sessions repeat, so convergence is reached either way.
+/// local history at roughly 200 bytes each, about 2 MiB on the wire. A history
+/// larger than this is sent as consecutive, lock-step summary pages; it is
+/// never truncated to the newest page.
 pub const MAX_SUMMARIES_PER_MESSAGE: usize = 10_000;
 
 /// Most ids one [`SyncMessage::Request`] may carry, and so the most items one
@@ -86,7 +86,7 @@ pub const MAX_HASH_BYTES: usize = 128;
 /// the merge. `created_at` is the **version** stamp, not the birth of the item:
 /// a tombstone carries the time of the deletion, which is what lets a delete
 /// beat the version it deleted ([`crate::sync::merge_decision`]).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ItemSummary {
     pub item_id: String,
     /// Milliseconds since the Unix epoch.
@@ -95,6 +95,16 @@ pub struct ItemSummary {
     /// one, so it takes part in the merge like any other version.
     pub deleted: bool,
     pub content_hash: String,
+    /// The final LWW tie-break. It has to be present here, not only on the
+    /// payload, because planning otherwise cannot distinguish two otherwise
+    /// equal versions and the replicas can keep opposite winners forever.
+    pub origin_device_id: String,
+    /// Pin state is part of the version on P2P. It is authenticated by the
+    /// Noise record carrying this summary and the matching item payload.
+    pub pinned: bool,
+    /// Explicit `None` clears a previous order on unpin; omission would retain
+    /// stale state at the receiver.
+    pub pin_order: Option<f64>,
 }
 
 /// The wire definition of content identity: lowercase hex SHA-256 of the
@@ -113,7 +123,7 @@ pub fn content_hash(content: &str) -> String {
 }
 
 /// An item being transferred. `content` is plaintext — see the module docs.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SyncItem {
     pub item_id: String,
     pub content: String,
@@ -130,6 +140,10 @@ pub struct SyncItem {
     /// device. Restamping this on every hop destroys the tie-break's
     /// determinism across a three-device circle.
     pub origin_device_id: String,
+    /// See [`ItemSummary::pinned`].
+    pub pinned: bool,
+    /// See [`ItemSummary::pin_order`].
+    pub pin_order: Option<f64>,
 }
 
 impl SyncItem {
@@ -140,12 +154,15 @@ impl SyncItem {
             created_at: self.created_at,
             deleted: self.deleted,
             content_hash: self.content_hash.clone(),
+            origin_device_id: self.origin_device_id.clone(),
+            pinned: self.pinned,
+            pin_order: self.pin_order,
         }
     }
 }
 
 /// One message on the wire.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum SyncMessage {
     Hello {
@@ -155,6 +172,10 @@ pub enum SyncMessage {
     },
     Summary {
         items: Vec<ItemSummary>,
+        /// More pages follow from this peer. Both sides exchange one page per
+        /// turn, so a large history cannot fill the channel before either end
+        /// reads.
+        more: bool,
     },
     Request {
         item_ids: Vec<String>,
@@ -205,6 +226,9 @@ pub enum ProtocolError {
     /// Outbound only — inbound negative timestamps are clamped, not rejected.
     #[error("{field} is negative")]
     NegativeTimestamp { field: &'static str },
+
+    #[error("pinned and pin_order are inconsistent")]
+    InvalidPinState,
 
     #[error("message could not be encoded: {0}")]
     Encode(String),
@@ -267,7 +291,7 @@ impl SyncMessage {
     /// survived its first fix.
     fn clamp_timestamps(&mut self) {
         match self {
-            Self::Summary { items } => {
+            Self::Summary { items, .. } => {
                 for s in items {
                     s.created_at = s.created_at.max(0);
                 }
@@ -302,12 +326,14 @@ impl SyncMessage {
                 check_len("device_name", device_name, MAX_DEVICE_NAME_BYTES)?;
             }
 
-            Self::Summary { items } => {
+            Self::Summary { items, .. } => {
                 check_count("summary", items.len(), MAX_SUMMARIES_PER_MESSAGE)?;
                 for s in items {
                     check_id("item_id", &s.item_id)?;
+                    check_id("origin_device_id", &s.origin_device_id)?;
                     check_len("content_hash", &s.content_hash, MAX_HASH_BYTES)?;
                     check_timestamp(s.created_at)?;
+                    check_pin_state(s.pinned, s.pin_order)?;
                 }
             }
 
@@ -327,6 +353,7 @@ impl SyncMessage {
                     check_len("content_type", &i.content_type, MAX_CONTENT_TYPE_BYTES)?;
                     check_len("content_hash", &i.content_hash, MAX_HASH_BYTES)?;
                     check_timestamp(i.created_at)?;
+                    check_pin_state(i.pinned, i.pin_order)?;
                     if i.content.len() > MAX_CONTENT_BYTES {
                         return Err(ProtocolError::ContentTooLarge {
                             bytes: i.content.len(),
@@ -385,6 +412,13 @@ fn check_timestamp(created_at: i64) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+fn check_pin_state(pinned: bool, pin_order: Option<f64>) -> Result<(), ProtocolError> {
+    if pin_order.is_some_and(|order| !order.is_finite()) || (pinned != pin_order.is_some()) {
+        return Err(ProtocolError::InvalidPinState);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -412,6 +446,9 @@ mod tests {
             created_at: 1_000,
             deleted: false,
             content_hash: "h".into(),
+            origin_device_id: "dev-a".into(),
+            pinned: false,
+            pin_order: None,
         }
     }
 
@@ -424,6 +461,8 @@ mod tests {
             deleted: false,
             content_hash: "h".into(),
             origin_device_id: "dev-a".into(),
+            pinned: false,
+            pin_order: None,
         }
     }
 
@@ -441,6 +480,7 @@ mod tests {
             hello(),
             SyncMessage::Summary {
                 items: vec![summary("a"), summary("b")],
+                more: false,
             },
             SyncMessage::Request {
                 item_ids: vec!["a".into()],
@@ -490,7 +530,9 @@ mod tests {
     #[test]
     fn too_many_summaries_is_rejected() {
         let items = vec![summary("a"); MAX_SUMMARIES_PER_MESSAGE + 1];
-        let err = SyncMessage::Summary { items }.validate().unwrap_err();
+        let err = SyncMessage::Summary { items, more: false }
+            .validate()
+            .unwrap_err();
         assert!(matches!(
             err,
             ProtocolError::TooManyEntries {
@@ -503,7 +545,9 @@ mod tests {
     #[test]
     fn a_full_summary_message_is_accepted() {
         let items = vec![summary("a"); MAX_SUMMARIES_PER_MESSAGE];
-        assert!(SyncMessage::Summary { items }.validate().is_ok());
+        assert!(SyncMessage::Summary { items, more: false }
+            .validate()
+            .is_ok());
     }
 
     #[test]
@@ -571,9 +615,9 @@ mod tests {
     #[test]
     fn negative_timestamps_are_clamped_on_decode() {
         let raw = br#"{"t":"summary","items":[
-            {"item_id":"a","created_at":-42,"deleted":false,"content_hash":"h"},
-            {"item_id":"b","created_at":7,"deleted":false,"content_hash":"h"}]}"#;
-        let SyncMessage::Summary { items } = SyncMessage::decode(raw).unwrap() else {
+            {"item_id":"a","created_at":-42,"deleted":false,"content_hash":"h","origin_device_id":"d","pinned":false,"pin_order":null},
+            {"item_id":"b","created_at":7,"deleted":false,"content_hash":"h","origin_device_id":"d","pinned":false,"pin_order":null}],"more":false}"#;
+        let SyncMessage::Summary { items, .. } = SyncMessage::decode(raw).unwrap() else {
             panic!("wrong variant");
         };
         assert_eq!(items[0].created_at, 0, "negative was not clamped");
@@ -584,7 +628,7 @@ mod tests {
     fn negative_timestamps_are_clamped_inside_items_too() {
         let raw = br#"{"t":"items","items":[
             {"item_id":"a","content":"c","content_type":"text","created_at":-999,
-             "deleted":false,"content_hash":"h","origin_device_id":"d"}]}"#;
+             "deleted":false,"content_hash":"h","origin_device_id":"d","pinned":false,"pin_order":null}]}"#;
         let SyncMessage::Items { items } = SyncMessage::decode(raw).unwrap() else {
             panic!("wrong variant");
         };
@@ -596,7 +640,11 @@ mod tests {
         let mut s = summary("a");
         s.created_at = -1;
         assert_eq!(
-            SyncMessage::Summary { items: vec![s] }.encode(),
+            SyncMessage::Summary {
+                items: vec![s],
+                more: false
+            }
+            .encode(),
             Err(ProtocolError::NegativeTimestamp {
                 field: "created_at"
             })
@@ -608,6 +656,7 @@ mod tests {
         for msg in [
             SyncMessage::Summary {
                 items: vec![summary("")],
+                more: false,
             },
             SyncMessage::Request {
                 item_ids: vec![String::new()],
@@ -634,6 +683,7 @@ mod tests {
         let long = "x".repeat(MAX_ID_BYTES + 1);
         let err = SyncMessage::Summary {
             items: vec![summary(&long)],
+            more: false,
         }
         .validate()
         .unwrap_err();

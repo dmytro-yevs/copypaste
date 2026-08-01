@@ -114,6 +114,7 @@ impl Store {
             content_hash: item.content_hash,
             created_at: item.created_at,
             pinned: false,
+            pin_order: None,
             is_sensitive: item.is_sensitive,
             deleted: false,
             // A capture on this device. The empty sentinel rather than a device

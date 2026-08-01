@@ -22,6 +22,9 @@ pub(super) fn summary(id: &str, created_at: i64, hash: &str, deleted: bool) -> I
         created_at,
         deleted,
         content_hash: hash.into(),
+        origin_device_id: "test-device".into(),
+        pinned: false,
+        pin_order: None,
     }
 }
 
@@ -36,6 +39,8 @@ pub(crate) fn item(id: &str, created_at: i64, content: &str, origin: &str) -> Sy
         // with a stand-in hash would be dropped exactly as a hostile peer's is.
         content_hash: content_hash(content),
         origin_device_id: origin.into(),
+        pinned: false,
+        pin_order: None,
     }
 }
 
@@ -48,6 +53,8 @@ pub(super) fn tombstone(id: &str, created_at: i64, hash: &str, origin: &str) -> 
         deleted: true,
         content_hash: hash.into(),
         origin_device_id: origin.into(),
+        pinned: false,
+        pin_order: None,
     }
 }
 
