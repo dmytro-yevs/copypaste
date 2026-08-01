@@ -253,7 +253,7 @@ describe("the poll backs off while the service is unhappy (AT-21)", () => {
     expect(POLL_BACKOFF_MS).toBeGreaterThan(POLL_ACTIVE_MS);
 
     listItems.mockImplementation(async () => {
-      throw new IpcFailure("internal");
+      throw new IpcFailure("internal", true);
     });
     const { Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });

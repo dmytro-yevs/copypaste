@@ -25,6 +25,9 @@ export function item(over: Partial<Item> = {}): Item {
     created_at: 1_700_000_000_000,
     pinned: false,
     is_sensitive: sensitive,
+    origin_device_id: "device-1",
+    origin_device_name: "This Mac",
+    too_large_to_sync: false,
     ...over,
   };
 }
@@ -54,6 +57,14 @@ export function status(over: Partial<StatusData> = {}): StatusData {
     item_count: 3,
     capture_running: true,
     clipboard_backend: "nspasteboard",
+    legacy_history_present: false,
+    counters: {
+      rejected_too_large: 0,
+      lost_intermediates: 0,
+      sensitive_swept: 0,
+      index_purged: 0,
+      uptime_secs: 60,
+    },
     ...over,
     private_mode: over.private_mode ?? false,
   };

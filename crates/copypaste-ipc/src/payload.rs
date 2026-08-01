@@ -77,6 +77,8 @@ pub struct ExportData {
 /// A malformed batch is refused whole, before anything is written. These
 /// counts cover only individually recoverable rows inside an accepted batch.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ImportData {
     pub inserted: u32,
     pub skipped: u32,
@@ -109,6 +111,8 @@ pub struct DiscoveredData {
 /// record claimed, and only the Noise handshake proves any of it. `paired` is
 /// resolved locally by looking the pairing id up in this device's own list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DiscoveredDevice {
     pub pairing_id: String,
     pub name: String,
@@ -194,6 +198,8 @@ pub struct PairingData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PeerInfo {
     pub pairing_id: String,
     pub name: String,
@@ -212,6 +218,13 @@ pub struct SyncResult {
     pub received: u32,
     /// Present when this peer failed; the rest of the run still reports.
     pub error: Option<String>,
+    /// Machine-readable counterpart to `error`.
+    ///
+    /// Additive within protocol v1: older daemons omit it, so a current client
+    /// treats absence as an unknown failure without reconstructing a code from
+    /// the English sentence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<crate::ErrorCode>,
 }
 
 /// What the daemon has refused, missed or deleted since it started.
@@ -228,6 +241,8 @@ pub struct SyncResult {
 /// Cumulative since the process started and never reset, so `uptime_secs` is
 /// the only thing they can honestly be read against.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DiagnosticCounters {
     /// Clipboard changes dropped for exceeding the read gate.
     pub rejected_too_large: u64,
@@ -244,6 +259,8 @@ pub struct DiagnosticCounters {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct StatusData {
     pub version: String,
     pub protocol_version: u32,

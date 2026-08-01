@@ -117,7 +117,7 @@ describe("a failure this screen watched happen", () => {
   it("outranks the structural states, because it is evidence", () => {
     const state = peerState(
       peer({ last_addr: null, last_seen_ms: NOW - 1000 }),
-      { failure: { at: NOW, kind: "peer_unreachable" } },
+      { failure: { at: NOW, kind: "peer_unreachable", retryable: true } },
       NOW,
     );
     expect(state).toBe("failing");
@@ -129,7 +129,9 @@ describe("a failure this screen watched happen", () => {
    * already settled would therefore sit on the row for ever.
    */
   it("is settled by a session that succeeded after it", () => {
-    const health = { failure: { at: NOW - 1000, kind: "peer_failed" } } as const;
+    const health = {
+      failure: { at: NOW - 1000, kind: "peer_failed", retryable: true },
+    } as const;
     expect(peerState(peer({ last_seen_ms: NOW }), health, NOW)).toBe("synced");
     expect(unsettledFailure(peer({ last_seen_ms: NOW }), health)).toBeUndefined();
   });
@@ -139,7 +141,7 @@ describe("a failure this screen watched happen", () => {
   it("is settled by a later run of its own that worked", () => {
     const stale = peer({ last_seen_ms: NOW - 60_000 });
     const health = {
-      failure: { at: NOW - 1000, kind: "peer_unreachable" },
+      failure: { at: NOW - 1000, kind: "peer_unreachable", retryable: true },
       success: { at: NOW, sent: 2, received: 0 },
     } as const;
     expect(unsettledFailure(stale, health)).toBeUndefined();
@@ -157,25 +159,29 @@ describe("what one run recorded, per peer", () => {
     const first = noteSync({}, [result({ sent: 3, received: 1 })], NOW - 5000);
     const second = noteSync(
       first,
-      [result({ error: "the peer stopped responding" })],
+      [result({ error: { code: "peer_unreachable", retryable: true } })],
       NOW,
     );
 
     expect(second["pair-1"]).toEqual({
       success: { at: NOW - 5000, sent: 3, received: 1 },
-      failure: { at: NOW, kind: "peer_unreachable" },
+      failure: { at: NOW, kind: "peer_unreachable", retryable: true },
     });
   });
 
-  /** INV-12: the daemon's per-peer text can name the socket path, so only a
-   *  kind is kept — the raw string never reaches a component. */
-  it("stores a kind, never the daemon's sentence", () => {
+  /** INV-12: the Tauri boundary has already dropped the daemon's sentence; the
+   *  row retains only its localized kind and Rust-owned retry decision. */
+  it("stores the structured failure without reconstructing text", () => {
     const health = noteSync(
       {},
-      [result({ error: "no such paired device /Users/someone/.copypaste.sock" })],
+      [result({ error: { code: "peer_not_found", retryable: false } })],
       NOW,
     );
-    expect(health["pair-1"]?.failure).toEqual({ at: NOW, kind: "peer_not_found" });
+    expect(health["pair-1"]?.failure).toEqual({
+      at: NOW,
+      kind: "peer_not_found",
+      retryable: false,
+    });
     expect(JSON.stringify(health)).not.toMatch(/Users/);
   });
 
@@ -184,7 +190,10 @@ describe("what one run recorded, per peer", () => {
       {},
       [
         result({ pairing_id: "pair-1", received: 4 }),
-        result({ pairing_id: "pair-2", error: "whatever the daemon said" }),
+        result({
+          pairing_id: "pair-2",
+          error: { code: "future_failure", retryable: true },
+        }),
       ],
       NOW,
     );

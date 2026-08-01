@@ -36,6 +36,7 @@ export const errors = {
   not_found: "That item is no longer in your clipboard history.",
   invalid_request: "The background service rejected that request.",
   unavailable: "This build of CopyPaste cannot do that yet.",
+  auth_failed: "Sign in again, then check the account details and try once more.",
   /** Says "unchanged" rather than only "can't read": the reassuring half is the
    *  half a user cannot work out for themselves (CLAUDE.md rule 3). */
   legacy_database:

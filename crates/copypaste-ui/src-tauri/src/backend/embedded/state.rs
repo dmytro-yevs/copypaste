@@ -8,7 +8,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use copypaste_core::{purge_indexed_secrets, Detector, Keyring, Store};
+use copypaste_core::{
+    purge_indexed_secrets, CryptoError, Detector, Keyring, Store, StoreError,
+};
+use copypaste_ipc::ErrorCode;
 
 use crate::backend::{BackendError, Result};
 
@@ -52,7 +55,7 @@ impl BackendState {
         // The same directory the database goes in, so the secret cannot end up
         // somewhere the history is not (security review F-11).
         let keyring = Keyring::load_or_create(data_dir)
-            .map_err(|e| BackendError::internal(&format!("could not open the keystore: {e}")))?;
+            .map_err(keyring_error)?;
 
         // The v2 filename, from the shared crate. Deliberately distinct from
         // v1's so an old database is never touched (CLAUDE.md rule 3).
@@ -61,8 +64,7 @@ impl BackendState {
                 .file_name()
                 .unwrap_or_else(|| std::ffi::OsStr::new("copypaste-v2.db")),
         );
-        let store = Store::open(&db_path, &keyring.db_key())
-            .map_err(|e| BackendError::internal(&format!("could not open history: {e}")))?;
+        let store = Store::open(&db_path, &keyring.db_key()).map_err(store_open_error)?;
 
         // Minted on first run, in the history database, so it moves with the
         // history and is the same identity a restored backup keeps out of.
@@ -93,6 +95,34 @@ impl BackendState {
             index_purged,
         })
     }
+}
+
+fn keyring_error(error: CryptoError) -> BackendError {
+    let message = format!("could not open the keystore: {error}");
+    let code = match error {
+        CryptoError::KeystoreUnavailable(_) => ErrorCode::KeyLocked,
+        CryptoError::KeystoreEntryUnusable(_) => ErrorCode::KeyUnusable,
+        CryptoError::AuthFailed
+        | CryptoError::InvalidNonce
+        | CryptoError::Internal(_) => ErrorCode::Internal,
+    };
+    BackendError::from_code(Some(code), None, Some(&message))
+}
+
+fn store_open_error(error: StoreError) -> BackendError {
+    let message = format!("could not open history: {error}");
+    let code = match error {
+        StoreError::LegacyDatabase => ErrorCode::LegacyDatabase,
+        StoreError::Sqlite(_)
+        | StoreError::Pool(_)
+        | StoreError::Migration(_)
+        | StoreError::InvalidKey
+        | StoreError::IntegrityCheckFailed
+        | StoreError::InvalidSchema
+        | StoreError::NotFound
+        | StoreError::InvalidCursor => ErrorCode::Internal,
+    };
+    BackendError::from_code(Some(code), None, Some(&message))
 }
 
 fn purge_search_index(store: &Store, detector: &Detector) -> u64 {

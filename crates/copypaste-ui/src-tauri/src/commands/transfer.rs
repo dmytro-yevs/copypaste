@@ -69,6 +69,8 @@ const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// What an export contained, and everything it left out.
 #[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ExportReport {
     pub exported: u32,
     /// Flagged items withheld because the caller did not ask for them.
@@ -91,6 +93,8 @@ impl From<&ExportData> for ExportReport {
 
 /// The only import information the WebView needs before confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ImportPreview {
     token: String,
     item_count: u32,

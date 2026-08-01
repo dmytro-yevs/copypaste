@@ -47,6 +47,7 @@ fn sync_result() -> SyncResult {
         sent: 1,
         received: 2,
         error: None,
+        error_code: None,
     }
 }
 
@@ -241,6 +242,29 @@ fn known_error_code_still_maps_to_the_stable_enum() {
     .unwrap();
     assert_eq!(response.error_code, Some(ErrorCode::NotFound));
     assert_eq!(response.raw_error_code, None);
+}
+
+#[test]
+fn sync_error_code_is_additive_and_omitted_when_absent() {
+    let old_wire = json!({
+        "pairing_id": "peer-1",
+        "name": "Phone",
+        "sent": 0,
+        "received": 0,
+        "error": "the peer stopped responding"
+    });
+    let old: SyncResult = serde_json::from_value(old_wire.clone()).unwrap();
+    assert_eq!(old.error_code, None);
+    assert_eq!(serde_json::to_value(old).unwrap(), old_wire);
+
+    let current = SyncResult {
+        error_code: Some(ErrorCode::PeerUnreachable),
+        ..sync_result()
+    };
+    assert_eq!(
+        serde_json::to_value(current).unwrap()["error_code"],
+        "peer_unreachable"
+    );
 }
 
 #[test]

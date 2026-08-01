@@ -12,11 +12,12 @@ import { EmptyState } from "@/components/EmptyState";
 import { HistoryList } from "@/components/history/HistoryList";
 import { ServiceOffline } from "@/components/shell/ServiceOffline";
 import { useTranslation } from "@/i18n";
-import { type ErrorKind, friendlyError, isRetryable } from "@/lib/errors";
+import { type ErrorKind, friendlyError } from "@/lib/errors";
 
 interface HistoryContentStateProps {
   loading: boolean;
   errorKind: ErrorKind | null;
+  errorRetryable: boolean;
   searching: boolean;
   filtered: boolean;
   privateMode: boolean;
@@ -30,6 +31,7 @@ interface HistoryContentStateProps {
 export function HistoryContentState({
   loading,
   errorKind,
+  errorRetryable,
   searching,
   filtered,
   privateMode,
@@ -84,7 +86,11 @@ export function HistoryContentState({
           icon={Lock}
           title={t("history.empty.keyLocked.title")}
           body={t("history.empty.keyLocked.body")}
-          action={{ label: t("common.tryAgain"), onClick: onRetry }}
+          action={
+            errorRetryable
+              ? { label: t("common.tryAgain"), onClick: onRetry }
+              : undefined
+          }
         />
       );
     case "offline":
@@ -106,7 +112,7 @@ export function HistoryContentState({
           title={t("history.empty.failed.title")}
           body={friendlyError(errorKind)}
           action={
-            isRetryable(errorKind)
+            errorRetryable
               ? { label: t("common.tryAgain"), onClick: onRetry }
               : undefined
           }

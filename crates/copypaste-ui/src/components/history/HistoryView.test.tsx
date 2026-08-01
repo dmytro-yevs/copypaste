@@ -42,7 +42,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("the service is not running", () => {
   it("hands over to the start-the-service screen instead of an empty list", async () => {
-    listItems.mockRejectedValue(new IpcFailure("offline"));
+    listItems.mockRejectedValue(new IpcFailure("offline", true));
     withClient(<HistoryView />);
 
     // Which variant of the offer is shown depends on whether the bridge is
@@ -256,9 +256,9 @@ describe("clear all", () => {
  * ui-parity finding 2).
  */
 describe("states no retry can clear", () => {
-  const failWith = (kind: ErrorKind) => {
-    listItems.mockRejectedValue(new IpcFailure(kind));
-    getStatus.mockRejectedValue(new IpcFailure(kind));
+  const failWith = (kind: ErrorKind, retryable = false) => {
+    listItems.mockRejectedValue(new IpcFailure(kind, retryable));
+    getStatus.mockRejectedValue(new IpcFailure(kind, retryable));
   };
 
   it("says a v0.4 history is a v0.4 history, and that it is untouched", async () => {
@@ -299,7 +299,7 @@ describe("states no retry can clear", () => {
    *  worth another go, and removing the retry from everything would be the
    *  same defect pointed the other way. */
   it("still offers a retry for an ordinary failure", async () => {
-    failWith("internal");
+    failWith("internal", true);
     withClient(<HistoryView />);
 
     await screen.findByText("Failed to load history");
@@ -309,17 +309,21 @@ describe("states no retry can clear", () => {
   /** The counterpart, and the reason the two key-store failures are separate
    *  codes: this one is worth asking again. */
   it("does offer a retry when the key store is merely locked", async () => {
-    failWith("key_locked");
+    failWith("key_locked", true);
     withClient(<HistoryView />);
 
     await screen.findByText(/Waiting for the key store/i);
     expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
   });
 
-  it.each(["legacy_database", "key_unusable", "key_locked"] as const)(
+  it.each([
+    ["legacy_database", false],
+    ["key_unusable", false],
+    ["key_locked", true],
+  ] as const)(
     "names no path for %s",
-    async (kind) => {
-      failWith(kind);
+    async (kind, retryable) => {
+      failWith(kind, retryable);
       const { container } = withClient(<HistoryView />);
       await waitFor(() =>
         expect(screen.queryByText("Loading…")).toBeNull(),

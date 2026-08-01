@@ -54,6 +54,8 @@ const fn default_storage_quota_bytes() -> u64 {
 /// `set_config`, so a UI can tell the user "this one needs a restart" instead
 /// of leaving them to notice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum Liveness {
     /// Applied by the next use — the capture loop reads its interval each tick,
@@ -87,6 +89,8 @@ pub enum Liveness {
 /// everything the detector flags. Data loss is the worst outcome (CLAUDE.md
 /// rule 4), and this one would be silent and irreversible.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(default)]
 pub struct ConfigData {
     /// Stop recording clipboard changes. Persisted so a restart cannot
@@ -269,6 +273,8 @@ fn range<T: PartialOrd + std::fmt::Display>(
 /// writing the whole record — v1's `set_config` took the full struct, which made
 /// two Settings tabs open at once a lost-update bug.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_mode: Option<bool>,

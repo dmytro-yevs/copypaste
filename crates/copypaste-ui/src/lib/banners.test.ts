@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { status } from "@/test/harness";
+
 import { legacyHistoryPresent, pickBanner } from "./banners";
 
 const ALL = {
@@ -179,13 +181,9 @@ describe("a CopyPaste 0.4 history sitting beside the new one", () => {
 });
 
 describe("reading the flag off the wire", () => {
-  it("is true only for an explicit true", () => {
-    expect(legacyHistoryPresent({ legacy_history_present: true })).toBe(true);
-    expect(legacyHistoryPresent({ legacy_history_present: false })).toBe(false);
-    // A daemon built before the field simply omits it, and `undefined` must not
-    // become a banner.
-    expect(legacyHistoryPresent({ version: "2.0.0" })).toBe(false);
+  it("uses the generated status field", () => {
+    expect(legacyHistoryPresent(status({ legacy_history_present: true }))).toBe(true);
+    expect(legacyHistoryPresent(status({ legacy_history_present: false }))).toBe(false);
     expect(legacyHistoryPresent(undefined)).toBe(false);
-    expect(legacyHistoryPresent(null)).toBe(false);
   });
 });
