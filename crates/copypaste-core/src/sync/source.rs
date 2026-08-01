@@ -223,6 +223,11 @@ impl SyncSource for StoreSource {
             )
             .map_err(|e| SyncError::Source(e.message().to_string()))?;
             if result.content {
+                self.store
+                    .evict_over_byte_cap(self.storage_quota_bytes)
+                    .map_err(|e| {
+                        store_error(e, "could not enforce storage quota after a P2P merge")
+                    })?;
                 if let Some(hook) = &self.on_applied {
                     hook(item.created_at);
                 }
@@ -385,7 +390,7 @@ mod tests {
             Arc::clone(&f.detector),
             f.here.clone(),
             "test-device".to_string(),
-            0,
+            1,
         );
 
         let oldest = peer_item("oldest", "first remote item", 1_000);
