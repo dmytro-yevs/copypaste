@@ -55,7 +55,22 @@ pub fn config_text(applied: &ConfigApplied) -> String {
             },
         ),
         setting("dedup window", format!("{} s", config.dedup_window_secs)),
-        setting("max item size", format!("{} bytes", config.max_item_bytes)),
+        setting(
+            "max text size",
+            format!("{} bytes", config.max_text_size_bytes),
+        ),
+        setting(
+            "max image size",
+            format!("{} bytes", config.max_image_size_bytes),
+        ),
+        setting(
+            "max file size",
+            format!("{} bytes", config.max_file_size_bytes),
+        ),
+        setting(
+            "decoded image cap",
+            format!("{} MiB", config.max_decoded_image_mb),
+        ),
         setting(
             "sensitive ttl",
             match config.sensitive_ttl_secs {
@@ -343,15 +358,23 @@ mod tests {
     /// Every setting the daemon has must be printable, or `config show` is a
     /// list a user cannot trust to be complete.
     #[test]
-    fn config_shows_the_two_copy_feedback_switches() {
+    fn config_shows_every_payload_limit_and_copy_feedback_switch() {
         let applied = ConfigApplied {
             config: copypaste_ipc::ConfigData {
+                max_text_size_bytes: 10_485_760,
+                max_image_size_bytes: 67_108_864,
+                max_file_size_bytes: 104_857_600,
+                max_decoded_image_mb: 50,
                 notify_on_copy: true,
                 ..Default::default()
             },
             restart_required: Vec::new(),
         };
         let text = config_text(&applied);
+        assert!(text.contains("max text size    10485760 bytes"), "{text}");
+        assert!(text.contains("max image size   67108864 bytes"), "{text}");
+        assert!(text.contains("max file size    104857600 bytes"), "{text}");
+        assert!(text.contains("decoded image cap 50 MiB"), "{text}");
         assert!(text.contains("notify on copy   on"), "{text}");
         assert!(text.contains("sound on copy    off"), "{text}");
     }

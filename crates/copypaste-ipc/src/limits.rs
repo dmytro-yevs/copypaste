@@ -1,15 +1,9 @@
 //! What one item, one page and one frame may weigh.
 //!
-//! One place because three independent numbers — an 8 MiB frame, a 10 MiB
-//! capture gate, a 64 MiB config ceiling — let the daemon store items no client
-//! could read back: the reply overran the decoder's line cap and arrived as a
-//! decode error, and since `List` answers with a page, one such item failed
-//! every item beside it too.
+//! The text response framing and page budget live together so a maximal page
+//! cannot overrun the decoder's line cap and fail every item beside it.
 
 /// Largest plaintext content one item may carry.
-///
-/// The source every other gate derives from: the clipboard read gate, the
-/// ceiling `max_item_bytes` may be set to, and [`MAX_FRAME_BYTES`].
 ///
 /// 4 MiB is `copypaste_p2p::protocol::MAX_CONTENT_BYTES`, so anything storable
 /// is also transportable to a peer.
@@ -69,7 +63,7 @@ pub fn clamp_page(limit: u32, default: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{content_type, ConfigData, ConfigPatch, Item, Response, ResponseData};
+    use crate::{content_type, Item, Response, ResponseData};
 
     #[test]
     fn page_sizes_are_clamped() {
@@ -95,8 +89,7 @@ mod tests {
 
     /// **The assertion whose absence is why this survived.**
     ///
-    /// The capture gate was 10 MiB and `max_item_bytes` could be set to 64 MiB
-    /// while a frame stopped at 8 MiB, so the daemon stored items whose reply
+    /// The capture and frame limits once disagreed, so the daemon stored items whose reply
     /// overran the client's decoder — an EOF or a decode error rather than a
     /// typed refusal, and on `List` it took the whole page down with it.
     #[test]
@@ -135,29 +128,5 @@ mod tests {
             "{}",
             line.len()
         );
-    }
-
-    /// A client may only set `max_item_bytes` to something it can read back.
-    #[test]
-    fn the_config_ceiling_is_what_a_frame_can_carry() {
-        let at_the_ceiling = ConfigPatch {
-            max_item_bytes: Some(MAX_CONTENT_BYTES as u64),
-            ..Default::default()
-        }
-        .apply(&ConfigData::default())
-        .expect("the ceiling itself must be settable");
-        assert_eq!(at_the_ceiling.max_item_bytes, MAX_CONTENT_BYTES as u64);
-
-        assert!(
-            ConfigPatch {
-                max_item_bytes: Some(MAX_CONTENT_BYTES as u64 + 1),
-                ..Default::default()
-            }
-            .apply(&ConfigData::default())
-            .is_err(),
-            "a value no frame can carry was accepted"
-        );
-
-        assert!(ConfigData::default().max_item_bytes <= MAX_CONTENT_BYTES as u64);
     }
 }

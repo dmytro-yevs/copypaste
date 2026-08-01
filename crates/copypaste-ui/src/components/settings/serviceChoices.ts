@@ -3,22 +3,17 @@
  *
  * # Why a fixed set and not a number field
  *
- * `copypaste_ipc::config` keeps the bounds for every field — its own header
- * says the Settings UI is one of the three parties that needs them — but the
- * consts are private to that crate, so nothing here can read them. Restating
- * `100..=60_000` in TypeScript is exactly the drift the module was written to
- * end (v1 had the limits in one crate, the clamp in another, and the UI's own
- * guesses in a third).
+ * `copypaste_ipc::config` is the source of truth. `rustParity.test.ts` reads
+ * those Rust constants and pins every repeated endpoint below to it.
  *
  * A closed set of choices needs no bounds: every value below is well inside
  * them, so an out-of-range write is unreachable from this screen rather than
  * caught by a copy of a rule. It also reads better — these are settings where a
  * user wants "a minute", not the ability to type 47.
  *
- * The remaining gap is deliberate and recorded: until `copypaste-ipc` publishes
- * its bounds, a value the service would accept and this list does not offer is
- * reachable only from the CLI. `valuesWith` keeps such a value visible rather
- * than silently snapping the control to a neighbour.
+ * A value the service accepts and this list does not offer is reachable from
+ * the CLI. `valuesWith` keeps it visible rather than silently snapping the
+ * control to a neighbour.
  */
 
 /** The leaf keys under `settings.service.units`. A union rather than `string`
@@ -70,6 +65,11 @@ const kilobytes = (kb: number): Choice => ({
   unit: "kilobytes",
   count: kb,
 });
+const megabyteValue = (mb: number): Choice => ({
+  value: mb,
+  unit: "megabytes",
+  count: mb,
+});
 
 /** `0` is a disabled sentinel on three of these fields, never "do it
  *  immediately" — the distinction is the whole of `CopyPaste-8ebg.1`. */
@@ -77,12 +77,21 @@ const OFF: Choice = { value: 0, unit: "off", count: 0 };
 const NEVER: Choice = { value: 0, unit: "never", count: 0 };
 
 export const POLL_INTERVAL_MS: readonly Choice[] = [
+  ms(100),
   ms(250),
   ms(500),
   ms(1000),
   ms(2000),
   ms(5000),
 ];
+
+export const POLL_INTERVAL_MIN_MS = 100;
+export const POLL_INTERVAL_MAX_MS = 5_000;
+export const MIN_TEXT_SIZE_BYTES = 64 * 1_024;
+export const MIN_IMAGE_SIZE_BYTES = 1_048_576;
+export const MIN_FILE_SIZE_BYTES = 1_048_576;
+export const MAX_FILE_SIZE_BYTES_LIMIT = 100 * 1_048_576;
+export const MIN_DECODED_IMAGE_MB = 1;
 
 export const HISTORY_LIMIT: readonly Choice[] = [
   items(100),
@@ -118,12 +127,35 @@ export const DEDUP_WINDOW_SECS: readonly Choice[] = [
   minutes(300),
 ];
 
-/** Stops at 4 MiB because `copypaste_ipc::MAX_CONTENT_BYTES` is the ceiling the
- *  daemon accepts — a larger choice here is a control that only ever errors. */
-export const MAX_ITEM_BYTES: readonly Choice[] = [
-  kilobytes(256),
+export const MAX_TEXT_SIZE_BYTES: readonly Choice[] = [
+  kilobytes(64),
   megabytes(1),
   megabytes(4),
+  megabytes(10),
+  megabytes(16),
+];
+
+export const MAX_IMAGE_SIZE_BYTES: readonly Choice[] = [
+  megabytes(1),
+  megabytes(16),
+  megabytes(32),
+  megabytes(64),
+  megabytes(128),
+];
+
+export const MAX_FILE_SIZE_BYTES: readonly Choice[] = [
+  megabytes(1),
+  megabytes(10),
+  megabytes(50),
+  megabytes(100),
+];
+
+export const MAX_DECODED_IMAGE_MB: readonly Choice[] = [
+  megabyteValue(1),
+  megabyteValue(25),
+  megabyteValue(50),
+  megabyteValue(100),
+  megabyteValue(250),
 ];
 
 /**

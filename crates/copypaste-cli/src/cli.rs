@@ -251,9 +251,18 @@ pub(crate) enum ConfigAction {
         /// Treat two identical copies within this many seconds as one item.
         #[arg(long)]
         dedup_window_secs: Option<u32>,
-        /// Ignore copies larger than this many bytes.
+        /// Ignore text copies larger than this many bytes. Minimum: 64 KiB.
         #[arg(long)]
-        max_item_bytes: Option<u64>,
+        max_text_size_bytes: Option<u64>,
+        /// Ignore encoded images larger than this many bytes. Minimum: 1 MiB.
+        #[arg(long)]
+        max_image_size_bytes: Option<u64>,
+        /// Ignore files larger than this many bytes. Range: 1-100 MiB.
+        #[arg(long)]
+        max_file_size_bytes: Option<u64>,
+        /// Maximum decoded image memory in MiB. Minimum: 1 MiB.
+        #[arg(long)]
+        max_decoded_image_mb: Option<u32>,
         /// Delete a flagged item after this many seconds. 0 disables it.
         #[arg(long)]
         sensitive_ttl_secs: Option<u64>,
@@ -344,7 +353,10 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         storage_quota_bytes,
         retention_days,
         dedup_window_secs,
-        max_item_bytes,
+        max_text_size_bytes,
+        max_image_size_bytes,
+        max_file_size_bytes,
+        max_decoded_image_mb,
         sensitive_ttl_secs,
         excluded_apps,
         lan_visibility,
@@ -362,7 +374,11 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         storage_quota_bytes: *storage_quota_bytes,
         retention_days: *retention_days,
         dedup_window_secs: *dedup_window_secs,
-        max_item_bytes: *max_item_bytes,
+        max_text_size_bytes: *max_text_size_bytes,
+        max_image_size_bytes: *max_image_size_bytes,
+        max_file_size_bytes: *max_file_size_bytes,
+        max_decoded_image_mb: *max_decoded_image_mb,
+        max_item_bytes: None,
         sensitive_ttl_secs: *sensitive_ttl_secs,
         excluded_app_bundle_ids: excluded_apps.as_ref().map(|raw| {
             raw.split(',')
@@ -398,8 +414,14 @@ mod tests {
             "30",
             "--dedup-window-secs",
             "15",
-            "--max-item-bytes",
-            "1048576",
+            "--max-text-size-bytes",
+            "10485760",
+            "--max-image-size-bytes",
+            "67108864",
+            "--max-file-size-bytes",
+            "104857600",
+            "--max-decoded-image-mb",
+            "50",
             "--sensitive-ttl-secs",
             "60",
             "--excluded-apps",
@@ -427,7 +449,11 @@ mod tests {
                 storage_quota_bytes: Some(52_428_800),
                 retention_days: Some(30),
                 dedup_window_secs: Some(15),
-                max_item_bytes: Some(1_048_576),
+                max_text_size_bytes: Some(10_485_760),
+                max_image_size_bytes: Some(67_108_864),
+                max_file_size_bytes: Some(104_857_600),
+                max_decoded_image_mb: Some(50),
+                max_item_bytes: None,
                 sensitive_ttl_secs: Some(60),
                 excluded_app_bundle_ids: Some(vec![
                     "com.example.One".to_string(),

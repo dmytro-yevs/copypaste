@@ -253,7 +253,11 @@ export interface ConfigData {
   /** `0` disables age-based eviction. */
   readonly retention_days: number;
   readonly dedup_window_secs: number;
-  readonly max_item_bytes: number;
+  readonly max_text_size_bytes: number;
+  readonly max_image_size_bytes: number;
+  readonly max_file_size_bytes: number;
+  /** Decoded-bitmap memory budget, in MiB. */
+  readonly max_decoded_image_mb: number;
   /** `0` is **off**, not "delete immediately" (`CopyPaste-8ebg.1`). */
   readonly sensitive_ttl_secs: number;
   readonly excluded_app_bundle_ids: readonly string[];

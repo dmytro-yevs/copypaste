@@ -73,8 +73,7 @@ pub struct ExportReport {
     pub exported: u32,
     /// Flagged items withheld because the caller did not ask for them.
     pub skipped_sensitive: u32,
-    /// Items that are not text. v2 captures text only, but a peer can deliver
-    /// something else.
+    /// Items that are not representable in the plaintext export.
     pub skipped_non_text: u32,
     pub skipped_undecryptable: u32,
 }

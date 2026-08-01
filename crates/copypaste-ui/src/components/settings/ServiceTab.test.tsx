@@ -8,7 +8,8 @@
  * `e2e/tests/daemon-config.e2e.test.ts` driving the CLI, because no Tauri
  * command routed `GetConfig` or `SetConfig`.
  *
- * The fourth is `sensitive_ttl_secs`. It ships off, and the reason recorded on
+ * The payload limits are independently live and patchable. The final contract
+ * covered here is `sensitive_ttl_secs`: it ships off, and the reason recorded on
  * the field is that v2 had nowhere to say the sweep had happened — so the
  * assertions here are about what the control says, not about what it stores.
  */
@@ -41,7 +42,10 @@ function config(over: Partial<ConfigData> = {}): ConfigData {
     storage_quota_bytes: 10 * 1_073_741_824,
     retention_days: 0,
     dedup_window_secs: 30,
-    max_item_bytes: 4 * 1_048_576,
+    max_text_size_bytes: 10 * 1_048_576,
+    max_image_size_bytes: 64 * 1_048_576,
+    max_file_size_bytes: 100 * 1_048_576,
+    max_decoded_image_mb: 50,
     sensitive_ttl_secs: 0,
     excluded_app_bundle_ids: [],
     lan_visibility: true,
@@ -89,6 +93,32 @@ describe("reading the service's settings", () => {
     expect((poll as HTMLSelectElement).value).toBe("1500");
   });
 
+  it("shows every binding payload default", async () => {
+    withUser(<ServiceTab />);
+    const expected = [
+      ["Ignore text larger than", 10 * 1_048_576],
+      ["Ignore images larger than", 64 * 1_048_576],
+      ["Ignore files larger than", 100 * 1_048_576],
+      ["Decoded image memory limit", 50],
+    ] as const;
+    for (const [name, value] of expected) {
+      const control = await screen.findByRole("combobox", { name });
+      expect((control as HTMLSelectElement).value).toBe(String(value));
+    }
+  });
+
+  it("associates each payload control with its visible help", async () => {
+    withUser(<ServiceTab />);
+    const file = await screen.findByRole("combobox", {
+      name: "Ignore files larger than",
+    });
+    const helpId = file.getAttribute("aria-describedby");
+    expect(helpId).toBeTruthy();
+    expect(document.getElementById(helpId!)?.textContent).toContain(
+      "hard maximum and default are 100 MB",
+    );
+  });
+
   it("says so plainly on a build that has no service to configure", async () => {
     getConfig.mockRejectedValue("not available in this build");
     withUser(<ServiceTab />);
@@ -128,6 +158,20 @@ describe("writing one", () => {
     );
   });
 
+  it.each([
+    ["Ignore text larger than", String(16 * 1_048_576), { max_text_size_bytes: 16 * 1_048_576 }],
+    ["Ignore images larger than", String(128 * 1_048_576), { max_image_size_bytes: 128 * 1_048_576 }],
+    ["Ignore files larger than", String(50 * 1_048_576), { max_file_size_bytes: 50 * 1_048_576 }],
+    ["Decoded image memory limit", "100", { max_decoded_image_mb: 100 }],
+  ])("patches only %s", async (name, value, patch) => {
+    const { user } = withUser(<ServiceTab />);
+    const control = await screen.findByRole("combobox", { name });
+    await user.selectOptions(control, value);
+
+    await waitFor(() => expect(setConfig).toHaveBeenCalledTimes(1));
+    expect(setConfig.mock.calls[0]![0]).toEqual(patch);
+  });
+
   it("persists private mode through the service", async () => {
     const { user } = withUser(<ServiceTab />);
     await user.click(await screen.findByRole("switch", { name: "Private mode" }));
@@ -141,6 +185,34 @@ describe("writing one", () => {
     withUser(<ServiceTab />);
     expect(await screen.findByRole("combobox", { name: "Check the clipboard every" })).toBeTruthy();
     expect(screen.queryByRole("switch", { name: "Private mode" })).toBeNull();
+  });
+});
+
+describe("payload-limit validation", () => {
+  it("offers the exact 64 KiB, 1 MiB, 100 MiB, and 5000 ms boundaries", async () => {
+    withUser(<ServiceTab />);
+    const values = async (name: string) =>
+      [...((await screen.findByRole("combobox", { name })) as HTMLSelectElement).options].map(
+        (option) => option.value,
+      );
+
+    expect(await values("Check the clipboard every")).toContain("5000");
+    expect(await values("Ignore text larger than")).toContain(String(64 * 1_024));
+    expect(await values("Ignore images larger than")).toContain(String(1_048_576));
+    expect(await values("Ignore files larger than")).toContain(String(100 * 1_048_576));
+    expect(await values("Decoded image memory limit")).toContain("1");
+  });
+
+  it("announces an out-of-range service value accessibly", async () => {
+    getConfig.mockResolvedValue(applied({ max_file_size_bytes: 101 * 1_048_576 }));
+    withUser(<ServiceTab />);
+    const file = await screen.findByRole("combobox", {
+      name: "Ignore files larger than",
+    });
+    expect(file.getAttribute("aria-invalid")).toBe("true");
+    const error = await screen.findByRole("alert");
+    expect(error.textContent).toContain("1 MB through 100 MB");
+    expect(file.getAttribute("aria-errormessage")).toBe(error.id);
   });
 });
 
