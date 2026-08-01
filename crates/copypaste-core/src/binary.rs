@@ -109,6 +109,9 @@ fn chunk_aad(prefix: &str, index: u32, is_final: bool) -> String {
 
 /// Seal bytes into header-, position- and final-block-authenticated chunks.
 pub fn seal(bytes: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoError> {
+    if bytes.len() as u64 > MAX_BINARY_BYTES {
+        return Err(CryptoError::AuthFailed);
+    }
     let meta = metadata(bytes);
     let header = header(bytes, &meta);
     let aad_prefix = chunk_aad_prefix(id, &header);
@@ -264,6 +267,17 @@ mod tests {
         assert_eq!(open(&sealed, &key, &id).unwrap(), bytes);
         assert_eq!(metadata(&bytes).chunk_count, 2);
         assert_eq!(id, item_id(&bytes));
+    }
+
+    #[test]
+    fn sealing_cannot_exceed_the_envelope_opening_bound() {
+        let bytes = vec![0; MAX_BINARY_BYTES as usize + 1];
+        let key = Keyring::from_secret(&[9; 32]).item_key();
+        let id = item_id(&bytes);
+        assert!(matches!(
+            seal(&bytes, &key, &id),
+            Err(CryptoError::AuthFailed)
+        ));
     }
 
     #[test]

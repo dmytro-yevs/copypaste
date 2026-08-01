@@ -398,7 +398,7 @@ impl Backend for EmbeddedBackend {
 
     /// Real, and always the defaults.
     ///
-    /// The settings are still worth reading: `max_item_bytes`,
+    /// The settings are still worth reading: the per-payload capture limits,
     /// `dedup_window_secs` and the sensitive TTL govern `copypaste_core::ingest`
     /// here exactly as they do in the daemon, so a screen that shows them is
     /// showing what this build actually does. `restart_required` is empty

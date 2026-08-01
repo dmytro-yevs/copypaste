@@ -15,13 +15,14 @@
 //! counter, one current value, no history — and it runs the *same*
 //! [`ChangeTracker`], so a test written here holds for `NSPasteboard`.
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
 use tracing::{debug, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{Capture, CapturePolicy, ClipboardSource, MAX_TEXT_BYTES};
+use super::{Capture, CapturePolicy, ClipboardSource};
 
 /// Environment variable naming a file the [`FakeClipboard`] watches.
 const FAKE_CLIPBOARD_ENV: &str = "COPYPASTE_FAKE_CLIPBOARD";
@@ -106,7 +107,7 @@ impl FakeClipboard {
     ///
     /// Returns without reading anything when the file has not moved, which is
     /// the property I-1 asks of the real backend.
-    fn sync_watched_file(&mut self) {
+    fn sync_watched_file(&mut self, cap: u64) {
         let Some(watched) = self.watched.as_mut() else {
             return;
         };
@@ -126,12 +127,11 @@ impl FakeClipboard {
 
         // I-18's shape: the size is checked before the bytes are copied in, and
         // the rejection is counted rather than dropped in silence (§6.5).
-        if stamp.len > MAX_TEXT_BYTES as u64 {
+        if stamp.len > cap {
             self.rejected_too_large += 1;
             warn!(
                 bytes = stamp.len,
-                cap = MAX_TEXT_BYTES,
-                "clipboard text exceeds the size cap; dropped"
+                cap, "clipboard text exceeds the size cap; dropped"
             );
             // I-3: acknowledge the change so it is not re-offered forever.
             self.contents = None;
@@ -139,8 +139,23 @@ impl FakeClipboard {
             return;
         }
 
-        match std::fs::read(&watched.path) {
-            Ok(bytes) => {
+        match std::fs::File::open(&watched.path) {
+            Ok(file) => {
+                let mut bytes = Vec::new();
+                if file
+                    .take(cap.saturating_add(1))
+                    .read_to_end(&mut bytes)
+                    .is_err()
+                {
+                    debug!("fake clipboard file could not be read; change ignored");
+                    return;
+                }
+                if bytes.len() as u64 > cap {
+                    self.rejected_too_large += 1;
+                    self.contents = None;
+                    self.change_count += 1;
+                    return;
+                }
                 // I-9: byte counts, never content, and never the path.
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 // Fake-only affordance: `echo hi > file` is the demo, and the
@@ -164,15 +179,13 @@ impl Default for FakeClipboard {
 
 impl ClipboardSource for FakeClipboard {
     fn poll(&mut self) -> Option<Capture> {
-        self.poll_with_policy(CapturePolicy {
-            private_mode: false,
-            excluded_app_bundle_ids: &[],
-            max_item_bytes: MAX_TEXT_BYTES as u64,
-        })
+        let settings = copypaste_ipc::ConfigData::default();
+        self.poll_with_policy(CapturePolicy::new(&settings))
     }
 
     fn poll_with_policy(&mut self, policy: CapturePolicy<'_>) -> Option<Capture> {
-        self.sync_watched_file();
+        let cap = policy.limit_bytes(copypaste_ipc::content_type::TEXT);
+        self.sync_watched_file(cap);
 
         match self.tracker.observe(self.change_count) {
             Change::Unchanged => return None,
@@ -193,10 +206,11 @@ impl ClipboardSource for FakeClipboard {
         // Private mode and app exclusions acknowledge the change after its
         // cursor was advanced above, but before any content is cloned.
         let app_bundle_id = self.frontmost_app.clone();
-        if policy.private_mode
-            || (!policy.excluded_app_bundle_ids.is_empty()
+        if policy.settings.private_mode
+            || (!policy.settings.excluded_app_bundle_ids.is_empty()
                 && app_bundle_id.as_ref().is_none_or(|id| {
                     policy
+                        .settings
                         .excluded_app_bundle_ids
                         .iter()
                         .any(|excluded| excluded == id)
@@ -209,7 +223,7 @@ impl ClipboardSource for FakeClipboard {
         // returned. §3.20: no content dedup here — re-copying the same text is
         // a real change and ingest is what collapses it into a recency bump.
         let content = self.contents.clone()?;
-        if content.len() as u64 > policy.max_item_bytes {
+        if content.len() as u64 > cap {
             self.rejected_too_large += 1;
             return None;
         }
@@ -227,7 +241,18 @@ impl ClipboardSource for FakeClipboard {
     }
 
     fn changed(&mut self) -> bool {
-        self.sync_watched_file();
+        if let Some(watched) = &self.watched {
+            let changed_on_disk = std::fs::metadata(&watched.path).ok().is_some_and(|meta| {
+                watched.last_seen
+                    != Some(FileStamp {
+                        modified: meta.modified().ok(),
+                        len: meta.len(),
+                    })
+            });
+            if changed_on_disk {
+                return true;
+            }
+        }
         !self.tracker.is_current(self.change_count)
     }
 
@@ -478,7 +503,7 @@ mod tests {
         let path = dir.path().join("clip");
         let mut cb = FakeClipboard::watching(path.clone());
 
-        std::fs::write(&path, vec![b'x'; MAX_TEXT_BYTES + 1]).expect("write");
+        std::fs::write(&path, vec![b'x'; crate::clipboard::MAX_CAPTURE_BYTES + 1]).expect("write");
         assert_eq!(cb.poll(), None);
         assert_eq!(cb.rejected_too_large_count(), 1);
         // I-3: acknowledged, so it is not offered again.
@@ -498,24 +523,17 @@ mod tests {
         cb.set_frontmost_app(Some("com.example.excluded"));
         cb.push_external("secret");
         let exclusions = ["com.example.excluded".to_string()];
-        assert!(cb
-            .poll_with_policy(CapturePolicy {
-                private_mode: false,
-                excluded_app_bundle_ids: &exclusions,
-                max_item_bytes: MAX_TEXT_BYTES as u64,
-            })
-            .is_none());
+        let settings = copypaste_ipc::ConfigData {
+            excluded_app_bundle_ids: exclusions.to_vec(),
+            ..Default::default()
+        };
+        assert!(cb.poll_with_policy(CapturePolicy::new(&settings)).is_none());
         assert!(cb.poll().is_none(), "excluded change was replayed");
 
         cb.set_frontmost_app(None);
         cb.push_external("unknown source");
         assert!(
-            cb.poll_with_policy(CapturePolicy {
-                private_mode: false,
-                excluded_app_bundle_ids: &exclusions,
-                max_item_bytes: MAX_TEXT_BYTES as u64,
-            })
-            .is_none(),
+            cb.poll_with_policy(CapturePolicy::new(&settings)).is_none(),
             "non-empty exclusions fail closed"
         );
         cb.push_external("normal");
@@ -541,13 +559,11 @@ mod tests {
     fn private_mode_suppresses_without_replaying_old_copies() {
         let mut cb = fake();
         cb.push_external("while private");
-        assert!(cb
-            .poll_with_policy(CapturePolicy {
-                private_mode: true,
-                excluded_app_bundle_ids: &[],
-                max_item_bytes: MAX_TEXT_BYTES as u64,
-            })
-            .is_none());
+        let settings = copypaste_ipc::ConfigData {
+            private_mode: true,
+            ..Default::default()
+        };
+        assert!(cb.poll_with_policy(CapturePolicy::new(&settings)).is_none());
         assert!(cb.poll().is_none(), "private copy was replayed");
         cb.push_external("after private");
         assert_eq!(
@@ -559,14 +575,19 @@ mod tests {
     #[test]
     fn live_size_policy_rejects_before_the_capture_is_returned() {
         let mut cb = fake();
+        let settings = copypaste_ipc::ConfigData {
+            max_text_size_bytes: 4,
+            ..Default::default()
+        };
         cb.push_external("four");
-        assert!(cb
-            .poll_with_policy(CapturePolicy {
-                private_mode: false,
-                excluded_app_bundle_ids: &[],
-                max_item_bytes: 3,
-            })
-            .is_none());
+        assert_eq!(
+            cb.poll_with_policy(CapturePolicy::new(&settings))
+                .map(|capture| capture.content),
+            Some("four".to_string()),
+            "the configured boundary must be accepted"
+        );
+        cb.push_external("five!");
+        assert!(cb.poll_with_policy(CapturePolicy::new(&settings)).is_none());
         assert_eq!(cb.rejected_too_large_count(), 1);
         assert!(cb.poll().is_none(), "oversized copy was replayed");
     }

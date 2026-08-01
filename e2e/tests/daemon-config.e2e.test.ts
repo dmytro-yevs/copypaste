@@ -117,19 +117,11 @@ describe("a rejected value", () => {
 
 describe("concurrent writers", () => {
   /**
-   * The reason `SetConfig` takes a patch rather than a whole `ConfigData`: two
-   * clients — two windows, a window and the CLI, two tabs of one screen — each
-   * send the field they changed, and neither carries a stale copy of the
-   * other's.
-   *
-   * **This currently fails, and the failure is real.**
-   * `daemon/src/settings.rs::apply` reads the live value under a read lock,
-   * drops it, validates the patch into a new `ConfigData`, persists that, and
-   * only then takes the write lock. Two connections are two tokio tasks, so
-   * both can read the same "before" and the second write erases the first
-   * one's field — a lost update, and the exact thing patches exist to prevent.
-   * It is not deterministic, which is why this runs several rounds rather than
-   * one.
+   * Regression guard for the lost-update defect fixed by d08b517d.
+   * Concurrent clients patch different fields; `Settings::apply` must keep one
+   * write lock across read, validation, persistence, and publication so no
+   * writer can erase another's field. Several rounds make the race observable
+   * if that lock scope regresses.
    */
   test("patches over different fields all survive", async () => {
     const lost: string[] = [];
@@ -143,13 +135,18 @@ describe("concurrent writers", () => {
         history_limit: 700 + round,
         retention_days: 10 + round,
         dedup_window_secs: 20 + round,
-        max_item_bytes: 1_000_000 + round,
+        max_text_size_bytes: 1_000_000 + round,
       };
       await Promise.all([
         daemon.json(["config", "set", "--history-limit", String(want.history_limit)]),
         daemon.json(["config", "set", "--retention-days", String(want.retention_days)]),
         daemon.json(["config", "set", "--dedup-window-secs", String(want.dedup_window_secs)]),
-        daemon.json(["config", "set", "--max-item-bytes", String(want.max_item_bytes)]),
+        daemon.json([
+          "config",
+          "set",
+          "--max-text-size-bytes",
+          String(want.max_text_size_bytes),
+        ]),
       ]);
 
       const after = (await show()).config as unknown as Record<string, number>;

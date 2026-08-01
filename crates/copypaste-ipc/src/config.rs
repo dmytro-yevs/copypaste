@@ -113,10 +113,6 @@ pub struct ConfigData {
     pub max_file_size_bytes: u64,
     /// Maximum decoded image memory, in MiB. **Live.**
     pub max_decoded_image_mb: u32,
-    /// Rust-only text read-gate cap, omitted from the config wire format.
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub max_item_bytes: u64,
     /// Seconds after which an item the detector flagged is deleted.
     ///
     /// `0` is an explicit **disabled** sentinel, not "delete immediately" — the
@@ -206,7 +202,6 @@ impl Default for ConfigData {
             max_image_size_bytes: MAX_IMAGE_SIZE_BYTES,
             max_file_size_bytes: MAX_FILE_SIZE_BYTES,
             max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
-            max_item_bytes: MAX_TEXT_SIZE_BYTES,
             // Auto-wipe off. `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL`
             // is still 30 s and is still the right value *once switched on* —
             // it is the suggestion, not the default. See the field's doc for
@@ -295,10 +290,6 @@ pub struct ConfigPatch {
     pub max_file_size_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_decoded_image_mb: Option<u32>,
-    /// Rust-only text read-gate patch, omitted from the config wire format.
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub max_item_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_ttl_secs: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -338,9 +329,8 @@ impl ConfigPatch {
         if let Some(v) = self.dedup_window_secs {
             next.dedup_window_secs = range("dedup_window_secs", v, DEDUP_WINDOW_SECS)?;
         }
-        if let Some(v) = self.max_text_size_bytes.or(self.max_item_bytes) {
+        if let Some(v) = self.max_text_size_bytes {
             next.max_text_size_bytes = range("max_text_size_bytes", v, MAX_TEXT_SIZE_RANGE)?;
-            next.max_item_bytes = next.max_text_size_bytes;
         }
         if let Some(v) = self.max_image_size_bytes {
             next.max_image_size_bytes = range("max_image_size_bytes", v, MAX_IMAGE_SIZE_RANGE)?;
@@ -401,7 +391,6 @@ impl From<&ConfigData> for ConfigPatch {
             max_image_size_bytes: Some(c.max_image_size_bytes),
             max_file_size_bytes: Some(c.max_file_size_bytes),
             max_decoded_image_mb: Some(c.max_decoded_image_mb),
-            max_item_bytes: None,
             sensitive_ttl_secs: Some(c.sensitive_ttl_secs),
             excluded_app_bundle_ids: Some(c.excluded_app_bundle_ids.clone()),
             lan_visibility: Some(c.lan_visibility),
@@ -462,16 +451,23 @@ impl ConfigData {
         names
     }
 
-    /// Live capture cap for one shared content-type classification.
+    /// Effective live capture cap for one shared content-type classification.
+    ///
+    /// The binding configuration can express larger image and file limits,
+    /// but the current binary envelope, local reader, and transport contract
+    /// support at most [`crate::MAX_CONTENT_BYTES`]. Raising that hard bound
+    /// requires a coordinated storage and chunk-transport change; until then
+    /// every pre-read and ingest boundary fails closed at the smaller value.
     #[must_use]
     pub fn capture_limit_bytes(&self, content_type: &str) -> u64 {
-        match crate::content_type::classify(content_type) {
+        let configured = match crate::content_type::classify(content_type) {
             crate::content_type::Kind::Text => self.max_text_size_bytes,
             crate::content_type::Kind::Image => self.max_image_size_bytes,
             crate::content_type::Kind::File | crate::content_type::Kind::Other => {
                 self.max_file_size_bytes
             }
-        }
+        };
+        configured.min(crate::MAX_CONTENT_BYTES as u64)
     }
 }
 
@@ -618,10 +614,7 @@ mod tests {
         let config = patch.apply(&ConfigData::default()).unwrap();
         let config_json = serde_json::to_string(&config).unwrap();
         let decoded: ConfigData = serde_json::from_str(&config_json).unwrap();
-        assert_eq!(decoded.max_text_size_bytes, config.max_text_size_bytes);
-        assert_eq!(decoded.max_image_size_bytes, config.max_image_size_bytes);
-        assert_eq!(decoded.max_file_size_bytes, config.max_file_size_bytes);
-        assert_eq!(decoded.max_decoded_image_mb, config.max_decoded_image_mb);
+        assert_eq!(decoded, config);
         assert!(!config_json.contains("max_item_bytes"));
     }
 
@@ -638,6 +631,18 @@ mod tests {
         assert_eq!(config.capture_limit_bytes("image/webp"), 22);
         assert_eq!(config.capture_limit_bytes(crate::content_type::FILE), 33);
         assert_eq!(config.capture_limit_bytes("application/x-future"), 33);
+    }
+
+    #[test]
+    fn effective_limits_stop_at_the_supported_storage_and_transport_bound() {
+        let config = ConfigData::default();
+        let hard = crate::MAX_CONTENT_BYTES as u64;
+        assert_eq!(config.capture_limit_bytes(crate::content_type::TEXT), hard);
+        assert_eq!(
+            config.capture_limit_bytes(crate::content_type::IMAGE_PNG),
+            hard
+        );
+        assert_eq!(config.capture_limit_bytes(crate::content_type::FILE), hard);
     }
 
     /// `0` disables the sweep. It must not be mistaken for "delete now", and it

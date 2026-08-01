@@ -291,6 +291,18 @@ mod tests {
         assert_eq!(f.store.count().unwrap(), 0);
     }
 
+    #[test]
+    fn an_all_over_limit_batch_is_counted_as_too_large() {
+        let mut f = fixture();
+        f.settings.max_text_size_bytes = copypaste_ipc::MIN_TEXT_SIZE_BYTES;
+        let oversized = "x".repeat(copypaste_ipc::MIN_TEXT_SIZE_BYTES as usize + 1);
+        let result = import_into(&f, vec![item(&oversized), item(&oversized)]).unwrap();
+
+        assert_eq!(result.inserted, 0);
+        assert_eq!(result.skipped, 2);
+        assert_eq!(f.store.count().unwrap(), 0);
+    }
+
     /// Importing the same file twice is one history, not two — the dedup window
     /// is applied around each item's own stamp, which is why re-importing an old
     /// file collapses rather than doubling.
