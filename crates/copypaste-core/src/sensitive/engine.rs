@@ -37,18 +37,11 @@ pub enum DetectorError {
     },
 }
 
-/// Lazy-DFA cache ceiling for the prefilter, and the difference between the
-/// prefilter being an optimisation and being a 55× pessimisation.
-///
-/// `regex` defaults to 2 MiB. The combined automaton for these ~45 patterns does
-/// not fit in it: the cache thrashes, every search falls back to the NFA
-/// simulation, and the one pass that is supposed to save 45 individual searches
-/// costs more than all 45 together. Measured on 116 KB of benign ASCII —
-/// 2 MiB: 1.0 MB/s · 4 MiB: 400 MB/s · flat to 32 MiB; running the 45 regexes
-/// serially instead: 59 MB/s. 8 MiB is past the knee with room for the ruleset
-/// to grow. The cache is allocated on demand, so this is a ceiling and not a
-/// cost.
-const PREFILTER_DFA_SIZE_LIMIT: usize = 8 * 1024 * 1024;
+/// The vendored Gitleaks patterns overflow `regex`'s 2 MiB lazy-DFA cache.
+/// At 8 MiB the prefilter benchmark took 13 seconds against 1 second for
+/// serial searches; 64 MiB restores the prefilter advantage. The cache is
+/// allocated on demand, so this is a ceiling rather than a fixed cost.
+const PREFILTER_DFA_SIZE_LIMIT: usize = 64 * 1024 * 1024;
 const PREFILTER_COMPILED_SIZE_LIMIT: usize = 32 * 1024 * 1024;
 
 /// The compiled ruleset. Construct **once** and share it: `new()` compiles the
@@ -227,9 +220,7 @@ impl Rule {
             }
             let globally_allowed = !self.spec.upstream_ids.is_empty()
                 && is_allowed(global_allowlists, secret, whole.as_str(), line);
-            if !globally_allowed
-                && !is_allowed(&self.allowlists, secret, whole.as_str(), line)
-            {
+            if !globally_allowed && !is_allowed(&self.allowlists, secret, whole.as_str(), line) {
                 spans.push((whole.start(), whole.end()));
             }
         }
@@ -263,8 +254,7 @@ fn compile_allowlists(
                 .regexes
                 .iter()
                 .map(|pattern| {
-                    Regex::new(pattern)
-                        .map_err(|source| DetectorError::Allowlist { rule, source })
+                    Regex::new(pattern).map_err(|source| DetectorError::Allowlist { rule, source })
                 })
                 .collect::<Result<_, _>>()?;
             Ok(CompiledAllowlist {
@@ -312,12 +302,7 @@ fn line_containing(text: &str, start: usize, end: usize) -> &str {
     &text[line_start..line_end]
 }
 
-fn is_allowed(
-    allowlists: &[CompiledAllowlist],
-    secret: &str,
-    matched: &str,
-    line: &str,
-) -> bool {
+fn is_allowed(allowlists: &[CompiledAllowlist], secret: &str, matched: &str, line: &str) -> bool {
     allowlists.iter().any(|allowlist| {
         let target = match allowlist.target {
             AllowlistTarget::Secret => secret,
@@ -784,26 +769,14 @@ mod tests {
     #[test]
     fn upstream_entropy_and_content_allowlists_filter_candidates() {
         let det = detector();
-        assert!(!fired(
-            &det,
-            "credential = aaaaaaaaaaaa",
-            "generic_api_key"
-        ));
-        assert!(fired(
-            &det,
-            "credential = aB3dE5gH7jK9",
-            "generic_api_key"
-        ));
+        assert!(!fired(&det, "credential = aaaaaaaaaaaa", "generic_api_key"));
+        assert!(fired(&det, "credential = aB3dE5gH7jK9", "generic_api_key"));
         assert!(!fired(
             &det,
             "credential = about7X9kLmPq",
             "generic_api_key"
         ));
-        assert!(!fired(
-            &det,
-            "credential = AbCdEfGhIjKl",
-            "generic_api_key"
-        ));
+        assert!(!fired(&det, "credential = AbCdEfGhIjKl", "generic_api_key"));
         assert!(!fired(
             &det,
             "credential=abc123XYZ987 --mount=type=secret,",
@@ -824,11 +797,7 @@ mod tests {
             "credential=abc123XYZ987 # gitleaks:allow",
             "generic_api_key"
         ));
-        assert!(fired(
-            &det,
-            "alice@example.com # gitleaks:allow",
-            "email"
-        ));
+        assert!(fired(&det, "alice@example.com # gitleaks:allow", "email"));
     }
 
     /// §7.2: rank by confidence, not by declaration index. v1 returned the
