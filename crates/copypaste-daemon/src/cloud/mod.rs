@@ -20,7 +20,7 @@ pub mod poll;
 pub mod realtime;
 pub mod source;
 
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use copypaste_cloud::auth::{Session, SupabaseAuth};
@@ -70,6 +70,16 @@ pub(crate) const KEY_WATERMARK: &str = "cloud_watermark_ms";
 pub(crate) const KEY_WATERMARK_ITEM: &str = "cloud_watermark_item_id";
 /// The upload floor: everything created before this has been offered for upload.
 pub(crate) const KEY_UPLOAD_FLOOR: &str = "cloud_upload_floor_ms";
+/// The tie-break half of the upload floor. Together the two keys let a capped
+/// upload scan resume after `(created_at, item_id)` instead of re-reading a
+/// full boundary page forever.
+pub(crate) const KEY_UPLOAD_FLOOR_ITEM: &str = "cloud_upload_floor_item_id";
+
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct UploadFloor {
+    pub(crate) created_at: i64,
+    pub(crate) item_id: Option<String>,
+}
 
 /// A signed-in account and the driver bound to it.
 struct Account {
@@ -92,6 +102,14 @@ pub struct Cloud {
     /// are `&'static str` by construction, so there is nothing here that could
     /// have interpolated a path or a token.
     last_error: Mutex<Option<&'static str>>,
+    /// Serializes a peer lowering the upload floor with a completed cloud round
+    /// advancing it. Without this, the round can overwrite an old-stamp peer
+    /// write that arrived while its network requests were in flight.
+    upload_floor_lock: Mutex<()>,
+    /// Changes whenever a writer asks the floor to be reconsidered. The floor
+    /// pair alone cannot record a peer write that lands in the same boundary
+    /// millisecond while a round is scanning it.
+    upload_floor_epoch: AtomicU64,
     /// Woken by sign-in and by `cloud sync`, so neither has to wait out the
     /// idle interval.
     wake: Notify,
@@ -114,6 +132,8 @@ impl Cloud {
             account: Mutex::new(None),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
+            upload_floor_lock: Mutex::new(()),
+            upload_floor_epoch: AtomicU64::new(0),
             wake: Notify::new(),
         }
     }
@@ -290,6 +310,78 @@ impl Cloud {
         self.last_error.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn lock_upload_floor(&self) -> MutexGuard<'_, ()> {
+        self.upload_floor_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn upload_floor(&self, meta: &Meta) -> Result<UploadFloor, crate::meta::MetaError> {
+        Ok(UploadFloor {
+            created_at: meta.state_ms(KEY_UPLOAD_FLOOR)?,
+            item_id: meta.state(KEY_UPLOAD_FLOOR_ITEM)?,
+        })
+    }
+
+    fn store_upload_floor(
+        &self,
+        meta: &Meta,
+        floor: &UploadFloor,
+    ) -> Result<(), crate::meta::MetaError> {
+        meta.set_state_all(&[
+            (KEY_UPLOAD_FLOOR, &floor.created_at.max(0).to_string()),
+            (
+                KEY_UPLOAD_FLOOR_ITEM,
+                floor.item_id.as_deref().unwrap_or(""),
+            ),
+        ])
+    }
+
+    pub(crate) fn upload_floor_epoch(&self) -> u64 {
+        self.upload_floor_epoch.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn note_version_written(&self, meta: &Meta, created_at_ms: i64) {
+        self.upload_floor_epoch.fetch_add(1, Ordering::AcqRel);
+        let _guard = self.lock_upload_floor();
+        let incoming = UploadFloor {
+            created_at: created_at_ms.max(0),
+            // An old-stamp write has no reliable position within this device's
+            // keyset, so re-offer its whole boundary millisecond.
+            item_id: None,
+        };
+        match self.upload_floor(meta) {
+            Ok(floor) if floor <= incoming => {}
+            Ok(_) => {
+                if let Err(e) = self.store_upload_floor(meta, &incoming) {
+                    warn!(error = ?e, "could not lower the cloud upload floor");
+                }
+            }
+            Err(e) => warn!(error = ?e, "could not read the cloud upload floor"),
+        }
+    }
+
+    pub(crate) fn commit_upload_floor(
+        &self,
+        meta: &Meta,
+        started: &UploadFloor,
+        started_epoch: u64,
+        candidate: &UploadFloor,
+    ) -> Result<(), crate::meta::MetaError> {
+        let _guard = self.lock_upload_floor();
+        if self.upload_floor_epoch() != started_epoch {
+            return Ok(());
+        }
+        let current = self.upload_floor(meta)?;
+        // A value below the one this round began from can only be a writer
+        // (not this round) pulling the floor back. Keep it so that writer is
+        // offered next time; a re-offer is safe, stranding it is not.
+        if current < *started {
+            return Ok(());
+        }
+        self.store_upload_floor(meta, &current.max(candidate.clone()))
+    }
+
     pub fn config(&self) -> Option<&CloudConfig> {
         self.config.as_ref()
     }
@@ -303,16 +395,7 @@ impl Cloud {
 /// otherwise. Lowering the floor costs one re-offer of everything above it, and
 /// a re-offer is an idempotent upsert.
 pub fn note_version_written(state: &AppState, created_at_ms: i64) {
-    let meta = &state.meta;
-    match meta.state_ms(KEY_UPLOAD_FLOOR) {
-        Ok(floor) if floor <= created_at_ms => {}
-        Ok(_) => {
-            if let Err(e) = meta.set_state_ms(KEY_UPLOAD_FLOOR, created_at_ms) {
-                warn!(error = ?e, "could not lower the cloud upload floor");
-            }
-        }
-        Err(e) => warn!(error = ?e, "could not read the cloud upload floor"),
-    }
+    state.cloud.note_version_written(&state.meta, created_at_ms);
 }
 
 /// Would cloud sync refuse to carry this item for its size?
