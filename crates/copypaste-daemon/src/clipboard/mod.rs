@@ -56,6 +56,7 @@
 
 mod change;
 mod fake;
+mod file_materialize;
 mod format;
 
 /// Decisions that must be made before a clipboard representation is read.
@@ -183,7 +184,13 @@ pub trait ClipboardSource: Send {
     /// Write a native binary representation back to the platform pasteboard.
     /// A backend that cannot do this refuses rather than converting bytes to
     /// text and corrupting the user's clipboard.
-    fn set_binary_contents(&mut self, _content_type: &str, _bytes: &[u8]) -> anyhow::Result<()> {
+    fn set_binary_contents(
+        &mut self,
+        _item_id: &str,
+        _content_type: &str,
+        _bytes: &[u8],
+        _metadata: Option<&copypaste_core::FileMetadata>,
+    ) -> anyhow::Result<()> {
         Err(anyhow::anyhow!(
             "this clipboard backend cannot write binary content"
         ))
