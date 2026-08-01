@@ -42,6 +42,10 @@ pub const PROTOCOL_VERSION: u32 = 2;
 /// never truncated to the newest page.
 pub const MAX_SUMMARIES_PER_MESSAGE: usize = 10_000;
 
+/// Aggregate summary ceiling for one session. Per-frame limits alone do not
+/// stop a paired but hostile peer from keeping `more = true` forever.
+pub const MAX_SUMMARY_PAGES_PER_SESSION: usize = 16;
+
 /// Most ids one [`SyncMessage::Request`] may carry, and so the most items one
 /// session transfers in one direction. Smaller than the summary bound: a
 /// request is a promise of transfer work, and bounding it bounds how long a
@@ -105,6 +109,11 @@ pub struct ItemSummary {
     /// Explicit `None` clears a previous order on unpin; omission would retain
     /// stale state at the receiver.
     pub pin_order: Option<f64>,
+    /// P2P-only LWW stamp for pin state. It deliberately differs from
+    /// `created_at`: cloud has no pin fields, so a pin must not republish an
+    /// older content version.
+    #[serde(default)]
+    pub pin_updated_at: i64,
 }
 
 /// The wire definition of content identity: lowercase hex SHA-256 of the
@@ -144,6 +153,8 @@ pub struct SyncItem {
     pub pinned: bool,
     /// See [`ItemSummary::pin_order`].
     pub pin_order: Option<f64>,
+    #[serde(default)]
+    pub pin_updated_at: i64,
 }
 
 impl SyncItem {
@@ -157,6 +168,7 @@ impl SyncItem {
             origin_device_id: self.origin_device_id.clone(),
             pinned: self.pinned,
             pin_order: self.pin_order,
+            pin_updated_at: self.pin_updated_at,
         }
     }
 }
@@ -294,11 +306,13 @@ impl SyncMessage {
             Self::Summary { items, .. } => {
                 for s in items {
                     s.created_at = s.created_at.max(0);
+                    s.pin_updated_at = s.pin_updated_at.max(0);
                 }
             }
             Self::Items { items } => {
                 for i in items {
                     i.created_at = i.created_at.max(0);
+                    i.pin_updated_at = i.pin_updated_at.max(0);
                 }
             }
             _ => {}
@@ -333,6 +347,7 @@ impl SyncMessage {
                     check_id("origin_device_id", &s.origin_device_id)?;
                     check_len("content_hash", &s.content_hash, MAX_HASH_BYTES)?;
                     check_timestamp(s.created_at)?;
+                    check_timestamp(s.pin_updated_at)?;
                     check_pin_state(s.pinned, s.pin_order)?;
                 }
             }
@@ -353,6 +368,7 @@ impl SyncMessage {
                     check_len("content_type", &i.content_type, MAX_CONTENT_TYPE_BYTES)?;
                     check_len("content_hash", &i.content_hash, MAX_HASH_BYTES)?;
                     check_timestamp(i.created_at)?;
+                    check_timestamp(i.pin_updated_at)?;
                     check_pin_state(i.pinned, i.pin_order)?;
                     if i.content.len() > MAX_CONTENT_BYTES {
                         return Err(ProtocolError::ContentTooLarge {
@@ -449,6 +465,7 @@ mod tests {
             origin_device_id: "dev-a".into(),
             pinned: false,
             pin_order: None,
+            pin_updated_at: 0,
         }
     }
 
@@ -463,6 +480,7 @@ mod tests {
             origin_device_id: "dev-a".into(),
             pinned: false,
             pin_order: None,
+            pin_updated_at: 0,
         }
     }
 

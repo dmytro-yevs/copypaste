@@ -27,7 +27,8 @@ use super::{SyncChannel, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
 use crate::protocol::{
     content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
-    MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
+    MAX_ITEM_BYTES_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+    PROTOCOL_VERSION,
 };
 
 /// Runs the initiating half of a session to completion.
@@ -152,6 +153,9 @@ fn summary_pages<S: SyncSource>(
     source: &S,
 ) -> Result<(HashMap<String, ItemSummary>, Vec<Vec<ItemSummary>>), SyncError> {
     let items = source.summaries()?;
+    if items.len() > MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION {
+        return Err(SyncError::TooManySummaryPages);
+    }
     let advertised = items
         .iter()
         .cloned()
@@ -187,6 +191,9 @@ async fn exchange_summaries_initiator<C: SyncChannel, S: SyncSource>(
         })
         .await?;
         let (items, peer_more) = recv_summary_page(chan).await?;
+        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
+            return Err(SyncError::TooManySummaryPages);
+        }
         remote.extend(items);
         if !more && !peer_more {
             return Ok((advertised, remote));
@@ -204,6 +211,9 @@ async fn exchange_summaries_responder<C: SyncChannel, S: SyncSource>(
     let mut page = 0;
     loop {
         let (items, peer_more) = recv_summary_page(chan).await?;
+        if page >= MAX_SUMMARY_PAGES_PER_SESSION {
+            return Err(SyncError::TooManySummaryPages);
+        }
         remote.extend(items);
         let more = page + 1 < pages.len();
         chan.send(SyncMessage::Summary {
@@ -391,7 +401,9 @@ async fn serve_items<C: SyncChannel, S: SyncSource>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{ProtocolError, MAX_REQUEST_IDS_PER_MESSAGE};
+    use crate::protocol::{
+        ProtocolError, MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+    };
     use crate::sync::testutil::{item, session, tombstone, try_session, ScriptChannel, TestSource};
 
     #[tokio::test]
@@ -815,6 +827,27 @@ mod tests {
         assert_eq!(
             run_initiator(&mut chan, &a).await,
             Err(SyncError::PeerOverran)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_peer_cannot_keep_the_summary_stream_open_forever() {
+        let a = TestSource::new("dev-a", vec![]);
+        let mut script = vec![SyncMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            device_id: "dev-b".into(),
+            device_name: "B".into(),
+        }];
+        script.extend(
+            (0..=MAX_SUMMARY_PAGES_PER_SESSION).map(|_| SyncMessage::Summary {
+                items: vec![],
+                more: true,
+            }),
+        );
+        let mut chan = ScriptChannel::new(script);
+        assert_eq!(
+            run_initiator(&mut chan, &a).await,
+            Err(SyncError::TooManySummaryPages)
         );
     }
 

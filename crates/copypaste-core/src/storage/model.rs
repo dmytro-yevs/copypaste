@@ -11,7 +11,7 @@ use rusqlite::{ErrorCode, Row};
 macro_rules! item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
-         pinned, pin_order, is_sensitive, deleted, origin_device_id"
+         pinned, pin_order, pin_updated_at, is_sensitive, deleted, origin_device_id"
     };
 }
 
@@ -22,6 +22,7 @@ macro_rules! item_columns_ci {
         "ci.id AS id, ci.content_ciphertext AS content_ciphertext, ci.nonce AS nonce, \
          ci.content_type AS content_type, ci.content_hash AS content_hash, \
          ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, \
+         ci.pin_updated_at AS pin_updated_at, \
          ci.is_sensitive AS is_sensitive, ci.deleted AS deleted, \
          ci.origin_device_id AS origin_device_id"
     };
@@ -107,6 +108,7 @@ pub struct StoredItem {
     pub created_at: i64,
     pub pinned: bool,
     pub pin_order: Option<f64>,
+    pub pin_updated_at: i64,
     pub is_sensitive: bool,
     /// A tombstone. `Store::get` and `Store::list` never return one; the sync
     /// reads in [`super::versions`] do, because a delete is a version.
@@ -174,6 +176,7 @@ pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
         created_at: row.get("created_at")?,
         pinned: row.get("pinned")?,
         pin_order: row.get("pin_order")?,
+        pin_updated_at: row.get("pin_updated_at")?,
         is_sensitive: row.get("is_sensitive")?,
         deleted: row.get("deleted")?,
         origin_device_id: row.get("origin_device_id")?,

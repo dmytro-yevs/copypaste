@@ -18,7 +18,7 @@ mod source;
 pub(crate) mod testutil;
 
 pub use error::SyncError;
-pub use merge::{merge_decision, merge_decision_by_summary, MergeDecision};
+pub use merge::{merge_decision, merge_decision_by_summary, pin_state_wins, MergeDecision};
 pub use plan::MAX_FUTURE_SKEW_MS;
 pub use session::{run_initiator, run_responder};
 pub use source::{SyncChannel, SyncOutcome, SyncSource, SyncStats};

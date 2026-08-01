@@ -26,7 +26,8 @@ use copypaste_p2p::sync::{SyncError, SyncSource};
 use tracing::warn;
 
 use super::merge::{
-    apply_remote_p2p_version, apply_remote_version, open_version, MergeError, RemoteVersion,
+    apply_remote_p2p_version_with_pin_stamp, apply_remote_version, open_version, MergeError,
+    RemoteVersion,
 };
 use super::MSG_STORE;
 use crate::sensitive::Detector;
@@ -133,6 +134,7 @@ impl StoreSource {
             origin_device_id: origin_or(&row.origin_device_id, &self.device_id).to_string(),
             pinned: row.pinned,
             pin_order: row.pin_order,
+            pin_updated_at: row.pin_updated_at,
             item_id: row.id,
         })
     }
@@ -169,6 +171,7 @@ impl SyncSource for StoreSource {
                         .to_string(),
                     pinned: version.pinned,
                     pin_order: version.pin_order,
+                    pin_updated_at: version.pin_updated_at,
                 })
                 .collect())
         })
@@ -189,7 +192,7 @@ impl SyncSource for StoreSource {
 
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
         super::blocking(|| {
-            apply_remote_p2p_version(
+            let result = apply_remote_p2p_version_with_pin_stamp(
                 &self.store,
                 &self.keyring,
                 &self.detector,
@@ -208,8 +211,15 @@ impl SyncSource for StoreSource {
                 },
                 item.pinned,
                 item.pin_order,
+                item.pin_updated_at,
             )
-            .map_err(|e| SyncError::Source(e.message().to_string()))
+            .map_err(|e| SyncError::Source(e.message().to_string()))?;
+            if result.content {
+                if let Some(hook) = &self.on_applied {
+                    hook(item.created_at);
+                }
+            }
+            Ok(result.any())
         })
     }
 }
@@ -254,6 +264,7 @@ mod tests {
             origin_device_id: "device-a".into(),
             pinned: false,
             pin_order: None,
+            pin_updated_at: 0,
         }
     }
 
