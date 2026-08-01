@@ -22,6 +22,7 @@ import {
   unsettledFailure,
 } from "@/components/devices/peerState";
 import { t as translate, useTranslation } from "@/i18n";
+import { cn } from "@/lib/cn";
 import { type ErrorKind, friendlyError, isRetryable } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
@@ -89,7 +90,10 @@ export function PeerRow({
   const presence = t(peer.online ? "devices.peer.online" : "devices.peer.offline");
 
   return (
-    <li className="flex flex-col gap-s-3 rounded-xl border border-border bg-card p-s-3">
+    <li
+      className="flex flex-col gap-s-3 rounded-xl border border-border bg-card p-s-3"
+      aria-busy={syncing || unpairing || revoking || undefined}
+    >
       <div className="flex min-w-0 items-start gap-s-3">
         <span
           aria-hidden="true"
@@ -102,6 +106,7 @@ export function PeerRow({
           <span
             className="truncate text-sm font-medium"
             title={t("devices.peer.nameHint")}
+            aria-label={`${peer.name}. ${t("devices.peer.nameHint")}`}
           >
             {peer.name}
           </span>
@@ -139,7 +144,7 @@ export function PeerRow({
           disabled={syncing}
           onClick={() => onSync(peer)}
         >
-          <RefreshCw aria-hidden="true" />
+          <RefreshCw aria-hidden="true" className={cn(syncing && "animate-spin")} />
           {t("devices.peer.syncAction")}
         </Button>
         <Button
@@ -178,7 +183,7 @@ export function PeerRow({
 
       {failure ? (
         <div className="flex flex-wrap items-center gap-s-2">
-          <p className="min-w-0 flex-1 text-xs text-err-strong">
+          <p role="status" aria-live="polite" className="min-w-0 flex-1 text-xs text-err-strong">
             {t("devices.peer.failedAt", { age: longAge(failure.at) })} ·{" "}
             {whyItFailed(failure.kind)}
           </p>
@@ -197,7 +202,7 @@ export function PeerRow({
       ) : (
         <>
           {hasHint(state) && (
-            <p className="flex items-start gap-2 text-xs text-muted-foreground">
+            <p role="status" aria-live="polite" className="flex items-start gap-2 text-xs text-muted-foreground">
               <Link2 aria-hidden="true" className="mt-px size-3.5 shrink-0" />
               {t(`devices.state.${state}.hint`)}
             </p>
