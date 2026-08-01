@@ -141,6 +141,10 @@ pub(super) fn luhn_valid(candidate: &str) -> bool {
     sum.is_multiple_of(10)
 }
 
+pub(super) fn iban_valid(candidate: &str) -> bool {
+    candidate.parse::<iban::Iban>().is_ok()
+}
+
 /// SSN group structure, per §4.2: group 1 in 001–899, group 2 in 01–99, group 3
 /// in 0001–9999, no all-zero group. Trims obvious non-SSNs only; the rule stays
 /// below the auto-wipe floor regardless, because a *real* SSN is still the
@@ -260,6 +264,102 @@ mod tests {
         // the 13..=19 clamp, independent of the checksum
         assert!(!luhn_valid("42424242424"));
         assert!(!luhn_valid("41111111111111111111"));
+    }
+
+    #[test]
+    fn iban_requires_registered_structure_length_and_checksum() {
+        let det = detector();
+        for valid in [
+            "NO9386011117947",
+            "NL91ABNA0417164300",
+            "KZ86125KZT5004100100",
+            "DE89370400440532013000",
+            "GB82WEST12345698765432",
+            "AL47212110090000000235698741",
+        ] {
+            assert!(iban_valid(valid), "valid fixture rejected: {valid}");
+            assert!(fired(&det, valid, "iban"), "IBAN rule missed {valid}");
+            assert!(!det.may_auto_wipe(valid), "IBAN became wipeable: {valid}");
+            let finding = det
+                .scan_all(valid)
+                .into_iter()
+                .find(|finding| finding.rule == "iban")
+                .unwrap_or_else(|| panic!("IBAN finding missing for {valid}"));
+            assert_eq!(finding.severity, Severity::Flag);
+        }
+
+        assert!(matches!(
+            "ZZ73123456789012345678".parse::<iban::Iban>(),
+            Err(iban::ParseIbanError::UnknownCountry(_))
+        ));
+        for invalid_length in ["DE5137040044053201300", "DE813704004405320130000"] {
+            assert!(matches!(
+                invalid_length.parse::<iban::Iban>(),
+                Err(iban::ParseIbanError::InvalidBban(_))
+            ));
+        }
+        assert!(matches!(
+            "GB93WES112345698765432".parse::<iban::Iban>(),
+            Err(iban::ParseIbanError::InvalidBban(_))
+        ));
+        assert!(matches!(
+            "DE88370400440532013000".parse::<iban::Iban>(),
+            Err(iban::ParseIbanError::InvalidBaseIban {
+                source: iban::ParseBaseIbanError::InvalidChecksum
+            })
+        ));
+
+        for (reason, invalid) in [
+            ("unknown country", "ZZ73123456789012345678"),
+            ("country length short", "DE5137040044053201300"),
+            ("country length long", "DE813704004405320130000"),
+            ("checksum", "DE88370400440532013000"),
+            ("country BBAN shape", "GB93WES112345698765432"),
+        ] {
+            assert!(!iban_valid(invalid), "{reason} fixture is valid: {invalid}");
+            assert!(
+                !fired(&det, invalid, "iban"),
+                "IBAN rule accepted {reason} fixture {invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn iban_extraction_handles_embedded_and_multibyte_context() {
+        let det = detector();
+        let iban = "DE89370400440532013000";
+        for text in [
+            format!("beneficiary={iban}; currency=EUR"),
+            format!("Рахунок🙂{iban}付款"),
+        ] {
+            let finding = det
+                .scan_all(&text)
+                .into_iter()
+                .find(|finding| finding.rule == "iban")
+                .unwrap_or_else(|| panic!("IBAN finding missing from {text:?}"));
+            assert_eq!(&text[finding.start..finding.end], iban);
+            assert_eq!(finding.severity, Severity::Flag);
+            assert!(!det.may_auto_wipe(&text));
+        }
+
+        for glued in [format!("X{iban}"), format!("{iban}X")] {
+            assert!(!fired(&det, &glued, "iban"), "matched inside {glued:?}");
+        }
+    }
+
+    #[test]
+    fn iban_shaped_benign_text_produces_no_finding() {
+        let det = detector();
+        for benign in [
+            "The documentation uses DE00123456789012345678 as a placeholder.",
+            "Ticket ZZ73123456789012345678 is not a bank account.",
+            "Legacy reference DE5137040044053201300 has the wrong length.",
+        ] {
+            assert!(
+                !fired(&det, benign, "iban"),
+                "IBAN false positive in {benign:?}"
+            );
+        }
     }
 
     #[test]
