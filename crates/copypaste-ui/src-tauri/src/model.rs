@@ -129,10 +129,7 @@ pub fn ui_items(items: Vec<Item>) -> Vec<UiItem> {
 /// a state rather than a failure.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(
-    feature = "typescript",
-    ts(rename = "ItemPage", export_to = "ipc.ts")
-)]
+#[cfg_attr(feature = "typescript", ts(rename = "ItemPage", export_to = "ipc.ts"))]
 pub struct UiPage {
     items: Vec<UiItem>,
     /// The full number of live history items, before this page's cap.

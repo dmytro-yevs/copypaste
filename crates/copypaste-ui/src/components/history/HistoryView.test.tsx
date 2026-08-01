@@ -63,7 +63,7 @@ describe("the service is not running", () => {
     const { container } = withClient(<HistoryView />);
 
     await waitFor(() =>
-      expect(screen.getByText(/clipboard service/i)).toBeTruthy(),
+      expect(screen.getByText(/background service returned an error/i)).toBeTruthy(),
     );
     expect(container.innerHTML).not.toMatch(/\/Users\/|dmitriy|\.sock/);
   });

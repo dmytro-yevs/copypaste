@@ -8,9 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use copypaste_core::{
-    purge_indexed_secrets, CryptoError, Detector, Keyring, Store, StoreError,
-};
+use copypaste_core::{purge_indexed_secrets, CryptoError, Detector, Keyring, Store, StoreError};
 use copypaste_ipc::ErrorCode;
 
 use crate::backend::{BackendError, Result};
@@ -54,8 +52,7 @@ impl BackendState {
 
         // The same directory the database goes in, so the secret cannot end up
         // somewhere the history is not (security review F-11).
-        let keyring = Keyring::load_or_create(data_dir)
-            .map_err(keyring_error)?;
+        let keyring = Keyring::load_or_create(data_dir).map_err(keyring_error)?;
 
         // The v2 filename, from the shared crate. Deliberately distinct from
         // v1's so an old database is never touched (CLAUDE.md rule 3).
@@ -102,9 +99,9 @@ fn keyring_error(error: CryptoError) -> BackendError {
     let code = match error {
         CryptoError::KeystoreUnavailable(_) => ErrorCode::KeyLocked,
         CryptoError::KeystoreEntryUnusable(_) => ErrorCode::KeyUnusable,
-        CryptoError::AuthFailed
-        | CryptoError::InvalidNonce
-        | CryptoError::Internal(_) => ErrorCode::Internal,
+        CryptoError::AuthFailed | CryptoError::InvalidNonce | CryptoError::Internal(_) => {
+            ErrorCode::Internal
+        }
     };
     BackendError::from_code(Some(code), None, Some(&message))
 }
