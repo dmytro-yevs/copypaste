@@ -150,15 +150,32 @@ impl Store {
     /// cursor produces a version this query cannot see. Callers pull their
     /// cursor back rather than this query widening.
     pub fn versions_since(&self, since_ms: i64, limit: i64) -> Result<Vec<StoredItem>, StoreError> {
+        self.versions_after(since_ms, None, limit)
+    }
+
+    /// Every version after the inclusive `created_at` boundary or, when an id
+    /// is present, strictly after the compound `(created_at, id)` keyset.
+    ///
+    /// The upload cursor needs the same tie-break as the download cursor. A
+    /// millisecond-only floor cannot drain a full page of rows that share its
+    /// boundary stamp: the next scan reads that first page again forever.
+    pub fn versions_after(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<StoredItem>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(concat!(
             "SELECT ",
             item_columns!(),
             " FROM clipboard_items \
-               WHERE is_sensitive = 0 AND created_at >= ?1 \
-               ORDER BY created_at ASC, id ASC LIMIT ?2"
+               WHERE is_sensitive = 0 \
+                 AND (created_at > ?1 \
+                      OR (created_at = ?1 AND (?2 IS NULL OR id > ?2))) \
+               ORDER BY created_at ASC, id ASC LIMIT ?3"
         ))?;
-        let rows = stmt.query_map(params![since_ms, limit], row_to_item)?;
+        let rows = stmt.query_map(params![since_ms, after_id, limit], row_to_item)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -448,6 +465,24 @@ mod tests {
         assert_eq!(ids, [a.id.as_str(), b.id.as_str()]);
         assert_eq!(s.versions_since(T0 + 60_000, 100).unwrap().len(), 1);
         assert_eq!(s.oldest_version_ms().unwrap(), Some(T0));
+    }
+
+    #[test]
+    fn versions_after_drains_a_same_millisecond_boundary_by_id() {
+        let s = store();
+        let a = s.insert(item("a", T0)).unwrap();
+        let b = s.insert(item("b", T0)).unwrap();
+        let c = s.insert(item("c", T0)).unwrap();
+        let mut ids = [a.id, b.id, c.id];
+        ids.sort();
+
+        let first = s.versions_after(T0, None, 2).unwrap();
+        assert_eq!(first.len(), 2);
+        let second = s.versions_after(T0, Some(&first[1].id), 2).unwrap();
+        assert_eq!(
+            second.iter().map(|row| &row.id).collect::<Vec<_>>(),
+            [&ids[2]]
+        );
     }
 
     #[test]

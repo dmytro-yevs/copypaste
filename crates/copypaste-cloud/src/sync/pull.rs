@@ -117,13 +117,20 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 .await?;
             let page_len = rows.len();
             stats.downloaded += page_len;
+            // Normalise at the page boundary, before the ordering and cursor
+            // see a stamp. Sorting raw `-1` before `(0, "a")` and then
+            // clamping it to `(0, "z")` would advance the keyset past the
+            // honest `(0, "a")` row.
+            for row in &mut rows {
+                row.created_at = clamp_stamp(row.created_at);
+            }
             sort_page(&mut rows);
 
             let now = now_ms();
             let mut advanced = cursor.clone();
 
             for row in rows {
-                let created_at = clamp_stamp(row.created_at);
+                let created_at = row.created_at;
 
                 if created_at > now.saturating_add(MAX_FUTURE_SKEW_MS) {
                     // Refuse the version, and do *not* let the cursor follow it
@@ -648,6 +655,37 @@ mod tests {
         assert_eq!(clamp_stamp(i64::MIN), 0);
         assert_eq!(clamp_stamp(0), 0);
         assert_eq!(clamp_stamp(1_700_000_000_000), 1_700_000_000_000);
+    }
+
+    #[tokio::test]
+    async fn a_negative_row_cannot_sort_a_zero_boundary_past_the_cursor() {
+        // The negative row's id sorts after the honest one. If sorting happened
+        // before normalisation it would become `(0, "z-negative")` first and
+        // cause `(0, "a-zero")` to be skipped by keyset advancement.
+        let source = FakeSource::with_keyset_watermark();
+        // A malformed persisted cursor or transport fixture can still expose a
+        // negative row even though production cursors are clamped at zero.
+        source.rewind(-1);
+        let sync = driver(
+            FakeRest::seeded(vec![
+                cloud_row("z-negative", -1, "bad clock"),
+                cloud_row("a-zero", 0, "honest boundary row"),
+            ]),
+            FakeAuth::default(),
+        );
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.applied, 1);
+        assert_eq!(
+            source.get("a-zero").unwrap().content,
+            b"honest boundary row"
+        );
+        assert_eq!(source.watermark().unwrap(), 0);
+        assert_eq!(
+            source.watermark_item_id().unwrap().as_deref(),
+            Some("z-negative")
+        );
     }
 
     #[tokio::test]

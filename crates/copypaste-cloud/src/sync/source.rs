@@ -63,6 +63,22 @@ pub trait CloudSource: Send + Sync {
     /// [`SyncError::Source`] for a store failure.
     fn local_changes_since(&self, since_ms: i64) -> Result<Vec<LocalItem>, SyncError>;
 
+    /// As [`local_changes_since`](Self::local_changes_since), but positioned
+    /// after the full upload keyset when its id half is known.
+    ///
+    /// The default preserves the inclusive millisecond boundary for small
+    /// embedders. Persistent stores should override it together with
+    /// [`upload_floor_item_id`](Self::upload_floor_item_id): otherwise a full
+    /// page at one timestamp can never be drained.
+    fn local_changes_after(
+        &self,
+        since_ms: i64,
+        after_item_id: Option<&str>,
+    ) -> Result<Vec<LocalItem>, SyncError> {
+        let _ = after_item_id;
+        self.local_changes_since(since_ms)
+    }
+
     /// Merge one remote version into the local history, returning whether
     /// anything changed.
     ///
@@ -155,6 +171,11 @@ pub trait CloudSource: Send + Sync {
     /// [`SyncError::Source`] for a store failure.
     fn upload_floor(&self) -> Result<i64, SyncError> {
         self.watermark()
+    }
+
+    /// The tie-break half of [`upload_floor`](Self::upload_floor).
+    fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
+        Ok(None)
     }
 
     /// Persist the cursor.
