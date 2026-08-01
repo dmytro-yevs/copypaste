@@ -2,7 +2,9 @@ mod model;
 mod render;
 
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use model::{load_inputs, read_selection, sha256};
@@ -49,8 +51,11 @@ async fn download(url: &str) -> Result<Vec<u8>> {
 
 fn generate(root: &Path) -> Result<()> {
     let inputs = load_inputs(root)?;
-    let output = render::render(&inputs)?;
-    write_atomic(&root.join(&inputs.selection.source.generated_rust), output.as_bytes())?;
+    let output = render_generated(&inputs)?;
+    write_atomic(
+        &root.join(&inputs.selection.source.generated_rust),
+        output.as_bytes(),
+    )?;
     println!(
         "generated {} from Gitleaks {}",
         inputs.selection.source.generated_rust, inputs.selection.source.release
@@ -60,7 +65,7 @@ fn generate(root: &Path) -> Result<()> {
 
 fn check(root: &Path) -> Result<()> {
     let inputs = load_inputs(root)?;
-    let expected = render::render(&inputs)?;
+    let expected = render_generated(&inputs)?;
     let path = root.join(&inputs.selection.source.generated_rust);
     let actual = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     if actual != expected {
@@ -71,6 +76,27 @@ fn check(root: &Path) -> Result<()> {
     }
     println!("Gitleaks snapshot checksum and generated rules are current");
     Ok(())
+}
+
+fn render_generated(inputs: &model::Inputs) -> Result<String> {
+    let rendered = render::render(inputs)?;
+    let mut child = Command::new("rustfmt")
+        .args(["--edition", "2021", "--emit", "stdout"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("start rustfmt")?;
+    child
+        .stdin
+        .as_mut()
+        .context("open rustfmt stdin")?
+        .write_all(rendered.as_bytes())
+        .context("write generated Rust to rustfmt")?;
+    let output = child.wait_with_output().context("wait for rustfmt")?;
+    if !output.status.success() {
+        bail!("rustfmt rejected generated sensitive rules");
+    }
+    String::from_utf8(output.stdout).context("rustfmt returned non-UTF-8 output")
 }
 
 fn verify_bytes(label: &str, bytes: &[u8], expected: &str) -> Result<()> {
@@ -107,6 +133,9 @@ mod tests {
     #[test]
     fn regeneration_is_deterministic() {
         let inputs = load_inputs(&workspace_root()).unwrap();
-        assert_eq!(render::render(&inputs).unwrap(), render::render(&inputs).unwrap());
+        assert_eq!(
+            render_generated(&inputs).unwrap(),
+            render_generated(&inputs).unwrap()
+        );
     }
 }
