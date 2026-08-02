@@ -88,7 +88,7 @@ export function HistoryDetail({
             type="button"
             aria-label={t("history.row.sensitiveReveal")}
             aria-busy={revealPending || undefined}
-            className="flex min-h-24 w-full flex-col justify-center gap-s-2 rounded-md bg-withheld p-s-3 text-left text-sm text-withheld-fg outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
+            className="flex min-h-24 w-full flex-col justify-center gap-s-2 rounded-md border border-withheld-border bg-withheld p-s-3 text-left text-sm text-withheld-fg outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
             onClick={() => item && !revealPending && onReveal(item)}
           >
             <span aria-hidden="true" className="flex w-full flex-col gap-2">

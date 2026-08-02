@@ -167,7 +167,7 @@ export function StatusChip({ attentionOnly = false }: { attentionOnly?: boolean 
         className={cn(
           "flex items-center gap-s-2 rounded-full border border-transparent px-s-2 py-s-1 text-xs text-muted-foreground outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
           serviceNeedsAttention
-            ? "border-warn/30 bg-warn/10 text-warn-strong hover:bg-warn/15"
+            ? "border-warn/20 bg-warn/15 text-warn-strong hover:bg-warn/15"
             : "disabled:cursor-default",
           attentionOnly && "shadow-sm",
         )}

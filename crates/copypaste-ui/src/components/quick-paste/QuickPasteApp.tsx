@@ -332,7 +332,7 @@ export function QuickPasteApp() {
           onChange={(event) => setQuery(event.target.value)}
           aria-label="Search clipboard history"
           placeholder="Search clipboard history"
-          className="h-11 flex-1 rounded-xl bg-secondary/45 py-0 pl-9 pr-3"
+          className="h-11 flex-1 rounded-xl bg-secondary py-0 pl-9 pr-3"
         />
       </div>
 

@@ -101,7 +101,7 @@ function EmptyStateArtwork({
   tone: EmptyStateTone;
 }) {
   const color = {
-    neutral: "text-primary",
+    neutral: "text-brand-2",
     info: "text-info-strong",
     attention: "text-warn-strong",
     danger: "text-err-strong",
