@@ -185,6 +185,8 @@ EOF
 #[path = "@REPO@/crates/copypaste-daemon/src/clipboard/mod.rs"]
 pub mod clipboard;
 
+const _: fn(&str) -> bool = clipboard::is_password_manager_app;
+
 #[path = "@REPO@/crates/copypaste-daemon/src/notify.rs"]
 pub mod notify;
 
@@ -226,6 +228,9 @@ impl FileMetadata {
 pub fn binary_item_id(_bytes: &[u8]) -> String {
     "00000000-0000-0000-0000-000000000000".to_owned()
 }
+
+#[path = "@REPO@/crates/copypaste-core/src/sensitive/origin.rs"]
+pub mod sensitive;
 EOF
 
     cat > "$dir/src/crypto.rs" <<'EOF'
