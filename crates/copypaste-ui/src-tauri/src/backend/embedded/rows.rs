@@ -10,7 +10,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::{decrypt, open_binary, origin_or, thumbnail_png, StoredItem};
 use copypaste_ipc::{ImagePreview, Item, PeerInfo};
 
-use super::Inner;
+use super::open::Inner;
 use crate::backend::{BackendError, Page, Result};
 
 pub(super) use copypaste_ipc::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
