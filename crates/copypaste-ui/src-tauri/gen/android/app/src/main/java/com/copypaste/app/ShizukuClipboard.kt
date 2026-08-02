@@ -176,7 +176,7 @@ object ShizukuClipboard {
     }
 
     /** `null` when the clipboard was empty, unreadable, or not text. */
-    fun pollOnce(): CapturedClip? = try {
+    internal fun pollOnce(): CapturedClip? = try {
         val clipboard = clipboardService()
         val clip = invoke(clipboard, "getPrimaryClip")
         clip?.let { value ->
@@ -298,7 +298,7 @@ object ShizukuClipboard {
     /** Exposed so [ClipListener] can reach the same proxy. */
     fun service(): Any = clipboardService()
 
-    private data class CapturedClip(
+    internal data class CapturedClip(
         val text: String,
         val sourceAppBundleId: String?,
     )
