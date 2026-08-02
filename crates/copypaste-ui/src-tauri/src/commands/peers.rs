@@ -42,9 +42,7 @@ pub async fn pair_accept(
     code: String,
     addr: String,
 ) -> Result<Vec<UiPeer>> {
-    backend
-        .pair_accept(code.trim(), addr.trim())
-        .await
+    backend.pair_accept(code.trim(), addr.trim()).await
 }
 
 /// Open Android's QR scanner. Desktop still supports pasting the same QR text.

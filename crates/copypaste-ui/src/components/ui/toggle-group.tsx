@@ -41,8 +41,8 @@ function ToggleGroup({
       data-equal-width={equalWidth || undefined}
       className={cn(
         equalWidth
-          ? "grid w-fit auto-cols-fr grid-flow-col items-center gap-1 rounded-full border border-border bg-panel/90 p-1 shadow-sm backdrop-blur-sm"
-          : "flex w-fit flex-wrap items-center gap-1 rounded-full border border-border bg-panel/90 p-1 shadow-sm backdrop-blur-sm",
+          ? "grid w-fit auto-cols-fr grid-flow-col items-center gap-1 rounded-full border border-border bg-panel p-1 shadow-sm backdrop-blur-sm"
+          : "flex w-fit flex-wrap items-center gap-1 rounded-full border border-border bg-panel p-1 shadow-sm backdrop-blur-sm",
         className,
       )}
       {...props}

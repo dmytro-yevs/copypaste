@@ -135,6 +135,12 @@ export const ALPHA_UTILITIES = [
     where: 'Banners',
     decorative: 'As border-warn/20.',
   },
+  {
+    util: 'bg-withheld-fg/25',
+    where: 'History rows and detail loading shapes',
+    decorative:
+      'The shapes represent withheld content and carry no text or control boundary; the adjacent label is --withheld-fg.',
+  },
 ];
 
 /**
@@ -156,6 +162,18 @@ export const EXEMPTIONS = [
       'Rows deliberately have no coarse variant. A one-line row already computes to 63px, and ' +
       '--pad-row-y is read by the virtualiser (INV-5) — a media query on it would change the ' +
       'row-height model without the virtualiser knowing, which is CopyPaste-g27b.30 again.',
+  },
+  {
+    rule: 'literal-colour',
+    files: ['index.css'],
+    why:
+      'These color-mix declarations compose resolved CopyPaste tokens for desktop glow, translucency and Sonner; they introduce no literal palette value.',
+  },
+  {
+    rule: 'literal-colour',
+    files: ['lib/nativeAppearance.ts'],
+    why:
+      'The native bridge must calculate black or white from a runtime system accent before CSS can resolve a token; no component palette value is hard-coded.',
   },
 ];
 

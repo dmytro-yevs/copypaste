@@ -197,7 +197,7 @@ export function SettingsView() {
                 ? tabs.map((tab) => <TabButton key={tab.value} tab={tab} desktop={false} />)
                 : GROUPS.map((group) => (
                     <div key={group.label} className="flex flex-col gap-1">
-                      <p className="pt-s-2 text-[11px] font-medium tracking-wide text-muted-foreground/75">
+                      <p className="pt-s-2 text-[11px] font-medium tracking-wide text-muted-foreground">
                         {t(group.label)}
                       </p>
                       {group.tabs.map((value) => {
