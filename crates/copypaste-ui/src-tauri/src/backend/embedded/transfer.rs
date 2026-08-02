@@ -6,7 +6,8 @@
 
 use copypaste_ipc::{ExportData, ExportItem, ImportData};
 
-use super::{BackendError, Inner, Result};
+use super::open::Inner;
+use super::{BackendError, Result};
 
 const MSG_EXPORT_FAILED: &str = "Your history couldn't be read.";
 const MSG_IMPORT_EMPTY: &str = "That file has nothing in it to import.";
