@@ -36,7 +36,7 @@
 use std::path::{Path, PathBuf};
 
 use copypaste_core::{
-    Detector, PurgeReport, purge_indexed_secrets_in_transaction, verify_integrity, verify_schema,
+    purge_indexed_secrets_in_transaction, verify_integrity, verify_schema, Detector, PurgeReport,
 };
 use copypaste_ipc::{BackupData, ErrorCode, Response, ResponseData};
 use rusqlite::{Connection, Transaction};
@@ -46,8 +46,8 @@ use super::messages::{
     MSG_BACKUP_EXISTS, MSG_BACKUP_FAILED, MSG_BACKUP_NO_DIR, MSG_BAD_PATH, MSG_NEEDS_CONFIRM,
     MSG_RESTORE_FAILED, MSG_RESTORE_NOT_A_BACKUP, MSG_RESTORE_NOT_FOUND,
 };
-use crate::AppState;
 use crate::dbfile;
+use crate::AppState;
 
 /// Tables a restore replaces, in delete order (children first is not an issue
 /// here — there are no foreign keys between them — but a stable order keeps the
@@ -703,13 +703,11 @@ mod tests {
         assert!(!deleted(&state, &leaked), "the retry must commit the row");
         assert_eq!(fts_rows(&state, &leaked), 0);
         assert!(state.store.search(RESTORED_SECRET, 10).unwrap().is_empty());
-        assert!(
-            state
-                .store
-                .search("rollback anchor", 10)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(state
+            .store
+            .search("rollback anchor", 10)
+            .unwrap()
+            .is_empty());
         assert_eq!(
             state
                 .store

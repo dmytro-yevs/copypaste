@@ -5,10 +5,10 @@
 //! to query (port manifest 02, I-15).
 
 use chacha20poly1305::{
-    Key, XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit, Payload},
+    Key, XChaCha20Poly1305, XNonce,
 };
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
 
 use super::{CryptoError, ItemKey};
 
@@ -122,8 +122,8 @@ pub fn decrypt(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::{key_a, ITEM, SECRET_A, SECRET_B};
     use super::super::Keyring;
-    use super::super::test_support::{ITEM, SECRET_A, SECRET_B, key_a};
     use super::*;
 
     #[test]

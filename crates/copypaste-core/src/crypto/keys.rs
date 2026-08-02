@@ -13,7 +13,7 @@ use std::{
 };
 
 use hkdf::Hkdf;
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
@@ -225,7 +225,7 @@ fn ephemeral_requested() -> bool {
 mod tests {
     use std::sync::mpsc;
 
-    use super::super::test_support::{ITEM, SECRET_A, SECRET_B, key_a};
+    use super::super::test_support::{key_a, ITEM, SECRET_A, SECRET_B};
     use super::super::{decrypt, encrypt};
     use super::*;
 

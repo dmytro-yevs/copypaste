@@ -25,7 +25,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
 import { expectSecretAbsent, outerHtml } from "../src/harness/leaks.js";
-import { visibleText, waitForRows, waitForText } from "../src/harness/ui.js";
+import { waitForRows, waitForText } from "../src/harness/ui.js";
 
 const ORDINARY = "an ordinary clipping to export";
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
@@ -110,8 +110,7 @@ describe("import", () => {
   test("the window renders the smuggled item as withheld", async () => {
     await waitForRows(app.browser, 3, 45_000);
     await app.browser.waitUntil(
-      async () =>
-        (await visibleText(app.browser)).split("Sensitive content hidden").length > 2,
+      async () => (await app.browser.$$('[aria-label^="Sensitive item, hidden"]')).length >= 2,
       {
         timeout: 45_000,
         interval: 500,

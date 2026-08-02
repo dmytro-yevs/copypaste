@@ -76,7 +76,6 @@ crates/copypaste-daemon/src/settings.rs
 crates/copypaste-ipc/src/config.rs
 crates/copypaste-ipc/src/content_type.rs
 crates/copypaste-ipc/src/lib.rs
-crates/copypaste-ipc/src/paths.rs
 crates/copypaste-ipc/src/payload.rs
 crates/copypaste-ipc/src/redact.rs
 crates/copypaste-p2p/src/discovery/mod.rs
@@ -100,7 +99,6 @@ crates/copypaste-ui/src-tauri/src/android_context.rs
 crates/copypaste-ui/src-tauri/src/backend/daemon.rs
 crates/copypaste-ui/src-tauri/src/backend/embedded/mod.rs
 crates/copypaste-ui/src-tauri/src/backend/embedded/peers.rs
-crates/copypaste-ui/src-tauri/src/backend/embedded/rows.rs
 crates/copypaste-ui/src-tauri/src/backend/error.rs
 crates/copypaste-ui/src-tauri/src/backend/mod.rs
 crates/copypaste-ui/src-tauri/src/capture/intake.rs

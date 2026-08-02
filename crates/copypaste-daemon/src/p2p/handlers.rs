@@ -22,12 +22,12 @@ use copypaste_ipc::{
     DiscoveredData, DiscoveredDevice, ErrorCode, PairingData, PeerInfo, Response, ResponseData,
     SyncResult,
 };
-use copypaste_p2p::NodeError;
 use copypaste_p2p::peers::Peer;
+use copypaste_p2p::NodeError;
 use tracing::{info, warn};
 
-use crate::AppState;
 use crate::sync::peer_source;
+use crate::AppState;
 
 /// Mint a pairing and hand back the code to read out to the other device.
 pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response {
@@ -442,25 +442,34 @@ mod tests {
 
         let response = revoke(&state, 1, &token.pairing_id()).await;
         assert!(response.ok, "{:?}", response.error);
-        assert!(
-            state
-                .p2p
-                .peers()
-                .upsert(Peer {
-                    pairing_id: token.pairing_id(),
-                    name: "the lost phone".into(),
-                    psk: token.psk(),
-                    last_addr: None,
-                    last_seen_ms: 0,
-                })
-                .is_err()
-        );
+        assert!(state
+            .p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: token.pairing_id(),
+                name: "the lost phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+            })
+            .is_err());
     }
 
     #[tokio::test]
     async fn peers_lists_what_was_paired() {
         let (state, _dir) = test_state("alpha");
-        pair_create(&state, 1, "laptop").await;
+        let token = PairingToken::generate();
+        state
+            .p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: token.pairing_id(),
+                name: "laptop".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+            })
+            .unwrap();
 
         let response = peers(&state, 2).await;
         let listed = match response.data {
@@ -470,7 +479,7 @@ mod tests {
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "laptop");
         assert!(listed[0].last_addr.is_none());
-        // Nothing has been seen on the network in a unit test.
+        // Nothing is currently visible on the network in a unit test.
         assert!(!listed[0].online);
     }
 
@@ -518,12 +527,23 @@ mod tests {
         );
     }
 
-    /// A peer that has never been reached and is not on the network is reported
-    /// per-peer, and the run still succeeds.
+    /// An established peer with no known address is reported per-peer, and the
+    /// run still succeeds.
     #[tokio::test]
     async fn a_peer_with_no_known_address_fails_only_itself() {
         let (state, _dir) = test_state("alpha");
-        pair_create(&state, 1, "unreachable").await;
+        let first = PairingToken::generate();
+        state
+            .p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: first.pairing_id(),
+                name: "unreachable".into(),
+                psk: first.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+            })
+            .unwrap();
         state
             .p2p
             .peers()
@@ -532,7 +552,7 @@ mod tests {
                 name: "second".into(),
                 psk: [3u8; TOKEN_LEN],
                 last_addr: None,
-                last_seen_ms: 0,
+                last_seen_ms: 1,
             })
             .unwrap();
 
@@ -544,11 +564,9 @@ mod tests {
         };
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|r| r.error.is_some()));
-        assert!(
-            results
-                .iter()
-                .all(|r| r.error_code == Some(ErrorCode::PeerUnreachable))
-        );
+        assert!(results
+            .iter()
+            .all(|r| r.error_code == Some(ErrorCode::PeerUnreachable)));
     }
 
     /// Every variant the node can produce, with the code it arrives under.

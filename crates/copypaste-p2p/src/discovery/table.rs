@@ -153,11 +153,7 @@ mod tests {
     #[test]
     fn stale_entries_expire() {
         let mut table = PeerTable::new(1_000, MAX_PEERS);
-        table.observe(
-            "a._copypaste._tcp.local.",
-            peer("fresh", 10_000),
-            10_000,
-        );
+        table.observe("a._copypaste._tcp.local.", peer("fresh", 10_000), 10_000);
         assert_eq!(table.snapshot(10_500).len(), 1);
         assert!(table.find("fresh", 10_500).is_some());
 
@@ -213,11 +209,7 @@ mod tests {
     fn find_prefers_the_most_recently_seen_claimant() {
         let mut table = PeerTable::default();
         let now = now_ms();
-        table.observe(
-            "old._copypaste._tcp.local.",
-            peer("dup", now - 5_000),
-            now,
-        );
+        table.observe("old._copypaste._tcp.local.", peer("dup", now - 5_000), now);
         table.observe("new._copypaste._tcp.local.", peer("dup", now), now);
         assert_eq!(table.find("dup", now).unwrap().last_seen_ms, now);
     }
@@ -243,20 +235,12 @@ mod tests {
     fn flooding_evicts_the_flood_before_a_live_peer() {
         let mut table = PeerTable::new(600_000, 4);
         let mut clock = 1_000i64;
-        table.observe(
-            "real._copypaste._tcp.local.",
-            peer("real", clock),
-            clock,
-        );
+        table.observe("real._copypaste._tcp.local.", peer("real", clock), clock);
 
         for i in 0..100 {
             clock += 10;
             // The real peer keeps refreshing, as a live device does.
-            table.observe(
-                "real._copypaste._tcp.local.",
-                peer("real", clock),
-                clock,
-            );
+            table.observe("real._copypaste._tcp.local.", peer("real", clock), clock);
             table.observe(
                 &format!("flood-{i}._copypaste._tcp.local."),
                 peer(&format!("junk-{i}"), clock),

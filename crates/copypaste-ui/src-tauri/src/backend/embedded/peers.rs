@@ -30,8 +30,8 @@ use copypaste_p2p::sync::SyncOutcome;
 use copypaste_p2p::{Node, NodeError};
 use tokio::sync::watch;
 
-use super::Inner;
 use super::rows::peer_info;
+use super::Inner;
 use crate::backend::{BackendError, Result};
 
 /// The node, plus the handle that stops its listener.

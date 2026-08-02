@@ -183,24 +183,22 @@ impl CleanupWorker {
         let worker_stop = Arc::clone(&stop);
         let handle = std::thread::Builder::new()
             .name("paste-file-cleanup".to_string())
-            .spawn(move || {
-                loop {
-                    let (lock, wake) = &*worker_stop;
-                    let stopped = lock.lock().unwrap_or_else(|held| held.into_inner());
-                    let (stopped, _) = wake
-                        .wait_timeout_while(stopped, interval, |stopped| !*stopped)
-                        .unwrap_or_else(|held| held.into_inner());
-                    if *stopped {
-                        break;
-                    }
-                    drop(stopped);
-                    let _access = access.lock().unwrap_or_else(|held| held.into_inner());
-                    if let Err(error) = cleanup_stale_at(&root, SystemTime::now(), max_age) {
-                        warn!(
-                            error_kind = ?error.kind(),
-                            "paste-file staging cleanup did not finish"
-                        );
-                    }
+            .spawn(move || loop {
+                let (lock, wake) = &*worker_stop;
+                let stopped = lock.lock().unwrap_or_else(|held| held.into_inner());
+                let (stopped, _) = wake
+                    .wait_timeout_while(stopped, interval, |stopped| !*stopped)
+                    .unwrap_or_else(|held| held.into_inner());
+                if *stopped {
+                    break;
+                }
+                drop(stopped);
+                let _access = access.lock().unwrap_or_else(|held| held.into_inner());
+                if let Err(error) = cleanup_stale_at(&root, SystemTime::now(), max_age) {
+                    warn!(
+                        error_kind = ?error.kind(),
+                        "paste-file staging cleanup did not finish"
+                    );
                 }
             })?;
         Ok(Self {
@@ -453,13 +451,11 @@ mod tests {
         let external = data_dir.path().join("external.txt");
         std::fs::write(&external, b"outside").unwrap();
         symlink(&external, content_dir.join("linked.txt")).unwrap();
-        assert!(
-            std::process::Command::new("mkfifo")
-                .arg(content_dir.join("receiver.fifo"))
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("mkfifo")
+            .arg(content_dir.join("receiver.fifo"))
+            .status()
+            .unwrap()
+            .success());
         let nested = content_dir.join("nested");
         std::fs::create_dir(&nested).unwrap();
         let nested_file = nested.join("keep.txt");

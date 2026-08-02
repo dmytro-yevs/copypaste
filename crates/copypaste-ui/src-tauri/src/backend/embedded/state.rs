@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use copypaste_core::{CryptoError, Detector, Keyring, Store, StoreError, purge_indexed_secrets};
+use copypaste_core::{purge_indexed_secrets, CryptoError, Detector, Keyring, Store, StoreError};
 use copypaste_ipc::ErrorCode;
 
 use crate::backend::{BackendError, Result};

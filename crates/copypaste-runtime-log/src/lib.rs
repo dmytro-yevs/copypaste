@@ -213,7 +213,7 @@ pub fn list(
         }
         events.extend(read_process_events(log_dir, process)?);
     }
-    events.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+    events.sort_by_key(|event| std::cmp::Reverse(event.timestamp_ms));
     events.retain(|event| {
         query.level.is_none_or(|level| event.level == level)
             && (needle.is_empty()
@@ -222,10 +222,7 @@ pub fn list(
     });
 
     let end = offset.saturating_add(limit).min(events.len());
-    let page = events
-        .get(offset..end)
-        .unwrap_or_default()
-        .to_vec();
+    let page = events.get(offset..end).unwrap_or_default().to_vec();
     Ok(RuntimeLogPage {
         events: page,
         next_cursor: (end < events.len()).then(|| end.to_string()),
@@ -347,7 +344,7 @@ impl Visit for Message {
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn fmt::Debug) {
-        self.record(field.name(), &format!("{value:?}").trim_matches('"'));
+        self.record(field.name(), format!("{value:?}").trim_matches('"'));
     }
 }
 

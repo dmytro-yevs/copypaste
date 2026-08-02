@@ -223,7 +223,7 @@ pub async fn reorder_pinned(backend: State<'_, SelectedBackend>, ids: Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{Page, testing::FakeBackend};
+    use crate::backend::{testing::FakeBackend, Page};
 
     /// `add_item` rejects blank content before spending a round trip, and the
     /// message it uses is one a user can act on.

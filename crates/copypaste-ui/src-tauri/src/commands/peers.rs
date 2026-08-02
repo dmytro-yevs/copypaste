@@ -45,7 +45,6 @@ pub async fn pair_accept(
     backend
         .pair_accept(code.trim(), addr.trim())
         .await
-        .map(|peers| peers.into_iter().map(UiPeer::from).collect())
 }
 
 /// Open Android's QR scanner. Desktop still supports pasting the same QR text.
@@ -61,7 +60,7 @@ pub async fn scan_pairing_qr(
 #[tauri::command]
 pub async fn scan_pairing_qr() -> Result<Option<String>> {
     Err(BackendError::Unsupported(
-        "QR scanning is available on Android. Paste the pairing code on this device.".into(),
+        "QR scanning is available on Android. Paste the pairing code on this device.",
     ))
 }
 

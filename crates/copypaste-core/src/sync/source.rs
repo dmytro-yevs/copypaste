@@ -433,7 +433,11 @@ mod tests {
         let created_at = 1_700_000_000_000;
 
         assert!(source
-            .apply(peer_item("device-a-item", "same clipboard text", created_at))
+            .apply(peer_item(
+                "device-a-item",
+                "same clipboard text",
+                created_at
+            ))
             .unwrap());
         assert!(source
             .apply(SyncItem {
@@ -469,7 +473,10 @@ mod tests {
                 .apply(peer_item("peer-item", "not stored", 1_700_000_000_000))
                 .map(|_| ()),
         ] {
-            assert_eq!(result, Err(SyncError::Source(MSG_SYNC_DISABLED.to_string())));
+            assert_eq!(
+                result,
+                Err(SyncError::Source(MSG_SYNC_DISABLED.to_string()))
+            );
         }
         assert!(f.store.get("peer-item").unwrap().is_none());
     }

@@ -22,8 +22,8 @@
 //! rendered by accident. A valid future snake_case code is preserved and
 //! falls back to the frontend's unknown-code copy.
 
-use copypaste_ipc::ErrorCode;
 use copypaste_ipc::redact::scrub_paths;
+use copypaste_ipc::ErrorCode;
 
 /// The complete and deliberately small Tauri error contract.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

@@ -30,9 +30,9 @@ mod wipe;
 
 pub use engine::{Detector, DetectorError};
 pub use finding::{Finding, Severity, SpannedFinding};
-pub use purge::{PurgeReport, purge_indexed_secrets, purge_indexed_secrets_in_transaction};
+pub use purge::{purge_indexed_secrets, purge_indexed_secrets_in_transaction, PurgeReport};
 pub use redact::redact_spans;
-pub use wipe::{DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED, sweep_sensitive};
+pub use wipe::{sweep_sensitive, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED};
 
 /// Credential managers are an independent sensitivity floor: their copied
 /// values must never enter full-text search even when their contents do not

@@ -51,7 +51,7 @@ use keyring_core::{Entry, Error as KeyringError};
 use zeroize::Zeroizing;
 
 use super::super::keys::random_secret;
-use super::{CryptoError, DeviceSecret, KEY_LEN, KEYSTORE_ACCOUNT, KEYSTORE_SERVICE, Lookup};
+use super::{CryptoError, DeviceSecret, Lookup, KEYSTORE_ACCOUNT, KEYSTORE_SERVICE, KEY_LEN};
 
 /// The `SharedPreferences` file holding the wrapped secret, and the Keystore
 /// alias of the key that wraps it — the store uses one name for both. Frozen

@@ -1,8 +1,8 @@
 //! STREAM constructors that keep item-key bytes inside the crypto module.
 
 use chacha20poly1305::{
-    Key, XChaCha20Poly1305,
     aead::stream::{DecryptorBE32, EncryptorBE32, Nonce as StreamNonce, StreamBE32},
+    Key, XChaCha20Poly1305,
 };
 
 use super::ItemKey;

@@ -20,8 +20,8 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
-use jni::JNIEnv;
 use jni::objects::JObject;
+use jni::JNIEnv;
 
 /// Called from `MainActivity.onCreate`, before `super.onCreate` — Tauri's setup
 /// opens the keystore during it, and the keystore needs this first.
