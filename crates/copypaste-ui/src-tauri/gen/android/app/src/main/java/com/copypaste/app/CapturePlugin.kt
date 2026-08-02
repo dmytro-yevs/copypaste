@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -17,6 +18,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import rikka.shizuku.Shizuku
 
 /**
  * The Kotlin half of `crate::capture`.
@@ -84,7 +86,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         apps.forEach { app ->
             result.put(JSObject().put("packageId", app.packageId).put("label", app.label))
         }
-        invoke.resolve(result)
+        invoke.resolve(JSObject().put("apps", result))
     }
 
     private fun installedApp(info: ResolveInfo): InstalledApp? {

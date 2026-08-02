@@ -38,6 +38,12 @@ pub struct AndroidInstalledSourceApp {
     pub label: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AndroidInstalledSourceApps {
+    apps: Vec<AndroidInstalledSourceApp>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SourceAppIconArgs<'a> {
@@ -161,7 +167,8 @@ impl AndroidCapture {
     /// Lists user-visible installed applications for the exclusion picker.
     /// Package identity remains the value written to the service config.
     pub fn installed_source_apps(&self) -> Result<Vec<AndroidInstalledSourceApp>> {
-        self.call("installedSourceApps", (), MSG_BRIDGE)
+        self.call::<_, AndroidInstalledSourceApps>("installedSourceApps", (), MSG_BRIDGE)
+            .map(|response| response.apps)
     }
 }
 
