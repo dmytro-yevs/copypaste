@@ -6,20 +6,20 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
 use backon::{BackoffBuilder, ExponentialBuilder};
 use copypaste_clock::{SystemWallClock, WallClock};
-use copypaste_cloud::auth::{REFRESH_MARGIN_MS, Session};
+use copypaste_cloud::auth::{Session, REFRESH_MARGIN_MS};
 use copypaste_cloud::sync::SyncError;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
-use super::{CREDENTIAL_KEYS, Cloud, Driver, poll};
-use crate::AppState;
+use super::{poll, Cloud, Driver, CREDENTIAL_KEYS};
 use crate::meta::Meta;
+use crate::AppState;
 
 const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MIN_REFRESH_INTERVAL_MS: i64 = 5_000;

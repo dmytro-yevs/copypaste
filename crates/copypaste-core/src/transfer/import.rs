@@ -3,8 +3,8 @@ use tracing::{info, warn};
 
 use crate::storage::{Store, StoreError};
 use crate::{
-    CryptoError, Detector, IngestError, Ingested, Keyring,
-    ingest::ingest_into_with_sensitivity_floor, now_ms,
+    ingest::ingest_into_with_sensitivity_floor, now_ms, CryptoError, Detector, IngestError,
+    Ingested, Keyring,
 };
 
 /// Ceiling on one import batch. The IPC frame cap bounds the bytes; this bounds
@@ -132,7 +132,7 @@ pub fn import(
 mod tests {
     use super::*;
     use crate::transfer::export;
-    use crate::transfer::testkit::{Fixture, fixture, fixture_named};
+    use crate::transfer::testkit::{fixture, fixture_named, Fixture};
 
     fn item(content: &str) -> ExportItem {
         ExportItem {

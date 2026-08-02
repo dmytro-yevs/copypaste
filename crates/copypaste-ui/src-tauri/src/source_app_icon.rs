@@ -138,11 +138,9 @@ mod tests {
     fn cache_is_bounded_and_reuses_a_resolved_icon() {
         let cache = SourceAppIconCache::default();
         let icon = UiSourceAppIcon::from_png(vec![1, 2, 3], 1, 1);
-        assert!(
-            cache
-                .resolve_with("com.example.writer", |_| Some(icon.clone()))
-                .is_some()
-        );
+        assert!(cache
+            .resolve_with("com.example.writer", |_| Some(icon.clone()))
+            .is_some());
         assert!(cache.resolve_with("com.example.writer", |_| None).is_some());
         for index in 0..MAX_CACHE_ENTRIES + 4 {
             let bundle_id = format!("com.example.app{index}");

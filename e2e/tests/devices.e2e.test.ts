@@ -91,23 +91,16 @@ async function interactiveSurface(): Promise<string> {
 }
 
 describe("pairing availability (ADR-0007)", () => {
-  test("explains why new pairing is unavailable", async () => {
+  test("offers both pairing flows", async () => {
     const text = await visibleText(app.browser);
-    expect(text).toContain("Pairing new devices is temporarily unavailable");
-    expect(text).toContain("verified security-code confirmation");
-    expect(text).toContain("existing devices can still sync, unpair and revoke");
+    expect(text).toContain("Join device");
+    expect(text).toContain("Show code");
   });
 
-  test("does not render pairing, credential, or QR controls", async () => {
+  test("labels pairing controls without exposing a credential", async () => {
     const controls = await interactiveSurface();
-    expect(controls).not.toMatch(/\bpair\b/i);
-    expect(controls).not.toMatch(/pair a new device/i);
-    expect(controls).not.toMatch(/add a device/i);
-    expect(controls).not.toMatch(/generate code/i);
-    expect(controls).not.toMatch(/reveal the pairing code/i);
-    expect(controls).not.toMatch(/copy code/i);
-    expect(controls).not.toMatch(/scan a code/i);
-    expect(controls).not.toMatch(/qr code/i);
+    expect(controls).toMatch(/join device/i);
+    expect(controls).toMatch(/show code/i);
 
     const pairingArtifacts = (await app.browser.execute(function () {
       return document.querySelectorAll(

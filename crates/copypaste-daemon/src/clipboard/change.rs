@@ -11,8 +11,8 @@
 //! Nothing in this file reads a representation, or knows what a representation
 //! is. It answers one question: *should the caller read the clipboard at all?*
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 
 /// `changeCount` delta at which a burst is reported (§4).
 ///

@@ -10,7 +10,7 @@
 //! [`Diagnostics`] can carry any, because there is no field one could travel
 //! in. The shape enforces it; the tests only prove it did not regress.
 
-use copypaste_ipc::{PROTOCOL_VERSION, StatusData, redact::scrub_paths};
+use copypaste_ipc::{redact::scrub_paths, StatusData, PROTOCOL_VERSION};
 use serde::Serialize;
 
 use super::ServiceState;

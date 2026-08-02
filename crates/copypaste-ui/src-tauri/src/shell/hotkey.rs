@@ -84,7 +84,8 @@ pub fn is_permission_free(code: Code) -> bool {
 }
 
 /// Why a shortcut was refused. `&'static str`, so no path can reach it.
-pub const MSG_NEEDS_ACCESSIBILITY: &str = "Media keys can't be used as the shortcut: macOS would ask for Accessibility \
+pub const MSG_NEEDS_ACCESSIBILITY: &str =
+    "Media keys can't be used as the shortcut: macOS would ask for Accessibility \
      access, and CopyPaste would lose it on every update. Pick another key.";
 
 pub const MSG_NEEDS_MODIFIER: &str = "Choose a key combination with Cmd, Ctrl, Option, or Shift.";

@@ -6,20 +6,20 @@
 //! are network I/O and live in `crate::p2p::handlers` instead — the split
 //! between the two files is the split between the two thread pools.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::{ItemCursor, StoredItem};
 use copypaste_ipc::{
-    DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE, ErrorCode, Item, ItemPage, MAX_PAGE_CONTENT_BYTES,
-    PROTOCOL_VERSION, Response, ResponseData, StatusData, clamp_page,
+    clamp_page, ErrorCode, Item, ItemPage, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
+    DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
 };
 use tracing::{error, warn};
 
 use super::messages::{
-    MSG_BAD_CURSOR, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT, MSG_IMAGE_PREVIEW,
-    MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG, decrypt_error, storage_error,
+    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_CLIPBOARD, MSG_EMPTY_CONTENT, MSG_ENCRYPT,
+    MSG_IMAGE_PREVIEW, MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
 };
-use crate::AppState;
 use crate::capture::{self, IngestError};
+use crate::AppState;
 
 /// Ceiling on one `reorder_pinned` request.
 ///
@@ -442,7 +442,7 @@ mod tests {
     use crate::server::dispatch::dispatch_store;
     use crate::testutil::test_state;
     use base64::engine::general_purpose::STANDARD;
-    use copypaste_ipc::{Method, content_type::TEXT};
+    use copypaste_ipc::{content_type::TEXT, Method};
 
     fn row_of(bytes: usize) -> StoredItem {
         StoredItem {

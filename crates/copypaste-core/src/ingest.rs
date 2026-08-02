@@ -17,7 +17,7 @@ use tracing::warn;
 
 use crate::sensitive::Detector;
 use crate::storage::{Ingest, NewItem, Store, StoreError, StoredItem};
-use crate::{CryptoError, Keyring, now_ms};
+use crate::{now_ms, CryptoError, Keyring};
 
 /// What a successful ingest did.
 #[derive(Debug)]
@@ -455,20 +455,18 @@ mod tests {
         f.settings.max_image_size_bytes = 8;
         f.settings.max_file_size_bytes = 12;
 
-        assert!(
-            ingest_binary_into_with_capture_context(
-                &f.store,
-                &f.keyring,
-                &[1; 8],
-                copypaste_ipc::content_type::IMAGE_PNG,
-                T0,
-                false,
-                None,
-                None,
-                &f.settings,
-            )
-            .is_ok()
-        );
+        assert!(ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &[1; 8],
+            copypaste_ipc::content_type::IMAGE_PNG,
+            T0,
+            false,
+            None,
+            None,
+            &f.settings,
+        )
+        .is_ok());
         assert!(matches!(
             ingest_binary_into_with_capture_context(
                 &f.store,
@@ -483,20 +481,18 @@ mod tests {
             ),
             Err(IngestError::TooLarge)
         ));
-        assert!(
-            ingest_binary_into_with_capture_context(
-                &f.store,
-                &f.keyring,
-                &[3; 12],
-                copypaste_ipc::content_type::FILE,
-                T0 + 2,
-                false,
-                None,
-                None,
-                &f.settings,
-            )
-            .is_ok()
-        );
+        assert!(ingest_binary_into_with_capture_context(
+            &f.store,
+            &f.keyring,
+            &[3; 12],
+            copypaste_ipc::content_type::FILE,
+            T0 + 2,
+            false,
+            None,
+            None,
+            &f.settings,
+        )
+        .is_ok());
         assert!(matches!(
             ingest_binary_into_with_capture_context(
                 &f.store,
@@ -550,12 +546,11 @@ mod tests {
         let stored = f.at("AKIAIOSFODNN7EXAMPLE", T0).unwrap().into_item();
 
         assert!(stored.is_sensitive);
-        assert!(
-            f.store
-                .search("AKIAIOSFODNN7EXAMPLE", 10)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(f
+            .store
+            .search("AKIAIOSFODNN7EXAMPLE", 10)
+            .unwrap()
+            .is_empty());
         // ...and it is still stored and still readable: flagging is not
         // deleting (CLAUDE.md rule 4).
         assert_eq!(f.plaintext(&stored), "AKIAIOSFODNN7EXAMPLE");
@@ -567,16 +562,12 @@ mod tests {
         let text = "Send to alice@example.com from 192.168.1.100:8080";
         let findings = f.detector.scan_all(text);
         assert!(findings.iter().any(|finding| finding.rule == "email"));
-        assert!(
-            findings
-                .iter()
-                .any(|finding| finding.rule == "ip_with_port")
-        );
-        assert!(
-            findings
-                .iter()
-                .all(|finding| finding.severity == crate::sensitive::Severity::Flag)
-        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "ip_with_port"));
+        assert!(findings
+            .iter()
+            .all(|finding| finding.severity == crate::sensitive::Severity::Flag));
 
         let stored = f.at(text, T0).unwrap().into_item();
         assert!(!stored.is_sensitive);
@@ -591,11 +582,9 @@ mod tests {
         let findings = f.detector.scan_all(text);
         assert_eq!(findings.len(), 2);
         assert!(findings.iter().any(|finding| finding.rule == "email"));
-        assert!(
-            findings
-                .iter()
-                .any(|finding| finding.rule == "aws_access_key")
-        );
+        assert!(findings
+            .iter()
+            .any(|finding| finding.rule == "aws_access_key"));
 
         let stored = f.at(text, T0).unwrap().into_item();
         assert!(stored.is_sensitive);

@@ -100,7 +100,7 @@ pub trait CaptureControl: Send + Sync + 'static {
     /// turning off one of the OS's privacy indicators on the user's behalf is
     /// precisely the move a clipboard manager must not make.
     fn set_toast_suppressed(&self, suppressed: bool, acknowledged: bool)
-    -> Result<CaptureSnapshot>;
+        -> Result<CaptureSnapshot>;
 
     /// Note that a clip reached the database, for the "last captured" line.
     fn note_stored(&self, at_ms: i64);

@@ -66,7 +66,7 @@ pub fn remove_socket(socket_path: &std::path::Path) {
 /// the same way — an aborted process leaves the socket file behind and the next
 /// start has to treat it as stale.
 pub async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::Result<()> {
-    use tokio::signal::unix::{SignalKind, signal};
+    use tokio::signal::unix::{signal, SignalKind};
 
     let mut sigterm = signal(SignalKind::terminate()).context("install the SIGTERM handler")?;
     let mut sigint = signal(SignalKind::interrupt()).context("install the SIGINT handler")?;

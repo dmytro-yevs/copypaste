@@ -1,8 +1,8 @@
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, DiagnosticCounters,
     DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind, ExportData, ExportItem,
-    ImportData, Item, ItemPage, Method, PairingData, PeerInfo, PrivateModeData, Request, Response,
-    ResponseData, StatusData, SyncResult, PROTOCOL_VERSION,
+    ImagePreview, ImportData, Item, ItemPage, Method, PairingData, PeerInfo, PrivateModeData,
+    Request, Response, ResponseData, StatusData, SyncResult, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -64,6 +64,7 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::Event(_) => "event",
         ResponseData::Page(_) => "page",
         ResponseData::Item(_) => "item",
+        ResponseData::ImagePreview(_) => "image_preview",
         ResponseData::Count(_) => "count",
         ResponseData::Pairing(_) => "pairing",
         ResponseData::Peers(_) => "peers",
@@ -141,6 +142,11 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             next_cursor: Some("cursor".into()),
         }),
         ResponseData::Item(item()),
+        ResponseData::ImagePreview(ImagePreview {
+            png_base64: "iVBORw0KGgo=".into(),
+            width: 1,
+            height: 1,
+        }),
         ResponseData::Count(1),
         ResponseData::Pairing(PairingData {
             code: "ABCD-EFGH".into(),
@@ -173,7 +179,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 17);
+    assert_eq!(variants.len(), 18);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }

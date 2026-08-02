@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::messages::{MSG_TOAST_UNEXPLAINED, detail, headline};
+use super::messages::{detail, headline, MSG_TOAST_UNEXPLAINED};
 
 pub use super::messages::{LOST_BODY, LOST_TITLE, TOAST_EXPLANATION};
 
