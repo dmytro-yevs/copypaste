@@ -10,6 +10,8 @@ buildscript {
         classpath("com.android.tools.build:gradle:8.11.0")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25")
         classpath("org.owasp:dependency-check-gradle:12.2.2")
+        // CopyPaste-oc15: Dependency-Check 12.2.2 calls ZipFile.builder().
+        classpath("org.apache.commons:commons-compress:1.27.1")
     }
 }
 
