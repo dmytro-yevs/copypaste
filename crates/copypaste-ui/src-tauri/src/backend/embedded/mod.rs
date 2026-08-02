@@ -53,7 +53,6 @@ use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
     ImagePreview, ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
 };
-pub(super) use open::Inner;
 pub use open::{Clipboard, EmbeddedBackend};
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 use state::write_settings;
@@ -451,7 +450,7 @@ impl Backend for EmbeddedBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     /// Records what was written, so `copy` can be asserted without a system
     /// clipboard.
