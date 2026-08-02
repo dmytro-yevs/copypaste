@@ -33,16 +33,19 @@
 // compiling across binding revisions instead of flipping with each bump.
 #![allow(unused_unsafe)]
 
-use objc2::rc::{Retained, autoreleasepool};
+use objc2::rc::{autoreleasepool, Retained};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use objc2_app_kit::{NSPasteboard, NSWorkspace};
+use objc2_app_kit::NSPasteboard;
 use objc2_foundation::{NSArray, NSData, NSString};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
+
+mod attribution;
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
 use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
+use attribution::{Attribution, FrontmostApp};
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
 /// statics: the values are frozen by the OS and by nspasteboard.org, and
@@ -122,34 +125,6 @@ pub struct MacOsClipboard {
     frontmost: Option<(Instant, Option<FrontmostApp>)>,
     last_attribution: Option<Attribution>,
     staging: super::file_materialize::StagingArea,
-}
-
-#[derive(Clone)]
-struct FrontmostApp {
-    /// Some foreground helpers do not advertise a bundle identifier even
-    /// though AppKit can still tell us their localized name. Keep the two
-    /// independently so the UI never turns a known source into “Unknown app”.
-    bundle_id: Option<String>,
-    name: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Attribution {
-    Bundle,
-    NameOnly,
-    Unavailable,
-}
-
-impl Attribution {
-    fn from_app(app: Option<&FrontmostApp>) -> Self {
-        match app {
-            Some(FrontmostApp {
-                bundle_id: Some(_), ..
-            }) => Self::Bundle,
-            Some(FrontmostApp { name: Some(_), .. }) => Self::NameOnly,
-            _ => Self::Unavailable,
-        }
-    }
 }
 
 enum SelectedRepresentation {
@@ -491,48 +466,6 @@ impl ClipboardSource for MacOsClipboard {
 
     fn lost_intermediates_count(&self) -> u64 {
         self.tracker.lost_intermediates
-    }
-}
-
-impl MacOsClipboard {
-    fn note_attribution(&mut self, app: Option<&FrontmostApp>) {
-        let attribution = Attribution::from_app(app);
-        if self.last_attribution == Some(attribution) {
-            return;
-        }
-        self.last_attribution = Some(attribution);
-        match attribution {
-            Attribution::Bundle => info!("macOS capture source attribution is available"),
-            Attribution::NameOnly => {
-                info!("macOS capture source attribution is available without a bundle identifier")
-            }
-            Attribution::Unavailable => {
-                warn!("macOS could not identify the source application for clipboard capture")
-            }
-        }
-    }
-
-    fn frontmost_app(&mut self) -> Option<FrontmostApp> {
-        if let Some((seen, app)) = &self.frontmost {
-            if seen.elapsed() < Duration::from_millis(750) {
-                return app.clone();
-            }
-        }
-        let app = unsafe {
-            NSWorkspace::sharedWorkspace()
-                .frontmostApplication()
-                .and_then(|app| {
-                    let bundle_id = app.bundleIdentifier().map(|id| id.to_string());
-                    let name = app.localizedName().map(|name| name.to_string());
-                    // A foreground application can be an unbundled helper.
-                    // It has neither value only when AppKit genuinely cannot
-                    // attribute the foreground process.
-                    (bundle_id.is_some() || name.is_some())
-                        .then_some(FrontmostApp { bundle_id, name })
-                })
-        };
-        self.frontmost = Some((Instant::now(), app.clone()));
-        app
     }
 }
 
@@ -898,11 +831,9 @@ mod tests {
 
         let oversized = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize + 1];
         write_types(&[(UTI_PNG, &oversized)]);
-        assert!(
-            clipboard
-                .poll_with_policy(CapturePolicy::new(&settings))
-                .is_none()
-        );
+        assert!(clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .is_none());
 
         let boundary = vec![0; copypaste_ipc::MIN_IMAGE_SIZE_BYTES as usize];
         write_types(&[(UTI_PNG, &boundary)]);

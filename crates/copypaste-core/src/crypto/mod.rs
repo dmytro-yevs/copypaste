@@ -32,10 +32,10 @@ mod keys;
 mod keystore;
 mod stream;
 
-pub use aead::{NONCE_LEN, TAG_LEN, decrypt, encrypt};
-pub use keys::{ItemKey, KEY_LEN, Keyring};
+pub use aead::{decrypt, encrypt, NONCE_LEN, TAG_LEN};
+pub use keys::{ItemKey, Keyring, KEY_LEN};
 pub(crate) use stream::{
-    STREAM_NONCE_LEN, decryptor as stream_decryptor, encryptor as stream_encryptor,
+    decryptor as stream_decryptor, encryptor as stream_encryptor, STREAM_NONCE_LEN,
 };
 
 /// Every failure this module can produce.
@@ -93,7 +93,7 @@ pub enum CryptoError {
 
 #[cfg(test)]
 pub(super) mod test_support {
-    use super::{ItemKey, KEY_LEN, Keyring};
+    use super::{ItemKey, Keyring, KEY_LEN};
 
     pub(super) const SECRET_A: [u8; KEY_LEN] = [7u8; KEY_LEN];
     pub(super) const SECRET_B: [u8; KEY_LEN] = [9u8; KEY_LEN];

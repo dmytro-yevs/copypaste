@@ -530,7 +530,10 @@ mod tests {
         // Same content hash, same bucket, different id: the dedup index owns
         // that pair.
         let applied = s
-            .upsert(&incoming("theirs", &mine.content_hash, T0 + 500))
+            .upsert(&IncomingItem {
+                origin_device_id: "",
+                ..incoming("theirs", &mine.content_hash, T0 + 500)
+            })
             .unwrap();
         assert!(!applied, "the collision must be reported, not stored");
         assert!(s.get("theirs").unwrap().is_none());

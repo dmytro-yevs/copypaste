@@ -226,8 +226,8 @@ mod tests {
     /// Deserializing checks the shape, never the bounds, so a stored value that
     /// exceeds today's binding range must fall back atomically.
     #[test]
-    fn a_stored_value_the_current_bounds_reject_falls_back_to_the_defaults()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn a_stored_value_the_current_bounds_reject_falls_back_to_the_defaults(
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let (state, _dir) = test_state("alpha");
         let stale = serde_json::to_string(&ConfigData {
             max_file_size_bytes: copypaste_ipc::MAX_FILE_SIZE_BYTES + 1,

@@ -56,11 +56,13 @@ pub(super) const MSG_RESTORE_NOT_A_BACKUP: &str =
 pub(super) const MSG_RESTORE_FAILED: &str =
     "the restore could not be completed; this device's history is unchanged";
 
-pub(crate) const MSG_KEY_LOCKED: &str = "the key store could not be read, so this history could not be unlocked; \
+pub(crate) const MSG_KEY_LOCKED: &str =
+    "the key store could not be read, so this history could not be unlocked; \
      it is worth trying again once the key store is available";
 /// Says the two things `MSG_KEY_LOCKED` does not: no retry helps, and the
 /// history is gone rather than waiting.
-pub(crate) const MSG_KEY_UNUSABLE: &str = "this device's key is present and cannot be used, so the history encrypted with it \
+pub(crate) const MSG_KEY_UNUSABLE: &str =
+    "this device's key is present and cannot be used, so the history encrypted with it \
      cannot be read by anything; trying again will not change that";
 
 /// A failure that carries a code of its own, distinct from the operation that

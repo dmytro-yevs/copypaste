@@ -415,13 +415,11 @@ mod tests {
             Some("COM.1Password.Desktop")
         );
         assert_eq!(stored.app_name.as_deref(), Some("1Password"));
-        assert!(
-            state
-                .store
-                .search("xK9mQ3nR7pT2vW5", 10)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(state
+            .store
+            .search("xK9mQ3nR7pT2vW5", 10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -452,13 +450,11 @@ mod tests {
 
         assert_eq!(duplicate.id, first.id);
         assert!(duplicate.is_sensitive);
-        assert!(
-            state
-                .store
-                .search("ordinary-looking", 10)
-                .unwrap()
-                .is_empty()
-        );
+        assert!(state
+            .store
+            .search("ordinary-looking", 10)
+            .unwrap()
+            .is_empty());
         assert!(state.store.versions_since(i64::MIN, 10).unwrap().is_empty());
     }
 }

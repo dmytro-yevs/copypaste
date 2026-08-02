@@ -20,7 +20,7 @@ mod source;
 mod testkit;
 
 pub use merge::{
-    MergeError, RemoteVersion, apply_remote_version, open_version, open_version_bytes,
+    apply_remote_version, open_version, open_version_bytes, MergeError, RemoteVersion,
 };
 pub use source::StoreSource;
 

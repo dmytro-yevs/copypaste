@@ -17,7 +17,7 @@ import { afterAll, beforeAll, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
 import { expectNoFilesystemPath, accessibleSurface } from "../src/harness/leaks.js";
-import { rowCount, visibleText, waitForRows, waitForText } from "../src/harness/ui.js";
+import { rowCount, waitForRows, waitForText } from "../src/harness/ui.js";
 
 /** `service::push::EVENT_CHANGED`, asserted on the Rust side by a test that
  *  names this string. Duplicated here on purpose: a test that imported it
@@ -158,7 +158,10 @@ test("a daemon that dies degrades to polling, not to a broken screen", async () 
 
   // The rows that were already fetched stay: a failed background poll must not
   // throw away what the user is reading.
-  await waitForText(browser, "not running", 30_000);
+  await browser.waitUntil(
+    async () => (await accessibleSurface(browser)).includes("Background service unreachable"),
+    { timeout: 30_000, timeoutMsg: "the status control never reported the outage" },
+  );
   expect(await rowCount(browser)).toBeGreaterThan(0);
   expectNoFilesystemPath(await accessibleSurface(browser), app.daemon.dataHome);
 
@@ -173,7 +176,7 @@ test("a daemon that dies degrades to polling, not to a broken screen", async () 
   // The banner clears on the status query's own cadence, which is slower than
   // the history query's — so this is a wait, not an immediate assertion.
   await browser.waitUntil(
-    async () => !(await visibleText(browser)).includes("not running"),
+    async () => !(await accessibleSurface(browser)).includes("Background service unreachable"),
     {
       timeout: 30_000,
       interval: 500,

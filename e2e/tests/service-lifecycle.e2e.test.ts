@@ -73,9 +73,9 @@ describe("the service-not-running screen", () => {
     expectNoRawError(await outerHtml(app.browser));
   });
 
-  test("offers a second look without a restart", async () => {
-    const recheck = await app.browser.$("button=Check again");
-    expect(await recheck.isExisting()).toBe(true);
+  test("keeps the recovery action available after a failed poll", async () => {
+    const start = await app.browser.$('button=Start the service');
+    expect(await start.isEnabled()).toBe(true);
   });
 });
 

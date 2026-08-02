@@ -17,11 +17,11 @@ use tauri::{Manager, Wry};
 
 use crate::backend::{BackendError, Result};
 
-use super::CaptureControl;
 use super::model::{
     AndroidArmResult, AndroidProbeResult, CaptureModel, CaptureSnapshot, CaptureSource, Clip,
-    LOST_BODY, LOST_TITLE, ReadOutcome, ShizukuProbe,
+    ReadOutcome, ShizukuProbe, LOST_BODY, LOST_TITLE,
 };
+use super::CaptureControl;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

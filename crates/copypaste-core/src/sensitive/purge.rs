@@ -51,8 +51,8 @@ use rusqlite::Transaction;
 
 use crate::sensitive::Detector;
 use crate::storage::{
-    IndexedText, Store, StoreError, indexed_texts_in, purge_from_index_in,
-    purge_index_of_unsearchable_in,
+    indexed_texts_in, purge_from_index_in, purge_index_of_unsearchable_in, IndexedText, Store,
+    StoreError,
 };
 
 /// Rows per read page. Large enough that the ~10k-row default history is a
@@ -179,10 +179,10 @@ fn purge_index<I: PurgeIndex>(index: &I, detector: &Detector) -> Result<PurgeRep
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::NewItem;
     use crate::storage::test_support::{
-        T0, fts_row_count, item, plant_fts_row, raw_row_count, store,
+        fts_row_count, item, plant_fts_row, raw_row_count, store, T0,
     };
+    use crate::storage::NewItem;
 
     fn detector() -> Detector {
         Detector::new().expect("ruleset compiles")
@@ -349,10 +349,9 @@ mod tests {
         let s = store();
         let inert = missed_at_capture(&s, "mail alice.smith@example.com about it", T0);
         let det = detector();
-        assert!(
-            !det.scan_all("mail alice.smith@example.com about it")
-                .is_empty()
-        );
+        assert!(!det
+            .scan_all("mail alice.smith@example.com about it")
+            .is_empty());
         assert!(!det.is_sensitive("mail alice.smith@example.com about it"));
         assert!(!det.may_auto_wipe("mail alice.smith@example.com about it"));
 

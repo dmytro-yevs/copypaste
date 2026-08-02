@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderValue, Method as HttpMethod, StatusCode, header};
+use axum::http::{header, HeaderMap, HeaderValue, Method as HttpMethod, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use copypaste_ipc::{ConfigPatch, PairingData};
@@ -25,9 +25,9 @@ use serde_json::Value;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
-use crate::backend::{Backend, BackendError, daemon::DaemonBackend};
+use crate::backend::{daemon::DaemonBackend, Backend, BackendError};
 use crate::model::{UiImagePreview, UiItem, UiPage, UiSyncResult};
-use crate::service::{ServiceState, diagnostics::Diagnostics};
+use crate::service::{diagnostics::Diagnostics, ServiceState};
 use crate::source_app_icon::SourceAppIconCache;
 
 const DEFAULT_VITE_ORIGIN: &str = "http://localhost:1420";

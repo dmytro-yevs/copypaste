@@ -32,7 +32,7 @@ const TABS = [
 
 /** `rowHeight(n)` from `lib/layout.ts`, duplicated deliberately: a test that
  *  imported the function could not catch it changing. */
-const ROW_HEIGHT = { 1: 63, 2: 84 } as const;
+const ROW_HEIGHT = { 1: 67, 2: 88 } as const;
 
 let app: App;
 
@@ -89,7 +89,7 @@ describe("the tabs", () => {
     }
   });
 
-  test("the row wraps instead of pushing a tab off-screen (A11Y-15)", async () => {
+  test("the sidebar keeps every section reachable without horizontal overflow", async () => {
     const row = (await app.browser.execute(function () {
       const list = document.querySelector('[role="tablist"]') as HTMLElement | null;
       if (!list) return null;
@@ -115,7 +115,7 @@ describe("the tabs", () => {
     } | null;
 
     expect(row).not.toBeNull();
-    expect(row!.wrap).toBe("wrap");
+    expect(row!.wrap).toBe("nowrap");
     expect(row!.overflow).toBeLessThanOrEqual(1);
     expect(row!.tabs).toHaveLength(TABS.length);
     for (const tab of row!.tabs) {

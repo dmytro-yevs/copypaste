@@ -14,7 +14,7 @@ import {
   outerHtml,
 } from "../src/harness/leaks.js";
 import { sleep, track, type Child } from "../src/harness/process.js";
-import { visibleText, waitForRows } from "../src/harness/ui.js";
+import { waitForRows } from "../src/harness/ui.js";
 
 let app: App;
 let dataHome: string;
@@ -30,7 +30,7 @@ beforeAll(async () => {
   await app.daemon.stop();
 
   await app.browser.waitUntil(
-    async () => (await visibleText(app.browser)).includes("service"),
+    async () => (await accessibleSurface(app.browser)).includes("Background service unreachable"),
     {
       timeout: 40_000,
       interval: 500,
@@ -44,8 +44,8 @@ afterAll(async () => {
 });
 
 test("the offline state is reported to the user", async () => {
-  const text = await visibleText(app.browser);
-  expect(text.toLowerCase()).toMatch(/service/);
+  const surface = await accessibleSurface(app.browser);
+  expect(surface).toContain("Background service unreachable");
 });
 
 test("no user-facing string contains a filesystem path (INV-12)", async () => {

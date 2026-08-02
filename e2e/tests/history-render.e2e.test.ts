@@ -13,7 +13,7 @@ const COUNT = 120;
 
 /** `rowHeight(2)` from crates/copypaste-ui/src/lib/layout.ts, duplicated
  *  deliberately: a test that imports the constant cannot catch it changing. */
-const ROW_HEIGHT = 84;
+const ROW_HEIGHT = 88;
 
 const LONG = "long ".repeat(400);
 

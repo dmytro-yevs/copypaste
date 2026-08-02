@@ -29,9 +29,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use copypaste_ipc::{
-    BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, MAX_FRAME_BYTES, Method, PROTOCOL_VERSION, PairingData,
-    PeerInfo, Request, Response, ResponseData, StatusData, SyncResult, socket_path,
+    socket_path, BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData,
+    ExportItem, ImagePreview, ImportData, Item, Method, PairingData, PeerInfo, Request, Response,
+    ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::UnixStream;
@@ -45,7 +45,8 @@ use super::{Backend, BackendError, Page, Result};
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Why `reorder_pinned` refuses. See the method for the full argument.
-const MSG_NO_REORDER: &str = "Reordering pinned items isn't available yet. Pinned items keep the order they \
+const MSG_NO_REORDER: &str =
+    "Reordering pinned items isn't available yet. Pinned items keep the order they \
      were pinned in.";
 
 /// Talks to the daemon. Holds nothing, so it is trivially `Send + Sync`.
@@ -508,10 +509,10 @@ mod tests {
 
     #[test]
     fn a_wrong_shape_is_reported_rather_than_silently_defaulted() {
-        assert!(
-            expect_page(into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).unwrap())
-                .is_err()
-        );
+        assert!(expect_page(
+            into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).unwrap()
+        )
+        .is_err());
     }
 
     #[test]
@@ -669,17 +670,15 @@ mod tests {
         );
         assert_eq!(applied.restart_required, ["lan_visibility"]);
 
-        assert!(
-            expect_config(
-                into_data(parse(
-                    r#"{"id":1,"ok":true,"data":{"config":{"config":{},"restart_required":[]}}}"#
-                ))
-                .unwrap()
-            )
+        assert!(expect_config(
+            into_data(parse(
+                r#"{"id":1,"ok":true,"data":{"config":{"config":{},"restart_required":[]}}}"#
+            ))
             .unwrap()
-            .restart_required
-            .is_empty()
-        );
+        )
+        .unwrap()
+        .restart_required
+        .is_empty());
     }
 
     /// The export wrapper keeps its item array distinct from a history page.

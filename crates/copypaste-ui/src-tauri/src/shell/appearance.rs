@@ -1,5 +1,8 @@
 use tauri::{AppHandle, Wry};
 
+#[cfg(target_os = "android")]
+use tauri::Manager as _;
+
 #[derive(Clone, serde::Serialize)]
 pub struct SystemAccent {
     pub color: String,
@@ -20,8 +23,6 @@ pub fn apply(app: &AppHandle<Wry>, theme: NativeTheme) {
 
     #[cfg(target_os = "android")]
     {
-        use tauri::Manager as _;
-
         let Some(system_bars) = app.try_state::<android::SystemBars>() else {
             tracing::warn!("the Android system-bars plugin was not registered");
             return;

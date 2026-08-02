@@ -30,7 +30,7 @@ use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 use tracing::{info, warn};
 
-use crate::cli::{Args, cloud_config};
+use crate::cli::{cloud_config, Args};
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
