@@ -287,6 +287,7 @@ impl Settings {
 EOF
 
     replace_in_place "s|@REPO@|$REPO_ROOT|g" "$dir/src/lib.rs"
+    replace_in_place "s|@REPO@|$REPO_ROOT|g" "$dir/copypaste-core-stub/src/lib.rs"
     replace_in_place "s|@REPO@|$REPO_ROOT|g" "$dir/src/crypto.rs"
 }
 

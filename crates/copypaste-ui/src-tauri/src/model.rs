@@ -41,6 +41,7 @@
 //! Everything else — copy, delete, pin — travels by id and does its work in the
 //! backend, so the secret never needs to be in the WebView to be *used*.
 
+#[cfg(any(target_os = "android", target_os = "macos", test))]
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_ipc::{DiscoveredDevice, ImagePreview, Item, PeerInfo, StatusData, SyncResult};
 use serde::Serialize;
