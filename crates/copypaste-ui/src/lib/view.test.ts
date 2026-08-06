@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import fuzzysort from "fuzzysort";
 
 import { item } from "@/test/harness";
 import {
   DEFAULT_VIEW,
   applyView,
   fuzzyItems,
+  fuzzyTargets,
   isDefaultView,
   mergeSearchResults,
 } from "@/lib/view";
@@ -138,5 +140,81 @@ describe("fuzzy and service search merge", () => {
     const secret = item({ id: "secret", is_sensitive: true });
     expect(fuzzyItems([secret], "sensitive")).toEqual([]);
     expect(mergeSearchResults([], [secret])).toEqual([]);
+  });
+});
+
+/**
+ * F-UI-2. The cache exists because `fuzzysort.single` re-indexes a raw string
+ * on every call — 12.65 ms per keystroke at 200 × 2 KB, 0.05 ms prepared. It
+ * holds plaintext, so what is asserted here is not only that it is used but
+ * that a sensitive row can never enter it and that its contents are droppable.
+ */
+describe("prepared fuzzy targets", () => {
+  it("returns the same result as the un-prepared filter", () => {
+    const rows = [
+      item({ id: "recent", content: "clipboard ocean" }),
+      item({ id: "older", content: "clipboard orbit" }),
+      item({ id: "exact", content: "clipboard" }),
+    ];
+    const targets = fuzzyTargets();
+    expect(fuzzyItems(rows, "clipboard", targets).map((entry) => entry.id)).toEqual(
+      fuzzyItems(rows, "clipboard").map((entry) => entry.id),
+    );
+  });
+
+  it("prepares an item once and re-uses it across keystrokes", () => {
+    const prepare = vi.spyOn(fuzzysort, "prepare");
+    const rows = [item({ id: "a", content: "clipboard ocean" })];
+    const targets = fuzzyTargets();
+
+    for (const needle of ["c", "cl", "cli", "clip"]) {
+      fuzzyItems(rows, needle, targets);
+    }
+    expect(prepare).toHaveBeenCalledTimes(1);
+    prepare.mockRestore();
+  });
+
+  it("re-prepares when the row behind an id is not the row it cached", () => {
+    const prepare = vi.spyOn(fuzzysort, "prepare");
+    const targets = fuzzyTargets();
+    fuzzyItems([item({ id: "a", content: "first" })], "fi", targets);
+    fuzzyItems([item({ id: "a", content: "second" })], "se", targets);
+    expect(prepare).toHaveBeenCalledTimes(2);
+    prepare.mockRestore();
+  });
+
+  it("never prepares a sensitive row — the check runs before the write", () => {
+    const prepare = vi.spyOn(fuzzysort, "prepare");
+    const secret = item({ id: "secret", is_sensitive: true });
+    const targets = fuzzyTargets();
+
+    expect(targets.prepare(secret)).toBeNull();
+    expect(fuzzyItems([secret], "secret", targets)).toEqual([]);
+    expect(prepare).not.toHaveBeenCalled();
+    prepare.mockRestore();
+  });
+
+  /** A revealed secret still arrives with `content: null` (INV-10); its
+   *  plaintext lives only in `useReveal`, which INV-11 expires. */
+  it("cannot hold a revealed secret, because a revealed row still has no content", () => {
+    const targets = fuzzyTargets();
+    expect(targets.prepare(item({ id: "s", is_sensitive: true }))).toBeNull();
+    expect(targets.prepare(item({ id: "e", content: null }))).toBeNull();
+  });
+
+  it("drops a row it no longer holds, and everything on release", () => {
+    const prepare = vi.spyOn(fuzzysort, "prepare");
+    const row = item({ id: "a", content: "clipboard" });
+    const targets = fuzzyTargets();
+
+    fuzzyItems([row], "clip", targets);
+    targets.retain([]);
+    fuzzyItems([row], "clip", targets);
+    expect(prepare).toHaveBeenCalledTimes(2);
+
+    targets.release();
+    fuzzyItems([row], "clip", targets);
+    expect(prepare).toHaveBeenCalledTimes(3);
+    prepare.mockRestore();
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDebounceValue } from "usehooks-ts";
 import { toast } from "sonner";
 
@@ -6,6 +6,7 @@ import { type OriginDevice, originsOf } from "@/components/history/origin";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
 import {
   historyOf,
+  statusItemCount,
   useClearHistory,
   useHistory,
   useHistorySearch,
@@ -13,12 +14,14 @@ import {
 } from "@/hooks/useHistory";
 import { type ErrorKind, ipcFailure, toFriendly } from "@/lib/errors";
 import type { Item } from "@/lib/ipc";
-import { SEARCH_DEBOUNCE_MS } from "@/lib/layout";
+import { FILTER_DEBOUNCE_MS, SEARCH_DEBOUNCE_MS } from "@/lib/layout";
 import {
   DEFAULT_VIEW,
+  type FuzzyTargets,
   type ViewOptions,
   applyView,
   fuzzyItems,
+  fuzzyTargets,
   isFilteringView,
   mergeSearchResults,
 } from "@/lib/view";
@@ -65,6 +68,14 @@ export function useHistoryController(pushLive: boolean): HistoryController {
   // §5.3: the FTS query is debounced 250ms. `usehooks-ts` owns the timer —
   // there is no reason for this repository to carry a fifth debounce.
   const [serverQuery] = useDebounceValue(normalizedQuery, SEARCH_DEBOUNCE_MS);
+  // The client filter used to run on the raw value, so a burst of keystrokes
+  // paid for one full pass each.
+  const [filterQuery] = useDebounceValue(normalizedQuery, FILTER_DEBOUNCE_MS);
+
+  const held = useRef<FuzzyTargets | null>(null);
+  held.current ??= fuzzyTargets();
+  const targets = held.current;
+  useEffect(() => () => targets.release(), [targets]);
 
   const [view, setLocalView] = useState<ViewOptions>(() => ({
     ...DEFAULT_VIEW,
@@ -72,7 +83,7 @@ export function useHistoryController(pushLive: boolean): HistoryController {
   }));
   const history = useHistory("", pushLive);
   const serverSearch = useHistorySearch(serverQuery);
-  const status = useStatus();
+  const status = useStatus(statusItemCount);
   const clear = useClearHistory();
   const { pending, remove } = useDeferredDelete();
 
@@ -134,9 +145,10 @@ export function useHistoryController(pushLive: boolean): HistoryController {
       pending.size === 0
         ? page.items
         : page.items.filter((item) => !pending.has(item.id));
+    targets.retain(shown);
     const searched = searching
       ? mergeSearchResults(
-          fuzzyItems(shown, normalizedQuery),
+          fuzzyItems(shown, filterQuery, targets),
           serverItems.filter((item) => !pending.has(item.id)),
         )
       : shown;
@@ -148,8 +160,8 @@ export function useHistoryController(pushLive: boolean): HistoryController {
         : all.slice(0, historyDisplayLimit);
     return { all, capped };
   }, [
+    filterQuery,
     historyDisplayLimit,
-    normalizedQuery,
     page.items,
     pending,
     searching,
@@ -186,7 +198,7 @@ export function useHistoryController(pushLive: boolean): HistoryController {
     displayLimit:
       result.capped.length < result.all.length ? historyDisplayLimit : null,
     skipped: page.skipped,
-    total: status.data?.item_count,
+    total: status.data,
     loading: history.isPending,
     errorKind: failure?.kind ?? null,
     errorRetryable: failure?.retryable ?? false,

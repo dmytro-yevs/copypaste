@@ -82,9 +82,16 @@ export const PAGE_SIZE = 200;
 export const LOAD_MORE_THRESHOLD_PX = 300;
 export const SEARCH_LIMIT = 500;
 export const SEARCH_DEBOUNCE_MS = 250;
+/** Shorter than the FTS debounce: the client filter is what the user watches
+ *  while typing, so it may not wait a quarter of a second. */
+export const FILTER_DEBOUNCE_MS = 60;
 export const UNDO_WINDOW_MS = 5000;
 export const COPY_FLASH_MS = 700;
 export const REVEAL_TIMEOUT_MS = 10_000;
+/** Row icons and thumbnails survive the virtualizer recycling a row, but not
+ *  indefinitely: a thumbnail must not outlive the clipping it was made from. */
+export const MEDIA_GC_MS = 300_000;
+export const ICON_STALE_MS = 300_000;
 
 /** §5.1: slowed from 1200ms — 50→20 IPC calls/min with no perceptible
  *  difference (s7ia B1). The backoff exists so a dead service is not hammered. */

@@ -13,6 +13,7 @@ import { toFriendly } from "@/lib/errors";
 import { UNDO_WINDOW_MS } from "@/lib/layout";
 import { type Item, deleteItem } from "@/lib/ipc";
 import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
+import { imagePreviewKey } from "@/hooks/useHistoryMedia";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
 
@@ -45,6 +46,8 @@ export function useDeferredDelete() {
         // the refetch has settled — otherwise it flashes back into the list.
         await qc.invalidateQueries({ queryKey: HISTORY_KEY });
         void qc.invalidateQueries({ queryKey: STATUS_KEY });
+        // A cached thumbnail must not outlive the clipping it was made from.
+        qc.removeQueries({ queryKey: imagePreviewKey(id) });
       } catch (raw) {
         toast.error(toFriendly(raw));
       } finally {

@@ -12,7 +12,7 @@ import { Boundary } from "@/components/shell/Boundary";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { HistoryView } from "@/components/history/HistoryView";
 import { useCaptureState, useCaptureSync } from "@/hooks/useCapture";
-import { useStatus } from "@/hooks/useHistory";
+import { statusReachable, useStatus } from "@/hooks/useHistory";
 import { usePush } from "@/hooks/usePush";
 import { useTranslation } from "@/i18n";
 import { classifyError } from "@/lib/errors";
@@ -52,7 +52,9 @@ export default function App() {
   // unmounts the app — 55 renders in 2.5s, measured.
   const appearance = usePrefs(useShallow(selectAppearance));
   const allowScreenshots = usePrefs((s) => s.allowScreenshots);
-  const status = useStatus();
+  // Only `status.error` is read here, and the root re-rendering twice a second
+  // re-renders every screen under it.
+  const status = useStatus(statusReachable);
   // Both subscribed once, here, not per screen: two subscribers invalidate the
   // same queries twice for one change.
   const pushLive = usePush();
