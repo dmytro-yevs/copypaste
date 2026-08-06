@@ -14,7 +14,13 @@ MAX_WAIT="${2:-2400}"
 shift 2
 [[ "${1:-}" == "--" ]] && shift
 
-load1() { cut -d' ' -f1 </proc/loadavg; }
+if [[ "$(uname -s)" == Darwin ]]; then
+    load1() { sysctl -n vm.loadavg | awk '{ print $2 }'; }
+    load_all() { sysctl -n vm.loadavg | tr -d '{}'; }
+else
+    load1() { cut -d' ' -f1 </proc/loadavg; }
+    load_all() { cat /proc/loadavg; }
+fi
 
 waited=0
 while awk -v l="$(load1)" -v m="$MAX_LOAD" 'BEGIN { exit !(l > m) }'; do
@@ -26,8 +32,8 @@ while awk -v l="$(load1)" -v m="$MAX_LOAD" 'BEGIN { exit !(l > m) }'; do
     waited=$((waited + 15))
 done
 
-echo "== load before: $(cat /proc/loadavg)" >&2
+echo "== load before: $(load_all)" >&2
 "$@"
 status=$?
-echo "== load after:  $(cat /proc/loadavg)" >&2
+echo "== load after:  $(load_all)" >&2
 exit $status
