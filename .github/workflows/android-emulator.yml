@@ -211,19 +211,33 @@ jobs:
           # here regenerates the Gradle project; see the release job for why.
           npm run tauri -- android build --debug --apk --target x86_64
 
+      - name: Stamp the day for the vulnerability database cache key
+        id: dc-day
+        run: echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
       - name: Restore OWASP vulnerability database
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.gradle/dependency-check-data
-          key: dependency-check-12-${{ runner.os }}-${{ hashFiles('crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts') }}
+          key: dependency-check-12-${{ runner.os }}-${{ steps.dc-day.outputs.day }}
           restore-keys: |
             dependency-check-12-${{ runner.os }}-
 
       - name: Audit resolved Android dependencies
         working-directory: crates/copypaste-ui/src-tauri/gen/android
+        timeout-minutes: 60
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon dependencyCheckAggregate
+          ./gradlew --no-daemon \
+            --init-script "${GITHUB_WORKSPACE}/scripts/ci/android-dependency-check.init.gradle.kts" \
+            dependencyCheckAggregate
+
+      - name: Save OWASP vulnerability database
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.gradle/dependency-check-data
+          key: dependency-check-12-${{ runner.os }}-${{ steps.dc-day.outputs.day }}
 
       - name: Locate it and check what it claims
         run: |
