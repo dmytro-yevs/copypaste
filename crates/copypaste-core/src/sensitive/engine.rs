@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use regex::{Captures, Regex, RegexSet, RegexSetBuilder};
 
-use super::finding::{Finding, Severity, SpannedFinding};
+use super::finding::{Finding, SpannedFinding, AUTOWIPE_CONFIDENCE_FLOOR};
 use super::normalise::normalise;
 use super::redact::redact_findings;
 use super::rules::{GLOBAL_ALLOWLISTS, RULES};
@@ -57,7 +57,24 @@ pub struct Detector {
     /// degrade-to-empty mechanism to hold this invariant; here it is
     /// structural, §7.6).
     rules: Vec<Rule>,
+    /// Index-aligned with `rules`: can this rule alone answer
+    /// [`Detector::may_auto_wipe`]? Derived from `confidence` at construction
+    /// and never listed by hand, or a new rule above the floor would silently
+    /// drop out of the gate between detection and destruction.
+    above_autowipe_floor: Vec<bool>,
     global_allowlists: Vec<CompiledAllowlist>,
+}
+
+/// The two shapes [`Detector::scan_normalised`] answers in. One implementation,
+/// because §7.4 records that v1's four overlapping "is it sensitive?" entry
+/// points were the defect — a second predicate is what must not exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScanMode {
+    /// Every validated match, ranked.
+    AllSpans,
+    /// The first validated match from a rule at or above the auto-wipe floor.
+    /// Rules below it cannot change the answer, so they are not run at all.
+    AutoWipeOnly,
 }
 
 impl Detector {
@@ -87,9 +104,14 @@ impl Detector {
             .build()
             .map_err(DetectorError::RuleSet)?;
         let global_allowlists = compile_allowlists("global", GLOBAL_ALLOWLISTS)?;
+        let above_autowipe_floor = rules
+            .iter()
+            .map(|rule| rule.spec.confidence >= AUTOWIPE_CONFIDENCE_FLOOR)
+            .collect();
         Ok(Self {
             set,
             rules,
+            above_autowipe_floor,
             global_allowlists,
         })
     }
@@ -101,29 +123,41 @@ impl Detector {
     /// followed by confidence and stable rule id.
     pub fn scan_all(&self, text: &str) -> Vec<SpannedFinding> {
         let normalised = normalise(text);
-        self.scan_normalised(&normalised)
+        self.scan_normalised(&normalised, ScanMode::AllSpans)
     }
 
     /// Highest-confidence match, or None. Ties prefer the longer match, then
     /// the stable rule id and earlier byte position.
     pub fn scan(&self, text: &str) -> Option<Finding> {
         let normalised = normalise(text);
-        self.scan_normalised(&normalised)
+        self.scan_normalised(&normalised, ScanMode::AllSpans)
             .into_iter()
             .max_by(compare_rank)
             .map(SpannedFinding::without_span)
     }
 
-    fn scan_normalised(&self, text: &str) -> Vec<SpannedFinding> {
+    fn scan_normalised(&self, text: &str, mode: ScanMode) -> Vec<SpannedFinding> {
+        let first_only = mode == ScanMode::AutoWipeOnly;
         let mut findings = Vec::new();
         let lowered = text.to_lowercase();
         for idx in self.set.matches(text) {
+            // Below the floor a match can never make `may_auto_wipe` true, and
+            // these are the rules ordinary content fires: any email address,
+            // any `host:port` in a config paste. Running their `captures_iter`
+            // and their checksum validators to build findings the caller throws
+            // away is the whole of F-CORE-4.
+            if first_only && !self.above_autowipe_floor[idx] {
+                continue;
+            }
             let rule = &self.rules[idx];
             if !rule.keyword_matches(&lowered) {
                 continue;
             }
-            for (start, end) in rule.spans(text, &self.global_allowlists) {
+            for (start, end) in rule.spans(text, &self.global_allowlists, first_only) {
                 findings.push(SpannedFinding::new(rule.spec.finding(), start, end));
+                if first_only {
+                    return findings;
+                }
             }
         }
         findings.sort_by(|a, b| {
@@ -144,9 +178,10 @@ impl Detector {
     /// with [`Detector::is_sensitive`] three separate times (`AB-6a`, `PG-23`,
     /// `PG-3`) and destroyed unrecoverable user data each time.
     pub fn may_auto_wipe(&self, text: &str) -> bool {
-        self.scan_all(text)
-            .iter()
-            .any(|finding| finding.severity == Severity::HighConfidence)
+        let normalised = normalise(text);
+        !self
+            .scan_normalised(&normalised, ScanMode::AutoWipeOnly)
+            .is_empty()
     }
 
     /// Compatibility predicate for whole-item sensitive classification. This
@@ -158,9 +193,11 @@ impl Detector {
 
     /// Redact every validated match. When matches exist, surrounding text is
     /// NFKC-normalised because the match offsets belong to that representation.
+    ///
+    /// The only span consumer, and it has no caller anywhere in the tree.
     pub fn redact(&self, text: &str) -> String {
         let normalised = normalise(text);
-        let findings = self.scan_normalised(&normalised);
+        let findings = self.scan_normalised(&normalised, ScanMode::AllSpans);
         if findings.is_empty() {
             text.to_owned()
         } else {
@@ -186,10 +223,17 @@ struct Rule {
 }
 
 impl Rule {
-    /// Every match that passes this rule's validator. No separate fast path:
+    /// Every match that passes this rule's validator, or just the first when
+    /// the caller only needs to know whether one exists. No separate fast path:
     /// v1's `RegexSet` shortcut skipped the value-strength validator and needed
-    /// a bespoke `generic_password_kv` case to compensate (§5.3).
-    fn spans(&self, text: &str, global_allowlists: &[CompiledAllowlist]) -> Vec<(usize, usize)> {
+    /// a bespoke `generic_password_kv` case to compensate (§5.3). `first_only`
+    /// stops the iteration, it does not weaken a single check.
+    fn spans(
+        &self,
+        text: &str,
+        global_allowlists: &[CompiledAllowlist],
+        first_only: bool,
+    ) -> Vec<(usize, usize)> {
         let mut spans = Vec::new();
         for caps in self.regex.captures_iter(text) {
             let Some(whole) = caps.get(0) else { continue };
@@ -222,6 +266,9 @@ impl Rule {
                 && is_allowed(global_allowlists, secret, whole.as_str(), line);
             if !globally_allowed && !is_allowed(&self.allowlists, secret, whole.as_str(), line) {
                 spans.push((whole.start(), whole.end()));
+                if first_only {
+                    break;
+                }
             }
         }
         spans
@@ -725,6 +772,109 @@ mod tests {
     #[test]
     fn ruleset_compiles() {
         assert!(Detector::new().is_ok());
+    }
+
+    /// The predicate skips every rule below the floor and stops at the first
+    /// validated match, so it must still answer exactly what a full ranked scan
+    /// answers — this is the gate between detection and destruction.
+    #[test]
+    fn the_predicate_answers_what_the_full_scan_answers() {
+        let det = detector();
+        let ghp = format!("ghp_{}", rep('A', 36));
+        let twilio = format!("SK{}", rep('a', 32));
+        let mut corpus: Vec<String> = BENIGN_CORPUS.iter().map(|t| (*t).to_string()).collect();
+        corpus.extend(
+            [
+                "AKIAIOSFODNN7EXAMPLE",
+                "please charge 4111 1111 1111 1111 today",
+                "mail alice@example.com token AKIAIOSFODNN7EXAMPLE",
+                "Send to alice@example.com from 192.168.1.100:8080",
+                "db_host=10.0.0.1:5432",
+                "DE89370400440532013000",
+                "012 31 2024",
+                "Call me at (555) 867-5309",
+                "Order AB123456789 is ready",
+                "arn:aws:iam::123456789012:role/ReadOnly",
+                "postgresql://alice:S3cr3tP@ss@db.example.com:5432/mydb",
+                "password=hunter2",
+                "password: foo",
+                "",
+                "   \n\t",
+                "\u{FF21}\u{FF2B}\u{FF29}\u{FF21}IOSFODNN7EXAMPLE",
+            ]
+            .map(str::to_string),
+        );
+        corpus.push(ghp);
+        corpus.push(twilio);
+        corpus.push(format!("notes\n{}\nmore notes", "AKIAIOSFODNN7EXAMPLE"));
+
+        for text in &corpus {
+            let ranked = det
+                .scan_all(text)
+                .iter()
+                .any(|finding| finding.severity == Severity::HighConfidence);
+            assert_eq!(det.may_auto_wipe(text), ranked, "{text:?}");
+            assert_eq!(det.is_sensitive(text), ranked, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn the_predicate_is_cheaper_than_the_ranked_scan_it_replaced() {
+        const UNIT: &str = "DB_HOST=10.0.0.1:5432\nSMTP_USER=alice@example.com\n\
+                            Authorization: Bearer eyJhbGci0iJSUzI1NiIsInR5cCI6IkpXVCJ9\n\
+                            contact: bob@example.org, 172.16.0.5:6379\n";
+        const RUNS: u32 = 5;
+
+        let det = detector();
+        let text = UNIT.repeat(500);
+        let ranked = |text: &str| {
+            det.scan_all(text)
+                .iter()
+                .any(|finding| finding.severity == Severity::HighConfidence)
+        };
+        assert!(!ranked(&text));
+        assert!(!det.may_auto_wipe(&text));
+
+        let started = std::time::Instant::now();
+        for _ in 0..RUNS {
+            assert!(!det.may_auto_wipe(&text));
+        }
+        let predicate_cost = started.elapsed();
+
+        let started = std::time::Instant::now();
+        for _ in 0..RUNS {
+            assert!(!ranked(&text));
+        }
+        let ranked_cost = started.elapsed();
+
+        eprintln!("predicate {predicate_cost:?} vs ranked scan {ranked_cost:?} over {RUNS} runs");
+        assert!(
+            predicate_cost <= ranked_cost,
+            "the predicate costs more than the ranked scan it replaced \
+             ({predicate_cost:?} vs {ranked_cost:?})"
+        );
+    }
+
+    /// The floor-membership index is derived, never listed: a rule added above
+    /// the floor must join the predicate without anyone remembering to add it.
+    #[test]
+    fn the_predicate_index_is_derived_from_the_floor() {
+        let det = detector();
+        assert_eq!(det.above_autowipe_floor.len(), det.rules.len());
+        for (rule, above) in det.rules.iter().zip(&det.above_autowipe_floor) {
+            assert_eq!(
+                *above,
+                rule.spec.confidence >= AUTOWIPE_CONFIDENCE_FLOOR,
+                "{}",
+                rule.spec.name
+            );
+            assert_eq!(
+                *above,
+                rule.spec.finding().severity == Severity::HighConfidence,
+                "{}",
+                rule.spec.name
+            );
+        }
     }
 
     /// I8: no silent drops. Name, category and confidence travel *with* the

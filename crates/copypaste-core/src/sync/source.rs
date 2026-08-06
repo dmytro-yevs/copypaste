@@ -18,7 +18,9 @@
 //! [`fetch`]: SyncSource::fetch
 //! [`apply`]: SyncSource::apply
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use copypaste_p2p::protocol::{ItemSummary, SyncItem};
 use copypaste_p2p::sync::{SyncError, SyncSource};
@@ -35,6 +37,43 @@ use crate::Keyring;
 
 const MSG_SYNC_DISABLED: &str = "sync is disabled";
 
+/// How long applied versions may coalesce onto one retention sweep.
+const RETENTION_DEBOUNCE: Duration = Duration::from_millis(250);
+
+/// Retention is a *bound* on the history, not a step of the merge. Enforcing it
+/// after every applied item runs the same `O(history)` sweep pair a thousand
+/// times over a first sync where sweeping a handful of times leaves the
+/// identical history — and that is the first-pair-of-devices path.
+///
+/// Leading edge inline, so a lone merge still returns with the limits enforced;
+/// a burst coalesces onto a trailing run scheduled on the reactor, which is
+/// what makes the bound hold when a session ends by error or disconnect and not
+/// only when it ends by agreement. Sweeping later can only delete less, later,
+/// which is the safe direction under CLAUDE.md rule 4 — skipping the trailing
+/// run is not, so with no reactor to carry it the sweep happens inline instead.
+#[derive(Default)]
+struct RetentionGate {
+    last_run: Mutex<Option<Instant>>,
+    trailing_scheduled: AtomicBool,
+}
+
+impl RetentionGate {
+    /// True when this caller owns the sweep for the current window.
+    fn claim(&self) -> bool {
+        let mut last = self.last_run.lock().unwrap_or_else(PoisonError::into_inner);
+        if last.is_none_or(|at| at.elapsed() >= RETENTION_DEBOUNCE) {
+            *last = Some(Instant::now());
+            true
+        } else {
+            false
+        }
+    }
+
+    fn stamp(&self) {
+        *self.last_run.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
+    }
+}
+
 /// A [`SyncSource`] over a [`Store`].
 ///
 /// Holds the keyring and the detector as well as the store: applying an item
@@ -47,6 +86,7 @@ pub struct StoreSource {
     device_id: String,
     device_name: String,
     retention_settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
+    retention: Arc<RetentionGate>,
     on_applied: Option<Arc<dyn Fn(i64) + Send + Sync>>,
 }
 
@@ -97,6 +137,7 @@ impl StoreSource {
             device_id,
             device_name,
             retention_settings: Arc::new(settings),
+            retention: Arc::default(),
             on_applied: None,
         }
     }
@@ -142,12 +183,57 @@ impl StoreSource {
             incoming,
         )?;
         if applied {
-            crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
+            self.enforce_retention(None);
             if let Some(hook) = &self.on_applied {
                 hook(incoming.created_at);
             }
         }
         Ok(applied)
+    }
+
+    /// Hold the retention bound after a stored version, at most once per
+    /// [`RETENTION_DEBOUNCE`]. `settings` is the clone this apply already made,
+    /// where it has one.
+    fn enforce_retention(&self, settings: Option<&copypaste_ipc::ConfigData>) {
+        if self.retention.claim() {
+            match settings {
+                Some(settings) => crate::ingest::enforce_retention(&self.store, settings),
+                None => {
+                    crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
+                }
+            }
+            return;
+        }
+        self.schedule_trailing_retention();
+    }
+
+    fn schedule_trailing_retention(&self) {
+        if self
+            .retention
+            .trailing_scheduled
+            .swap(true, Ordering::SeqCst)
+        {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            self.retention
+                .trailing_scheduled
+                .store(false, Ordering::SeqCst);
+            self.retention.stamp();
+            crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
+            return;
+        };
+        let retention = Arc::clone(&self.retention);
+        let settings = Arc::clone(&self.retention_settings);
+        let store = self.store.clone();
+        handle.spawn(async move {
+            tokio::time::sleep(RETENTION_DEBOUNCE).await;
+            // Cleared before the sweep, so a version applied while it runs
+            // schedules the next one rather than being absorbed by this one.
+            retention.trailing_scheduled.store(false, Ordering::SeqCst);
+            retention.stamp();
+            super::blocking(|| crate::ingest::enforce_retention(&store, &settings()));
+        });
     }
 
     /// The row as it will travel, or `None` when it must not.
@@ -177,9 +263,12 @@ impl StoreSource {
         })
     }
 
-    fn require_sync_enabled(&self) -> Result<(), SyncError> {
-        if (self.retention_settings)().sync_enabled {
-            Ok(())
+    /// The current settings, or the refusal. One clone per call: `apply` needs
+    /// both the switch and the retention policy out of the same read.
+    fn settings_if_sync_enabled(&self) -> Result<copypaste_ipc::ConfigData, SyncError> {
+        let settings = (self.retention_settings)();
+        if settings.sync_enabled {
+            Ok(settings)
         } else {
             Err(SyncError::Source(MSG_SYNC_DISABLED.to_string()))
         }
@@ -201,7 +290,7 @@ impl SyncSource for StoreSource {
     }
 
     fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError> {
-        self.require_sync_enabled()?;
+        self.settings_if_sync_enabled()?;
         super::blocking(|| {
             let rows = self
                 .store
@@ -225,7 +314,7 @@ impl SyncSource for StoreSource {
     }
 
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
-        self.require_sync_enabled()?;
+        self.settings_if_sync_enabled()?;
         super::blocking(|| {
             let rows = self
                 .store
@@ -239,7 +328,7 @@ impl SyncSource for StoreSource {
     }
 
     fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
-        self.require_sync_enabled()?;
+        let settings = self.settings_if_sync_enabled()?;
         super::blocking(|| {
             let result = apply_remote_p2p_version_with_pin_stamp(
                 &self.store,
@@ -267,7 +356,7 @@ impl SyncSource for StoreSource {
             )
             .map_err(|e| SyncError::Source(e.message().to_string()))?;
             if result.content {
-                crate::ingest::enforce_retention(&self.store, &(self.retention_settings)());
+                self.enforce_retention(Some(&settings));
                 if let Some(hook) = &self.on_applied {
                     hook(item.created_at);
                 }
@@ -544,6 +633,40 @@ mod tests {
         let stored = f.store.version("peer-item").unwrap().unwrap();
         assert!(stored.pinned);
         assert_eq!(stored.pin_order, Some(3.0));
+    }
+
+    /// The debounce may sweep later; it may never not sweep at all. A burst
+    /// that ends with no further apply — which is how a session ends when the
+    /// peer disconnects — must still come back under the cap, and only the
+    /// trailing run can bring it there.
+    #[tokio::test]
+    async fn a_burst_of_applies_still_lands_under_the_history_cap() {
+        let f = fixture_named("beta");
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            Arc::clone(&f.detector),
+            f.here.clone(),
+            "test-device".to_string(),
+            copypaste_ipc::ConfigData {
+                history_limit: 2,
+                ..Default::default()
+            },
+        );
+
+        for n in 0..8 {
+            assert!(source
+                .apply(peer_item(
+                    &format!("item-{n}"),
+                    &format!("remote value {n}"),
+                    1_000 + n,
+                ))
+                .unwrap());
+        }
+
+        tokio::time::sleep(RETENTION_DEBOUNCE * 4).await;
+        assert_eq!(f.store.count().unwrap(), 2);
+        assert!(f.store.get("item-7").unwrap().is_some());
     }
 
     #[test]
