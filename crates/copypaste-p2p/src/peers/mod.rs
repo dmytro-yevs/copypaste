@@ -11,6 +11,7 @@
 //! and both are enforced on every read path rather than at one gate.
 //!
 mod error;
+mod expiry;
 mod file;
 mod peer;
 mod store;

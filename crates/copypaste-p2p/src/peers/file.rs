@@ -154,6 +154,18 @@ fn sync_dir(dir: &Path) {
     }
 }
 
+pub(super) fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
+    let Some(stored) = state.peers.get(&incoming.pairing_id) else {
+        return false;
+    };
+    stored.last_seen_ms > 0
+        && incoming.last_seen_ms > 0
+        && !state.pending.contains_key(&incoming.pairing_id)
+        && stored.name == incoming.name
+        && stored.last_addr == incoming.last_addr
+        && stored.psk_matches(&incoming.psk)
+}
+
 /// Warn — do not fail — if the file on disk is readable by anyone else. It
 /// holds every pre-shared key.
 #[cfg(unix)]
