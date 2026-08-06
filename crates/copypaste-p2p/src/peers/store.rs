@@ -22,6 +22,7 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
 use zeroize::Zeroizing;
@@ -39,6 +40,7 @@ use crate::transport::PskCandidate;
 pub struct PeerStore {
     path: PathBuf,
     state: RwLock<State>,
+    unflushed: AtomicBool,
 }
 
 impl PeerStore {
@@ -65,6 +67,7 @@ impl PeerStore {
         Ok(Self {
             path: path.to_path_buf(),
             state: RwLock::new(state),
+            unflushed: AtomicBool::new(false),
         })
     }
 
@@ -154,6 +157,13 @@ impl PeerStore {
             return Err(PeerStoreError::TooManyPairings);
         }
 
+        if only_last_seen_moved(&guard, &peer) {
+            let pairing_id = peer.pairing_id.clone();
+            guard.peers.insert(pairing_id, peer);
+            self.unflushed.store(true, Ordering::Release);
+            return Ok(());
+        }
+
         let established = peer.last_seen_ms > 0;
         let previous_deadline = if established {
             guard.pending.remove(&pairing_id)
@@ -166,7 +176,7 @@ impl PeerStore {
         };
         let previous = guard.peers.insert(pairing_id.clone(), peer);
 
-        match write_atomically(&self.path, &guard) {
+        match self.persist(&guard) {
             Ok(()) => {
                 tracing::debug!(%pairing_id, established, "paired device saved");
                 Ok(())
@@ -203,7 +213,7 @@ impl PeerStore {
             return Ok(false);
         };
         let deadline = guard.pending.remove(pairing_id);
-        match write_atomically(&self.path, &guard) {
+        match self.persist(&guard) {
             Ok(()) => {
                 tracing::debug!(%pairing_id, "paired device removed");
                 Ok(true)
@@ -241,7 +251,7 @@ impl PeerStore {
         let deadline = guard.pending.remove(pairing_id);
         let previous_revocation = guard.revoked.insert(pairing_id.to_string(), now_ms);
 
-        match write_atomically(&self.path, &guard) {
+        match self.persist(&guard) {
             Ok(()) => {
                 tracing::info!(%pairing_id, "revoked a paired device");
                 Ok(removed.is_some())
@@ -279,7 +289,7 @@ impl PeerStore {
             guard.revoked.insert(pairing_id.clone(), now_ms);
         }
 
-        match write_atomically(&self.path, &guard) {
+        match self.persist(&guard) {
             Ok(()) => {
                 tracing::info!(revoked = peers.len(), "revoked every paired device");
                 Ok(peers.len())
@@ -340,7 +350,7 @@ impl PeerStore {
             removed.push((pairing_id.clone(), peer, deadline));
         }
 
-        match write_atomically(&self.path, &guard) {
+        match self.persist(&guard) {
             Ok(()) => {
                 tracing::info!(count = stale.len(), "dropped unredeemed pairing codes");
                 Ok(stale.len())
@@ -419,6 +429,34 @@ impl PeerStore {
     pub fn is_empty(&self) -> bool {
         self.list().is_empty()
     }
+
+    pub fn flush(&self) -> Result<(), PeerStoreError> {
+        if !self.unflushed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let guard = self.state.read().map_err(|_| PeerStoreError::Poisoned)?;
+        self.persist(&guard)
+    }
+
+    fn persist(&self, state: &State) -> Result<(), PeerStoreError> {
+        let written = write_atomically(&self.path, state);
+        if written.is_ok() {
+            self.unflushed.store(false, Ordering::Release);
+        }
+        written
+    }
+}
+
+fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
+    let Some(stored) = state.peers.get(&incoming.pairing_id) else {
+        return false;
+    };
+    stored.last_seen_ms > 0
+        && incoming.last_seen_ms > 0
+        && !state.pending.contains_key(&incoming.pairing_id)
+        && stored.name == incoming.name
+        && stored.last_addr == incoming.last_addr
+        && stored.psk_matches(&incoming.psk)
 }
 
 /// Pairings that count against [`MAX_PAIRINGS`]: the ones whose keys a
@@ -578,6 +616,125 @@ mod tests {
         assert!(
             leftovers.is_empty(),
             "temp files left behind: {leftovers:?}"
+        );
+    }
+
+    /// The end of every successful session writes a fresh `last_seen_ms` and
+    /// nothing else. That must not cost two `fsync`s and a directory `fsync`;
+    /// the value is still live to every reader, and the next write carries it.
+    #[test]
+    fn a_repeat_session_does_not_rewrite_the_file_for_last_seen_alone() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+
+        let established = peer("Laptop");
+        let id = established.pairing_id.clone();
+        let touched = redeemed(&established, 1_753_999_999_999);
+        store.upsert(established).expect("first session");
+        let on_disk = std::fs::read(&path).expect("read");
+
+        store.upsert(touched).expect("second session");
+        assert_eq!(
+            std::fs::read(&path).expect("read"),
+            on_disk,
+            "a fresh last_seen_ms must not cost a write"
+        );
+        assert_eq!(
+            store.get(&id).expect("present").last_seen_ms,
+            1_753_999_999_999,
+            "the reader must still see it"
+        );
+
+        store.flush().expect("flush");
+        assert_eq!(
+            PeerStore::open(&path)
+                .expect("reopen")
+                .get(&id)
+                .expect("present")
+                .last_seen_ms,
+            1_753_999_999_999
+        );
+        // And a flush with nothing outstanding writes nothing at all.
+        let flushed = std::fs::read(&path).expect("read");
+        store.flush().expect("second flush");
+        assert_eq!(std::fs::read(&path).expect("read"), flushed);
+    }
+
+    /// The lazy path is for `last_seen_ms` and nothing else. A revocation that
+    /// only reached the disk on the next mutation would let a device the user
+    /// cut off come back after a crash (`CopyPaste-gbo`).
+    #[test]
+    fn revoking_after_a_deferred_touch_is_durable_immediately() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+
+        let lost = peer("stolen phone");
+        let id = lost.pairing_id.clone();
+        let touched = redeemed(&lost, 1_753_999_999_999);
+        store.upsert(lost).expect("upsert");
+        store.upsert(touched).expect("session");
+
+        assert!(store.revoke(&id, 1_753_900_000_000).expect("revoke"));
+
+        let reopened = PeerStore::open(&path).expect("reopen");
+        assert!(
+            reopened.get(&id).is_none(),
+            "the pairing survived a restart"
+        );
+        assert!(reopened.psks().is_empty());
+        assert_eq!(reopened.revoked().len(), 1);
+    }
+
+    /// A name or an address arriving with a session is not telemetry: the peer
+    /// list renders it and the next dial uses it, so it is written now.
+    #[test]
+    fn a_changed_name_or_address_still_writes_through() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+
+        let first = peer("placeholder");
+        let id = first.pairing_id.clone();
+        let psk = first.psk;
+        let addr = first.last_addr;
+        store.upsert(first).expect("upsert");
+
+        store
+            .upsert(Peer {
+                pairing_id: id.clone(),
+                name: "the name off the wire".to_string(),
+                psk,
+                last_addr: addr,
+                last_seen_ms: 1_753_999_999_999,
+            })
+            .expect("session");
+        assert_eq!(
+            PeerStore::open(&path)
+                .expect("reopen")
+                .get(&id)
+                .expect("present")
+                .name,
+            "the name off the wire"
+        );
+
+        store
+            .upsert(Peer {
+                pairing_id: id.clone(),
+                name: "the name off the wire".to_string(),
+                psk,
+                last_addr: Some("192.168.1.9:47654".parse().expect("addr")),
+                last_seen_ms: 1_754_000_000_000,
+            })
+            .expect("moved");
+        assert_eq!(
+            PeerStore::open(&path)
+                .expect("reopen")
+                .get(&id)
+                .expect("present")
+                .last_addr,
+            Some("192.168.1.9:47654".parse().expect("addr"))
         );
     }
 

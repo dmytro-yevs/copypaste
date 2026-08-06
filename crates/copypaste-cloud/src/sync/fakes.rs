@@ -202,16 +202,18 @@ impl CloudSource for FakeSource {
             .collect())
     }
 
-    fn apply_remote(&self, incoming: LocalItem) -> Result<bool, SyncError> {
+    fn apply_remote(&self, incoming: LocalItem) -> Result<Applied, SyncError> {
         self.applies.fetch_add(1, Ordering::SeqCst);
         let mut stored = self.stored.lock().unwrap();
         match stored.get(&incoming.item_id) {
             // Strict `>`: equal keeps local, which is what makes a replay
             // free (INV-I1).
-            Some(local) if incoming.created_at <= local.created_at => Ok(false),
+            Some(local) if incoming.created_at <= local.created_at => {
+                Ok(Applied::Declined(incoming))
+            }
             _ => {
                 stored.insert(incoming.item_id.clone(), incoming);
-                Ok(true)
+                Ok(Applied::Merged)
             }
         }
     }
