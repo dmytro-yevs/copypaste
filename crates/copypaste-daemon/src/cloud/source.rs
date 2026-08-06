@@ -20,7 +20,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use copypaste_cloud::sync::{CloudSource, LocalItem, SyncError};
+use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, SyncError};
 use copypaste_core::sync::blocking;
 use copypaste_core::RemoteVersion;
 use copypaste_p2p::protocol::ItemSummary;
@@ -173,7 +173,7 @@ impl CloudSource for StoreSource {
         })
     }
 
-    fn apply_remote(&self, item: LocalItem) -> Result<bool, SyncError> {
+    fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError> {
         blocking(|| {
             let text = copypaste_ipc::content_type::is_text(&item.content_type)
                 .then(|| String::from_utf8_lossy(&item.content));
@@ -211,7 +211,11 @@ impl CloudSource for StoreSource {
                     crate::cloud::note_version_written(&self.state, local.created_at);
                 }
             }
-            Ok(applied)
+            Ok(if applied {
+                Applied::Merged
+            } else {
+                Applied::Declined(item)
+            })
         })
     }
 
@@ -624,9 +628,12 @@ mod tests {
             origin_device_id: "device-a".into(),
         };
 
-        assert!(source.apply_remote(incoming()).unwrap());
+        assert_eq!(source.apply_remote(incoming()).unwrap(), Applied::Merged);
         assert!(
-            !source.apply_remote(incoming()).unwrap(),
+            matches!(
+                source.apply_remote(incoming()).unwrap(),
+                Applied::Declined(_)
+            ),
             "a replayed version must not be re-applied (INV-I1)"
         );
 
@@ -674,7 +681,10 @@ mod tests {
         let offered = source.local_changes_since(0).unwrap();
         let mine = offered.into_iter().find(|i| i.item_id == id).unwrap();
 
-        assert!(!source.apply_remote(mine).unwrap());
+        assert!(matches!(
+            source.apply_remote(mine).unwrap(),
+            Applied::Declined(_)
+        ));
         assert_eq!(state.store.count().unwrap(), 1);
     }
 
@@ -697,7 +707,10 @@ mod tests {
         let mut stale = local.clone();
         stale.created_at -= 1;
         stale.origin_device_id = "device-b".into();
-        assert!(!source.apply_remote(stale).unwrap());
+        assert!(matches!(
+            source.apply_remote(stale).unwrap(),
+            Applied::Declined(_)
+        ));
         assert_eq!(
             source.upload_floor().unwrap(),
             local.created_at,
@@ -713,7 +726,10 @@ mod tests {
             .meta
             .set_state_ms(KEY_UPLOAD_FLOOR, passed_floor)
             .unwrap();
-        assert!(!source.apply_remote(local).unwrap());
+        assert!(matches!(
+            source.apply_remote(local).unwrap(),
+            Applied::Declined(_)
+        ));
         assert_eq!(
             source.upload_floor().unwrap(),
             passed_floor,
