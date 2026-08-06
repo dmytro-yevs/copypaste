@@ -56,7 +56,9 @@ describe("search orchestration", () => {
     });
 
     await waitFor(() => expect(result.current.items).toHaveLength(2));
-    expect(listItems).toHaveBeenCalledTimes(2);
+    // Two cursor pages plus the head poll that replaced the infinite query's
+    // `refetchInterval` (F-UI-1).
+    expect(listItems).toHaveBeenCalledTimes(3);
     expect(result.current.hasMore).toBe(false);
   });
 

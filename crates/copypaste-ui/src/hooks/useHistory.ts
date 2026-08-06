@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -9,6 +10,7 @@ import { toast } from "sonner";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
+import { IMAGE_PREVIEW_KEY, imagePreviewKey } from "@/hooks/useHistoryMedia";
 import {
   PAGE_SIZE,
   POLL_ACTIVE_MS,
@@ -35,7 +37,10 @@ export const HISTORY_KEY = ["history"] as const;
 export const HISTORY_SEARCH_KEY = ["history-search"] as const;
 export const STATUS_KEY = ["status"] as const;
 
-export const historyKey = (query: string) => [...HISTORY_KEY, query] as const;
+export const HISTORY_HEAD_KEY = [...HISTORY_KEY, "head"] as const;
+
+export const historyKey = (query: string) =>
+  [...HISTORY_KEY, "pages", query] as const;
 
 export interface History {
   readonly items: readonly Item[];
@@ -67,11 +72,11 @@ export function pollInterval(pushLive: boolean, failed: boolean): number {
  * Skipped counts sum across pages; the last page's alone would shrink as the
  * user scrolls.
  */
-function flatten(data: { pages: ItemPage[] }): History {
+function flatten(pages: readonly ItemPage[]): History {
   const seen = new Set<string>();
   const items: Item[] = [];
   let skipped = 0;
-  for (const page of data.pages) {
+  for (const page of pages) {
     skipped += page.skipped_undecryptable;
     for (const item of page.items) {
       if (seen.has(item.id)) continue;
@@ -82,12 +87,31 @@ function flatten(data: { pages: ItemPage[] }): History {
   return { items, skipped };
 }
 
+function flattenPages(data: { pages: ItemPage[] }): History {
+  return flatten(data.pages);
+}
+
+/**
+ * The head is a fresh read of the same window the first cached page holds, so
+ * its `skipped_undecryptable` replaces that page's rather than adding to it.
+ * The cached page's *items* are still needed: rows the head window has pushed
+ * out are behind the cursor page 2 was fetched with, so nothing else names
+ * them.
+ */
+function mergeHead(head: ItemPage, cached: { pages: ItemPage[] }): History {
+  const merged = flatten([head, ...cached.pages]);
+  return {
+    items: merged.items,
+    skipped: merged.skipped - (cached.pages[0]?.skipped_undecryptable ?? 0),
+  };
+}
+
 /** Paged by cursor, never by offset (B-1, `CopyPaste-8ebg.57`). Search is not
  *  paged at all. */
 export function useHistory(query: string, pushLive = false) {
   const searching = query.length > 0;
 
-  return useInfiniteQuery({
+  const pages = useInfiniteQuery({
     queryKey: historyKey(query),
     queryFn: ({ pageParam }) =>
       searching ? searchItems(query, SEARCH_LIMIT) : listItems(PAGE_SIZE, pageParam),
@@ -96,13 +120,46 @@ export function useHistory(query: string, pushLive = false) {
     // in `skipped_undecryptable` were read and dropped, so stopping on a short
     // page hides the rest of the history behind a handful of corrupt rows.
     getNextPageParam: (lastPage) => (searching ? undefined : lastPage.next_cursor ?? undefined),
-    // INV-27: `refetchIntervalInBackground` stays unset, so a hidden window
-    // polls zero times.
-    refetchInterval: (q) => pollInterval(pushLive, q.state.status === "error"),
+    // A periodic refetch on an infinite query re-walks `oldPages.length` pages
+    // sequentially. The freshness the poll exists for only concerns the head,
+    // which the query below polls on its own.
+    refetchInterval: false,
     // Typing must not blank the list between keystrokes.
     placeholderData: keepPreviousData,
-    select: flatten,
   });
+
+  // INV-27: `refetchIntervalInBackground` stays unset, so a hidden window polls
+  // zero times.
+  const head = useQuery({
+    queryKey: HISTORY_HEAD_KEY,
+    queryFn: () => listItems(PAGE_SIZE, null),
+    enabled: !searching,
+    refetchInterval: (q) => pollInterval(pushLive, q.state.status === "error"),
+  });
+
+  const headPage = searching ? undefined : head.data;
+  const cached = pages.data;
+
+  // Both inputs are reference-stable across an idle poll, so this returns the
+  // same list — INV-2, and the anchor INV-1/INV-6 reads is undisturbed. The
+  // head goes first because `flatten` keeps the first occurrence: a pin that
+  // moved a row between two held pages must not show it twice (INV-4).
+  const data = useMemo(() => {
+    if (cached === undefined) return headPage && flatten([headPage]);
+    if (headPage === undefined) return flattenPages(cached);
+    return mergeHead(headPage, cached);
+  }, [cached, headPage]);
+
+  return {
+    data,
+    error: pages.error,
+    isError: pages.isError,
+    isPending: pages.isPending,
+    hasNextPage: pages.hasNextPage,
+    isFetchingNextPage: pages.isFetchingNextPage,
+    fetchNextPage: pages.fetchNextPage,
+    refetch: pages.refetch,
+  };
 }
 
 export function useHistorySearch(query: string) {
@@ -117,14 +174,27 @@ export function historyOf(data: History | undefined): History {
   return data ?? EMPTY;
 }
 
-export function useStatus() {
-  return useQuery<StatusData>({
+/**
+ * `select` is not an optimisation of the poll — the 2s cadence is a defect fix
+ * (`CopyPaste-f701`) and stays. It is what stops `counters.uptime_secs`, which
+ * ticks every second, from handing every consumer a new object twice a second
+ * and re-rendering the whole history subtree at idle. Pass a *module-scope*
+ * selector naming only the fields the caller renders; structural sharing then
+ * returns the previous result. `error` and `isPending` are unaffected, so a
+ * dead daemon is still detected within one poll.
+ */
+export function useStatus<T = StatusData>(select?: (data: StatusData) => T) {
+  return useQuery<StatusData, Error, T>({
     queryKey: STATUS_KEY,
     queryFn: getStatus,
     refetchInterval: (q) =>
       q.state.status === "error" ? POLL_BACKOFF_MS : STATUS_POLL_MS,
+    select,
   });
 }
+
+export const statusReachable = (): true => true;
+export const statusItemCount = (data: StatusData): number => data.item_count;
 
 /**
  * Not optimistic, and nothing here reorders locally: INV-31 (a pinned item
@@ -168,6 +238,7 @@ export function useClearHistory() {
       toast.success(t("history.toast.cleared", { count: removed }));
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
+      qc.removeQueries({ queryKey: IMAGE_PREVIEW_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
@@ -237,10 +308,13 @@ export function useBulkDelete() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (items: readonly Item[]) => runBulk(items, (item) => deleteItem(item.id)),
-    onSuccess: (outcome) => {
+    onSuccess: (outcome, items) => {
       report("deleted", outcome);
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
+      for (const item of items) {
+        qc.removeQueries({ queryKey: imagePreviewKey(item.id) });
+      }
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
