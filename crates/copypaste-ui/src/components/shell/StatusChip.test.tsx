@@ -3,6 +3,7 @@ import { configure, screen, waitFor } from "@testing-library/react";
 
 import { StatusChip } from "@/components/shell/StatusChip";
 import { IpcFailure } from "@/lib/errors";
+import { STATUS_POLL_MS } from "@/lib/layout";
 import { useUi } from "@/store/ui";
 import { peer, status, withClient, withUser } from "@/test/harness";
 
@@ -77,6 +78,23 @@ describe("sync status", () => {
     expect(useUi.getState().view).toBe("settings");
     expect(useUi.getState().settingsTab).toBe("service");
   });
+
+  /** `CopyPaste-f701`: a 10s poll left this chip green long after the service
+   *  had died. F-UI-3 narrows what the chip *selects* out of the status payload
+   *  so a ticking uptime stops re-rendering the app — the liveness signal it
+   *  reads is `status.error`, and that must still arrive within one poll. */
+  it("goes red within one poll of the service dying", async () => {
+    withClient(<StatusChip />);
+    await screen.findByRole("status", { name: /sync: synced/i });
+
+    getStatus.mockRejectedValue(new IpcFailure("offline", true));
+    await waitFor(
+      () => expect(screen.getByRole("status").getAttribute("aria-label")).toMatch(
+        /sync: offline/i,
+      ),
+      { timeout: STATUS_POLL_MS * 2 },
+    );
+  }, 20_000);
 
   it("does not add an Android floating status affordance while healthy", async () => {
     withClient(<StatusChip attentionOnly />);

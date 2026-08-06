@@ -9,11 +9,11 @@
  *   A11Y-14         the announcer is not inside role="list"
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { createRef } from "react";
 
 import { HistoryList, quickSlot } from "@/components/history/HistoryList";
-import { items } from "@/test/harness";
+import { items, withClient } from "@/test/harness";
 import type { Selection } from "@/hooks/useSelection";
 import type { Item } from "@/lib/ipc";
 
@@ -65,7 +65,7 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
     ...over,
   };
 
-  const view = render(<HistoryList {...props} />);
+  const view = withClient(<HistoryList {...props} />);
   return {
     ...view,
     props,

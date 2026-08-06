@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { ImageOff, LoaderCircle } from "lucide-react";
 
-import { getImagePreview } from "@/lib/ipc";
+import { useImagePreview } from "@/hooks/useHistoryMedia";
 import { cn } from "@/lib/cn";
 
 interface HistoryImagePreviewProps {
@@ -33,32 +33,33 @@ export function HistoryImagePreview({
   loadingLabel,
   failureLabel,
 }: HistoryImagePreviewProps) {
-  const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
+  const preview = useImagePreview(id);
+  const base64 = preview.data?.png_base64 ?? null;
   const [url, setUrl] = useState<string | null>(null);
+  const [undecodable, setUndecodable] = useState(false);
 
+  // The Blob URL stays owned here, so it is still revoked the moment the
+  // virtualizer unmounts the row; only the round trip behind it is cached.
   useEffect(() => {
-    let active = true;
-    let objectUrl: string | null = null;
-    void getImagePreview(id)
-      .then((preview) => {
-        objectUrl = pngUrl(preview.png_base64);
-        if (active) {
-          setUrl(objectUrl);
-          setState(objectUrl === null ? "failed" : "ready");
-        }
-        else if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
-      })
-      .catch(() => {
-        if (active) {
-          setUrl(null);
-          setState("failed");
-        }
-      });
+    if (base64 === null) {
+      setUrl(null);
+      setUndecodable(false);
+      return;
+    }
+    const objectUrl = pngUrl(base64);
+    setUrl(objectUrl);
+    setUndecodable(objectUrl === null);
     return () => {
-      active = false;
       if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
     };
-  }, [id]);
+  }, [base64]);
+
+  const state =
+    url !== null
+      ? "ready"
+      : preview.isError || undecodable
+        ? "failed"
+        : "loading";
 
   if (state !== "ready" || url === null) {
     const fallbackStyle = {

@@ -11,7 +11,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 
-import { HISTORY_KEY, useHistory } from "@/hooks/useHistory";
+import { HISTORY_HEAD_KEY, HISTORY_KEY, useHistory } from "@/hooks/useHistory";
 import { IpcFailure } from "@/lib/errors";
 import { PAGE_SIZE } from "@/lib/layout";
 import { item, items, page, testClient } from "@/test/harness";
@@ -55,7 +55,9 @@ describe("an idle poll produces no new data (INV-2 / AT-5)", () => {
     const first = result.current.data;
     await client.refetchQueries({ queryKey: HISTORY_KEY });
     await client.refetchQueries({ queryKey: HISTORY_KEY });
-    await waitFor(() => expect(listItems).toHaveBeenCalledTimes(3));
+    // Two queries under `HISTORY_KEY`: the cursor-paged one and the head poll
+    // that replaced its `refetchInterval` (F-UI-1).
+    await waitFor(() => expect(listItems).toHaveBeenCalledTimes(6));
 
     // Same reference after three polls: no re-render, and the scroll anchor is
     // never disturbed.
@@ -63,17 +65,57 @@ describe("an idle poll produces no new data (INV-2 / AT-5)", () => {
   });
 
   it("does produce a new array when a row actually changes (INV-3 / AT-6)", async () => {
-    listItems.mockImplementationOnce(async () => page(items(3)));
-    listItems.mockImplementation(async () => page(items(4)));
+    let rows = 3;
+    listItems.mockImplementation(async () => page(items(rows)));
 
     const { client, Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
     await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
 
     const first = result.current.data;
+    rows = 4;
     await client.refetchQueries({ queryKey: HISTORY_KEY });
     await waitFor(() => expect(result.current.data?.items).toHaveLength(4));
     expect(result.current.data).not.toBe(first);
+  });
+});
+
+/**
+ * F-UI-1. A `refetchInterval` on an infinite query re-walks every page the user
+ * has scrolled through, sequentially, on every tick — 5 `list` round trips per
+ * poll at the default display limit. Freshness only ever concerned the head.
+ */
+describe("the idle poll reads the head, not every loaded page", () => {
+  it("issues one list call per tick however many pages are held", async () => {
+    const page1 = items(PAGE_SIZE);
+    const page2 = items(PAGE_SIZE).map((entry) => ({
+      ...entry,
+      id: `p2-${entry.id}`,
+    }));
+    listItems.mockImplementation(async (_limit: number, cursor: string | null) =>
+      cursor === null ? page(page1, 0, "after-page-1") : page(page2),
+    );
+
+    const { client, Wrapper } = wrapper();
+    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE));
+    await result.current.fetchNextPage();
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE * 2));
+
+    listItems.mockClear();
+    await client.refetchQueries({ queryKey: HISTORY_HEAD_KEY });
+    expect(listItems).toHaveBeenCalledTimes(1);
+    expect(listItems).toHaveBeenCalledWith(PAGE_SIZE, null);
+    // The pages the user scrolled through are still there.
+    expect(result.current.data?.items).toHaveLength(PAGE_SIZE * 2);
+  });
+
+  it("counts undecryptable rows once when the head re-reads the first page", async () => {
+    listItems.mockImplementation(async () => page(items(2), 7));
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
+    await waitFor(() => expect(result.current.data?.skipped).toBe(7));
   });
 });
 
@@ -118,7 +160,6 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
       ...entry,
       id: `row-${index}`,
     }));
-    // Two captures land above the window after page 1 has been read.
     let list = original;
     const arrivals = ["fresh-a", "fresh-b"].map((id) => ({ ...item(), id }));
 
@@ -127,13 +168,15 @@ describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
       const slice = list.slice(start, start + limit);
       const last = slice.at(-1);
       const more = last !== undefined && list.indexOf(last) < list.length - 1;
-      if (cursor === null) list = [...arrivals, ...original];
       return page(slice, 0, more ? (last?.id ?? null) : null);
     });
 
     const { Wrapper } = wrapper();
     const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
     await waitFor(() => expect(result.current.data?.items).toHaveLength(PAGE_SIZE));
+
+    // Two captures land above the window after page 1 has been read.
+    list = [...arrivals, ...original];
 
     await result.current.fetchNextPage();
     await waitFor(() => expect(result.current.hasNextPage).toBe(false));
