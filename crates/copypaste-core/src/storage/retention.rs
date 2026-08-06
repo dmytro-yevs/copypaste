@@ -8,7 +8,9 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::connection::write_tx;
-use super::model::{is_constraint_violation, item_columns, row_to_item, StoreError, StoredItem};
+use super::model::{
+    is_constraint_violation, item_columns, row_to_item, ItemColumns, StoreError, StoredItem,
+};
 use super::store::Store;
 
 /// Width of the UNIQUE-index dedup bucket, in milliseconds.
@@ -28,6 +30,20 @@ pub const DEDUP_WINDOW_MS: i64 = 60_000;
 /// [`DEDUP_WINDOW_MS`] so the index and the code that resolves its violations
 /// agree about where a bucket starts.
 const DEDUP_BUCKET_MS: i64 = DEDUP_WINDOW_MS;
+
+fn live_count(conn: &Connection) -> rusqlite::Result<u64> {
+    let live: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(live.max(0) as u64)
+}
+
+fn unpinned_bytes(conn: &Connection) -> rusqlite::Result<u64> {
+    let total: i64 = conn.query_row(BYTE_CAP_TOTAL_SQL, [], |r| r.get(0))?;
+    Ok(total.max(0) as u64)
+}
 
 const BYTE_CAP_TOTAL_SQL: &str =
     "SELECT COALESCE(SUM(LENGTH(COALESCE(content_ciphertext, X''))), 0) \
@@ -63,14 +79,19 @@ impl Store {
     /// a user-visible delete event to propagate.
     pub fn evict_over_cap(&self, max_items: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn)?;
+        // The gate runs outside any transaction. `write_tx` is IMMEDIATE, so
+        // opening one first takes the database write lock before the query that
+        // says there is nothing to do — three times per capture, in the steady
+        // state where nothing is ever over a cap. The in-transaction re-check
+        // below is what makes reading it unlocked safe, and it is mandatory:
+        // eviction is a hard delete, so two callers both deciding to evict is
+        // unrecoverable (`has_wipeable_sensitive` is the same pattern).
+        if live_count(&conn)? <= max_items {
+            return Ok(0);
+        }
 
-        let live: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
-            [],
-            |r| r.get(0),
-        )?;
-        let live = live.max(0) as u64;
+        let tx = write_tx(&mut conn)?;
+        let live = live_count(&tx)?;
         if live <= max_items {
             return Ok(0);
         }
@@ -110,9 +131,12 @@ impl Store {
     /// deliberately retained for sync.
     pub fn evict_over_byte_cap(&self, max_bytes: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
+        if unpinned_bytes(&conn)? <= max_bytes {
+            return Ok(0);
+        }
+
         let tx = write_tx(&mut conn)?;
-        let total: i64 = tx.query_row(BYTE_CAP_TOTAL_SQL, [], |r| r.get(0))?;
-        let total = total.max(0) as u64;
+        let total = unpinned_bytes(&tx)?;
         if total <= max_bytes {
             return Ok(0);
         }
@@ -157,6 +181,19 @@ impl Store {
     /// Pinned items are never TTL-deleted (I9).
     pub fn evict_older_than(&self, cutoff_ms: i64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
+        let any: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM clipboard_items \
+                            WHERE deleted = 0 AND pinned = 0 AND created_at < ?1)",
+            [cutoff_ms],
+            |r| r.get(0),
+        )?;
+        if !any {
+            return Ok(0);
+        }
+
+        // The victim select inside the transaction is itself the re-check: it
+        // re-reads the same predicate under the write lock, so a row saved by a
+        // pin between the gate and here is no longer selected.
         let tx = write_tx(&mut conn)?;
         let victims: Vec<String> = {
             let mut stmt = tx.prepare(
@@ -208,7 +245,8 @@ impl Store {
               WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0 AND created_at < ?1 \
               ORDER BY created_at ASC, id ASC"
         ))?;
-        let rows = stmt.query_map([cutoff_ms], row_to_item)?;
+        let columns = ItemColumns::resolve(&stmt)?;
+        let rows = stmt.query_map([cutoff_ms], |row| row_to_item(row, &columns))?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }
@@ -238,8 +276,11 @@ pub(super) fn newest_live_with_hash(
           WHERE content_hash = ?1 AND created_at >= ?2 AND deleted = 0 \
           ORDER BY created_at DESC, id DESC LIMIT 1"
     ))?;
-    stmt.query_row(params![content_hash, since_ms], row_to_item)
-        .optional()
+    let columns = ItemColumns::resolve(&stmt)?;
+    stmt.query_row(params![content_hash, since_ms], |row| {
+        row_to_item(row, &columns)
+    })
+    .optional()
 }
 
 /// Moves a row's version stamp to `created_at`, in the caller's transaction.
@@ -292,9 +333,10 @@ pub(super) fn find_in_bucket(
           WHERE content_hash = ?1 AND created_at / ?2 = ?3 AND deleted = 0 \
           ORDER BY created_at DESC, id DESC LIMIT 1"
     ))?;
+    let columns = ItemColumns::resolve(&stmt)?;
     stmt.query_row(
         params![content_hash, DEDUP_BUCKET_MS, created_at / DEDUP_BUCKET_MS],
-        row_to_item,
+        |row| row_to_item(row, &columns),
     )
     .optional()
 }
@@ -305,7 +347,13 @@ fn hard_delete_in_tx(tx: &Transaction<'_>, ids: &[String]) -> rusqlite::Result<u
     if ids.is_empty() {
         return Ok(0);
     }
-    let mut del_fts = tx.prepare("DELETE FROM clipboard_fts WHERE id = ?1")?;
+    // By rowid, and while the item row still holds it. Keyed by `id` this was
+    // one full scan of the plaintext index per victim, so an eviction was
+    // quadratic in history and held the write lock for all of it.
+    let mut del_fts = tx.prepare(
+        "DELETE FROM clipboard_fts \
+          WHERE rowid = (SELECT fts_rowid FROM clipboard_items WHERE id = ?1)",
+    )?;
     let mut del_item = tx.prepare("DELETE FROM clipboard_items WHERE id = ?1")?;
     let mut removed = 0u64;
     for id in ids {
