@@ -41,7 +41,11 @@ CREATE TABLE clipboard_items (
     origin_device_id   TEXT    NOT NULL DEFAULT '',
     app_bundle_id      TEXT,
     app_name           TEXT,
-    payload_metadata   TEXT
+    payload_metadata   TEXT,
+    -- `clipboard_fts.rowid` of this row's index entry, NULL when it has none.
+    -- FTS5 seeks on nothing but its rowid: `WHERE id = ?` against the
+    -- UNINDEXED column is filtered after a full scan of the plaintext index.
+    fts_rowid          INTEGER
 );
 
 -- Serves the list query verbatim: pinned first, then pin order, then newest
@@ -79,9 +83,26 @@ CREATE INDEX idx_items_unpinned_bytes
     ON clipboard_items(LENGTH(COALESCE(content_ciphertext, X'')))
     WHERE deleted = 0 AND pinned = 0;
 
+-- Serves the sync read, covering. The partial predicate must stay written
+-- exactly as the query writes it or SQLite silently declines the index
+-- (`CopyPaste-crh3.3`); here that predicate is also what keeps a live sensitive
+-- item out of an advertisement, so a drift is a disclosure, not a slow query.
+CREATE INDEX idx_items_syncable
+    ON clipboard_items(created_at, id, content_hash, deleted, origin_device_id,
+                       pinned, pin_order, pin_updated_at, is_sensitive)
+    WHERE deleted = 1 OR is_sensitive = 0;
+
+-- Serves the incremental variant. Pin state moves on `pin_updated_at`, not on
+-- `created_at`, so a cursor over `created_at` alone silently stops propagating
+-- pin and unpin to old items (manifest 05 §3.6).
+CREATE INDEX idx_items_sync_cursor
+    ON clipboard_items(MAX(created_at, pin_updated_at), id)
+    WHERE deleted = 1 OR is_sensitive = 0;
+
 -- External-content mode is NOT used: there is no cascade from clipboard_items,
 -- so every delete path must remove the FTS row explicitly, in the same
--- transaction as the row change.
+-- transaction as the row change. Rows are keyed by `rowid`, mirrored in
+-- `clipboard_items.fts_rowid`, because that is the only key FTS5 can seek on.
 CREATE VIRTUAL TABLE clipboard_fts USING fts5(id UNINDEXED, content_text);
 
 -- This device's identity and every cursor, token and setting either transport
@@ -103,7 +124,7 @@ CREATE TABLE sync_device_name (
 );
 "#;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 struct Column {
     name: &'static str,
@@ -216,6 +237,12 @@ const CLIPBOARD_ITEMS_COLUMNS: &[Column] = &[
         not_null: false,
         primary_key: false,
     },
+    Column {
+        name: "fts_rowid",
+        declared_type: "INTEGER",
+        not_null: false,
+        primary_key: false,
+    },
 ];
 
 const CLIPBOARD_FTS_COLUMNS: &[Column] = &[
@@ -293,6 +320,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up_with_hook("", repair_early_v2_schema),
         M::up_with_hook("", repair_early_v2_schema),
         M::up_with_hook("", repair_dedup_index),
+        M::up_with_hook("", add_fts_rowid_and_sync_indexes),
     ])
 });
 
@@ -342,6 +370,38 @@ fn repair_dedup_index(tx: &Transaction<'_>) -> HookResult {
          CREATE UNIQUE INDEX idx_items_dedup
              ON clipboard_items(content_hash, created_at / 60000, origin_device_id)
              WHERE deleted = 0 AND content_hash <> '';",
+    )?;
+    Ok(())
+}
+
+/// Idempotent like the repair hooks above, because [`SCHEMA_V1`] already
+/// carries all of this on a fresh database and only a v2 history written
+/// before it needs the work done.
+///
+/// The backfill goes through a keyed temporary table rather than a correlated
+/// subquery: `clipboard_fts.id` is UNINDEXED, so the direct form is one full
+/// scan of the plaintext index per item row.
+fn add_fts_rowid_and_sync_indexes(tx: &Transaction<'_>) -> HookResult {
+    if !has_column(tx, "fts_rowid")? {
+        tx.execute_batch("ALTER TABLE clipboard_items ADD COLUMN fts_rowid INTEGER;")?;
+        tx.execute_batch(
+            "CREATE TEMP TABLE fts_rowid_map (id TEXT PRIMARY KEY, rowid_value INTEGER);
+             INSERT OR REPLACE INTO fts_rowid_map (id, rowid_value)
+                 SELECT id, rowid FROM clipboard_fts;
+             UPDATE clipboard_items SET fts_rowid =
+                 (SELECT rowid_value FROM fts_rowid_map m WHERE m.id = clipboard_items.id)
+               WHERE id IN (SELECT id FROM fts_rowid_map);
+             DROP TABLE fts_rowid_map;",
+        )?;
+    }
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_items_syncable
+             ON clipboard_items(created_at, id, content_hash, deleted, origin_device_id,
+                                pinned, pin_order, pin_updated_at, is_sensitive)
+             WHERE deleted = 1 OR is_sensitive = 0;
+         CREATE INDEX IF NOT EXISTS idx_items_sync_cursor
+             ON clipboard_items(MAX(created_at, pin_updated_at), id)
+             WHERE deleted = 1 OR is_sensitive = 0;",
     )?;
     Ok(())
 }
@@ -431,6 +491,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::super::connection::run_pragma;
+    use super::super::dbfile::open_validated;
     use super::super::test_support::KEY;
     use super::super::{Store, StoreError};
     use super::verify_schema;
@@ -539,6 +600,44 @@ mod tests {
         assert_eq!(
             store.list_from(None, 10).unwrap().items[0].id,
             "historic-item"
+        );
+    }
+
+    /// The `fts_rowid` back-pointer is the only key a delete now uses, so a
+    /// history written before the column existed has to be mapped onto it. An
+    /// unmapped row would leave the plaintext of a deleted item in the index.
+    #[test]
+    fn index_rows_written_before_the_back_pointer_are_mapped_onto_it() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        rewrite_as_early_v2(&path, 1, EARLY_COLUMNS);
+        // Planted on a connection that does not migrate, so these rows carry
+        // FTS5's own rowids and no back-pointer — the state an upgrade finds.
+        open_validated(&path, &KEY)
+            .unwrap()
+            .execute_batch(
+                "INSERT INTO clipboard_fts (id, content_text) \
+                 VALUES ('decoy', 'unrelated text');
+                 INSERT INTO clipboard_fts (id, content_text) \
+                 VALUES ('historic-item', 'historic plaintext');",
+            )
+            .unwrap();
+
+        let store = Store::open(&path, &KEY).unwrap();
+        assert!(store.delete("historic-item").unwrap());
+
+        let conn = store.conn().unwrap();
+        let left: Vec<String> = conn
+            .prepare("SELECT id FROM clipboard_fts")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            left,
+            vec!["decoy".to_string()],
+            "the delete must take its own index row and only its own"
         );
     }
 

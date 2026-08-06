@@ -50,7 +50,32 @@ const CONNECTION_PRAGMAS: &[&str] = &[
     "PRAGMA wal_autocheckpoint = 1000",
     "PRAGMA journal_size_limit = 67108864",
     "PRAGMA cache_size = -8192",
+    // Bounds what `PRAGMA optimize` will do: without it each analysed index is
+    // scanned in full, which is the cost this is meant to avoid paying.
+    "PRAGMA analysis_limit = 400",
 ];
+
+/// Runs `PRAGMA optimize` as the pool retires a connection.
+///
+/// Nothing else in the tree writes `sqlite_stat1`, so the planner works from
+/// default selectivity guesses and picks `idx_items_history` — seeking on
+/// `pinned`, a two-valued column — over the `created_at` range that
+/// `idx_items_evictable` was built for. `optimize` is the upstream idiom for
+/// this: it analyses only what has changed enough to be worth it, and is a
+/// no-op otherwise.
+///
+/// `on_release` rather than `on_acquire`: r2d2 calls it when a connection
+/// leaves the pool, so the write lock it takes is never taken on a checkout the
+/// caller is waiting for. Failures are dropped — the connection is being closed
+/// and stale statistics are not an error.
+#[derive(Debug)]
+struct OptimizeOnRelease;
+
+impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for OptimizeOnRelease {
+    fn on_release(&self, conn: Connection) {
+        let _ = run_pragma(&conn, "PRAGMA optimize");
+    }
+}
 
 pub(super) fn build_pool(
     manager: SqliteConnectionManager,
@@ -66,7 +91,8 @@ pub(super) fn build_pool(
 
     let mut builder = Pool::builder()
         .max_size(POOL_SIZE)
-        .connection_timeout(Duration::from_secs(10));
+        .connection_timeout(Duration::from_secs(10))
+        .connection_customizer(Box::new(OptimizeOnRelease));
     if in_memory {
         // A shared-cache in-memory database exists only while a connection to
         // it is open, so keep one open for the life of the pool.
