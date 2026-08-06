@@ -10,6 +10,7 @@ import { SearchBar } from "@/components/history/SearchBar";
 import { SkippedNotice } from "@/components/history/SkippedNotice";
 import { markedOrigins, originLabel } from "@/components/history/origin";
 import { useCopy, usePin, useStatus } from "@/hooks/useHistory";
+import type { StatusData } from "@/lib/ipc";
 import { useHistoryController } from "@/hooks/useHistoryController";
 import { useHistorySelection } from "@/hooks/useHistorySelection";
 import { useReveal } from "@/hooks/useReveal";
@@ -18,6 +19,11 @@ import type { Item } from "@/lib/ipc";
 import { previewOf } from "@/lib/format";
 import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
+
+const captureModes = (data: StatusData) => ({
+  privateMode: data.private_mode === true,
+  capturePaused: data.capture_running === false,
+});
 
 interface HistoryViewProps {
   /** From `usePush` at the app root: slows the poll without stopping it. */
@@ -38,7 +44,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
   const reveal = useReveal();
   const copy = useCopy();
   const pin = usePin();
-  const status = useStatus();
+  const status = useStatus(captureModes);
 
   const [confirmClear, setConfirmClear] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -182,8 +188,8 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
         errorKind={history.errorKind}
         searching={history.searching}
         filtered={history.filtered}
-        privateMode={status.data?.private_mode === true}
-        capturePaused={status.data?.capture_running === false}
+        privateMode={status.data?.privateMode === true}
+        capturePaused={status.data?.capturePaused === true}
         query={history.query}
         hasMore={history.hasMore}
         onLoadMore={history.loadMore}

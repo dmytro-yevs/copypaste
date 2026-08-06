@@ -8,7 +8,7 @@
  * The body button and the action buttons are siblings, never nested — nesting
  * is the `nested-interactive` violation INV-8 is about.
  */
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import {
   CloudOff,
   LoaderCircle,
@@ -48,14 +48,18 @@ const CHECKBOX_ACTION = "size-[var(--sz-iconbtn)]";
  * The clip is concatenated onto a catalogue prefix, never interpolated into a
  * message — no template takes an item's content as a variable.
  */
-export function rowLabel(item: Item, origin: string | null = null): string {
+export function rowLabel(
+  item: Item,
+  origin: string | null = null,
+  preview?: string,
+): string {
   const body = item.is_sensitive
     ? t("history.row.sensitiveName")
     : item.content === null
       ? t("history.row.empty")
       : item.content_type.toLowerCase().startsWith("image/")
         ? "Image"
-      : previewOf(item.content);
+      : preview ?? previewOf(item.content);
   const named = item.pinned ? `${t("history.row.pinnedPrefix")} ${body}` : body;
 
   const marks: string[] = [];
@@ -104,7 +108,17 @@ function HistoryRowImpl({
   onOpen,
 }: HistoryRowProps) {
   const { t: tr } = useTranslation();
-  const kind = kindOf(item);
+  // `kindOf` is a chain of regexes and `previewOf` a pass over the item's whole
+  // content, both to render two CSS-clamped lines. They depend on the item
+  // alone, so they must not be redone when `active`, `checked` or `flashing`
+  // flips.
+  const { kind, preview } = useMemo(
+    () => ({
+      kind: kindOf(item),
+      preview: item.content === null ? "" : previewOf(item.content),
+    }),
+    [item],
+  );
   const isImage = kind === "image";
   const imageHeight = imagePreviewHeight(previewLines);
   const type = clipTypeMetadata(kind);
@@ -113,11 +127,11 @@ function HistoryRowImpl({
   const SourceIcon = source.Icon;
   const revealed = revealedContent !== null;
   const masked = item.is_sensitive && !revealed;
-  const body = revealed ? revealedContent : item.content;
   const stranded = wontSync(item);
   const android = isAndroidPlatform();
   // Roving: 200 rows must not be 1000 tab stops.
   const tab = active ? 0 : -1;
+  const label = rowLabel(item, origin, preview);
 
   return (
     <div
@@ -145,7 +159,7 @@ function HistoryRowImpl({
           <Checkbox
             checked={checked}
             tabIndex={tab}
-            aria-label={`${tr("history.row.selectPrefix")} ${rowLabel(item, origin)}`}
+            aria-label={`${tr("history.row.selectPrefix")} ${label}`}
             onCheckedChange={() => onToggleChecked(item)}
           />
         </span>
@@ -172,7 +186,7 @@ function HistoryRowImpl({
       <div className="flex min-w-0 flex-1 flex-col items-start">
         <button
           type="button"
-          aria-label={rowLabel(item, origin)}
+          aria-label={label}
           title={tr(
             selecting
               ? "history.row.selectingHint"
@@ -234,7 +248,7 @@ function HistoryRowImpl({
               WebkitLineClamp: previewLines,
             }}
           >
-            {body === null ? "" : previewOf(body)}
+            {revealedContent !== null ? previewOf(revealedContent) : preview}
           </span>
         )}
 
