@@ -168,8 +168,14 @@ impl AppState {
     }
 
     fn publish(&self, event: EventKind, captured: bool, swept: u32) {
-        // `send` fails only when nobody is listening, which is the ordinary
-        // case: the CLI does not subscribe and the app may not be running.
+        // Having no subscriber is the ordinary case: the CLI does not subscribe
+        // and the app may not be running. `item_count` costs a `SELECT COUNT(*)`
+        // over the live set, so it is not built for nobody. Safe against the
+        // subscribe-then-ack ordering in `server::listener` because
+        // `subscribe()` increments the count synchronously.
+        if self.events.receiver_count() == 0 {
+            return;
+        }
         let _ = self.events.send(EventData {
             event,
             item_count: self.store.count().unwrap_or(0),
