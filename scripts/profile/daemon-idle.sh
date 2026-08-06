@@ -31,8 +31,7 @@ for interval in "${INTERVALS[@]}"; do
         # there or not at all. So it takes a restart, not a reconfigure.
         "$CLI" config set --lan-visibility false >/dev/null
         kill "$DAEMON_PID" 2>/dev/null; wait "$DAEMON_PID" 2>/dev/null
-        "$DAEMON" --foreground >>"$DAEMON_DATA_DIR/daemon.log" 2>&1 &
-        DAEMON_PID=$!
+        spawn_daemon
         for _ in $(seq 1 100); do "$CLI" status >/dev/null 2>&1 && break; sleep 0.2; done
     fi
     # One interval of settling, so the reconfigure itself is outside the window.
@@ -41,7 +40,7 @@ for interval in "${INTERVALS[@]}"; do
     note "idle, poll_interval_ms=$interval, ${SECONDS_PER_RUN}s, load $(load_now)"
     PROFILE_THREAD_DUMP="$DAEMON_DATA_DIR/threads" \
         sample_for "$DAEMON_PID" "$SECONDS_PER_RUN" | report_rates
-    echo "  Wakeups by thread:"
+    echo "  Per thread, $THREAD_COLUMN:"
     thread_delta "$DAEMON_DATA_DIR/threads.before" "$DAEMON_DATA_DIR/threads.after"
     stop_daemon
 done
