@@ -192,134 +192,170 @@ will notice.
 section exists: a thread that only exists on macOS was never in any number
 taken on host L.
 
+**Not re-taken after wave 1, and it should be.** F-IDLE-1 made the paste-file
+staging sweeper start on the first paste-back instead of at construction, and
+lengthened its interval from 30 s to 10 min; F-IDLE-2 returns from the cloud
+refresh loop immediately when no deployment is configured, removing a 10 s
+tick. Both remove threads or timers from exactly this measurement, so 281.7/min
+and 17 threads are a **pre-wave** figure. Re-taking it needs an interactive
+approval: the daemon reads the device secret from the login Keychain, and a
+freshly built binary blocks on the access prompt, so `daemon-idle.sh` cannot
+complete unattended.
+
 ---
 
 ## 3. The text capture path, per stage — **T**, except `insert` which is **S**
 
-Host M, `cargo bench --bench capture` and `--bench detect`, load 121 falling to
-22 — the most contended table here, and the one to re-take first when a quiet
-host is available. The ratios between stages are what it is for.
+Host M, `cargo bench --bench capture` and `--bench detect`, load 3.3 to 6.3.
+Re-taken on a quiet host after the wave-1 merge; the earlier version of this
+table was captured at load 65-121 and every number in it moved.
 
 | stage | 256 B | 64 KiB | 4 MiB |
 |---|---|---|---|
-| detect | 2.84 µs | 207 µs | 15.0 ms |
-| hash | 1.29 µs | 158 µs | 8.27 ms |
-| encrypt | 2.90 µs | 140 µs | 7.05 ms |
-| dedup probe | 7.87 µs | 2.60 µs | 2.30 µs |
-| insert | 3.15 ms | 76.8 ms | 74.0 ms |
-| **whole `ingest`** | **12.0 ms** | **266 ms** | **413 ms** |
+| detect | 1.08 µs | 141 µs | 9.76 ms |
+| hash | 0.68 µs | 115 µs | 7.61 ms |
+| encrypt | 1.38 µs | 111 µs | 6.95 ms |
+| dedup probe | 4.10 µs | 3.58 µs | 3.37 µs |
+| insert | 294 µs | 1.48 ms | 103 ms |
 
-Detection is the most expensive pure-computation stage at every size — 15.0 ms
-at 4 MiB, twice the AEAD. The dedup probe is flat because it is an index seek,
-not a scan.
+Detection is still the most expensive pure-computation stage at every size, and
+at 4 MiB it is 1.4× the AEAD. The dedup probe is flat because it is an index
+seek, not a scan.
 
-**The stages do not add up to the total, and the gap is not yet explained.** At
-256 B the measured stages sum to ~3.2 ms against a 12.0 ms `ingest`. The three
-sweeps that ride every capture account for well under a millisecond of it at a
-10 000-row history — cap 122 µs, byte cap ~0.4 ms extrapolated from §5, and
-age-based retention is off by default. That leaves ~8 ms unattributed on a
-table taken at load 65 against stage rows taken at load 22, which is the most
-likely explanation and is not a measurement anyone should build on: **re-take
-§3 on a quiet host before quoting the total.** The stage rows and the ratios
-between them are the usable part.
+**`insert` at 64 KiB was 57.4 ms before this wave and is 1.48 ms now.** That is
+F-STOR-1: every FTS write first deleted the row's old index entry by `id`,
+which `clipboard_fts` cannot seek on, so each insert full-scanned the plaintext
+index. At 4 MiB `insert` moved the other way, 67.6 ms to 103 ms, because the
+`fts_rowid` back-pointer is written by a second `UPDATE` of a row that holds
+the whole ciphertext.
 
-Detection alone, `--bench detect`, load 121:
+**The whole path is not the sum of these stages, and the difference is not
+explained.** `ingest` measures 2.55 ms at 256 B, 4.80 ms at 64 KiB and 222 ms
+at 4 MiB, against stage sums of 0.30 ms, 1.85 ms and 127 ms. The gap is roughly
+constant at the two small sizes and large at 4 MiB. Load is not the explanation
+— this run is quiet — so quote the stage rows and the ratios between them, and
+do not quote the totals as a decomposition until someone accounts for the
+remainder.
+
+Detection alone, `--bench detect`:
 
 | | 64 B | 1 KiB | 116 KB | 1 MiB | 4 MiB |
 |---|---|---|---|---|---|
-| benign | 1.39 µs | 9.78 µs | 951 µs | 7.15 ms | 36.8 ms |
-| matching | 3.33 µs | 15.0 µs | 1.16 ms | 25.0 ms | 148 ms |
+| benign | 362 ns | 2.94 µs | 230 µs | 2.07 ms | 8.33 ms |
+| matching | 1.14 µs | 4.69 µs | 280 µs | 2.49 ms | 10.02 ms |
 
-Text that matches rules costs up to 4× text that does not, and the gap widens
-with size: the prefilter is cheap, the per-rule searches behind it are not.
+Text that matches rules costs about 1.2× text that does not. The earlier 4×
+figure was load, not detection. This group is a no-regression check and nothing
+more: `benign` has no matches, so the floor-membership filter F-CORE-4 added
+never bites, and `matching` fires a rule above the floor immediately, so it
+cannot skip anything either. F-CORE-4's own number is the in-process A/B in
+`the_predicate_is_cheaper_than_the_ranked_scan_it_replaced`.
 
-Two fixed costs, same run: `Detector::new()` **349 ms** (once per process,
-never per call — `CopyPaste-mnte`), and `Store::open` **3.70 ms**.
+`Detector::new()` is **102 ms**, once per process and never per call
+(`CopyPaste-mnte`). `capture/store_open` is not quoted: the group aborts on
+this host because it opens a fresh pool per iteration and runs out of threads,
+on this tree and on the pre-wave one alike.
 
 The idle tick with the sensitive sweep off — the shipped default — is
-**5.36 ns**. With it on it is 289 µs against a 2 000-row history.
+**3.33 ns**. With it on it is 218 µs against a 2 000-row history.
 
 ---
 
 ## 4. The binary capture path — **T**
 
-Host M, `cargo bench --bench binary`, load 22.6 falling to 9.5. Pure
-computation plus one insert, so the class is T: an M4 is a different constant
-from a phone, not a different shape.
+Host M, `cargo bench --bench binary`, load 3.7 to 5.3, run on the pre-wave tree
+and on the merged one back to back. Pure computation plus one insert, so the
+class is T: an M4 is a different constant from a phone, not a different shape.
 
-| payload | `item_id` (one SHA-256) | `seal` (STREAM) | `open` | whole `ingest` |
-|---|---|---|---|---|
-| 256 KiB | 501 µs | 1.42 ms | 1.48 ms | 4.93 ms |
-| 1 MiB | 2.09 ms | 6.13 ms | 3.79 ms | 22.7 ms |
-| 4 MiB | **8.41 ms** | 23.4 ms | 16.3 ms | **91.3 ms** |
+| 4 MiB | before | after |
+|---|---|---|
+| `item_id` (one SHA-256) | 7.66 ms | 8.23 ms |
+| `seal` (STREAM) | 22.32 ms | **14.47 ms** |
+| `open` | 15.02 ms | 15.04 ms |
+| whole `ingest` | 77.97 ms | **55.62 ms** |
 
-**SHA-256 here runs at 475 MiB/s**, not the ~2 GB/s an ARMv8 crypto-extension
-path would give and not the 334 MB/s `openssl speed` reports for LibreSSL. That
-was the open question behind the binary path's four-passes-over-one-payload
-problem, and it settles it: at 4 MiB each pass is 8.4 ms, four passes are
-33.6 ms, and the three redundant ones are **25.2 ms of a 91.3 ms capture — 28%
-of the whole path**, on the foreground thread, per screenshot.
+| whole `ingest` | before | after |
+|---|---|---|
+| 256 KiB | 4.50 ms | 3.03 ms |
+| 1 MiB | 17.68 ms | 11.53 ms |
+| 4 MiB | 77.97 ms | 55.62 ms |
 
-`capture/stage/4MiB/hash` measures the same primitive through the text path and
-lands at 8.27 ms, which is the cross-check.
+**SHA-256 here runs at about 535 MiB/s**, not the ~2 GB/s an ARMv8
+crypto-extension path would give. That is why the four-passes-over-one-payload
+problem was worth fixing and it is why the hardware backend is still worth
+enabling: at 4 MiB one pass is 7.7 ms.
+
+F-CORE-1 threaded a single digest through the item id, the envelope header and
+the row's `content_hash`. **Measured: 22.3 ms off a 78 ms capture, 29% of the
+path**, on the foreground thread, per screenshot. `seal` accounts for 7.9 ms of
+that (it hashed the payload twice internally) and the two removed callers for
+the rest.
+
+F-CORE-5 replaced STREAM's per-chunk allocate-and-copy with an in-place seal and
+open against a presized output buffer. **On wall time it is a null result** —
+`open` at 4 MiB is 15.02 ms before and 15.04 ms after. What it removes is
+allocation: one `Vec::with_capacity` for the whole plaintext instead of one
+`Vec` per chunk plus the growth reallocations of a `Vec::new()`. That count is
+not measured here.
 
 ---
 
 ## 5. The store, keyed — **S**
 
-Host M, `cargo bench --bench storage`, load 8.2 to 12.1. Class S: every page a
-statement touches is an AES-256-CBC decrypt plus an HMAC-SHA512 verify, so
-these are SQLCipher figures rather than SQLite ones, but the constant is this
-machine's APFS and this machine's AES.
+Host M, `cargo bench --bench storage`, load 3.7 to 5.3, both trees. Class S:
+every page a statement touches is an AES-256-CBC decrypt plus an HMAC-SHA512
+verify, so these are SQLCipher figures rather than SQLite ones.
 
-| rows | `summaries(i64::MAX)` | `insert_or_bump` (insert) | `insert_or_bump` (bump) | `upsert` |
-|---|---|---|---|---|
-| 500 | 622 µs | 374 µs | 7.9 µs | 570 µs |
-| 2 000 | 2.49 ms | 984 µs | 7.5 µs | 843 µs |
-| 8 000 | 8.88 ms | 1.92 ms | 8.1 µs | 3.99 ms |
+| 8 000 rows | before | after |
+|---|---|---|
+| `summaries(i64::MAX)` | 5.25 ms | **1.39 ms** |
+| `insert_or_bump` (insert) | 1.174 ms | **264 µs** |
+| `insert_or_bump` (bump) | 5.24 µs | 4.71 µs |
+| `upsert` | 2.142 ms | **277 µs** |
+| `evict_over_byte_cap`, nothing to do | 202 µs | 166 µs |
 
-`summaries` is linear at **1.11 µs per row** and it is the read a sync round
-opens with, unbounded. The bump branch is flat and ~240× cheaper than the
-insert branch at 8 000 rows: what a duplicate capture costs is not the store,
-it is everything the caller did before reaching it.
+`summaries` is the read a sync round opens with, unbounded; `idx_items_syncable`
+makes it a covering seek instead of a scan plus a temp B-tree. `upsert` and
+`insert` both fell because every FTS write used to delete the row's old index
+entry by `id`, which `clipboard_fts` cannot seek on.
 
-The byte-cap sweep, with nothing to evict, which is what it does on all but one
-capture in a history (load 17.8 falling to 9.4):
-
-| rows | `evict_over_byte_cap`, nothing to do |
-|---|---|
-| 500 | 25.8 µs |
-| 2 000 | 82.2 µs |
-| 8 000 | **331 µs** |
-
-Linear, because it sums the stored bytes of the whole table — inside a write
-transaction it opened before it could know there was nothing to do. Every
-capture and every applied remote item pays it. At the shipped 10 000-row
-`history_limit` that extrapolates to ~0.4 ms each.
+**The byte-cap sweep is the one place the wave argued for a win and did not get
+one.** F-STOR-3 moved the gate query out of the IMMEDIATE transaction so a sweep
+with nothing to do would not take the write lock. Measured, that changed
+nothing: 205 µs against 208 µs at 8 000 rows uncontended, and 0.22 ms per
+capture on both trees with a rate-matched writer running concurrently. The gate
+query — a `SUM(LENGTH(...))` over every unpinned row — is the whole cost, and
+hoisting it does not remove it. **F-STOR-3 was reverted.** The 202 µs to 166 µs
+above is what is left, and the only candidate for it is F-STOR-4's
+`PRAGMA optimize`.
 
 ---
 
 ## 6. Merging a peer's session — **S**
 
-Host M, `cargo bench --bench sync`, load 5.4 to 11.1. The unit is a whole
-session of N applies against a primed history, because the per-item cost is the
-question and it is invisible at N = 1.
+Host M, `cargo bench --bench sync`, load 3.7 to 5.3, both trees. The unit is a
+whole session of N applies against a primed history, because the per-item cost
+is the question and it is invisible at N = 1.
 
-| history | 10 items | per item | 200 items | per item |
+| 200 items | before | per item | after | per item |
 |---|---|---|---|---|
-| 500 | 21.2 ms | 2.12 ms | 180 ms | 0.90 ms |
-| 2 000 | 35.5 ms | 3.55 ms | 342 ms | 1.71 ms |
-| 8 000 | 63.3 ms | 6.33 ms | **1.28 s** | **6.41 ms** |
+| against 500 rows | 143 ms | 0.72 ms | 137 ms | 0.69 ms |
+| against 2 000 rows | 305 ms | 1.53 ms | 209 ms | 1.04 ms |
+| against 8 000 rows | **987 ms** | **4.93 ms** | **467 ms** | **2.34 ms** |
 
-Read the last column downwards. A 200-item session costs 0.90 ms per item
-against a 500-row history and 6.41 ms against an 8 000-row one — **the per-item
-cost is proportional to the history, not to the item**. Read it across, and the
-batching benefit that exists at 500 rows (0.90 against 2.12) has gone entirely
-by 8 000 (6.41 against 6.33): whatever scales with the history is being paid
-once per item and swamps everything a larger batch could amortise.
+Read the per-item columns downwards. Before the wave the cost grew 6.8× as the
+history grew 16×; after it grows 3.4×. The session against an 8 000-row history
+is **2.1× faster**, and a 10-item session against the same history went 48.9 ms
+to 24.9 ms.
 
-`sync/summaries` is the same read as §4's through the source layer: 491 µs,
-1.57 ms, 6.96 ms at the three depths.
+The remaining growth is real: the debounce (F-CORE-3) removed the retention
+sweep pair from every applied item, and reading the local version once instead
+of twice (F-CORE-2 part i) removed one full-row read with its ciphertext, but
+the `upsert` itself still scales with the history. F-CORE-2 part (ii) — reading
+the metadata projection rather than the whole row — is wave 2.
+
+`sync/summaries` at the three depths: 299 µs, 1.35 ms, 5.53 ms before;
+**128 µs, 496 µs, 1.96 ms** after.
 
 ---
 
