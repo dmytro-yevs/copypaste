@@ -374,4 +374,7 @@ pub struct Item {
     /// cap. [`CloudSyncData::skipped_too_large`] is the per-round half.
     #[serde(default)]
     pub too_large_to_sync: bool,
+
+    #[serde(default)]
+    pub truncated: bool,
 }
