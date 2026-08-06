@@ -7,15 +7,19 @@
  * string rather than a preview.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactElement } from "react";
 
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
 import { absoluteTime } from "@/lib/format";
 import { imagePreviewHeight } from "@/lib/layout";
-import { item } from "@/test/harness";
+import { item, withClient } from "@/test/harness";
 import type { Item } from "@/lib/ipc";
+
+// The row's source-app icon is a React Query leaf now (F-UI-6), so every mount
+// of a row needs a client.
+const render = (ui: ReactElement) => withClient(ui);
 
 // Thumbnail decoding has its own contract tests. Here the row tests the
 // layout contract: image rows keep the leading type icon and pass the image

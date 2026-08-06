@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType } from "react";
 
-import { getSourceAppIcon } from "@/lib/ipc";
+import { useSourceAppIcon } from "@/hooks/useHistoryMedia";
 import { cn } from "@/lib/cn";
 
 type FallbackIcon = ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
@@ -26,31 +26,24 @@ function pngUrl(base64: string): string | null {
  * then this component owns the short-lived Blob URL rather than an app path.
  */
 export function SourceAppIcon({ bundleId, Fallback, className }: SourceAppIconProps) {
+  const icon = useSourceAppIcon(bundleId);
+  const base64 = icon.data?.png_base64 ?? null;
   const [url, setUrl] = useState<string | null>(null);
 
+  // The URL, not the fetch, is what this component owns: it is revoked when the
+  // virtualizer recycles the row, and never kept from a previous application
+  // while the next icon resolves.
   useEffect(() => {
-    // Do not keep a previous application's logo in a recycled virtual row
-    // while the next icon is resolving.
-    setUrl(null);
-    if (!bundleId) {
+    if (base64 === null) {
+      setUrl(null);
       return;
     }
-    let active = true;
-    let objectUrl: string | null = null;
-    void getSourceAppIcon(bundleId)
-      .then((icon) => {
-        objectUrl = icon ? pngUrl(icon.png_base64) : null;
-        if (active) setUrl(objectUrl);
-        else if (objectUrl) URL.revokeObjectURL(objectUrl);
-      })
-      .catch(() => {
-        if (active) setUrl(null);
-      });
+    const objectUrl = pngUrl(base64);
+    setUrl(objectUrl);
     return () => {
-      active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [bundleId]);
+  }, [base64]);
 
   if (url) {
     return (

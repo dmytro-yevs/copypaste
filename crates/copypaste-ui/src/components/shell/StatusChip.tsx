@@ -15,7 +15,7 @@ import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { classifyError } from "@/lib/errors";
 import { longAge } from "@/lib/format";
-import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
+import { CURRENT_PROTOCOL_VERSION, type StatusData } from "@/lib/ipc";
 import { isAndroidPlatform } from "@/lib/platform";
 import { useUi } from "@/store/ui";
 
@@ -42,12 +42,17 @@ const STATE_KEY = {
   error: "shell.status.error",
 } as const satisfies Record<ChipState, string>;
 
+const chipStatus = (data: StatusData) => ({
+  protocol_version: data.protocol_version,
+  capture_running: data.capture_running,
+});
+
 export function StatusChip({ attentionOnly = false }: { attentionOnly?: boolean }) {
   const { t } = useTranslation();
   const tooltipId = useId();
   const setView = useUi((state) => state.setView);
   const setSettingsTab = useUi((state) => state.setSettingsTab);
-  const status = useStatus();
+  const status = useStatus(chipStatus);
   const peers = usePeers();
   const syncing = useIsMutating({ mutationKey: SYNC_KEY }) > 0;
   const statusErrorKind = status.error ? classifyError(status.error) : null;
