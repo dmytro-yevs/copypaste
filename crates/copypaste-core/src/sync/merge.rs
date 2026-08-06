@@ -152,7 +152,47 @@ pub fn apply_remote_version(
     here: &str,
     incoming: &RemoteVersion<'_>,
 ) -> Result<bool, MergeError> {
-    apply_remote_version_with_pin_state(store, keyring, detector, here, incoming, None)
+    if payload_is_refused(incoming) {
+        return Ok(false);
+    }
+    let local = local_version(store, incoming.item_id)?;
+    apply_remote_version_with_pin_state(
+        store,
+        keyring,
+        detector,
+        here,
+        incoming,
+        None,
+        local.as_ref(),
+    )
+}
+
+fn local_version(store: &Store, item_id: &str) -> Result<Option<StoredItem>, MergeError> {
+    store.version(item_id).map_err(|e| {
+        warn!(error = ?e, "could not read the local version of an incoming item");
+        MergeError::Store
+    })
+}
+
+/// Shapes that are never stored, whichever transport carried them. Checked by
+/// the entry points so the local row is read exactly once per incoming item.
+fn payload_is_refused(incoming: &RemoteVersion<'_>) -> bool {
+    if !incoming.deleted
+        && copypaste_ipc::content_type::is_binary(incoming.content_type)
+        && incoming.binary_content.is_none()
+    {
+        return true;
+    }
+    if !incoming.deleted && incoming.content_type == copypaste_ipc::content_type::FILE {
+        incoming
+            .payload_metadata
+            .and_then(crate::FileMetadata::from_json)
+            .is_none()
+    } else {
+        // Metadata belongs only to a file payload. Keeping it on a text/image
+        // row would preserve unactionable, user-controlled cleartext forever.
+        incoming.payload_metadata.is_some()
+    }
 }
 
 /// P2P's version of [`apply_remote_version`]. Pin state is authenticated by
@@ -168,10 +208,7 @@ pub fn apply_remote_p2p_version_with_pin_stamp(
     pin_order: Option<f64>,
     pin_updated_at: i64,
 ) -> Result<P2pApply, MergeError> {
-    let local = store.version(incoming.item_id).map_err(|e| {
-        warn!(error = ?e, "could not read the local version of an incoming item");
-        MergeError::Store
-    })?;
+    let local = local_version(store, incoming.item_id)?;
     let remote_pin_wins = !incoming.deleted
         && local.as_ref().is_none_or(|local| {
             pin_state_wins(
@@ -198,14 +235,19 @@ pub fn apply_remote_p2p_version_with_pin_stamp(
             )
         });
 
-    let content = apply_remote_version_with_pin_state(
-        store,
-        keyring,
-        detector,
-        here,
-        incoming,
-        Some((pinned, pin_order, pin_updated_at, remote_pin_wins)),
-    )?;
+    let content = if payload_is_refused(incoming) {
+        false
+    } else {
+        apply_remote_version_with_pin_state(
+            store,
+            keyring,
+            detector,
+            here,
+            incoming,
+            Some((pinned, pin_order, pin_updated_at, remote_pin_wins)),
+            local.as_ref(),
+        )?
+    };
     let pin = if !content && remote_pin_wins {
         store
             .apply_pin_state(incoming.item_id, pinned, pin_order, pin_updated_at)
@@ -219,6 +261,10 @@ pub fn apply_remote_p2p_version_with_pin_stamp(
     Ok(P2pApply { content, pin })
 }
 
+/// `local` is read by the entry points rather than here: both of them already
+/// need it, and `Store::version` materialises the stored ciphertext, which this
+/// path never looks at.
+#[allow(clippy::too_many_arguments)]
 fn apply_remote_version_with_pin_state(
     store: &Store,
     keyring: &Keyring,
@@ -226,33 +272,16 @@ fn apply_remote_version_with_pin_state(
     here: &str,
     incoming: &RemoteVersion<'_>,
     pin_state: Option<(bool, Option<f64>, i64, bool)>,
+    local: Option<&StoredItem>,
 ) -> Result<bool, MergeError> {
-    if !incoming.deleted
-        && copypaste_ipc::content_type::is_binary(incoming.content_type)
-        && incoming.binary_content.is_none()
-    {
-        return Ok(false);
-    }
-    if !incoming.deleted && incoming.content_type == copypaste_ipc::content_type::FILE {
-        if incoming
-            .payload_metadata
-            .and_then(crate::FileMetadata::from_json)
-            .is_none()
-        {
-            return Ok(false);
-        }
-    } else if incoming.payload_metadata.is_some() {
-        // Metadata belongs only to a file payload. Keeping it on a text/image
-        // row would preserve unactionable, user-controlled cleartext forever.
-        return Ok(false);
-    }
     let content = incoming
         .binary_content
         .unwrap_or(incoming.content.as_bytes());
-    let local = store.version(incoming.item_id).map_err(|e| {
-        warn!(error = ?e, "could not read the local version of an incoming item");
-        MergeError::Store
-    })?;
+    // One digest for a binary payload: the same bytes are both merge key 2 and
+    // the envelope header the seal below writes.
+    let digest = (!incoming.deleted
+        && copypaste_ipc::content_type::is_binary(incoming.content_type))
+    .then(|| crate::binary::content_digest(content));
 
     // A tombstone with no hash of its own inherits the one it is deleting: the
     // store keeps `content_hash` on a tombstone deliberately, so inheriting it
@@ -266,9 +295,12 @@ fn apply_remote_version_with_pin_state(
     let computed;
     let content_hash: &str = match incoming.content_hash {
         Some(hash) if incoming.deleted => hash,
-        None if incoming.deleted => local.as_ref().map_or("", |l| l.content_hash.as_str()),
+        None if incoming.deleted => local.map_or("", |l| l.content_hash.as_str()),
         _ => {
-            computed = crate::storage::compute_content_hash(content);
+            computed = match &digest {
+                Some(digest) => crate::binary::content_hash(digest),
+                None => crate::storage::compute_content_hash(content),
+            };
             &computed
         }
     };
@@ -284,7 +316,7 @@ fn apply_remote_version_with_pin_state(
         pin_updated_at: pin_state.map_or(0, |state| state.2),
     };
 
-    if let Some(local) = &local {
+    if let Some(local) = local {
         let mine = ItemSummary {
             item_id: local.id.clone(),
             created_at: local.created_at,
@@ -308,7 +340,7 @@ fn apply_remote_version_with_pin_state(
     }
 
     let is_sensitive = if incoming.deleted {
-        local.as_ref().is_some_and(|l| l.is_sensitive)
+        local.is_some_and(|l| l.is_sensitive)
     } else {
         copypaste_ipc::content_type::is_text(incoming.content_type)
             && detector.is_sensitive(incoming.content)
@@ -318,11 +350,14 @@ fn apply_remote_version_with_pin_state(
         None
     } else {
         let key = keyring.item_key();
-        if copypaste_ipc::content_type::is_binary(incoming.content_type) {
-            let ciphertext = crate::seal_binary(content, &key, incoming.item_id).map_err(|e| {
-                warn!(error = ?e, "could not seal incoming binary item");
-                MergeError::Encrypt
-            })?;
+        if let Some(digest) = &digest {
+            let ciphertext =
+                crate::binary::seal_with_digest(content, digest, &key, incoming.item_id).map_err(
+                    |e| {
+                        warn!(error = ?e, "could not seal incoming binary item");
+                        MergeError::Encrypt
+                    },
+                )?;
             Some((Vec::new(), ciphertext))
         } else {
             Some(
@@ -344,7 +379,7 @@ fn apply_remote_version_with_pin_state(
     } else {
         match pin_state {
             Some((pinned, pin_order, pin_updated_at, true)) => (pinned, pin_order, pin_updated_at),
-            Some((_, _, _, false)) | None => local.as_ref().map_or((false, None, 0), |item| {
+            Some((_, _, _, false)) | None => local.map_or((false, None, 0), |item| {
                 (item.pinned, item.pin_order, item.pin_updated_at)
             }),
         }
