@@ -20,7 +20,7 @@ use super::connection::write_tx;
 use super::model::{
     is_constraint_violation, item_columns, row_to_item, ItemColumns, StoreError, StoredItem,
 };
-use super::search::{delete_fts_row_in_tx, upsert_fts_in_tx};
+use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
 /// The version identity of one row — the four merge keys and the id.
@@ -331,11 +331,26 @@ impl Store {
             (incoming.pinned, incoming.pin_order, incoming.pin_updated_at)
         };
 
+        let indexable = incoming
+            .search_text
+            .filter(|t| !incoming.deleted && !t.trim().is_empty());
+        let fts_rowid = match indexable {
+            Some(text) => insert_fts_in_tx(
+                &tx,
+                incoming.id,
+                text,
+                incoming.is_sensitive,
+                incoming.content_type,
+            )?,
+            None => None,
+        };
+
         let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, payload_metadata) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, payload_metadata, \
+                  fts_rowid) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  nonce              = excluded.nonce, \
@@ -350,7 +365,7 @@ impl Store {
                  pinned             = excluded.pinned, \
                  pin_order          = excluded.pin_order, \
                  pin_updated_at     = excluded.pin_updated_at, \
-                 fts_rowid          = NULL",
+                 fts_rowid          = excluded.fts_rowid",
             params![
                 incoming.id,
                 incoming.content_ciphertext,
@@ -365,6 +380,7 @@ impl Store {
                 incoming.deleted,
                 incoming.origin_device_id,
                 incoming.payload_metadata,
+                fts_rowid,
             ],
         );
 
@@ -379,20 +395,6 @@ impl Store {
             Err(e) => return Err(e.into()),
         }
 
-        // The index row was removed above the write, unconditionally, so a
-        // version that arrives sensitive, deleted, or simply changed cannot
-        // leave a stale one behind. This is the write-time layer of "sensitive
-        // items never reach the search index" for the sync path (rule 4).
-        if !incoming.deleted && copypaste_ipc::content_type::is_text(incoming.content_type) {
-            if let Some(text) = incoming.search_text.filter(|t| !t.trim().is_empty()) {
-                // Layer 2 rather than a second `is_sensitive` test here: it
-                // re-reads the row this transaction just wrote, so a caller
-                // that passes text for an item it flagged still cannot index
-                // it.
-                upsert_fts_in_tx(&tx, incoming.id, text)?;
-            }
-        }
-
         tx.commit()?;
         Ok(true)
     }
@@ -401,7 +403,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::test_support::{item, sensitive_item, store, T0};
+    use crate::storage::test_support::{fts_row_count, item, sensitive_item, store, T0};
 
     fn incoming<'a>(id: &'a str, hash: &'a str, created_at: i64) -> IncomingItem<'a> {
         IncomingItem {
@@ -612,12 +614,16 @@ mod tests {
         let applied = s
             .upsert(&IncomingItem {
                 origin_device_id: "",
+                search_text: Some("leaking remote text"),
                 ..incoming("theirs", &mine.content_hash, T0 + 500)
             })
             .unwrap();
         assert!(!applied, "the collision must be reported, not stored");
         assert!(s.get("theirs").unwrap().is_none());
         assert!(s.get(&mine.id).unwrap().is_some(), "no local data lost");
+        assert!(s.search("leaking", 10).unwrap().is_empty());
+        assert_eq!(fts_row_count(&s, "theirs"), 0);
+        assert_eq!(fts_row_count(&s, &mine.id), 1);
     }
 
     #[test]
