@@ -79,17 +79,6 @@ impl Store {
     /// a user-visible delete event to propagate.
     pub fn evict_over_cap(&self, max_items: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
-        // The gate runs outside any transaction. `write_tx` is IMMEDIATE, so
-        // opening one first takes the database write lock before the query that
-        // says there is nothing to do — three times per capture, in the steady
-        // state where nothing is ever over a cap. The in-transaction re-check
-        // below is what makes reading it unlocked safe, and it is mandatory:
-        // eviction is a hard delete, so two callers both deciding to evict is
-        // unrecoverable (`has_wipeable_sensitive` is the same pattern).
-        if live_count(&conn)? <= max_items {
-            return Ok(0);
-        }
-
         let tx = write_tx(&mut conn)?;
         let live = live_count(&tx)?;
         if live <= max_items {
@@ -131,10 +120,6 @@ impl Store {
     /// deliberately retained for sync.
     pub fn evict_over_byte_cap(&self, max_bytes: u64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
-        if unpinned_bytes(&conn)? <= max_bytes {
-            return Ok(0);
-        }
-
         let tx = write_tx(&mut conn)?;
         let total = unpinned_bytes(&tx)?;
         if total <= max_bytes {
@@ -181,19 +166,6 @@ impl Store {
     /// Pinned items are never TTL-deleted (I9).
     pub fn evict_older_than(&self, cutoff_ms: i64) -> Result<u64, StoreError> {
         let mut conn = self.conn()?;
-        let any: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM clipboard_items \
-                            WHERE deleted = 0 AND pinned = 0 AND created_at < ?1)",
-            [cutoff_ms],
-            |r| r.get(0),
-        )?;
-        if !any {
-            return Ok(0);
-        }
-
-        // The victim select inside the transaction is itself the re-check: it
-        // re-reads the same predicate under the write lock, so a row saved by a
-        // pin between the gate and here is no longer selected.
         let tx = write_tx(&mut conn)?;
         let victims: Vec<String> = {
             let mut stmt = tx.prepare(
