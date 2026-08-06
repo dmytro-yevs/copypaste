@@ -99,7 +99,7 @@ tempfile.workspace = true
 # effect on any shipped binary.
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
-# `harness = false` on all three: criterion parses its own arguments, and the
+# `harness = false` on every one: criterion parses its own arguments, and the
 # libtest harness would eat them. It also keeps benches out of `cargo test`,
 # which is the point — a bench must never run in the normal test path.
 [[bench]]
@@ -107,7 +107,19 @@ name = "capture"
 harness = false
 
 [[bench]]
+name = "binary"
+harness = false
+
+[[bench]]
 name = "history"
+harness = false
+
+[[bench]]
+name = "storage"
+harness = false
+
+[[bench]]
+name = "sync"
 harness = false
 
 [[bench]]
