@@ -19,6 +19,7 @@ fn item() -> Item {
         source_app_bundle_id: None,
         source_app_name: None,
         too_large_to_sync: false,
+        truncated: false,
     }
 }
 
@@ -302,4 +303,37 @@ fn omitted_import_sensitivity_defaults_to_false() {
     });
     let item: ExportItem = serde_json::from_value(wire).unwrap();
     assert!(!item.is_sensitive);
+}
+
+#[test]
+fn an_item_with_no_truncated_flag_reads_as_a_whole_body() {
+    let wire: Value = json!({
+        "id": "item-1",
+        "content": "hello",
+        "content_type": "text/plain",
+        "created_at": 1,
+        "pinned": false,
+        "is_sensitive": false
+    });
+    let item: Item = serde_json::from_value(wire).unwrap();
+    assert!(!item.truncated);
+}
+
+#[test]
+fn a_bounded_list_body_says_so_on_the_wire() {
+    let mut content = "x".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 2);
+    assert!(copypaste_ipc::limits::bound_preview(&mut content));
+
+    let mut cut = item();
+    cut.content = content;
+    cut.truncated = true;
+    let wire = serde_json::to_value(&cut).unwrap();
+    assert_eq!(wire["truncated"], json!(true));
+    assert_eq!(
+        wire["content"].as_str().unwrap().len(),
+        copypaste_ipc::limits::LIST_PREVIEW_BYTES
+    );
+
+    let back: Item = serde_json::from_value(wire).unwrap();
+    assert!(back.truncated);
 }

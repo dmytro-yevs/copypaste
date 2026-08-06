@@ -1076,6 +1076,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "ts-rs",
+ "unicode-segmentation",
 ]
 
 [[package]]
