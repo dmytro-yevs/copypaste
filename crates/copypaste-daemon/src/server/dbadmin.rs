@@ -277,8 +277,8 @@ fn swap(
         // Named columns, not `*`: an fts5 table's `*` includes the hidden rank
         // and table-name columns, which are not insertable.
         tx.execute(
-            "INSERT INTO clipboard_fts (id, content_text) \
-             SELECT fts.id, fts.content_text FROM restore_src.clipboard_fts fts \
+            "INSERT INTO clipboard_fts (rowid, id, content_text) \
+             SELECT ci.fts_rowid, fts.id, fts.content_text FROM restore_src.clipboard_fts fts \
              JOIN restore_src.clipboard_items ci ON ci.id = fts.id \
              WHERE ci.deleted = 0 AND ci.is_sensitive = 0 \
                AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
@@ -410,6 +410,18 @@ mod tests {
         conn.query_row(
             "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
             [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn dangling_fts_pointers(state: &AppState) -> i64 {
+        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items ci \
+              WHERE ci.fts_rowid IS NOT NULL \
+                AND ci.id IS NOT (SELECT f.id FROM clipboard_fts f WHERE f.rowid = ci.fts_rowid)",
+            [],
             |row| row.get(0),
         )
         .unwrap()
@@ -639,6 +651,49 @@ mod tests {
 
         assert!(restore_from(&state, &dest, true).ok);
         assert_eq!(state.store.search("needle", 10).unwrap().len(), 1);
+        assert_eq!(
+            dangling_fts_pointers(&state),
+            0,
+            "a restored fts_rowid names another item's index row"
+        );
+    }
+
+    #[test]
+    fn a_restore_carries_the_index_rowids_the_items_point_at() {
+        let (state, dir) = test_state("alpha");
+        let a = add(&state, "alpha aardvark");
+        let b = add(&state, "bravo baboon");
+        let c = add(&state, "charlie cheetah");
+        let d = add(&state, "delta dingo");
+
+        assert!(state.store.delete(&b).unwrap());
+        let dest = dir.path().join("history.backup");
+        assert!(backup_to(&state, &dest).ok);
+
+        state.store.delete_all().unwrap();
+        assert!(restore_from(&state, &dest, true).ok);
+        assert_eq!(
+            dangling_fts_pointers(&state),
+            0,
+            "the restore re-keyed the index without moving the back-pointers"
+        );
+        assert_eq!(fts_rows(&state, &a), 1);
+        assert_eq!(fts_rows(&state, &c), 1);
+        assert_eq!(fts_rows(&state, &d), 1);
+
+        assert!(state.store.delete(&c).unwrap());
+        assert_eq!(
+            fts_rows(&state, &c),
+            0,
+            "the deleted item's plaintext is still in the search index"
+        );
+        assert_eq!(
+            fts_rows(&state, &d),
+            1,
+            "deleting one item unindexed another"
+        );
+        assert!(state.store.search("cheetah", 10).unwrap().is_empty());
+        assert_eq!(state.store.search("dingo", 10).unwrap().len(), 1);
     }
 
     #[test]
