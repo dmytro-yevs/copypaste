@@ -1,6 +1,6 @@
 //! Encrypted, content-addressed binary clipboard payloads.
 
-use chacha20poly1305::aead::Payload;
+use chacha20poly1305::aead::Buffer;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -70,38 +70,96 @@ impl FileMetadata {
     }
 }
 
+/// SHA-256 of the payload — the one identity every other spelling is derived
+/// from: the item id, the envelope header the STREAM AAD covers, and the row's
+/// `content_hash`. Computing it once and threading it through is what keeps a
+/// 4 MiB capture from being hashed four times over.
+#[must_use]
+pub fn content_digest(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
+}
+
+/// The same string [`crate::storage::compute_content_hash`] produces for the
+/// same bytes, from a digest already in hand. Pinned by
+/// `the_content_hash_of_a_digest_is_the_stores_own_value`.
+#[must_use]
+pub fn content_hash(digest: &[u8; 32]) -> String {
+    hex::encode(digest)
+}
+
 /// A deterministic logical id for a binary value.  The UUID spelling preserves
 /// the existing item-id contract while the full digest remains the dedup key.
 #[must_use]
 pub fn item_id(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
+    item_id_from_digest(&content_digest(bytes))
+}
+
+#[must_use]
+pub fn item_id_from_digest(digest: &[u8; 32]) -> String {
     let mut id = [0u8; 16];
     id.copy_from_slice(&digest[..16]);
     uuid::Uuid::from_bytes(id).to_string()
 }
 
+fn chunk_count(byte_len: usize) -> u32 {
+    u32::try_from(byte_len.div_ceil(CHUNK_BYTES).max(1)).unwrap_or(u32::MAX)
+}
+
 #[must_use]
 pub fn metadata(bytes: &[u8]) -> BinaryMetadata {
-    let chunks = bytes.len().div_ceil(CHUNK_BYTES).max(1);
     BinaryMetadata {
         byte_len: bytes.len() as u64,
-        chunk_count: u32::try_from(chunks).unwrap_or(u32::MAX),
-        content_hash: hex::encode(Sha256::digest(bytes)),
+        chunk_count: chunk_count(bytes.len()),
+        content_hash: content_hash(&content_digest(bytes)),
     }
 }
 
 fn header(
-    bytes: &[u8],
-    meta: &BinaryMetadata,
+    digest: &[u8; 32],
+    byte_len: u64,
     stream_nonce: &[u8; STREAM_NONCE_LEN],
 ) -> [u8; HEADER_BYTES] {
     let mut header = [0; HEADER_BYTES];
     header[..4].copy_from_slice(MAGIC);
     header[4] = VERSION;
-    header[5..13].copy_from_slice(&meta.byte_len.to_be_bytes());
-    header[13..STREAM_NONCE_OFFSET].copy_from_slice(&Sha256::digest(bytes));
+    header[5..13].copy_from_slice(&byte_len.to_be_bytes());
+    header[13..STREAM_NONCE_OFFSET].copy_from_slice(digest);
     header[STREAM_NONCE_OFFSET..].copy_from_slice(stream_nonce);
     header
+}
+
+/// The tail of `out` from `start` onwards, as an AEAD buffer.
+///
+/// STREAM's in-place API appends the tag to the buffer it is handed and
+/// truncates it away again on the way back, so pointing it at the end of the
+/// output vector removes the per-chunk allocate-then-copy-twice without moving
+/// a byte of the framing.
+struct Tail<'a> {
+    out: &'a mut Vec<u8>,
+    start: usize,
+}
+
+impl AsRef<[u8]> for Tail<'_> {
+    fn as_ref(&self) -> &[u8] {
+        &self.out[self.start..]
+    }
+}
+
+impl AsMut<[u8]> for Tail<'_> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.out[self.start..]
+    }
+}
+
+impl Buffer for Tail<'_> {
+    fn extend_from_slice(&mut self, other: &[u8]) -> chacha20poly1305::aead::Result<()> {
+        self.out.extend_from_slice(other);
+        Ok(())
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.out.truncate(self.start + len);
+    }
 }
 
 fn stream_aad(id: &str, header: &[u8; HEADER_BYTES]) -> Vec<u8> {
@@ -117,15 +175,28 @@ fn stream_aad(id: &str, header: &[u8; HEADER_BYTES]) -> Vec<u8> {
 
 /// Seal bytes with RustCrypto STREAM, binding the item id and envelope header.
 pub fn seal(bytes: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoError> {
+    seal_with_digest(bytes, &content_digest(bytes), key, id)
+}
+
+/// [`seal`] for a caller that already holds [`content_digest`] of these exact
+/// bytes. The digest goes into the header verbatim, so it must remain
+/// `SHA-256(bytes)`: it is covered by the STREAM AAD and [`open`] verifies the
+/// recovered plaintext against it.
+pub fn seal_with_digest(
+    bytes: &[u8],
+    digest: &[u8; 32],
+    key: &ItemKey,
+    id: &str,
+) -> Result<Vec<u8>, CryptoError> {
     if bytes.len() as u64 > MAX_BINARY_BYTES {
         return Err(CryptoError::AuthFailed);
     }
-    let meta = metadata(bytes);
+    let chunk_count = chunk_count(bytes.len());
     let mut stream_nonce = [0u8; STREAM_NONCE_LEN];
     OsRng.fill_bytes(&mut stream_nonce);
-    let header = header(bytes, &meta, &stream_nonce);
+    let header = header(digest, bytes.len() as u64, &stream_nonce);
     let aad = stream_aad(id, &header);
-    let tag_bytes = (meta.chunk_count as usize).saturating_mul(TAG_LEN);
+    let tag_bytes = (chunk_count as usize).saturating_mul(TAG_LEN);
     let mut out = Vec::with_capacity(
         bytes
             .len()
@@ -135,7 +206,7 @@ pub fn seal(bytes: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoErro
     out.extend_from_slice(&header);
 
     let mut stream = stream_encryptor(key, &stream_nonce);
-    let final_index = meta.chunk_count as usize - 1;
+    let final_index = chunk_count as usize - 1;
     for index in 0..final_index {
         let start = index
             .checked_mul(CHUNK_BYTES)
@@ -146,13 +217,17 @@ pub fn seal(bytes: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoErro
         let chunk = bytes
             .get(start..end)
             .ok_or(CryptoError::Internal("binary chunk range is invalid"))?;
-        let ciphertext = stream
-            .encrypt_next(Payload {
-                msg: chunk,
-                aad: &aad,
-            })
+        let record = out.len();
+        out.extend_from_slice(chunk);
+        stream
+            .encrypt_next_in_place(
+                &aad,
+                &mut Tail {
+                    out: &mut out,
+                    start: record,
+                },
+            )
             .map_err(|_| CryptoError::Internal("STREAM rejected the binary chunk"))?;
-        out.extend_from_slice(&ciphertext);
     }
 
     let final_start = final_index
@@ -161,13 +236,17 @@ pub fn seal(bytes: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoErro
     let final_chunk = bytes
         .get(final_start..)
         .ok_or(CryptoError::Internal("binary chunk range is invalid"))?;
-    let ciphertext = stream
-        .encrypt_last(Payload {
-            msg: final_chunk,
-            aad: &aad,
-        })
+    let record = out.len();
+    out.extend_from_slice(final_chunk);
+    stream
+        .encrypt_last_in_place(
+            &aad,
+            &mut Tail {
+                out: &mut out,
+                start: record,
+            },
+        )
         .map_err(|_| CryptoError::Internal("STREAM rejected the binary chunk"))?;
-    out.extend_from_slice(&ciphertext);
     Ok(out)
 }
 
@@ -204,22 +283,31 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoE
     let aad = stream_aad(id, header);
     let mut stream = stream_decryptor(key, stream_nonce);
     let mut offset = HEADER_BYTES;
-    let mut plain = Vec::new();
+    // Only now that `expected_envelope_len` has been matched is `plain_len` a
+    // length this envelope actually carries; presizing any earlier would let an
+    // untrusted header ask for an arbitrary allocation
+    // (`an_absurd_untrusted_byte_length_fails_without_allocating`). The tag
+    // slack is the room STREAM's in-place decrypt needs before it truncates.
+    let mut plain = Vec::with_capacity(plain_len.saturating_add(TAG_LEN));
     for _ in 0..chunk_count - 1 {
         let end = offset
             .checked_add(CHUNK_BYTES + TAG_LEN)
             .ok_or(CryptoError::AuthFailed)?;
         let ciphertext = envelope.get(offset..end).ok_or(CryptoError::AuthFailed)?;
-        let decoded = stream
-            .decrypt_next(Payload {
-                msg: ciphertext,
-                aad: &aad,
-            })
+        let record = plain.len();
+        plain.extend_from_slice(ciphertext);
+        stream
+            .decrypt_next_in_place(
+                &aad,
+                &mut Tail {
+                    out: &mut plain,
+                    start: record,
+                },
+            )
             .map_err(|_| CryptoError::AuthFailed)?;
-        if decoded.len() != CHUNK_BYTES {
+        if plain.len() - record != CHUNK_BYTES {
             return Err(CryptoError::AuthFailed);
         }
-        plain.extend_from_slice(&decoded);
         offset = end;
     }
 
@@ -233,18 +321,22 @@ pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Vec<u8>, CryptoE
         .checked_add(final_ciphertext_len)
         .ok_or(CryptoError::AuthFailed)?;
     let ciphertext = envelope.get(offset..end).ok_or(CryptoError::AuthFailed)?;
-    let decoded = stream
-        .decrypt_last(Payload {
-            msg: ciphertext,
-            aad: &aad,
-        })
+    let record = plain.len();
+    plain.extend_from_slice(ciphertext);
+    stream
+        .decrypt_last_in_place(
+            &aad,
+            &mut Tail {
+                out: &mut plain,
+                start: record,
+            },
+        )
         .map_err(|_| CryptoError::AuthFailed)?;
-    if decoded.len() != final_plain_len {
+    if plain.len() - record != final_plain_len {
         return Err(CryptoError::AuthFailed);
     }
-    plain.extend_from_slice(&decoded);
     offset = end;
-    let actual_hash: [u8; 32] = Sha256::digest(&plain).into();
+    let actual_hash = content_digest(&plain);
     if offset != envelope.len()
         || plain.len() as u64 != byte_len
         || actual_hash.as_slice() != expected_hash
@@ -310,6 +402,41 @@ mod tests {
         assert_eq!(id, item_id(&bytes));
     }
 
+    /// The digest is threaded through instead of recomputed at each spelling,
+    /// so every spelling must still be the one it was: the id, the row's
+    /// `content_hash` and the header the STREAM AAD covers.
+    #[test]
+    fn the_content_hash_of_a_digest_is_the_stores_own_value() {
+        for bytes in [b"".as_slice(), b"a payload", &vec![0x7f; CHUNK_BYTES + 5]] {
+            let digest = content_digest(bytes);
+            assert_eq!(
+                content_hash(&digest),
+                crate::storage::compute_content_hash(bytes)
+            );
+            assert_eq!(item_id_from_digest(&digest), item_id(bytes));
+            assert_eq!(metadata(bytes).content_hash, content_hash(&digest));
+        }
+    }
+
+    /// `seal_with_digest` must produce an envelope indistinguishable from
+    /// `seal`'s, header included — a digest of anything but the plaintext would
+    /// be a header `open` refuses.
+    #[test]
+    fn sealing_with_a_precomputed_digest_writes_the_same_header() {
+        let bytes = vec![0x6c; CHUNK_BYTES + 11];
+        let key = Keyring::from_secret(&[15; 32]).item_key();
+        let id = item_id(&bytes);
+        let threaded = seal_with_digest(&bytes, &content_digest(&bytes), &key, &id).unwrap();
+        let hashed = seal(&bytes, &key, &id).unwrap();
+
+        assert_eq!(
+            threaded[..STREAM_NONCE_OFFSET],
+            hashed[..STREAM_NONCE_OFFSET]
+        );
+        assert_eq!(threaded.len(), hashed.len());
+        assert_eq!(open(&threaded, &key, &id).unwrap(), bytes);
+    }
+
     #[test]
     fn maximum_payload_round_trips_and_one_extra_byte_is_rejected() {
         let key = Keyring::from_secret(&[9; 32]).item_key();
@@ -347,11 +474,14 @@ mod tests {
         let sealed = seal(&bytes, &key, id).unwrap();
         let first = chunk_records(&sealed)[0].clone();
         let mut forged = sealed[..first.end].to_vec();
-        let prefix_meta = metadata(&known_prefix);
         let nonce = sealed[STREAM_NONCE_OFFSET..HEADER_BYTES]
             .try_into()
             .unwrap();
-        forged[..HEADER_BYTES].copy_from_slice(&header(&known_prefix, &prefix_meta, nonce));
+        forged[..HEADER_BYTES].copy_from_slice(&header(
+            &content_digest(&known_prefix),
+            known_prefix.len() as u64,
+            nonce,
+        ));
 
         assert_auth_failed(open(&forged, &key, id));
     }
