@@ -122,23 +122,22 @@ pub(super) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
     if content_type == copypaste_ipc::content_type::FILE && metadata.is_none() {
         return Response::err(id, ErrorCode::Internal, MSG_CLIPBOARD);
     };
-    let binary = copypaste_ipc::content_type::is_binary(&content_type).then(|| {
-        copypaste_core::open_binary(&row.content_ciphertext, &state.keyring.item_key(), &row.id)
-    });
-    let item = match to_wire(state, row) {
-        Ok(item) => item,
+    // One open, and it is the authenticating one: the plaintext the pasteboard
+    // receives is exactly the bytes that opened under this row's id as AAD.
+    let (item, plaintext) = match to_wire_and_plaintext(state, row) {
+        Ok(opened) => opened,
         Err(e) => return decrypt_error(id, &e),
     };
 
-    let write = match binary {
-        Some(Ok(bytes)) => state.clipboard().set_binary_contents(
+    let write = if copypaste_ipc::content_type::is_binary(&content_type) {
+        state.clipboard().set_binary_contents(
             &item.id,
             &content_type,
-            &bytes,
+            &plaintext,
             metadata.as_ref(),
-        ),
-        Some(Err(e)) => return decrypt_error(id, &e),
-        None => state.clipboard().set_contents(&item.content),
+        )
+    } else {
+        state.clipboard().set_contents(&item.content)
     };
     if let Err(e) = write {
         error!(error = ?e, "pasteboard write failed");
@@ -329,6 +328,13 @@ pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Respo
 /// One row, one origin lookup. [`decrypt_rows`] resolves a whole page in one
 /// query instead — see [`to_wire_with`], which is what the two share.
 fn to_wire(state: &AppState, row: StoredItem) -> Result<Item, copypaste_core::CryptoError> {
+    to_wire_and_plaintext(state, row).map(|(item, _)| item)
+}
+
+fn to_wire_and_plaintext(
+    state: &AppState,
+    row: StoredItem,
+) -> Result<(Item, Vec<u8>), copypaste_core::CryptoError> {
     let origin = state.meta.origin_of(&row).unwrap_or_else(|e| {
         // Attribution is advisory: a row whose origin cannot be read is still
         // the user's item, and the fallback is the same one the origin table's
@@ -336,29 +342,34 @@ fn to_wire(state: &AppState, row: StoredItem) -> Result<Item, copypaste_core::Cr
         warn!(error = ?e, "could not resolve an item's origin device");
         state.meta.here()
     });
-    to_wire_with(state, row, &origin)
+    to_wire_with(row, &origin, &state.keyring.item_key())
 }
 
-/// [`to_wire`] with the origin already resolved.
+/// [`to_wire`] with the origin and the item key already resolved.
+///
+/// Returns the plaintext alongside the wire item so a caller that needs the
+/// bytes — `copy`, which has to hand them to the pasteboard — takes them from
+/// the open that authenticated this row rather than opening it a second time.
+/// Handing them back is the only way to get them: there is no entry point that
+/// accepts bytes opened under some other row's identity.
 fn to_wire_with(
-    state: &AppState,
     row: StoredItem,
     origin: &crate::meta::Origin,
-) -> Result<Item, copypaste_core::CryptoError> {
-    let key = state.keyring.item_key();
+    key: &copypaste_core::ItemKey,
+) -> Result<(Item, Vec<u8>), copypaste_core::CryptoError> {
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (CLAUDE.md rule 4,
     // "fail closed on crypto").
     let plaintext = if copypaste_ipc::content_type::is_binary(&row.content_type) {
-        copypaste_core::open_binary(&row.content_ciphertext, &key, &row.id)?
+        copypaste_core::open_binary(&row.content_ciphertext, key, &row.id)?
     } else {
-        copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, &key, &row.id)?
+        copypaste_core::decrypt(&row.content_ciphertext, &row.nonce, key, &row.id)?
     };
     // Measured on the plaintext bytes, because that is what the cloud path
     // measures: `LocalItem::content` is the opened payload, and the seal that
     // follows is a fixed overhead the cap does not count.
     let too_large_to_sync = crate::cloud::too_large_to_sync(&row.content_type, plaintext.len());
-    Ok(Item {
+    let item = Item {
         id: row.id,
         content: if copypaste_ipc::content_type::is_binary(&row.content_type) {
             format!(
@@ -377,7 +388,8 @@ fn to_wire_with(
         source_app_bundle_id: row.app_bundle_id,
         source_app_name: row.app_name,
         too_large_to_sync,
-    })
+    };
+    Ok((item, plaintext))
 }
 
 /// Decrypt a page of rows, dropping any row that will not open — and saying how
@@ -405,11 +417,16 @@ fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage {
         std::collections::HashMap::new()
     });
     let here = state.meta.here();
+    // One HKDF extract-and-expand for the page, not one per row: the derivation
+    // is constant for the process. Scoped to the page rather than held on
+    // `AppState`, so the key's window in memory is no wider than the plaintexts
+    // it opens.
+    let key = state.keyring.item_key();
     for row in rows {
         let row_id = row.id.clone();
         let origin = origins.get(&row_id).unwrap_or(&here);
-        match to_wire_with(state, row, origin) {
-            Ok(item) => page.items.push(item),
+        match to_wire_with(row, origin, &key) {
+            Ok((item, _)) => page.items.push(item),
             Err(e) => {
                 warn!(id = %row_id, error = ?e, "skipping an item that failed to decrypt");
                 page.skipped_undecryptable += 1;
