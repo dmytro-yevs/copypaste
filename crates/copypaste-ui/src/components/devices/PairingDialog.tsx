@@ -172,7 +172,7 @@ export function PairingDialog({ open, onOpenChange, flow, initialAddress, incomi
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="!flex min-w-0 flex-col !gap-0 !overflow-hidden !p-0 sm:!max-w-lg">
+      <DialogContent className="!flex min-w-0 flex-col !gap-0 !overflow-hidden !p-0 !max-w-lg">
         {flow === "create" && (
           <>
             <DialogHeader className="shrink-0 px-6 pt-6 pr-14 pb-s-3">

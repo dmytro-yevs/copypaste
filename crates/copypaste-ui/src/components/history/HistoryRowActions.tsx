@@ -68,7 +68,7 @@ export function HistoryRowActions({
 
         <DialogContent
           showCloseButton={false}
-          className="top-auto right-[calc(var(--inset-right)+var(--s-2))] bottom-[calc(var(--inset-bottom)+var(--s-2))] left-[calc(var(--inset-left)+var(--s-2))] w-auto max-h-[calc(100dvh-var(--inset-top)-var(--inset-bottom)-var(--s-4))] translate-x-0 translate-y-0 rounded-xl p-4 sm:top-auto sm:right-[calc(var(--inset-right)+var(--s-2))] sm:bottom-[calc(var(--inset-bottom)+var(--s-2))] sm:left-[calc(var(--inset-left)+var(--s-2))] sm:w-auto sm:max-w-none sm:translate-x-0 sm:translate-y-0"
+          className="top-auto right-[calc(var(--inset-right)+var(--s-2))] bottom-[calc(var(--inset-bottom)+var(--s-2))] left-[calc(var(--inset-left)+var(--s-2))] w-auto max-h-[calc(100dvh-var(--inset-top)-var(--inset-bottom)-var(--s-4))] max-w-none translate-x-0 translate-y-0 rounded-xl p-4"
         >
           <DialogHeader>
             <DialogTitle>{t("history.row.actions")}</DialogTitle>
