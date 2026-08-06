@@ -21,45 +21,46 @@ pub(super) struct GateRejection {
     pub(super) was_watch: bool,
 }
 
-/// Everything that can reject a request before a handler sees it.
+/// One line to a `Request`, or the reply that says why not.
 ///
-/// The rejection is boxed: a `Response` carries a whole payload variant, and an
-/// error type that large would be paid for on the success path too.
-pub(super) fn parse_and_gate(state: &AppState, line: &str) -> Result<Request, GateRejection> {
-    let request: Request = match serde_json::from_str(line) {
-        Ok(request) => request,
-        Err(e) => {
-            debug!(error = %e, "could not parse a request");
-            return Err(GateRejection {
-                response: Box::new(Response::err(
-                    recover_id(line),
-                    ErrorCode::InvalidRequest,
-                    MSG_MALFORMED,
-                )),
-                was_watch: false,
-            });
+/// Split from [`gate`] so that the caller's `Shutdown` fast path can branch on
+/// the parsed value instead of parsing the line a second time to find the
+/// method. The rejection is boxed: a `Response` carries a whole payload
+/// variant, and an error type that large would be paid for on the success path
+/// too.
+pub(super) fn parse(line: &str) -> Result<Request, GateRejection> {
+    serde_json::from_str(line).map_err(|e| {
+        debug!(error = %e, "could not parse a request");
+        GateRejection {
+            response: Box::new(Response::err(
+                recover_id(line),
+                ErrorCode::InvalidRequest,
+                MSG_MALFORMED,
+            )),
+            was_watch: false,
         }
-    };
+    })
+}
 
-    if let Some(rejection) = protocol_gate(&request) {
-        return Err(GateRejection {
+/// Everything that can reject a parsed request before a handler sees it.
+pub(super) fn gate(state: &AppState, request: &Request) -> Option<GateRejection> {
+    if let Some(rejection) = protocol_gate(request) {
+        return Some(GateRejection {
             response: Box::new(rejection),
             was_watch: matches!(request.method, Method::Watch),
         });
     }
     if requires_ready(&request.method) && !state.is_ready() {
-        let was_watch = matches!(request.method, Method::Watch);
-        return Err(GateRejection {
+        return Some(GateRejection {
             response: Box::new(Response::err(
                 request.id,
                 ErrorCode::NotReady,
                 MSG_NOT_READY,
             )),
-            was_watch,
+            was_watch: matches!(request.method, Method::Watch),
         });
     }
-
-    Ok(request)
+    None
 }
 
 /// Best-effort id recovery for a request that did not deserialise.
