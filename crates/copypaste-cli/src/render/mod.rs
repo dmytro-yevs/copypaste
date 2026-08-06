@@ -322,6 +322,7 @@ mod tests {
             source_app_bundle_id: None,
             source_app_name: None,
             too_large_to_sync: false,
+            truncated: false,
         }
     }
 

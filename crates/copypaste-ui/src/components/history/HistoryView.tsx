@@ -14,9 +14,9 @@ import type { StatusData } from "@/lib/ipc";
 import { useHistoryController } from "@/hooks/useHistoryController";
 import { useHistorySelection } from "@/hooks/useHistorySelection";
 import { useReveal } from "@/hooks/useReveal";
-import { hideWindow } from "@/lib/ipc";
+import { copyItems, hideWindow } from "@/lib/ipc";
 import type { Item } from "@/lib/ipc";
-import { previewOf } from "@/lib/format";
+import { useDetailBody } from "@/hooks/useDetailBody";
 import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
 
@@ -64,6 +64,8 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       : null;
   }, [detailId, items]);
 
+  const detailBody = useDetailBody(detail?.item ?? null);
+
   const openDetail = useCallback(
     (item: Item) => {
       setActiveId(item.id);
@@ -110,27 +112,17 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
     setBulkCopying(true);
     copy.mutate(first, {
       onSuccess: () => {
-        const text = selected
-          .filter(
-            (item) =>
-              !item.is_sensitive &&
-              item.content !== null &&
-              !item.content_type.toLowerCase().startsWith("image"),
-          )
-          .map((item) => previewOf(item.content!))
-          .join("\n");
         const finish = () => {
           selection.end();
           setBulkCopying(false);
         };
 
-        if (!text || typeof navigator.clipboard?.writeText !== "function") {
+        if (selected.length < 2) {
           finish();
           return;
         }
 
-        void Promise.resolve()
-          .then(() => navigator.clipboard.writeText(text))
+        void copyItems(selected.map((item) => item.id))
           .catch(() => {
             // Best effort: the daemon copy has already succeeded (§3.1.9).
           })
@@ -224,6 +216,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
       <HistoryDetail
         item={detail?.item ?? null}
         origin={detail?.origin ?? null}
+        fullContent={detailBody}
         revealedContent={
           detail && reveal.revealedId === detail.item.id
             ? reveal.revealedContent

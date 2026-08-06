@@ -8,6 +8,7 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_core::{ItemCursor, StoredItem};
+use copypaste_ipc::limits::bound_preview;
 use copypaste_ipc::{
     clamp_page, ErrorCode, Item, ItemPage, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
     DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
@@ -84,6 +85,9 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
 
     let next = page.next.map(|cursor| cursor.token());
     let mut wire = decrypt_rows(state, page.items);
+    for item in &mut wire.items {
+        item.truncated = bound_preview(&mut item.content);
+    }
     wire.next_cursor = next;
     Response::ok(id, ResponseData::Page(wire))
 }
@@ -388,6 +392,7 @@ fn to_wire_with(
         source_app_bundle_id: row.app_bundle_id,
         source_app_name: row.app_name,
         too_large_to_sync,
+        truncated: false,
     };
     Ok((item, plaintext))
 }
@@ -459,6 +464,7 @@ mod tests {
     use crate::server::dispatch::dispatch_store;
     use crate::testutil::test_state;
     use base64::engine::general_purpose::STANDARD;
+    use copypaste_ipc::limits::LIST_PREVIEW_BYTES;
     use copypaste_ipc::{content_type::TEXT, Method};
 
     fn row_of(bytes: usize) -> StoredItem {
@@ -504,6 +510,49 @@ mod tests {
     /// which is the same as not having them. This is the caller that made
     /// deleting their `allow(dead_code)` correct.
     #[test]
+    fn a_full_page_of_large_clippings_serialises_within_the_preview_bound() {
+        const PAGE: usize = 200;
+        const BODY: usize = 2048;
+
+        let (state, _dir) = test_state("list-page-bytes");
+        for n in 0..PAGE {
+            let body = format!("{n:07} ").repeat(BODY / 8);
+            assert!(body.len() >= BODY);
+            match add(&state, n as u64, &body).data {
+                Some(ResponseData::Item(_)) => {}
+                other => panic!("{other:?}"),
+            }
+        }
+
+        let response = list(&state, 1, PAGE as u32, None);
+        let bounded = serde_json::to_string(&response).unwrap().len();
+
+        let mut whole = match response.data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(whole.items.len(), PAGE);
+        assert!(whole.items.iter().all(|item| item.truncated));
+        for item in &mut whole.items {
+            item.content = item.content.repeat(BODY / LIST_PREVIEW_BYTES);
+            item.truncated = false;
+        }
+        let unbounded = serde_json::to_string(&Response::ok(1, ResponseData::Page(whole)))
+            .unwrap()
+            .len();
+
+        assert!(
+            bounded <= PAGE * (LIST_PREVIEW_BYTES + 512),
+            "a bounded page of {PAGE} items serialised to {bounded} bytes"
+        );
+        assert!(
+            unbounded > bounded,
+            "{unbounded} was not larger than {bounded}"
+        );
+        eprintln!("page bytes: bounded {bounded}, whole bodies {unbounded}");
+    }
+
+    #[test]
     fn status_carries_the_counters_nothing_used_to_read() {
         let (state, _dir) = test_state("counters");
         state.note_sensitive_swept(2);
@@ -539,6 +588,69 @@ mod tests {
     /// read time, and by a purge migration").
     /// Reading must never have the side effect of copying: `get` returns the
     /// content, and the clipboard is untouched by it.
+    #[test]
+    fn list_bounds_bodies_while_get_and_copy_still_answer_in_full() {
+        let (state, _dir) = test_state("list-preview");
+        let long = "x".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 3);
+        let added = match add(&state, 1, &long).data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(added.content.len(), long.len());
+        assert!(!added.truncated);
+
+        match list(&state, 2, 50, None).data {
+            Some(ResponseData::Page(page)) => {
+                let item = page
+                    .items
+                    .iter()
+                    .find(|candidate| candidate.id == added.id)
+                    .expect("the item is listed");
+                assert_eq!(
+                    item.content.len(),
+                    copypaste_ipc::limits::LIST_PREVIEW_BYTES
+                );
+                assert!(item.truncated);
+                assert!(long.starts_with(&item.content));
+            }
+            other => panic!("{other:?}"),
+        }
+
+        match get(&state, 3, &added.id).data {
+            Some(ResponseData::Item(item)) => {
+                assert_eq!(item.content, long);
+                assert!(!item.truncated);
+            }
+            other => panic!("{other:?}"),
+        }
+
+        match copy(&state, 4, &added.id).data {
+            Some(ResponseData::Item(item)) => assert_eq!(item.content, long),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_body_within_the_bound_is_listed_whole_and_unmarked() {
+        let (state, _dir) = test_state("list-preview-short");
+        let added = match add(&state, 1, "short enough").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        match list(&state, 2, 50, None).data {
+            Some(ResponseData::Page(page)) => {
+                let item = page
+                    .items
+                    .iter()
+                    .find(|candidate| candidate.id == added.id)
+                    .expect("the item is listed");
+                assert_eq!(item.content, "short enough");
+                assert!(!item.truncated);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[test]
     fn get_returns_an_item_without_touching_the_clipboard() {
         let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("server");

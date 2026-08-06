@@ -115,11 +115,17 @@ impl Backend for FakeBackend {
             source_app_bundle_id: None,
             source_app_name: None,
             too_large_to_sync: false,
+            truncated: false,
         })
     }
 
-    async fn get(&self, _id: &str) -> Result<Item> {
-        Err(refused())
+    async fn get(&self, id: &str) -> Result<Item> {
+        let page = self.page.lock().unwrap();
+        page.items
+            .iter()
+            .find(|item| item.id == id)
+            .cloned()
+            .ok_or_else(refused)
     }
 
     async fn image_preview(&self, _id: &str) -> Result<ImagePreview> {

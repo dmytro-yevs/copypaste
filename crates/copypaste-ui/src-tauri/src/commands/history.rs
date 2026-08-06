@@ -13,13 +13,16 @@
 //! The exception is [`reveal_item`], which has no `Method` behind it. See its
 //! docs.
 
-use tauri::State;
+use tauri::{AppHandle, Runtime, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 use crate::model::{UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon};
 use crate::source_app_icon::SourceAppIconCache;
 
 type Result<T> = std::result::Result<T, BackendError>;
+
+const MSG_BULK_COPY_FAILED: &str = "Those items couldn't be copied to the clipboard.";
 
 /// Most recent items, newest first; pinned ahead of unpinned.
 ///
@@ -106,6 +109,35 @@ pub async fn copy_item_as_plain_text(
 #[tauri::command]
 pub async fn reveal_item(backend: State<'_, SelectedBackend>, id: String) -> Result<String> {
     Ok(backend.get(&id).await?.content)
+}
+
+#[tauri::command]
+pub async fn copy_items<R: Runtime>(
+    app: AppHandle<R>,
+    backend: State<'_, SelectedBackend>,
+    ids: Vec<String>,
+) -> Result<bool> {
+    let text = joined_text(&*backend, &ids).await?;
+    if text.is_empty() {
+        return Ok(false);
+    }
+    app.clipboard().write_text(text).map_err(|e| {
+        tracing::warn!(error = %e, "a bulk clipboard write failed");
+        BackendError::Internal(MSG_BULK_COPY_FAILED.to_string())
+    })?;
+    Ok(true)
+}
+
+async fn joined_text(backend: &impl Backend, ids: &[String]) -> Result<String> {
+    let mut parts: Vec<String> = Vec::with_capacity(ids.len());
+    for id in ids {
+        let item = backend.get(id).await?;
+        if item.is_sensitive || copypaste_ipc::content_type::is_binary(&item.content_type) {
+            continue;
+        }
+        parts.push(item.content);
+    }
+    Ok(parts.join("\n"))
 }
 
 /// A lazy thumbnail for an image row. This cannot return a sensitive image:
@@ -233,6 +265,79 @@ mod tests {
         let shown = err.to_string();
         assert!(shown.ends_with('.'), "not a sentence: {shown}");
         assert!(!shown.contains('/'), "{shown}");
+    }
+
+    fn listed(
+        id: &str,
+        content: &str,
+        content_type: &str,
+        is_sensitive: bool,
+    ) -> copypaste_ipc::Item {
+        copypaste_ipc::Item {
+            id: id.into(),
+            content: content.into(),
+            content_type: content_type.into(),
+            created_at: 0,
+            pinned: false,
+            is_sensitive,
+            origin_device_id: "fake-device".into(),
+            origin_device_name: None,
+            source_app_bundle_id: None,
+            source_app_name: None,
+            too_large_to_sync: false,
+            truncated: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bulk_copy_joins_whole_bodies_fetched_by_id() {
+        let long = "y".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 2);
+        let backend = FakeBackend::failing().with_page(Page {
+            items: vec![
+                listed("a", &long, "text/plain", false),
+                listed("b", "second", "text/plain", false),
+            ],
+            ..Page::default()
+        });
+
+        let text = joined_text(&backend, &["a".to_string(), "b".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(text, format!("{long}\nsecond"));
+    }
+
+    #[tokio::test]
+    async fn a_bulk_copy_leaves_out_flagged_and_binary_items() {
+        let backend = FakeBackend::failing().with_page(Page {
+            items: vec![
+                listed("a", "kept", "text/plain", false),
+                listed("b", "AKIAsecret", "text/plain", true),
+                listed("c", "[Image]", "image/png", false),
+            ],
+            ..Page::default()
+        });
+
+        let text = joined_text(
+            &backend,
+            &["a".to_string(), "b".to_string(), "c".to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(text, "kept");
+    }
+
+    #[tokio::test]
+    async fn a_bulk_copy_refuses_whole_rather_than_copying_a_fragment() {
+        let backend = FakeBackend::failing().with_page(Page {
+            items: vec![listed("a", "kept", "text/plain", false)],
+            ..Page::default()
+        });
+
+        assert!(
+            joined_text(&backend, &["a".to_string(), "gone".to_string()])
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

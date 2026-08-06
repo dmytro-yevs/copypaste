@@ -95,6 +95,28 @@ describe("reading a long clipping", () => {
     );
   });
 
+  it("reads the whole body by id when the list only carried a preview", async () => {
+    const whole = `${LONG}\nline 40 the list never sent`;
+    listItems.mockResolvedValue(
+      page([item({ id: "long", content: LONG, truncated: true })]),
+    );
+    revealItem.mockResolvedValue(whole);
+
+    const { user } = withUser(<HistoryView />);
+    const dialog = await open(user);
+
+    await waitFor(() => expect(revealItem).toHaveBeenCalledWith("long"));
+    await waitFor(() =>
+      expect(dialog.textContent).toContain("line 40 the list never sent"),
+    );
+  });
+
+  it("asks for nothing extra when the list carried the whole body", async () => {
+    const { user } = withUser(<HistoryView />);
+    await open(user);
+    expect(revealItem).not.toHaveBeenCalled();
+  });
+
   it("copies from inside the view", async () => {
     const { user } = withUser(<HistoryView />);
     const dialog = await open(user);

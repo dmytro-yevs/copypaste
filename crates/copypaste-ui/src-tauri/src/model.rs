@@ -80,6 +80,7 @@ pub struct UiItem {
     /// so before the first attempt rather than after it silently never arrives
     /// (`CopyPaste-f72f`).
     too_large_to_sync: bool,
+    truncated: bool,
 }
 
 /// A thumbnail produced on demand from a non-sensitive image item.
@@ -202,6 +203,7 @@ impl From<Item> for UiItem {
             source_app_bundle_id: item.source_app_bundle_id,
             source_app_name: item.source_app_name,
             too_large_to_sync: item.too_large_to_sync,
+            truncated: item.truncated,
         }
     }
 }
@@ -344,6 +346,7 @@ mod tests {
             source_app_bundle_id: Some("com.apple.Safari".into()),
             source_app_name: Some("Safari".into()),
             too_large_to_sync: false,
+            truncated: false,
         }
     }
 

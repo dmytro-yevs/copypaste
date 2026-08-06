@@ -192,6 +192,7 @@ pub fn run() {
             commands::history::copy_item,
             commands::history::copy_item_as_plain_text,
             commands::history::reveal_item,
+            commands::history::copy_items,
             commands::history::get_image_preview,
             commands::history::get_source_app_icon,
             commands::history::list_installed_source_apps,
