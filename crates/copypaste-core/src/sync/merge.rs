@@ -12,7 +12,7 @@ use tracing::{debug, warn};
 
 use super::{MSG_ENCRYPT, MSG_STORE};
 use crate::sensitive::Detector;
-use crate::storage::{origin_or, IncomingItem, Store, StoredItem};
+use crate::storage::{origin_or, IncomingItem, Store, StoredItem, Version};
 use crate::Keyring;
 
 /// Open a stored version under the local item key, ready to leave the device.
@@ -167,8 +167,8 @@ pub fn apply_remote_version(
     )
 }
 
-fn local_version(store: &Store, item_id: &str) -> Result<Option<StoredItem>, MergeError> {
-    store.version(item_id).map_err(|e| {
+fn local_version(store: &Store, item_id: &str) -> Result<Option<Version>, MergeError> {
+    store.version_summary(item_id).map_err(|e| {
         warn!(error = ?e, "could not read the local version of an incoming item");
         MergeError::Store
     })
@@ -272,7 +272,7 @@ fn apply_remote_version_with_pin_state(
     here: &str,
     incoming: &RemoteVersion<'_>,
     pin_state: Option<(bool, Option<f64>, i64, bool)>,
-    local: Option<&StoredItem>,
+    local: Option<&Version>,
 ) -> Result<bool, MergeError> {
     let content = incoming
         .binary_content
@@ -779,6 +779,35 @@ mod tests {
             origin_device_id: &f.here,
             ..version("mine", "mine", 1_000)
         }));
+    }
+
+    #[test]
+    fn a_tombstone_does_not_clear_the_sensitive_flag() {
+        let f = fixture();
+        f.apply(&version("leaky", "AKIAIOSFODNN7EXAMPLE", 1_000));
+        let stamp = f.store.version("leaky").unwrap().unwrap().created_at + 1;
+
+        assert!(f.apply(&RemoteVersion {
+            content: "",
+            deleted: true,
+            ..version("leaky", "", stamp)
+        }));
+
+        let row = f
+            .store
+            .version_summary("leaky")
+            .unwrap()
+            .expect("tombstone");
+        assert!(row.deleted);
+        assert!(
+            row.is_sensitive,
+            "a delete cleared the sensitive flag; the secret becomes indexable again"
+        );
+        assert!(f
+            .store
+            .search("AKIAIOSFODNN7EXAMPLE", 10)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
