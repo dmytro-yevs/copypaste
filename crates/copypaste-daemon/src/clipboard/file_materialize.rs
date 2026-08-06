@@ -4,7 +4,7 @@ use std::ffi::CStr;
 use std::fs::File;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,12 +16,24 @@ use tracing::warn;
 const DIRECTORY_MODE: Mode = Mode::RWXU;
 const FILE_MODE: Mode = Mode::RUSR.union(Mode::WUSR);
 const MAX_AGE: Duration = Duration::from_secs(10 * 60);
-const CLEANUP_INTERVAL: Duration = Duration::from_secs(30);
+/// Matched to `MAX_AGE`: the sweep enforces a deadline nothing waits on, so
+/// sampling it more often than it can expire is a resident timer for nothing.
+const CLEANUP_INTERVAL: Duration = MAX_AGE;
 
 pub(super) struct StagingArea {
     root: PathBuf,
+    /// Opened once. Re-`open`ing and re-`fchmod`ing per paste-back put six
+    /// syscalls on the interactive path to reassert a mode nothing changes.
+    root_fd: std::os::fd::OwnedFd,
     access: Arc<Mutex<()>>,
-    _cleanup: CleanupWorker,
+    /// Started on the first successful `materialize`, not at construction: on a
+    /// machine that never pastes a file back the sweeper has nothing to sweep,
+    /// and it was costing a resident OS thread for the life of the daemon. The
+    /// start-time sweep in `with_timing` still bounds anything a previous run
+    /// left behind.
+    cleanup: OnceLock<CleanupWorker>,
+    max_age: Duration,
+    interval: Duration,
 }
 
 impl StagingArea {
@@ -32,23 +44,50 @@ impl StagingArea {
     fn with_timing(data_dir: &Path, max_age: Duration, interval: Duration) -> io::Result<Self> {
         let root = std::path::absolute(data_dir)?.join("paste-files");
         let root_fd = open_or_create_root(&root)?;
-        drop(root_fd);
         cleanup_stale_at(&root, SystemTime::now(), max_age)?;
-        let access = Arc::new(Mutex::new(()));
-        let cleanup = CleanupWorker::start(root.clone(), Arc::clone(&access), max_age, interval)?;
         Ok(Self {
             root,
-            access,
-            _cleanup: cleanup,
+            root_fd,
+            access: Arc::new(Mutex::new(())),
+            cleanup: OnceLock::new(),
+            max_age,
+            interval,
         })
     }
 
     pub(super) fn materialize(&self, bytes: &[u8], metadata: &FileMetadata) -> io::Result<PathBuf> {
         let filename = safe_filename(metadata)?;
         let _access = self.access.lock().unwrap_or_else(|held| held.into_inner());
+        let path = self.stage(bytes, filename)?;
+        self.start_cleanup();
+        Ok(path)
+    }
+
+    /// The TTL sweeper exists because this directory holds *decrypted* payloads.
+    /// Retried on the next paste-back if the thread could not be spawned.
+    fn start_cleanup(&self) {
+        if self.cleanup.get().is_some() {
+            return;
+        }
+        match CleanupWorker::start(
+            self.root.clone(),
+            Arc::clone(&self.access),
+            self.max_age,
+            self.interval,
+        ) {
+            Ok(worker) => {
+                let _ = self.cleanup.set(worker);
+            }
+            Err(error) => warn!(
+                error_kind = ?error.kind(),
+                "could not start the paste-file staging sweeper"
+            ),
+        }
+    }
+
+    fn stage(&self, bytes: &[u8], filename: &str) -> io::Result<PathBuf> {
         let content_id = copypaste_core::binary_item_id(bytes);
-        let root_fd = open_or_create_root(&self.root)?;
-        let content_fd = open_or_create_content_dir(&root_fd, &content_id)?;
+        let content_fd = open_or_create_content_dir(&self.root_fd, &content_id)?;
 
         match open_regular_at(&content_fd, filename) {
             Ok(file) => {
@@ -69,7 +108,13 @@ impl StagingArea {
         let mut temporary = File::from(temporary_fd);
         let write_result = (|| {
             temporary.write_all(bytes)?;
-            temporary.sync_all()?;
+            // `flush`, never `sync_all`: `write -> publish -> read` crosses a
+            // process boundary, so the bytes must be visible before the
+            // `linkat`, but they need never reach stable storage. A staging file
+            // lost to a crash is re-derived from the encrypted row on the next
+            // paste, and the fsync was tens of milliseconds of interactive
+            // latency for a file `MAX_AGE` deletes within ten minutes anyway.
+            temporary.flush()?;
             rustix::fs::linkat(
                 &content_fd,
                 temporary_name.as_str(),
@@ -395,6 +440,22 @@ mod tests {
             .materialize(b"custom", &metadata("custom.txt"))
             .unwrap();
         assert!(path.starts_with(active_data_dir.join("paste-files")));
+    }
+
+    #[test]
+    fn the_sweeper_starts_on_the_first_paste_back_and_not_before() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let staging = StagingArea::new(data_dir.path()).unwrap();
+        assert!(
+            staging.cleanup.get().is_none(),
+            "a daemon that never pasted a file back must not carry a sweeper thread"
+        );
+
+        staging.materialize(b"bytes", &metadata("a.txt")).unwrap();
+        assert!(
+            staging.cleanup.get().is_some(),
+            "staged plaintext must be under the TTL sweeper"
+        );
     }
 
     #[test]

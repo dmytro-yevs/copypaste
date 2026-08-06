@@ -23,7 +23,7 @@ use crate::AppState;
 
 const MIN_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MIN_REFRESH_INTERVAL_MS: i64 = 5_000;
-const SIGNED_OUT_INTERVAL: Duration = Duration::from_secs(10);
+const SIGNED_OUT_INTERVAL: Duration = poll::SIGNED_OUT_INTERVAL;
 const RETRY_MIN: Duration = Duration::from_secs(30);
 const RETRY_MAX: Duration = Duration::from_secs(300);
 
@@ -146,6 +146,13 @@ impl RefreshTarget for AppState {
 }
 
 pub async fn run(state: Arc<AppState>, shutdown: watch::Receiver<bool>) {
+    // Keyed on `is_configured`, which is static for the process — not on
+    // `driver()`, which `Cloud::restore` populates before this task is spawned
+    // and sign-in populates later.
+    if !state.cloud.is_configured() {
+        debug!("no cloud deployment configured; refresh is idle");
+        return;
+    }
     maintain(state, SystemWallClock, shutdown).await;
 }
 
