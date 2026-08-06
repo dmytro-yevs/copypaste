@@ -20,6 +20,7 @@ use crate::protocol::SyncMessage;
 use crate::sync::{SyncChannel, SyncError};
 use crate::transport::Session;
 use serde_json::value::RawValue;
+use zeroize::Zeroizing;
 
 /// How long one half waits for the other's next message.
 ///
@@ -79,17 +80,12 @@ impl NoiseChannel {
 
 impl SyncChannel for NoiseChannel {
     async fn send(&mut self, msg: SyncMessage) -> Result<(), SyncError> {
-        let bytes = msg.encode()?;
-        // `RawValue` is emitted verbatim, so what reaches the wire is exactly
-        // the bytes `encode` validated.
-        let raw =
-            RawValue::from_string(String::from_utf8(bytes).map_err(|_| {
-                SyncError::Channel("outgoing message was not valid text".to_string())
-            })?)
-            .map_err(|_| SyncError::Channel("outgoing message could not be framed".to_string()))?;
+        // Handed down verbatim, so what reaches the wire is exactly the bytes
+        // `encode` validated.
+        let bytes = Zeroizing::new(msg.encode()?);
 
         self.session
-            .send(&raw)
+            .send_bytes(bytes)
             .await
             .map_err(|e| SyncError::Channel(e.to_string()))
     }
