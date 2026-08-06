@@ -8,7 +8,9 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 use zeroize::Zeroizing;
 
-use super::connection::{apply_connection_pragmas, apply_key, build_pool, validate_key};
+use super::connection::{
+    apply_connection_pragmas, apply_key, build_pool, run_pragma, validate_key,
+};
 use super::model::StoreError;
 use super::schema::migrate;
 
@@ -46,6 +48,9 @@ impl Store {
         validate_key(&conn)?;
         apply_connection_pragmas(&conn)?;
         migrate(&mut conn)?;
+        // A restart onto a populated history would otherwise plan every query
+        // from default guesses until the pool first retires a connection.
+        let _ = run_pragma(&conn, "PRAGMA optimize");
         drop(conn);
 
         let pool = build_pool(SqliteConnectionManager::file(path), db_key, false)?;
