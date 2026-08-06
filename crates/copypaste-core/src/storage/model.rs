@@ -170,27 +170,44 @@ pub enum StoreError {
     InvalidCursor,
 }
 
-pub(super) fn row_to_item(row: &Row<'_>) -> rusqlite::Result<StoredItem> {
+pub(super) const ITEM_COLUMN_COUNT: usize = 15;
+
+pub(super) struct ItemColumns([usize; ITEM_COLUMN_COUNT]);
+
+impl ItemColumns {
+    pub(super) fn resolve(stmt: &rusqlite::Statement<'_>) -> rusqlite::Result<Self> {
+        let mut at = [0usize; ITEM_COLUMN_COUNT];
+        for (slot, name) in (0..ITEM_COLUMN_COUNT).zip(item_columns!().split(',')) {
+            at[slot] = stmt.column_index(name.trim())?;
+        }
+        Ok(Self(at))
+    }
+
+    pub(super) fn pin_order_index(&self) -> usize {
+        self.0[7]
+    }
+}
+
+pub(super) fn row_to_item(row: &Row<'_>, columns: &ItemColumns) -> rusqlite::Result<StoredItem> {
+    let at = &columns.0;
     Ok(StoredItem {
-        id: row.get("id")?,
+        id: row.get(at[0])?,
         // NULL only on a tombstone, which no read path returns; map defensively
         // rather than failing the whole query.
-        content_ciphertext: row
-            .get::<_, Option<Vec<u8>>>("content_ciphertext")?
-            .unwrap_or_default(),
-        nonce: row.get::<_, Option<Vec<u8>>>("nonce")?.unwrap_or_default(),
-        content_type: row.get("content_type")?,
-        content_hash: row.get("content_hash")?,
-        created_at: row.get("created_at")?,
-        pinned: row.get("pinned")?,
-        pin_order: row.get("pin_order")?,
-        pin_updated_at: row.get("pin_updated_at")?,
-        is_sensitive: row.get("is_sensitive")?,
-        deleted: row.get("deleted")?,
-        origin_device_id: row.get("origin_device_id")?,
-        app_bundle_id: row.get("app_bundle_id")?,
-        app_name: row.get("app_name")?,
-        payload_metadata: row.get("payload_metadata")?,
+        content_ciphertext: row.get::<_, Option<Vec<u8>>>(at[1])?.unwrap_or_default(),
+        nonce: row.get::<_, Option<Vec<u8>>>(at[2])?.unwrap_or_default(),
+        content_type: row.get(at[3])?,
+        content_hash: row.get(at[4])?,
+        created_at: row.get(at[5])?,
+        pinned: row.get(at[6])?,
+        pin_order: row.get(at[7])?,
+        pin_updated_at: row.get(at[8])?,
+        is_sensitive: row.get(at[9])?,
+        deleted: row.get(at[10])?,
+        origin_device_id: row.get(at[11])?,
+        app_bundle_id: row.get(at[12])?,
+        app_name: row.get(at[13])?,
+        payload_metadata: row.get(at[14])?,
     })
 }
 
@@ -206,4 +223,43 @@ pub(super) fn is_constraint_violation(err: &rusqlite::Error) -> bool {
 pub(super) fn is_not_a_database(err: &rusqlite::Error) -> bool {
     matches!(err, rusqlite::Error::SqliteFailure(e, _)
         if e.code == ErrorCode::NotADatabase || e.code == ErrorCode::DatabaseCorrupt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::test_support::{item, store, T0};
+    use super::*;
+
+    #[test]
+    fn the_resolved_indices_match_the_projection_and_follow_the_names() {
+        assert_eq!(
+            item_columns!().split(',').count(),
+            ITEM_COLUMN_COUNT,
+            "the projection and the resolved width must agree"
+        );
+        assert_eq!(
+            item_columns_ci!().split(',').count(),
+            ITEM_COLUMN_COUNT,
+            "the aliased projection must list the same columns"
+        );
+
+        let s = store();
+        let stored = s.insert(item("round trip", T0)).unwrap();
+        let conn = s.conn().unwrap();
+
+        for sql in [
+            concat!("SELECT ", item_columns!(), " FROM clipboard_items"),
+            concat!("SELECT ", item_columns_ci!(), " FROM clipboard_items ci"),
+            "SELECT payload_metadata, app_name, app_bundle_id, origin_device_id, deleted, \
+             is_sensitive, pin_updated_at, pin_order, pinned, created_at, content_hash, \
+             content_type, nonce, content_ciphertext, id FROM clipboard_items",
+        ] {
+            let mut stmt = conn.prepare(sql).unwrap();
+            let columns = ItemColumns::resolve(&stmt).unwrap();
+            let read = stmt
+                .query_row([], |row| row_to_item(row, &columns))
+                .unwrap();
+            assert_eq!(read, stored, "projection: {sql}");
+        }
+    }
 }

@@ -7,10 +7,11 @@ use rusqlite::{params, OptionalExtension};
 
 use super::connection::write_tx;
 use super::model::{
-    is_constraint_violation, item_columns, row_to_item, Ingest, NewItem, StoreError, StoredItem,
+    is_constraint_violation, item_columns, row_to_item, Ingest, ItemColumns, NewItem, StoreError,
+    StoredItem,
 };
 use super::retention::{bump_in_tx, find_in_bucket, newest_live_with_hash};
-use super::search::upsert_fts_in_tx;
+use super::search::{delete_fts_row_in_tx, upsert_fts_in_tx};
 use super::store::Store;
 
 fn promote_sensitive_in_tx(
@@ -20,13 +21,15 @@ fn promote_sensitive_in_tx(
     if item.is_sensitive {
         return Ok(item);
     }
+    // This must share the classification update's transaction: otherwise a
+    // password-manager re-copy can leave an ordinary row searchable. The index
+    // row goes first, while `fts_rowid` still names it.
+    delete_fts_row_in_tx(tx, &item.id)?;
     tx.execute(
-        "UPDATE clipboard_items SET is_sensitive = 1 WHERE id = ?1 AND deleted = 0",
+        "UPDATE clipboard_items SET is_sensitive = 1, fts_rowid = NULL \
+          WHERE id = ?1 AND deleted = 0",
         [&item.id],
     )?;
-    // This must share the classification update's transaction: otherwise a
-    // password-manager re-copy can leave an ordinary row searchable.
-    tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [&item.id])?;
     item.is_sensitive = true;
     Ok(item)
 }
@@ -204,7 +207,10 @@ impl Store {
               ORDER BY pinned DESC, pin_order ASC, created_at DESC, id DESC \
               LIMIT ?1 OFFSET ?2"
         ))?;
-        let rows = stmt.query_map(params![i64::from(limit), i64::from(offset)], row_to_item)?;
+        let columns = ItemColumns::resolve(&stmt)?;
+        let rows = stmt.query_map(params![i64::from(limit), i64::from(offset)], |row| {
+            row_to_item(row, &columns)
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -216,7 +222,10 @@ impl Store {
             item_columns!(),
             " FROM clipboard_items WHERE id = ?1 AND deleted = 0"
         ))?;
-        Ok(stmt.query_row([id], row_to_item).optional()?)
+        let columns = ItemColumns::resolve(&stmt)?;
+        Ok(stmt
+            .query_row([id], |row| row_to_item(row, &columns))
+            .optional()?)
     }
 
     /// Soft-deletes an item, returning whether a live row was affected.
@@ -227,6 +236,8 @@ impl Store {
     pub fn delete(&self, id: &str) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
+        // Unconditional, and before the update that clears `fts_rowid`.
+        delete_fts_row_in_tx(&tx, id)?;
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
@@ -235,13 +246,11 @@ impl Store {
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?2) \
                     END, \
-                    pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL \
+                    pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, \
+                    fts_rowid = NULL \
               WHERE id = ?1 AND deleted = 0",
             params![id, crate::now_ms()],
         )?;
-        // Unconditional: this also repairs a stale row left by an earlier
-        // partial failure.
-        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])?;
         tx.commit()?;
         Ok(changed > 0)
     }
@@ -257,11 +266,21 @@ impl Store {
     ) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
+        // Read before the update clears it; the delete still runs only if the
+        // update fired, so a row the predicates saved keeps its index entry.
+        let fts_rowid: Option<i64> = tx
+            .query_row(
+                "SELECT fts_rowid FROM clipboard_items WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, nonce = NULL, \
                     content_hash = '', pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, \
-                    payload_metadata = NULL, \
+                    payload_metadata = NULL, fts_rowid = NULL, \
                     created_at = CASE \
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?4) \
@@ -270,8 +289,8 @@ impl Store {
                 AND is_sensitive = 1 AND pinned = 0 AND deleted = 0",
             params![id, created_at, content_hash, crate::now_ms()],
         )?;
-        if changed > 0 {
-            tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])?;
+        if let (true, Some(rowid)) = (changed > 0, fts_rowid) {
+            tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
         }
         tx.commit()?;
         Ok(changed > 0)
@@ -293,7 +312,8 @@ impl Store {
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?1) \
                     END, \
-                    pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL \
+                    pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, \
+                    fts_rowid = NULL \
               WHERE deleted = 0 AND pinned = 0",
             [crate::now_ms()],
         )?;

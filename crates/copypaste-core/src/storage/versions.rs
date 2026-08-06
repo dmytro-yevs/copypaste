@@ -17,8 +17,10 @@ use std::collections::HashSet;
 use rusqlite::{params, OptionalExtension};
 
 use super::connection::write_tx;
-use super::model::{is_constraint_violation, item_columns, row_to_item, StoreError, StoredItem};
-use super::search::upsert_fts_in_tx;
+use super::model::{
+    is_constraint_violation, item_columns, row_to_item, ItemColumns, StoreError, StoredItem,
+};
+use super::search::{delete_fts_row_in_tx, upsert_fts_in_tx};
 use super::store::Store;
 
 /// The version identity of one row — the four merge keys and the id.
@@ -38,6 +40,10 @@ pub struct Version {
     pub pin_updated_at: i64,
     /// Empty means "captured on this device" — see [`origin_or`].
     pub origin_device_id: String,
+    /// Read by the merge for the tombstone case: an incoming delete must not
+    /// clear the flag, or the item is re-indexed and the secret becomes
+    /// searchable.
+    pub is_sensitive: bool,
 }
 
 /// One version arriving from another device, already sealed under the local key.
@@ -79,6 +85,30 @@ pub fn origin_or<'a>(stored: &'a str, here: &'a str) -> &'a str {
     }
 }
 
+/// The projection behind [`Version`], in the order [`row_to_version`] reads and
+/// in the order `idx_items_syncable` carries, so the covering read and the
+/// index stay recognisably one thing.
+macro_rules! version_columns {
+    () => {
+        "created_at, id, content_hash, deleted, origin_device_id, \
+         pinned, pin_order, pin_updated_at, is_sensitive"
+    };
+}
+
+fn row_to_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
+    Ok(Version {
+        created_at: row.get(0)?,
+        id: row.get(1)?,
+        content_hash: row.get(2)?,
+        deleted: row.get::<_, i64>(3)? != 0,
+        origin_device_id: row.get(4)?,
+        pinned: row.get(5)?,
+        pin_order: row.get(6)?,
+        pin_updated_at: row.get(7)?,
+        is_sensitive: row.get(8)?,
+    })
+}
+
 impl Store {
     /// Apply a P2P pin-state version without touching the content version.
     ///
@@ -110,25 +140,63 @@ impl Store {
     /// peers without disclosing the secret.
     pub fn summaries(&self, limit: i64) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(
-            "SELECT id, created_at, content_hash, deleted, origin_device_id, pinned, pin_order, pin_updated_at \
-               FROM clipboard_items \
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ",
+            version_columns!(),
+            " FROM clipboard_items \
               WHERE deleted = 1 OR is_sensitive = 0 \
-              ORDER BY created_at DESC, id DESC LIMIT ?1",
-        )?;
-        let rows = stmt.query_map([limit], |row| {
-            Ok(Version {
-                id: row.get(0)?,
-                created_at: row.get(1)?,
-                content_hash: row.get(2)?,
-                deleted: row.get::<_, i64>(3)? != 0,
-                origin_device_id: row.get(4)?,
-                pinned: row.get(5)?,
-                pin_order: row.get(6)?,
-                pin_updated_at: row.get(7)?,
-            })
-        })?;
+              ORDER BY created_at DESC, id DESC LIMIT ?1"
+        ))?;
+        let rows = stmt.query_map([limit], row_to_version)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// The same view, from a cursor: everything whose version *or pin state*
+    /// moved at or after `since_ms`, oldest change first.
+    ///
+    /// Ordered and bounded on `MAX(created_at, pin_updated_at)`, not on
+    /// `created_at`. Pinning does not restamp the content version — that is the
+    /// whole point of `pin_updated_at` — so a `created_at` cursor would stop
+    /// carrying pin and unpin for any item older than it, permanently.
+    ///
+    /// `after_id` breaks the tie the way [`Store::versions_after`] does: a
+    /// stamp-only floor cannot drain a page of rows that share its boundary.
+    pub fn summaries_since(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<Version>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ",
+            version_columns!(),
+            " FROM clipboard_items \
+               WHERE (deleted = 1 OR is_sensitive = 0) \
+                 AND (MAX(created_at, pin_updated_at) > ?1 \
+                      OR (MAX(created_at, pin_updated_at) = ?1 \
+                          AND (?2 IS NULL OR id > ?2))) \
+               ORDER BY MAX(created_at, pin_updated_at) ASC, id ASC LIMIT ?3"
+        ))?;
+        let rows = stmt.query_map(params![since_ms, after_id, limit], row_to_version)?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// One row's version identity, without its payload.
+    ///
+    /// [`Store::version`] for a caller that only compares metadata: the merge
+    /// reads eight scalars and the full projection makes it read and copy the
+    /// ciphertext BLOB to do it. Sensitive rows are included for the same
+    /// reason they are in [`Store::version`] — the merge has to compare against
+    /// one — and `is_sensitive` is part of the answer, not filtered out of it.
+    pub fn version_summary(&self, id: &str) -> Result<Option<Version>, StoreError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare_cached(concat!(
+            "SELECT ",
+            version_columns!(),
+            " FROM clipboard_items WHERE id = ?1"
+        ))?;
+        Ok(stmt.query_row([id], row_to_version).optional()?)
     }
 
     /// One row as the merge sees it — live, tombstoned, or sensitive.
@@ -143,7 +211,10 @@ impl Store {
             item_columns!(),
             " FROM clipboard_items WHERE id = ?1"
         ))?;
-        Ok(stmt.query_row([id], row_to_item).optional()?)
+        let columns = ItemColumns::resolve(&stmt)?;
+        Ok(stmt
+            .query_row([id], |row| row_to_item(row, &columns))
+            .optional()?)
     }
 
     /// The rows behind a request, still encrypted. Live sensitive items and
@@ -170,7 +241,10 @@ impl Store {
             item_columns!()
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(unique), row_to_item)?;
+        let columns = ItemColumns::resolve(&stmt)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(unique), |row| {
+            row_to_item(row, &columns)
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -211,7 +285,10 @@ impl Store {
                       OR (created_at = ?1 AND (?2 IS NULL OR id > ?2))) \
                ORDER BY created_at ASC, id ASC LIMIT ?3"
         ))?;
-        let rows = stmt.query_map(params![since_ms, after_id, limit], row_to_item)?;
+        let columns = ItemColumns::resolve(&stmt)?;
+        let rows = stmt.query_map(params![since_ms, after_id, limit], |row| {
+            row_to_item(row, &columns)
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -245,6 +322,9 @@ impl Store {
     pub fn upsert(&self, incoming: &IncomingItem<'_>) -> Result<bool, StoreError> {
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
+        // Before the write below clears `fts_rowid`, and rolled back with it if
+        // the dedup index refuses the version.
+        delete_fts_row_in_tx(&tx, incoming.id)?;
         let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
             (false, None, 0)
         } else {
@@ -269,7 +349,8 @@ impl Store {
                  payload_metadata   = excluded.payload_metadata, \
                  pinned             = excluded.pinned, \
                  pin_order          = excluded.pin_order, \
-                 pin_updated_at     = excluded.pin_updated_at",
+                 pin_updated_at     = excluded.pin_updated_at, \
+                 fts_rowid          = NULL",
             params![
                 incoming.id,
                 incoming.content_ciphertext,
@@ -298,11 +379,10 @@ impl Store {
             Err(e) => return Err(e.into()),
         }
 
-        // Unconditional, so a version that arrives sensitive, deleted, or
-        // simply changed cannot leave a stale index row behind. This is the
-        // write-time layer of "sensitive items never reach the search index"
-        // for the sync path (CLAUDE.md rule 4).
-        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [incoming.id])?;
+        // The index row was removed above the write, unconditionally, so a
+        // version that arrives sensitive, deleted, or simply changed cannot
+        // leave a stale one behind. This is the write-time layer of "sensitive
+        // items never reach the search index" for the sync path (rule 4).
         if !incoming.deleted && copypaste_ipc::content_type::is_text(incoming.content_type) {
             if let Some(text) = incoming.search_text.filter(|t| !t.trim().is_empty()) {
                 // Layer 2 rather than a second `is_sensitive` test here: it
@@ -575,5 +655,177 @@ mod tests {
     #[test]
     fn an_empty_history_has_no_oldest_version() {
         assert_eq!(store().oldest_version_ms().unwrap(), None);
+    }
+
+    fn plan_of(store: &Store, sql: &str) -> Vec<String> {
+        let conn = store.conn().unwrap();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let bound: Vec<rusqlite::types::Null> = (0..stmt.parameter_count())
+            .map(|_| rusqlite::types::Null)
+            .collect();
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(bound), |row| {
+                row.get::<_, String>(3)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        rows
+    }
+
+    /// F-STOR-2. Without an index the sync read scans `clipboard_items` — whose
+    /// rows are dominated by the ciphertext this projection discards — and then
+    /// materialises a temp B-tree over every qualifying row. Measured 9.06 ms →
+    /// 0.86 ms at 5 000 rows.
+    ///
+    /// The partial predicate has to be written exactly as `idx_items_syncable`
+    /// declares it or SQLite silently declines the index (`CopyPaste-crh3.3`),
+    /// and here that predicate is also what keeps a live sensitive item out of
+    /// an advertisement — so this test guards a disclosure, not a stall.
+    #[test]
+    fn the_sync_read_is_served_by_its_covering_index_without_a_sort() {
+        let s = store();
+        s.insert(item("something", T0)).unwrap();
+        let plan = plan_of(
+            &s,
+            concat!(
+                "SELECT ",
+                version_columns!(),
+                " FROM clipboard_items \
+                  WHERE deleted = 1 OR is_sensitive = 0 \
+                  ORDER BY created_at DESC, id DESC LIMIT ?1"
+            ),
+        );
+        assert!(
+            plan.iter().any(|d| d.contains("idx_items_syncable")),
+            "the sync read must use its index, got {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|d| d.contains("TEMP B-TREE")),
+            "the index must supply the order, got {plan:?}"
+        );
+    }
+
+    #[test]
+    fn the_sync_cursor_seeks_rather_than_scanning() {
+        let s = store();
+        s.insert(item("something", T0)).unwrap();
+        let plan = plan_of(
+            &s,
+            concat!(
+                "SELECT ",
+                version_columns!(),
+                " FROM clipboard_items \
+                   WHERE (deleted = 1 OR is_sensitive = 0) \
+                     AND (MAX(created_at, pin_updated_at) > ?1 \
+                          OR (MAX(created_at, pin_updated_at) = ?1 \
+                              AND (?2 IS NULL OR id > ?2))) \
+                   ORDER BY MAX(created_at, pin_updated_at) ASC, id ASC LIMIT ?3"
+            ),
+        );
+        assert!(
+            plan.iter().any(|d| d.contains("idx_items_sync_cursor")),
+            "the cursor must use its index, got {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|d| d.contains("TEMP B-TREE")),
+            "the index must supply the order, got {plan:?}"
+        );
+    }
+
+    /// Manifest 05 §3.6. A pin does **not** restamp `created_at` — that is the
+    /// entire reason `pin_updated_at` is a separate column — so a cursor over
+    /// `created_at` alone would advertise the pin change to nobody, for ever.
+    #[test]
+    fn the_cursor_carries_a_pin_change_on_an_item_older_than_itself() {
+        let s = store();
+        let old = s.insert(item("pinned later", T0)).unwrap();
+        s.insert(item("newer", T0 + 600_000)).unwrap();
+
+        // Everything up to here is behind the reader.
+        let cursor = T0 + 600_000;
+        assert!(s.summaries_since(cursor + 1, None, 100).unwrap().is_empty());
+
+        s.apply_pin_state(&old.id, true, Some(1.0), cursor + 5_000)
+            .unwrap();
+        let moved = s.summaries_since(cursor + 1, None, 100).unwrap();
+        assert_eq!(
+            moved.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(),
+            [old.id.as_str()],
+            "a pin on an old item must cross the cursor"
+        );
+        assert!(moved[0].pinned);
+        assert_eq!(moved[0].created_at, T0, "the content version must not move");
+    }
+
+    #[test]
+    fn the_cursor_is_inclusive_ordered_and_drains_a_shared_boundary_by_id() {
+        let s = store();
+        let a = s.insert(item("a", T0)).unwrap();
+        let b = s.insert(item("b", T0)).unwrap();
+        let c = s.insert(item("c", T0 + 60_000)).unwrap();
+        let mut first_two = [a.id.clone(), b.id.clone()];
+        first_two.sort();
+
+        let all = s.summaries_since(T0, None, 100).unwrap();
+        assert_eq!(all.len(), 3, "the bound is inclusive");
+        assert_eq!(all[2].id, c.id, "oldest change first");
+
+        let page = s.summaries_since(T0, None, 1).unwrap();
+        assert_eq!(page[0].id, first_two[0]);
+        let rest = s.summaries_since(T0, Some(&page[0].id), 1).unwrap();
+        assert_eq!(rest[0].id, first_two[1], "the boundary must drain by id");
+    }
+
+    /// The same exclusion `summaries` enforces: a live sensitive item must not
+    /// be advertised by the incremental read either, and its tombstone must.
+    #[test]
+    fn the_cursor_excludes_live_sensitive_items_and_includes_their_tombstones() {
+        let s = store();
+        let secret = s.insert(sensitive_item("AKIA-shaped", T0)).unwrap();
+        assert!(!s
+            .summaries_since(T0, None, 100)
+            .unwrap()
+            .iter()
+            .any(|v| v.id == secret.id));
+
+        assert!(s.delete(&secret.id).unwrap());
+        let tombstone = s
+            .summaries_since(T0, None, 100)
+            .unwrap()
+            .into_iter()
+            .find(|v| v.id == secret.id)
+            .expect("a sensitive tombstone is still a version");
+        assert!(tombstone.deleted);
+        assert!(tombstone.is_sensitive);
+    }
+
+    /// `version_summary` is `version` without the ciphertext, for the merge —
+    /// and `is_sensitive` is load-bearing in it: the tombstone branch reads the
+    /// local flag, so losing it would let an incoming delete clear the flag and
+    /// let the item back into the search index.
+    #[test]
+    fn a_version_summary_carries_the_sensitive_flag_and_no_payload() {
+        let s = store();
+        let secret = s.insert(sensitive_item("secret", T0)).unwrap();
+        let gone = s.insert(item("gone", T0 + 60_000)).unwrap();
+        s.delete(&gone.id).unwrap();
+
+        let flagged = s.version_summary(&secret.id).unwrap().unwrap();
+        assert!(flagged.is_sensitive);
+        assert!(!flagged.deleted);
+        assert_eq!(flagged.created_at, T0);
+
+        let tombstone = s.version_summary(&gone.id).unwrap().unwrap();
+        assert!(tombstone.deleted);
+        assert!(!tombstone.is_sensitive);
+
+        // Same answer as the full read, minus the payload.
+        let full = s.version(&gone.id).unwrap().unwrap();
+        assert_eq!(tombstone.content_hash, full.content_hash);
+        assert_eq!(tombstone.origin_device_id, full.origin_device_id);
+        assert_eq!(tombstone.pin_updated_at, full.pin_updated_at);
+
+        assert!(s.version_summary("never-existed").unwrap().is_none());
     }
 }

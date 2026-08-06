@@ -24,7 +24,7 @@
 
 use rusqlite::{params, OptionalExtension};
 
-use super::model::{item_columns, row_to_item, StoreError, StoredItem};
+use super::model::{item_columns, row_to_item, ItemColumns, StoreError, StoredItem};
 use super::store::Store;
 
 /// Where a page stopped: the sort key of its last row.
@@ -97,6 +97,7 @@ impl Store {
               LIMIT ?6"
         ))?;
 
+        let columns = ItemColumns::resolve(&stmt)?;
         let rows = stmt.query_map(
             params![
                 i64::from(after.is_some()),
@@ -106,7 +107,12 @@ impl Store {
                 after.map_or("", |c| c.id.as_str()),
                 i64::from(limit),
             ],
-            |row| Ok((row_to_item(row)?, row.get::<_, Option<f64>>("pin_order")?)),
+            |row| {
+                Ok((
+                    row_to_item(row, &columns)?,
+                    row.get::<_, Option<f64>>(columns.pin_order_index())?,
+                ))
+            },
         )?;
         let rows = rows.collect::<rusqlite::Result<Vec<_>>>()?;
 
