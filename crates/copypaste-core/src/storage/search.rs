@@ -18,7 +18,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 
 use super::connection::write_tx;
-use super::model::{item_columns_ci, row_to_item, StoreError, StoredItem};
+use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
 use super::store::Store;
 
 /// One row of the search index, as stored. `text` is plaintext: `clipboard_fts`
@@ -50,7 +50,10 @@ impl Store {
                 AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%') \
               ORDER BY rank LIMIT ?2"
         ))?;
-        let rows = stmt.query_map(params![match_expr, i64::from(limit)], row_to_item)?;
+        let columns = ItemColumns::resolve(&stmt)?;
+        let rows = stmt.query_map(params![match_expr, i64::from(limit)], |row| {
+            row_to_item(row, &columns)
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -136,11 +139,32 @@ pub(crate) fn purge_index_of_unsearchable_in(conn: &Connection) -> rusqlite::Res
 
 pub(crate) fn purge_from_index_in(conn: &Connection, rowids: &[i64]) -> rusqlite::Result<u64> {
     let mut removed = 0u64;
+    // Both seeks. Clearing the back-pointer first, while the index row still
+    // names its item: a `fts_rowid` left behind would later name whichever row
+    // FTS5 hands that rowid to next, and the delete would take the wrong one.
+    let mut clear = conn.prepare(
+        "UPDATE clipboard_items SET fts_rowid = NULL \
+          WHERE id = (SELECT id FROM clipboard_fts WHERE rowid = ?1)",
+    )?;
     let mut stmt = conn.prepare("DELETE FROM clipboard_fts WHERE rowid = ?1")?;
     for rowid in rowids {
+        clear.execute([rowid])?;
         removed += stmt.execute([rowid])? as u64;
     }
     Ok(removed)
+}
+
+/// Removes an item's index row, by the one key FTS5 can seek on.
+///
+/// The caller must clear `fts_rowid` in the same transaction — normally by
+/// folding it into the row update it is already making.
+pub(super) fn delete_fts_row_in_tx(tx: &Transaction<'_>, id: &str) -> rusqlite::Result<()> {
+    tx.execute(
+        "DELETE FROM clipboard_fts \
+          WHERE rowid = (SELECT fts_rowid FROM clipboard_items WHERE id = ?1)",
+        [id],
+    )?;
+    Ok(())
 }
 
 /// Layer 2 of ADR-015: re-read `is_sensitive` **inside the same transaction** as
@@ -151,21 +175,28 @@ pub(crate) fn purge_from_index_in(conn: &Connection, rowids: &[i64]) -> rusqlite
 /// in this transaction, so a crash cannot leave an item permanently
 /// unsearchable.
 pub(super) fn upsert_fts_in_tx(tx: &Transaction<'_>, id: &str, text: &str) -> rusqlite::Result<()> {
-    let searchable: Option<bool> = tx
+    let row: Option<(bool, Option<i64>)> = tx
         .query_row(
-            "SELECT is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%') \
+            "SELECT is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%'), \
+                    fts_rowid \
              FROM clipboard_items WHERE id = ?1 AND deleted = 0",
             [id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
-    if searchable != Some(true) {
+    let Some((true, fts_rowid)) = row else {
         return Ok(());
+    };
+    if let Some(rowid) = fts_rowid {
+        tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
     }
-    tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])?;
     tx.execute(
         "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
         params![id, text],
+    )?;
+    tx.execute(
+        "UPDATE clipboard_items SET fts_rowid = ?2 WHERE id = ?1",
+        params![id, tx.last_insert_rowid()],
     )?;
     Ok(())
 }
@@ -242,6 +273,22 @@ mod tests {
         fts_dump, fts_row_count, item, plant_fts_row, sensitive_item, store, T0,
     };
     use super::*;
+
+    fn plan_of(store: &Store, sql: &str) -> Vec<String> {
+        let conn = store.conn().unwrap();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let bound: Vec<rusqlite::types::Null> = (0..stmt.parameter_count())
+            .map(|_| rusqlite::types::Null)
+            .collect();
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(bound), |row| {
+                row.get::<_, String>(3)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        rows
+    }
 
     #[test]
     fn search_finds_a_non_sensitive_item() {
@@ -338,6 +385,116 @@ mod tests {
         assert!(s.indexed_texts(0, 10).unwrap().is_empty());
         assert_eq!(s.purge_index_of_unsearchable().unwrap(), 1);
         assert_eq!(fts_row_count(&s, &image.id), 0);
+    }
+
+    /// F-STOR-1. `clipboard_fts.id` is UNINDEXED, so FTS5's `xBestIndex`
+    /// declines a constraint on it and SQLite filters after a full scan of the
+    /// table holding every searchable item's plaintext — 278 µs at 2 000 rows,
+    /// 1.32 ms at 8 000, once per victim inside an eviction. Every delete must
+    /// therefore name the row by `rowid`.
+    #[test]
+    fn every_index_delete_seeks_on_rowid_rather_than_scanning_the_index() {
+        let s = store();
+        for sql in [
+            "DELETE FROM clipboard_fts WHERE rowid = ?1",
+            "DELETE FROM clipboard_fts \
+              WHERE rowid = (SELECT fts_rowid FROM clipboard_items WHERE id = ?1)",
+        ] {
+            let plan = plan_of(&s, sql);
+            assert!(
+                plan.iter()
+                    .any(|d| d.contains("clipboard_fts VIRTUAL TABLE INDEX 0:=")),
+                "an index delete must seek, got {plan:?}"
+            );
+        }
+
+        // The form this replaced still demonstrates the scan, so the assertion
+        // above is pinning a real difference.
+        let scanning = plan_of(&s, "DELETE FROM clipboard_fts WHERE id = ?1");
+        assert!(
+            scanning
+                .iter()
+                .any(|d| d.contains("SCAN clipboard_fts VIRTUAL TABLE INDEX 0:")
+                    && !d.contains("INDEX 0:=")),
+            "delete by id must still be the scan this fix removed, got {scanning:?}"
+        );
+    }
+
+    /// The hazard the `fts_rowid` back-pointer introduces: FTS5 hands a freed
+    /// rowid to the next insert, so a pointer left behind by a delete would
+    /// name somebody else's index row. Deleting one item must never unindex
+    /// another.
+    #[test]
+    fn a_reused_index_rowid_is_never_deleted_out_from_under_its_new_owner() {
+        let s = store();
+        let keep = s.insert(item("alpha alpha", T0)).unwrap();
+        let doomed = s.insert(item("bravo bravo", T0 + 60_000)).unwrap();
+        assert!(s.delete(&doomed.id).unwrap());
+
+        // Takes the rowid the delete above freed.
+        let reuser = s.insert(item("charlie charlie", T0 + 120_000)).unwrap();
+        assert_eq!(fts_row_count(&s, &reuser.id), 1);
+
+        assert!(s.delete(&keep.id).unwrap());
+        assert_eq!(
+            fts_row_count(&s, &reuser.id),
+            1,
+            "deleting one item unindexed another"
+        );
+        assert_eq!(s.search("charlie", 10).unwrap().len(), 1);
+    }
+
+    /// An eviction is the compounding case: it was one scan of the plaintext
+    /// index per victim inside a single write transaction.
+    #[test]
+    fn a_hard_delete_leaves_no_index_row_and_no_dangling_pointer() {
+        let s = store();
+        let mut ids = Vec::new();
+        for n in 0..4 {
+            ids.push(
+                s.insert(item(&format!("victim {n}"), T0 + n * 60_000))
+                    .unwrap()
+                    .id,
+            );
+        }
+        assert_eq!(s.evict_over_cap(1).unwrap(), 3);
+
+        for id in &ids[..3] {
+            assert_eq!(fts_row_count(&s, id), 0);
+        }
+        assert_eq!(fts_row_count(&s, &ids[3]), 1);
+        assert!(!s.search("victim", 10).unwrap().is_empty());
+        assert_eq!(dangling_fts_pointers(&s), 0);
+    }
+
+    /// Every live index row is named by exactly the item it belongs to.
+    fn dangling_fts_pointers(store: &Store) -> i64 {
+        let conn = store.conn().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items ci \
+              WHERE ci.fts_rowid IS NOT NULL \
+                AND ci.id IS NOT (SELECT f.id FROM clipboard_fts f WHERE f.rowid = ci.fts_rowid)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_reindex_repoints_the_row_at_its_new_index_entry() {
+        let s = store();
+        let a = s.insert(item("first text", T0)).unwrap();
+        s.insert(item("second text", T0 + 60_000)).unwrap();
+        {
+            let mut conn = s.conn().unwrap();
+            let tx = conn.transaction().unwrap();
+            upsert_fts_in_tx(&tx, &a.id, "rewritten text").unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(fts_row_count(&s, &a.id), 1, "the upsert must not duplicate");
+        assert_eq!(dangling_fts_pointers(&s), 0);
+        assert_eq!(s.search("rewritten", 10).unwrap().len(), 1);
+        assert!(s.search("first", 10).unwrap().is_empty());
     }
 
     #[test]
