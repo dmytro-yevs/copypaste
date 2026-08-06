@@ -27,7 +27,7 @@
 
 use super::driver::CloudSync;
 use super::outcome::{SyncError, SyncStats};
-use super::source::{CloudSource, LocalItem};
+use super::source::{Applied, CloudSource, LocalItem};
 use super::transport::{AuthApi, RestApi};
 // One wall clock for the crate: `auth` already owns the saturating
 // `SystemTime` read that every expiry and every stamp comparison uses, and a
@@ -205,11 +205,11 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     deleted: row.deleted,
                     origin_device_id: row.origin_device_id,
                 };
-                let applied = source.apply_remote(incoming.clone())?;
-                if applied {
-                    stats.applied += 1;
-                } else {
-                    republish |= source.requeue_local_winner(&incoming)?;
+                match source.apply_remote(incoming)? {
+                    Applied::Merged => stats.applied += 1,
+                    Applied::Declined(declined) => {
+                        republish |= source.requeue_local_winner(&declined)?;
+                    }
                 }
                 advanced.advance_past(created_at, &item_id);
             }

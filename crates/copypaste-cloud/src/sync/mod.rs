@@ -65,7 +65,7 @@ pub use driver::CloudSync;
 pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
 pub use push::{MAX_BINARY_BYTES, MAX_TEXT_BYTES};
-pub use source::{CloudSource, LocalItem, SensitiveGuard};
+pub use source::{Applied, CloudSource, LocalItem, SensitiveGuard};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};
 
 #[cfg(test)]

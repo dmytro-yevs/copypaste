@@ -42,6 +42,22 @@ pub struct LocalItem {
     pub origin_device_id: String,
 }
 
+/// What [`CloudSource::apply_remote`] did with the version it was given.
+///
+/// `Declined` hands the item back rather than reporting `false`, because the
+/// caller needs it again for [`CloudSource::requeue_local_winner`] and that is
+/// the branch it usually does not take: returning it is what lets the applied
+/// path — every row of a catch-up drain — move the decrypted plaintext instead
+/// of copying it speculatively.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Applied {
+    /// The remote version won and the local history changed.
+    Merged,
+    /// The local copy won, or the two were equal on every ordering key. The
+    /// local history is unchanged (INV-I1).
+    Declined(LocalItem),
+}
+
 /// The daemon's history, as this driver needs to see it.
 ///
 /// Implementations live over the store. The driver never touches SQLite, and
@@ -84,8 +100,14 @@ pub trait CloudSource: Send + Sync {
         Ok(items)
     }
 
-    /// Merge one remote version into the local history, returning whether
-    /// anything changed.
+    /// Merge one remote version into the local history, reporting what happened
+    /// and handing the item back when it was declined.
+    ///
+    /// The decision is still made **here**, against what the store holds at the
+    /// moment of the call. Nothing about the return type moves it up into
+    /// [`CloudSync::pull`](super::CloudSync::pull): a caller that compared
+    /// against a snapshot taken earlier in the page would resurrect items a
+    /// concurrent capture had already superseded (INV-I1).
     ///
     /// **The implementor owns the ordering decision, and it must be the same
     /// comparator the P2P transport uses** — `copypaste_p2p::sync::merge_decision`,
@@ -107,8 +129,8 @@ pub trait CloudSource: Send + Sync {
     ///
     /// Three requirements come with owning the decision:
     ///
-    /// * **Equal on every ordering key ⇒ keep local, report `false`.** This is
-    ///   what makes replay and self-echo free (INV-I1, INV-I2).
+    /// * **Equal on every ordering key ⇒ keep local, report [`Applied::Declined`].**
+    ///   This is what makes replay and self-echo free (INV-I1, INV-I2).
     /// * **A tombstone for an unknown `item_id` must still be persisted** as a
     ///   tombstone row. Dropping it lets a later-arriving create resurrect the
     ///   item (T-3, `CopyPaste-bfiu`).
@@ -118,8 +140,8 @@ pub trait CloudSource: Send + Sync {
     /// # Errors
     ///
     /// [`SyncError::Source`] for a store failure. A version this device
-    /// declines to take is `Ok(false)`, not an error.
-    fn apply_remote(&self, item: LocalItem) -> Result<bool, SyncError>;
+    /// declines to take is [`Applied::Declined`], not an error.
+    fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError>;
 
     /// The reconciliation cursor, in Unix milliseconds. Zero on a first run.
     ///
