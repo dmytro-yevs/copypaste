@@ -266,6 +266,10 @@ async fn main() -> anyhow::Result<()> {
         warn!(error = ?e, "ipc server did not shut down cleanly");
     }
 
+    if let Err(e) = state.p2p.peers().flush() {
+        warn!(error = ?e, "could not persist the paired-device list on shutdown");
+    }
+
     remove_socket(&socket_path);
     Ok(())
 }
