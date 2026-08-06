@@ -40,7 +40,7 @@ use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
-use super::dispatch::{dispatch_request, parse_and_gate};
+use super::dispatch::{dispatch_request, gate, parse};
 use super::messages::{MSG_TOO_LARGE, MSG_WATCHERS_FULL};
 use crate::AppState;
 
@@ -270,29 +270,47 @@ async fn handle_connection(
             continue;
         }
 
+        let request = match parse(&line) {
+            Ok(request) => request,
+            Err(rejection) => {
+                if send(&mut writer, &rejection.response).await.is_err() {
+                    break;
+                }
+                continue;
+            }
+        };
+
         // `shutdown` is taken here for the same reason `watch` is below: it
         // changes what the connection is — this one ends, and so does the
         // process. Handling it in the dispatcher could not order the two
         // correctly, because `run` aborts the connection tasks as soon as it
         // sees the signal, and the reply would be the thing aborted. Here the
         // acknowledgement is written *first*, and only then is the signal sent.
-        if let Some(id) = shutdown_id(&line) {
+        //
+        // Taken before the gates, never after: a client that speaks a version
+        // this daemon does not is *the* caller for this verb — that is the
+        // whole of ADR-0004's protocol-mismatch state — and refusing it with
+        // `protocol_mismatch` would leave the mismatch with no way out. It is
+        // exempt from readiness for the same reason: a daemon whose database
+        // will not open is exactly the one a user needs to be able to stop.
+        if matches!(request.method, Method::Shutdown) {
             info!("shutdown requested over ipc");
-            let _ = send(&mut writer, &Response::ok(id, ResponseData::Empty {})).await;
+            let _ = send(
+                &mut writer,
+                &Response::ok(request.id, ResponseData::Empty {}),
+            )
+            .await;
             state.request_shutdown();
             break;
         }
 
-        let request = match parse_and_gate(&state, &line) {
-            Ok(request) => request,
-            Err(rejection) => {
-                let close_connection = rejection.was_watch;
-                if send(&mut writer, &rejection.response).await.is_err() || close_connection {
-                    break;
-                }
-                continue;
+        if let Some(rejection) = gate(&state, &request) {
+            let close_connection = rejection.was_watch;
+            if send(&mut writer, &rejection.response).await.is_err() || close_connection {
+                break;
             }
-        };
+            continue;
+        }
 
         // `watch` turns the connection into a stream, so it is taken here
         // rather than in the dispatcher: from this point the loop above no
@@ -325,19 +343,6 @@ async fn handle_connection(
             break;
         }
     }
-}
-
-/// The request id when this line asks the daemon to stop, else `None`.
-///
-/// Deliberately not gated on readiness or on the protocol version. A client
-/// that speaks a version this daemon does not is *the* caller for this verb —
-/// that is the whole of ADR-0004's protocol-mismatch state — and refusing it
-/// with `protocol_mismatch` would leave the mismatch with no way out. The
-/// request shape is one word and cannot drift, and the socket is `0600`, so
-/// there is nothing here a version could disagree about.
-fn shutdown_id(line: &str) -> Option<u64> {
-    let request: copypaste_ipc::Request = serde_json::from_str(line).ok()?;
-    matches!(request.method, Method::Shutdown).then_some(request.id)
 }
 
 /// One request, one line, one response line.
@@ -931,6 +936,36 @@ mod tests {
         let reply = Client::new(stream).call(request(2, Method::Shutdown)).await;
         assert!(reply.ok, "{:?}", reply.error);
 
+        let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
+    }
+
+    /// Manifest 04 §6.2 / ADR-0004: a client speaking a version this daemon
+    /// does not is *the* caller for this verb, so `protocol_mismatch` must not
+    /// stand between it and the acknowledgement — that would leave the mismatch
+    /// state with no way out.
+    #[tokio::test]
+    async fn shutdown_answers_through_a_protocol_mismatch() {
+        let (state, dir) = test_state("server");
+        let path = dir.path().join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
+        let mut stopping = state.shutdown_rx();
+
+        let stream = UnixStream::connect(&path).await.expect("connect");
+        let mismatched = serde_json::json!({
+            "id": 9,
+            "protocol_version": PROTOCOL_VERSION + 1,
+            "method": "shutdown",
+        });
+        let reply = Client::new(stream).call_raw(&mismatched.to_string()).await;
+        assert!(reply.ok, "{:?}", reply.error);
+        assert_eq!(reply.id, 9);
+
+        tokio::time::timeout(Duration::from_secs(5), stopping.changed())
+            .await
+            .expect("the signal must follow the reply")
+            .expect("the sender outlives this");
+        assert!(*stopping.borrow());
         let _ = tokio::time::timeout(Duration::from_secs(5), server).await;
     }
 
