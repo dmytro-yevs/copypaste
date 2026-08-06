@@ -74,7 +74,16 @@ const INFO_PER_ACCOUNT_SALT: &[u8] = b"copypaste/v2/cloud-sync-key/per-account-a
 /// constant-time-comparison hazard of manifest 02 I-13 does not arise. If a
 /// rotation flow is added later, add a `subtle::ConstantTimeEq`-backed
 /// `ct_eq` and no plain `==`.
-pub struct SyncKey(Zeroizing<[u8; KEY_LEN]>);
+pub struct SyncKey {
+    material: Zeroizing<[u8; KEY_LEN]>,
+    /// The row-signing subkey, derived once here rather than per row.
+    ///
+    /// It is a pure function of `material`, which is resident for the life of
+    /// the key anyway, so holding it adds no secret that was not already
+    /// reachable — and [`super::sign`] runs on every row of every push and
+    /// every pull, where one HKDF-Expand each way is the whole of the work.
+    row_signing: Zeroizing<[u8; KEY_LEN]>,
+}
 
 impl SyncKey {
     /// Construct from raw bytes.
@@ -84,7 +93,15 @@ impl SyncKey {
     /// start. Does not validate anything; there is nothing to validate about 32
     /// random-looking bytes.
     pub fn from_bytes(bytes: [u8; KEY_LEN]) -> Self {
-        Self(Zeroizing::new(bytes))
+        Self::new(Zeroizing::new(bytes))
+    }
+
+    fn new(material: Zeroizing<[u8; KEY_LEN]>) -> Self {
+        let row_signing = super::sign::derive_row_signing_key(material.as_ref());
+        Self {
+            material,
+            row_signing,
+        }
     }
 
     /// The raw key bytes, for handing to the keystore.
@@ -92,7 +109,7 @@ impl SyncKey {
     /// Wrapped in `Zeroizing` so the copy this makes is erased when the caller
     /// drops it. Keep the borrow short.
     pub fn to_bytes(&self) -> Zeroizing<[u8; KEY_LEN]> {
-        Zeroizing::new(*self.0)
+        Zeroizing::new(*self.material)
     }
 
     /// The key material, for the AEAD in [`super::row`].
@@ -101,7 +118,12 @@ impl SyncKey {
     /// exists for the keystore and hands out an owned copy, which is the wrong
     /// shape for something called once per row.
     pub(super) fn material(&self) -> &[u8] {
-        self.0.as_ref()
+        self.material.as_ref()
+    }
+
+    /// The row-signing subkey. Derived once, at construction; see the field.
+    pub(super) fn row_signing_key(&self) -> &[u8] {
+        self.row_signing.as_ref()
     }
 }
 
@@ -156,7 +178,7 @@ pub fn derive_sync_key(passphrase: &str, account_id: &str) -> Result<SyncKey, Cl
         .hash_password_into(passphrase.as_bytes(), salt.as_ref(), okm.as_mut())
         .map_err(|_| CloudCryptoError::Internal("Argon2 derivation failed"))?;
 
-    Ok(SyncKey(okm))
+    Ok(SyncKey::new(okm))
 }
 
 /// HKDF-SHA256 over the account id. Not a secret and not meant to be — a salt's
