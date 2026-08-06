@@ -188,32 +188,54 @@ export function HistoryList({
     return () => clearTimeout(timer);
   }, [flashId]);
 
-  function copy(item: Item) {
-    setFlashId(item.id);
-    onCopy(item);
-  }
+  // Every callback the row receives is stabilised: `memo(HistoryRow)` compares
+  // props shallowly, so one fresh function identity per render defeats it for
+  // all of them.
+  const copy = useCallback(
+    (item: Item) => {
+      setFlashId(item.id);
+      onCopy(item);
+    },
+    [onCopy],
+  );
 
-  function select(index: number) {
-    const item = items[index];
-    if (!item) return;
-    onActiveIdChange(item.id);
-    // From the height model, not scrollIntoView: the target row may not be in
-    // the DOM at all.
-    const virtualIndex = entries.findIndex(
-      (entry) => entry.type === "item" && entry.itemIndex === index,
-    );
-    if (virtualIndex >= 0) {
-      virtualizer.scrollToIndex(virtualIndex, { align: "auto" });
-    }
-  }
+  const toggleChecked = useCallback(
+    (clicked: Item) => selection.toggle(clicked.id),
+    [selection.toggle],
+  );
 
-  function onScroll(event: UIEvent<HTMLDivElement>) {
-    captureAnchor();
-    const el = event.currentTarget;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_MORE_THRESHOLD_PX) {
-      onLoadMore();
-    }
-  }
+  const selectItem = useCallback(
+    (clicked: Item) => onActiveIdChange(clicked.id),
+    [onActiveIdChange],
+  );
+
+  const select = useCallback(
+    (index: number) => {
+      const item = items[index];
+      if (!item) return;
+      onActiveIdChange(item.id);
+      // From the height model, not scrollIntoView: the target row may not be in
+      // the DOM at all.
+      const virtualIndex = entries.findIndex(
+        (entry) => entry.type === "item" && entry.itemIndex === index,
+      );
+      if (virtualIndex >= 0) {
+        virtualizer.scrollToIndex(virtualIndex, { align: "auto" });
+      }
+    },
+    [entries, items, onActiveIdChange, virtualizer],
+  );
+
+  const onScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      captureAnchor();
+      const el = event.currentTarget;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < LOAD_MORE_THRESHOLD_PX) {
+        onLoadMore();
+      }
+    },
+    [captureAnchor, onLoadMore],
+  );
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (items.length === 0) return;
@@ -383,8 +405,8 @@ export function HistoryList({
                   origin={originLabel(item, marked)}
                   selecting={selection.selecting}
                   checked={selection.selected.has(item.id)}
-                  onToggleChecked={(clicked) => selection.toggle(clicked.id)}
-                  onSelect={(clicked) => onActiveIdChange(clicked.id)}
+                  onToggleChecked={toggleChecked}
+                  onSelect={selectItem}
                   onCopy={copy}
                   onTogglePin={onTogglePin}
                   onDelete={onDelete}
