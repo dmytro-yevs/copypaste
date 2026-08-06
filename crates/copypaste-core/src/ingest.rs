@@ -327,8 +327,13 @@ pub fn ingest_binary_into_with_capture_source(
         return Err(IngestError::TooLarge);
     }
 
-    let item_id = crate::binary_item_id(bytes);
-    let ciphertext = crate::seal_binary(bytes, &keyring.item_key(), &item_id)?;
+    // One SHA-256 pass, four spellings: the item id, the envelope header the
+    // STREAM AAD covers, and the row's `content_hash`. Hashing per spelling
+    // cost a 4 MiB screenshot three redundant passes on the capture path.
+    let digest = crate::binary::content_digest(bytes);
+    let item_id = crate::binary::item_id_from_digest(&digest);
+    let ciphertext =
+        crate::binary::seal_with_digest(bytes, &digest, &keyring.item_key(), &item_id)?;
     let ingested = store.insert_or_bump(NewItem {
         id: item_id,
         content_ciphertext: ciphertext,
@@ -336,7 +341,7 @@ pub fn ingest_binary_into_with_capture_source(
         // distinguishes it from the text AEAD and is never a fallback path.
         nonce: Vec::new(),
         content_type: content_type.to_owned(),
-        content_hash: crate::storage::compute_content_hash(bytes),
+        content_hash: crate::binary::content_hash(&digest),
         is_sensitive: sensitive_floor,
         search_text: None,
         created_at,
