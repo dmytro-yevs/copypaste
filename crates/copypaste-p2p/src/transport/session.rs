@@ -103,6 +103,27 @@ impl Session {
             return Err(TransportError::Malformed);
         }
         let payload = Zeroizing::new(serde_json::to_vec(msg).map_err(|_| TransportError::Codec)?);
+        self.write_message(&payload).await
+    }
+
+    /// Send an already-encoded message body, exactly as given.
+    ///
+    /// The bytes the caller validated are the bytes that reach the wire: there
+    /// is no re-parse and no re-serialisation between here and the AEAD.
+    /// `payload` is taken by value in [`Zeroizing`] so the caller cannot keep a
+    /// plaintext copy alive past the send (security review F-14).
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::send`], minus `Codec` — nothing is serialised here.
+    pub async fn send_bytes(&mut self, payload: Zeroizing<Vec<u8>>) -> Result<(), TransportError> {
+        if self.poisoned {
+            return Err(TransportError::Malformed);
+        }
+        self.write_message(&payload).await
+    }
+
+    async fn write_message(&mut self, payload: &[u8]) -> Result<(), TransportError> {
         if payload.len() > MAX_MESSAGE_BYTES {
             return Err(TransportError::TooLarge);
         }
@@ -514,6 +535,48 @@ mod tests {
             .send(&at_limit)
             .await
             .expect("exactly at the limit must send");
+        server.await.expect("server task");
+    }
+
+    /// `send_bytes` puts the caller's bytes on the wire unchanged, and applies
+    /// the same size refusal `send` does — a pre-encoded body must not be a way
+    /// around [`MAX_MESSAGE_BYTES`].
+    #[tokio::test]
+    async fn pre_encoded_bytes_reach_the_wire_unchanged_and_stay_bounded() {
+        let (listener, addr) = loopback().await;
+        let psk = PairingToken::generate().psk();
+        // Spelled by hand: a `RawValue` round trip would have re-emitted this
+        // as serde_json chose to, not as it was written.
+        let body = br#"{"seq":1,"note":"hello"}"#.to_vec();
+
+        let server_psk = psk;
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut session = Session::accept(stream, &server_psk)
+                .await
+                .expect("responder");
+            let raw: Box<serde_json::value::RawValue> =
+                session.recv().await.expect("recv").expect("message");
+            assert_eq!(raw.get().as_bytes(), br#"{"seq":1,"note":"hello"}"#);
+        });
+
+        let mut client = Session::connect(addr, &psk).await.expect("initiator");
+        let oversized = Zeroizing::new(vec![b'x'; MAX_MESSAGE_BYTES + 1]);
+        assert!(
+            matches!(
+                client.send_bytes(oversized).await,
+                Err(TransportError::TooLarge)
+            ),
+            "an oversized pre-encoded body must be refused"
+        );
+        assert!(
+            !client.is_poisoned(),
+            "refusing to send must not break the session"
+        );
+        client
+            .send_bytes(Zeroizing::new(body))
+            .await
+            .expect("send bytes");
         server.await.expect("server task");
     }
 

@@ -158,12 +158,16 @@ fn mac(key: &SyncKey, meta: &RowMetadata<'_>) -> [u8; SIGNATURE_LEN] {
 
 fn keyed(key: &SyncKey) -> HmacSha256 {
     // HMAC accepts a key of any length, so this cannot fail for 32 bytes.
-    HmacSha256::new_from_slice(signing_key(key).as_ref()).expect("HMAC accepts a key of any length")
+    HmacSha256::new_from_slice(key.row_signing_key()).expect("HMAC accepts a key of any length")
 }
 
 /// The row-signing key: HKDF-Expand over the sync key. See the module docs.
-fn signing_key(key: &SyncKey) -> Zeroizing<[u8; KEY_LEN]> {
-    let hk = Hkdf::<Sha256>::from_prk(key.material())
+///
+/// Called once, by [`SyncKey`]'s constructor. It is a pure function of the sync
+/// key and this runs on every row of every push and every pull, so deriving it
+/// per call was one HMAC-SHA256 per row for a value that never changes.
+pub(super) fn derive_row_signing_key(material: &[u8]) -> Zeroizing<[u8; KEY_LEN]> {
+    let hk = Hkdf::<Sha256>::from_prk(material)
         .expect("a 32-byte PRK is at least the hash output length");
     let mut okm = Zeroizing::new([0u8; KEY_LEN]);
     hk.expand(INFO_ROW_SIGNATURE, okm.as_mut())
@@ -254,9 +258,15 @@ mod tests {
         // Cross-primitive reuse is what the HKDF step exists to avoid; if this
         // ever became an identity the separation would be gone silently.
         let k = key();
-        assert_ne!(signing_key(&k).as_ref(), k.to_bytes().as_ref());
-        // And it is deterministic, or two devices would not agree.
-        assert_eq!(signing_key(&k).as_ref(), signing_key(&k).as_ref());
+        assert_ne!(k.row_signing_key(), k.to_bytes().as_ref());
+        // And it is deterministic, or two devices would not agree — including
+        // across the hoist onto `SyncKey`, which must derive what the free
+        // function derived.
+        assert_eq!(
+            k.row_signing_key(),
+            derive_row_signing_key(k.to_bytes().as_ref()).as_ref()
+        );
+        assert_eq!(key().row_signing_key(), k.row_signing_key());
     }
 
     #[test]

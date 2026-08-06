@@ -85,6 +85,20 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
 /// `fsync` the file so the contents are durable before the rename publishes
 /// them, then `fsync` the directory so the rename survives a power loss.
 pub(super) fn write_atomically(path: &Path, state: &State) -> Result<(), PeerStoreError> {
+    blocking(|| write_now(path, state))
+}
+
+fn blocking<T>(f: impl FnOnce() -> T) -> T {
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current() {
+        Ok(handle) if matches!(handle.runtime_flavor(), RuntimeFlavor::MultiThread) => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
+
+fn write_now(path: &Path, state: &State) -> Result<(), PeerStoreError> {
     let mut records: Vec<Peer> = state.peers.values().cloned().collect();
     records.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
     let file = StoreFile {
@@ -181,6 +195,22 @@ mod tests {
             let reopened = PeerStore::open(&path).expect("file must always parse");
             assert_eq!(reopened.len(), i + 1);
         }
+    }
+
+    #[test]
+    fn a_write_from_a_reactor_worker_completes_off_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let store = PeerStore::open(&path).expect("open");
+            store.upsert(peer("Laptop")).expect("upsert");
+            store.upsert(peer("Phone")).expect("upsert");
+        });
+        assert_eq!(PeerStore::open(&path).expect("reopen").len(), 2);
     }
 
     #[cfg(unix)]
