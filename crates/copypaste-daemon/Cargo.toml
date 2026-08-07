@@ -34,10 +34,6 @@ directories.workspace = true
 rusqlite.workspace = true
 hex.workspace = true
 zeroize.workspace = true
-# flock(2) around the socket-bind critical section (CopyPaste-ah1m). A
-# maintained syscall wrapper rather than a raw libc call, and it is already in
-# the tree; covers macOS and Android (CLAUDE.md rules 1 and 7).
-rustix.workspace = true
 # Local interface addresses for the `listen_addr` a freshly minted pairing
 # reports. `getifaddrs` behind a maintained crate rather than a hand-rolled
 # `SIOCGIFCONF` walk or a "connect a UDP socket and read its local end" trick;
@@ -50,6 +46,13 @@ base64.workspace = true
 url.workspace = true
 tempfile.workspace = true
 mime_guess.workspace = true
+
+# flock(2) around the socket-bind critical section (CopyPaste-ah1m), and the
+# `*at` syscalls the file-drop staging directory is built from. A maintained
+# syscall wrapper rather than a raw libc call, and it is already in the tree.
+# Target-gated because `rustix::fs` is a POSIX surface with no Windows half.
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true

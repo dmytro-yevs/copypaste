@@ -116,6 +116,8 @@ fn read_secret(path: &Path, mut file: fs::File) -> Result<DeviceSecret, CryptoEr
     // Re-assert 0600 if something loosened it. Refusing to start is stricter
     // but locks the user out of their own history over a permission bit;
     // tightening and continuing risks no data loss.
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
