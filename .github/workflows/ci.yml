@@ -547,3 +547,183 @@ jobs:
           security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db"
           security delete-keychain "$RUNNER_TEMP/copypaste-ci.keychain-db"
           exit 0
+
+  # ---------------------------------------------------------------------------
+  # Windows (ADR-0013). The third platform, and the only one with no Linux
+  # stand-in: `scripts/check-macos-types.sh` works because the two macOS files
+  # depend on objc2 and security-framework and neither builds any C, while a
+  # Windows build pulls SQLCipher, ring and the Windows SDK that WebView2 links
+  # against. So this runner is the only machine in the project that compiles a
+  # `cfg(windows)` line at all.
+  #
+  # Nothing here executes a clipboard, a credential store or a window. It moves
+  # Windows from "never compiled" to "compiles", which is where the macOS job
+  # started; docs/rewrite/testing-policy.md is the place that says so.
+  # ---------------------------------------------------------------------------
+
+  windows-check:
+    name: Windows check (x86_64)
+    # Deliberately not pinned the way `macos-14` is. That pin buys agreement
+    # with release.yml and a specific hazard (the macOS 15 pasteboard prompt);
+    # Windows has neither yet, and a pinned image label that GitHub retires
+    # fails to resolve rather than building something stale. Pin it the day a
+    # Windows release job exists to agree with.
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        # The runner default is PowerShell. Every `run:` body in this workflow
+        # is bash, and the runner ships Git Bash.
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-1.96
+          key: dev-profile
+
+      - name: What this runner is the only machine to compile
+        # The same argument the `embedded-backend` and `check-macos-types.sh`
+        # steps above make, for the third platform. An empty inventory is a
+        # failure, not a pass: a Windows job that compiles no Windows-gated line
+        # and reports green is the exact shape of "we thought Windows was
+        # covered" that ADR-0013 is written against.
+        run: |
+          set -uo pipefail
+          mapfile -t hits < <(grep -rlE 'cfg\(windows\)|target_os *= *"windows"|target_family *= *"windows"' \
+            --include='*.rs' crates | sort)
+          if (( ${#hits[@]} == 0 )); then
+            echo "::error::no file under crates/ carries a Windows cfg, so this job compiled nothing Windows-specific. Land the code or delete the job (ADR-0013)."
+            exit 1
+          fi
+          printf '%s\n' "${hits[@]}"
+          {
+            echo '## Windows-gated files compiled here and nowhere else'
+            echo
+            printf -- '- `%s`\n' "${hits[@]}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: cargo clippy (Windows paths)
+        # `--all-features` for the reason the macOS job gives: a Windows arm
+        # behind an optional feature is checked by nothing otherwise.
+        if: success() || failure()
+        run: cargo +1.96 clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: cargo test --workspace
+        # The portable suite, on Windows. It is not a second run of the Linux
+        # job: path separators, `\r\n`, case-insensitive filenames and the
+        # absence of `0600` are all portable-code assumptions that only fail
+        # here.
+        if: success() || failure()
+        run: cargo +1.96 test --workspace --locked
+
+  windows-bundle:
+    name: Windows installers (MSI + NSIS, unsigned)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      # rust-toolchain.toml outranks `rustup default`, and the Tauri CLI builds
+      # through a bare `cargo`. See the macOS job in release.yml.
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-1.96
+          key: release-profile
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - name: Confirm no Authenticode signing path is configured
+        # release.yml's premise, applied to the platform that does not have a
+        # release job yet: nothing in CI holds a signing credential (ADR-0001).
+        # Guarding the config rather than an environment variable name because
+        # the config is what the bundler actually reads — these two keys are the
+        # only ways Tauri signs a Windows artefact.
+        run: |
+          set -euo pipefail
+          conf=crates/copypaste-ui/src-tauri/tauri.windows.conf.json
+          if grep -qE '"(certificateThumbprint|signCommand)"' "$conf"; then
+            echo "::error::$conf declares an Authenticode signing path. ADR-0001's premise is that no workflow here holds a signing credential; see packaging/windows/README.md for what changing that costs."
+            exit 1
+          fi
+
+      - name: Build the installers
+        # No `--bundles` flag: the targets come from tauri.windows.conf.json, so
+        # this step fails when that file stops selecting them. Building them in
+        # ci.yml rather than release.yml is deliberate — ADR-0013 leaves it
+        # undecided whether Windows ships in the same version stream, and until
+        # that is settled a bundler configuration no machine executes is the
+        # dead text this whole section exists to prevent.
+        run: |
+          set -euo pipefail
+          cd crates/copypaste-ui
+          npm ci
+          npm run tauri -- build
+
+      - name: Collect and checksum
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # src-tauri is a workspace member, so cargo writes to the root
+          # target/. Both roots are searched anyway: if that ever stops being
+          # true the failure should be an empty artifact, not a green run.
+          roots=(target/release/bundle crates/copypaste-ui/src-tauri/target/release/bundle)
+          found=()
+          for r in "${roots[@]}"; do
+            found+=("$r"/msi/*.msi "$r"/nsis/*-setup.exe)
+          done
+          if (( ${#found[@]} == 0 )); then
+            echo "::error::the Tauri Windows bundler produced neither an MSI nor an NSIS installer"
+            find "${roots[@]}" -maxdepth 2 -type d 2>/dev/null | sed 's/^/::error::  /' || true
+            exit 1
+          fi
+
+          mkdir -p dist
+          : > dist/SHA256SUMS
+          for f in "${found[@]}"; do
+            cp "$f" dist/
+            ( cd dist && sha256sum "$(basename "$f")" ) >> dist/SHA256SUMS
+          done
+          cat dist/SHA256SUMS
+
+          # Installer size is one of the inputs to the MSI-versus-NSIS choice
+          # ADR-0013 leaves open, and it is free to report here.
+          {
+            echo '## Windows installers (unsigned)'
+            echo
+            echo '```'
+            ( cd dist && ls -lh )
+            cat dist/SHA256SUMS
+            echo '```'
+            echo
+            echo 'Unsigned: SmartScreen will interstitial these. See packaging/windows/README.md.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installers
+          path: |
+            dist/*.msi
+            dist/*.exe
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

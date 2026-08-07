@@ -383,4 +383,46 @@ mod tests {
         assert_eq!(main["skipTaskbar"], false);
         assert_eq!(main["transparent"], true);
     }
+
+    // Tauri merges a platform config over the base one as JSON, and a JSON
+    // merge replaces arrays rather than merging their elements. So a field
+    // omitted from `app.windows` here is not inherited from tauri.conf.json —
+    // it is lost. `contentProtected` is INV-35 and `dragDropEnabled` keeps a
+    // dropped file from being opened as one; both fail silently and invisibly.
+    #[test]
+    fn windows_main_window_restates_what_the_array_merge_would_drop() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.conf.json"))
+                .expect("the Windows Tauri config is valid JSON");
+        let main = &config["app"]["windows"][0];
+
+        assert_eq!(main["label"], "main");
+        assert_eq!(main["contentProtected"], true);
+        assert_eq!(main["dragDropEnabled"], false);
+        assert_eq!(main["width"], 1100);
+        assert_eq!(main["height"], 760);
+        assert_eq!(main["minWidth"], 720);
+        assert_eq!(main["minHeight"], 460);
+        assert_eq!(main["skipTaskbar"], false);
+    }
+
+    // packaging/windows/README.md is the argument; this is the part of it that
+    // a commit can break without anyone reading the file.
+    #[test]
+    fn windows_bundle_builds_both_installers_and_holds_no_signing_credential() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.conf.json"))
+                .expect("the Windows Tauri config is valid JSON");
+        let bundle = &config["bundle"];
+
+        let targets = bundle["targets"]
+            .as_array()
+            .expect("the Windows bundle names its targets");
+        assert!(targets.iter().any(|t| t == "msi"));
+        assert!(targets.iter().any(|t| t == "nsis"));
+
+        // ADR-0001's premise, on the platform that has no release job yet.
+        assert!(bundle["windows"]["certificateThumbprint"].is_null());
+        assert!(bundle["windows"]["signCommand"].is_null());
+    }
 }
