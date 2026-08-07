@@ -41,7 +41,10 @@ import sys
 
 # Without this, piping the report into `head` ends in a traceback, which in a
 # gate reads as the check crashing rather than as the reader stopping early.
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+# Windows has no SIGPIPE at all, and asking for it there is itself the crash
+# this line exists to avoid.
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 max_block, max_header, max_ratio, ratio_floor, baseline_path = (
     int(sys.argv[1]),
