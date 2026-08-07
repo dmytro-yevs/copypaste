@@ -22,8 +22,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::plan::plan;
-use super::{SyncChannel, SyncError, SyncOutcome, SyncSource, SyncStats};
+use super::plan::{plan, Plan};
+use super::{SyncChannel, SyncCursor, SyncError, SyncOutcome, SyncSource, SyncStats};
 use crate::now_ms;
 use crate::protocol::{
     ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_ITEMS_PER_MESSAGE,
@@ -39,22 +39,25 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
     listen_addr: Option<&str>,
+    cursor: SyncCursor,
 ) -> Result<SyncOutcome, SyncError> {
     let peer = {
-        chan.send(local_hello(source, listen_addr)).await?;
+        chan.send(local_hello(source, listen_addr, cursor.since_ms))
+            .await?;
         recv_hello(chan, source).await?
     };
 
-    let (advertised, remote) = exchange_summaries_initiator(chan, source).await?;
+    let (advertised, remote) =
+        exchange_summaries_initiator(chan, source, cursor.advertise_from(peer.3)).await?;
 
     let mut stats = SyncStats::default();
-    let wanted = plan(&advertised, &remote, now_ms(), &mut stats);
+    let planned = plan(&advertised, &remote, now_ms(), &mut stats);
 
     chan.send(SyncMessage::Request {
-        item_ids: wanted.keys().cloned().collect(),
+        item_ids: planned.wanted.keys().cloned().collect(),
     })
     .await?;
-    receive_items(chan, source, &wanted, &mut stats).await?;
+    let applied = receive_items(chan, source, &planned.wanted, &mut stats).await?;
 
     let requested = recv_request(chan).await?;
     serve_items(chan, source, &advertised, requested, &mut stats).await?;
@@ -64,6 +67,11 @@ pub async fn run_initiator<C: SyncChannel, S: SyncSource>(
         peer_device_id: peer.0,
         peer_device_name: peer.1,
         peer_listen_addr: peer.2,
+        cursor: SyncCursor {
+            since_ms: watermark(cursor.since_ms, &remote, &planned, &applied.attempted),
+            relay_floor_ms: None,
+        },
+        applied_floor: applied.floor,
     })
 }
 
@@ -76,41 +84,50 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
     listen_addr: Option<&str>,
+    cursor: SyncCursor,
 ) -> Result<SyncOutcome, SyncError> {
     let peer = {
         let peer = recv_hello(chan, source).await?;
-        chan.send(local_hello(source, listen_addr)).await?;
+        chan.send(local_hello(source, listen_addr, cursor.since_ms))
+            .await?;
         peer
     };
 
-    let (advertised, remote) = exchange_summaries_responder(chan, source).await?;
+    let (advertised, remote) =
+        exchange_summaries_responder(chan, source, cursor.advertise_from(peer.3)).await?;
 
     let mut stats = SyncStats::default();
 
     let requested = recv_request(chan).await?;
     serve_items(chan, source, &advertised, requested, &mut stats).await?;
 
-    let wanted = plan(&advertised, &remote, now_ms(), &mut stats);
+    let planned = plan(&advertised, &remote, now_ms(), &mut stats);
     chan.send(SyncMessage::Request {
-        item_ids: wanted.keys().cloned().collect(),
+        item_ids: planned.wanted.keys().cloned().collect(),
     })
     .await?;
-    receive_items(chan, source, &wanted, &mut stats).await?;
+    let applied = receive_items(chan, source, &planned.wanted, &mut stats).await?;
 
     Ok(SyncOutcome {
         stats,
         peer_device_id: peer.0,
         peer_device_name: peer.1,
         peer_listen_addr: peer.2,
+        cursor: SyncCursor {
+            since_ms: watermark(cursor.since_ms, &remote, &planned, &applied.attempted),
+            relay_floor_ms: None,
+        },
+        applied_floor: applied.floor,
     })
 }
 
-fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>) -> SyncMessage {
+fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i64) -> SyncMessage {
     SyncMessage::Hello {
         protocol_version: PROTOCOL_VERSION,
         device_id: source.device_id(),
         device_name: source.device_name(),
         listen_addr: listen_addr.map(str::to_owned),
+        since_ms,
     }
 }
 
@@ -121,7 +138,7 @@ fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>) -> SyncMess
 async fn recv_hello<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
-) -> Result<(String, String, Option<std::net::SocketAddr>), SyncError> {
+) -> Result<(String, String, Option<std::net::SocketAddr>, i64), SyncError> {
     let msg = chan.recv().await?;
     msg.validate()?;
     match msg {
@@ -129,6 +146,7 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
             device_id,
             device_name,
             listen_addr,
+            since_ms,
             ..
         } => {
             if device_id == source.device_id() {
@@ -138,6 +156,7 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
                 device_id,
                 device_name,
                 listen_addr.and_then(|addr| addr.parse().ok()),
+                since_ms,
             ))
         }
         other => Err(SyncError::Unexpected {
@@ -167,8 +186,39 @@ struct PreparedSummaries {
     pages: Vec<Vec<ItemSummary>>,
 }
 
-fn summary_pages<S: SyncSource>(source: &S) -> Result<PreparedSummaries, SyncError> {
-    let items = source.summaries()?;
+struct Applied {
+    attempted: HashSet<String>,
+    floor: Option<i64>,
+}
+
+pub(super) fn summary_key(summary: &ItemSummary) -> i64 {
+    summary.created_at.max(summary.pin_updated_at)
+}
+
+fn watermark(
+    previous: i64,
+    remote: &[ItemSummary],
+    planned: &Plan,
+    attempted: &HashSet<String>,
+) -> i64 {
+    let mut reached = previous;
+    let mut blocked = i64::MAX;
+    for summary in remote {
+        let key = summary_key(summary);
+        let unresolved = planned.deferred.contains(&summary.item_id)
+            || (planned.wanted.contains_key(&summary.item_id)
+                && !attempted.contains(&summary.item_id));
+        if unresolved {
+            blocked = blocked.min(key);
+        } else {
+            reached = reached.max(key);
+        }
+    }
+    reached.min(blocked)
+}
+
+fn summary_pages<S: SyncSource>(source: &S, since_ms: i64) -> Result<PreparedSummaries, SyncError> {
+    let items = source.summaries(since_ms)?;
     if items.len() > MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION {
         return Err(SyncError::TooManySummaryPages);
     }
@@ -195,8 +245,9 @@ fn summary_pages<S: SyncSource>(source: &S) -> Result<PreparedSummaries, SyncErr
 async fn exchange_summaries_initiator<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
+    since_ms: i64,
 ) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let PreparedSummaries { advertised, pages } = summary_pages(source)?;
+    let PreparedSummaries { advertised, pages } = summary_pages(source, since_ms)?;
     let mut remote = Vec::new();
     let mut page = 0;
     loop {
@@ -221,8 +272,9 @@ async fn exchange_summaries_initiator<C: SyncChannel, S: SyncSource>(
 async fn exchange_summaries_responder<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
+    since_ms: i64,
 ) -> Result<(HashMap<String, ItemSummary>, Vec<ItemSummary>), SyncError> {
-    let PreparedSummaries { advertised, pages } = summary_pages(source)?;
+    let PreparedSummaries { advertised, pages } = summary_pages(source, since_ms)?;
     let mut remote = Vec::new();
     let mut page = 0;
     loop {
@@ -265,12 +317,13 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
     source: &S,
     wanted: &HashMap<String, ItemSummary>,
     stats: &mut SyncStats,
-) -> Result<(), SyncError> {
+) -> Result<Applied, SyncError> {
     // The byte cap can force every requested item into its own `Items` message.
     // One extra frame lets an invalid item be dropped before `Done`; anything
     // beyond one frame per requested id plus that allowance cannot be useful.
     let mut budget = wanted.len().saturating_add(2);
     let mut applied: HashSet<String> = HashSet::new();
+    let mut floor: Option<i64> = None;
 
     loop {
         if budget == 0 {
@@ -328,14 +381,21 @@ async fn receive_items<C: SyncChannel, S: SyncSource>(
                         // must still land, or the delete is lost.
                         item.content.clear();
                     }
+                    let stamp = summary_key(&item.summary());
                     if source.apply(item)? {
                         stats.received += 1;
+                        floor = Some(floor.map_or(stamp, |low: i64| low.min(stamp)));
                     } else {
                         stats.skipped += 1;
                     }
                 }
             }
-            SyncMessage::Done => return Ok(()),
+            SyncMessage::Done => {
+                return Ok(Applied {
+                    attempted: applied,
+                    floor,
+                })
+            }
             other => {
                 return Err(SyncError::Unexpected {
                     expected: "items",
@@ -429,9 +489,179 @@ mod tests {
         ProtocolError, MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
     };
     use crate::sync::testutil::{
-        item, session, tombstone, try_session, try_session_with_listen_addresses, ScriptChannel,
-        TestSource,
+        item, session, session_with, summary, tombstone, try_session,
+        try_session_with_listen_addresses, ScriptChannel, TestSource,
     };
+
+    const CONVERGED: SyncCursor = SyncCursor {
+        since_ms: 5_000,
+        relay_floor_ms: None,
+    };
+
+    #[tokio::test]
+    async fn a_delete_survives_a_cursor_advance() {
+        let history = vec![
+            item("doomed", 800, "secret note", "dev-a"),
+            item("recent", 5_000, "newer", "dev-b"),
+        ];
+        let a = TestSource::new("dev-a", history.clone());
+        let b = TestSource::new("dev-b", history);
+
+        a.apply(tombstone(
+            "doomed",
+            6_000,
+            &content_hash("secret note"),
+            "dev-a",
+        ))
+        .unwrap();
+
+        let (oa, _) = session_with(&a, &b, CONVERGED, CONVERGED).await;
+
+        assert!(
+            b.get("doomed").expect("still known").deleted,
+            "a delete stamped above the cursor must still cross it"
+        );
+        assert!(oa.cursor.since_ms >= CONVERGED.since_ms);
+    }
+
+    #[tokio::test]
+    async fn a_relayed_delete_is_advertised_again_below_the_cursor() {
+        let history = vec![
+            item("doomed", 800, "secret note", "dev-a"),
+            item("recent", 5_000, "newer", "dev-b"),
+        ];
+        let b = TestSource::new("dev-b", history.clone());
+        let c = TestSource::new("dev-c", history);
+
+        b.apply(tombstone(
+            "doomed",
+            900,
+            &content_hash("secret note"),
+            "dev-a",
+        ))
+        .unwrap();
+
+        session_with(&b, &c, CONVERGED, CONVERGED).await;
+        assert!(
+            !c.get("doomed").expect("still known").deleted,
+            "a cursor at 5000 cannot see a tombstone stamped 900 on its own"
+        );
+
+        let relaying = SyncCursor {
+            since_ms: 5_000,
+            relay_floor_ms: Some(900),
+        };
+        session_with(&b, &c, relaying, CONVERGED).await;
+        assert!(
+            c.get("doomed").expect("still known").deleted,
+            "the relay floor is what stops a delete falling below the cursor (T-3)"
+        );
+    }
+
+    #[tokio::test]
+    async fn pinning_an_old_item_still_crosses_the_cursor() {
+        let old = item("ancient", 800, "kept", "dev-a");
+        let a = TestSource::new("dev-a", vec![old.clone()]);
+        let b = TestSource::new("dev-b", vec![old.clone()]);
+
+        a.apply(SyncItem {
+            pinned: true,
+            pin_order: Some(1.0),
+            pin_updated_at: 6_000,
+            ..old
+        })
+        .unwrap();
+
+        session_with(&a, &b, CONVERGED, CONVERGED).await;
+
+        let pinned = b.get("ancient").expect("still known");
+        assert!(
+            pinned.pinned,
+            "pin state moves on pin_updated_at, not created_at; a created_at cursor loses it"
+        );
+        assert_eq!(pinned.pin_updated_at, 6_000);
+        assert_eq!(
+            pinned.created_at, 800,
+            "the content version must not be restamped"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_converged_round_advertises_only_the_boundary_entry() {
+        let history: Vec<_> = (0..200)
+            .map(|n| item(&format!("i{n:04}"), 1_000 + n as i64, "same", "dev-a"))
+            .collect();
+        let a = TestSource::new("dev-a", history.clone());
+        let b = TestSource::new("dev-b", history);
+
+        let (oa, ob) = session(&a, &b).await;
+
+        assert_eq!(oa.cursor.since_ms, 1_199);
+        assert_eq!(a.summaries(oa.cursor.since_ms).unwrap().len(), 1);
+        assert_eq!(b.summaries(ob.cursor.since_ms).unwrap().len(), 1);
+    }
+
+    fn planned(wanted: &[&ItemSummary], deferred: &[&str]) -> Plan {
+        Plan {
+            wanted: wanted
+                .iter()
+                .map(|s| (s.item_id.clone(), (*s).clone()))
+                .collect(),
+            deferred: deferred.iter().map(|id| (*id).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn the_watermark_stops_below_anything_the_session_did_not_finish() {
+        let remote = vec![
+            summary("a", 100, "h", false),
+            summary("b", 200, "h", false),
+            summary("c", 300, "h", false),
+        ];
+        let plan = planned(&[&remote[1]], &[]);
+
+        assert_eq!(
+            watermark(0, &remote, &plan, &HashSet::new()),
+            200,
+            "an item that was wanted but never arrived must be offered again"
+        );
+        let attempted: HashSet<String> = ["b".to_string()].into_iter().collect();
+        assert_eq!(watermark(0, &remote, &plan, &attempted), 300);
+    }
+
+    #[test]
+    fn the_watermark_never_moves_on_its_own() {
+        let plan = planned(&[], &[]);
+        assert_eq!(watermark(5_000, &[], &plan, &HashSet::new()), 5_000);
+    }
+
+    #[test]
+    fn a_deferred_want_pulls_the_watermark_back_below_it() {
+        let remote = vec![
+            summary("old", 100, "h", false),
+            summary("new", 900, "h", false),
+        ];
+        let plan = planned(&[], &["old"]);
+        assert_eq!(watermark(5_000, &remote, &plan, &HashSet::new()), 100);
+    }
+
+    #[test]
+    fn a_refused_future_stamp_cannot_drag_the_watermark_forward() {
+        let remote = vec![
+            summary("sane", 900, "h", false),
+            summary("forged", i64::MAX, "h", false),
+        ];
+        let plan = planned(&[], &["forged"]);
+        assert_eq!(watermark(0, &remote, &plan, &HashSet::new()), 900);
+    }
+
+    #[test]
+    fn the_pin_stamp_is_part_of_the_cursor_key() {
+        let mut pinned = summary("ancient", 800, "h", false);
+        pinned.pin_updated_at = 6_000;
+        assert_eq!(summary_key(&pinned), 6_000);
+        assert_eq!(summary_key(&summary("plain", 800, "h", false)), 800);
+    }
 
     #[tokio::test]
     async fn two_divergent_devices_converge() {
@@ -727,6 +957,7 @@ mod tests {
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 listen_addr: None,
+                since_ms: 0,
             },
             SyncMessage::Summary {
                 items: vec![],
@@ -738,7 +969,9 @@ mod tests {
             SyncMessage::Done,
         ]);
 
-        let outcome = run_responder(&mut chan, &a, None).await.unwrap();
+        let outcome = run_responder(&mut chan, &a, None, SyncCursor::default())
+            .await
+            .unwrap();
         assert_eq!(outcome.stats.sent, 0);
         for msg in &chan.sent {
             if let SyncMessage::Items { items } = msg {
@@ -771,6 +1004,7 @@ mod tests {
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 listen_addr: None,
+                since_ms: 0,
             },
             SyncMessage::Summary {
                 items: vec![],
@@ -783,7 +1017,9 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None, SyncCursor::default())
+            .await
+            .unwrap();
         assert!(a.get("pushed").is_none(), "an unrequested item was applied");
         assert_eq!(outcome.stats.received, 0);
         assert_eq!(outcome.stats.skipped, 1);
@@ -804,6 +1040,7 @@ mod tests {
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 listen_addr: None,
+                since_ms: 0,
             },
             SyncMessage::Summary {
                 items: vec![promised],
@@ -814,7 +1051,9 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None, SyncCursor::default())
+            .await
+            .unwrap();
         assert!(a.get("x").is_none());
         assert_eq!(outcome.stats.skipped, 1);
     }
@@ -836,6 +1075,7 @@ mod tests {
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 listen_addr: None,
+                since_ms: 0,
             },
             SyncMessage::Summary {
                 items: vec![promised],
@@ -848,7 +1088,9 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None, SyncCursor::default())
+            .await
+            .unwrap();
         assert!(a.get("x").is_none(), "a forged content_hash was applied");
         assert_eq!(outcome.stats.received, 0);
         assert_eq!(outcome.stats.skipped, 1);
@@ -868,6 +1110,7 @@ mod tests {
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 listen_addr: None,
+                since_ms: 0,
             },
             SyncMessage::Summary {
                 items: vec![grave.summary()],
@@ -878,7 +1121,9 @@ mod tests {
             SyncMessage::Request { item_ids: vec![] },
         ]);
 
-        let outcome = run_initiator(&mut chan, &a, None).await.unwrap();
+        let outcome = run_initiator(&mut chan, &a, None, SyncCursor::default())
+            .await
+            .unwrap();
         assert_eq!(outcome.stats.received, 1, "the delete was dropped");
         assert!(a.get("x").is_some_and(|i| i.deleted));
     }
@@ -892,6 +1137,7 @@ mod tests {
                 device_id: "dev-b".into(),
                 device_name: "B".into(),
                 listen_addr: None,
+                since_ms: 0,
             },
             SyncMessage::Summary {
                 items: vec![],
@@ -903,7 +1149,7 @@ mod tests {
 
         let mut chan = ScriptChannel::new(script);
         assert_eq!(
-            run_initiator(&mut chan, &a, None).await,
+            run_initiator(&mut chan, &a, None, SyncCursor::default()).await,
             Err(SyncError::PeerOverran)
         );
     }
@@ -916,6 +1162,7 @@ mod tests {
             device_id: "dev-b".into(),
             device_name: "B".into(),
             listen_addr: None,
+            since_ms: 0,
         }];
         script.extend(
             (0..=MAX_SUMMARY_PAGES_PER_SESSION).map(|_| SyncMessage::Summary {
@@ -925,7 +1172,7 @@ mod tests {
         );
         let mut chan = ScriptChannel::new(script);
         assert_eq!(
-            run_initiator(&mut chan, &a, None).await,
+            run_initiator(&mut chan, &a, None, SyncCursor::default()).await,
             Err(SyncError::TooManySummaryPages)
         );
     }
@@ -938,11 +1185,12 @@ mod tests {
             device_id: "dev-b".into(),
             device_name: "B".into(),
             listen_addr: None,
+            since_ms: 0,
         };
 
         let mut chan = ScriptChannel::new(vec![stale.clone()]);
         assert_eq!(
-            run_initiator(&mut chan, &a, None).await,
+            run_initiator(&mut chan, &a, None, SyncCursor::default()).await,
             Err(SyncError::Protocol(ProtocolError::VersionMismatch {
                 ours: PROTOCOL_VERSION,
                 theirs: PROTOCOL_VERSION + 1,
@@ -951,7 +1199,7 @@ mod tests {
 
         let mut chan = ScriptChannel::new(vec![stale]);
         assert!(matches!(
-            run_responder(&mut chan, &a, None).await,
+            run_responder(&mut chan, &a, None, SyncCursor::default()).await,
             Err(SyncError::Protocol(ProtocolError::VersionMismatch { .. }))
         ));
     }
@@ -964,9 +1212,10 @@ mod tests {
             device_id: "dev-a".into(),
             device_name: "me".into(),
             listen_addr: None,
+            since_ms: 0,
         }]);
         assert_eq!(
-            run_initiator(&mut chan, &a, None).await,
+            run_initiator(&mut chan, &a, None, SyncCursor::default()).await,
             Err(SyncError::SelfSync)
         );
     }
@@ -976,7 +1225,7 @@ mod tests {
         let a = TestSource::new("dev-a", vec![]);
         let mut chan = ScriptChannel::new(vec![SyncMessage::Done]);
         assert_eq!(
-            run_initiator(&mut chan, &a, None).await,
+            run_initiator(&mut chan, &a, None, SyncCursor::default()).await,
             Err(SyncError::Unexpected {
                 expected: "hello",
                 got: "done"

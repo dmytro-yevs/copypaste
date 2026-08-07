@@ -105,9 +105,10 @@ async fn serve_peer<S, F>(
 
     let mut channel = NoiseChannel::new(session);
     let listen_addr = node.listen_addr();
+    let cursor = node.cursors().get(&pairing_id);
     let outcome = tokio::time::timeout(
         SESSION_TIMEOUT,
-        run_responder(&mut channel, source, listen_addr.as_deref()),
+        run_responder(&mut channel, source, listen_addr.as_deref(), cursor),
     )
     .await;
     channel.close().await;
@@ -127,6 +128,7 @@ async fn serve_peer<S, F>(
                 skipped = outcome.stats.skipped,
                 "served a peer sync session"
             );
+            node.record_cursor(&pairing_id, &outcome);
             if let Some(peer) = node.peers().get(&pairing_id) {
                 node.touch_peer(
                     &peer,
