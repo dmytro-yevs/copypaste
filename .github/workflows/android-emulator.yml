@@ -26,6 +26,11 @@ name: Android emulator
 # blocks here, so check.sh can parse them, shellcheck them, and run their
 # --self-test — which proves the detectors fail when they should.
 #
+# The debug leg then runs e2e-android/, which attaches to the WebView the smoke
+# test left running and drives it over CDP — taps, typing, the DOM. That is the
+# only leg that can: wry compiles the devtools call out of a release build, and
+# the release leg asserts it did.
+#
 # What this cannot do is exercise rung 2: Shizuku needs a wireless-debugging
 # pairing performed by hand and cannot be granted on a stock emulator. The
 # script asserts the honest consequence instead — no foreground service, no
@@ -79,6 +84,7 @@ on:
       - "crates/copypaste-p2p/**"
       - "design/**"
       - "scripts/release/android-*.sh"
+      - "e2e-android/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -96,6 +102,7 @@ on:
       - "crates/copypaste-p2p/**"
       - "design/**"
       - "scripts/release/android-*.sh"
+      - "e2e-android/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -345,6 +352,16 @@ jobs:
           # do it, which reads as a hang rather than as a missing device.
           [[ -e /dev/kvm ]] || { echo "::error::/dev/kvm is absent — this runner cannot accelerate the emulator"; exit 1; }
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e-android/package-lock.json
+
+      - name: Install the UI harness
+        working-directory: e2e-android
+        run: npm ci
+
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ inputs.api-level || '36' }}
@@ -353,10 +370,17 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: ./scripts/release/android-smoke.sh
+          # The harness attaches to the app the smoke test leaves running, so
+          # the order is load-bearing and so is `set -e`: without it the UI run
+          # would report last and a failed smoke test would look green.
+          script: |
+            set -euo pipefail
+            ./scripts/release/android-smoke.sh
+            npm --prefix e2e-android test
         env:
           APK: dist/copypaste-emulator-x86_64-debug.apk
           SMOKE_OUT: artifacts/android-smoke
+          HARNESS_OUT: ${{ github.workspace }}/artifacts/android-ui
 
       # Always: a failed assertion is exactly when the logcat, the screenshot
       # and the pulled database are worth having.
@@ -364,7 +388,9 @@ jobs:
         if: always()
         with:
           name: android-emulator-evidence
-          path: artifacts/android-smoke
+          path: |
+            artifacts/android-smoke
+            artifacts/android-ui
           if-no-files-found: warn
           retention-days: 14
 
