@@ -49,6 +49,7 @@ mod page;
 mod pinning;
 mod retention;
 mod schema;
+mod schema_verify;
 mod search;
 mod state;
 mod store;
