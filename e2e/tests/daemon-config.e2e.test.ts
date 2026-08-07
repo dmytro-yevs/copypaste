@@ -5,8 +5,7 @@
  * are routed Tauri commands, and Settings has a Service tab built on them, so
  * the two properties a screen is built on are now asserted at the screen:
  * `crates/copypaste-ui/src/components/settings/ServiceTab.test.tsx` covers the
- * value that round-trips and the patch that carries only the field it names,
- * including the restart badge on `lan_visibility`.
+ * value that round-trips and the patch that carries only the field it names.
  *
  * What stays here is the half a jsdom test cannot reach: a rejection that
  * changes *nothing* on a real daemon, and the concurrent-writer race below,
@@ -63,14 +62,18 @@ describe("the round trip", () => {
     expect((await show()).config.poll_interval_ms).toBe(1500);
   });
 
-  test("a field that needs a restart says so; a live one does not", async () => {
-    const restart = await daemon.json<ConfigApplied>([
+  // `lan_visibility` was the one field that needed a restart until discovery
+  // became startable behind `&self` (60a2da93); the daemon now applies it on the
+  // spot, so the honest answer to every patch is an empty `restart_required`.
+  test("every field takes effect live, so nothing asks for a restart", async () => {
+    const lan = await daemon.json<ConfigApplied>([
       "config",
       "set",
       "--lan-visibility",
       "false",
     ]);
-    expect(restart.restart_required).toContain("lan_visibility");
+    expect(lan.config.lan_visibility).toBe(false);
+    expect(lan.restart_required).toEqual([]);
 
     const live = await daemon.json<ConfigApplied>([
       "config",

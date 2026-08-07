@@ -45,9 +45,9 @@ export function useServiceConfig() {
   });
 }
 
-/** `restart_required` is passed to the caller rather than toasted: the fields
- *  it names have to be marked at the control they belong to, and a toast is
- *  gone before the user looks back at the row. */
+/** `restart_required` is passed to the caller rather than toasted: it has to
+ *  stay on screen until the restart happens, and a toast is gone before the
+ *  user looks back. */
 export function useSetServiceConfig() {
   const qc = useQueryClient();
   return useMutation<ConfigApplied, unknown, ConfigPatch>({
