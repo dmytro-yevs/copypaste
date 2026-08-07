@@ -197,6 +197,10 @@ impl Node {
         }
     }
 
+    // Not `!peers.is_empty()`, which clippy asks for: `PeerStore::is_empty` is
+    // `list()`, and `list` hides a pairing that is minted but not yet redeemed
+    // — the one moment this device most has to stay discoverable.
+    #[allow(clippy::len_zero)]
     fn wants_discovery(&self) -> bool {
         self.lan_visible.load(Ordering::Relaxed)
             && (self.peers.len() > 0
