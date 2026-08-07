@@ -575,6 +575,14 @@ jobs:
         # The runner default is PowerShell. Every `run:` body in this workflow
         # is bash, and the runner ships Git Bash.
         shell: bash
+    env:
+      # PATH order is the bug, so this names the interpreter instead of
+      # reordering it: under `shell: bash` Git's /usr/bin/perl shadows the
+      # runner's Strawberry Perl, and Git's is an msys build without
+      # Locale::Maketext::Simple, which OpenSSL's ./Configure loads. Run
+      # 31224144932 died there. openssl-src reads OPENSSL_SRC_PERL, then PERL,
+      # then bare `perl` — the first is the only one nothing else competes for.
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -587,6 +595,16 @@ jobs:
         with:
           shared-key: windows-1.96
           key: dev-profile
+
+      - name: Confirm openssl-src has a Perl that can run ./Configure
+        # Two seconds here rather than three minutes into an OpenSSL build, and
+        # the failure names the interpreter instead of a missing .pm.
+        run: |
+          set -euo pipefail
+          if ! "$OPENSSL_SRC_PERL" -MLocale::Maketext::Simple -e 'exit 0'; then
+            echo "::error::$OPENSSL_SRC_PERL cannot load Locale::Maketext::Simple, which OpenSSL's ./Configure needs. windows-latest ships Strawberry Perl under C:\\Strawberry; if the image moved it, OPENSSL_SRC_PERL is the thing to update."
+            exit 1
+          fi
 
       - name: What this runner is the only machine to compile
         # The same argument the `embedded-backend` and `check-macos-types.sh`
@@ -634,6 +652,11 @@ jobs:
       # rust-toolchain.toml outranks `rustup default`, and the Tauri CLI builds
       # through a bare `cargo`. See the macOS job in release.yml.
       RUSTUP_TOOLCHAIN: "1.96"
+      # Set here as well; windows-check above carries the reason. This job only
+      # escaped run 31224144932's Perl failure because npm spawns the Tauri CLI
+      # through cmd.exe, where Git's perl is not on PATH — an accident of which
+      # process starts cargo, not a property of the job.
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -651,6 +674,14 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - name: Confirm openssl-src has a Perl that can run ./Configure
+        run: |
+          set -euo pipefail
+          if ! "$OPENSSL_SRC_PERL" -MLocale::Maketext::Simple -e 'exit 0'; then
+            echo "::error::$OPENSSL_SRC_PERL cannot load Locale::Maketext::Simple, which OpenSSL's ./Configure needs. windows-latest ships Strawberry Perl under C:\\Strawberry; if the image moved it, OPENSSL_SRC_PERL is the thing to update."
+            exit 1
+          fi
 
       - name: Confirm no Authenticode signing path is configured
         # release.yml's premise, applied to the platform that does not have a
