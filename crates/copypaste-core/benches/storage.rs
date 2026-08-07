@@ -133,12 +133,25 @@ fn upsert(c: &mut Criterion) {
     group.finish();
 }
 
-fn byte_cap(c: &mut Criterion) {
+/// The two retention gates with nothing to delete, which is what they do on
+/// every capture but one in `history_limit`.
+///
+/// **Read these across the three depths, not one at a time.** Each gate answers
+/// a yes/no question that must not depend on how much history the answer is
+/// about, so a figure that climbs with the row count is a scan on the capture
+/// path — that is what `cap_nothing_to_do` did at 331 µs against 8 000 rows
+/// while every absolute number still looked unremarkable.
+fn gates(c: &mut Criterion) {
     let mut group = c.benchmark_group("storage/sweep");
     for history in HISTORIES {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = primed(dir.path(), history);
 
+        group.bench_with_input(
+            BenchmarkId::new("cap_nothing_to_do", history),
+            &history,
+            |b, &history| b.iter(|| store.evict_over_cap(black_box(history as u64))),
+        );
         group.bench_with_input(
             BenchmarkId::new("byte_cap_nothing_to_do", history),
             &history,
@@ -148,5 +161,5 @@ fn byte_cap(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, summaries, insert_or_bump, upsert, byte_cap);
+criterion_group!(benches, summaries, insert_or_bump, upsert, gates);
 criterion_main!(benches);

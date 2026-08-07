@@ -5,9 +5,9 @@
 //! pipeline taken apart, so a total that moves can be attributed rather than
 //! guessed at.
 //!
-//! Every store is primed to a steady state and capped there, because the two
-//! sweeps are `O(history)` and measuring them on an empty database measures
-//! nothing a user would ever see.
+//! Every store is primed to a steady state and capped there, because the
+//! sweeps are history-sensitive and measuring them on an empty database
+//! measures nothing a user would ever see.
 
 use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -123,8 +123,14 @@ fn stages(c: &mut Criterion) {
     }
 }
 
-/// The two sweeps that ride every capture, measured with nothing to delete —
-/// which is what they do on all but one capture in `history_limit`.
+/// The sweeps that ride every capture, at the two things they actually do: the
+/// gate alone, and the gate plus the one eviction a full history pays for.
+///
+/// `cap_nothing_to_do` must be **flat** across the three depths. It reads a
+/// maintained counter, so a figure that climbs with the row count means it is
+/// counting rows again — the 331 µs at 8 000 rows this bench was extended to
+/// catch. `cap_one_to_evict` is not flat and is not meant to be; it carries a
+/// hard delete.
 fn sweeps(c: &mut Criterion) {
     let keyring = keyring();
     let mut group = c.benchmark_group("capture/sweep");
@@ -137,6 +143,23 @@ fn sweeps(c: &mut Criterion) {
             BenchmarkId::new("cap_nothing_to_do", history),
             &history,
             |b, &history| b.iter(|| store.evict_over_cap(black_box(history as u64))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("cap_one_to_evict", history),
+            &history,
+            |b, &history| {
+                b.iter_batched(
+                    // Untimed: puts the store exactly one row over the cap, so
+                    // every timed call evicts one and the depth never moves.
+                    || {
+                        store
+                            .insert(row(&keyring, &clipping(256, seed()), T0))
+                            .expect("insert");
+                    },
+                    |()| store.evict_over_cap(black_box(history as u64)),
+                    criterion::BatchSize::SmallInput,
+                );
+            },
         );
         group.bench_with_input(
             BenchmarkId::new("retention_nothing_to_do", history),
