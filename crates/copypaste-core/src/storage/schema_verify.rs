@@ -144,6 +144,21 @@ const CLIPBOARD_FTS_COLUMNS: &[Column] = &[
     },
 ];
 
+const CLIPBOARD_LIVE_COUNT_COLUMNS: &[Column] = &[
+    Column {
+        name: "only_row",
+        declared_type: "INTEGER",
+        not_null: true,
+        primary_key: true,
+    },
+    Column {
+        name: "live",
+        declared_type: "INTEGER",
+        not_null: true,
+        primary_key: false,
+    },
+];
+
 const SYNC_DEVICE_STATE_COLUMNS: &[Column] = &[
     Column {
         name: "key",
@@ -184,6 +199,11 @@ const TABLES: &[Table] = &[
         name: "clipboard_fts",
         columns: CLIPBOARD_FTS_COLUMNS,
         virtual_fts5: true,
+    },
+    Table {
+        name: "clipboard_live_count",
+        columns: CLIPBOARD_LIVE_COUNT_COLUMNS,
+        virtual_fts5: false,
     },
     Table {
         name: "sync_device_state",
@@ -293,6 +313,23 @@ mod tests {
              );",
         )
         .unwrap();
+
+        assert!(matches!(
+            verify_schema(&conn),
+            Err(StoreError::InvalidSchema)
+        ));
+    }
+
+    /// The counter table is verified like any other, so a history that lost it
+    /// is refused rather than silently counted wrong.
+    #[test]
+    fn schema_validation_rejects_a_history_without_the_live_count() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        let store = Store::open(&path, &KEY).unwrap();
+        let conn = store.conn().unwrap();
+        conn.execute_batch("DROP TABLE clipboard_live_count;")
+            .unwrap();
 
         assert!(matches!(
             verify_schema(&conn),

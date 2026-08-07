@@ -572,6 +572,35 @@ mod tests {
         assert!(!row.pinned, "a tombstone has nothing to be pinned to");
     }
 
+    /// A merge moves rows in both directions, and the history cap evicts from
+    /// a counter rather than a `COUNT(*)`. A resurrect that the counter misses
+    /// leaves the cap enforcing a number the history no longer has.
+    #[test]
+    fn an_upsert_moves_the_live_count_in_both_directions() {
+        let s = store();
+        let row = s.insert(item("contested", T0)).unwrap();
+        assert_eq!(s.count().unwrap(), 1);
+
+        let tombstone = IncomingItem {
+            content_ciphertext: None,
+            nonce: None,
+            deleted: true,
+            search_text: None,
+            ..incoming(&row.id, &row.content_hash, T0 + 1)
+        };
+        s.upsert(&tombstone).unwrap();
+        assert_eq!(s.count().unwrap(), 0, "a tombstone is not live");
+
+        // Applying the same tombstone twice must not count it twice.
+        s.upsert(&tombstone).unwrap();
+        assert_eq!(s.count().unwrap(), 0);
+
+        // A peer's live version outranks the tombstone: the row comes back.
+        s.upsert(&incoming(&row.id, "hash-newer", T0 + 900_000))
+            .unwrap();
+        assert_eq!(s.count().unwrap(), 1, "a resurrected row is live again");
+    }
+
     #[test]
     fn an_incoming_version_replaces_pin_state() {
         let s = store();

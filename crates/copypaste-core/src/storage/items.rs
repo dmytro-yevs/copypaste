@@ -10,7 +10,7 @@ use super::model::{
     is_constraint_violation, item_columns, row_to_item, Ingest, ItemColumns, NewItem, StoreError,
     StoredItem,
 };
-use super::retention::{bump_in_tx, find_in_bucket, newest_live_with_hash};
+use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_hash};
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
@@ -363,12 +363,7 @@ impl Store {
     /// Number of live items. Tombstones do not count.
     pub fn count(&self) -> Result<u64, StoreError> {
         let conn = self.conn()?;
-        let n: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
-            [],
-            |r| r.get(0),
-        )?;
-        Ok(n.max(0) as u64)
+        Ok(live_count(&conn)?)
     }
 }
 
