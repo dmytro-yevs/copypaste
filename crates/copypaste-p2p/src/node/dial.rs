@@ -11,6 +11,7 @@ use tracing::{debug, info, warn};
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
 use super::{placeholder_name, store_error, Node, NodeError};
 use crate::peers::{Peer, MAX_PAIRINGS};
+use crate::protocol::ProtocolError;
 use crate::sync::{run_initiator, SyncCursor, SyncError, SyncOutcome, SyncSource};
 use crate::transport::{PairingToken, Session};
 
@@ -172,10 +173,17 @@ impl Node {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(e)) => {
                 warn!(error = %e, "sync session failed");
-                Err(NodeError::Session)
+                Err(session_error(&e))
             }
             Err(_) => Err(NodeError::Timeout),
         }
+    }
+}
+
+fn session_error(e: &SyncError) -> NodeError {
+    match e {
+        SyncError::Protocol(ProtocolError::VersionMismatch { .. }) => NodeError::PeerVersion,
+        _ => NodeError::Session,
     }
 }
 
@@ -201,7 +209,7 @@ mod tests {
 
     fn node(dir: &tempfile::TempDir) -> Node {
         let peers = PeerStore::open(&dir.path().join("peers.json")).unwrap();
-        Node::new(peers, None, 0)
+        Node::new(peers, None, 0, true)
     }
 
     #[tokio::test]
