@@ -133,8 +133,12 @@ pub(crate) fn now_ms() -> i64 {
 
 fn unix_millis(time: SystemTime) -> i64 {
     time.duration_since(UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+        .map(saturating_millis)
         .unwrap_or(0)
+}
+
+fn saturating_millis(since_epoch: Duration) -> i64 {
+    i64::try_from(since_epoch.as_millis()).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
@@ -228,8 +232,11 @@ mod tests {
 
     #[test]
     fn cloud_wall_time_saturates_at_the_wire_integer_limit() {
-        let overflow = UNIX_EPOCH + Duration::from_millis(i64::MAX as u64 + 1);
-        assert_eq!(unix_millis(overflow), i64::MAX);
+        // Asserted on the duration, not on `UNIX_EPOCH + d`: a Windows
+        // SystemTime is a FILETIME and cannot represent a date 2.9e8 years
+        // out, so building that instant panics before unix_millis is reached.
+        let overflow = Duration::from_millis(i64::MAX as u64 + 1);
+        assert_eq!(saturating_millis(overflow), i64::MAX);
         assert_eq!(unix_millis(UNIX_EPOCH - Duration::from_millis(1)), 0);
     }
 }
