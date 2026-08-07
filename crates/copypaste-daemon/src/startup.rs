@@ -65,6 +65,7 @@ pub fn remove_socket(socket_path: &std::path::Path) {
 /// because it cannot signal a process it did not start. All three must unwind
 /// the same way — an aborted process leaves the socket file behind and the next
 /// start has to treat it as stale.
+#[cfg(unix)]
 pub async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::Result<()> {
     use tokio::signal::unix::{signal, SignalKind};
 
@@ -73,6 +74,29 @@ pub async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::
     tokio::select! {
         _ = sigterm.recv() => info!("received SIGTERM"),
         _ = sigint.recv() => info!("received SIGINT"),
+        _ = requested.wait_for(|stopping| *stopping) => info!("shutdown was requested over ipc"),
+    }
+    Ok(())
+}
+
+/// The same three ways in, spelled in console control events.
+///
+/// Windows has no SIGTERM: the Service Control Manager and a closing console
+/// both arrive as `CTRL_CLOSE`/`CTRL_SHUTDOWN`, and the process is killed a few
+/// seconds later whatever the handler does — so the teardown this unblocks has
+/// to stay short.
+#[cfg(windows)]
+pub async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::Result<()> {
+    use tokio::signal::windows::{ctrl_break, ctrl_close, ctrl_shutdown};
+
+    let mut closing = ctrl_close().context("install the console-close handler")?;
+    let mut stopping = ctrl_shutdown().context("install the system-shutdown handler")?;
+    let mut interrupted = ctrl_break().context("install the Ctrl-Break handler")?;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => info!("received Ctrl-C"),
+        _ = interrupted.recv() => info!("received Ctrl-Break"),
+        _ = closing.recv() => info!("the console is closing"),
+        _ = stopping.recv() => info!("the system is shutting down"),
         _ = requested.wait_for(|stopping| *stopping) => info!("shutdown was requested over ipc"),
     }
     Ok(())
