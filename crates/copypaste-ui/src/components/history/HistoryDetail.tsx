@@ -22,6 +22,7 @@ interface HistoryDetailProps {
    *  deleted underneath the reader closes it rather than showing a ghost. */
   item: Item | null;
   origin: string | null;
+  fullContent: string | null;
   revealedContent: string | null;
   revealPending: boolean;
   onReveal: (item: Item) => void;
@@ -37,6 +38,7 @@ interface HistoryDetailProps {
 export function HistoryDetail({
   item,
   origin,
+  fullContent,
   revealedContent,
   revealPending,
   onReveal,
@@ -51,7 +53,9 @@ export function HistoryDetail({
   const masked = item?.is_sensitive === true && !revealed;
   // The plaintext is read from the reveal, never held here: this component
   // keeps no copy of it, so INV-11's expiry re-masks the view by itself.
-  const body = revealed ? revealedContent : (item?.content ?? null);
+  const body = revealed
+    ? revealedContent
+    : (fullContent ?? item?.content ?? null);
   const kind = item ? kindOf(item) : "text";
   const isImage = kind === "image";
 
