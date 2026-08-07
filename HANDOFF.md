@@ -111,6 +111,11 @@ were clean on it, and `Supply chain` is green on the final commit.
    Before-figure: 281.7 wakeups/min, 0.012 CPU-s/hour, 17 threads. So the two idle fixes
    (an always-on 30 s cleanup thread; a 10 s cloud-refresh tick on unconfigured daemons)
    remain argued, not measured, on the shipping platform.
+   The premise was wrong: `COPYPASTE_EPHEMERAL_KEY` is in v2 and short-circuits before
+   any Security-framework call, so a profiling daemon on a throwaway `--data-dir` needs
+   no keychain at all. `docs/rewrite/macos-idle-measurement.md` has the diagnosis and
+   the routes, `scripts/profile/macos-keychain-preflight.sh` picks one and
+   `scripts/profile/macos-idle-after.sh` takes the measurement. Still not run.
 4. **F-LOCK-1 was never started.** No `arc_swap`, `Cargo.toml` untouched. The finding:
    `config::set` holds the settings write lock across a SQLCipher KV write while the capture
    loop reads that lock on a reactor thread. Auditor C rated the impact low and it is the
