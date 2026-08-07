@@ -22,6 +22,7 @@ pub enum ErrorCode {
     PeerUnreachable,
     PairingLimit,
     PeerFailed,
+    PeerVersion,
     /// No such paired device; items use `NotFound`.
     PeerNotFound,
 
@@ -44,6 +45,7 @@ impl ErrorCode {
             Self::PeerUnreachable => "peer_unreachable",
             Self::PairingLimit => "pairing_limit",
             Self::PeerFailed => "peer_failed",
+            Self::PeerVersion => "peer_version",
             Self::PeerNotFound => "peer_not_found",
             Self::Internal => "internal",
         }
@@ -63,6 +65,7 @@ impl ErrorCode {
             "peer_unreachable" => Some(Self::PeerUnreachable),
             "pairing_limit" => Some(Self::PairingLimit),
             "peer_failed" => Some(Self::PeerFailed),
+            "peer_version" => Some(Self::PeerVersion),
             "peer_not_found" => Some(Self::PeerNotFound),
             "internal" => Some(Self::Internal),
             _ => None,
@@ -86,6 +89,7 @@ impl ErrorCode {
             | Self::PairingCode
             | Self::PairingAddress
             | Self::PairingLimit
+            | Self::PeerVersion
             | Self::PeerNotFound => false,
         }
     }
@@ -110,6 +114,7 @@ mod tests {
             (ErrorCode::PeerUnreachable, "\"peer_unreachable\""),
             (ErrorCode::PairingLimit, "\"pairing_limit\""),
             (ErrorCode::PeerFailed, "\"peer_failed\""),
+            (ErrorCode::PeerVersion, "\"peer_version\""),
             (ErrorCode::PeerNotFound, "\"peer_not_found\""),
             (ErrorCode::Internal, "\"internal\""),
         ] {
@@ -139,6 +144,7 @@ mod tests {
             ErrorCode::PairingCode,
             ErrorCode::PairingAddress,
             ErrorCode::PairingLimit,
+            ErrorCode::PeerVersion,
             ErrorCode::PeerNotFound,
         ] {
             assert!(!code.retryable(), "{code:?}");

@@ -46,6 +46,7 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
         if *shutdown.borrow() {
             break;
         }
+        state.p2p.node().reconcile_discovery();
         round(&state).await;
     }
 
