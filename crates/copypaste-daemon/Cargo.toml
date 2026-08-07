@@ -70,10 +70,24 @@ tokio = { workspace = true, features = ["test-util"] }
 # `windows-permissions` and `windows-acl` are the only wrappers that cover this,
 # neither has had a release since 2021, and neither removes an unsafe call —
 # their SID and descriptor conversions carry the same invariants.
+# `Win32_UI_WindowsAndMessaging` is the clipboard owner's window, which
+# `Win32_System_Threading` turns into a process image name; the crates that
+# package that pair also hand back the window title, which is user content.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
 ] }
+# Windows clipboard. `arboard` is the cross-platform crate and is already in the
+# tree behind Tauri, but it exposes no sequence number, no arbitrary registered
+# format and no size-before-read — so polling it means reading the clipboard's
+# content every tick, which I-1 forbids and the do-not-record formats exist to
+# prevent. This is arboard's own Windows layer, one level down.
+clipboard-win = { version = "5.4", features = ["std"] }
+# Windows puts screenshots on the clipboard as an uncompressed bitmap and the
+# rest of CopyPaste stores PNG. `bmp` is added here rather than on the workspace
+# line so macOS and Android builds carry neither the decoder nor the encoder.
+image = { workspace = true, features = ["bmp"] }
