@@ -541,7 +541,7 @@ group "SQLCipher's crypto backend (ADR-0007)"
 # linked against the runner's Homebrew libcrypto builds, signs, and mounts.
 if grep -q 'bundled-sqlcipher-vendored-openssl' Cargo.toml; then
     bad "root Cargo.toml keeps vendored OpenSSL off the default path" \
-        "a feature in [workspace.dependencies] reaches macOS too; ADR-0007 scopes it to Android"
+        "a feature in [workspace.dependencies] reaches macOS too; ADR-0007 scopes it per target"
 else
     ok "root Cargo.toml keeps vendored OpenSSL off the default path"
 fi
@@ -555,26 +555,32 @@ if grep -rql 'bundled-sqlcipher-vendored-openssl' --include=Cargo.toml crates >/
     ok "some crate manifest enables vendored OpenSSL (ADR-0007 part 1)"
 else
     bad "some crate manifest enables vendored OpenSSL (ADR-0007 part 1)" \
-        "no crates/**/Cargo.toml enables it; the Android build has no crypto backend to link SQLCipher against"
+        "no crates/**/Cargo.toml enables it; the Android and Windows builds have no crypto backend to link SQLCipher against"
 fi
 
-# Where the feature does appear it must sit under an android cfg. In a plain
-# [dependencies] it vendors on every target — the same mistake, wider blast
-# radius, and resolver v2 is the only reason the scoped form works at all.
+# Where the feature does appear it must sit under a cfg for a target that has
+# no crypto backend to fall back on — android (no OpenSSL in the NDK sysroot)
+# and windows (no system OpenSSL, and libsqlite3-sys panics rather than
+# choosing). In a plain [dependencies] it vendors on every target — the same
+# mistake, wider blast radius, and resolver v2 is the only reason the scoped
+# form works at all. macOS is what this guards: it resolves CommonCrypto only
+# while no cfg it matches enables the feature.
 misplaced=""
 while IFS= read -r f; do
     grep -q 'bundled-sqlcipher-vendored-openssl' "$f" || continue
     awk '
-        /^[[:space:]]*\[/ { android = ($0 ~ /^\[target\.[^]]*android[^]]*\.dependencies\]/) }
-        /bundled-sqlcipher-vendored-openssl/ { if (!android) offending = 1 }
+        /^[[:space:]]*\[/ {
+            scoped = ($0 ~ /^\[target\.[^]]*(android|windows)[^]]*\.dependencies\]/)
+        }
+        /bundled-sqlcipher-vendored-openssl/ { if (!scoped) offending = 1 }
         END { exit offending ? 1 : 0 }
     ' "$f" || misplaced="${misplaced} ${f}"
 done < <(find crates -name Cargo.toml)
 if [[ -n "$misplaced" ]]; then
-    bad "vendored OpenSSL is android-scoped wherever it appears" \
-        "found outside a cfg(target_os = \"android\") section in:${misplaced}"
+    bad "vendored OpenSSL is scoped to the targets that need it" \
+        "found outside an android/windows cfg section in:${misplaced}"
 else
-    ok "vendored OpenSSL is android-scoped wherever it appears"
+    ok "vendored OpenSSL is scoped to the targets that need it"
 fi
 
 if grep -q 'name = "openssl-sys", wrappers = \["libsqlite3-sys"\]' deny.toml; then
