@@ -62,6 +62,14 @@ rust {
 }
 
 dependencies {
+    // tauri-2.11.5/mobile/android pins 2.15.3, which is inside the ranges of
+    // CVE-2026-54512 and CVE-2026-54513 — PolymorphicTypeValidator bypasses,
+    // 8.1, reachable from the ObjectMapper every plugin call is deserialised
+    // through. 2.18.9 is the lowest release outside all five of its advisories.
+    constraints {
+        implementation("com.fasterxml.jackson.core:jackson-databind:2.18.9")
+    }
+
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     // Rung 2. CLAUDE.md rule 1: the maintained client library, not a
