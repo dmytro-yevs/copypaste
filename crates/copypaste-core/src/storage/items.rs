@@ -11,7 +11,7 @@ use super::model::{
     StoredItem,
 };
 use super::retention::{bump_in_tx, find_in_bucket, newest_live_with_hash};
-use super::search::{delete_fts_row_in_tx, upsert_fts_in_tx};
+use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
 fn promote_sensitive_in_tx(
@@ -98,11 +98,17 @@ impl Store {
             return Ok(Ingest::Bumped(bumped));
         }
 
+        let fts_rowid = match search_text {
+            Some(text) => insert_fts_in_tx(&tx, &id, text, item.is_sensitive, &item.content_type)?,
+            None => None,
+        };
+
         let insert = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10)",
+                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata, \
+                  fts_rowid) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10, ?11)",
             params![
                 &id,
                 &item.content_ciphertext,
@@ -114,12 +120,16 @@ impl Store {
                 &item.app_bundle_id,
                 &item.app_name,
                 &item.payload_metadata,
+                fts_rowid,
             ],
         );
 
         match insert {
             Ok(_) => {}
             Err(e) if is_constraint_violation(&e) => {
+                if let Some(rowid) = fts_rowid {
+                    tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
+                }
                 // The dedup backstop fired: a concurrent capture of the same
                 // content committed between the probe above and this INSERT.
                 // Resolve the winner *inside* the same transaction so there is
@@ -148,9 +158,6 @@ impl Store {
             Err(e) => return Err(e.into()),
         }
 
-        if let Some(text) = search_text {
-            upsert_fts_in_tx(&tx, &id, text)?;
-        }
         tx.commit()?;
 
         Ok(Ingest::Inserted(StoredItem {
@@ -342,7 +349,56 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{fts_dump, fts_row_count, item, store, T0};
+    use super::super::model::NewItem;
+    use super::super::test_support::{fts_dump, fts_row_count, item, store, KEY, T0};
+    use super::super::Store;
+
+    #[test]
+    fn a_capture_writes_its_payload_to_the_wal_once() {
+        const PAYLOAD: usize = 1 << 20;
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        let wal = std::path::PathBuf::from(format!("{}-wal", path.display()));
+        let s = Store::open(&path, &KEY).unwrap();
+
+        let big = |n: i64| NewItem {
+            content_ciphertext: vec![b'x'; PAYLOAD],
+            search_text: Some(format!("marker {n}")),
+            ..item(&format!("payload {n}"), T0 + n * 60_000)
+        };
+
+        s.insert(big(0)).unwrap();
+        {
+            let conn = s.conn().unwrap();
+            super::super::connection::run_pragma(&conn, "PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        }
+        assert!(std::fs::metadata(&wal).unwrap().len() < PAYLOAD as u64 / 8);
+
+        s.insert(big(1)).unwrap();
+        let written = std::fs::metadata(&wal).unwrap().len();
+        assert!(
+            written < PAYLOAD as u64 * 3 / 2,
+            "one {PAYLOAD}-byte capture put {written} bytes in the WAL; \
+             the payload is being written twice"
+        );
+    }
+
+    #[test]
+    fn a_capture_the_insert_rejects_leaves_no_plaintext_in_the_index() {
+        let s = store();
+        let first = s.insert(item("alpha payload", T0)).unwrap();
+
+        let clash = NewItem {
+            id: first.id.clone(),
+            ..item("beta payload leaking", T0 + 60_000)
+        };
+        assert!(s.insert(clash).is_err());
+
+        assert_eq!(fts_row_count(&s, &first.id), 1);
+        assert!(!fts_dump(&s).contains("leaking"));
+        assert!(s.search("leaking", 10).unwrap().is_empty());
+        assert_eq!(s.search("alpha", 10).unwrap().len(), 1);
+    }
 
     #[test]
     fn insert_and_get_round_trip() {
