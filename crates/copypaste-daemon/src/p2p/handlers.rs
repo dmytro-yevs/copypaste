@@ -256,6 +256,7 @@ fn node_error_code(error: &NodeError) -> ErrorCode {
         NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
         NodeError::TooManyPairings => ErrorCode::PairingLimit,
         NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
+        NodeError::PeerVersion => ErrorCode::PeerVersion,
         NodeError::NoPeer => ErrorCode::PeerNotFound,
     }
 }
@@ -583,6 +584,7 @@ mod tests {
         (NodeError::TooManyPairings, ErrorCode::PairingLimit),
         (NodeError::Session, ErrorCode::PeerFailed),
         (NodeError::PeerStore, ErrorCode::PeerFailed),
+        (NodeError::PeerVersion, ErrorCode::PeerVersion),
         (NodeError::NoPeer, ErrorCode::PeerNotFound),
     ];
 
