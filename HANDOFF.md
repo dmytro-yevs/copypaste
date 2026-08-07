@@ -134,10 +134,13 @@ were clean on it, and `Supply chain` is green on the final commit.
    `on_applied` closure in `daemon/src/sync.rs` that the original prescription named —
    `sync.rs` is the peer source and its own doc says the cloud transport deliberately does
    not take that hook.
-7. **Residual, unfixed, measured:** the retention gate still runs
+7. **The retention gate is fixed, and the fix is unbuilt and unmeasured.** It ran
    `SELECT COUNT(*) ... WHERE deleted = 0` on every capture — a full index scan, 331 µs at
-   8k rows. The fix is to make the gate cheap (a maintained counter, or
-   `SELECT 1 ... LIMIT 1 OFFSET max_items`), not to move it.
+   8k rows. It now reads `clipboard_live_count`, a single row maintained by three triggers
+   on `clipboard_items` and recomputed from the table on every open. Schema version 6 → 7,
+   so **backups taken by an older build are refused by restore**, as every schema bump does.
+   `storage/sweep/cap_nothing_to_do` at 500/2k/8k is the A/B; the property is flatness
+   across the three depths, not any single number. Nothing here was compiled or run.
 8. **Storage benches cannot see large-payload write regressions** at ROW_BYTES=512. Only
    `capture/stage/*/insert` and the WAL-bytes test can. A future storage change can regress
    big writes with every storage bench green.
