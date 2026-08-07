@@ -1,5 +1,5 @@
-//! The daemon client: one Unix socket, one newline-delimited JSON request, one
-//! typed response.
+//! The daemon client: one [`transport`] connection, one newline-delimited JSON
+//! request, one typed response.
 //!
 //! Framing is [`tokio_util::codec::LinesCodec`], not a byte-scanning read loop —
 //! the same codec the daemon uses, so there is exactly one framing
@@ -11,6 +11,7 @@
 //! this crate.
 
 use crate::error::CliError;
+use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredData,
     ErrorCode, EventData, ExportData, ImportData, Item, ItemPage, Method, PairingData, PeerInfo,
@@ -21,7 +22,6 @@ use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::net::UnixStream;
 use tokio::time::{timeout_at, Instant};
 use tokio_util::codec::{Framed, LinesCodec};
 
@@ -48,7 +48,7 @@ fn next_id() -> u64 {
 }
 
 struct Connection {
-    framed: Framed<UnixStream, LinesCodec>,
+    framed: Framed<transport::Stream, LinesCodec>,
 }
 
 impl Connection {
@@ -56,7 +56,7 @@ impl Connection {
         // The path is never surfaced to the user: it discloses the local
         // username (CLAUDE.md rule 4). Every failure here collapses to one
         // pathless variant.
-        let stream = before(deadline, UnixStream::connect(path))
+        let stream = before(deadline, transport::connect(path))
             .await?
             .map_err(|_| CliError::DaemonUnreachable)?;
         Ok(Self {
@@ -338,11 +338,20 @@ pub fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>, CliErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The stub daemon binds a real endpoint, which only Unix has one of yet.
+    // Everything below that decodes a reply is platform-independent and stays
+    // ungated, so the wire contract is still covered on Windows.
+    #[cfg(unix)]
     use std::path::PathBuf;
+    #[cfg(unix)]
     use std::sync::{Arc, Mutex};
+    #[cfg(unix)]
     use tokio::io::AsyncWriteExt;
+    #[cfg(unix)]
     use tokio::net::UnixListener;
 
+    #[cfg(unix)]
     enum StubAction {
         Reply(String),
         Close,
@@ -356,17 +365,20 @@ mod tests {
         },
     }
 
+    #[cfg(unix)]
     struct StubDaemon {
         path: PathBuf,
         request_ids: Arc<Mutex<Vec<u64>>>,
         task: tokio::task::JoinHandle<()>,
     }
 
+    #[cfg(unix)]
     async fn hold<T>(value: T) {
         std::future::pending::<()>().await;
         drop(value);
     }
 
+    #[cfg(unix)]
     impl StubDaemon {
         fn start(name: &str, actions: Vec<StubAction>) -> Self {
             let path = std::env::temp_dir().join(format!(
@@ -436,6 +448,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     impl Drop for StubDaemon {
         fn drop(&mut self) {
             self.task.abort();
@@ -443,6 +456,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_full_request_response_round_trip_yields_typed_items() {
         let stub = StubDaemon::start(
@@ -477,6 +491,7 @@ mod tests {
         assert!(!err.user_message().contains('/'), "{err}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn hanging_up_without_answering_is_treated_as_unreachable() {
         let stub = StubDaemon::start("hangup", vec![StubAction::Close]);
@@ -484,6 +499,7 @@ mod tests {
         assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
     }
 
+    #[cfg(unix)]
     fn assert_deadline_error_is_prompt_and_pathless(err: &CliError, started: Instant, path: &Path) {
         assert_eq!(err.exit_code(), crate::error::EXIT_UNREACHABLE);
         assert!(started.elapsed() < Duration::from_secs(2));
@@ -492,6 +508,7 @@ mod tests {
         assert!(!message.contains('/'), "{message}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn an_accepted_socket_that_never_reads_has_a_write_deadline() {
         let stub = StubDaemon::start("never-read", vec![StubAction::NeverRead]);
@@ -508,6 +525,7 @@ mod tests {
         assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn an_accepted_request_that_never_gets_a_reply_has_a_read_deadline() {
         let stub = StubDaemon::start("never-reply", vec![StubAction::NeverReply]);
@@ -518,6 +536,7 @@ mod tests {
         assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_partial_reply_without_a_newline_has_a_read_deadline() {
         let stub = StubDaemon::start(
@@ -531,6 +550,7 @@ mod tests {
         assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn watch_acknowledgement_has_a_deadline() {
         let stub = StubDaemon::start("watch-no-ack", vec![StubAction::NeverReply]);
@@ -542,6 +562,7 @@ mod tests {
         assert_deadline_error_is_prompt_and_pathless(&err, started, &stub.path);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn watch_stream_is_unbounded_after_the_acknowledgement() {
         let stub = StubDaemon::start(
@@ -590,6 +611,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_reply_for_a_different_request_is_rejected() {
         let stub = StubDaemon::start(
@@ -603,6 +625,7 @@ mod tests {
         assert!(err.user_message().contains("reply for request"), "{err}");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn not_ready_is_retried_on_a_fresh_connection() {
         let stub = StubDaemon::start(
@@ -624,6 +647,7 @@ mod tests {
         assert_eq!(status.item_count, 0);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn not_ready_gives_up_rather_than_retrying_forever() {
         let reply = r#"{"id":{id},"ok":false,"error":"still starting","error_code":"not_ready"}"#

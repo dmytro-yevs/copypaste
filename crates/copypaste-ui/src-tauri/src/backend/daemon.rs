@@ -1,4 +1,5 @@
-//! The desktop backend: IPC to the running daemon over its `0600` Unix socket.
+//! The desktop backend: IPC to the running daemon over the local endpoint
+//! [`copypaste_ipc::transport`] names — a `0600` Unix socket today.
 //!
 //! Deliberately thin. It owns no state, caches nothing and retries nothing —
 //! React Query does all three on the frontend, and a second policy here could
@@ -28,13 +29,13 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData,
     ExportItem, ImagePreview, ImportData, Item, Method, PairingData, PeerInfo, Request, Response,
     ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
-use tokio::net::UnixStream;
 use tokio::sync::mpsc::{self, Receiver};
 use tokio_util::codec::{Framed, LinesCodec};
 
@@ -62,7 +63,7 @@ impl DaemonBackend {
     async fn call(&self, method: Method) -> Result<Option<ResponseData>> {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
-        let stream = UnixStream::connect(socket_path())
+        let stream = transport::connect(&socket_path())
             .await
             .map_err(|_| BackendError::Unreachable)?;
         let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
@@ -423,7 +424,7 @@ impl Backend for DaemonBackend {
     /// owns it and ends when the receiver is dropped, which is what makes the
     /// lifetime the caller's rather than a background task's.
     async fn watch(&self) -> Result<Receiver<EventData>> {
-        let stream = UnixStream::connect(socket_path())
+        let stream = transport::connect(&socket_path())
             .await
             .map_err(|_| BackendError::Unreachable)?;
         let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));

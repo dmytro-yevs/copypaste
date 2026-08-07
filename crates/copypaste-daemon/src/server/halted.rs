@@ -1,4 +1,4 @@
-//! The socket a daemon serves when its history cannot be opened at all.
+//! The endpoint a daemon serves when its history cannot be opened at all.
 //!
 //! Exiting instead is what makes an unrecoverable startup failure look like a
 //! crash. The app finds no socket, says "the background service is not
@@ -20,9 +20,9 @@
 
 use std::sync::Arc;
 
+use copypaste_ipc::transport::{Listener, Stream};
 use copypaste_ipc::{ErrorCode, Method, Request, Response, ResponseData, MAX_FRAME_BYTES};
 use futures_util::StreamExt;
-use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tracing::{debug, warn};
@@ -31,7 +31,7 @@ use super::listener::{send, MAX_CONCURRENT_CONNECTIONS, READ_TIMEOUT};
 
 /// Accept connections and refuse each one, until told to stop.
 pub async fn serve(
-    listener: UnixListener,
+    listener: Listener,
     refusal: (ErrorCode, &'static str),
     stop: watch::Sender<bool>,
 ) {
@@ -43,7 +43,7 @@ pub async fn serve(
         tokio::select! {
             _ = shutdown.changed() => break,
             accepted = listener.accept() => match accepted {
-                Ok((stream, _)) => {
+                Ok(stream) => {
                     let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else {
                         debug!("ipc connection cap reached; dropping a connection");
                         continue;
@@ -63,7 +63,7 @@ pub async fn serve(
 }
 
 async fn refuse(
-    stream: UnixStream,
+    stream: Stream,
     (code, message): (ErrorCode, &'static str),
     stop: watch::Sender<bool>,
 ) {
@@ -112,18 +112,21 @@ async fn refuse(
     }
 }
 
+// Every test here binds a real endpoint, which only Unix has one of yet.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use crate::server::messages::{Refusal, MSG_KEY_LOCKED};
     use copypaste_core::CryptoError;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixListener;
 
     /// Round-trip one request against a halted daemon on a real socket.
     async fn ask(request: &str) -> Response {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("daemon.sock");
-        let listener = UnixListener::bind(&path).unwrap();
+        let listener: Listener = UnixListener::bind(&path).unwrap().into();
         let stop = watch::channel(false).0;
         let refusal = CryptoError::KeystoreUnavailable("locked")
             .refusal()
@@ -174,7 +177,7 @@ mod tests {
     async fn shutdown_is_acknowledged_and_ends_the_server() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("daemon.sock");
-        let listener = UnixListener::bind(&path).unwrap();
+        let listener: Listener = UnixListener::bind(&path).unwrap().into();
         let stop = watch::channel(false).0;
         let server = tokio::spawn(serve(
             listener,
