@@ -47,37 +47,17 @@
 
     <suppress>
         <notes><![CDATA[
-        kotlin.io.createTempFile / createTempDir used a Java API that left temporary
-        files under the JVM-wide java.io.tmpdir readable by other local users. The
-        advisory's own text says it was fixed in Kotlin 1.4.21; every Kotlin artifact
-        on this classpath is well past that. The only reason it matches is NVD's CPE
-        range, versionEndExcluding 2.1.0, which contradicts the description beside
-        it.
-
-        The precondition is absent on Android in any case: java.io.tmpdir is the
-        app's own cache directory inside the per-application UID sandbox, so there is
-        no other local user to read the file.
-
-        Wrong if: NVD corrects the range - the rule then suppresses nothing and the
-        build fails until someone deletes it - or Kotlin code from this graph starts
-        running somewhere with a shared temp directory.
-        ]]></notes>
-        <packageUrl regex="true">^pkg:maven/org\.jetbrains\.kotlin/kotlin-stdlib(-jdk[78])?@.*$</packageUrl>
-        <cve>CVE-2020-29582</cve>
-    </suppress>
-
-    <suppress>
-        <notes><![CDATA[
         "Code execution was possible via unsafe deserialization in the build cache
         metadata" is Kotlin's build tooling. NVD scores it against
         cpe:2.3:a:jetbrains:kotlin - the whole product - so every artifact in the
         org.jetbrains.kotlin group below 2.4.20 inherits the 9.8, the standard
         library included.
 
-        Checked, not assumed: kotlin-stdlib-2.0.21.jar holds 1054 entries and every
-        one of them is under kotlin/. The code that reads build cache metadata is in
-        kotlin-compiler-embeddable and kotlin-build-tools-impl, which run on the
-        build host and are not packaged into the APK.
+        Checked, not assumed: kotlin-stdlib 2.2.21 holds 1037 entries, 1029 of them
+        under kotlin/ and the remaining 8 META-INF metadata. The code that reads
+        build cache metadata is in kotlin-compiler-embeddable and
+        kotlin-build-tools-impl, which run on the build host and are not packaged
+        into the APK.
 
         There is also nothing to upgrade to. On 2026-08-08 the newest kotlin-stdlib
         on Maven Central is 2.4.20-Beta2, so the fixed release named by the advisory
