@@ -26,3 +26,11 @@ tempfile.workspace = true
 
 [features]
 typescript = ["dep:ts-rs"]
+
+# The Windows endpoint: `windows-sys` for one constant, `sha2` and `hex` for the
+# per-user pipe name. All three are already resolved in this tree, so these are
+# dependency edges and not new packages.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation"] }
+sha2.workspace = true
+hex.workspace = true

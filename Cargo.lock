@@ -1064,6 +1064,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
@@ -1072,13 +1073,16 @@ name = "copypaste-ipc"
 version = "2.0.0-alpha.5"
 dependencies = [
  "directories",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "ts-rs",
  "unicode-segmentation",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
