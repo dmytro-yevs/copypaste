@@ -540,3 +540,82 @@ jobs:
           security default-keychain -d user -s "$HOME/Library/Keychains/login.keychain-db"
           security delete-keychain "$RUNNER_TEMP/copypaste-ci.keychain-db"
           exit 0
+
+  # ---------------------------------------------------------------------------
+  # Windows, for the device secret and nothing else (ADR-0013). It is what the
+  # macOS job's Keychain steps are: proof that the real OS store round-trips,
+  # rather than the assumption that it does.
+  #
+  # `-p copypaste-core` on purpose. The daemon, the CLI and the Tauri bridge are
+  # Unix-socket-only and do not compile here yet; widening this to `--workspace`
+  # before the named-pipe transport lands turns one honest signal into a red job
+  # nobody reads.
+  #
+  # Prerequisite: this job cannot go green until `bundled-sqlcipher` is resolved
+  # on Windows — `libsqlite3-sys` links `-lcrypto` against the build machine's
+  # OpenSSL and wants `OPENSSL_DIR` (ADR-0013, "Build").
+  # ---------------------------------------------------------------------------
+
+  windows-check:
+    name: Windows check + device secret (x64)
+    # Pinned rather than `windows-latest` so the toolchain and SDK under test do
+    # not move without a commit, matching the macos-14 pin above.
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96
+
+      # `--all-targets` is what type-checks the DPAPI backend and its tests,
+      # which no other runner in this workflow can parse.
+      - name: cargo clippy (Windows paths)
+        run: cargo +1.96 clippy -p copypaste-core --all-targets --locked -- -D warnings
+
+      - name: DPAPI, for real (port manifest 02)
+        # These are not `#[ignore]`d, unlike the Keychain set: DPAPI writes
+        # nothing outside the temp directory each test is handed, so there is no
+        # real device secret on the runner for them to destroy.
+        #
+        # An empty run is a failure, not a pass. A filter that matches nothing
+        # exits 0, and "we thought Windows was covered" is the shape this job
+        # exists to prevent.
+        if: success() || failure()
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          out="$(cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$out"
+          if [[ "$status" -ne 0 ]]; then
+            echo "::error::the device-secret tests exited $status"
+            exit "$status"
+          fi
+          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
+            echo "::error::no device-secret test ran"
+            exit 1
+          fi
+
+      - name: The Credential Manager holds nothing of ours
+        # The backend is DPAPI precisely because a credential in this store is
+        # enumerable by anything in the session. If a future change quietly
+        # moves the secret there, this is the step that says so.
+        if: success() || failure()
+        shell: pwsh
+        run: |
+          $found = cmdkey /list | Select-String -Pattern 'copypaste' -SimpleMatch
+          if ($found) {
+            Write-Output "::error::a CopyPaste credential is in the Credential Manager"
+            $found
+            exit 1
+          }
+          Write-Output "no CopyPaste entry in the Credential Manager, as designed"

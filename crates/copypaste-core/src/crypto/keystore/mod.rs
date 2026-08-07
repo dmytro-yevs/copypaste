@@ -1,7 +1,7 @@
 //! Where the device secret lives, per platform.
 //!
-//! Three backends — `macos.rs`, `android.rs`, `file.rs` — selected by the
-//! target alone, behind the load/create policy in this module.
+//! Four backends — `macos.rs`, `android.rs`, `windows.rs`, `file.rs` — selected
+//! by the target alone, behind the load/create policy in this module.
 //!
 //! # The rule every backend obeys
 //!
@@ -26,8 +26,8 @@ use super::{CryptoError, KEY_LEN};
 /// Keystore service name, shared by the macOS Keychain item and the Android
 /// credential store. Frozen (port manifest 02, I-10) — renaming it makes an
 /// existing install's database unopenable. Defined unconditionally even though
-/// only two of the three backends read it: moving a frozen identifier behind a
-/// `cfg` is how it drifts.
+/// not every backend reads it: moving a frozen identifier behind a `cfg` is how
+/// it drifts.
 #[allow(dead_code)]
 const KEYSTORE_SERVICE: &str = "com.copypaste.daemon";
 
@@ -38,6 +38,19 @@ const KEYSTORE_ACCOUNT: &str = "device-secret-key";
 /// Filename of the development-only file-backed secret store.
 #[allow(dead_code)]
 const SECRET_FILE_NAME: &str = "device_secret.key";
+
+/// Filename of the Windows DPAPI-sealed secret. Frozen (I-10), and deliberately
+/// not [`SECRET_FILE_NAME`]: a plaintext secret carried in from a development
+/// host must never be handed to DPAPI, nor a sealed blob read as one.
+#[allow(dead_code)]
+const SECRET_BLOB_NAME: &str = "device_secret.dpapi";
+
+/// DPAPI secondary entropy. Frozen (I-10) — changing it abandons every sealed
+/// blob and orphans the database it opens. Not a secret and not a boundary: it
+/// is published in this repository, and its whole effect is that a credential
+/// sweep which has never heard of CopyPaste comes back empty.
+#[allow(dead_code)]
+const DPAPI_ENTROPY: &[u8] = b"copypaste/v2/device-secret/dpapi-entropy";
 
 /// What a backend returns: 32 bytes, zeroized on drop (I-12).
 pub(super) type DeviceSecret = Zeroizing<[u8; KEY_LEN]>;
@@ -59,7 +72,11 @@ mod backend;
 #[path = "android.rs"]
 mod backend;
 
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(target_os = "windows")]
+#[path = "windows.rs"]
+mod backend;
+
+#[cfg(not(any(target_os = "macos", target_os = "android", target_os = "windows")))]
 #[path = "file.rs"]
 mod backend;
 
@@ -126,12 +143,19 @@ mod tests {
         assert_eq!(KEYSTORE_SERVICE, "com.copypaste.daemon");
         assert_eq!(KEYSTORE_ACCOUNT, "device-secret-key");
         assert_eq!(SECRET_FILE_NAME, "device_secret.key");
+        assert_eq!(SECRET_BLOB_NAME, "device_secret.dpapi");
+        assert_eq!(
+            DPAPI_ENTROPY,
+            b"copypaste/v2/device-secret/dpapi-entropy".as_slice()
+        );
     }
 
     /// Everything below drives a real backend, so it runs only where that
     /// backend is a file in a temp directory. On macOS these would write to the
-    /// developer's login Keychain; on Android they cannot run at all.
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    /// developer's login Keychain; on Android they cannot run at all; on
+    /// Windows `windows.rs` carries its own copies, which can also assert that
+    /// what landed on disk is sealed.
+    #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "windows")))]
     mod mint_authorisation {
         use super::*;
 
