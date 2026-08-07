@@ -353,6 +353,14 @@ fn set_owner_only(path: &Path) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
+/// **Unverified off unix.** The backup inherits the destination directory's
+/// ACL, which is not the same guarantee; restricting it needs a DACL rather
+/// than a mode, and that is a decision, not a cfg.
+#[cfg(not(unix))]
+fn set_owner_only(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 fn failed(
     id: u64,
     operation: &'static str,

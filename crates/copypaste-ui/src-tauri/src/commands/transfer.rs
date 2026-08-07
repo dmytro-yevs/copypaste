@@ -31,7 +31,6 @@
 
 use std::fs::File;
 use std::io::{BufReader, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -338,10 +337,16 @@ fn to_path(chosen: Option<FilePath>) -> Result<Option<PathBuf>> {
 /// would be world-readable on a shared machine, and the mode has to be set at
 /// `open` rather than after the write, or there is a window in which it is not.
 fn write_owner_only(dest: &PathBuf, bytes: &[u8]) -> Result<()> {
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    // **Unverified off unix**: there the file inherits the chosen directory's
+    // ACL, which the sentence above is not a claim about.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options
         .open(dest)
         .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
     file.write_all(bytes)
