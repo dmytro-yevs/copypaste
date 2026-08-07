@@ -22,6 +22,9 @@
 //!   makes reachable.
 //! * `macos` — `NSPasteboard`, compiled only on macOS. It contains the Cocoa
 //!   spelling and nothing else that could have been tested off a mac.
+//! * `windows` — the same shape against `GetClipboardSequenceNumber` and the
+//!   four do-not-record clipboard formats, compiled only on Windows. Its
+//!   opt-out decision is in `windows_optout`, which is built everywhere.
 //!
 //! This file keeps only what both backends must agree on: the port itself, the
 //! captured value, and the size gate.
@@ -57,6 +60,10 @@ mod fake;
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod file_materialize;
 mod format;
+/// The Windows opt-out vocabulary. Built everywhere, like `change`, because the
+/// decision it encodes is the one that must not regress unnoticed.
+#[cfg(any(target_os = "windows", test))]
+mod windows_optout;
 
 /// Decisions that must be made before a clipboard representation is read.
 ///
@@ -82,6 +89,9 @@ impl<'a> CapturePolicy<'a> {
 
 #[cfg(target_os = "macos")]
 mod macos;
+
+#[cfg(target_os = "windows")]
+mod windows;
 
 #[cfg(not(target_os = "macos"))]
 pub use fake::FakeClipboard;
@@ -129,6 +139,37 @@ impl Capture {
             app_name: None,
         }
     }
+}
+
+/// A file the user copied, described from its path alone.
+///
+/// I-16: polling never reads a file's bytes. The MIME type comes from the
+/// extension, and the metadata carries a basename — the full path is on the
+/// capture for the tick to open, and goes no further.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub(crate) fn file_capture(
+    path: std::path::PathBuf,
+    app_bundle_id: Option<String>,
+    app_name: Option<String>,
+) -> Option<Capture> {
+    if !path.is_absolute() {
+        tracing::debug!("clipboard file path was not absolute; dropped");
+        return None;
+    }
+    let filename = path.file_name()?.to_string_lossy().into_owned();
+    let mime = mime_guess::from_path(&path)
+        .first_raw()
+        .unwrap_or("application/octet-stream");
+    let metadata = copypaste_core::FileMetadata::new(filename, mime)?;
+    Some(Capture {
+        content: String::new(),
+        binary_content: None,
+        file_path: Some(path),
+        file_metadata: Some(metadata),
+        content_type: copypaste_ipc::content_type::FILE.to_string(),
+        app_bundle_id,
+        app_name,
+    })
 }
 
 /// The seam between the daemon and the system clipboard.
@@ -208,13 +249,21 @@ pub trait ClipboardSource: Send {
     }
 }
 
-/// macOS -> `NSPasteboard`. Everything else -> the fake.
+/// macOS -> `NSPasteboard`. Windows -> the system clipboard. Everything else ->
+/// the fake.
 pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn ClipboardSource>> {
     #[cfg(target_os = "macos")]
     {
         Ok(Box::new(macos::MacOsClipboard::new(data_dir)?))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // No staging directory: this backend refuses a file paste-back rather
+        // than materialising plaintext it has no sweeper for.
+        let _ = data_dir;
+        Ok(Box::new(windows::WindowsClipboard::new()?))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = data_dir;
         Ok(Box::new(FakeClipboard::new()))
@@ -223,8 +272,36 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
 
 #[cfg(test)]
 mod tests {
-    use super::{is_password_manager_app, CapturePolicy, MAX_CAPTURE_BYTES};
+    use super::{file_capture, is_password_manager_app, CapturePolicy, MAX_CAPTURE_BYTES};
     use copypaste_ipc::ConfigData;
+
+    /// What "absolute" means is the platform's answer, not ours: a
+    /// drive-letter path is relative on Unix and a leading slash is relative on
+    /// Windows, and either mistake would drop every file the user copied.
+    fn absolute(name: &str) -> std::path::PathBuf {
+        if cfg!(windows) {
+            std::path::PathBuf::from(format!("C:\\Users\\example\\{name}"))
+        } else {
+            std::path::PathBuf::from(format!("/Users/example/{name}"))
+        }
+    }
+
+    #[test]
+    fn file_capture_uses_the_extension_mime_and_keeps_a_basename() {
+        let path = absolute("Report.pdf");
+        let capture = file_capture(path.clone(), None, None).unwrap();
+        assert_eq!(capture.file_path, Some(path));
+        assert_eq!(
+            capture.file_metadata,
+            Some(copypaste_core::FileMetadata::new("Report.pdf", "application/pdf").unwrap())
+        );
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
+    }
+
+    #[test]
+    fn a_relative_file_path_is_dropped() {
+        assert!(file_capture(std::path::PathBuf::from("Report.pdf"), None, None).is_none());
+    }
 
     #[test]
     fn policy_selects_each_payload_cap_before_applying_the_hard_bound() {

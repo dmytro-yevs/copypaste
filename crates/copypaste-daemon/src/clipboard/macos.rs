@@ -44,7 +44,7 @@ use tracing::{debug, warn};
 mod attribution;
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
+use super::{file_capture, Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
 use attribution::{Attribution, FrontmostApp};
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
@@ -145,31 +145,6 @@ fn first_absolute_filename_plist(bytes: &[u8]) -> Option<PathBuf> {
         .into_iter()
         .map(PathBuf::from)
         .find(|path| path.is_absolute())
-}
-
-fn file_capture(
-    path: PathBuf,
-    app_bundle_id: Option<String>,
-    app_name: Option<String>,
-) -> Option<Capture> {
-    if !path.is_absolute() {
-        debug!("pasteboard file path was not absolute; dropped");
-        return None;
-    }
-    let filename = path.file_name()?.to_string_lossy().into_owned();
-    let mime = mime_guess::from_path(&path)
-        .first_raw()
-        .unwrap_or("application/octet-stream");
-    let metadata = copypaste_core::FileMetadata::new(filename, mime)?;
-    Some(Capture {
-        content: String::new(),
-        binary_content: None,
-        file_path: Some(path),
-        file_metadata: Some(metadata),
-        content_type: copypaste_ipc::content_type::FILE.to_string(),
-        app_bundle_id,
-        app_name,
-    })
 }
 
 impl MacOsClipboard {
@@ -564,19 +539,6 @@ mod tests {
     fn malformed_or_non_binary_legacy_filename_data_is_dropped() {
         assert!(first_absolute_filename_plist(b"/Users/example/Report.pdf").is_none());
         assert!(first_absolute_filename_plist(b"bplist00not-a-plist").is_none());
-    }
-
-    #[test]
-    fn file_capture_uses_the_extension_mime_and_never_retains_the_full_path() {
-        let capture = file_capture(PathBuf::from("/Users/example/Report.pdf"), None, None).unwrap();
-        assert_eq!(
-            capture.file_path,
-            Some(PathBuf::from("/Users/example/Report.pdf"))
-        );
-        assert_eq!(
-            capture.file_metadata,
-            Some(copypaste_core::FileMetadata::new("Report.pdf", "application/pdf").unwrap())
-        );
     }
 
     #[test]

@@ -1037,6 +1037,7 @@ dependencies = [
  "backon",
  "base64 0.22.1",
  "clap",
+ "clipboard-win",
  "copypaste-clock",
  "copypaste-cloud",
  "copypaste-core",
@@ -1048,6 +1049,7 @@ dependencies = [
  "gethostname",
  "hex",
  "if-addrs",
+ "image",
  "mime_guess",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
@@ -1065,6 +1067,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
