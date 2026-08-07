@@ -97,8 +97,18 @@ fn read(path: &Path) -> Option<String> {
     Some(value)
 }
 
+/// Windows replaces through `MoveFileEx`, which fails with
+/// ERROR_ACCESS_DENIED while another replace of the same target is in flight.
+/// POSIX `rename(2)` cannot fail that way — a racing writer just wins or loses
+/// — so on Windows two concurrent `set` calls turned one save into a spurious
+/// "couldn't save the shortcut setting". Serialising the replace is what makes
+/// the two platforms agree. In-process is the whole scope: one app writes this
+/// file, and `set` is the only caller.
+static REPLACE: Mutex<()> = Mutex::new(());
+
 fn write(path: &Path, value: &str) -> Result<(), BackendError> {
     write_with_persist(path, value, |temporary, target| {
+        let _serialised = REPLACE.lock().unwrap_or_else(|error| error.into_inner());
         temporary
             .persist(target)
             .map(|_| ())
