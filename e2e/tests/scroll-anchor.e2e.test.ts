@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
-import { rowBoxes, scrollTo, scroller, waitForRows } from "../src/harness/ui.js";
+import {
+  scrollTo,
+  scroller,
+  settledList,
+  waitForRows,
+  type ListSnapshot,
+} from "../src/harness/ui.js";
 
 const COUNT = 150;
 
@@ -18,42 +24,39 @@ afterAll(async () => {
 });
 
 /** The row occupying the top of the viewport, by list-space offset. */
-async function topRow(app: App) {
-  const { scrollTop } = await scroller(app.browser);
-  const rows = (await rowBoxes(app.browser)).sort((a, b) => a.start - b.start);
-  const row = rows.find((candidate) => candidate.start + candidate.height > scrollTop);
+function topRow(snapshot: ListSnapshot) {
+  const rows = [...snapshot.rows].sort((a, b) => a.start - b.start);
+  const row = rows.find(
+    (candidate) => candidate.start + candidate.height > snapshot.scrollTop,
+  );
   if (!row) throw new Error("no row covers the current scroll offset");
-  return { row, scrollTop, intra: scrollTop - row.start };
+  return { row, scrollTop: snapshot.scrollTop, intra: snapshot.scrollTop - row.start };
 }
 
 test("a prepend keeps the row under the viewport top where it was (INV-1)", async () => {
   const { browser } = app;
 
   await scrollTo(browser, 2_400);
-  await browser.waitUntil(
-    async () => (await scroller(browser)).scrollTop > 2_000,
-    { timeout: 10_000, timeoutMsg: "the list did not scroll" },
+  const before = topRow(
+    await settledList(browser, (list) => list.scrollTop > 2_000 && list.rows.length > 0, {
+      timeout: 10_000,
+      describe: "the list did not come to rest scrolled past 2000px",
+    }),
   );
-
-  const before = await topRow(app);
   expect(before.row.text).toContain("anchor item");
 
   await app.daemon.add("a brand new clipping that arrives while scrolled");
 
-  await browser.waitUntil(
-    async () => {
-      const rows = await rowBoxes(browser);
-      const total = (await scroller(browser)).totalSize;
-      return rows.length > 0 && total > COUNT * 84 - 1;
-    },
-    { timeout: 30_000, interval: 500, timeoutMsg: "the poll never picked up the new item" },
+  const after = topRow(
+    await settledList(
+      browser,
+      (list) => list.totalSize >= (COUNT + 1) * 84 - 1 && list.rows.length > 0,
+      {
+        timeout: 30_000,
+        describe: "the poll never picked up the new item, or the list height never grew",
+      },
+    ),
   );
-  await browser.waitUntil(
-    async () => (await scroller(browser)).totalSize >= (COUNT + 1) * 84 - 1,
-    { timeout: 30_000, interval: 500, timeoutMsg: "the list height never grew" },
-  );
-
-  const after = await topRow(app);
   expect(after.row.id).toBe(before.row.id);
   // The anchored row keeps its position under the viewport top, so the whole
   // list must have shifted down by exactly one row's reservation.
@@ -78,37 +81,30 @@ test("scroll offset is never left past the end when the list shrinks (INV-6)", a
   const remaining = await app.daemon.items();
   expect(remaining.length).toBeLessThan(items.length / 2);
 
-  const seen: string[] = [];
-  const deadline = Date.now() + 45_000;
-  let shrank = false;
-  while (Date.now() < deadline) {
-    const now = await scroller(browser);
-    seen.push(`${Math.round(now.totalSize)}@${Math.round(now.scrollTop)}`);
-    if (now.totalSize < bottom.totalSize / 2) {
-      shrank = true;
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 1_000));
-  }
-  expect(
-    shrank,
-    `list height never fell below ${bottom.totalSize / 2}px after deleting ` +
-      `${doomed.length} of ${items.length} items (daemon now has ` +
-      `${remaining.length}). Observed totalSize@scrollTop: ${seen.join(" ")}`,
-  ).toBe(true);
+  // Waits for the shrink to land and the virtualiser to stop moving — never for
+  // the invariant below, which is asserted once against that resting state.
+  const after = await settledList(
+    browser,
+    (list) => list.totalSize < bottom.totalSize / 2,
+    {
+      timeout: 45_000,
+      describe:
+        `list height never came to rest below ${bottom.totalSize / 2}px after ` +
+        `deleting ${doomed.length} of ${items.length} items (daemon now has ` +
+        `${remaining.length})`,
+    },
+  );
 
-  const after = await scroller(browser);
   expect(after.scrollTop).toBeLessThanOrEqual(
     Math.max(0, after.scrollHeight - after.clientHeight) + 1,
   );
 
   // A clamp that only fixed the DOM would leave the virtualiser rendering the
   // rows it thinks are on screen, so the window must still cover the viewport.
-  const rows = await rowBoxes(browser);
-  expect(rows.length).toBeGreaterThan(0);
-  const covered = rows.some(
+  expect(after.rows.length).toBeGreaterThan(0);
+  const covered = after.rows.some(
     (row) =>
       row.start <= after.scrollTop && row.start + row.height > after.scrollTop,
   );
-  expect(covered).toBe(true);
+  expect(covered, `no rendered row covers scrollTop ${after.scrollTop}`).toBe(true);
 }, 120_000);
