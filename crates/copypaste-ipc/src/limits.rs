@@ -60,10 +60,72 @@ pub fn clamp_page(limit: u32, default: u32) -> u32 {
     }
 }
 
+pub const LIST_PREVIEW_BYTES: usize = 1024;
+
+pub fn bound_preview(content: &mut String) -> bool {
+    if content.len() <= LIST_PREVIEW_BYTES {
+        return false;
+    }
+    let mut cut = 0;
+    for (at, cluster) in
+        unicode_segmentation::UnicodeSegmentation::grapheme_indices(content.as_str(), true)
+    {
+        if at + cluster.len() > LIST_PREVIEW_BYTES && cut > 0 {
+            break;
+        }
+        cut = at + cluster.len();
+    }
+    content.truncate(cut);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{content_type, Item, Response, ResponseData};
+
+    #[test]
+    fn content_within_the_preview_bound_is_untouched() {
+        let mut content = "a".repeat(LIST_PREVIEW_BYTES);
+        assert!(!bound_preview(&mut content));
+        assert_eq!(content.len(), LIST_PREVIEW_BYTES);
+    }
+
+    #[test]
+    fn content_over_the_preview_bound_is_cut_to_it() {
+        let mut content = "a".repeat(LIST_PREVIEW_BYTES + 1);
+        assert!(bound_preview(&mut content));
+        assert_eq!(content.len(), LIST_PREVIEW_BYTES);
+    }
+
+    #[test]
+    fn the_cut_never_splits_a_grapheme_cluster() {
+        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+        let flag = "\u{1f1fa}\u{1f1e6}";
+        for cluster in [family, flag] {
+            let repeats = LIST_PREVIEW_BYTES / cluster.len() + 2;
+            let mut content = cluster.repeat(repeats);
+            assert!(bound_preview(&mut content));
+            assert!(content.len() <= LIST_PREVIEW_BYTES, "{}", content.len());
+            assert_eq!(
+                content.len() % cluster.len(),
+                0,
+                "cut mid-cluster at {}",
+                content.len()
+            );
+        }
+    }
+
+    #[test]
+    fn a_single_cluster_over_the_bound_survives_whole() {
+        let cluster: String = std::iter::once("\u{1f468}".to_string())
+            .chain(std::iter::repeat_n("\u{200d}\u{1f466}".to_string(), 400))
+            .collect();
+        assert!(cluster.len() > LIST_PREVIEW_BYTES);
+        let mut content = cluster.clone();
+        assert!(bound_preview(&mut content));
+        assert_eq!(content, cluster);
+    }
 
     #[test]
     fn page_sizes_are_clamped() {
@@ -86,6 +148,7 @@ mod tests {
             source_app_bundle_id: None,
             source_app_name: None,
             too_large_to_sync: false,
+            truncated: false,
         }
     }
 

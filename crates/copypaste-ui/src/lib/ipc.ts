@@ -87,6 +87,10 @@ export function copyItemAsPlainText(id: string): Promise<Item> {
   return call<Item>("copy_item_as_plain_text", { id });
 }
 
+export function copyItems(ids: readonly string[]): Promise<boolean> {
+  return call<boolean>("copy_items", { ids });
+}
+
 export function addItem(content: string): Promise<Item> {
   return call<Item>("add_item", { content });
 }

@@ -26,6 +26,7 @@ const listItems = vi.fn();
 const searchItems = vi.fn();
 const getStatus = vi.fn();
 const copyItem = vi.fn();
+const copyItems = vi.fn();
 const setPinned = vi.fn();
 const deleteItem = vi.fn();
 
@@ -37,6 +38,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     searchItems: (...a: unknown[]) => searchItems(...a),
     getStatus: () => getStatus(),
     copyItem: (...a: unknown[]) => copyItem(...a),
+    copyItems: (...a: unknown[]) => copyItems(...a),
     setPinned: (...a: unknown[]) => setPinned(...a),
     deleteItem: (...a: unknown[]) => deleteItem(...a),
   };
@@ -47,6 +49,7 @@ beforeEach(() => {
   searchItems.mockReset().mockResolvedValue(page([]));
   getStatus.mockReset().mockResolvedValue(status());
   copyItem.mockReset().mockResolvedValue(item());
+  copyItems.mockReset().mockResolvedValue(true);
   setPinned.mockReset().mockResolvedValue(item());
   deleteItem.mockReset().mockResolvedValue(true);
   useUi.setState({ query: "", activeId: null });
@@ -112,13 +115,13 @@ describe("selection mode", () => {
 });
 
 describe("bulk copy", () => {
-  it("copies the first row and writes safe previews in screen order", async () => {
+  it("hands the selection to the backend by id and assembles no text itself", async () => {
     listItems.mockResolvedValue(
       page([
-        item({ id: "first", content: "first preview" }),
+        item({ id: "first", content: "first prev", truncated: true }),
         item({ id: "secret", is_sensitive: true }),
         item({ id: "image", content: "image preview", content_type: "image/png" }),
-        item({ id: "last", content: "last preview" }),
+        item({ id: "last", content: "last prev", truncated: true }),
       ]),
     );
     const { user } = withUser(<HistoryView />);
@@ -133,8 +136,14 @@ describe("bulk copy", () => {
 
     await waitFor(() => expect(copyItem).toHaveBeenCalledWith("first"));
     await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith("first preview\nlast preview"),
+      expect(copyItems).toHaveBeenCalledWith([
+        "first",
+        "secret",
+        "image",
+        "last",
+      ]),
     );
+    expect(writeText).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(
         screen.queryByRole("region", { name: /selection actions/i }),
@@ -142,10 +151,21 @@ describe("bulk copy", () => {
     );
   });
 
+  it("leaves a single selected row to the daemon copy", async () => {
+    const { user } = withUser(<HistoryView />);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
+    await selectRows(user, 1);
+
+    const bar = screen.getByRole("region", { name: /selection actions/i });
+    await user.click(within(bar).getByRole("button", { name: /^copy$/i }));
+
+    await waitFor(() => expect(copyItem).toHaveBeenCalledTimes(1));
+    expect(copyItems).not.toHaveBeenCalled();
+  });
+
   it("stops on daemon failure and leaves the selection available", async () => {
     copyItem.mockRejectedValueOnce(new Error("copy failed"));
     const { user } = withUser(<HistoryView />);
-    const writeText = vi.spyOn(navigator.clipboard, "writeText");
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(4));
     await selectRows(user, 2);
 
@@ -155,7 +175,7 @@ describe("bulk copy", () => {
 
     await waitFor(() => expect(copyItem).toHaveBeenCalledTimes(1));
     await waitFor(() => expect((copy as HTMLButtonElement).disabled).toBe(false));
-    expect(writeText).not.toHaveBeenCalled();
+    expect(copyItems).not.toHaveBeenCalled();
     expect(
       screen.getByRole("region", { name: /selection actions/i }),
     ).toBeTruthy();
