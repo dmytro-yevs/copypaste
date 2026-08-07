@@ -210,6 +210,12 @@ impl CloudSource for StoreSource {
                 if let Some(local) = local.filter(|local| !self.is_self_echo(local, &item)) {
                     crate::cloud::note_version_written(&self.state, local.created_at);
                 }
+            } else {
+                self.state
+                    .p2p
+                    .node()
+                    .cursors()
+                    .note_applied("", item.created_at);
             }
             Ok(if applied {
                 Applied::Merged
@@ -561,6 +567,41 @@ mod tests {
 
         assert_eq!(source.upload_floor().unwrap(), 1_000);
         assert_eq!(source.upload_floor_item_id().unwrap(), None);
+    }
+
+    #[test]
+    fn a_cloud_applied_older_version_pulls_the_p2p_relay_floor_back() {
+        let (source, state, _dir) = source("relay-floor");
+        let cursors = state.p2p.node().cursors();
+        cursors.record_session("peer-1", 5_000);
+        assert_eq!(cursors.get("peer-1").relay_floor_ms, None);
+
+        let old_stamp = 1_000;
+        assert_eq!(
+            source
+                .apply_remote(LocalItem {
+                    item_id: "relayed-through-cloud".into(),
+                    content: b"older than the peer cursor".to_vec(),
+                    content_type: "text".into(),
+                    payload_metadata: None,
+                    created_at: old_stamp,
+                    deleted: false,
+                    origin_device_id: "device-c".into(),
+                })
+                .unwrap(),
+            Applied::Merged
+        );
+
+        assert_eq!(
+            cursors.get("peer-1").relay_floor_ms,
+            Some(old_stamp),
+            "a cloud-applied row left the peer's relay floor above it"
+        );
+        assert_eq!(
+            cursors.get("peer-1").advertise_from(5_000),
+            old_stamp,
+            "the next session with that peer would not re-advertise the row"
+        );
     }
 
     #[test]
