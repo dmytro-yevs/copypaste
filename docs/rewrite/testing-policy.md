@@ -17,12 +17,18 @@ the assertion.
 | Rust | `ci.yml` → `test + clippy (linux)`, `demo.sh` + `demo-p2p.sh` | portable logic against fakes: crypto, storage, detection, merge, IPC framing, CLI | anything a platform API answers |
 | Browser (jsdom) | `ci.yml` → `npm build + test (jsdom)` | component logic, hooks, reducers, catalogue coverage | layout, scrolling, virtualisation, anything crossing the Tauri bridge |
 | Browser (WebKitGTK, Linux) | `browser-webkitgtk.yml` | shared React behaviour in a real engine: rendering, composition, navigation, responsive layout, forms, dialogs, menus, loading/empty/error states, keyboard navigation, focus, the accessibility tree, overflow and scrolling, console errors, behaviour against a real daemon | Tauri commands as shipped, WKWebView, Android WebView, NSPasteboard, Keychain, Keystore, intents, tray or menu bar, global shortcuts, launch at login, native notifications, native window focus or dismissal, platform permissions, packaging, signing, installation |
-| Android | `android-emulator.yml` — the built APK installed on an emulator | Android | macOS |
+| Android | `android-emulator.yml` — the built APK installed on an emulator, plus `e2e-android/` driving its WebView over CDP | Android | macOS |
 | macOS | `ci.yml` → `macOS check + platform (arm64)`; `release.yml` → `smoke-macos-dmg.sh` on a tag | macOS | Android |
 
 The browser layer does execute Tauri commands through `wry` on Linux. That is
 useful and it is not verification: the shipped bridges are WKWebView and the
 Android WebView, and each command's behaviour belongs to its platform's layer.
+
+The Android layer's UI half attaches to the shipping WebView over the Chrome
+DevTools Protocol, so it sees the document and nothing outside it: layout, not
+paint; the DOM, not TalkBack; and only a debuggable build, because wry compiles
+the call that enables it out of a release one. `e2e-android/README.md` states
+the edges.
 
 The CLI is a test surface, not a product surface (CLAUDE.md rule 6). A CLI
 assertion never satisfies a UI requirement.
@@ -51,7 +57,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | `changeCount`, burst loss, self-write suppression, `org.nspasteboard.*`, size cap | macOS | Verified — `--ignored` tests on `macos-14`; an empty run fails the job |
 | A real `pbcopy` reaches history through the shipped bundle | macOS | Partial — ENFORCED in `smoke-macos-dmg.sh`, tag-only |
 | Capture pipeline against the fake source | Rust | Verified |
-| `ACTION_SEND` / `ACTION_PROCESS_TEXT` reach SQLCipher | Android | Partial — debug leg only; the release leg has no `run-as` and prints `NOT ASSERTED` |
+| `ACTION_SEND` / `ACTION_PROCESS_TEXT` reach SQLCipher | Android | Partial — debug leg only; the release leg has no `run-as` and prints `NOT ASSERTED`. `e2e-android/` follows an `ACTION_SEND` further, onto the screen |
 | Rung 2: Shizuku shell-uid clipboard read | Android | **NOT VERIFIED IN CI** — pairing cannot be granted on a stock emulator |
 | `ClipListener` / `ClipQueue` / `CaptureService` | Android | **NOT VERIFIED IN CI** — only the negative case is asserted; no Kotlin unit test exists |
 | Quick Settings tile | Android | **NOT VERIFIED IN CI** — probed, never asserted |
@@ -116,7 +122,12 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Design tokens and contrast | `ci.yml` → `design tokens` | Verified |
 | The app renders on WKWebView | macOS | **NOT VERIFIED IN CI** — the tag-only smoke observes a `WebContent` process, nothing more |
 | The app renders on the Android WebView | Android | Partial — `assert_painted` degrades to `NOT ASSERTED` when the screen is asleep or uiautomator returns no dump |
-| Anything about the Android UI beyond a painted screen | Android | **NOT VERIFIED IN CI** |
+| The frontend mounts and lays out in the Android WebView | Android | Verified — `e2e-android/` asserts a React root with children and non-zero row boxes |
+| Navigation and keyboard input on Android | Android | Verified — a real tap moves between screens, typing filters the list |
+| A sensitive item is absent from the Android document, not obscured (INV-10) | Android | Verified — `e2e-android/` against `outerHTML` and every live input value |
+| No filesystem path in any Android accessible string (INV-12) | Android | Verified — `e2e-android/` sweeps text and the naming attributes |
+| Android UI beyond mount, navigation, typing and those two sweeps | Android | **NOT VERIFIED IN CI** — CDP sees the document only: no pixels, no TalkBack, nothing native |
+| The release build exposes no WebView debugger | Android | Verified — `android-smoke-release.sh` fails if the shipped APK publishes `@webview_devtools_remote_<pid>` |
 | VoiceOver and TalkBack | macOS, Android | **NOT VERIFIED IN CI** — no screen reader is driven anywhere |
 
 ### Native shell

@@ -120,3 +120,5 @@ design/node_modules/
 # e2e harness dependencies.
 /e2e/node_modules/
 /e2e/test-results/
+/e2e-android/node_modules/
+/e2e-android/artifacts/

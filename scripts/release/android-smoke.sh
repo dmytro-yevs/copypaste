@@ -189,6 +189,20 @@ fi
 
 assert_painted "$PAINT_TIMEOUT" "$launched_at" "$OUT/ui-launch1.xml" "$OUT/launch1.png"
 
+# The precondition for e2e-android/, which drives this WebView over CDP. It is
+# asserted here so that a build whose devtools were compiled out fails saying
+# so, instead of the harness timing out on a connection and reading as a UI
+# that never came up. The release leg asserts the opposite, and that is the
+# security property: see android-smoke-release.sh.
+unix_sockets="$(sh_ cat /proc/net/unix)"
+webview_socket="$(devtools_sockets "$unix_sockets" "$pid_now")"
+if [[ -n "$webview_socket" ]]; then
+    ok "the WebView published a devtools socket ($webview_socket)"
+else
+    bad "the WebView published a devtools socket" \
+        "nothing matching @webview_devtools_remote_$pid_now is open; the UI harness in e2e-android/ cannot attach to this build"
+fi
+
 # ---------------------------------------------------------------------------
 group "4. The database opens"
 # ---------------------------------------------------------------------------

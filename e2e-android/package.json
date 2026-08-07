@@ -1,0 +1,16 @@
+{
+  "name": "copypaste-e2e-android",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "execa": "^10.0.1",
+    "puppeteer-core": "^24.36.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -241,6 +241,18 @@ own_map_paths() {   # <maps file> <package>
     ' "$1" | sort -u
 }
 
+# The WebView's remote-debugging socket, if the process published one.
+#
+# It is an abstract socket named after the pid, so the name is different after
+# every restart and a lookup by a remembered name silently describes nothing.
+# The security property both legs assert with this: wry compiles
+# `setWebContentsDebuggingEnabled` out under
+# `#[cfg(any(debug_assertions, feature = "devtools"))]`, so a release build must
+# publish no such socket at all.
+devtools_sockets() {   # <cat /proc/net/unix output> <pid>
+    grep -oE "@webview_devtools_remote_$2\$" <<<"$1"
+}
+
 # ---------------------------------------------------------------------------
 # adb helpers
 # ---------------------------------------------------------------------------
@@ -504,6 +516,29 @@ self_test() {
     [[ -z "$(r8_report "$t/r8-clean.log")" ]] \
         && ok "an ordinary log holds no stripped symbol" \
         || bad "an ordinary log holds no stripped symbol"
+
+    group "self-test: the WebView devtools socket"
+
+    # Real /proc/net/unix rows. The zygote's socket and another process's are
+    # both present, because "some webview socket exists" is not the question.
+    local unix_dump
+    unix_dump="$(printf '%s\n' \
+        '0000000000000000: 00000002 00000000 00010000 0001 01 14836 @com.android.internal.os.WebViewZygoteInit/069a548f' \
+        '0000000000000000: 00000002 00000000 00010000 0001 01 53464 @webview_devtools_remote_8689' \
+        '0000000000000000: 00000002 00000000 00010000 0001 01 53999 @webview_devtools_remote_99999')"
+
+    [[ -n "$(devtools_sockets "$unix_dump" 8689)" ]] \
+        && ok "the socket published by this pid is found" \
+        || bad "the socket published by this pid is found"
+
+    [[ -z "$(devtools_sockets "$unix_dump" 868)" ]] \
+        && ok "a pid that is a prefix of another's socket does not match it" \
+        || bad "a pid that is a prefix of another's socket does not match it" \
+               "$(devtools_sockets "$unix_dump" 868)"
+
+    [[ -z "$(devtools_sockets "$unix_dump" 4242)" ]] \
+        && ok "a process that published nothing reports nothing" \
+        || bad "a process that published nothing reports nothing"
 
     group "self-test: the WebView painted"
 
