@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
 use super::{placeholder_name, store_error, Node, NodeError};
 use crate::peers::{Peer, MAX_PAIRINGS};
-use crate::sync::{run_initiator, SyncError, SyncOutcome, SyncSource};
+use crate::sync::{run_initiator, SyncCursor, SyncError, SyncOutcome, SyncSource};
 use crate::transport::{PairingToken, Session};
 
 /// A pairing that has been proved by a complete session.
@@ -68,9 +68,12 @@ impl Node {
             }
         };
 
-        let outcome = self.run_session(session, source).await.inspect_err(|_| {
-            warn!(%pairing_id, "pairing session failed; not storing the peer");
-        })?;
+        let outcome = self
+            .run_session(session, source, SyncCursor::default())
+            .await
+            .inspect_err(|_| {
+                warn!(%pairing_id, "pairing session failed; not storing the peer");
+            })?;
 
         if outcome.peer_device_id == source.device_id() {
             return Err(NodeError::SelfPairing);
@@ -84,6 +87,7 @@ impl Node {
             last_seen_ms: crate::now_ms(),
         };
         self.peers().upsert(peer.clone()).map_err(store_error)?;
+        self.record_cursor(&pairing_id, &outcome);
         self.republish();
 
         info!(
@@ -117,11 +121,13 @@ impl Node {
             }
         };
 
-        let outcome = self.run_session(session, source).await?;
+        let cursor = self.cursors().get(&peer.pairing_id);
+        let outcome = self.run_session(session, source, cursor).await?;
         if outcome.peer_device_id == source.device_id() {
             self.unpair(&peer.pairing_id)?;
             return Err(NodeError::SelfPairing);
         }
+        self.record_cursor(&peer.pairing_id, &outcome);
         self.touch_peer(
             peer,
             outcome.peer_listen_addr.or(Some(addr)),
@@ -146,6 +152,7 @@ impl Node {
         &self,
         session: Session,
         source: &S,
+        cursor: SyncCursor,
     ) -> Result<SyncOutcome, NodeError> {
         let mut channel = NoiseChannel::new(session);
         let listen_addr = self.listen_addr();
@@ -153,7 +160,8 @@ impl Node {
         // see `NoiseChannel::wait_for_close` for why a session is not over when
         // `run_initiator` returns.
         let outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
-            let outcome = run_initiator(&mut channel, source, listen_addr.as_deref()).await?;
+            let outcome =
+                run_initiator(&mut channel, source, listen_addr.as_deref(), cursor).await?;
             channel.wait_for_close().await;
             Ok::<_, SyncError>(outcome)
         })
