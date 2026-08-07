@@ -1,14 +1,15 @@
 //! The "something was captured" notification (parity 18, backlog B-18).
 //!
-//! macOS will not let the daemon post this. `UNUserNotificationCenter` needs an
-//! application bundle and the daemon is a bare executable started by launchd, so
-//! the daemon reports [`copypaste_ipc::EventData::captured`] and the app decides
-//! what to do about it — reading `notify_on_copy` back out of the service.
-//! Manifest 06 §3.6 describes that split.
+//! The daemon cannot post it. `UNUserNotificationCenter` needs an application
+//! bundle and the daemon is a bare executable, so the daemon reports
+//! [`copypaste_ipc::EventData::captured`] and the app decides what to do about
+//! it (manifest 06 §3.6). Windows divides the same way for its own reason: the
+//! plugin sets our AppUserModelID only once the executable is outside
+//! `target/debug|release` (`tauri-plugin-notification-2.3.3/src/desktop.rs`),
+//! so a toast appears from an installed build and not under `tauri dev`.
 //!
-//! NOT VERIFIED IN CI: that a notification is delivered, and that the window's
-//! visibility is what macOS thinks it is. This host has no bundle and no
-//! notification centre. Only [`should_post`] is exercised.
+//! NOT VERIFIED IN CI: that a notification is delivered. This host has no
+//! bundle and no notification centre; only [`should_post`] is exercised.
 
 use tauri::{AppHandle, Manager as _, Runtime};
 use tauri_plugin_notification::{NotificationExt as _, PermissionState};
@@ -23,6 +24,15 @@ pub const TITLE: &str = "Saved to CopyPaste";
 pub const BODY: &str = "What you just copied is in your history.";
 pub const COPY_TITLE: &str = "Copied from CopyPaste";
 pub const COPY_BODY: &str = "The clipping is ready to paste.";
+
+/// `tauri-winrt-notification`'s `Sound::from_str` matches `"Default"` exactly;
+/// anything else fails to parse, `notify-rust` drops the error, and the toast
+/// is silent. The lowercase name would turn `sound_on_copy` off on Windows
+/// with nothing to see.
+#[cfg(target_os = "windows")]
+const SOUND: &str = "Default";
+#[cfg(not(target_os = "windows"))]
+const SOUND: &str = "default";
 
 /// Something was captured. Post the notification, if the user asked for one and
 /// is not already looking at the app.
@@ -105,7 +115,7 @@ fn post<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str, sound: bool) {
 
     let notification = notifier.builder().title(title).body(body);
     let notification = if sound {
-        notification.sound("default")
+        notification.sound(SOUND)
     } else {
         notification
     };

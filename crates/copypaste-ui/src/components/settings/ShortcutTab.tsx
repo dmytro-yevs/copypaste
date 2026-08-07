@@ -4,11 +4,14 @@ import { RotateCcw, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Row } from "@/components/settings/Row";
+import { Section } from "@/components/settings/Section";
+import { SwitchRow } from "@/components/settings/SwitchRow";
 import {
   DEFAULT_SHORTCUT,
   acceleratorGlyphs,
   captureAccelerator,
 } from "@/lib/accelerator";
+import { useOpenAtLogin, useSetOpenAtLogin } from "@/hooks/useOpenAtLogin";
 import { useTranslation } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { isUnavailable, toFriendly } from "@/lib/errors";
@@ -191,6 +194,52 @@ export function ShortcutTab() {
           {t("settings.shortcut.unavailable", { accelerator: fallback })}
         </p>
       )}
+
+      <StartupSection />
     </div>
+  );
+}
+
+/**
+ * Launch at login had no interface at all: the only way to set it was the tray
+ * menu, which on Windows lives inside the notification-area overflow (CLAUDE.md
+ * rule 6). Both surfaces write through the same command and both re-read the
+ * system afterwards, so neither can end up claiming a state the machine does
+ * not hold.
+ */
+function StartupSection() {
+  const { t } = useTranslation();
+  const openAtLogin = useOpenAtLogin();
+  const save = useSetOpenAtLogin();
+
+  const enabled = openAtLogin.data ?? false;
+  // The write succeeded and the system still disagrees — on Windows, a Startup
+  // apps override. Silence here would leave a switch that flicks back with no
+  // explanation.
+  const blocked =
+    save.isSuccess && save.variables === true && save.data === false;
+
+  return (
+    <Section title={t("settings.startup.title")}>
+      <SwitchRow
+        title={t("settings.startup.openAtLogin.title")}
+        description={t("settings.startup.openAtLogin.description")}
+        id="open-at-login"
+        checked={enabled}
+        disabled={openAtLogin.isPending || save.isPending}
+        note={
+          blocked ? (
+            <span role="status" className="text-xs text-warn-strong">
+              {t("settings.startup.blocked")}
+            </span>
+          ) : save.isError ? (
+            <span role="alert" className="text-xs text-err-strong">
+              {t("settings.startup.failed")}
+            </span>
+          ) : undefined
+        }
+        onChange={(next) => save.mutate(next)}
+      />
+    </Section>
   );
 }
