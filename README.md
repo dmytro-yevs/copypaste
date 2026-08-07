@@ -146,6 +146,12 @@ get mixed in:
 adb logcat --pid="$(adb shell pidof -s com.copypaste.app)"
 ```
 
+The smoke harness that `android-emulator.yml` drives needs only `adb` and a
+booted device, so it also runs against an emulator you already have.
+[`docs/rewrite/android-local-smoke.md`](docs/rewrite/android-local-smoke.md) is
+the procedure, and is explicit about which of its assertions a local run
+carries.
+
 ## The specification
 
 `docs/rewrite/port-manifest/` contains ~500 acceptance tests and 200+ recovered

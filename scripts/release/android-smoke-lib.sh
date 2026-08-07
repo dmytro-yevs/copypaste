@@ -245,6 +245,17 @@ own_map_paths() {   # <maps file> <package>
 # adb helpers
 # ---------------------------------------------------------------------------
 
+# Git Bash rewrites any argument that looks like a POSIX path into a Windows one
+# before exec, so `adb pull /sdcard/ui.xml` asks the device for
+# `C:/Program Files/Git/sdcard/ui.xml`. It fails in the worst way available:
+# dump_hierarchy and the /proc read return nothing, assert_painted and the maps
+# block both downgrade to NOT ASSERTED, and the run exits 0 having quietly
+# stopped asserting three things. Only the device-side roots are excluded —
+# local paths must still be converted, because python3 here is a Windows build.
+case "$(uname -s)" in
+    MINGW*|MSYS*) export MSYS2_ARG_CONV_EXCL='/sdcard;/proc;/data;/storage' ;;
+esac
+
 sh_() { adb shell "$@" 2>&1 | tr -d '\r'; }
 
 # The app's own process, and not a WebView renderer.

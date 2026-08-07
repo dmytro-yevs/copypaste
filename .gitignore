@@ -2,6 +2,10 @@
 /target/
 /dist/
 
+# Default SMOKE_OUT for the Android smoke harness — logcat, screenshots and a
+# pulled SQLCipher database. CI uploads it; a local run must not stage it.
+/artifacts/
+
 # Playwright/Chrome-devtools MCP runtime artifacts (regenerated each session)
 .playwright-mcp/
 
