@@ -60,6 +60,10 @@ use crate::AppState;
 /// id without the name it resolves to leaves every restored peer item labelled
 /// with a bare UUID. Nothing keys off a name, so a stale row costs a label at
 /// worst.
+///
+/// `clipboard_live_count` is absent because it is derived: its triggers count
+/// the deletes and inserts below as they happen. Copying the backup's value on
+/// top of that would apply the same rows twice.
 const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_device_name"];
 
 /// Every table this build knows how to restore, including the ones it leaves in
@@ -69,6 +73,7 @@ const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_dev
 const KNOWN_TABLES: &[&str] = &[
     "clipboard_items",
     "clipboard_fts",
+    "clipboard_live_count",
     "sync_device_name",
     "sync_device_state",
 ];
