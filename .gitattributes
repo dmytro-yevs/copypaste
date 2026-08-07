@@ -1,0 +1,9 @@
+# A Windows checkout runs with core.autocrlf=true, and two tests assert on the
+# bytes of tracked files: tools/sensitive-rules pins config/gitleaks/gitleaks.toml
+# by SHA-256, and copypaste-ui's app-assembly tests `include_str!` their own
+# lib.rs and split it on "\n#[cfg(test)]". CRLF fails both, and would fail them
+# on any Windows machine, not only CI.
+* text=auto eol=lf
+
+# The one file that is read by cmd.exe.
+*.bat text eol=crlf
