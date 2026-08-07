@@ -32,7 +32,25 @@ apply(plugin = "org.owasp.dependencycheck")
 val nvdApiKey: String? = System.getenv("NVD_API_KEY")?.takeIf { it.isNotBlank() }
 
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-    failBuildOnCVSS = 0.0F
+    // ADR-0016. The threshold, the project filter and the suppression file are
+    // one decision: at 7.0 without the filter the build still fails on netty
+    // in AGP's test harness, and filtered without a threshold it still fails on
+    // a Drupal XSS from 2009.
+    failBuildOnCVSS = 7.0F
+    scanProjects.set(listOf(":app"))
+    // One release runtime classpath per ABI. The ABI list is generated into
+    // app/tauri.build.gradle.kts, so read the names off the project instead of
+    // pinning a copy that file is free to change. Empty is fatal: an audit that
+    // silently resolves to nothing is worse than one that is noisy.
+    scanConfigurations.set(provider {
+        project(":app").configurations.names
+            .filter { it.endsWith("ReleaseRuntimeClasspath") }
+            .sorted()
+            .also { require(it.isNotEmpty()) { ":app exposes no release runtime classpath" } }
+    })
+    suppressionFile = "$projectDir/dependency-check-suppressions.xml"
+    // A rule that no longer suppresses anything is a rule nobody deleted.
+    failBuildOnUnusedSuppressionRule = true
     format = ReportGenerator.Format.ALL.toString()
     data.directory = "${System.getProperty("user.home")}/.gradle/dependency-check-data"
     nvd {
