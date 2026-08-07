@@ -27,6 +27,7 @@ mod error;
 mod listen;
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::Semaphore;
@@ -47,6 +48,8 @@ pub use listen::{bind, listen};
 /// past the limit are dropped without a handshake: refusing early tells an
 /// unauthenticated dialler nothing it did not already know from the open port.
 const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
+
+const DISCOVERY_INTEREST_MS: i64 = 60_000;
 
 /// A freshly minted pairing, and the one rendering of its secret.
 ///
@@ -85,6 +88,8 @@ pub struct Node {
     /// a different answer.
     listen_addr: RwLock<Option<SocketAddr>>,
     sessions: Arc<Semaphore>,
+    browse_until_ms: AtomicI64,
+    lan_visible: AtomicBool,
 }
 
 impl std::fmt::Debug for Node {
@@ -98,7 +103,12 @@ impl std::fmt::Debug for Node {
 
 impl Node {
     #[must_use]
-    pub fn new(peers: PeerStore, discovery: Option<Discovery>, port: u16) -> Self {
+    pub fn new(
+        peers: PeerStore,
+        discovery: Option<Discovery>,
+        port: u16,
+        lan_visible: bool,
+    ) -> Self {
         let cursors = CursorStore::open(
             &peers
                 .path()
@@ -113,14 +123,18 @@ impl Node {
                 .map(|peer| peer.pairing_id.clone())
                 .collect::<Vec<_>>(),
         );
-        Self {
+        let node = Self {
             peers,
             cursors,
             discovery,
             port,
             listen_addr: RwLock::new(None),
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
-        }
+            browse_until_ms: AtomicI64::new(0),
+            lan_visible: AtomicBool::new(lan_visible),
+        };
+        node.republish();
+        node
     }
 
     #[must_use]
@@ -129,7 +143,7 @@ impl Node {
     }
 
     #[must_use]
-    pub(crate) fn cursors(&self) -> &CursorStore {
+    pub fn cursors(&self) -> &CursorStore {
         &self.cursors
     }
 
@@ -155,10 +169,38 @@ impl Node {
     /// degraded, which is never an error: an explicit address always works.
     #[must_use]
     pub fn seen(&self) -> Vec<DiscoveredPeer> {
+        self.note_discovery_interest();
         self.discovery
             .as_ref()
             .map(Discovery::peers)
             .unwrap_or_default()
+    }
+
+    pub fn note_discovery_interest(&self) {
+        let until = crate::now_ms().saturating_add(DISCOVERY_INTEREST_MS);
+        self.browse_until_ms.fetch_max(until, Ordering::Relaxed);
+        self.reconcile_discovery();
+    }
+
+    pub fn set_lan_visibility(&self, visible: bool) {
+        if self.lan_visible.swap(visible, Ordering::Relaxed) != visible {
+            self.reconcile_discovery();
+        }
+    }
+
+    pub fn reconcile_discovery(&self) {
+        let Some(discovery) = self.discovery.as_ref() else {
+            return;
+        };
+        if self.wants_discovery() != discovery.is_running() {
+            self.republish();
+        }
+    }
+
+    fn wants_discovery(&self) -> bool {
+        self.lan_visible.load(Ordering::Relaxed)
+            && (self.peers.len() > 0
+                || crate::now_ms() < self.browse_until_ms.load(Ordering::Relaxed))
     }
 
     /// Whether a given pairing is visible right now.
@@ -183,7 +225,11 @@ impl Node {
         let Some(discovery) = self.discovery.as_ref() else {
             return;
         };
-        if let Err(e) = discovery.republish(&ids) {
+        if !self.wants_discovery() {
+            discovery.stop();
+            return;
+        }
+        if let Err(e) = discovery.publish(&ids) {
             debug!(error = %e, "could not republish the discovery record");
         }
     }
@@ -313,7 +359,60 @@ mod tests {
     fn node() -> (Node, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let peers = PeerStore::open(&dir.path().join("peers.json")).unwrap();
-        (Node::new(peers, None, 0), dir)
+        (Node::new(peers, None, 0, true), dir)
+    }
+
+    fn node_with_discovery() -> (Node, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let peers = PeerStore::open(&dir.path().join("peers.json")).unwrap();
+        let discovery = Discovery::dormant("test device", 0).expect("a valid device name");
+        (Node::new(peers, Some(discovery), 0, true), dir)
+    }
+
+    fn browsing(node: &Node) -> bool {
+        node.discovery().expect("a discovery handle").is_running()
+    }
+
+    #[test]
+    fn a_device_with_nothing_to_discover_does_not_run_mdns() {
+        let (node, _dir) = node_with_discovery();
+        assert!(!browsing(&node));
+    }
+
+    #[test]
+    fn a_pairing_waiting_to_be_redeemed_keeps_this_device_discoverable() {
+        let (node, _dir) = node_with_discovery();
+        assert!(node.peers().list().is_empty());
+        node.pair_create("laptop").expect("mint a pairing");
+        assert!(browsing(&node));
+    }
+
+    #[test]
+    fn unpairing_the_last_device_stops_mdns() {
+        let (node, _dir) = node_with_discovery();
+        let pairing = node.pair_create("laptop").expect("mint a pairing");
+        assert!(browsing(&node));
+
+        assert!(node.unpair(&pairing.pairing_id).unwrap());
+        assert!(!browsing(&node));
+    }
+
+    #[test]
+    fn looking_at_the_lan_starts_mdns_on_a_device_with_no_peers() {
+        let (node, _dir) = node_with_discovery();
+        assert!(node.seen().is_empty());
+        assert!(browsing(&node));
+    }
+
+    #[test]
+    fn mdns_stops_again_once_nobody_is_looking() {
+        let (node, _dir) = node_with_discovery();
+        assert!(node.seen().is_empty());
+        assert!(browsing(&node));
+
+        node.browse_until_ms.store(0, Ordering::Relaxed);
+        node.reconcile_discovery();
+        assert!(!browsing(&node));
     }
 
     #[test]

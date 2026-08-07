@@ -437,7 +437,7 @@ impl ConfigData {
             ("max_decoded_image_mb", Liveness::Live),
             ("sensitive_ttl_secs", Liveness::Live),
             ("excluded_app_bundle_ids", Liveness::Live),
-            ("lan_visibility", Liveness::NeedsRestart),
+            ("lan_visibility", Liveness::Live),
             ("sync_enabled", Liveness::Live),
             // Both are read at the moment a capture lands, so a change takes
             // effect on the next copy.
@@ -450,11 +450,8 @@ impl ConfigData {
     /// until the daemon restarts. Empty is the common case.
     #[must_use]
     pub fn restart_required_by(patch: &ConfigPatch) -> Vec<&'static str> {
-        let mut names = Vec::new();
-        if patch.lan_visibility.is_some() {
-            names.push("lan_visibility");
-        }
-        names
+        let _ = patch;
+        Vec::new()
     }
 
     /// Effective live capture cap for one shared content-type classification.
@@ -813,19 +810,20 @@ mod tests {
     }
 
     #[test]
-    fn a_restart_is_reported_only_for_the_fields_that_need_one() {
+    fn no_field_needs_a_restart_any_more() {
         assert!(ConfigData::restart_required_by(&ConfigPatch {
             max_decoded_image_mb: Some(25),
             ..Default::default()
         })
         .is_empty());
-        assert_eq!(
-            ConfigData::restart_required_by(&ConfigPatch {
-                lan_visibility: Some(false),
-                ..Default::default()
-            }),
-            ["lan_visibility"]
-        );
+        assert!(ConfigData::restart_required_by(&ConfigPatch {
+            lan_visibility: Some(false),
+            ..Default::default()
+        })
+        .is_empty());
+        assert!(ConfigData::field_liveness()
+            .iter()
+            .all(|(_, liveness)| *liveness == Liveness::Live));
     }
 
     /// A config written by a newer build must load: an unknown key is ignored

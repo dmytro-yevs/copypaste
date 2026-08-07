@@ -35,6 +35,9 @@ pub(super) fn set(state: &AppState, id: u64, patch: &ConfigPatch) -> Response {
             {
                 copypaste_core::ingest::enforce_retention(&state.store, &config);
             }
+            if config.lan_visibility != before.lan_visibility {
+                state.p2p.node().set_lan_visibility(config.lan_visibility);
+            }
             Response::ok(
                 id,
                 ResponseData::Config(ConfigApplied {
@@ -174,10 +177,8 @@ mod tests {
         assert_eq!(state.store.count().unwrap(), 50);
     }
 
-    /// The one field that cannot be applied live must say so at the moment it
-    /// is changed, not leave the user to notice.
     #[test]
-    fn changing_lan_visibility_reports_that_a_restart_is_needed() {
+    fn turning_lan_visibility_off_takes_effect_without_a_restart() {
         let (state, _dir) = test_state("alpha");
         let result = applied(call(
             &state,
@@ -189,7 +190,12 @@ mod tests {
             },
         ));
         assert!(!result.config.lan_visibility);
-        assert_eq!(result.restart_required, ["lan_visibility"]);
+        assert!(result.restart_required.is_empty());
+        assert!(!state
+            .p2p
+            .discovery()
+            .expect("a discovery handle")
+            .is_running());
     }
 
     #[test]

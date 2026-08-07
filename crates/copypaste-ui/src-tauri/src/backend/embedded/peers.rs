@@ -54,27 +54,21 @@ impl PeerNode {
         // listener accepts.
         let peers = PeerStore::open(&inner.state.peers_path)
             .map_err(|e| BackendError::internal(&format!("could not open paired devices: {e}")))?;
-        let pairing_ids: Vec<String> = peers
-            .list()
-            .iter()
-            .map(|peer| peer.pairing_id.clone())
-            .collect();
         // Never fatal: a network that filters multicast still pairs and still
         // syncs to an explicit address, which is the common case on a phone.
-        let discovery = if inner.settings().lan_visibility {
-            match Discovery::start(&inner.state.device_name, &pairing_ids, PORT) {
-                Ok(discovery) => Some(discovery),
-                Err(e) => {
-                    tracing::warn!(error = %e, "could not start discovery; peers must be given an address");
-                    None
-                }
+        let discovery = match Discovery::dormant(&inner.state.device_name, PORT) {
+            Ok(discovery) => Some(discovery),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not start discovery; peers must be given an address");
+                None
             }
-        } else {
-            tracing::info!("LAN visibility is off; not advertising or browsing");
-            None
         };
+        let lan_visibility = inner.settings().lan_visibility;
+        if !lan_visibility {
+            tracing::info!("LAN visibility is off; not advertising or browsing");
+        }
 
-        let node = Arc::new(Node::new(peers, discovery, PORT));
+        let node = Arc::new(Node::new(peers, discovery, PORT, lan_visibility));
         let (shutdown, shutdown_rx) = watch::channel(false);
 
         match copypaste_p2p::node::bind(PORT).and_then(tokio::net::TcpListener::from_std) {
@@ -312,6 +306,7 @@ fn node_error_code(error: &NodeError) -> copypaste_ipc::ErrorCode {
         NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
         NodeError::TooManyPairings => ErrorCode::PairingLimit,
         NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
+        NodeError::PeerVersion => ErrorCode::PeerVersion,
         NodeError::NoPeer => ErrorCode::PeerNotFound,
     }
 }

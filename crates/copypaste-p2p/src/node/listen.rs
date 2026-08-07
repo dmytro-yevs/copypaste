@@ -152,7 +152,7 @@ mod tests {
 
     fn node(dir: &tempfile::TempDir, name: &str) -> Arc<Node> {
         let peers = PeerStore::open(&dir.path().join(format!("{name}-peers.json"))).unwrap();
-        Arc::new(Node::new(peers, None, 0))
+        Arc::new(Node::new(peers, None, 0, true))
     }
 
     /// A listener plus the pairing both halves share. Returns the address to
@@ -236,11 +236,13 @@ mod tests {
             PeerStore::open(&a_dir.path().join("a-peers.json")).unwrap(),
             None,
             crate::DEFAULT_PORT,
+            true,
         ));
         let b = Node::new(
             PeerStore::open(&b_dir.path().join("b-peers.json")).unwrap(),
             None,
             crate::DEFAULT_PORT,
+            true,
         );
         let a_source = Arc::new(TestSource::new(
             "desktop",
