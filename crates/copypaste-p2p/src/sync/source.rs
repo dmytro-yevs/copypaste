@@ -28,6 +28,23 @@ pub struct SyncOutcome {
     pub peer_device_id: String,
     pub peer_device_name: String,
     pub peer_listen_addr: Option<SocketAddr>,
+    pub cursor: SyncCursor,
+    pub applied_floor: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SyncCursor {
+    pub since_ms: i64,
+    pub relay_floor_ms: Option<i64>,
+}
+
+impl SyncCursor {
+    #[must_use]
+    pub fn advertise_from(&self, peer_since_ms: i64) -> i64 {
+        self.relay_floor_ms
+            .map_or(peer_since_ms, |floor| floor.min(peer_since_ms))
+            .max(0)
+    }
 }
 
 /// What the session needs from the local store. The daemon implements it over
@@ -56,7 +73,7 @@ pub trait SyncSource {
 
     /// Summaries of everything eligible to sync. Live sensitive items excluded;
     /// payload-less sensitive tombstones included.
-    fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError>;
+    fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError>;
 
     /// Full items for the given ids, plaintext. Unknown ids are omitted rather
     /// than erroring; live sensitive ids are omitted too.
