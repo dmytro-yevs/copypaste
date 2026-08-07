@@ -6,7 +6,7 @@
 //! is the state the panel exists to make legible.
 
 use std::io::Write;
-#[cfg(not(target_os = "android"))]
+#[cfg(all(unix, not(target_os = "android")))]
 use std::os::unix::fs::OpenOptionsExt as _;
 
 use tauri::{AppHandle, Runtime, State};
@@ -77,7 +77,7 @@ pub async fn export_diagnostics_report<R: Runtime>(
 
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
-    #[cfg(not(target_os = "android"))]
+    #[cfg(all(unix, not(target_os = "android")))]
     options.mode(0o600);
     let mut file = app
         .fs()
@@ -122,7 +122,7 @@ pub async fn export_support_bundle<R: Runtime>(
     };
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
-    #[cfg(not(target_os = "android"))]
+    #[cfg(all(unix, not(target_os = "android")))]
     options.mode(0o600);
     let mut file = app
         .fs()

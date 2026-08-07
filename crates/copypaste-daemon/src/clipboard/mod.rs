@@ -52,7 +52,9 @@
 
 mod change;
 mod fake;
-#[cfg(any(target_os = "macos", test))]
+// `test` so the module is exercised off macOS, but only where it compiles:
+// every syscall in it is `rustix::fs`, which has no Windows implementation.
+#[cfg(any(target_os = "macos", all(test, unix)))]
 mod file_materialize;
 mod format;
 
