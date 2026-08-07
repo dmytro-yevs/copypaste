@@ -972,9 +972,13 @@ by the file store (CLAUDE.md rule 4).
   `kSecAttrSynchronizable = false`. The item therefore takes the default
   accessibility and is eligible for inclusion in a backup, which is the
   property §3.8 records as load-bearing.
-- **I-22 has no equivalent.** `Keyring::load_or_create` runs inline in
-  `main`, with no timeout and no dedicated thread. On a machine where the read
-  raises a GUI prompt the daemon blocks at startup instead of degrading.
+- **I-22 has an equivalent, and it is untested on a prompting Keychain.**
+  `Keyring::load_or_create` runs the macOS read through `load_with_timeout`
+  (8 s, thread `keystore-load`, `crypto/keys.rs`), and a timeout degrades to
+  `KeystoreUnavailable` so `halt_or_fail` holds the socket. Security-framework
+  exposes no cancellation, so the worker is detached rather than stopped and
+  stays parked on the prompt for the life of the process. Nothing has observed
+  that path; `docs/rewrite/macos-idle-measurement.md` is where it would be.
 - **A prompting Keychain is untested by construction.** The runner is headless,
   so a read that would prompt returns `errSecInteractionNotAllowed` instead.
   That is the fail-closed direction, and it means these tests say nothing about
