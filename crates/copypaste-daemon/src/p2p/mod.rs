@@ -52,9 +52,14 @@ impl std::fmt::Debug for P2p {
 }
 
 impl P2p {
-    pub fn new(peers: PeerStore, discovery: Option<Discovery>, port: u16) -> Self {
+    pub fn new(
+        peers: PeerStore,
+        discovery: Option<Discovery>,
+        port: u16,
+        lan_visible: bool,
+    ) -> Self {
         Self {
-            node: Arc::new(Node::new(peers, discovery, port)),
+            node: Arc::new(Node::new(peers, discovery, port, lan_visible)),
             wake: Notify::new(),
             idle: Idle::default(),
         }

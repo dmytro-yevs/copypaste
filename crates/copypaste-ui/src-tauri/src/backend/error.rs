@@ -183,6 +183,7 @@ impl BackendError {
             | ErrorCode::PeerUnreachable
             | ErrorCode::PairingLimit
             | ErrorCode::PeerFailed
+            | ErrorCode::PeerVersion
             | ErrorCode::PeerNotFound
             | ErrorCode::InvalidRequest
             | ErrorCode::AuthFailed

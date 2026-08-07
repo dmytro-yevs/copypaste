@@ -23,6 +23,8 @@ pub enum NodeError {
     NoAddress,
     #[error("the sync session with the other device failed")]
     Session,
+    #[error("the two devices are running versions of CopyPaste that cannot sync with each other; update both and try again")]
+    PeerVersion,
     #[error("the other device stopped responding")]
     Timeout,
     #[error("the paired-device list could not be updated")]
@@ -67,6 +69,7 @@ mod tests {
         NodeError::NoPeer,
         NodeError::NoAddress,
         NodeError::Session,
+        NodeError::PeerVersion,
         NodeError::Timeout,
         NodeError::PeerStore,
         NodeError::TooManyPairings,

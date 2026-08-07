@@ -36,7 +36,7 @@ const TEARDOWN_TIMEOUT: Duration = Duration::from_millis(500);
 pub struct Discovery {
     /// `None` once torn down, and also when the mDNS daemon could not be
     /// created at all — the degraded mode described in the module docs.
-    daemon: Option<ServiceDaemon>,
+    daemon: Mutex<Option<ServiceDaemon>>,
     shared: Arc<Shared>,
     device_name: String,
     port: u16,
@@ -104,6 +104,28 @@ impl Discovery {
         pairing_ids: &[String],
         port: u16,
     ) -> Result<Self, DiscoveryError> {
+        let this = Self::dormant(device_name, port)?;
+        this.publish(pairing_ids)?;
+        Ok(this)
+    }
+
+    pub fn dormant(device_name: &str, port: u16) -> Result<Self, DiscoveryError> {
+        sanitise_instance(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
+        Ok(Self {
+            daemon: Mutex::new(None),
+            shared: Arc::new(Shared::for_port(port)),
+            device_name: device_name.to_string(),
+            port,
+        })
+    }
+
+    pub fn publish(&self, pairing_ids: &[String]) -> Result<(), DiscoveryError> {
+        let mut daemon = lock(&self.daemon);
+        if let Some(running) = daemon.as_ref() {
+            return self.readvertise(running, pairing_ids);
+        }
+        let device_name: &str = &self.device_name;
+        let port = self.port;
         // Validate and encode before touching the network, so bad input is a
         // clean error rather than a half-started daemon.
         let info = build_service_info(device_name, device_name, pairing_ids, port)?;
@@ -112,32 +134,26 @@ impl Discovery {
             fullname: info.get_fullname().to_string(),
         };
 
-        let shared = Arc::new(Shared::for_port(port));
-        let mut this = Self {
-            daemon: None,
-            shared: Arc::clone(&shared),
-            device_name: device_name.to_string(),
-            port,
-        };
+        let shared = Arc::clone(&self.shared);
 
         // `ServiceDaemon::new` only binds a loopback signalling socket; the
         // multicast sockets are opened later on the daemon thread, so a host
         // that forbids multicast fails through `DaemonEvent::Error` rather than
         // here. Either way we degrade.
-        let daemon = match ServiceDaemon::new() {
-            Ok(daemon) => daemon,
+        let started = match ServiceDaemon::new() {
+            Ok(started) => started,
             Err(e) => {
                 debug!(reason = %e, "mdns daemon unavailable; discovery is disabled");
-                return Ok(this);
+                return Ok(());
             }
         };
 
-        match daemon.register(info) {
+        match started.register(info) {
             Ok(()) => *lock(&shared.registration) = Some(registration),
             Err(e) => debug!(reason = %e, "mdns registration refused; not advertising"),
         }
 
-        match daemon.browse(SERVICE_TYPE) {
+        match started.browse(SERVICE_TYPE) {
             Ok(events) => {
                 let shared = Arc::clone(&shared);
                 spawn("copypaste-mdns-browse", move || {
@@ -147,7 +163,7 @@ impl Discovery {
             Err(e) => debug!(reason = %e, "mdns browse refused; peer list stays empty"),
         }
 
-        match daemon.monitor() {
+        match started.monitor() {
             Ok(events) => {
                 let shared = Arc::clone(&shared);
                 spawn("copypaste-mdns-monitor", move || {
@@ -157,8 +173,17 @@ impl Discovery {
             Err(e) => debug!(reason = %e, "mdns monitor refused"),
         }
 
-        this.daemon = Some(daemon);
-        Ok(this)
+        daemon.replace(started);
+        Ok(())
+    }
+
+    pub fn stop(&self) {
+        self.teardown(&mut lock(&self.daemon));
+    }
+
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        lock(&self.daemon).is_some()
     }
 
     /// Currently-known peers, stale entries dropped.
@@ -175,13 +200,15 @@ impl Discovery {
     }
 
     /// Update the advertised pairing ids after a new pairing.
-    ///
-    /// A no-op returning `Ok` when discovery is degraded — there is nothing to
-    /// republish, and a new pairing must not fail because mDNS is unavailable.
-    pub fn republish(&self, pairing_ids: &[String]) -> Result<(), DiscoveryError> {
+    fn readvertise(
+        &self,
+        daemon: &ServiceDaemon,
+        pairing_ids: &[String],
+    ) -> Result<(), DiscoveryError> {
         // Re-register under whatever instance name the daemon settled on, so a
         // conflict-driven rename does not leave two advertisements behind.
-        let instance = lock(&self.shared.registration)
+        let mut registration = lock(&self.shared.registration);
+        let instance = registration
             .as_ref()
             .map(|r| r.instance.clone())
             .unwrap_or_else(|| self.device_name.clone());
@@ -191,23 +218,18 @@ impl Discovery {
         // own records and rename us to "<name> (2)".
         info.set_requires_probe(false);
 
-        let Some(daemon) = self.daemon.as_ref() else {
-            debug!("discovery is disabled; nothing to republish");
-            return Ok(());
-        };
-
         let fullname = info.get_fullname().to_string();
         daemon.register(info)?;
-        *lock(&self.shared.registration) = Some(Registration { instance, fullname });
+        registration.replace(Registration { instance, fullname });
         Ok(())
     }
 
-    pub fn shutdown(mut self) {
-        self.teardown();
+    pub fn shutdown(self) {
+        self.stop();
     }
 
-    fn teardown(&mut self) {
-        let Some(daemon) = self.daemon.take() else {
+    fn teardown(&self, held: &mut Option<ServiceDaemon>) {
+        let Some(daemon) = held.take() else {
             return;
         };
 
@@ -232,14 +254,14 @@ impl Discovery {
 
 impl Drop for Discovery {
     fn drop(&mut self) {
-        self.teardown();
+        self.stop();
     }
 }
 
 impl std::fmt::Debug for Discovery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Discovery")
-            .field("enabled", &self.daemon.is_some())
+            .field("enabled", &self.is_running())
             .field("port", &self.port)
             .finish_non_exhaustive()
     }
@@ -353,7 +375,7 @@ mod tests {
 
         // A new pairing must never fail because mDNS is unavailable.
         discovery
-            .republish(&["pair-one".to_string(), "pair-two".to_string()])
+            .publish(&["pair-one".to_string(), "pair-two".to_string()])
             .expect("republish must tolerate a degraded daemon");
 
         discovery.shutdown();

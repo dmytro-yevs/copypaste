@@ -137,32 +137,23 @@ async fn main() -> anyhow::Result<()> {
     // start, so this is the moment it either happens or does not. It is the one
     // setting `ConfigData::field_liveness` marks `NeedsRestart`, and this line
     // is why.
-    let discovery = if settings.get().lan_visibility {
-        // Never fatal: a host without multicast still pairs and still syncs to
-        // an explicit address, and that is the common case on a locked-down
-        // network.
-        let pairing_ids: Vec<String> = peers
-            .list()
-            .iter()
-            .map(|peer| peer.pairing_id.clone())
-            .collect();
-        match Discovery::start(meta.device_name(), &pairing_ids, args.port) {
-            Ok(discovery) => Some(discovery),
-            Err(e) => {
-                warn!(error = %e, "could not start discovery; peers must be given an address");
-                Some(
-                    Discovery::start("CopyPaste device", &[], args.port)
-                        .context("start discovery with a fallback name")?,
-                )
-            }
+    let discovery = match Discovery::dormant(meta.device_name(), args.port) {
+        Ok(discovery) => Some(discovery),
+        Err(e) => {
+            warn!(error = %e, "could not start discovery; peers must be given an address");
+            Some(
+                Discovery::dormant("CopyPaste device", args.port)
+                    .context("start discovery with a fallback name")?,
+            )
         }
-    } else {
-        info!("LAN visibility is off; not advertising and not browsing");
-        None
     };
+    let lan_visibility = settings.get().lan_visibility;
+    if !lan_visibility {
+        info!("LAN visibility is off; not advertising and not browsing");
+    }
     let device_id = meta.device_id().to_string();
     let device_name = meta.device_name().to_string();
-    let p2p = P2p::new(peers, discovery, args.port);
+    let p2p = P2p::new(peers, discovery, args.port, lan_visibility);
 
     // Cloud sync. Unconfigured is a supported state, and so is configured but
     // signed out: `Cloud::restore` reads back an account only if a previous run

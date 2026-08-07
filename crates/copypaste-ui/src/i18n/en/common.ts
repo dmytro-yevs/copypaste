@@ -55,6 +55,8 @@ export const errors = {
   pairing_limit:
     "This device is already paired with as many devices as it can hold. Unpair one, then try again.",
   peer_failed: "Syncing with the other device didn't finish. Try again in a moment.",
+  peer_version:
+    "These two devices are running versions of CopyPaste that can't sync with each other. Update both to the latest version, then try again.",
   /** Says "device", where `not_found` says "item". The daemon used to answer a
    *  vanished device with `not_found`, so unpairing one reported a missing
    *  clipping (post-merge review, finding 4). */
