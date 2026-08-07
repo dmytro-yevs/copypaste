@@ -56,8 +56,24 @@ android-native-keyring-store = { version = "1", optional = true }
 # in libsqlite3-sys's build.rs to fall into — it panics on a missing
 # OPENSSL_DIR. Vendored here for the same reason Android vendors below, and
 # scoped the same way so macOS keeps CommonCrypto. See ADR-0007.
+#
+# `windows-sys` is Microsoft's own binding to `crypt32.dll` for the DPAPI
+# device-secret backend, and it adds no package to the tree: 0.61 is already
+# resolved through `tokio` and `tempfile`.
+#
+# CLAUDE.md rule 1, exemption 1, for the two DPAPI calls that stay hand-written.
+# `windows-dpapi` is the only maintained safe wrapper and does not fit: it copies
+# the unsealed buffer out and `LocalFree`s it without wiping, which leaves the
+# device secret in the process heap on every start and loses I-12 on the one
+# value that matters most. It also drops the Windows error code into
+# `anyhow::Error`, and that code is what separates "this blob will never open"
+# from "the master key is not loaded yet" (I-20).
 [target.'cfg(target_os = "windows")'.dependencies]
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security_Cryptography",
+] }
 
 # sha2's `asm` backend, for every target that can assemble it. The feature
 # pulls sha2-asm, whose sources are GNU `.S` files that cl.exe rejects, so
