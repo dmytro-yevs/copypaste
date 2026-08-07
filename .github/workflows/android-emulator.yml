@@ -226,8 +226,19 @@ jobs:
       - name: Audit resolved Android dependencies
         working-directory: crates/copypaste-ui/src-tauri/gen/android
         timeout-minutes: 60
+        env:
+          # Read by the `nvd` block in gen/android/build.gradle.kts, which
+          # picks its request delay from whether this is set. Absent is a
+          # supported state and must stay one: fork pull requests are never
+          # given secrets, and a clone has none either.
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: |
           set -euo pipefail
+          if [[ -n "${NVD_API_KEY:-}" ]]; then
+            echo "NVD API key present; a cold vulnerability-database update takes ~11 minutes."
+          else
+            echo "::warning::No NVD_API_KEY secret. The audit still runs, but tokenless NVD allows 5 requests per 30s and a cold vulnerability-database update takes ~50 of this job's 75 minutes. Get a free key at https://nvd.nist.gov/developers/request-an-api-key and add it as a repository secret named NVD_API_KEY; nothing else has to change."
+          fi
           ./gradlew --no-daemon \
             --init-script "${GITHUB_WORKSPACE}/scripts/ci/android-dependency-check.init.gradle.kts" \
             dependencyCheckAggregate
