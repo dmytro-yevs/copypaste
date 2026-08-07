@@ -25,17 +25,22 @@
 //!   same-UID client that connects and never drains otherwise pins a permit and
 //!   the database mutex for as long as it likes.
 
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(unix)]
 use anyhow::Context;
+use copypaste_ipc::transport::{Listener, OwnedReadHalf, OwnedWriteHalf, Stream};
 use copypaste_ipc::{ErrorCode, Method, Response, ResponseData, MAX_FRAME_BYTES};
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
-use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use tokio::net::UnixListener;
 use tokio::sync::{watch, Semaphore};
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
@@ -71,7 +76,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 ///
 /// Tightening the parent directory stays warn-only — it may be a pre-existing
 /// shared data dir — because [`bind_owner_only`] does not rely on it.
-pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
+#[cfg(unix)]
+pub fn bind(path: &Path) -> anyhow::Result<Listener> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).context("create the socket directory")?;
         if let Err(e) = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)) {
@@ -88,7 +94,17 @@ pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
     let listener = bind_owner_only(path)?;
 
     info!("ipc socket listening");
-    Ok(listener)
+    Ok(listener.into())
+}
+
+/// A named pipe will not reach a listener through the body above: there is no
+/// mode to `chmod`, no path to unlink, and the exclusion `flock` buys comes
+/// from `FILE_FLAG_FIRST_PIPE_INSTANCE` instead. So it gets its own body rather
+/// than a cfg threaded through that one.
+#[cfg(not(unix))]
+pub fn bind(path: &Path) -> anyhow::Result<Listener> {
+    let _ = path;
+    Err(copypaste_ipc::transport::unsupported().into())
 }
 
 /// Bind the socket already restricted to `0600` (security review F-9).
@@ -100,6 +116,7 @@ pub fn bind(path: &Path) -> anyhow::Result<UnixListener> {
 /// staging directory and renamed into place: the rename is atomic, so the
 /// final path never exists at any other mode. Not `umask(2)`, which is
 /// process-wide and would apply to whatever other threads create meanwhile.
+#[cfg(unix)]
 fn bind_owner_only(path: &Path) -> anyhow::Result<UnixListener> {
     let staging = staging_dir(path);
     let _ = std::fs::remove_dir_all(&staging);
@@ -117,6 +134,7 @@ fn bind_owner_only(path: &Path) -> anyhow::Result<UnixListener> {
     bound
 }
 
+#[cfg(unix)]
 fn bind_staged(staged: &Path, path: &Path) -> anyhow::Result<UnixListener> {
     let listener = UnixListener::bind(staged).context("bind the daemon socket")?;
     std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o600))
@@ -128,6 +146,7 @@ fn bind_staged(staged: &Path, path: &Path) -> anyhow::Result<UnixListener> {
 /// A sibling of the socket, so the rename into place stays within one
 /// filesystem. Short names because `sun_path` is 104 bytes on macOS and the
 /// staged path has to fit as well.
+#[cfg(unix)]
 fn staging_dir(socket_path: &Path) -> PathBuf {
     let mut name = socket_path.as_os_str().to_os_string();
     name.push(".new");
@@ -139,10 +158,12 @@ fn staging_dir(socket_path: &Path) -> PathBuf {
 /// The lock file is created and never removed: unlinking it would let a second
 /// starter create and lock a *different* inode while the first still holds the
 /// old one, which is the race this exists to close.
+#[cfg(unix)]
 struct BindLock {
     _file: std::fs::File,
 }
 
+#[cfg(unix)]
 impl BindLock {
     fn acquire(socket_path: &Path) -> anyhow::Result<Self> {
         let mut name = socket_path.as_os_str().to_os_string();
@@ -171,6 +192,7 @@ impl BindLock {
 /// one database is a data-loss shape, and the second one exiting is the safe
 /// outcome. Correct only while [`BindLock`] is held — without it, the connect
 /// probe and the `remove_file` straddle the moment another starter binds.
+#[cfg(unix)]
 fn clear_stale_socket(path: &Path) -> anyhow::Result<()> {
     if std::fs::symlink_metadata(path).is_err() {
         return Ok(());
@@ -184,11 +206,7 @@ fn clear_stale_socket(path: &Path) -> anyhow::Result<()> {
 }
 
 /// Accept connections until shutdown.
-pub async fn run(
-    listener: UnixListener,
-    state: Arc<AppState>,
-    mut shutdown: watch::Receiver<bool>,
-) {
+pub async fn run(listener: Listener, state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
     let mut connections = tokio::task::JoinSet::new();
     let permits = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
     let watchers = Arc::new(Semaphore::new(MAX_WATCHERS));
@@ -197,7 +215,7 @@ pub async fn run(
         tokio::select! {
             _ = shutdown.changed() => break,
             accepted = listener.accept() => match accepted {
-                Ok((stream, _)) => {
+                Ok(stream) => {
                     // Non-blocking: waiting for a permit here would stop the
                     // accept loop, which turns a busy daemon into an
                     // unreachable one (`CopyPaste-6ot5`).
@@ -224,7 +242,7 @@ pub async fn run(
 /// One connection: read lines, answer each with exactly one line, until EOF —
 /// or until it subscribes, after which it only writes.
 async fn handle_connection(
-    stream: UnixStream,
+    stream: Stream,
     state: Arc<AppState>,
     watchers: Arc<Semaphore>,
     mut shutdown: watch::Receiver<bool>,
@@ -374,10 +392,13 @@ pub(super) async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Re
 /// The read half, once a connection has subscribed.
 pub(super) type Reader = FramedRead<OwnedReadHalf, LinesCodec>;
 
+// Every test here binds a real endpoint, which only Unix has one of yet.
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use crate::testutil::test_state;
+    use copypaste_ipc::transport;
     use copypaste_ipc::{Method, Request, PROTOCOL_VERSION};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Barrier;
@@ -548,7 +569,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let mut client = Client::new(stream);
 
         // status answers, and reports the fake backend rather than a real one.
@@ -679,7 +700,7 @@ mod tests {
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
 
         for (id, protocol_version) in [(20, 0), (21, PROTOCOL_VERSION + 1)] {
-            let stream = UnixStream::connect(&path).await.expect("connect");
+            let stream = transport::connect(&path).await.expect("connect");
             let mut client = Client::new(stream);
             let response = client
                 .call(Request {
@@ -708,7 +729,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let mut client = Client::new(stream);
         let response = client.call(request(22, Method::Watch)).await;
 
@@ -729,7 +750,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let mut client = Client::new(stream);
         let response = client
             .call_raw(r#"{"id":23,"protocol_version":"wrong","method":"watch"}"#)
@@ -753,7 +774,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let ack = Client::new(stream).call(request(25, Method::Watch)).await;
 
         assert!(ack.ok, "{:?}", ack.error);
@@ -774,7 +795,7 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let mut watcher = Client::new(stream);
         let ack = watcher.call(request(1, Method::Watch)).await;
         assert!(ack.ok, "{:?}", ack.error);
@@ -824,7 +845,7 @@ mod tests {
             })
             .unwrap();
 
-        let (server_stream, client_stream) = UnixStream::pair().expect("socket pair");
+        let (server_stream, client_stream) = Stream::pair().expect("socket pair");
         let (reader, mut writer) = server_stream.into_split();
         let mut reader = FramedRead::new(reader, LinesCodec::new());
         let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
@@ -857,7 +878,7 @@ mod tests {
     #[tokio::test]
     async fn a_watcher_stops_when_the_client_disconnects() {
         let (events_tx, events) = tokio::sync::broadcast::channel(1);
-        let (server_stream, client_stream) = UnixStream::pair().expect("socket pair");
+        let (server_stream, client_stream) = Stream::pair().expect("socket pair");
         let (reader, mut writer) = server_stream.into_split();
         let mut reader = FramedRead::new(reader, LinesCodec::new());
         let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
@@ -890,7 +911,7 @@ mod tests {
         let mut stopping = state.shutdown_rx();
         assert!(!*stopping.borrow(), "nothing has asked yet");
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let reply = Client::new(stream).call(request(7, Method::Shutdown)).await;
         assert!(reply.ok, "{:?}", reply.error);
         assert_eq!(reply.id, 7, "a client matches replies by id");
@@ -919,7 +940,7 @@ mod tests {
         let listener = bind(&path).expect("bind");
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let mut client = Client::new(stream);
         let refused = client
             .call(request(
@@ -932,7 +953,7 @@ mod tests {
             .await;
         assert_eq!(refused.error_code, Some(ErrorCode::NotReady));
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let reply = Client::new(stream).call(request(2, Method::Shutdown)).await;
         assert!(reply.ok, "{:?}", reply.error);
 
@@ -951,7 +972,7 @@ mod tests {
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
         let mut stopping = state.shutdown_rx();
 
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let mismatched = serde_json::json!({
             "id": 9,
             "protocol_version": PROTOCOL_VERSION + 1,
@@ -984,7 +1005,7 @@ mod tests {
         // trip the test would race the accept loop rather than the cap.
         let mut idle = Vec::new();
         for n in 0..MAX_CONCURRENT_CONNECTIONS {
-            let mut client = Client::new(UnixStream::connect(&path).await.expect("connect"));
+            let mut client = Client::new(transport::connect(&path).await.expect("connect"));
             assert!(
                 client
                     .call(request(n as u64 + 100, Method::Status))
@@ -998,7 +1019,7 @@ mod tests {
         // served. Which of the three symptoms shows up — a broken pipe on the
         // write, a reset on the read, or a clean EOF — depends on timing; the
         // property is that no `Response` comes back.
-        let stream = UnixStream::connect(&path).await.expect("connect");
+        let stream = transport::connect(&path).await.expect("connect");
         let mut client = Client::new(stream);
         let line = serde_json::to_string(&request(1, Method::Status)).unwrap();
         let served = tokio::time::timeout(Duration::from_secs(5), async {
@@ -1026,7 +1047,7 @@ mod tests {
     }
 
     impl Client {
-        fn new(stream: UnixStream) -> Self {
+        fn new(stream: Stream) -> Self {
             let (reader, writer) = stream.into_split();
             Self {
                 writer,
