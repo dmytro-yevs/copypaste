@@ -7,8 +7,19 @@ buildscript {
         maven(url = "https://plugins.gradle.org/m2/")
     }
     dependencies {
-        classpath("com.android.tools.build:gradle:8.11.0")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.25")
+        // The 8.x ceiling. AGP 9 is the only line that runs on Gradle 9, and it
+        // needs android.newDsl=false and android.builtInKotlin=false — both
+        // removed in AGP 10 — because the vendored Tauri Android projects apply
+        // org.jetbrains.kotlin.android and set kotlinOptions. It also resolves
+        // the same netty as this does, so it buys no CVE.
+        classpath("com.android.tools.build:gradle:8.13.2")
+        // 2.2.x is the ceiling: Kotlin 2.3 turns `kotlinOptions.jvmTarget:
+        // String` into an error and tauri-2.11.5's Android library sets it.
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21")
+        // Held at 12.2.2 deliberately. 13.0.0 carries the same vulnerable
+        // transitives (jackson-databind 2.9.10.3, guava 20.0, gson 2.3.1) so it
+        // clears nothing, and its core rebuilds the NVD database from cold —
+        // ~50 minutes of a tokenless runner's 75-minute job.
         classpath("org.owasp:dependency-check-gradle:12.2.2")
         // CopyPaste-oc15: Dependency-Check 12.2.2 calls ZipFile.builder().
         classpath("org.apache.commons:commons-compress:1.27.1")
