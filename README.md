@@ -1,8 +1,10 @@
 # CopyPaste
 
-Encrypted clipboard manager for macOS and Android. One app — Tauri v2 + React —
-on both platforms, over a shared Rust core. On desktop the app talks to a local
-daemon; on Android it links the core in-process
+Encrypted clipboard manager for macOS and Android, with Windows decided as a
+third platform and not yet built
+([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)). One app — Tauri v2 +
+React — over a shared Rust core. On desktop the app talks to a local daemon; on
+Android it links the core in-process
 ([ADR-0003](docs/adr/0003-one-command-surface-two-backends.md)).
 
 **2.0.0-alpha.1, on `main`, unaudited.** CopyPaste is under active development.
@@ -17,6 +19,11 @@ and reviewed, and never observed doing its job on a platform we ship to.
 authority for which layer establishes what. Every requirement has one
 authoritative layer, and one that no run reaches is marked NOT VERIFIED IN CI
 there rather than being credited to a layer that cannot see it.
+
+**Windows appears in neither table.** It is a shipping platform by decision and
+has no code: IPC, secret storage, clipboard capture, the shell and packaging are
+macOS and Android only, and no workflow has a Windows runner
+([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
 
 ### Works — covered by tests, and by the demo scripts where a script reaches
 
