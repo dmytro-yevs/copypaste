@@ -1,0 +1,20 @@
+# Security updates only. `open-pull-requests-limit: 0` turns off version-update
+# PRs, which are not wanted: Cargo.lock is bumped deliberately, and
+# `supply-chain.yml` already runs cargo audit and cargo deny on every push and
+# weekly. Security update PRs are exempt from that limit and still arrive.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+    ignore:
+      # glib 0.18.5 (RUSTSEC-2024-0429), pinned by Tauri's GTK 0.18 Linux
+      # desktop stack. Lowest non-vulnerable is 0.20.0 and the highest this
+      # tree can resolve is 0.18.5, so every run fails
+      # `security_update_not_possible`. Accepted as unshipped in ADR-0014.
+      #
+      # Dependabot has no advisory-level scope, so this silences future glib
+      # advisories too. Delete it in the commit that moves Tauri to glib 0.20+.
+      - dependency-name: "glib"

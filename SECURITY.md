@@ -222,3 +222,10 @@ build and revoke it on every update. See
 
 `cargo deny check` and `cargo audit`, both run in CI by
 `.github/workflows/supply-chain.yml` on every push and weekly on a schedule.
+
+One advisory is accepted rather than fixed: `glib 0.18.5` (RUSTSEC-2024-0429),
+reachable only through Tauri's Linux desktop webview stack, which is a CI test
+surface and not a shipping target. `.github/dependabot.yml` ignores that one
+crate so the unresolvable retry stops; every other dependency still alerts.
+[ADR-0014](docs/adr/0014-accept-the-glib-advisory-as-unshipped.md) has the
+argument and what would reverse it.
