@@ -477,6 +477,13 @@ Three separate hard-won rules, all on the same subsystem:
 - **Rewrite note.** Model this as a platform trait with a null implementation, so
   the cfg-noise disappears instead of being ported. But keep the *contract*:
   non-macOS = silent no-op, never a panic or an error.
+- **Amended for Windows (ADR-0013).** "Non-macOS" now means "no real backend",
+  not "not macOS": Windows has one, and §2's invariants bind it exactly as they
+  bind `NSPasteboard`. §3.4's opt-out markers are `Clipboard Viewer Ignore`,
+  `ExcludeClipboardContentFromMonitorProcessing` and the `DWORD`-valued
+  `CanIncludeInClipboardHistory` / `CanUploadToCloudClipboard`. The no-op
+  contract still holds for every other target, which is what keeps Linux CI a
+  test surface.
 
 ### 3.12 Cocoa string constants must not be reallocated per tick
 
