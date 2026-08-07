@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CopyPaste",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 460,
+        "resizable": true,
+        "alwaysOnTop": false,
+        "decorations": true,
+        "transparent": false,
+        "shadow": true,
+        "center": true,
+        "skipTaskbar": false,
+        "visible": true,
+        "dragDropEnabled": false,
+        "contentProtected": true
+      }
+    ]
+  },
+  "bundle": {
+    "publisher": "CopyPaste",
+    "targets": ["msi", "nsis"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

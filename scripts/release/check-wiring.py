@@ -102,8 +102,10 @@ for wf, doc in docs.items():
                 "; ".join(hits) + "  — use find -print -quit")
 
 # --- runner images ----------------------------------------------------------
-KNOWN = {"ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "macos-14", "macos-15", "macos-latest"}
+KNOWN = {"ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "macos-14", "macos-15", "macos-latest",
+         "windows-latest", "windows-2025", "windows-2022"}
 mac = set()
+win = set()
 for wf, doc in docs.items():
     for jn, j in (doc.get("jobs") or {}).items():
         r = j.get("runs-on")
@@ -112,8 +114,12 @@ for wf, doc in docs.items():
         rec(r in KNOWN, "{}: {} runs on a known image ({})".format(wf, jn, r), "unrecognised runner label")
         if r.startswith("macos"):
             mac.add(r)
+        if r.startswith("windows"):
+            win.add(r)
 rec(len(mac) <= 1, "every macOS job uses the same runner image {}".format(sorted(mac)),
     "mixed macOS runners: {}".format(sorted(mac)))
+rec(len(win) <= 1, "every Windows job uses the same runner image {}".format(sorted(win)),
+    "mixed Windows runners: {}".format(sorted(win)))
 
 # --- one ref per action, across every workflow ------------------------------
 refs = {}
