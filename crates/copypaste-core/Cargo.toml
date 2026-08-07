@@ -96,6 +96,24 @@ rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"]
 keyring-core = "1"
 android-native-keyring-store = "1"
 
+# Windows DPAPI backend for the device secret, target-gated for the same reason
+# as the two above. `windows-sys` is Microsoft's own binding to `crypt32.dll`,
+# and it adds no package to the tree: 0.61 is already resolved through `tokio`
+# and `tempfile`, so this is a dependency edge and nothing more.
+#
+# CLAUDE.md rule 1, exemption 1, for the two calls that stay hand-written here.
+# `windows-dpapi` is the only maintained safe wrapper and does not fit: it copies
+# the unsealed buffer out and `LocalFree`s it without wiping, which leaves the
+# device secret in the process heap on every start and loses I-12 on the one
+# value that matters most. It also drops the Windows error code into
+# `anyhow::Error`, and that code is what separates "this blob will never open"
+# from "the master key is not loaded yet" (I-20).
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security_Cryptography",
+] }
+
 [features]
 # Compile `crypto/keystore/android.rs` on a host that is not Android. It
 # selects nothing — the file backend is still what a Linux build uses — and
