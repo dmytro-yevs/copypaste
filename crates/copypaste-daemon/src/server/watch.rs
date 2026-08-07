@@ -22,9 +22,9 @@
 //! the ordinary methods' — and a push channel cannot quietly become a second,
 //! laxer one.
 
+use copypaste_ipc::transport::OwnedWriteHalf;
 use copypaste_ipc::{EventData, Response, ResponseData};
 use futures_util::StreamExt;
-use tokio::net::unix::OwnedWriteHalf;
 use tokio::sync::broadcast::{error::RecvError, Receiver};
 use tokio::sync::watch;
 use tracing::debug;

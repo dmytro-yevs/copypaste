@@ -16,6 +16,13 @@ thiserror.workspace = true
 directories.workspace = true
 unicode-segmentation.workspace = true
 ts-rs = { workspace = true, optional = true }
+# `transport` only: the endpoint type every consumer of this crate already
+# frames over, so that "what a local IPC connection is" has one definition
+# rather than one per crate.
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [features]
 typescript = ["dep:ts-rs"]
