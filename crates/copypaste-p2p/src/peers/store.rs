@@ -27,8 +27,9 @@ use std::sync::RwLock;
 
 use zeroize::Zeroizing;
 
-use super::file::{parse, warn_if_permissive, write_atomically, State};
-use super::{Peer, PeerStoreError, RevokedDevice, MAX_PAIRINGS, PAIRING_CODE_TTL};
+use super::expiry::{is_expired, ttl_ms};
+use super::file::{only_last_seen_moved, parse, warn_if_permissive, write_atomically, State};
+use super::{Peer, PeerStoreError, RevokedDevice, MAX_PAIRINGS};
 use crate::now_ms;
 use crate::transport::PskCandidate;
 
@@ -98,6 +99,11 @@ impl PeerStore {
             .collect();
         peers.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
         peers
+    }
+
+    #[must_use]
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
     }
 
     /// One usable peer by pairing id. `None` once an unredeemed code has aged
@@ -447,18 +453,6 @@ impl PeerStore {
     }
 }
 
-fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
-    let Some(stored) = state.peers.get(&incoming.pairing_id) else {
-        return false;
-    };
-    stored.last_seen_ms > 0
-        && incoming.last_seen_ms > 0
-        && !state.pending.contains_key(&incoming.pairing_id)
-        && stored.name == incoming.name
-        && stored.last_addr == incoming.last_addr
-        && stored.psk_matches(&incoming.psk)
-}
-
 /// Pairings that count against [`MAX_PAIRINGS`]: the ones whose keys a
 /// handshake is still offered. An aged-out code authenticates nothing and is
 /// erased by [`PeerStore::prune_expired`], so holding a slot open for it would
@@ -469,18 +463,6 @@ fn usable_count(state: &State, now_ms: i64) -> usize {
         .keys()
         .filter(|id| !is_expired(state, id, now_ms))
         .count()
-}
-
-/// Has this pairing's unredeemed code aged out?
-fn is_expired(state: &State, pairing_id: &str, now_ms: i64) -> bool {
-    state
-        .pending
-        .get(pairing_id)
-        .is_some_and(|deadline| *deadline <= now_ms)
-}
-
-fn ttl_ms() -> i64 {
-    i64::try_from(PAIRING_CODE_TTL.as_millis()).unwrap_or(i64::MAX)
 }
 
 /// Peer count only. The path is not printed — `CLAUDE.md` rule 4 keeps paths
