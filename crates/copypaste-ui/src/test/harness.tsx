@@ -30,6 +30,7 @@ export function item(over: Partial<Item> = {}): Item {
     source_app_bundle_id: null,
     source_app_name: null,
     too_large_to_sync: false,
+    truncated: false,
     ...over,
   };
 }

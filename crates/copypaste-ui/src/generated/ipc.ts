@@ -24,7 +24,7 @@ export type SourceAppIcon = { png_base64: string, width: number, height: number,
 
 export type InstalledSourceApp = { package_id: string, label: string, };
 
-export type Item = { id: string, content: string | null, content_type: string, created_at: number, pinned: boolean, is_sensitive: boolean, origin_device_id: string, origin_device_name: string | null, source_app_bundle_id: string | null, source_app_name: string | null, too_large_to_sync: boolean, };
+export type Item = { id: string, content: string | null, content_type: string, created_at: number, pinned: boolean, is_sensitive: boolean, origin_device_id: string, origin_device_name: string | null, source_app_bundle_id: string | null, source_app_name: string | null, too_large_to_sync: boolean, truncated: boolean, };
 
 export type ItemPage = { items: Array<Item>, total: number, skipped_undecryptable: number, next_cursor: string | null, };
 

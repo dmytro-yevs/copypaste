@@ -68,6 +68,7 @@ impl Inner {
             source_app_name: row.app_name,
             // Nothing here talks to a cloud account.
             too_large_to_sync: false,
+            truncated: false,
         })
     }
 

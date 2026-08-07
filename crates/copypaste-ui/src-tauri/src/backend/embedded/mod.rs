@@ -94,6 +94,9 @@ impl Backend for EmbeddedBackend {
                 .map_err(|_| BackendError::internal("history could not be read"))?;
             let next = page.next.map(|cursor| cursor.token());
             let mut wire = inner.to_wire_page(page.items);
+            for item in &mut wire.items {
+                item.truncated = copypaste_ipc::limits::bound_preview(&mut item.content);
+            }
             // From the store's page, never from what survived decryption: rows
             // that would not open still occupy the window.
             wire.next_cursor = next;
