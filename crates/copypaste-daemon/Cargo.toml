@@ -63,3 +63,17 @@ plist.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+
+# The pipe's access list: this account's SID, and the SDDL parser that turns it
+# into a security descriptor. Microsoft's own binding, already resolved through
+# tokio. CLAUDE.md rule 1, exemption 1 for the calls that stay hand-written:
+# `windows-permissions` and `windows-acl` are the only wrappers that cover this,
+# neither has had a release since 2021, and neither removes an unsafe call —
+# their SID and descriptor conversions carry the same invariants.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Threading",
+] }

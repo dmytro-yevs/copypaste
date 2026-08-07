@@ -1,14 +1,13 @@
 //! The local IPC endpoint, as a type the daemon, the CLI and the app can all
 //! name without knowing what it is underneath.
 //!
-//! Unix is a `0600` socket at [`socket_path`](crate::socket_path); Windows will
-//! be a named pipe and is not implemented yet, so every entry point here fails
-//! with [`unsupported`] on it.
+//! Unix is a `0600` socket at [`socket_path`](crate::socket_path); Windows is a
+//! named pipe, and [`pipe`] is where the two differ.
 //!
 //! **Binding is not here.** The daemon owns that policy — refusing to steal a
-//! live socket, the `flock` critical section, the `0600` mode — and a named
-//! pipe upholds none of it by the same mechanism. This module owns only what a
-//! bound endpoint and a dialled connection *are*.
+//! live endpoint, the `flock` critical section, the `0600` mode, and on Windows
+//! the access list every pipe instance is created with. This module owns only
+//! what a bound endpoint and a dialled connection *are*.
 
 use std::io;
 use std::path::Path;
@@ -17,14 +16,17 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-/// What a caller is told when the platform has no transport yet.
+#[cfg(windows)]
+pub mod pipe;
+
+/// What a caller is told when the platform has no transport.
 ///
 /// It names no path: the socket path discloses the local username
 /// (CLAUDE.md rule 4), and this string reaches a user through the CLI's and the
 /// app's connect-failure paths.
 pub const MSG_UNSUPPORTED: &str = "local IPC is not implemented on this platform yet";
 
-/// The one failure an unimplemented platform returns.
+/// The one failure a platform with no transport returns.
 ///
 /// `io::ErrorKind::Unsupported` rather than a new error enum: every caller of
 /// this module already handles `io::Error`, and a bespoke type would have to be
@@ -41,9 +43,20 @@ mod imp {
     pub type WriteHalf = tokio::net::unix::OwnedWriteHalf;
 }
 
-// `Infallible` is uninhabited, so no value of any type below can exist off Unix
-// and `match self.0 {}` proves each body dead rather than panicking in one.
-#[cfg(not(unix))]
+// A pipe has no `into_split` of its own, so the halves are `tokio::io::split`'s
+// and the two platforms' half types are not the same shape.
+#[cfg(windows)]
+mod imp {
+    pub type Listener = super::pipe::Listener;
+    pub type Stream = super::pipe::Stream;
+    pub type ReadHalf = tokio::io::ReadHalf<super::pipe::Stream>;
+    pub type WriteHalf = tokio::io::WriteHalf<super::pipe::Stream>;
+}
+
+// `Infallible` is uninhabited, so no value of any type below can exist on a
+// third platform and `match self.0 {}` proves each body dead rather than
+// panicking in one.
+#[cfg(not(any(unix, windows)))]
 mod imp {
     pub type Listener = std::convert::Infallible;
     pub type Stream = std::convert::Infallible;
@@ -76,6 +89,15 @@ impl From<tokio::net::UnixListener> for Listener {
     }
 }
 
+/// As above: the daemon has already created the first instance, which is what
+/// makes it the only daemon.
+#[cfg(windows)]
+impl From<pipe::Listener> for Listener {
+    fn from(listener: pipe::Listener) -> Self {
+        Self(listener)
+    }
+}
+
 impl Listener {
     /// Wait for the next connection.
     pub async fn accept(&self) -> io::Result<Stream> {
@@ -83,7 +105,11 @@ impl Listener {
         {
             self.0.accept().await.map(|(stream, _)| Stream(stream))
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            self.0.accept().await.map(Stream)
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             match self.0 {}
         }
@@ -96,7 +122,11 @@ pub async fn connect(path: &Path) -> io::Result<Stream> {
     {
         tokio::net::UnixStream::connect(path).await.map(Stream)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        pipe::connect(path).await.map(Stream)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = path;
         Err(unsupported())
@@ -110,7 +140,12 @@ impl Stream {
             let (reader, writer) = self.0.into_split();
             (OwnedReadHalf(reader), OwnedWriteHalf(writer))
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            let (reader, writer) = tokio::io::split(self.0);
+            (OwnedReadHalf(reader), OwnedWriteHalf(writer))
+        }
+        #[cfg(not(any(unix, windows)))]
         {
             match self.0 {}
         }
@@ -123,6 +158,15 @@ impl Stream {
         let (a, b) = tokio::net::UnixStream::pair()?;
         Ok((Self(a), Self(b)))
     }
+
+    /// As above. Async because a pipe pair is only connected once
+    /// `ConnectNamedPipe` has been through the reactor, and `socketpair` needs
+    /// no such step.
+    #[cfg(windows)]
+    pub async fn pair() -> io::Result<(Self, Self)> {
+        let (a, b) = pipe::pair().await?;
+        Ok((Self(a), Self(b)))
+    }
 }
 
 macro_rules! delegate_read {
@@ -133,11 +177,11 @@ macro_rules! delegate_read {
                 cx: &mut Context<'_>,
                 buf: &mut ReadBuf<'_>,
             ) -> Poll<io::Result<()>> {
-                #[cfg(unix)]
+                #[cfg(any(unix, windows))]
                 {
                     Pin::new(&mut self.get_mut().0).poll_read(cx, buf)
                 }
-                #[cfg(not(unix))]
+                #[cfg(not(any(unix, windows)))]
                 {
                     let _ = (cx, buf);
                     match self.0 {}
@@ -155,11 +199,11 @@ macro_rules! delegate_write {
                 cx: &mut Context<'_>,
                 buf: &[u8],
             ) -> Poll<io::Result<usize>> {
-                #[cfg(unix)]
+                #[cfg(any(unix, windows))]
                 {
                     Pin::new(&mut self.get_mut().0).poll_write(cx, buf)
                 }
-                #[cfg(not(unix))]
+                #[cfg(not(any(unix, windows)))]
                 {
                     let _ = (cx, buf);
                     match self.0 {}
@@ -167,11 +211,11 @@ macro_rules! delegate_write {
             }
 
             fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-                #[cfg(unix)]
+                #[cfg(any(unix, windows))]
                 {
                     Pin::new(&mut self.get_mut().0).poll_flush(cx)
                 }
-                #[cfg(not(unix))]
+                #[cfg(not(any(unix, windows)))]
                 {
                     let _ = cx;
                     match self.0 {}
@@ -179,11 +223,11 @@ macro_rules! delegate_write {
             }
 
             fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-                #[cfg(unix)]
+                #[cfg(any(unix, windows))]
                 {
                     Pin::new(&mut self.get_mut().0).poll_shutdown(cx)
                 }
-                #[cfg(not(unix))]
+                #[cfg(not(any(unix, windows)))]
                 {
                     let _ = cx;
                     match self.0 {}
@@ -234,7 +278,24 @@ mod tests {
         dialled.await.unwrap();
     }
 
-    #[cfg(not(unix))]
+    /// The halves are `tokio::io::split`'s here rather than the stream's own,
+    /// so that they still carry bytes is worth one test of its own.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_pair_round_trips_bytes_through_the_seam() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (server, client) = Stream::pair().await.unwrap();
+        let (_reader, mut writer) = client.into_split();
+        let (mut reader, _writer) = server.into_split();
+
+        writer.write_all(b"ping\n").await.unwrap();
+        let mut got = [0u8; 5];
+        reader.read_exact(&mut got).await.unwrap();
+        assert_eq!(&got, b"ping\n");
+    }
+
+    #[cfg(not(any(unix, windows)))]
     #[tokio::test]
     async fn dialling_reports_the_platform_rather_than_a_missing_endpoint() {
         let err = connect(Path::new("anything")).await.unwrap_err();

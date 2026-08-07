@@ -123,8 +123,13 @@ Single canonical resolver: `copypaste_ipc::paths::socket_path()`
 | Step | Rule |
 |---|---|
 | 1 | `COPYPASTE_SOCKET` env var, if set (even if empty string → used verbatim) |
-| 2 (Windows) | `\\.\pipe\copypaste-daemon` (named-pipe pseudo-path) |
-| 3 (Unix) | `app_support_dir()/daemon.sock` |
+| 2 | `app_support_dir()/daemon.sock`, on every platform |
+
+v2 has no Windows arm here. The resolver stays platform-neutral and the Windows
+transport derives a pipe name from whatever it returns
+(`copypaste_ipc::transport::pipe::name_for`), because v1's fixed
+`\\.\pipe\copypaste-daemon` is machine-global: two accounts on one machine would
+contend for one endpoint, and the second daemon would refuse to start.
 
 `app_support_dir()` (`paths.rs:41`):
 
