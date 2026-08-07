@@ -116,7 +116,7 @@ fn summaries(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(history as u64));
         group.bench_with_input(BenchmarkId::from_parameter(history), &history, |b, _| {
-            b.iter(|| black_box(source.summaries().expect("summaries")).len());
+            b.iter(|| black_box(source.summaries(0).expect("summaries")).len());
         });
     }
     group.finish();

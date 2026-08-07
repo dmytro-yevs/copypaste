@@ -22,7 +22,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use copypaste_p2p::protocol::{ItemSummary, SyncItem};
+use copypaste_p2p::protocol::{
+    ItemSummary, SyncItem, MAX_SUMMARIES_PER_MESSAGE, MAX_SUMMARY_PAGES_PER_SESSION,
+};
 use copypaste_p2p::sync::{SyncError, SyncSource};
 use tracing::warn;
 
@@ -36,6 +38,9 @@ use crate::storage::{origin_or, Store, StoredItem};
 use crate::Keyring;
 
 const MSG_SYNC_DISABLED: &str = "sync is disabled";
+
+const MAX_SUMMARIES_PER_SESSION: i64 =
+    (MAX_SUMMARIES_PER_MESSAGE * MAX_SUMMARY_PAGES_PER_SESSION) as i64;
 
 /// How long applied versions may coalesce onto one retention sweep.
 const RETENTION_DEBOUNCE: Duration = Duration::from_millis(250);
@@ -289,12 +294,12 @@ impl SyncSource for StoreSource {
         self.device_name.clone()
     }
 
-    fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError> {
+    fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
         self.settings_if_sync_enabled()?;
         super::blocking(|| {
             let rows = self
                 .store
-                .summaries(i64::MAX)
+                .summaries_since(since_ms, None, MAX_SUMMARIES_PER_SESSION)
                 .map_err(|e| store_error(e, "could not read item summaries for a sync session"))?;
             Ok(rows
                 .into_iter()
@@ -422,7 +427,7 @@ mod tests {
         let id = add(&f, "mine", "shared thing", 1_000);
         let source = f.source();
 
-        let summaries = source.summaries().unwrap();
+        let summaries = source.summaries(0).unwrap();
         assert!(summaries.iter().any(|s| s.item_id == id));
 
         let items = source.fetch(std::slice::from_ref(&id)).unwrap();
@@ -446,7 +451,7 @@ mod tests {
         let source = f.source();
 
         assert!(
-            !source.summaries().unwrap().iter().any(|s| s.item_id == id),
+            !source.summaries(0).unwrap().iter().any(|s| s.item_id == id),
             "a sensitive item reached the advertised set"
         );
         assert!(
@@ -463,7 +468,7 @@ mod tests {
         let source = f.source();
 
         assert!(source
-            .summaries()
+            .summaries(0)
             .unwrap()
             .iter()
             .any(|summary| summary.item_id == id && summary.deleted));
@@ -556,7 +561,7 @@ mod tests {
         );
 
         for result in [
-            source.summaries().map(|_| ()),
+            source.summaries(0).map(|_| ()),
             source.fetch(&["anything".to_string()]).map(|_| ()),
             source
                 .apply(peer_item("peer-item", "not stored", 1_700_000_000_000))
@@ -746,7 +751,7 @@ mod tests {
         );
         // And it does not go back out again.
         assert!(!source
-            .summaries()
+            .summaries(0)
             .unwrap()
             .iter()
             .any(|s| s.item_id == "leaky"));
@@ -758,7 +763,7 @@ mod tests {
         let id = add(&f, "doomed", "doomed", 1_000);
         let source = f.source();
         let local = source
-            .summaries()
+            .summaries(0)
             .unwrap()
             .into_iter()
             .find(|s| s.item_id == id)
@@ -777,7 +782,7 @@ mod tests {
 
         assert!(f.store.get(&id).unwrap().is_none());
         let summary = source
-            .summaries()
+            .summaries(0)
             .unwrap()
             .into_iter()
             .find(|s| s.item_id == id)
