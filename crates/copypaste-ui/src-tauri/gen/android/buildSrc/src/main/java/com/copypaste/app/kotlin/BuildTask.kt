@@ -1,12 +1,18 @@
 import java.io.File
+import javax.inject.Inject
 import org.apache.tools.ant.taskdefs.condition.Os
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
 import org.gradle.api.logging.LogLevel
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskAction
+import org.gradle.process.ExecOperations
 
-open class BuildTask : DefaultTask() {
+// Gradle 9 removed Project.exec, which the generated template used. ExecOperations
+// is the replacement, and it has to be constructor-injected — a Tauri
+// `android init` will regenerate this file and undo it.
+open class BuildTask @Inject constructor(private val execOperations: ExecOperations) :
+    DefaultTask() {
     @Input
     var rootDirRel: String? = null
     @Input
@@ -57,7 +63,7 @@ open class BuildTask : DefaultTask() {
         val release = release ?: throw GradleException("release cannot be null")
         val args = listOf("run", "--", "tauri", "android", "android-studio-script");
 
-        project.exec {
+        execOperations.exec {
             workingDir(File(project.projectDir, rootDirRel))
             executable(executable)
             args(args)
