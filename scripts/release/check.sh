@@ -325,6 +325,10 @@ check "android-smoke.sh --self-test" ./scripts/release/android-smoke.sh --self-t
 # The release leg is a second entry point onto the same detectors. Running its
 # --self-test too is what catches the entry point itself being broken.
 check "android-smoke-release.sh --self-test" ./scripts/release/android-smoke-release.sh --self-test
+# The four surfaces README.md calls unverified, and the same reason again: a
+# parcel reader that never finds a canary, or a flag reader that says SECURE
+# about everything, would turn the rung assertions into decoration.
+check "android-rungs.sh --self-test" ./scripts/release/android-rungs.sh --self-test
 
 # Comment lines are excluded: the workflow explains at length why it does not
 # do this, and the explanation is not the thing being checked for.

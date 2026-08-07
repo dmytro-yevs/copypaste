@@ -369,15 +369,25 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          # The harness attaches to the app the smoke test leaves running, so
-          # the order is load-bearing and so is `set -e`: without it the UI run
-          # would report last and a failed smoke test would look green.
+          # Order is load-bearing: the UI harness attaches to the app the smoke
+          # test leaves running, and android-rungs.sh force-stops Settings and
+          # drives the tile, so it goes last. It installs nothing — it drives the
+          # package the smoke test put there, so a reinstall cannot wipe the
+          # store its tile assertion writes to.
+          #
+          # Every leg runs whatever the one before it concluded, because a rung
+          # failure, a launch failure and a UI failure are different reports and
+          # one must not hide the other. That is why there is no `set -e`: the
+          # statuses are collected and the last line is what fails the job.
           script: |
             # dash, not bash: the emulator-runner action runs this with
-            # /usr/bin/sh, which has no `pipefail`. Nothing here pipes.
-            set -eu
-            ./scripts/release/android-smoke.sh
-            npm --prefix e2e-android test
+            # /usr/bin/sh, which has no `pipefail`. Nothing here pipes, and the
+            # three legs collect their own statuses so all three always run.
+            set -u
+            ./scripts/release/android-smoke.sh; smoke=$?
+            npm --prefix e2e-android test; ui=$?
+            APK= SMOKE_OUT=artifacts/android-rungs ./scripts/release/android-rungs.sh; rungs=$?
+            [ $smoke -eq 0 ] && [ $ui -eq 0 ] && [ $rungs -eq 0 ]
         env:
           APK: dist/copypaste-emulator-x86_64-debug.apk
           SMOKE_OUT: artifacts/android-smoke
@@ -392,6 +402,7 @@ jobs:
           path: |
             artifacts/android-smoke
             artifacts/android-ui
+            artifacts/android-rungs
           if-no-files-found: warn
           retention-days: 14
 
