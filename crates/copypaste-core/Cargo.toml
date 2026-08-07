@@ -52,6 +52,20 @@ image.workspace = true
 keyring-core = { version = "1", optional = true }
 android-native-keyring-store = { version = "1", optional = true }
 
+# Windows has no system OpenSSL to link SQLCipher against and no third branch
+# in libsqlite3-sys's build.rs to fall into — it panics on a missing
+# OPENSSL_DIR. Vendored here for the same reason Android vendors below, and
+# scoped the same way so macOS keeps CommonCrypto. See ADR-0007.
+[target.'cfg(target_os = "windows")'.dependencies]
+rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
+
+# sha2's `asm` backend, for every target that can assemble it. The feature
+# pulls sha2-asm, whose sources are GNU `.S` files that cl.exe rejects, so
+# windows-msvc has to resolve sha2 without it. Feature unification carries this
+# to the rest of the workspace, exactly as the rusqlite tables around it do.
+[target.'cfg(not(windows))'.dependencies]
+sha2 = { workspace = true, features = ["asm"] }
+
 # macOS Keychain backend for the device secret. Target-gated, not feature-gated:
 # it is already absent from a Linux build, and the feature that used to guard it
 # was never passed by any release script — so every shipped macOS binary wrote
