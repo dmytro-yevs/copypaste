@@ -1,13 +1,13 @@
-//! The global hotkey, and the guard that keeps it permission-free.
+//! The global hotkey, and the per-platform policy about which keys it will
+//! bind.
 //!
-//! # The finding this file exists to enforce
+//! # macOS: the finding this file exists to enforce
 //!
 //! ADR-0002 left one open question: whether `tauri-plugin-global-shortcut`
 //! costs an Accessibility grant on macOS, which — for an ad-hoc-signed app
 //! whose cdhash changes on every build — would be silently revoked on every
 //! update (ADR-0001). The crate has now been read. The answer is
-//! **mostly no, with one sharp edge**, and the edge is why this is a module
-//! rather than a line in the ADR.
+//! **mostly no, with one sharp edge**.
 //!
 //! `tauri-plugin-global-shortcut` 2.3.2 delegates to `global-hotkey` 0.8.0. In
 //! `global-hotkey-0.8.0/src/platform_impl/macos/mod.rs`:
@@ -17,51 +17,59 @@
 //! * `register()` (line 83) looks the key up in `key_to_scancode`, and for
 //!   every ordinary key calls **`RegisterEventHotKey`** (line 116) — the one
 //!   public global-hotkey API that needs no Accessibility, because the app is
-//!   told about exactly one combination and never sees other input. This is the
-//!   path ADR-0001's table already assumed.
+//!   told about exactly one combination and never sees other input.
 //! * **But** if `key_to_scancode` returns `None` and the key is a media key
 //!   (line 140), `register` falls through to `start_watching_media_keys()`,
-//!   which calls **`CGEventTapCreate`** (line 206) at
-//!   `CGEventTapLocation::Session` with `CGEventTapOptions::Default` — an
-//!   *active* tap, not a listener. That requires Accessibility.
+//!   which calls **`CGEventTapCreate`** (line 206) with
+//!   `CGEventTapOptions::Default` — an *active* tap. That requires
+//!   Accessibility.
 //!
-//! So the permission cost is not a property of the crate; it is a property of
-//! **which key is registered**. Five keys — `MediaPlayPause`,
-//! `MediaTrackNext`, `MediaTrackPrevious`, `MediaFastForward`, `MediaRewind` —
-//! take the tap. Every other key takes Carbon.
+//! So the cost is not a property of the crate; it is a property of **which key
+//! is registered**. A comment cannot prevent a shortcut recorder from offering
+//! one of those five keys, but [`refusal`] can, and it is checked on the `Code`
+//! rather than on a spelling so it cannot be sidestepped.
 //!
-//! # Why a guard rather than a note
+//! `RegisterEventHotKey` also cannot bind modifier-only shortcuts, so no
+//! recorder may offer "double-tap Control"; and the hotkey shows the window, it
+//! never synthesises a paste.
 //!
-//! The plugin parses shortcut strings straight through
-//! `Shortcut::from_str`, and `global-hotkey`'s parser accepts `MEDIAPLAYPAUSE`
-//! and friends (`hotkey.rs` lines 335-340). So the moment the app grows a
-//! user-configurable shortcut recorder, a user typing a media key would cause a
-//! `CGEventTap` to be created and a TCC prompt to appear — and after the next
-//! `brew upgrade` the grant would be gone and the hotkey would silently stop
-//! working. That is precisely the outcome ADR-0002 says not to ship.
+//! # Windows: a different platform, so a different policy
 //!
-//! A comment cannot prevent that. [`is_permission_free`] can, and
-//! [`register`] refuses anything it rejects. The check is on the key rather
-//! than on a blocklist of strings so that it cannot be sidestepped by
-//! spelling — `Code` is what `register` actually branches on.
+//! `global-hotkey`'s Windows path is `RegisterHotKey`
+//! (`platform_impl/windows/mod.rs` line 91), which needs no permission at all
+//! and has `VK_MEDIA_*` codes for play/pause, stop and track skip. Refusing
+//! those here would deny a Windows user a binding the OS supports, for a reason
+//! that belongs to another operating system.
 //!
-//! # Cost we accept, unchanged from ADR-0001
-//!
-//! `RegisterEventHotKey` cannot bind modifier-only shortcuts, so a future
-//! recorder must not offer "double-tap Control" and similar. And the hotkey
-//! shows the window; it never synthesises a paste.
+//! What that table has no entry for is `MediaFastForward` and `MediaRewind`, so
+//! `register` fails them with `Unknown VKCode`. They are refused up front
+//! instead, because the alternative is reporting "already in use by another
+//! app" about a key nothing has taken.
 //!
 //! # Unverified
 //!
-//! The source reading is exact and cited. What has **not** been done is running
-//! it: this host is Linux with no macOS SDK, so no build here has ever called
-//! `RegisterEventHotKey`. The claim "no TCC prompt appears" is inferred from
-//! the API used, not observed.
+//! The source reading is exact and cited. Neither platform has been run: no
+//! macOS host, and the Windows build is blocked. "No TCC prompt appears" and
+//! "`RegisterHotKey` succeeds" are both inferred from the API used.
 
 use std::str::FromStr;
 use tauri::{AppHandle, Runtime};
 
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
+
+/// Why a shortcut was refused. `&'static str`, so no path can reach it.
+pub const MSG_NEEDS_ACCESSIBILITY: &str =
+    "Media keys can't be used as the shortcut: macOS would ask for Accessibility \
+     access, and CopyPaste would lose it on every update. Pick another key.";
+
+pub const MSG_NO_VIRTUAL_KEY: &str =
+    "Windows has no key code for that media key, so it can't be bound. Pick another key.";
+
+#[cfg(target_os = "windows")]
+pub const MSG_NEEDS_MODIFIER: &str = "Choose a key combination with Ctrl, Alt, or Shift.";
+
+#[cfg(not(target_os = "windows"))]
+pub const MSG_NEEDS_MODIFIER: &str = "Choose a key combination with Cmd, Ctrl, Option, or Shift.";
 
 /// Whether binding `code` avoids the `CGEventTap` path in `global-hotkey`.
 ///
@@ -72,6 +80,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutSt
 /// rejected set is the part that is stable — a new ordinary key added upstream
 /// should be allowed here without an edit, whereas a new *media* key must not
 /// be.
+#[cfg(not(target_os = "windows"))]
 pub fn is_permission_free(code: Code) -> bool {
     !matches!(
         code,
@@ -83,12 +92,18 @@ pub fn is_permission_free(code: Code) -> bool {
     )
 }
 
-/// Why a shortcut was refused. `&'static str`, so no path can reach it.
-pub const MSG_NEEDS_ACCESSIBILITY: &str =
-    "Media keys can't be used as the shortcut: macOS would ask for Accessibility \
-     access, and CopyPaste would lose it on every update. Pick another key.";
+/// The reason this platform will not bind `code`, or `None` if it will.
+#[cfg(not(target_os = "windows"))]
+pub fn refusal(code: Code) -> Option<&'static str> {
+    (!is_permission_free(code)).then_some(MSG_NEEDS_ACCESSIBILITY)
+}
 
-pub const MSG_NEEDS_MODIFIER: &str = "Choose a key combination with Cmd, Ctrl, Option, or Shift.";
+/// Only the two media keys `key_to_vk` has no `VK_` constant for. Everything
+/// else, media keys included, goes to `RegisterHotKey` and costs nothing.
+#[cfg(target_os = "windows")]
+pub fn refusal(code: Code) -> Option<&'static str> {
+    matches!(code, Code::MediaFastForward | Code::MediaRewind).then_some(MSG_NO_VIRTUAL_KEY)
+}
 
 /// Register the app's global shortcut.
 ///
@@ -100,8 +115,8 @@ pub fn register<R: Runtime>(
     app: &AppHandle<R>,
     shortcut: Shortcut,
 ) -> std::result::Result<(), &'static str> {
-    if !is_permission_free(shortcut.key) {
-        return Err(MSG_NEEDS_ACCESSIBILITY);
+    if let Some(reason) = refusal(shortcut.key) {
+        return Err(reason);
     }
 
     app.global_shortcut()
@@ -125,8 +140,8 @@ pub fn validate(accelerator: &str) -> std::result::Result<Shortcut, &'static str
     if shortcut.mods.is_empty() {
         return Err(MSG_NEEDS_MODIFIER);
     }
-    if !is_permission_free(shortcut.key) {
-        return Err(MSG_NEEDS_ACCESSIBILITY);
+    if let Some(reason) = refusal(shortcut.key) {
+        return Err(reason);
     }
     Ok(shortcut)
 }
@@ -177,10 +192,11 @@ mod tests {
     use super::*;
     use tauri_plugin_global_shortcut::Modifiers;
 
-    /// The load-bearing test. Each of these five reaches
-    /// `start_watching_media_keys` in `global-hotkey`, which calls
-    /// `CGEventTapCreate` and therefore requires Accessibility — the permission
-    /// ADR-0001 says this app must never need.
+    /// The load-bearing test on the platforms that take the Carbon path. Each
+    /// of these five reaches `start_watching_media_keys` in `global-hotkey`,
+    /// which calls `CGEventTapCreate` and therefore requires Accessibility —
+    /// the permission ADR-0001 says this app must never need.
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn every_media_key_is_refused() {
         for code in [
@@ -190,17 +206,36 @@ mod tests {
             Code::MediaFastForward,
             Code::MediaRewind,
         ] {
-            assert!(
-                !is_permission_free(code),
+            assert_eq!(
+                refusal(code),
+                Some(MSG_NEEDS_ACCESSIBILITY),
                 "{code:?} takes the CGEventTap path and must be refused"
             );
         }
     }
 
-    /// Everything with a Carbon scancode is fine, including the keys a
+    /// Windows binds media keys through `RegisterHotKey` at no permission cost,
+    /// so refusing them would be borrowing another platform's constraint. The
+    /// two exceptions are the ones `key_to_vk` cannot map at all.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_refuses_only_the_media_keys_with_no_virtual_key_code() {
+        for code in [
+            Code::MediaPlayPause,
+            Code::MediaTrackNext,
+            Code::MediaTrackPrevious,
+        ] {
+            assert_eq!(refusal(code), None, "{code:?} has a VK_ constant");
+        }
+        for code in [Code::MediaFastForward, Code::MediaRewind] {
+            assert_eq!(refusal(code), Some(MSG_NO_VIRTUAL_KEY), "{code:?}");
+        }
+    }
+
+    /// Everything with a scancode is fine everywhere, including the keys a
     /// shortcut recorder is most likely to offer.
     #[test]
-    fn ordinary_keys_are_permission_free() {
+    fn ordinary_keys_are_never_refused() {
         for code in [
             Code::KeyV,
             Code::KeyC,
@@ -211,19 +246,20 @@ mod tests {
             Code::ArrowUp,
             Code::Digit1,
             Code::Escape,
-            // Volume keys have scancodes in `key_to_scancode` (0x48-0x4a) and
-            // are *not* in `is_media_key`, so they take Carbon too.
+            // Volume keys have scancodes in macOS's `key_to_scancode`
+            // (0x48-0x4a) and are *not* in `is_media_key`, so they take Carbon;
+            // Windows has `VK_VOLUME_*` for all three.
             Code::AudioVolumeUp,
             Code::AudioVolumeMute,
         ] {
-            assert!(is_permission_free(code), "{code:?} should be allowed");
+            assert_eq!(refusal(code), None, "{code:?} should be allowed");
         }
     }
 
     #[test]
     fn the_persisted_default_is_one_we_are_willing_to_bind() {
         let shortcut = validate(crate::shell::shortcut::DEFAULT_SHORTCUT).unwrap();
-        assert!(is_permission_free(shortcut.key));
+        assert_eq!(refusal(shortcut.key), None);
         assert_eq!(shortcut.key, Code::KeyV);
         #[cfg(target_os = "macos")]
         assert!(shortcut.mods.contains(Modifiers::SUPER));
@@ -233,23 +269,31 @@ mod tests {
     }
 
     #[test]
-    fn frontend_spelling_parses_and_media_keys_do_not() {
+    fn frontend_spelling_parses_and_a_bare_key_does_not() {
         assert!(validate("CmdOrCtrl+Shift+V").is_ok());
         assert_eq!(validate("V"), Err(MSG_NEEDS_MODIFIER));
         assert!(validate("Alt+V").is_ok());
-        assert!(matches!(
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn a_media_key_is_refused_through_the_parser_too() {
+        assert_eq!(
             validate("CmdOrCtrl+MediaPlayPause"),
             Err(MSG_NEEDS_ACCESSIBILITY)
-        ));
+        );
     }
 
     /// The refusal has to explain itself: a user told only "no" would try
     /// another media key.
     #[test]
-    fn the_refusal_message_names_the_reason_and_the_remedy() {
+    fn the_refusal_messages_name_the_reason_and_the_remedy() {
         assert!(MSG_NEEDS_ACCESSIBILITY.contains("Accessibility"));
         assert!(MSG_NEEDS_ACCESSIBILITY.contains("every update"));
-        assert!(MSG_NEEDS_ACCESSIBILITY.contains("Pick another key"));
-        assert!(!MSG_NEEDS_ACCESSIBILITY.contains('/'));
+        for message in [MSG_NEEDS_ACCESSIBILITY, MSG_NO_VIRTUAL_KEY] {
+            assert!(message.contains("Pick another key"), "{message}");
+            assert!(!message.contains('/'), "{message}");
+            assert!(!message.contains('\\'), "{message}");
+        }
     }
 }

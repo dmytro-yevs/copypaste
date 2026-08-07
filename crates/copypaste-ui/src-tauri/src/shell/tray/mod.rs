@@ -4,8 +4,12 @@
 //! `show_menu_on_left_click(false)` — with a popover, clicking the icon *is*
 //! the gesture, so the menu stays on the secondary click.
 //!
+//! `IconMenuItem`'s native icons are a documented no-op away from macOS
+//! (`muda-0.19.3/src/items/icon.rs`), so the Windows menu is the same rows
+//! carrying the same text with no images. The labels already hold the state.
+//!
 //! UNVERIFIED: Linux host. The refresh loop, the slot reconciliation and the
-//! click-to-copy path have never been run.
+//! click-to-copy path have never been run on macOS or Windows.
 
 mod menu;
 #[cfg(target_os = "macos")]
@@ -77,6 +81,14 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     tray.build(app)?;
     force_menu_image_visibility(app);
 
+    // Settings owns the same switch (CLAUDE.md rule 6), and the tray cannot see
+    // a change made there. One writer emits; every reader listens.
+    let follower = Arc::clone(&tray_menu);
+    let handle = app.clone();
+    app.listen(autostart::EVENT_CHANGED, move |_| {
+        follower.set_autostart(autostart::is_enabled(&handle));
+    });
+
     spawn_refresh(app.clone(), tray_menu);
     Ok(())
 }
@@ -89,13 +101,13 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
         menu::ID_TOGGLE => window::show_main(app),
         menu::ID_SETTINGS => window::show_main_settings(app),
         menu::ID_AUTOSTART => {
-            // The visible state is updated only after the system setting is
-            // written, so a refusal cannot leave the menu claiming it worked.
+            // No optimistic label: `set_enabled` emits the state it can read
+            // back afterwards, and the listener in `build` applies that. A
+            // refusal emits nothing, so the menu keeps saying what is true.
             let wanted = !autostart::is_enabled(app);
-            if autostart::set_enabled(app, wanted).is_err() {
-                tracing::warn!("could not change the launch-at-login setting");
+            if let Err(error) = autostart::set_enabled(app, wanted) {
+                tracing::warn!(%error, "could not change the launch-at-login setting");
             }
-            tray_menu.set_autostart(autostart::is_enabled(app));
         }
         menu::ID_PRIVATE_MODE => {
             let previous = tray_menu.private_mode_enabled();

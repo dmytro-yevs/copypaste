@@ -457,6 +457,7 @@ fn cocoa_point_to_physical(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IconRect {
     pub centre_x: f64,
+    pub top: f64,
     pub bottom: f64,
 }
 
@@ -472,11 +473,13 @@ fn to_physical(rect: tauri::Rect, scale: f64) -> IconRect {
     };
     IconRect {
         centre_x: position.x + size.width / 2.0,
+        top: position.y,
         bottom: position.y + size.height,
     }
 }
 
-/// Where the popover goes: centred under the icon, clamped onto the monitor.
+/// Where the popover goes: centred on the icon, on whichever side of it there
+/// is room for, clamped onto the monitor.
 ///
 /// Split out from [`position_under_tray`] because it is the only part with a
 /// right answer that can be checked — everything around it is platform state
@@ -497,6 +500,7 @@ pub fn anchor(
     let width = f64::from(window.width);
     let height = f64::from(window.height);
     let inset = EDGE_INSET_PX * scale;
+    let gap = GAP_PX * scale;
 
     let left = f64::from(monitor_position.x) + inset;
     let right = f64::from(monitor_position.x) + f64::from(monitor_size.width) - width - inset;
@@ -506,9 +510,29 @@ pub fn anchor(
     // `max` then `min`: on a monitor narrower than the window the window is
     // pinned to the left edge rather than pushed off the left one.
     let x = (icon.centre_x - width / 2.0).max(left).min(right.max(left));
-    let y = (icon.bottom + GAP_PX * scale).max(top).min(bottom.max(top));
+    // Windows keeps the notification area on the taskbar, which sits at the
+    // bottom of the screen by default. Hanging the popover *below* that icon
+    // puts it behind the taskbar, and the clamp then pins it to the bottom
+    // inset overlapping it. Decided from where the icon actually is, not from a
+    // `cfg`: a taskbar the user moved to the top then behaves like a menu bar,
+    // and a macOS menu bar is always in the upper half so nothing changes there.
+    let y = if in_lower_half(&icon, monitor_position, monitor_size) {
+        icon.top - gap - height
+    } else {
+        icon.bottom + gap
+    };
+    let y = y.max(top).min(bottom.max(top));
 
     PhysicalPosition::new(x.round() as i32, y.round() as i32)
+}
+
+fn in_lower_half(
+    icon: &IconRect,
+    monitor_position: &PhysicalPosition<i32>,
+    monitor_size: &PhysicalSize<u32>,
+) -> bool {
+    let centre_y = (icon.top + icon.bottom) / 2.0;
+    centre_y > f64::from(monitor_position.y) + f64::from(monitor_size.height) / 2.0
 }
 
 /// Window-event policy. Wired once in `crate::run`.
@@ -716,16 +740,61 @@ mod tests {
         }
     }
 
+    /// A menu-bar icon: 24 physical pixels tall, at the top of the screen.
+    fn menu_bar_icon(centre_x: f64) -> IconRect {
+        IconRect {
+            centre_x,
+            top: 0.0,
+            bottom: 24.0,
+        }
+    }
+
+    /// A notification-area icon on a Windows taskbar at the bottom of the
+    /// screen: 32 physical pixels tall, its bottom edge on the screen edge.
+    fn taskbar_icon(centre_x: f64, monitor_bottom: f64) -> IconRect {
+        IconRect {
+            centre_x,
+            top: monitor_bottom - 32.0,
+            bottom: monitor_bottom,
+        }
+    }
+
     #[test]
     fn the_window_is_centred_under_the_icon_and_hangs_below_it() {
         let (pos, size) = primary();
-        let icon = IconRect {
-            centre_x: 700.0,
-            bottom: 24.0,
-        };
-        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
+        let at = anchor(menu_bar_icon(700.0), WINDOW, &pos, &size, 1.0);
         assert_eq!(at.x, 700 - 210);
         assert_eq!(at.y, 24 + GAP_PX as i32);
+    }
+
+    /// The Windows default. Below the icon is behind the taskbar and past the
+    /// bottom of the display, so the popover has to open upwards.
+    ///
+    /// The notification area sits at the right end of the taskbar, so centring
+    /// on the icon would put the window off the display: 1300 + 210 is past
+    /// 1440. The right clamp, not the centring, is what places it here.
+    #[test]
+    fn an_icon_on_a_bottom_taskbar_opens_the_window_above_it() {
+        let (pos, size) = primary();
+        let at = anchor(taskbar_icon(1300.0, 900.0), WINDOW, &pos, &size, 1.0);
+        assert_eq!(at.y, 900 - 32 - GAP_PX as i32 - WINDOW.height as i32);
+        assert!(at.y + WINDOW.height as i32 <= 900 - 32, "{at:?}");
+        assert_eq!(at.x, 1440 - WINDOW.width as i32 - EDGE_INSET_PX as i32);
+    }
+
+    /// The same taskbar moved to the top of the screen is a menu bar as far as
+    /// this calculation is concerned, which is why the side is chosen from the
+    /// icon's position rather than from the target platform.
+    #[test]
+    fn an_icon_in_the_upper_half_still_opens_downwards() {
+        let (pos, size) = primary();
+        let icon = IconRect {
+            centre_x: 1300.0,
+            top: 0.0,
+            bottom: 32.0,
+        };
+        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
+        assert_eq!(at.y, 32 + GAP_PX as i32);
     }
 
     #[cfg(target_os = "macos")]
@@ -761,11 +830,7 @@ mod tests {
     #[test]
     fn an_icon_near_the_right_edge_does_not_push_the_window_off_screen() {
         let (pos, size) = primary();
-        let icon = IconRect {
-            centre_x: 1430.0,
-            bottom: 24.0,
-        };
-        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
+        let at = anchor(menu_bar_icon(1430.0), WINDOW, &pos, &size, 1.0);
         assert!(
             at.x + 420 <= 1440,
             "the window ran off the right edge: x={}",
@@ -779,11 +844,7 @@ mod tests {
     #[test]
     fn a_monitor_with_a_negative_origin_keeps_the_window_on_that_monitor() {
         let (pos, size) = secondary_on_the_left();
-        let icon = IconRect {
-            centre_x: -2555.0,
-            bottom: 24.0,
-        };
-        let at = anchor(icon, WINDOW, &pos, &size, 1.0);
+        let at = anchor(menu_bar_icon(-2555.0), WINDOW, &pos, &size, 1.0);
         assert!(at.x >= -2560, "{at:?}");
         assert!(at.x + 420 <= 0, "{at:?}");
     }
@@ -795,6 +856,7 @@ mod tests {
         let (pos, size) = primary();
         let icon = IconRect {
             centre_x: 700.0,
+            top: 0.0,
             bottom: 48.0,
         };
         let at = anchor(icon, WINDOW, &pos, &size, 2.0);
@@ -811,6 +873,7 @@ mod tests {
         let size = PhysicalSize::new(320, 240);
         let icon = IconRect {
             centre_x: 160.0,
+            top: 0.0,
             bottom: 12.0,
         };
         let at = anchor(icon, WINDOW, &pos, &size, 1.0);

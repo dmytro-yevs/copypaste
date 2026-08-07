@@ -15,6 +15,7 @@ import { ChoiceRow } from "@/components/settings/ChoiceRow";
 import { Row } from "@/components/settings/Row";
 import { Section } from "@/components/settings/Section";
 import { SourceExclusions } from "@/components/settings/SourceExclusions";
+import { SwitchRow } from "@/components/settings/SwitchRow";
 import {
   DEDUP_WINDOW_SECS,
   HISTORY_LIMIT,
@@ -391,39 +392,5 @@ function CaptureControls() {
         </Row>
       )}
     </Section>
-  );
-}
-
-interface SwitchRowProps {
-  title: string;
-  description: string;
-  id: string;
-  checked: boolean;
-  disabled?: boolean;
-  badge?: React.ReactNode;
-  note?: React.ReactNode;
-  onChange: (checked: boolean) => void;
-}
-
-function SwitchRow({
-  title,
-  description,
-  id,
-  checked,
-  disabled,
-  badge,
-  note,
-  onChange,
-}: SwitchRowProps) {
-  return (
-    <Row title={title} description={description} badge={badge} note={note}>
-      <Switch
-        id={id}
-        aria-label={title}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-      />
-    </Row>
   );
 }
