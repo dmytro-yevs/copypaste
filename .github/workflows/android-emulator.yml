@@ -257,10 +257,9 @@ jobs:
           path: ~/.gradle/dependency-check-data
           key: dependency-check-12-${{ runner.os }}-${{ steps.dc-day.outputs.day }}
 
-      # failBuildOnCVSS is 0, so the first run that reaches the reporting stage
-      # is a failing run and every step below it is skipped. Collect the report
-      # here or the CVE list exists only in the log. Ignore, not warn: a run
-      # that dies before reporting writes nothing.
+      # A failing audit skips every step below it, and the CVE list would then
+      # exist only in the log. Ignore, not warn: a run that dies before
+      # reporting writes nothing.
       - name: Keep the audit report whatever it concluded
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
