@@ -143,6 +143,13 @@ pub trait CloudSource: Send + Sync {
     /// declines to take is [`Applied::Declined`], not an error.
     fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError>;
 
+    fn apply_remote_batch(&self, items: Vec<LocalItem>) -> Result<Vec<Applied>, SyncError> {
+        items
+            .into_iter()
+            .map(|item| self.apply_remote(item))
+            .collect()
+    }
+
     /// The reconciliation cursor, in Unix milliseconds. Zero on a first run.
     ///
     /// # Errors
