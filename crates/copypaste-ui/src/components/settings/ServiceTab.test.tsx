@@ -1,10 +1,9 @@
 /**
  * The service's settings, which had no interface at all until this tab.
  *
- * Three of these are the properties the daemon's own contract is built on, seen
- * from the screen that uses it: a value that round-trips, a write that carries
- * only the field it names, and the one field whose change does not take effect
- * until the service restarts. They were previously exercised only by
+ * Two of these are the properties the daemon's own contract is built on, seen
+ * from the screen that uses it: a value that round-trips, and a write that
+ * carries only the field it names. They were previously exercised only by
  * `e2e/tests/daemon-config.e2e.test.ts` driving the CLI, because no Tauri
  * command routed `GetConfig` or `SetConfig`.
  *
@@ -269,22 +268,27 @@ describe("payload-limit validation", () => {
   });
 });
 
-describe("liveness (the one field marked NeedsRestart)", () => {
-  it("marks the field itself, before anyone touches it", async () => {
+describe("liveness", () => {
+  /**
+   * `lan_visibility` was marked `NeedsRestart`, and the row carried a badge
+   * saying so that named the field in the component. Discovery became
+   * startable behind `&self` in 60a2da93 and the daemon has applied the change
+   * on the spot ever since; the badge went on claiming otherwise, because
+   * nothing tied it to the answer the service gives.
+   */
+  it("claims no restart for a field the service applies live", async () => {
     withUser(<ServiceTab />);
     const lan = await screen.findByRole("switch", { name: "Visible on this network" });
-    // The badge has to be beside this control, not in a footnote: a rule read
-    // after the switch appeared to do nothing is a rule read too late.
-    const row = lan.closest("div.flex-wrap");
-    expect(row?.textContent).toContain("Needs a restart");
+    expect(lan.closest("div.flex-wrap")?.textContent).not.toContain("restart");
   });
 
   it("offers the restart once the service says the change is waiting on one", async () => {
-    setConfig.mockResolvedValue(applied({ lan_visibility: false }, ["lan_visibility"]));
+    // No field is marked `NeedsRestart` today, so which field this names is
+    // arbitrary. What is asserted is that the offer follows the service's list
+    // rather than a field the screen names for itself.
+    setConfig.mockResolvedValue(applied({ sound_on_copy: true }, ["sound_on_copy"]));
     const { user } = withUser(<ServiceTab />);
-    await user.click(
-      await screen.findByRole("switch", { name: "Visible on this network" }),
-    );
+    await user.click(await screen.findByRole("switch", { name: "Sound on capture" }));
     expect(
       await screen.findByRole("button", { name: "Restart the service" }),
     ).toBeTruthy();
