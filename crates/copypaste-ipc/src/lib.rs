@@ -7,9 +7,10 @@
 //! this crate and on nothing else for wire types, so a change here breaks
 //! compilation on both sides rather than drifting.
 //!
-//! Framing is newline-delimited JSON over a Unix socket. That much v1 got
-//! right; what it got wrong was hand-rolling the frame codec, so the daemon
-//! uses `tokio_util::codec::LinesCodec` instead of a byte-scanning read loop.
+//! Framing is newline-delimited JSON over the local endpoint [`transport`]
+//! names. That much v1 got right; what it got wrong was hand-rolling the frame
+//! codec, so the daemon uses `tokio_util::codec::LinesCodec` instead of a
+//! byte-scanning read loop.
 
 #![forbid(unsafe_code)]
 
@@ -21,6 +22,7 @@ pub mod paths;
 pub mod payload;
 pub mod redact;
 mod response;
+pub mod transport;
 
 pub use paths::{data_dir, database_path, socket_path};
 
