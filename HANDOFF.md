@@ -33,10 +33,28 @@ FIRST THING ON THE NEW MACHINE — nothing below matters until this passes:
 
 Then see what CI made of the push: `gh run list --limit 10`.
 
-GitHub flagged 1 moderate dependabot vulnerability on the default branch at push time. It
-predates this work — the only dependency added was `sha2-asm 0.6.4`, and `cargo audit` and
-`cargo deny` were clean on it. It is likely the same thing the Android audit will report
-once it reaches its reporting stage for the first time.
+GitHub flagged 1 moderate dependabot vulnerability on the default branch. **It predates this
+work and it is diagnosed:** the alert is on `glib`, and Dependabot's own run fails with
+`security_update_not_possible` — lowest non-vulnerable version 0.20.0, latest resolvable
+0.18.5, no conflicting dependencies reported.
+
+The lock pins `glib 0.18.5` through the entire GTK 0.18 stack: `gtk 0.18.2`,
+`webkit2gtk 2.0.2`, `gdk`, `gdk-pixbuf`, `gdkx11`, `atk`, `cairo-rs`, `pango`, `soup3`,
+`javascriptcore-rs`, `libappindicator`. That is Tauri's **Linux desktop** webview stack —
+and CLAUDE.md rule 7 says this project ships **macOS and Android, not Linux desktop**. So
+the vulnerable subtree is never shipped; it is present because the workspace builds for a
+target the product does not support, and because `browser-webkitgtk.yml` exercises it in CI.
+
+Three honest options, none of them this work's business:
+- Upgrade Tauri so the GTK stack moves to glib 0.20+. Large, unrelated, needs its own pass.
+- Constrain the Linux-desktop dependency behind a target cfg so it leaves the default lock.
+- Accept and document it as unshipped, and stop Dependabot retrying weekly on something it
+  structurally cannot resolve.
+Decide it deliberately; do not let it sit as a permanently red bot run that trains everyone
+to ignore the security tab.
+
+The only dependency this work added was `sha2-asm 0.6.4`; `cargo audit` and `cargo deny`
+were clean on it, and `Supply chain` is green on the final commit.
 
 ## What is where
 
