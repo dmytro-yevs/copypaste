@@ -18,10 +18,46 @@ val auditPins = arrayOf(
     "com.google.guava:guava:33.6.0-jre",
 )
 
+// netty and protobuf reach this build only through the Unified Test Platform
+// configurations AGP puts on every Android module, at versions compiled into
+// AGP rather than declared in its POM — AGP 9.3.1 resolves the same
+// netty 4.1.93/4.1.110, so no AGP upgrade moves them and forcing is the lever.
+//
+// 4.1.137.Final clears CVE-2023-34462, CVE-2023-44487, CVE-2024-29025,
+// CVE-2024-47535, CVE-2025-24970 and CVE-2025-55163; 3.25.5 clears
+// CVE-2024-7254 while staying on the contract gRPC 1.57/1.69 generate against.
+val utpUpgrades = arrayOf(
+    "io.netty:netty-buffer:4.1.137.Final",
+    "io.netty:netty-codec:4.1.137.Final",
+    "io.netty:netty-codec-http:4.1.137.Final",
+    "io.netty:netty-codec-http2:4.1.137.Final",
+    "io.netty:netty-codec-socks:4.1.137.Final",
+    "io.netty:netty-common:4.1.137.Final",
+    "io.netty:netty-handler:4.1.137.Final",
+    "io.netty:netty-handler-proxy:4.1.137.Final",
+    "io.netty:netty-resolver:4.1.137.Final",
+    "io.netty:netty-transport:4.1.137.Final",
+    "io.netty:netty-transport-native-unix-common:4.1.137.Final",
+    "com.google.protobuf:protobuf-java:3.25.5",
+    "com.google.protobuf:protobuf-java-util:3.25.5",
+    "com.google.protobuf:protobuf-kotlin:3.25.5",
+)
+
 gradle.allprojects {
     if (rootProject.name == "buildSrc") {
         configurations.configureEach {
             resolutionStrategy.force(*auditPins)
+        }
+    } else {
+        configurations.configureEach {
+            // By name, and only these names, so the force provably cannot change
+            // what is packaged: no `:app` runtime or compile classpath resolves
+            // either group. AGP 9 drops the leading underscore.
+            if (name.removePrefix("_").startsWith("internal-unified-test-platform") ||
+                name.startsWith("unified-test-platform")
+            ) {
+                resolutionStrategy.force(*utpUpgrades)
+            }
         }
     }
 }
