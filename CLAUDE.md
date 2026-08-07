@@ -174,10 +174,12 @@ product surface.
 
 ## 7. Scope
 
-macOS and Android. Not Windows, not Linux desktop.
+macOS, Android and Windows ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
+Not Linux desktop, which is a test surface (`browser-webkitgtk.yml`) and never a
+shipped target.
 
-Every dependency added must work on both, or be behind a platform cfg with the
-other side implemented.
+Every dependency added must work on all three, or be behind a platform cfg with
+every other side implemented.
 
 ## 8. Do not document the obvious
 
