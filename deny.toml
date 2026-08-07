@@ -97,12 +97,16 @@ highlight = "all"
 # from quietly undoing it.
 #
 # openssl-sys is scoped rather than banned outright. SQLCipher's only portable
-# crypto backend is OpenSSL, and the Android NDK sysroot ships no libcrypto to
-# link against, so libsqlite3-sys vendors one for the Android targets alone —
-# ADR-0007. `wrappers` keeps that the only way it may appear: native-tls, or a
-# reqwest that lost its rustls features, still fails this check. macOS is
-# unaffected and stays on CommonCrypto, so no darwin target in [graph] resolves
-# openssl-sys at all.
+# crypto backend is OpenSSL; neither the Android NDK sysroot nor a Windows host
+# ships a libcrypto to link against, so libsqlite3-sys vendors one for those
+# targets alone — ADR-0007. `wrappers` keeps that the only way it may appear:
+# native-tls, or a reqwest that lost its rustls features, still fails this
+# check. macOS is unaffected and stays on CommonCrypto, so no darwin target in
+# [graph] resolves openssl-sys at all.
+#
+# [graph] does NOT yet list a windows triple, so the Windows dependency graph
+# is unaudited by this file. Adding one is a decision for the ADR that makes
+# Windows a shipping platform, not a side effect of getting it to compile.
 #
 # This is the cheap half of rule 1: a stated invariant that a machine checks.
 deny = [
