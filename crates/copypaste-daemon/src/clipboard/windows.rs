@@ -395,7 +395,11 @@ impl ClipboardSource for WindowsClipboard {
     }
 
     fn backend_name(&self) -> &'static str {
-        "windows-clipboard"
+        // Contains "system" deliberately: the app decides whether a backend is
+        // real by matching `/pasteboard|nspasteboard|system/i`, and a name it
+        // does not recognise puts a "this is not the system clipboard" warning
+        // in front of every Windows user.
+        "windows-system-clipboard"
     }
 
     fn rejected_too_large_count(&self) -> u64 {
