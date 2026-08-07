@@ -1,10 +1,10 @@
-//! The Unix-socket IPC server.
+//! The local IPC server.
 //!
 //! The files follow the path a request takes:
 //!
 //! * [`listener`] — the socket: binding it, refusing to steal a live one,
-//!   locking it to `0600`, and framing lines off it. The only file here that
-//!   touches the filesystem or a socket.
+//!   locking it to `0600`, and framing lines off it. `pipe` is the Windows
+//!   half of those first three; the framing is shared.
 //! * [`dispatch`] — parse, the protocol and readiness gates, and the `match`
 //!   that routes a `Method` to a handler. This is also where the split between
 //!   the reactor (peer operations, which are network I/O) and `spawn_blocking`
@@ -35,8 +35,14 @@ mod halted;
 mod items;
 mod listener;
 pub(crate) mod messages;
+#[cfg(windows)]
+mod pipe;
 mod transfer;
 mod watch;
 
 pub use halted::serve as serve_halted;
-pub use listener::{bind, run};
+#[cfg(unix)]
+pub use listener::bind;
+pub use listener::run;
+#[cfg(windows)]
+pub use pipe::bind;

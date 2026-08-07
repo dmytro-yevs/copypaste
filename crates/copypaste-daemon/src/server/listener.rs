@@ -27,6 +27,7 @@
 
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+#[cfg(unix)]
 use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
@@ -95,16 +96,6 @@ pub fn bind(path: &Path) -> anyhow::Result<Listener> {
 
     info!("ipc socket listening");
     Ok(listener.into())
-}
-
-/// A named pipe will not reach a listener through the body above: there is no
-/// mode to `chmod`, no path to unlink, and the exclusion `flock` buys comes
-/// from `FILE_FLAG_FIRST_PIPE_INSTANCE` instead. So it gets its own body rather
-/// than a cfg threaded through that one.
-#[cfg(not(unix))]
-pub fn bind(path: &Path) -> anyhow::Result<Listener> {
-    let _ = path;
-    Err(copypaste_ipc::transport::unsupported().into())
 }
 
 /// Bind the socket already restricted to `0600` (security review F-9).
