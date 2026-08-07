@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 /// Version of the message set. Bumped whenever a change would confuse an older
 /// peer. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
 /// local history at roughly 200 bytes each, about 2 MiB on the wire. A history
@@ -201,6 +201,8 @@ pub enum SyncMessage {
         device_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         listen_addr: Option<String>,
+        #[serde(default)]
+        since_ms: i64,
     },
     Summary {
         items: Vec<ItemSummary>,
@@ -338,6 +340,7 @@ impl SyncMessage {
                     i.pin_updated_at = i.pin_updated_at.max(0);
                 }
             }
+            Self::Hello { since_ms, .. } => *since_ms = (*since_ms).max(0),
             _ => {}
         }
     }
@@ -350,6 +353,7 @@ impl SyncMessage {
                 device_id,
                 device_name,
                 listen_addr,
+                since_ms,
             } => {
                 // Fail closed, and do it before anything else in the message is
                 // trusted: a differing version means the fields below may not
@@ -362,6 +366,9 @@ impl SyncMessage {
                 }
                 check_id("device_id", device_id)?;
                 check_len("device_name", device_name, MAX_DEVICE_NAME_BYTES)?;
+                if *since_ms < 0 {
+                    return Err(ProtocolError::NegativeTimestamp { field: "since_ms" });
+                }
                 if let Some(addr) = listen_addr {
                     check_len("listen_addr", addr, MAX_LISTEN_ADDR_BYTES)?;
                     if addr.parse::<SocketAddr>().is_err() {
@@ -552,6 +559,7 @@ mod tests {
             device_id: "dev-a".into(),
             device_name: "Laptop".into(),
             listen_addr: None,
+            since_ms: 0,
         }
     }
 
@@ -595,6 +603,19 @@ mod tests {
                 ours: PROTOCOL_VERSION,
                 theirs: 99
             })
+        );
+    }
+
+    #[test]
+    fn a_hello_from_a_build_without_a_cursor_still_reads_as_a_version_gap() {
+        let raw = br#"{"t":"hello","protocol_version":2,"device_id":"d","device_name":"n"}"#;
+        assert_eq!(
+            SyncMessage::decode(raw),
+            Err(ProtocolError::VersionMismatch {
+                ours: PROTOCOL_VERSION,
+                theirs: 2
+            }),
+            "an older peer must be named as a version gap, not as a broken message"
         );
     }
 
@@ -750,6 +771,7 @@ mod tests {
                 device_id: String::new(),
                 device_name: "n".into(),
                 listen_addr: None,
+                since_ms: 0,
             },
         ] {
             assert!(
@@ -785,6 +807,7 @@ mod tests {
             device_id: "d".into(),
             device_name: "x".repeat(MAX_DEVICE_NAME_BYTES + 1),
             listen_addr: None,
+            since_ms: 0,
         }
         .validate()
         .unwrap_err();
@@ -804,6 +827,7 @@ mod tests {
             device_id: "d".into(),
             device_name: "n".into(),
             listen_addr: Some("not-an-endpoint".into()),
+            since_ms: 0,
         };
         assert_eq!(malformed.validate(), Err(ProtocolError::InvalidListenAddr));
 
@@ -812,6 +836,7 @@ mod tests {
             device_id: "d".into(),
             device_name: "n".into(),
             listen_addr: Some("1".repeat(MAX_LISTEN_ADDR_BYTES + 1)),
+            since_ms: 0,
         };
         assert!(matches!(
             oversized.validate(),
@@ -832,6 +857,7 @@ mod tests {
             decoded,
             SyncMessage::Hello {
                 listen_addr: None,
+                since_ms: 0,
                 ..
             }
         ));

@@ -10,7 +10,9 @@
 //! and whether a pairing was revoked ([`PeerStore::revoke`]). Both are refusals,
 //! and both are enforced on every read path rather than at one gate.
 //!
+mod cursor;
 mod error;
+mod expiry;
 mod file;
 mod peer;
 mod store;
@@ -20,6 +22,7 @@ mod testutil;
 
 use std::time::Duration;
 
+pub use cursor::{CursorStore, DEFAULT_CURSOR_FILE_NAME};
 pub use error::PeerStoreError;
 pub use peer::Peer;
 pub use store::PeerStore;
