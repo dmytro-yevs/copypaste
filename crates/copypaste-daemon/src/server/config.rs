@@ -2,9 +2,8 @@
 //!
 //! Thin on purpose: validation, persistence and the "last good value survives a
 //! rejection" rule all live in [`crate::settings`], which is where a change to
-//! them belongs. What is here is the mapping onto the wire — including the list
-//! of fields that will not take effect until a restart, which a Settings screen
-//! needs at the moment of the change rather than afterwards.
+//! them belongs. What is here is the mapping onto the wire, and the side effects
+//! a changed value has on a running daemon.
 
 use copypaste_ipc::{
     ConfigApplied, ConfigData, ConfigPatch, ErrorCode, PrivateModeData, Response, ResponseData,

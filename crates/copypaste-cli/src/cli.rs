@@ -269,7 +269,7 @@ pub(crate) enum ConfigAction {
         /// Bundle ids never to capture from, comma-separated. Empty clears it.
         #[arg(long, value_name = "IDS")]
         excluded_apps: Option<String>,
-        /// Whether to advertise this device on the LAN. Needs a restart.
+        /// Whether to advertise this device on the LAN.
         #[arg(long)]
         lan_visibility: Option<bool>,
         /// Master switch for every sync transport.

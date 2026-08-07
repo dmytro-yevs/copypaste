@@ -2,11 +2,11 @@
  * A11Y-15: it wraps rather than truncating, so at the 720px minimum the control
  * drops below its label instead of being pushed off the pane.
  *
- * `badge` and `note` are separate slots: a badge is a property of the *field* —
- * "this one needs a restart" is true whether or not it has been touched — and
- * sits beside the title; a note is the field's state right now and sits under
- * the description. Neither is a footnote at the bottom of the pane, which is
- * read only after the user has wondered why nothing happened.
+ * `badge` and `note` are separate slots: a badge is a property of the *field*,
+ * true whether or not it has been touched, and sits beside the title; a note is
+ * the field's state right now and sits under the description. Neither is a
+ * footnote at the bottom of the pane, which is read only after the user has
+ * wondered why nothing happened.
  */
 import type { ReactNode } from "react";
 
