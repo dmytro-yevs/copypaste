@@ -141,6 +141,8 @@ pub(super) struct FakeSource {
     floor: Mutex<i64>,
     #[allow(dead_code)]
     applies: AtomicUsize,
+    pub(super) batches: AtomicUsize,
+    short_batch: bool,
 }
 
 impl FakeSource {
@@ -156,6 +158,13 @@ impl FakeSource {
     pub(super) fn with_keyset_watermark() -> Self {
         Self {
             keyset: true,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn dropping_one_batch_outcome() -> Self {
+        Self {
+            short_batch: true,
             ..Self::default()
         }
     }
@@ -216,6 +225,18 @@ impl CloudSource for FakeSource {
                 Ok(Applied::Merged)
             }
         }
+    }
+
+    fn apply_remote_batch(&self, items: Vec<LocalItem>) -> Result<Vec<Applied>, SyncError> {
+        self.batches.fetch_add(1, Ordering::SeqCst);
+        let mut out: Vec<Applied> = items
+            .into_iter()
+            .map(|item| self.apply_remote(item))
+            .collect::<Result<_, _>>()?;
+        if self.short_batch {
+            out.pop();
+        }
+        Ok(out)
     }
 
     fn watermark(&self) -> Result<i64, SyncError> {

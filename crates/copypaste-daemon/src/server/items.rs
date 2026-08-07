@@ -75,11 +75,12 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
     // every item beside it down. Re-ask for the count that fits so the cursor
     // comes from the store rather than being invented here.
     let page = match within_budget(&page.items) {
-        kept if kept < page.items.len() => match state.store.list_from(after.as_ref(), kept as u32)
-        {
-            Ok(page) => page,
-            Err(e) => return storage_error(id, "list", &e),
-        },
+        kept if kept < page.items.len() => {
+            match trim_to_budget(state, page, kept, after.as_ref()) {
+                Ok(page) => page,
+                Err(e) => return storage_error(id, "list", &e),
+            }
+        }
         _ => page,
     };
 
@@ -458,6 +459,26 @@ fn within_budget(rows: &[StoredItem]) -> usize {
     rows.len()
 }
 
+fn trim_to_budget(
+    state: &AppState,
+    mut page: copypaste_core::Page,
+    kept: usize,
+    after: Option<&ItemCursor>,
+) -> Result<copypaste_core::Page, copypaste_core::StoreError> {
+    page.items.truncate(kept);
+    let Some(last) = page.items.last() else {
+        return state.store.list_from(after, kept as u32);
+    };
+    match state.store.cursor_for(&last.id) {
+        Ok(next) => {
+            page.next = Some(next);
+            Ok(page)
+        }
+        Err(copypaste_core::StoreError::NotFound) => state.store.list_from(after, kept as u32),
+        Err(e) => Err(e),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,6 +525,72 @@ mod tests {
     #[test]
     fn one_item_over_the_budget_is_still_served() {
         assert_eq!(within_budget(&[row_of(MAX_PAGE_CONTENT_BYTES * 2)]), 1);
+    }
+
+    #[test]
+    fn an_over_budget_page_resumes_at_the_first_item_it_dropped() {
+        const BIG: usize = 1_500_000;
+
+        let (state, _dir) = test_state("list-over-budget");
+        let mut added = Vec::new();
+        for n in 0..3 {
+            let body = format!("{n:07} ").repeat(BIG / 8);
+            match add(&state, n as u64, &body).data {
+                Some(ResponseData::Item(item)) => added.push(item.id),
+                other => panic!("{other:?}"),
+            }
+        }
+
+        let first = match list(&state, 1, 10, None).data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            first.items.len(),
+            2,
+            "the byte budget did not trim the page"
+        );
+        let cursor = first
+            .next_cursor
+            .expect("a trimmed page must carry a cursor");
+
+        let second = match list(&state, 2, 10, Some(&cursor)).data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("{other:?}"),
+        };
+
+        let mut seen: Vec<String> = first.items.iter().map(|i| i.id.clone()).collect();
+        seen.extend(second.items.iter().map(|i| i.id.clone()));
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seen.len(), "a row was served twice: {seen:?}");
+        added.sort();
+        assert_eq!(sorted, added, "paging did not visit every item");
+    }
+
+    #[test]
+    fn a_row_deleted_before_its_cursor_is_taken_falls_back_to_the_re_ask() {
+        let (state, _dir) = test_state("list-trim-anchor-gone");
+        for n in 0..4 {
+            match add(&state, n as u64, &format!("item {n}")).data {
+                Some(ResponseData::Item(_)) => {}
+                other => panic!("{other:?}"),
+            }
+        }
+
+        let page = state.store.list_from(None, 4).unwrap();
+        let anchor = page.items[1].id.clone();
+        assert!(state.store.delete(&anchor).unwrap());
+
+        let trimmed = trim_to_budget(&state, page, 2, None).expect("the fallback must serve");
+        assert_eq!(trimmed.items.len(), 2);
+        let next = trimmed.next.expect("the fallback page must carry a cursor");
+        let after = state.store.list_from(Some(&next), 10).unwrap();
+        assert!(
+            !after.items.iter().any(|i| i.id == anchor),
+            "the deleted anchor came back"
+        );
     }
 
     /// I-39 / §6.5: the two clipboard counters existed and nothing read them,

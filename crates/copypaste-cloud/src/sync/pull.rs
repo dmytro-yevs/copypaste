@@ -53,6 +53,8 @@ const PULL_PAGE_LIMIT: u32 = 100;
 /// exactly where this one stopped.
 const MAX_PAGES_PER_PULL: usize = 50;
 
+const MSG_BATCH_ARITY: &str = "the history database did not answer for every row of a page";
+
 /// How far ahead of the local clock a row's `created_at` may be before this
 /// device refuses to take that version.
 ///
@@ -138,6 +140,7 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
             let now = now_ms();
             let mut advanced = cursor.clone();
+            let mut batch: Vec<LocalItem> = Vec::new();
 
             for row in rows {
                 let created_at = row.created_at;
@@ -195,23 +198,37 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     }
                 };
 
-                let item_id = row.item_id;
-                let incoming = LocalItem {
-                    item_id: item_id.clone(),
+                batch.push(LocalItem {
+                    item_id: row.item_id,
                     content,
                     content_type: row.content_type,
                     payload_metadata: row.payload_metadata,
                     created_at,
                     deleted: row.deleted,
                     origin_device_id: row.origin_device_id,
-                };
-                match source.apply_remote(incoming)? {
-                    Applied::Merged => stats.applied += 1,
-                    Applied::Declined(declined) => {
-                        republish |= source.requeue_local_winner(&declined)?;
+                });
+            }
+
+            let reached = batch
+                .last()
+                .map(|item| (item.created_at, item.item_id.clone()));
+            let offered = batch.len();
+            if offered > 0 {
+                let outcomes = source.apply_remote_batch(batch)?;
+                if outcomes.len() != offered {
+                    return Err(SyncError::Source(MSG_BATCH_ARITY));
+                }
+                for outcome in outcomes {
+                    match outcome {
+                        Applied::Merged => stats.applied += 1,
+                        Applied::Declined(declined) => {
+                            republish |= source.requeue_local_winner(&declined)?;
+                        }
                     }
                 }
-                advanced.advance_past(created_at, &item_id);
+                if let Some((created_at, item_id)) = reached {
+                    advanced.advance_past(created_at, &item_id);
+                }
             }
 
             // Persist per page, so an interrupted drain resumes from the last
@@ -347,6 +364,70 @@ mod tests {
         assert_eq!(source.get("a").unwrap().content, b"first");
         assert_eq!(source.get("b").unwrap().content, b"second");
         assert_eq!(source.watermark().unwrap(), 2_000);
+    }
+
+    #[tokio::test]
+    async fn a_page_is_merged_through_one_batch_call_that_answers_for_every_row() {
+        let rows: Vec<CloudItem> = (0..PULL_PAGE_LIMIT as usize + 30)
+            .map(|i| cloud_row(&format!("item-{i:04}"), 1_000 + i as i64, "x"))
+            .collect();
+        let source = FakeSource::default();
+        let sync = driver(FakeRest::seeded(rows), FakeAuth::default());
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.applied, PULL_PAGE_LIMIT as usize + 30);
+        assert_eq!(
+            source.batches.load(Ordering::SeqCst),
+            2,
+            "the merge was driven per row rather than per page"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_declined_row_is_still_reported_on_its_own_after_batching() {
+        let local = item("a", 5_000, "the local winner");
+        let source = FakeSource::with_local(local);
+        source.set_upload_floor(9_000);
+        let sync = driver(
+            FakeRest::seeded(vec![
+                cloud_row("a", 1_000, "an older remote version"),
+                cloud_row("b", 2_000, "a new one"),
+            ]),
+            FakeAuth::default(),
+        );
+
+        let stats = sync.pull(&source).await.unwrap();
+
+        assert_eq!(stats.applied, 1, "only the unseen row should have merged");
+        assert_eq!(source.get("a").unwrap().content, b"the local winner");
+        assert_eq!(
+            source.upload_floor().unwrap(),
+            5_000,
+            "the declined row's local winner was not re-offered"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_batch_that_answers_for_fewer_rows_than_it_was_given_fails_the_page() {
+        let source = FakeSource::dropping_one_batch_outcome();
+        let sync = driver(
+            FakeRest::seeded(vec![
+                cloud_row("a", 1_000, "first"),
+                cloud_row("b", 2_000, "second"),
+            ]),
+            FakeAuth::default(),
+        );
+
+        assert!(matches!(
+            sync.pull(&source).await,
+            Err(SyncError::Source(MSG_BATCH_ARITY))
+        ));
+        assert_eq!(
+            source.watermark().unwrap(),
+            0,
+            "the cursor advanced over a page the source did not answer for"
+        );
     }
 
     #[tokio::test]
