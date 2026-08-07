@@ -143,7 +143,7 @@ impl Node {
     }
 
     #[must_use]
-    pub(crate) fn cursors(&self) -> &CursorStore {
+    pub fn cursors(&self) -> &CursorStore {
         &self.cursors
     }
 
