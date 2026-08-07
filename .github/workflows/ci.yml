@@ -700,10 +700,12 @@ jobs:
       - name: Build the installers
         # No `--bundles` flag: the targets come from tauri.windows.conf.json, so
         # this step fails when that file stops selecting them. Building them in
-        # ci.yml rather than release.yml is deliberate — ADR-0013 leaves it
-        # undecided whether Windows ships in the same version stream, and until
-        # that is settled a bundler configuration no machine executes is the
-        # dead text this whole section exists to prevent.
+        # ci.yml rather than release.yml is deliberate — Windows has no release
+        # job yet, and a bundler configuration no machine executes is the dead
+        # text this whole section exists to prevent. Both installers carry the
+        # product version; only the MSI's internal ProductVersion is the numeric
+        # projection wix.version holds, because Windows Installer has no field
+        # that can spell "alpha".
         run: |
           set -euo pipefail
           cd crates/copypaste-ui
