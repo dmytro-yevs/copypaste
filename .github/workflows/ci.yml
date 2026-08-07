@@ -556,9 +556,10 @@ jobs:
   # against. So this runner is the only machine in the project that compiles a
   # `cfg(windows)` line at all.
   #
-  # Nothing here executes a clipboard, a credential store or a window. It moves
-  # Windows from "never compiled" to "compiles", which is where the macOS job
-  # started; docs/rewrite/testing-policy.md is the place that says so.
+  # It does execute the credential store: DPAPI writes only inside the temp
+  # directory each test is handed, so there is no real device secret here to
+  # destroy. The clipboard is the exception — those tests drive the session's
+  # one clipboard and stay `#[ignore]`d; docs/rewrite/testing-policy.md says so.
   # ---------------------------------------------------------------------------
 
   windows-check:
@@ -640,6 +641,45 @@ jobs:
         # here.
         if: success() || failure()
         run: cargo +1.96 test --workspace --locked
+
+      - name: DPAPI, for real (port manifest 02)
+        # Not `#[ignore]`d, unlike the Keychain set: DPAPI writes nothing
+        # outside the temp directory each test is handed, so there is no real
+        # device secret on the runner for them to destroy.
+        #
+        # The step above would stay green if the module were cfg'd out, because
+        # a filter that matches nothing exits 0. An empty run is a failure.
+        if: success() || failure()
+        run: |
+          set -uo pipefail
+          set +e
+          out="$(cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$out"
+          if [[ "$status" -ne 0 ]]; then
+            echo "::error::the device-secret tests exited $status"
+            exit "$status"
+          fi
+          if ! grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"; then
+            echo "::error::no device-secret test ran"
+            exit 1
+          fi
+
+      - name: The Credential Manager holds nothing of ours
+        # The backend is DPAPI precisely because a credential in that store is
+        # enumerable by anything in the session. If a future change quietly
+        # moves the secret there, this is the step that says so.
+        if: success() || failure()
+        shell: pwsh
+        run: |
+          $found = cmdkey /list | Select-String -Pattern 'copypaste' -SimpleMatch
+          if ($found) {
+            Write-Output "::error::a CopyPaste credential is in the Credential Manager"
+            $found
+            exit 1
+          }
+          Write-Output "no CopyPaste entry in the Credential Manager, as designed"
 
   windows-bundle:
     name: Windows installers (MSI + NSIS, unsigned)

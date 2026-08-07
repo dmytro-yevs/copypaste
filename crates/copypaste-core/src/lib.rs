@@ -1,6 +1,12 @@
 //! Core: crypto, storage, and sensitive-content detection.
 
-#![forbid(unsafe_code)]
+// `forbid` everywhere it can be kept, which is every target but one. Windows
+// has no safe path to DPAPI: the wrappers on crates.io free the unsealed buffer
+// without wiping it, which loses I-12 on the device secret itself. `deny` is
+// the same error with one auditable exception — `crypto::keystore::windows`,
+// which carries `#![allow(unsafe_code)]` and nothing else in the tree does.
+#![cfg_attr(not(target_os = "windows"), forbid(unsafe_code))]
+#![cfg_attr(target_os = "windows", deny(unsafe_code))]
 
 pub mod binary;
 pub mod crypto;
