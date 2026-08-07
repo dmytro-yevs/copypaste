@@ -112,9 +112,29 @@ export const settings = {
     refusal: {
       mediaKeys:
         "Media keys can't be used: binding one needs macOS Accessibility permission, and CopyPaste loses that permission every time it updates. Pick another key.",
+      /** Windows binds the other media keys with no permission at all, so only
+       *  the two it has no key code for are refused — and for that reason,
+       *  which is not the macOS one. */
+      noKeyCode:
+        "Windows has no key code for that media key, so it can't be bound. Pick another key.",
       needsModifier:
         "A shortcut needs at least one modifier — hold ⌘, ⌥ or ⌃ as well.",
+      needsModifierWindows:
+        "A shortcut needs at least one modifier — hold Ctrl, Alt or Shift as well.",
     },
+  },
+
+  startup: {
+    title: "Startup",
+    openAtLogin: {
+      title: "Open CopyPaste at login",
+      description: "Starts CopyPaste automatically when you sign in.",
+    },
+    /** The write can succeed while the machine still holds the app off, so the
+     *  switch reports what it reads back rather than what was asked for. */
+    blocked:
+      "Your system is still set to skip CopyPaste at startup. Check the Startup apps list.",
+    failed: "That setting couldn't be changed.",
   },
 
   sync: {

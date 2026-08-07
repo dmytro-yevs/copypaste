@@ -222,10 +222,12 @@ pub fn run() {
             commands::service::hide_window,
             commands::service::show_main_window,
             commands::protection::set_allow_screenshots,
-            // desktop global shortcut
+            // desktop global shortcut, and launch at login
             commands::shortcut::get_default_shortcut,
             commands::shortcut::get_shortcut,
             commands::shortcut::set_shortcut,
+            commands::autostart::get_open_at_login,
+            commands::autostart::set_open_at_login,
             // the service's own settings
             commands::config::get_config,
             commands::config::set_config,
@@ -408,6 +410,12 @@ mod tests {
 
     // packaging/windows/README.md is the argument; this is the part of it that
     // a commit can break without anyone reading the file.
+    //
+    // `nsis` is also what makes the capture toast possible: the notification
+    // plugin sets our AppUserModelID from the Start Menu shortcut an installer
+    // writes, and a plain `.exe` has none, so it posts nothing. `currentUser`
+    // keeps launch-at-login honest — that writes `HKCU\...\Run`, so the app
+    // must sit where the same user can update it without an elevation prompt.
     #[test]
     fn windows_bundle_builds_both_installers_and_holds_no_signing_credential() {
         let config: serde_json::Value =
@@ -420,6 +428,7 @@ mod tests {
             .expect("the Windows bundle names its targets");
         assert!(targets.iter().any(|t| t == "msi"));
         assert!(targets.iter().any(|t| t == "nsis"));
+        assert_eq!(bundle["windows"]["nsis"]["installMode"], "currentUser");
 
         // ADR-0001's premise, on the platform that has no release job yet.
         assert!(bundle["windows"]["certificateThumbprint"].is_null());
