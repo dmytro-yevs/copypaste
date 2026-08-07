@@ -329,6 +329,20 @@ hoisting it does not remove it. **F-STOR-3 was reverted.** The 202 µs to 166 µ
 above is what is left, and the only candidate for it is F-STOR-4's
 `PRAGMA optimize`.
 
+**The item-cap gate was the same shape and did have a fix.** `evict_over_cap`
+opened with `SELECT COUNT(*) … WHERE deleted = 0` — a full index scan, 331 µs at
+8 000 rows, paid on every accepted capture inside the IMMEDIATE transaction.
+SQLite has no O(1) row count, so the query was replaced rather than relocated:
+`clipboard_live_count` holds the number, three triggers on `clipboard_items`
+maintain it across insert, hard delete and every change of `deleted`, and
+`schema::migrate` recomputes it from the table on every open so a drift cannot
+outlive a restart. The gate is now a single-row primary-key read, and the one
+full count v2 still pays is that reconcile.
+
+**No after-figure has been taken.** `storage/sweep/cap_nothing_to_do` at
+500 / 2 000 / 8 000 is the A/B, and the property to check is flatness across the
+three depths rather than any single number.
+
 ---
 
 ## 6. Merging a peer's session — **S**
