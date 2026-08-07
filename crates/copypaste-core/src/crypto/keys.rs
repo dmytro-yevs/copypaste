@@ -229,11 +229,19 @@ mod tests {
     use super::super::{decrypt, encrypt};
     use super::*;
 
+    /// For the one test whose subject *is* the deadline. Short so it does not
+    /// stall the suite.
     const TEST_TIMEOUT: Duration = Duration::from_millis(20);
+
+    /// For the three below, whose subject is what a completed load returns.
+    /// 20 ms is a thread spawn plus a channel hop, and on a Windows runner with
+    /// 300 tests in flight that budget is genuinely marginal — those tests were
+    /// timing out and reporting it as the wrong outcome.
+    const AMPLE_TIMEOUT: Duration = Duration::from_secs(10);
 
     #[test]
     fn bounded_load_returns_a_successful_secret() {
-        let secret = load_with_timeout(TEST_TIMEOUT, || Ok(Zeroizing::new(SECRET_A))).unwrap();
+        let secret = load_with_timeout(AMPLE_TIMEOUT, || Ok(Zeroizing::new(SECRET_A))).unwrap();
 
         assert_eq!(*secret, SECRET_A);
     }
@@ -241,7 +249,7 @@ mod tests {
     #[test]
     fn bounded_load_preserves_a_backend_error() {
         let result: Result<Zeroizing<[u8; KEY_LEN]>, CryptoError> =
-            load_with_timeout(TEST_TIMEOUT, || {
+            load_with_timeout(AMPLE_TIMEOUT, || {
                 Err(CryptoError::KeystoreUnavailable(
                     "the keychain is locked or access was denied",
                 ))
@@ -258,7 +266,7 @@ mod tests {
     #[test]
     fn bounded_load_preserves_a_wrong_length_error() {
         let result: Result<Zeroizing<[u8; KEY_LEN]>, CryptoError> =
-            load_with_timeout(TEST_TIMEOUT, || {
+            load_with_timeout(AMPLE_TIMEOUT, || {
                 Err(CryptoError::KeystoreEntryUnusable(
                     "the stored device secret is the wrong length",
                 ))
