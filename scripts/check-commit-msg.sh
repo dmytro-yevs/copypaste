@@ -28,6 +28,34 @@ done < <(sed -e '/^#/d' -e '/^diff --git /,$d' "$MSG_FILE")
 SUBJECT="${LINES[0]:-}"
 [[ -z "${SUBJECT// }" ]] && { echo "  ✗ empty subject" >&2; exit 1; }
 
+# A merge is not one logical change and its message is not authored: git writes
+# the subject from the ref names, and under merge.log the body too. Holding
+# generated text to rule 10 bans merging rather than enforcing anything: the
+# subject git writes for a merge into dmytro-yevs/commit-msg-hook is 98 chars,
+# and no rewording is available short of --no-ff -m.
+#
+# The quote after the ref kind is what makes this git's output rather than
+# prose. A hand-written subject that opens with "Merge" is still held to the
+# rule, which is why history has "Merge the hardware SHA-2 backend ..." (59
+# chars, imperative) and it passes on its own merits.
+MERGE_GENERATED="^Merge (branch|branches|remote-tracking branch|remote-tracking branches|tag|commit) '"
+MERGE_GENERATED+="|^Merge pull request #[0-9]+ from "
+
+if [[ "$SUBJECT" =~ $MERGE_GENERATED ]]; then
+    # Nothing about the shape is the author's to fix. The two bans below are:
+    # git never emits either, so their presence is always deliberate.
+    MERGE_TEXT="$(printf '%s\n' "${LINES[@]}")"
+    if grep -qiE '^Co-Authored-By:.*(claude|copilot|gpt|ai)' <<< "$MERGE_TEXT"; then
+        echo "  ✗ AI Co-Authored-By trailer — not used in this repository" >&2
+        exit 1
+    fi
+    if grep -qiE 'claude\.ai/code/session|Claude-Session:' <<< "$MERGE_TEXT"; then
+        echo "  ✗ session URL — not used in this repository" >&2
+        exit 1
+    fi
+    exit 0
+fi
+
 # --- subject -----------------------------------------------------------------
 
 if (( ${#SUBJECT} > MAX_SUBJECT )); then
