@@ -58,32 +58,42 @@ impl Store {
     /// A bump only ever moves the stamp *forward* (T-37), and it leaves
     /// `pinned` / `pin_order` alone: a re-copied pin keeps its slot in the
     /// pinned section rather than jumping to the top (manifest 06 INV-31).
-    pub fn insert_or_bump(&self, item: NewItem) -> Result<Ingest, StoreError> {
+    pub fn insert_or_bump(&self, mut item: NewItem) -> Result<Ingest, StoreError> {
+        let sealed = (
+            std::mem::take(&mut item.nonce),
+            std::mem::take(&mut item.content_ciphertext),
+            item.search_text.take(),
+        );
+        self.insert_or_bump_late_sealed(item, move || Ok(sealed))
+    }
+
+    pub(crate) fn insert_or_bump_late_sealed<E, F>(
+        &self,
+        item: NewItem,
+        seal: F,
+    ) -> Result<Ingest, E>
+    where
+        E: From<StoreError>,
+        F: FnOnce() -> Result<(Vec<u8>, Vec<u8>, Option<String>), E>,
+    {
         // ADR-015 layer 1: unconditional, and it ignores what the caller
         // passed. A sensitive item is never indexed.
-        let search_text =
-            if item.is_sensitive || !copypaste_ipc::content_type::is_text(&item.content_type) {
-                if item.search_text.is_some() {
-                    tracing::warn!(
-                        "search_text supplied for a sensitive item; dropping it (it must be None)"
-                    );
-                }
-                None
-            } else {
-                item.search_text.as_deref().filter(|t| !t.trim().is_empty())
-            };
+        let indexable =
+            !item.is_sensitive && copypaste_ipc::content_type::is_text(&item.content_type);
 
         // The caller's id, not a fresh one: the ciphertext is already sealed
         // against it (see `NewItem::id`).
         let id = item.id.clone();
-        let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn)?;
+        let mut conn = self.conn().map_err(StoreError::from)?;
+        let tx = write_tx(&mut conn).map_err(StoreError::from)?;
 
         // The probe and the bump share the insert's transaction, so no third
         // capture can land between finding the row and restamping it.
-        if let Some(existing) = newest_live_with_hash(&tx, &item.content_hash, i64::MIN)? {
+        if let Some(existing) =
+            newest_live_with_hash(&tx, &item.content_hash, i64::MIN).map_err(StoreError::from)?
+        {
             let existing = if item.is_sensitive {
-                promote_sensitive_in_tx(&tx, existing)?
+                promote_sensitive_in_tx(&tx, existing).map_err(StoreError::from)?
             } else {
                 existing
             };
@@ -93,13 +103,25 @@ impl Store {
                 item.created_at,
                 &item.app_bundle_id,
                 &item.app_name,
-            )?;
-            tx.commit()?;
+            )
+            .map_err(StoreError::from)?;
+            tx.commit().map_err(StoreError::from)?;
             return Ok(Ingest::Bumped(bumped));
         }
 
+        let (nonce, content_ciphertext, plaintext) = seal()?;
+        let search_text = plaintext
+            .as_deref()
+            .filter(|t| indexable && !t.trim().is_empty());
+        if !indexable && plaintext.is_some() {
+            tracing::warn!(
+                "search_text supplied for a sensitive item; dropping it (it must be None)"
+            );
+        }
+
         let fts_rowid = match search_text {
-            Some(text) => insert_fts_in_tx(&tx, &id, text, item.is_sensitive, &item.content_type)?,
+            Some(text) => insert_fts_in_tx(&tx, &id, text, item.is_sensitive, &item.content_type)
+                .map_err(StoreError::from)?,
             None => None,
         };
 
@@ -111,8 +133,8 @@ impl Store {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10, ?11)",
             params![
                 &id,
-                &item.content_ciphertext,
-                &item.nonce,
+                &content_ciphertext,
+                &nonce,
                 &item.content_type,
                 &item.content_hash,
                 item.is_sensitive,
@@ -128,17 +150,19 @@ impl Store {
             Ok(_) => {}
             Err(e) if is_constraint_violation(&e) => {
                 if let Some(rowid) = fts_rowid {
-                    tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
+                    tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])
+                        .map_err(StoreError::from)?;
                 }
                 // The dedup backstop fired: a concurrent capture of the same
                 // content committed between the probe above and this INSERT.
                 // Resolve the winner *inside* the same transaction so there is
                 // no TOCTOU gap between the failed INSERT and this lookup.
-                let existing = find_in_bucket(&tx, &item.content_hash, item.created_at)?;
+                let existing = find_in_bucket(&tx, &item.content_hash, item.created_at)
+                    .map_err(StoreError::from)?;
                 return match existing {
                     Some(existing) => {
                         let existing = if item.is_sensitive {
-                            promote_sensitive_in_tx(&tx, existing)?
+                            promote_sensitive_in_tx(&tx, existing).map_err(StoreError::from)?
                         } else {
                             existing
                         };
@@ -148,22 +172,23 @@ impl Store {
                             item.created_at,
                             &item.app_bundle_id,
                             &item.app_name,
-                        )?;
-                        tx.commit()?;
+                        )
+                        .map_err(StoreError::from)?;
+                        tx.commit().map_err(StoreError::from)?;
                         Ok(Ingest::Bumped(bumped))
                     }
-                    None => Err(e.into()),
+                    None => Err(StoreError::from(e).into()),
                 };
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(StoreError::from(e).into()),
         }
 
-        tx.commit()?;
+        tx.commit().map_err(StoreError::from)?;
 
         Ok(Ingest::Inserted(StoredItem {
             id,
-            content_ciphertext: item.content_ciphertext,
-            nonce: item.nonce,
+            content_ciphertext,
+            nonce,
             content_type: item.content_type,
             content_hash: item.content_hash,
             created_at: item.created_at,
