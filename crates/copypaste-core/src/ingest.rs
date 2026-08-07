@@ -214,29 +214,29 @@ pub fn ingest_into_with_capture_source(
     // every row fails authentication on every later read. That is why `NewItem`
     // carries `id` rather than the store minting one.
     let item_id = uuid::Uuid::new_v4().to_string();
-    let key = keyring.item_key();
-    let (nonce, ciphertext) = crate::encrypt(content.as_bytes(), &key, &item_id)?;
+    let seal_id = item_id.clone();
+    let indexable = !is_sensitive && copypaste_ipc::content_type::is_text(content_type);
 
-    let ingested = store.insert_or_bump(NewItem {
-        id: item_id,
-        content_ciphertext: ciphertext,
-        nonce,
-        content_type: content_type.to_string(),
-        content_hash: hash,
-        is_sensitive,
-        // CLAUDE.md rule 4 / manifest 03 ADR-015: a sensitive item never
-        // reaches the search index. This is the write-time layer of that rule;
-        // the search handler enforces it again at read time.
-        search_text: if is_sensitive || !copypaste_ipc::content_type::is_text(content_type) {
-            None
-        } else {
-            Some(content.to_string())
+    let ingested = store.insert_or_bump_late_sealed(
+        NewItem {
+            id: item_id,
+            content_ciphertext: Vec::new(),
+            nonce: Vec::new(),
+            content_type: content_type.to_string(),
+            content_hash: hash,
+            is_sensitive,
+            search_text: None,
+            created_at,
+            app_bundle_id: app_bundle_id.map(str::to_owned),
+            app_name: app_name.map(str::to_owned),
+            payload_metadata: None,
         },
-        created_at,
-        app_bundle_id: app_bundle_id.map(str::to_owned),
-        app_name: app_name.map(str::to_owned),
-        payload_metadata: None,
-    })?;
+        || -> Result<_, IngestError> {
+            let (nonce, ciphertext) =
+                crate::encrypt(content.as_bytes(), &keyring.item_key(), &seal_id)?;
+            Ok((nonce, ciphertext, indexable.then(|| content.to_string())))
+        },
+    )?;
 
     enforce_retention(store, settings);
 
