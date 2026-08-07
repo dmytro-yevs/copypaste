@@ -33,7 +33,8 @@ use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use crate::discovery::{DiscoveredPeer, Discovery};
-use crate::peers::{Peer, PeerStore, PeerStoreError};
+use crate::peers::{CursorStore, Peer, PeerStore, PeerStoreError, DEFAULT_CURSOR_FILE_NAME};
+use crate::sync::SyncOutcome;
 
 pub use channel::{NoiseChannel, READ_TIMEOUT, SESSION_TIMEOUT};
 pub use error::NodeError;
@@ -75,6 +76,7 @@ impl std::fmt::Debug for NewPairing {
 /// off) rather than a degraded state.
 pub struct Node {
     peers: PeerStore,
+    cursors: CursorStore,
     discovery: Option<Discovery>,
     /// The port [`listen`] binds, which is what a pairing tells a peer to dial.
     port: u16,
@@ -97,8 +99,23 @@ impl std::fmt::Debug for Node {
 impl Node {
     #[must_use]
     pub fn new(peers: PeerStore, discovery: Option<Discovery>, port: u16) -> Self {
+        let cursors = CursorStore::open(
+            &peers
+                .path()
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join(DEFAULT_CURSOR_FILE_NAME),
+        );
+        cursors.retain(
+            &peers
+                .list()
+                .iter()
+                .map(|peer| peer.pairing_id.clone())
+                .collect::<Vec<_>>(),
+        );
         Self {
             peers,
+            cursors,
             discovery,
             port,
             listen_addr: RwLock::new(None),
@@ -109,6 +126,19 @@ impl Node {
     #[must_use]
     pub fn peers(&self) -> &PeerStore {
         &self.peers
+    }
+
+    #[must_use]
+    pub(crate) fn cursors(&self) -> &CursorStore {
+        &self.cursors
+    }
+
+    pub(crate) fn record_cursor(&self, pairing_id: &str, outcome: &SyncOutcome) {
+        if let Some(floor) = outcome.applied_floor {
+            self.cursors.note_applied(pairing_id, floor);
+        }
+        self.cursors
+            .record_session(pairing_id, outcome.cursor.since_ms);
     }
 
     #[must_use]
@@ -222,6 +252,7 @@ impl Node {
             NodeError::PeerStore
         })?;
         if removed {
+            self.cursors.forget(pairing_id);
             self.republish();
         }
         Ok(removed)

@@ -12,11 +12,11 @@ use tokio::sync::mpsc;
 
 use super::{
     merge_decision, pin_state_wins, run_initiator, run_responder, MergeDecision, SyncChannel,
-    SyncError, SyncOutcome, SyncSource,
+    SyncCursor, SyncError, SyncOutcome, SyncSource,
 };
 use crate::protocol::{content_hash, ItemSummary, SyncItem, SyncMessage};
 
-pub(super) fn summary(id: &str, created_at: i64, hash: &str, deleted: bool) -> ItemSummary {
+pub(crate) fn summary(id: &str, created_at: i64, hash: &str, deleted: bool) -> ItemSummary {
     ItemSummary {
         item_id: id.into(),
         created_at,
@@ -118,7 +118,7 @@ impl SyncSource for TestSource {
         self.device_name.clone()
     }
 
-    fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError> {
+    fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
         let sensitive = self.sensitive.lock().unwrap();
         let mut v: Vec<_> = self
             .items
@@ -127,8 +127,9 @@ impl SyncSource for TestSource {
             .values()
             .filter(|i| i.deleted || !sensitive.contains(&i.item_id))
             .map(|i| i.summary())
+            .filter(|s| super::session::summary_key(s) >= since_ms)
             .collect();
-        v.sort_by(|a, b| a.item_id.cmp(&b.item_id));
+        v.sort_by_key(|s| (super::session::summary_key(s), s.item_id.clone()));
         Ok(v)
     }
 
@@ -267,24 +268,56 @@ pub(super) async fn try_session_with_listen_addresses(
     Result<SyncOutcome, SyncError>,
     Result<SyncOutcome, SyncError>,
 ) {
+    try_session_with(
+        a,
+        b,
+        a_listen_addr,
+        b_listen_addr,
+        SyncCursor::default(),
+        SyncCursor::default(),
+    )
+    .await
+}
+
+pub(super) async fn try_session_with(
+    a: &TestSource,
+    b: &TestSource,
+    a_listen_addr: Option<&str>,
+    b_listen_addr: Option<&str>,
+    a_cursor: SyncCursor,
+    b_cursor: SyncCursor,
+) -> (
+    Result<SyncOutcome, SyncError>,
+    Result<SyncOutcome, SyncError>,
+) {
     let (ca, cb) = duplex();
     tokio::join!(
         async move {
             let mut ca = ca;
-            let out = run_initiator(&mut ca, a, a_listen_addr).await;
+            let out = run_initiator(&mut ca, a, a_listen_addr, a_cursor).await;
             drop(ca);
             out
         },
         async move {
             let mut cb = cb;
-            let out = run_responder(&mut cb, b, b_listen_addr).await;
+            let out = run_responder(&mut cb, b, b_listen_addr, b_cursor).await;
             drop(cb);
             out
         }
     )
 }
 
-pub(super) async fn session(a: &TestSource, b: &TestSource) -> (SyncOutcome, SyncOutcome) {
+pub(crate) async fn session(a: &TestSource, b: &TestSource) -> (SyncOutcome, SyncOutcome) {
     let (ra, rb) = try_session(a, b).await;
+    (ra.expect("initiator"), rb.expect("responder"))
+}
+
+pub(super) async fn session_with(
+    a: &TestSource,
+    b: &TestSource,
+    a_cursor: SyncCursor,
+    b_cursor: SyncCursor,
+) -> (SyncOutcome, SyncOutcome) {
+    let (ra, rb) = try_session_with(a, b, None, None, a_cursor, b_cursor).await;
     (ra.expect("initiator"), rb.expect("responder"))
 }

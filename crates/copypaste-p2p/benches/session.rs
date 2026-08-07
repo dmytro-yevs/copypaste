@@ -21,7 +21,8 @@ use tokio::sync::mpsc;
 
 use copypaste_p2p::protocol::{content_hash, ItemSummary, SyncItem, SyncMessage};
 use copypaste_p2p::sync::{
-    merge_decision, run_initiator, run_responder, MergeDecision, SyncChannel, SyncError, SyncSource,
+    merge_decision, run_initiator, run_responder, MergeDecision, SyncChannel, SyncCursor,
+    SyncError, SyncSource,
 };
 
 /// `MAX_SUMMARIES_PER_MESSAGE` is 10 000, so the largest case is the biggest
@@ -56,15 +57,16 @@ impl SyncSource for BenchSource {
         format!("{} name", self.device_id)
     }
 
-    fn summaries(&self) -> Result<Vec<ItemSummary>, SyncError> {
+    fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
         let mut v: Vec<_> = self
             .items
             .lock()
             .unwrap()
             .values()
             .map(SyncItem::summary)
+            .filter(|s| s.created_at.max(s.pin_updated_at) >= since_ms)
             .collect();
-        v.sort_by(|a, b| a.item_id.cmp(&b.item_id));
+        v.sort_by_key(|s| (s.created_at.max(s.pin_updated_at), s.item_id.clone()));
         Ok(v)
     }
 
@@ -159,21 +161,29 @@ fn history(n: usize, origin: &str) -> Vec<SyncItem> {
         .collect()
 }
 
-async fn round(a: &BenchSource, b: &BenchSource, bytes: &Arc<AtomicUsize>) {
+async fn round(
+    a: &BenchSource,
+    b: &BenchSource,
+    bytes: &Arc<AtomicUsize>,
+    ca_cursor: SyncCursor,
+    cb_cursor: SyncCursor,
+) -> (SyncCursor, SyncCursor) {
     let (mut ca, mut cb) = duplex(bytes);
     let (ra, rb) = tokio::join!(
         async move {
-            let out = run_initiator(&mut ca, a, None).await;
+            let out = run_initiator(&mut ca, a, None, ca_cursor).await;
             drop(ca);
             out
         },
         async move {
-            let out = run_responder(&mut cb, b, None).await;
+            let out = run_responder(&mut cb, b, None, cb_cursor).await;
             drop(cb);
             out
         }
     );
-    black_box((ra.expect("initiator"), rb.expect("responder")));
+    let (ra, rb) = (ra.expect("initiator"), rb.expect("responder"));
+    let cursors = (ra.cursor, rb.cursor);
+    black_box(cursors)
 }
 
 fn converged_round(c: &mut Criterion) {
@@ -191,13 +201,22 @@ fn converged_round(c: &mut Criterion) {
         let b = BenchSource::new("device-b", history(n, "device-a"));
         let bytes = Arc::new(AtomicUsize::new(0));
 
-        rt.block_on(round(&a, &b, &bytes));
+        let (ca, cb) = rt.block_on(round(
+            &a,
+            &b,
+            &bytes,
+            SyncCursor::default(),
+            SyncCursor::default(),
+        ));
+        let first_round = bytes.load(Ordering::Relaxed);
+        bytes.store(0, Ordering::Relaxed);
+        rt.block_on(round(&a, &b, &bytes, ca, cb));
         let per_round = bytes.load(Ordering::Relaxed);
-        println!("p2p/session/converged/{n}: {per_round} bytes across the duplex per round");
+        println!("p2p/session/converged/{n}: {first_round} bytes on the first round, {per_round} bytes across the duplex per round after it");
 
-        group.throughput(Throughput::Bytes(per_round as u64));
+        group.throughput(Throughput::Bytes(per_round.max(1) as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |bench, _| {
-            bench.iter(|| rt.block_on(round(&a, &b, &bytes)));
+            bench.iter(|| rt.block_on(round(&a, &b, &bytes, ca, cb)));
         });
     }
     group.finish();

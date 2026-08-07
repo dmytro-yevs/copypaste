@@ -101,6 +101,11 @@ impl PeerStore {
         peers
     }
 
+    #[must_use]
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// One usable peer by pairing id. `None` once an unredeemed code has aged
     /// out, so an expired pairing reads as "no such device" rather than as one
     /// that cannot be reached.

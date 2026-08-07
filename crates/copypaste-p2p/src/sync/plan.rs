@@ -16,6 +16,11 @@ use crate::protocol::{ItemSummary, MAX_REQUEST_IDS_PER_MESSAGE};
 /// delete anything (manifest 05 §3.4, R-CLK-2: refusal, not correction).
 pub const MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
+pub(super) struct Plan {
+    pub(super) wanted: HashMap<String, ItemSummary>,
+    pub(super) deferred: HashSet<String>,
+}
+
 /// Decides what to ask the peer for, from the two summaries alone.
 ///
 /// Three cases, and the third is the subtle one:
@@ -32,9 +37,10 @@ pub(super) fn plan(
     remote: &[ItemSummary],
     now: i64,
     stats: &mut SyncStats,
-) -> HashMap<String, ItemSummary> {
+) -> Plan {
     let ceiling = now.saturating_add(MAX_FUTURE_SKEW_MS);
     let mut wanted: HashMap<String, ItemSummary> = HashMap::new();
+    let mut deferred: HashSet<String> = HashSet::new();
 
     for r in remote {
         if r.created_at > ceiling {
@@ -43,6 +49,7 @@ pub(super) fn plan(
                 "peer offered a version stamped beyond the clock-skew ceiling; skipping it"
             );
             stats.skipped += 1;
+            deferred.insert(r.item_id.clone());
             continue;
         }
 
@@ -81,11 +88,16 @@ pub(super) fn plan(
             max = MAX_REQUEST_IDS_PER_MESSAGE,
             "more wanted items than one session transfers; the rest follow next session"
         );
+        for id in wanted.keys() {
+            if !keep.contains(id.as_str()) {
+                deferred.insert(id.clone());
+            }
+        }
         wanted.retain(|id, _| keep.contains(id.as_str()));
         stats.skipped += dropped;
     }
 
-    wanted
+    Plan { wanted, deferred }
 }
 
 #[cfg(test)]
@@ -100,7 +112,7 @@ mod tests {
         let local = HashMap::new();
         let remote = vec![summary("gone", 50, "h", true)];
         let mut stats = SyncStats::default();
-        let wanted = plan(&local, &remote, 1_000, &mut stats);
+        let wanted = plan(&local, &remote, 1_000, &mut stats).wanted;
         assert!(wanted.contains_key("gone"));
         assert_eq!(stats.skipped, 0);
     }
@@ -114,7 +126,7 @@ mod tests {
             summary("forged", i64::MAX, "h", false),
         ];
         let mut stats = SyncStats::default();
-        let wanted = plan(&local, &remote, now, &mut stats);
+        let wanted = plan(&local, &remote, now, &mut stats).wanted;
         assert!(wanted.contains_key("sane"));
         assert!(!wanted.contains_key("forged"));
         assert_eq!(stats.skipped, 1);
@@ -129,7 +141,7 @@ mod tests {
             summary("i", 200, "h", false),
         ];
         let mut stats = SyncStats::default();
-        let wanted = plan(&local, &remote, 10_000, &mut stats);
+        let wanted = plan(&local, &remote, 10_000, &mut stats).wanted;
         assert_eq!(wanted.len(), 1);
         assert_eq!(wanted["i"].created_at, 300);
         assert_eq!(stats.skipped, 2);
@@ -142,7 +154,7 @@ mod tests {
             .map(|n| summary(&format!("i{n}"), n as i64, "h", false))
             .collect();
         let mut stats = SyncStats::default();
-        let wanted = plan(&local, &remote, i64::MAX / 2, &mut stats);
+        let wanted = plan(&local, &remote, i64::MAX / 2, &mut stats).wanted;
         assert_eq!(wanted.len(), MAX_REQUEST_IDS_PER_MESSAGE);
         assert_eq!(stats.skipped, 10);
         assert!(wanted.contains_key(&format!("i{}", MAX_REQUEST_IDS_PER_MESSAGE + 9)));

@@ -138,6 +138,7 @@ mod tests {
             device_id: "device-a".into(),
             device_name: "A".into(),
             listen_addr: None,
+            since_ms: 0,
         })
         .await
         .unwrap();
