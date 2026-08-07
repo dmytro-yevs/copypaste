@@ -116,11 +116,19 @@ once it reaches its reporting stage for the first time.
    AAD-bound item id stay eager. Before-baseline only (duplicate ingest p50, history 2000,
    contended host: 256 B 351 µs, 4 KiB 365 µs, 64 KiB 1448 µs, 1 MiB 24.1 ms) — there is no
    after number, and rustfmt never ran on those files.
-6. **I-6 may be incomplete.** A cloud-applied older row must pull the p2p relay floor back.
-   It needed `pub(crate) fn cursors()` widened to `pub` in `copypaste-p2p/src/node/mod.rs`;
-   that was routed to the worker owning the file and landed as `465121b5`. Verify both
-   halves are present and that the test proving a cloud-applied older version lowers the
-   floor exists and passes — the worker reported it "parked unbuilt".
+6. **I-6 is in, and it nearly was not.** A cloud-applied older row must pull the p2p relay
+   floor back. It was parked on a scratch branch because it could not compile until
+   `pub(crate) fn cursors()` was widened to `pub` (`465121b5`, by the worker owning that
+   file), so it was NOT in the first push. Merged afterwards as `43df70e`, and
+   `cargo check -p copypaste-daemon` passes — the one build that was run, because a commit
+   whose own message said "DOES NOT COMPILE" should not reach `main` unchecked. Its test
+   (`applying_an_older_version_pulls_every_other_peer_back_to_it`, mirrored for the cloud
+   path: peer-1 at 5,000, apply a cloud row stamped 1,000, assert `relay_floor_ms` is
+   `Some(1000)`) has still never been executed. Run it.
+   Note the wiring went into `StoreSource::apply_remote` in `cloud/source.rs`, NOT the
+   `on_applied` closure in `daemon/src/sync.rs` that the original prescription named —
+   `sync.rs` is the peer source and its own doc says the cloud transport deliberately does
+   not take that hook.
 7. **Residual, unfixed, measured:** the retention gate still runs
    `SELECT COUNT(*) ... WHERE deleted = 0` on every capture — a full index scan, 331 µs at
    8k rows. The fix is to make the gate cheap (a maintained counter, or
