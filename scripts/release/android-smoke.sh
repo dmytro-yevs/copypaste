@@ -40,8 +40,18 @@ group "Preflight"
 # ---------------------------------------------------------------------------
 command -v adb >/dev/null 2>&1 || { echo "  FATAL adb is not on PATH"; exit 1; }
 adb wait-for-device
-devices="$(adb devices | grep -cE '\sdevice$')"
-[[ "$devices" == "1" ]] || { echo "  FATAL expected one device, adb reports $devices"; adb devices; exit 1; }
+# Every adb call below is unqualified, so one attached device is the default
+# requirement. ANDROID_SERIAL qualifies all of them, which is the same guarantee
+# by another route — a phone plugged into a developer's machine is not a reason
+# to refuse the run.
+if [[ -n "${ANDROID_SERIAL:-}" ]]; then
+    state="$(adb get-state 2>&1 | tr -d '\r')"
+    [[ "$state" == "device" ]] \
+        || { echo "  FATAL ANDROID_SERIAL=$ANDROID_SERIAL is '$state', not 'device'"; adb devices; exit 1; }
+else
+    devices="$(adb devices | tr -d '\r' | grep -cE '\sdevice$')"
+    [[ "$devices" == "1" ]] || { echo "  FATAL expected one device, adb reports $devices"; adb devices; exit 1; }
+fi
 
 sdk="$(sh_ getprop ro.build.version.sdk)"
 abi="$(sh_ getprop ro.product.cpu.abi)"
