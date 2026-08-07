@@ -32,6 +32,9 @@
       },
       "nsis": {
         "installMode": "currentUser"
+      },
+      "wix": {
+        "version": "2.0.0.5"
       }
     }
   }

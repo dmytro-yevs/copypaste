@@ -224,7 +224,7 @@ reject "setup-tap.sh needs a user"   ./scripts/release/setup-tap.sh --dry-run
 reject "setup-tap.sh rejects a bad tap name" ./scripts/release/setup-tap.sh --github-user dmytro-yevs --tap-name "Bad Name" --dry-run
 
 # ---------------------------------------------------------------------------
-group "One version, three files"
+group "One version, four files"
 # ---------------------------------------------------------------------------
 # The macOS bundler falls back to the Cargo package version when tauri.conf.json
 # has no "version"; the Android one does not — it writes no tauri.properties at
@@ -244,6 +244,29 @@ if [[ "$CONF_V" == "../package.json" ]]; then
 else
     bad "tauri.conf.json resolves its version from ../package.json" \
         "version=${CONF_V:-<unset>} — unset makes the APK claim versionName 1.0, and the release job then fails on it"
+fi
+
+# The fourth file. A Windows Installer ProductVersion is four numeric fields, so
+# the MSI bundler refuses "2.0.0-alpha.5" outright — it will only project a
+# pre-release that parses whole as a number. `bundle.windows.wix.version` is the
+# documented override and is the one field Windows gets to disagree on; the
+# installer filename, NSIS and the macOS and Android bundles all keep the real
+# version. JSON cannot hold the reason, so it is here: the projection is
+# major.minor.patch plus the pre-release's trailing number, 0 when there is no
+# pre-release, and it has to be bumped with the other three.
+WIX_V="$(python3 -c 'import json;print(json.load(open("crates/copypaste-ui/src-tauri/tauri.windows.conf.json"))["bundle"]["windows"]["wix"]["version"])' 2>/dev/null || true)"
+WANT_WIX="$(python3 -c '
+import re, sys
+v = sys.argv[1]
+core, _, pre = v.partition("-")
+tail = re.findall(r"[0-9]+", pre)
+print(core + "." + (tail[-1] if tail else "0"))
+' "$PKG_V" 2>/dev/null || true)"
+if [[ -n "$WANT_WIX" && "$WIX_V" == "$WANT_WIX" ]]; then
+    ok "tauri.windows.conf.json wix.version is $WIX_V, the numeric projection of $PKG_V"
+else
+    bad "tauri.windows.conf.json wix.version tracks package.json" \
+        "wix.version=${WIX_V:-<unset>} but $PKG_V projects to ${WANT_WIX:-<unknown>} — a stale one ships every Windows build under one ProductVersion"
 fi
 
 # ---------------------------------------------------------------------------
