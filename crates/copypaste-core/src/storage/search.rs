@@ -15,7 +15,7 @@
 //! the index through [`Store::indexed_texts`] and drops what the current ruleset
 //! calls a secret, whatever the row was flagged as when it arrived.
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, Transaction};
 
 use super::connection::write_tx;
 use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
@@ -167,38 +167,21 @@ pub(super) fn delete_fts_row_in_tx(tx: &Transaction<'_>, id: &str) -> rusqlite::
     Ok(())
 }
 
-/// Layer 2 of ADR-015: re-read `is_sensitive` **inside the same transaction** as
-/// the FTS write, so a concurrent update that flips an item to sensitive cannot
-/// slip its plaintext into the index. A missing row is also a no-op.
-///
-/// FTS5 has no `ON CONFLICT`, so the upsert idiom is DELETE + INSERT; both run
-/// in this transaction, so a crash cannot leave an item permanently
-/// unsearchable.
-pub(super) fn upsert_fts_in_tx(tx: &Transaction<'_>, id: &str, text: &str) -> rusqlite::Result<()> {
-    let row: Option<(bool, Option<i64>)> = tx
-        .query_row(
-            "SELECT is_sensitive = 0 AND (content_type = 'text' OR content_type LIKE 'text/%'), \
-                    fts_rowid \
-             FROM clipboard_items WHERE id = ?1 AND deleted = 0",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()?;
-    let Some((true, fts_rowid)) = row else {
-        return Ok(());
-    };
-    if let Some(rowid) = fts_rowid {
-        tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
+pub(super) fn insert_fts_in_tx(
+    tx: &Transaction<'_>,
+    id: &str,
+    text: &str,
+    is_sensitive: bool,
+    content_type: &str,
+) -> rusqlite::Result<Option<i64>> {
+    if is_sensitive || !copypaste_ipc::content_type::is_text(content_type) {
+        return Ok(None);
     }
     tx.execute(
         "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
         params![id, text],
     )?;
-    tx.execute(
-        "UPDATE clipboard_items SET fts_rowid = ?2 WHERE id = ?1",
-        params![id, tx.last_insert_rowid()],
-    )?;
-    Ok(())
+    Ok(Some(tx.last_insert_rowid()))
 }
 
 /// Turns arbitrary user input into an FTS5 MATCH expression, or `None` when
@@ -363,7 +346,16 @@ mod tests {
             let tx = conn.transaction().unwrap();
             tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", [&secret.id])
                 .unwrap();
-            upsert_fts_in_tx(&tx, &secret.id, "hunter2 again").unwrap();
+            assert!(
+                insert_fts_in_tx(&tx, &secret.id, "hunter2 again", true, "text")
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                insert_fts_in_tx(&tx, &secret.id, "hunter2 again", false, "image/png")
+                    .unwrap()
+                    .is_none()
+            );
             tx.commit().unwrap();
         }
         assert_eq!(fts_row_count(&s, &secret.id), 0);
@@ -488,7 +480,13 @@ mod tests {
         {
             let mut conn = s.conn().unwrap();
             let tx = conn.transaction().unwrap();
-            upsert_fts_in_tx(&tx, &a.id, "rewritten text").unwrap();
+            delete_fts_row_in_tx(&tx, &a.id).unwrap();
+            let rowid = insert_fts_in_tx(&tx, &a.id, "rewritten text", false, "text").unwrap();
+            tx.execute(
+                "UPDATE clipboard_items SET fts_rowid = ?2 WHERE id = ?1",
+                params![&a.id, rowid],
+            )
+            .unwrap();
             tx.commit().unwrap();
         }
         assert_eq!(fts_row_count(&s, &a.id), 1, "the upsert must not duplicate");
