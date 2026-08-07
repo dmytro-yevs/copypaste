@@ -61,14 +61,17 @@ impl Keyring {
     ///   and that is what happened.
     /// * **Android** — a 32-byte secret sealed with an AES-GCM key held in the
     ///   Android Keystore, kept as a blob in app-private storage.
+    /// * **Windows** — the same shape: sealed with DPAPI under the user's
+    ///   login, kept as `device_secret.dpapi` in the data directory. Not the
+    ///   Credential Manager, which any process in the session can enumerate.
     /// * **Everywhere else** — a `0600` file named `device_secret.key`, for
     ///   development only. See `keystore::file` for why it is not a keystore.
     ///
     /// `data_dir` is the directory holding the history database, so the secret
     /// stays with the data it opens when `--data-dir` moves it (security review
-    /// F-11). The two keystore backends are app- or user-scoped and ignore it;
-    /// the argument is still theirs to receive, because the guard that refuses
-    /// to mint over an existing history needs it on every platform.
+    /// F-11). The Keychain and the Android Keystore are app- or user-scoped and
+    /// ignore it; the argument is still theirs to receive, because the guard
+    /// that refuses to mint over an existing history needs it everywhere.
     ///
     /// `COPYPASTE_EPHEMERAL_KEY` short-circuits every backend and mints a
     /// throwaway secret; data written under it is unrecoverable after exit.
