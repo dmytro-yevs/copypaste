@@ -152,13 +152,21 @@ export function useHistory(query: string, pushLive = false) {
 
   return {
     data,
-    error: pages.error,
-    isError: pages.isError,
+    // The head is the query on a timer, so it is the only one that sees the
+    // service go away — and come back. Reporting the paged query's error here
+    // left a stopped daemon rendering "Nothing copied yet" (bdac.2): nothing
+    // refetches that query after the first load, so it never fails.
+    error: searching ? pages.error : head.error,
+    isError: searching ? pages.isError : head.isError,
     isPending: pages.isPending,
     hasNextPage: pages.hasNextPage,
     isFetchingNextPage: pages.isFetchingNextPage,
     fetchNextPage: pages.fetchNextPage,
-    refetch: pages.refetch,
+    /** Both, because "try again" has to retry whichever one is failing. */
+    async refetch() {
+      const [paged, fresh] = await Promise.all([pages.refetch(), head.refetch()]);
+      return { error: searching ? paged.error : fresh.error };
+    },
   };
 }
 
