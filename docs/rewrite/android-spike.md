@@ -1,10 +1,12 @@
 # The Android device spike
 
-**Status:** open · rung 0 runs on an emulator; rung 2 is still only read, not
-observed
-**Blocking:** the rung 2 recommendation in
-[android-clipboard-access.md](android-clipboard-access.md) §4 rests on a claim
-derived from AOSP source and never observed.
+**Status:** open · rung 0 runs on an emulator; rung 2's platform half is now
+observed, its Shizuku half is not
+**No longer blocking:** [android-clipboard-access.md](android-clipboard-access.md)
+§4's claim — a binder call as the shell uid with
+`callingPackage = "com.android.shell"` reads the clipboard with no focus — was
+derived from AOSP source and has now been run. `scripts/release/android-rungs.sh`
+asserts it on every nightly.
 
 ## What the emulator settled
 
@@ -33,19 +35,58 @@ in, on Android 16, x86_64, `google_apis`:
   passed anyway. The check polls to a 90-second budget and reports the time it
   actually took, so the margin stays measured.
 
-What it did **not** settle, and why:
+### What the second script settled
 
-* **The Quick Settings tile.** `cmd statusbar add-tile` and `click-tile` print
-  nothing on this image and `cmd clipboard` does not exist on it — there is no
-  way to put text on the clipboard from the shell, so the tile's read has
-  nothing to read. Unproven, and the job says so.
-* **Rung 2 itself, and R8.** Shizuku needs a pairing done by hand. The APK is
-  the debug one because every filesystem assertion goes through `run-as`, so
-  the minified release build's plugin reflection is untested.
+`scripts/release/android-rungs.sh` runs after the smoke test on the same booted
+device. On API 36, x86_64, `google_apis`:
+
+* **The shell uid reads the clipboard with no focus.** `service call clipboard`
+  as `com.android.shell` returns a clip another app copied, while that app has
+  focus and ours does not. The same call naming our own package is refused with
+  `Package com.copypaste.app does not belong to 2000` from
+  `AppOpsManager.checkPackage` — so item 5 below passes for shell and the
+  identity, not the transport, is what grants the read. AOSP's argument vector
+  `(String callingPackage, String attributionTag, int userId, int deviceId)`
+  is this API level's, which settles item 4.
+* **The Quick Settings tile works end to end.** One `click-tile` starts
+  `ClipboardCaptureActivity` and the clip reaches SQLCipher unreadable.
+* **`FLAG_SECURE` is on the window from the first dump onwards**, twenty dumps
+  over a minute, with another window on the same device reported unprotected by
+  the same reader.
+* **Nothing claims to capture when nothing is listening.** With `enabled=true`
+  written straight into `shared_prefs/capture-service.xml`, no foreground
+  service runs and no notification appears.
+
+Two things that were reported as dead ends and are not:
+
+* **`cmd statusbar add-tile` and `click-tile` work.** They print nothing either
+  way. `add-tile` is visible in `sysui_qs_tiles`, and `click-tile` reaches a
+  third-party tile *once SystemUI has bound it* — which it does lazily, so the
+  panel has to be opened once first. Clicking without that is a silent no-op,
+  which is what read as "prints nothing".
+* **Text can be put on the clipboard without `cmd clipboard`.** It still does
+  not exist. Driving another app's text field does: Settings' search box,
+  `input keycombination` for select-all, `KEYCODE_COPY` — and
+  `getPrimaryClipSource` then names that app, so the clip is genuinely foreign.
+
+What is still **not** settled, and why:
+
+* **The Shizuku transport.** `ShizukuBinderWrapper`, `IClipboard$Stub.asInterface`
+  by reflection, the `IOnPrimaryClipChangedListener` descriptor and whether the
+  listener ever fires are items 2, 3 and 8 and need a pairing done by hand.
+  What is settled is everything the proxy is transparent to.
+* **R8.** The APK is the debug one because every filesystem assertion goes
+  through `run-as`, so the minified release build's plugin reflection is
+  untested.
+* **The loss notification after a reboot.** The binder death recipient that
+  posts it lives in the process that died, so a cold start with the armed flag
+  still on disk posts nothing. Recorded as a probe rather than a failure: §5
+  rule 3 wants loss pushed, and whether the app should re-post on start from
+  the persisted flag is a decision, not a defect.
 
 Everything unobservable is printed under `NOT ASSERTED` rather than skipped, and
-`check.sh` runs the smoke test's `--self-test` so its detectors are known to
-fail when they should.
+`check.sh` runs both scripts' `--self-test` so their detectors are known to fail
+when they should.
 
 ### Two traps, each of which cost a run
 
@@ -62,8 +103,8 @@ accessibility tree is the signal; the screenshot is for a human to look at.
 
 ## On a phone, not an emulator
 
-Each of these would falsify something currently written as true. Items 2 to 8
-are all rung 2 or hardware, which is why none of them moved.
+Each of these would falsify something currently written as true. Items 4 and 5
+moved on an emulator; what is left is the Shizuku transport and the hardware.
 
 1. ~~**The Kotlin does not compile.**~~ Settled: it builds, installs, and runs.
    The AIDL package placement is still only known to *build* — whether a system
@@ -76,16 +117,13 @@ are all rung 2 or hardware, which is why none of them moved.
    on a timer. `ShizukuClipboard.pollOnce` is that call; what is missing is the
    timer, and the state model needs no change because a polled read reports the
    same `ReadOutcome`.
-4. **The argument vector is wrong on this API level.** `invoke` assumes AOSP's
-   ordering — first `String` is the calling package, first `int` is the user id.
-   A `SecurityException` naming a uid, or a `NullPointerException` inside
-   `system_server`, is this. `lastFailure` records it.
-5. **`mAppOps.checkPackage(2000, "com.android.shell")` refuses.** This is the
-   one that would falsify the whole rung. It would appear as a
-   `SecurityException` on the first `getPrimaryClip`, not as a null. If it
-   happens, rung 2 is not available on this device and the honest answer is the
-   state model's `ReadRefused`, which is already wired to say so and to offer no
-   button that would not help.
+4. ~~**The argument vector is wrong on this API level.**~~ Settled on API 36:
+   `(String callingPackage, String attributionTag, int userId, int deviceId)`
+   is the order, which is what `invoke` builds. Still open on other API levels,
+   and `lastFailure` records it if it moves.
+5. ~~**`mAppOps.checkPackage(2000, "com.android.shell")` refuses.**~~ Settled on
+   API 36: it passes for the shell package and refuses every other, which is
+   the whole hinge. Still open on an OEM build.
 6. **The foreground service is killed anyway** by an OEM battery manager
    (Xiaomi, Samsung). Capture stops without the binder dying, so nothing
    notices: the `Working` state would persist while nothing is captured. **This

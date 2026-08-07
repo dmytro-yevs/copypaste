@@ -175,13 +175,18 @@ No logcat, no denial-line parsing, no overlay activity, no focus stealing, no
 polling. This is strictly better than v1 and it is the reason this rung is worth
 building rather than just documenting.
 
-> **Marked as unverified.** This design is derived from AOSP source, not from a
-> device. Before committing to it, spike it on a real phone: confirm the
-> listener registers and fires as shell, confirm `mAppOps.checkPackage(2000,
-> "com.android.shell")` passes through the Shizuku proxy, and check what the
-> Android 12+ toast actually looks like in practice. If the listener path fails,
-> fall back to polling `getPrimaryClip` over Shizuku on a timer — still far
-> better than logcat.
+> **Half verified.** The platform half has been run: on API 36 a `getPrimaryClip`
+> as uid 2000 with `callingPackage = "com.android.shell"` returns another app's
+> clip with no focus, `mAppOps.checkPackage` passes for the shell package and
+> refuses every other, and the argument vector above is this level's.
+> `scripts/release/android-rungs.sh` asserts it nightly.
+>
+> **The Shizuku half is not.** Whether the proxy's binder wrapper, the reflected
+> `IClipboard$Stub.asInterface` and the `IOnPrimaryClipChangedListener`
+> descriptor survive a real `system_server`, and whether the listener fires,
+> still need a phone with Shizuku paired. If the listener path fails, fall back
+> to polling `getPrimaryClip` over Shizuku on a timer — still far better than
+> logcat.
 
 **What the user installs.** [Shizuku](https://github.com/RikkaApps/Shizuku),
 Apache-2.0, ~28k stars, on Google Play as `moe.shizuku.privileged.api`; the

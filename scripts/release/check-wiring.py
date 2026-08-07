@@ -328,7 +328,7 @@ if emu:
         rec(all("--target x86_64" in l for l in build), "{}: builds for the AVD's ABI".format(apk_job),
             "an APK with no x86_64 native library installs and then dies on load: {}".format(build))
 
-for name in ("android-smoke.sh", "android-smoke-release.sh"):
+for name in ("android-smoke.sh", "android-smoke-release.sh", "android-rungs.sh"):
     smoke = pathlib.Path("scripts/release") / name
     rec(smoke.is_file() and "--self-test" in smoke.read_text(),
         "{} carries a --self-test".format(name),
