@@ -41,7 +41,12 @@ import sys
 
 # Without this, piping the report into `head` ends in a traceback, which in a
 # gate reads as the check crashing rather than as the reader stopping early.
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+# Windows has no SIGPIPE and no traceback to suppress, and asking for it there
+# raised `AttributeError` before a single file was measured — so the check that
+# reports a rule 8 breach became a hook that rejected every commit.
+sigpipe = getattr(signal, "SIGPIPE", None)
+if sigpipe is not None:
+    signal.signal(sigpipe, signal.SIG_DFL)
 
 max_block, max_header, max_ratio, ratio_floor, baseline_path = (
     int(sys.argv[1]),
