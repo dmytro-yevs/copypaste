@@ -31,14 +31,19 @@ pub const DEDUP_WINDOW_MS: i64 = 60_000;
 /// agree about where a bucket starts.
 const DEDUP_BUCKET_MS: i64 = DEDUP_WINDOW_MS;
 
-fn live_count(conn: &Connection) -> rusqlite::Result<u64> {
-    let live: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
-        [],
-        |r| r.get(0),
-    )?;
+/// Live rows, read from the counter the schema's triggers maintain.
+///
+/// Never `COUNT(*) … WHERE deleted = 0`. The cap is tested on every capture and
+/// that count is a full index scan — 331 µs at 8 000 rows, on the write path,
+/// inside the IMMEDIATE transaction. Moving the test out of that transaction
+/// was measured and won nothing (F-STOR-3, 205 → 208 µs): the query is the
+/// cost, not where it runs, so the fix has to be a cheaper question.
+pub(super) fn live_count(conn: &Connection) -> rusqlite::Result<u64> {
+    let live: i64 = conn.query_row(LIVE_COUNT_SQL, [], |r| r.get(0))?;
     Ok(live.max(0) as u64)
 }
+
+const LIVE_COUNT_SQL: &str = "SELECT live FROM clipboard_live_count";
 
 fn unpinned_bytes(conn: &Connection) -> rusqlite::Result<u64> {
     let total: i64 = conn.query_row(BYTE_CAP_TOTAL_SQL, [], |r| r.get(0))?;
@@ -552,6 +557,89 @@ mod tests {
             plan.iter()
                 .any(|detail| detail.contains("idx_items_unpinned_bytes")),
             "byte quota gate must use its expression index, got {plan:?}"
+        );
+    }
+
+    /// The gate reads the one counter row. A plan that names `clipboard_items`
+    /// is the full index scan back on the capture path.
+    #[test]
+    fn the_history_cap_gate_never_scans_the_items_table() {
+        let s = store();
+        s.insert(item("payload", T0)).unwrap();
+        let conn = s.conn().unwrap();
+        let plan = conn
+            .prepare(&format!("EXPLAIN QUERY PLAN {LIVE_COUNT_SQL}"))
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            !plan.iter().any(|detail| detail.contains("clipboard_items")),
+            "the cap gate must not read the items table, got {plan:?}"
+        );
+    }
+
+    /// Every path that changes liveness must move the counter with it. A drift
+    /// here is silent until the cap evicts the wrong number of items.
+    #[test]
+    fn the_maintained_count_tracks_every_liveness_change() {
+        let s = store();
+        assert_counter_matches(&s, "an empty store");
+
+        let ids: Vec<String> = (0..4)
+            .map(|n| {
+                s.insert(item(&format!("item {n}"), T0 + n * 60_000))
+                    .unwrap()
+                    .id
+            })
+            .collect();
+        assert_eq!(s.count().unwrap(), 4);
+        assert_counter_matches(&s, "four inserts");
+
+        // A bump is not a new row, so it must not move the count.
+        s.insert_or_bump(item("item 0", T0 + 7 * 86_400_000))
+            .unwrap();
+        assert_counter_matches(&s, "a dedup bump");
+
+        assert!(s.delete(&ids[1]).unwrap());
+        assert_eq!(s.count().unwrap(), 3, "a tombstone is not live");
+        assert_counter_matches(&s, "a soft delete");
+
+        // Re-deleting a tombstone changes nothing, and must not double-count.
+        assert!(!s.delete(&ids[1]).unwrap());
+        assert_counter_matches(&s, "a repeated soft delete");
+
+        // The hard delete the cap performs, with a pin it may not touch.
+        assert!(s.set_pinned(&ids[0], true).unwrap());
+        assert_eq!(s.evict_over_cap(2).unwrap(), 1);
+        assert_counter_matches(&s, "an eviction");
+
+        s.delete_all().unwrap();
+        assert_eq!(s.count().unwrap(), 1, "the pin survives");
+        assert_counter_matches(&s, "delete_all");
+
+        // ...and a re-copy after all that is a fresh live row.
+        s.insert(item("after the sweep", T0 + 8 * 86_400_000))
+            .unwrap();
+        assert_counter_matches(&s, "a re-copy after delete_all");
+    }
+
+    #[track_caller]
+    fn assert_counter_matches(s: &Store, after: &str) {
+        let scanned: i64 = {
+            let conn = s.conn().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            i64::try_from(s.count().unwrap()).unwrap(),
+            scanned,
+            "the maintained live count drifted after {after}"
         );
     }
 

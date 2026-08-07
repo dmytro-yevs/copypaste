@@ -99,6 +99,38 @@ CREATE INDEX idx_items_sync_cursor
     ON clipboard_items(MAX(created_at, pin_updated_at), id)
     WHERE deleted = 1 OR is_sensitive = 0;
 
+-- The history cap is tested on every capture, so the test may not be a scan.
+-- SQLite has no O(1) row count; this row is one. The triggers below are the
+-- only thing that maintains it, and `seed_live_count` recomputes it from the
+-- table on every open so a drift cannot outlive a restart.
+CREATE TABLE clipboard_live_count (
+    only_row INTEGER PRIMARY KEY NOT NULL CHECK (only_row = 0),
+    live     INTEGER NOT NULL
+);
+INSERT INTO clipboard_live_count (only_row, live) VALUES (0, 0);
+
+CREATE TRIGGER clipboard_live_count_insert AFTER INSERT ON clipboard_items
+WHEN NEW.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live + 1;
+END;
+
+CREATE TRIGGER clipboard_live_count_delete AFTER DELETE ON clipboard_items
+WHEN OLD.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live - 1;
+END;
+
+-- Liveness is this column and nothing else, so `UPDATE OF deleted` is the whole
+-- surface: a soft delete, and the resurrect a merge performs when a peer's live
+-- version outranks a local tombstone.
+CREATE TRIGGER clipboard_live_count_update AFTER UPDATE OF deleted ON clipboard_items
+WHEN OLD.deleted <> NEW.deleted
+BEGIN
+    UPDATE clipboard_live_count
+       SET live = live + (CASE WHEN NEW.deleted = 0 THEN 1 ELSE -1 END);
+END;
+
 -- External-content mode is NOT used: there is no cascade from clipboard_items,
 -- so every delete path must remove the FTS row explicitly, in the same
 -- transaction as the row change. Rows are keyed by `rowid`, mirrored in
@@ -124,9 +156,38 @@ CREATE TABLE sync_device_name (
 );
 "#;
 
+/// The same objects as the tail of [`SCHEMA_V1`], written idempotently for a v2
+/// history that predates them.
+const LIVE_COUNT_DDL: &str = r#"
+CREATE TABLE IF NOT EXISTS clipboard_live_count (
+    only_row INTEGER PRIMARY KEY NOT NULL CHECK (only_row = 0),
+    live     INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO clipboard_live_count (only_row, live) VALUES (0, 0);
+
+CREATE TRIGGER IF NOT EXISTS clipboard_live_count_insert AFTER INSERT ON clipboard_items
+WHEN NEW.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live + 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS clipboard_live_count_delete AFTER DELETE ON clipboard_items
+WHEN OLD.deleted = 0
+BEGIN
+    UPDATE clipboard_live_count SET live = live - 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS clipboard_live_count_update AFTER UPDATE OF deleted ON clipboard_items
+WHEN OLD.deleted <> NEW.deleted
+BEGIN
+    UPDATE clipboard_live_count
+       SET live = live + (CASE WHEN NEW.deleted = 0 THEN 1 ELSE -1 END);
+END;
+"#;
+
 /// One past the last migration in [`MIGRATIONS`]. `super::schema_verify` reads
 /// it to refuse a file this ladder has not produced.
-pub(super) const SCHEMA_VERSION: i64 = 6;
+pub(super) const SCHEMA_VERSION: i64 = 7;
 
 static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
     Migrations::new(vec![
@@ -136,8 +197,17 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up_with_hook("", repair_early_v2_schema),
         M::up_with_hook("", repair_dedup_index),
         M::up_with_hook("", add_fts_rowid_and_sync_indexes),
+        M::up_with_hook("", add_live_count),
     ])
 });
+
+/// Idempotent for the same reason [`add_fts_rowid_and_sync_indexes`] is: a
+/// fresh database already carries all of this from [`SCHEMA_V1`].
+fn add_live_count(tx: &Transaction<'_>) -> HookResult {
+    tx.execute_batch(LIVE_COUNT_DDL)?;
+    seed_live_count(tx)?;
+    Ok(())
+}
 
 fn repair_early_v2_schema(tx: &Transaction<'_>) -> HookResult {
     for (name, statement) in [
@@ -221,6 +291,15 @@ fn add_fts_rowid_and_sync_indexes(tx: &Transaction<'_>) -> HookResult {
     Ok(())
 }
 
+fn seed_live_count(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "UPDATE clipboard_live_count \
+            SET live = (SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0)",
+        [],
+    )?;
+    Ok(())
+}
+
 fn has_column(tx: &Transaction<'_>, name: &str) -> Result<bool, rusqlite::Error> {
     tx.query_row(
         "SELECT 1 FROM pragma_table_info('clipboard_items') WHERE name = ?1 LIMIT 1",
@@ -234,6 +313,10 @@ fn has_column(tx: &Transaction<'_>, name: &str) -> Result<bool, rusqlite::Error>
 /// Creates the v2 schema. A database written by a newer schema is refused.
 pub(super) fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
     MIGRATIONS.to_latest(conn)?;
+    // `clipboard_live_count` is derived state, so it is recomputed rather than
+    // trusted. This is the one full `COUNT(*)` v2 pays, and paying it per open
+    // is what lets the history cap gate be a single-row read per capture.
+    seed_live_count(conn)?;
     Ok(())
 }
 
@@ -244,7 +327,7 @@ mod tests {
     use super::super::connection::run_pragma;
     use super::super::dbfile::open_validated;
     use super::super::schema_verify::verify_schema;
-    use super::super::test_support::KEY;
+    use super::super::test_support::{item, KEY, T0};
     use super::super::{Store, StoreError};
 
     fn rewrite_as_early_v2(path: &std::path::Path, version: i64, columns: &str) {
@@ -359,6 +442,47 @@ mod tests {
             vec!["decoy".to_string()],
             "the delete must take its own index row and only its own"
         );
+    }
+
+    /// The live count is derived state, so a value that has drifted — by a
+    /// crash between the row write and the trigger, or by a tool that wrote
+    /// rows behind them — must not survive a restart. The cap evicts from this
+    /// number, and a wrong one either over-deletes or stops enforcing.
+    #[test]
+    fn a_drifted_live_count_is_recomputed_on_open() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        {
+            let store = Store::open(&path, &KEY).unwrap();
+            store.insert(item("first", T0)).unwrap();
+            store.insert(item("second", T0 + 60_000)).unwrap();
+            store
+                .conn()
+                .unwrap()
+                .execute("UPDATE clipboard_live_count SET live = 99", [])
+                .unwrap();
+            assert_eq!(store.count().unwrap(), 99, "the drift must be real");
+        }
+
+        assert_eq!(Store::open(&path, &KEY).unwrap().count().unwrap(), 2);
+    }
+
+    /// A repaired v2 history has to get the *triggers* back, not only the
+    /// table. Without them the counter freezes at whatever the open computed
+    /// and the history cap silently stops enforcing.
+    #[test]
+    fn a_repaired_schema_regains_the_live_count_triggers() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("copypaste-v2.db");
+        rewrite_as_early_v2(&path, 1, EARLY_COLUMNS);
+
+        let store = Store::open(&path, &KEY).unwrap();
+        assert_eq!(store.count().unwrap(), 1, "the planted row is live");
+
+        let added = store.insert(item("after the repair", T0)).unwrap();
+        assert_eq!(store.count().unwrap(), 2);
+        assert!(store.delete(&added.id).unwrap());
+        assert_eq!(store.count().unwrap(), 1);
     }
 
     #[test]
