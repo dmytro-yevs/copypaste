@@ -147,6 +147,21 @@ fi
 # single signal that the plugin surface came through R8 intact.
 assert_painted "$PAINT_TIMEOUT" "$launched_at" "$OUT/release-ui.xml" "$OUT/release.png"
 
+# The security half of the UI harness in e2e-android/. That harness attaches to
+# the WebView over CDP, which is only possible because wry calls
+# setWebContentsDebuggingEnabled under
+# `#[cfg(any(debug_assertions, feature = "devtools"))]`. Nothing in this
+# workspace enables that feature, so the call is not in this binary — asserted
+# here rather than reasoned about, because it is what keeps a remote debugger
+# off the build people install.
+unix_sockets="$(sh_ cat /proc/net/unix)"
+if [[ -n "$pid_now" && -n "$(devtools_sockets "$unix_sockets" "$pid_now")" ]]; then
+    bad "the shipped build publishes no WebView devtools socket" \
+        "$(devtools_sockets "$unix_sockets" "$pid_now") is open on pid $pid_now — anyone with adb can attach a debugger to the WebView"
+else
+    ok "the shipped build publishes no WebView devtools socket"
+fi
+
 # ---------------------------------------------------------------------------
 group "3. Native code is mapped"
 # ---------------------------------------------------------------------------
