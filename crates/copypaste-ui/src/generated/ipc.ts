@@ -10,7 +10,7 @@ export type DiagnosticCounters = { rejected_too_large: number, lost_intermediate
 
 export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, };
 
-export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_not_found" | "internal";
+export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_version" | "peer_not_found" | "internal";
 
 export type ExportReport = { exported: number, skipped_sensitive: number, skipped_non_text: number, skipped_undecryptable: number, };
 

@@ -25,6 +25,7 @@ const FRIENDLY = {
   peer_unreachable: "errors.peer_unreachable",
   pairing_limit: "errors.pairing_limit",
   peer_failed: "errors.peer_failed",
+  peer_version: "errors.peer_version",
   peer_not_found: "errors.peer_not_found",
   internal: "errors.internal",
   unknown: "errors.unknown",
