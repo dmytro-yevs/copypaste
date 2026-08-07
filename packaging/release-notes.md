@@ -1,3 +1,19 @@
+## What changed
+
+**The p2p wire protocol is now v3.** A device still on an older build will stop
+syncing with this one until both are updated. Deliberate — v2 keeps no backward
+compatibility.
+
+**`copypaste list --json` now returns a 1 KB preview of each item body** rather
+than the whole body. A script that needs full contents must use
+`copypaste export`, which is unchanged.
+
+The rest is a performance pass. Sync no longer re-sends history a peer already
+has: a converged round over 10,000 items went from ~5 MB to under 1 KB, and idle
+cost per peer from ~62 MB/hour to ~11 KB/hour. Capture, search and the history
+list are all faster; the measurements are in
+[docs/rewrite/performance.md](https://github.com/dmytro-yevs/copypaste/blob/main/docs/rewrite/performance.md).
+
 ## Install
 
 **macOS** (Apple Silicon):
