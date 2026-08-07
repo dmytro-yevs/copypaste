@@ -219,6 +219,15 @@ impl CloudSource for StoreSource {
         })
     }
 
+    fn apply_remote_batch(&self, items: Vec<LocalItem>) -> Result<Vec<Applied>, SyncError> {
+        blocking(|| {
+            items
+                .into_iter()
+                .map(|item| self.apply_remote(item))
+                .collect()
+        })
+    }
+
     fn watermark(&self) -> Result<i64, SyncError> {
         blocking(|| {
             self.state
