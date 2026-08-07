@@ -333,6 +333,18 @@ is where the length came from: the three longest messages here each described
 three or four subsystems, because a wide `git add` had made a wide commit
 inevitable. Rule 9 and this rule are the same rule from two ends.
 
+### Merges are exempt from the shape
+
+A merge is not one logical change, and its subject is not authored — git writes
+it from the ref names. `Merge remote-tracking branch 'origin/<branch>' into
+<branch>` is past 72 characters on this repository's branch names alone, so the
+rule above cannot be met and cannot be meant. The bans on AI trailers and
+session URLs still hold, because git emits neither.
+
+Merging is allowed; history here is not linear. `--no-verify` is not the way to
+get a merge past the hook — if the hook rejects one, that is a defect in the
+hook.
+
 ### Enforced, not merely written
 
 `scripts/check-commit-msg.sh` runs from `.githooks/commit-msg` and from CI.

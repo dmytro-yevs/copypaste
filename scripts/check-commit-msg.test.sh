@@ -45,6 +45,83 @@ expect_unterminated() {
 AT_LIMIT="$(printf '%68s' '' | tr ' ' x)"   # "Add " + 68 == 72
 OVER_LIMIT="${AT_LIMIT}x"
 
+# The shape rules cannot be met by a subject git wrote, and the long ones have
+# no rewording available short of --no-ff -m.
+group "Merges: git writes the subject, so rule 10's shape does not apply"
+
+expect_unterminated accept 'merge subject past 72 chars' <<'EOF'
+Merge remote-tracking branch 'origin/dmytro-yevs/commit-msg-hook' into dmytro-yevs/commit-msg-hook
+EOF
+
+expect accept 'merge of two branches' <<'EOF'
+Merge remote-tracking branches 'origin/f2' and 'origin/f3' into perf-integrate
+EOF
+
+expect accept 'merge tag' <<'EOF'
+Merge tag 'v0.4.1' into main
+EOF
+
+expect accept 'merge commit' <<'EOF'
+Merge commit '465121b5' into dmytro-yevs/perf-integrate
+EOF
+
+expect accept 'GitHub pull-request merge' <<'EOF'
+Merge pull request #12 from dmytro-yevs/perf-storage
+EOF
+
+# merge.log expands the body past the 12-line budget with other commits' text.
+expect accept 'merge.log body over the body budget' <<'EOF'
+Merge remote-tracking branch 'origin/perf-core' into perf-integrate
+
+* origin/perf-core:
+  Add a
+  Add b
+  Add c
+  Add d
+  Add e
+  Add f
+  Add g
+  Add h
+  Add i
+  Add j
+  Add k
+  Add l
+EOF
+
+expect accept 'conflict comment block is stripped' <<'EOF'
+Merge branch 'perf-net' into perf-integrate
+
+# Conflicts:
+#	crates/copypaste-daemon/src/p2p/relay.rs
+EOF
+
+# The exemption is shape-only: git emits neither of these, so either one is
+# always something a person or a tool added.
+expect reject 'AI trailer on a merge' 'Co-Authored-By' <<'EOF'
+Merge branch 'perf-net' into perf-integrate
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+EOF
+
+expect reject 'session URL on a merge' 'session URL' <<'EOF'
+Merge branch 'perf-net' into perf-integrate
+
+https://claude.ai/code/session/abc123
+EOF
+
+# A subject that merely opens with "Merge" is prose and stays under the rule.
+expect reject 'hand-written Merge subject over 72 chars' 'max 72' <<EOF
+Merge $OVER_LIMIT
+EOF
+
+expect reject 'hand-written Merge subject with a period' 'period' <<'EOF'
+Merge the hardware SHA-2 backend into the integration branch.
+EOF
+
+expect accept 'hand-written Merge subject that obeys the rule' <<'EOF'
+Merge the hardware SHA-2 backend into the integration branch
+EOF
+
 # Dropping the last line reported a single-line message as empty, and silently
 # skipped whatever a multi-line one said last.
 group "An unterminated final line is still read"
