@@ -345,9 +345,58 @@ maintain it across insert, hard delete and every change of `deleted`, and
 outlive a restart. The gate is now a single-row primary-key read, and the one
 full count v2 still pays is that reconcile.
 
-**No after-figure has been taken.** `storage/sweep/cap_nothing_to_do` at
-500 / 2 000 / 8 000 is the A/B, and the property to check is flatness across the
-three depths rather than any single number.
+### 5.1 Two sweeps, one design — **no baseline has been taken**
+
+A store write gets dearer for two independent reasons: there are more rows, or
+the rows are bigger. Every figure in §5 above is one point in that plane — a
+512-byte row, read at three depths. The benches sweep each axis with the other
+pinned, because their product is not affordable: 8 000 four-MiB rows is 32 GB.
+
+**Depth, at a fixed small row.** `storage/sweep/*` at 500 / 2 000 / 8 000 over
+`ROW_BYTES` = 512, and `capture/sweep/*` at 100 / 2 000 / 10 000 over 256 B.
+The two carry their own depth triples because only the shape of each line is
+being read, never one group's absolute figure against the other's. That shape
+is *flatness*: each gate answers a yes/no question that must not depend on how
+much history the answer is about, so a line that climbs with the row count is a
+scan on the capture path. That is the 331 µs above, and no single depth would
+have shown it — every absolute number looked unremarkable on its own.
+`capture/sweep/cap_one_to_evict` is the deliberate exception, not flat and not
+meant to be, because it carries a hard delete.
+
+**Payload, at a depth of 32.** `storage/payload/{512B,64KiB,1MiB,4MiB}` over
+`insert`, `bump`, `upsert` and the byte-cap gate. Nothing in the depth sweep
+moves when a change costs per byte rather than per row: a second pass over the
+ciphertext, a bump that rewrites a big row instead of stamping it, an FTS write
+that carries the plaintext twice. §3's stage table sweeps payload already but
+stops at `insert`, and neither it nor the
+`a_capture_writes_its_payload_to_the_wal_once` test covers `insert_or_bump` or
+`upsert` — the two writes this section is about. Disk is what fixes the depth
+at 32: `clipboard_fts` is not contentless, so a primed 4 MiB row costs its
+ciphertext and its plaintext both, and 32 of them is ~300 MB.
+
+```sh
+cargo bench -p copypaste-core --bench storage -- 'storage/(sweep|payload)'
+cargo bench -p copypaste-core --bench capture -- capture/sweep
+```
+
+**The byte-cap gate is read on both axes, and that is the point.** It is a
+`SUM(LENGTH(...))` over every unpinned row, so it should climb with depth and
+stay flat across payload — SQLite takes a blob's length from the record header,
+not its overflow pages. Whichever half moves localises the change. The item-cap
+gate is in the depth sweep only: since the fix it reads one counter row, so no
+payload can reach it.
+
+**Neither half has a figure yet.** A regression that needs depth *and* payload
+together is invisible to both, which follows from the affordability argument
+above rather than being an oversight. The payload group was smoke-run at 4 MiB
+on a third host — a WSL2 Linux VM, so neither L nor M, and not a Windows figure
+either despite [ADR-0013](../adr/0013-windows-as-a-third-platform.md). It ran
+only to confirm the group discriminates: `bump` came out more than an order of
+magnitude below `insert`, so it takes the bump branch rather than silently
+inserting, and the byte-cap gate came out flat. No constant from that host is
+quoted and it is not the baseline. The first run on host M is — for the payload
+half a baseline with no before-tree to put beside it, and for the depth half
+the after-side of the item-cap fix, whose before-side is the 331 µs above.
 
 ---
 

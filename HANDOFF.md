@@ -145,10 +145,14 @@ were clean on it, and `Supply chain` is green on the final commit.
    on `clipboard_items` and recomputed from the table on every open. Schema version 6 → 7,
    so **backups taken by an older build are refused by restore**, as every schema bump does.
    `storage/sweep/cap_nothing_to_do` at 500/2k/8k is the A/B; the property is flatness
-   across the three depths, not any single number. Nothing here was compiled or run.
-8. **Storage benches cannot see large-payload write regressions** at ROW_BYTES=512. Only
-   `capture/stage/*/insert` and the WAL-bytes test can. A future storage change can regress
-   big writes with every storage bench green.
+   across the three depths, not any single number. Never measured.
+8. **The storage benches now sweep two axes, and neither has been run.** Depth is item 7's
+   sweep, at a 512-byte row; `storage/payload/{512B,64KiB,1MiB,4MiB}` is the other,
+   measuring `insert`, `bump`, `upsert` and the byte-cap gate at a fixed depth of 32 rows.
+   `docs/rewrite/performance.md` §5.1 is the single design both belong to. Take both
+   baselines — the payload half has no before-tree, so its first run is the number and not
+   a comparison. The pair still cannot see a regression that needs depth and payload
+   together.
 9. **`copypaste list --json` now returns bounded bodies** (1 KB preview). Export remains the
    full-body path. Behaviour change, belongs in release notes.
 10. **The p2p wire protocol is now v3.** Devices on older builds stop syncing until both
