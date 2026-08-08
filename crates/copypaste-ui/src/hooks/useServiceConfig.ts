@@ -78,38 +78,41 @@ export function useSetPrivateMode() {
     PrivateModeData,
     unknown,
     boolean,
-    { previous: PrivateModeData | undefined }
+    {
+      previous: PrivateModeData | undefined;
+      optimisticUpdateCount: number;
+    }
   >({
     mutationFn: setPrivateMode,
     onMutate: async (enabled) => {
       await qc.cancelQueries({ queryKey: PRIVATE_MODE_KEY });
       const previous = qc.getQueryData<PrivateModeData>(PRIVATE_MODE_KEY);
-      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, {
+      const optimistic = {
         private_mode: enabled,
         private_mode_epoch: previous?.private_mode_epoch ?? 0,
-      });
-      return { previous };
+      };
+      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, optimistic);
+      const optimisticUpdateCount =
+        qc.getQueryState<PrivateModeData>(PRIVATE_MODE_KEY)?.dataUpdateCount ?? 0;
+      return { previous, optimisticUpdateCount };
     },
-    onSuccess: (confirmed) => {
-      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, (cached) =>
-        cached !== undefined &&
-        cached.private_mode_epoch > confirmed.private_mode_epoch
-          ? cached
-          : confirmed,
-      );
+    onSuccess: (confirmed, _enabled, context) => {
+      const updateCount =
+        qc.getQueryState<PrivateModeData>(PRIVATE_MODE_KEY)?.dataUpdateCount;
+      if (updateCount === context.optimisticUpdateCount) {
+        qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, confirmed);
+      }
     },
     onError: (raw, _enabled, context) => {
-      const cached = qc.getQueryData<PrivateModeData>(PRIVATE_MODE_KEY);
       const previous = context?.previous;
-      if (previous === undefined) {
-        if (cached?.private_mode_epoch === 0) {
+      const updateCount =
+        qc.getQueryState<PrivateModeData>(PRIVATE_MODE_KEY)?.dataUpdateCount;
+      if (updateCount === context?.optimisticUpdateCount) {
+        if (previous === undefined) {
           qc.removeQueries({ queryKey: PRIVATE_MODE_KEY, exact: true });
+        } else {
+          qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, previous);
         }
-      } else if (
-        cached === undefined ||
-        cached.private_mode_epoch <= previous.private_mode_epoch
-      ) {
-        qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, previous);
       }
       toast.error(toFriendly(raw), { duration: 3500 });
     },

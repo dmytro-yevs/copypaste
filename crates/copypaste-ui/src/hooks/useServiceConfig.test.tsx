@@ -173,6 +173,40 @@ describe("private-mode mutation", () => {
     });
   });
 
+  it("does not let a stale echo overwrite an intervening same-epoch event", async () => {
+    const client = testClient();
+    client.setQueryDefaults(PRIVATE_MODE_KEY, { gcTime: Infinity });
+    client.setQueryData(PRIVATE_MODE_KEY, {
+      private_mode: false,
+      private_mode_epoch: 5,
+    });
+    let settle: ((value: PrivateModeData) => void) | undefined;
+    setPrivateMode.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useSetPrivateMode(), {
+      wrapper: wrapper(client),
+    });
+
+    act(() => result.current.mutate(true));
+    await waitFor(() => expect(result.current.isPending).toBe(true));
+    client.setQueryData(PRIVATE_MODE_KEY, {
+      private_mode: false,
+      private_mode_epoch: 5,
+    });
+    await act(async () =>
+      settle?.({ private_mode: true, private_mode_epoch: 6 }),
+    );
+
+    expect(client.getQueryData(PRIVATE_MODE_KEY)).toEqual({
+      private_mode: false,
+      private_mode_epoch: 5,
+    });
+  });
+
   it("does not roll back over a newer cached epoch after failure", async () => {
     const client = testClient();
     client.setQueryDefaults(PRIVATE_MODE_KEY, { gcTime: Infinity });
@@ -203,6 +237,39 @@ describe("private-mode mutation", () => {
     expect(client.getQueryData(PRIVATE_MODE_KEY)).toEqual({
       private_mode: false,
       private_mode_epoch: 8,
+    });
+  });
+
+  it("does not roll back over an intervening same-epoch event", async () => {
+    const client = testClient();
+    client.setQueryDefaults(PRIVATE_MODE_KEY, { gcTime: Infinity });
+    client.setQueryData(PRIVATE_MODE_KEY, {
+      private_mode: false,
+      private_mode_epoch: 5,
+    });
+    let reject: ((reason: unknown) => void) | undefined;
+    setPrivateMode.mockImplementation(
+      () =>
+        new Promise((_resolve, rejectPromise) => {
+          reject = rejectPromise;
+        }),
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { result } = renderHook(() => useSetPrivateMode(), {
+      wrapper: wrapper(client),
+    });
+
+    act(() => result.current.mutate(true));
+    await waitFor(() => expect(result.current.isPending).toBe(true));
+    client.setQueryData(PRIVATE_MODE_KEY, {
+      private_mode: true,
+      private_mode_epoch: 5,
+    });
+    await act(async () => reject?.(new Error("refused")));
+
+    expect(client.getQueryData(PRIVATE_MODE_KEY)).toEqual({
+      private_mode: true,
+      private_mode_epoch: 5,
     });
   });
 

@@ -114,26 +114,20 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
             let previous = tray_menu.private_mode_enabled();
             let wanted = !previous;
             tray_menu.set_private_mode(wanted);
+            let revision = tray_menu.private_mode_snapshot().1;
             let menu = Arc::clone(tray_menu);
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 let backend = app.state::<SelectedBackend>();
-                let applied = match backend
-                    .set_config(copypaste_ipc::ConfigPatch {
-                        private_mode: Some(wanted),
-                        ..Default::default()
-                    })
-                    .await
-                {
-                    Ok(applied) => Some(applied.config.private_mode),
+                let applied = match backend.set_private_mode(wanted).await {
+                    Ok(applied) => Some(applied.private_mode),
                     Err(error) => {
                         tracing::warn!(%error, "could not change private mode");
                         None
                     }
                 };
                 let update = private_mode::toggle_update(previous, applied);
-                menu.set_private_mode(update.value);
-                if update.broadcast {
+                if menu.confirm_private_mode(update.value, revision) && update.broadcast {
                     let _ = app.emit(private_mode::EVENT_CHANGED, update.value);
                 }
             });
