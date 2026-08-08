@@ -9,13 +9,22 @@
 # output nothing declares, a job that reads a file no job it depends on wrote.
 import json, pathlib, re, sys, yaml
 
+SELF_TEST = "--self-test" in sys.argv
+
 WF = pathlib.Path(".github/workflows")
 docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
 text = {p.name: p.read_text() for p in sorted(WF.glob("*.yml"))}
 
 
-def rec(cond, desc, detail=""):
+def emit(cond, desc, detail=""):
     print("{}|{}|{}".format("PASS" if cond else "FAIL", desc, "" if cond else detail))
+
+
+def rec(cond, desc, detail=""):
+    # --self-test reports only its own verdicts, so check.sh counts two runs
+    # rather than every check in this file twice.
+    if not SELF_TEST:
+        emit(cond, desc, detail)
 
 
 def steps(job):
@@ -111,18 +120,41 @@ for wf, doc in docs.items():
                 "; ".join(hits) + "  — use find -print -quit")
 
 # --- runner images ----------------------------------------------------------
-KNOWN = {"ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04", "macos-14", "macos-15", "macos-latest"}
-mac = set()
-for wf, doc in docs.items():
-    for jn, j in (doc.get("jobs") or {}).items():
-        r = j.get("runs-on")
-        if not isinstance(r, str):
+# One table per OS family, so a new platform is a line of data rather than a
+# second copy of the loop below. The flag marks a family whose jobs must all
+# agree on one image: what the artefact is built against must not move without
+# a commit. Linux jobs are free to differ, and several do.
+RUNNER_IMAGES = {
+    "Linux": (False, {"ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04"}),
+    "macOS": (True, {"macos-14", "macos-15", "macos-latest"}),
+    "Windows": (True, {"windows-2022", "windows-2025", "windows-latest"}),
+}
+
+
+def runner_image_checks(workflows):
+    used = {}
+    for wf, doc in workflows.items():
+        for jn, j in (doc.get("jobs") or {}).items():
+            r = j.get("runs-on")
+            if not isinstance(r, str):
+                continue
+            family = next((f for f, (_, labels) in RUNNER_IMAGES.items() if r in labels), None)
+            yield (family is not None,
+                   "{}: {} runs on a known image ({})".format(wf, jn, r),
+                   "unrecognised runner label")
+            if family:
+                used.setdefault(family, set()).add(r)
+    for family, (one_image, _) in RUNNER_IMAGES.items():
+        if not one_image:
             continue
-        rec(r in KNOWN, "{}: {} runs on a known image ({})".format(wf, jn, r), "unrecognised runner label")
-        if r.startswith("macos"):
-            mac.add(r)
-rec(len(mac) <= 1, "every macOS job uses the same runner image {}".format(sorted(mac)),
-    "mixed macOS runners: {}".format(sorted(mac)))
+        images = sorted(used.get(family, ()))
+        yield (len(images) <= 1,
+               "every {} job uses the same runner image {}".format(family, images),
+               "mixed {} runners: {}".format(family, images))
+
+
+for check in runner_image_checks(docs):
+    rec(*check)
 
 # --- one ref per action, across every workflow ------------------------------
 refs = {}
@@ -356,12 +388,35 @@ if hardware:
         "the hardware gate verifies arm64 and runs the release smoke harness",
         "the gate must reject another ABI and exercise the signed APK")
 
-for name in ("android-smoke.sh", "android-smoke-release.sh"):
-    smoke = pathlib.Path("scripts/release") / name
-    rec(smoke.is_file() and "--self-test" in smoke.read_text(),
-        "{} carries a --self-test".format(name),
-        "its detectors are the only part checkable without a device, so they have to be checkable")
+NO_DEVICE = "its detectors are the only part checkable without a device, so they have to be checkable"
+SELF_TESTED = {
+    "android-smoke.sh": NO_DEVICE,
+    "android-smoke-release.sh": NO_DEVICE,
+    "check-wiring.py": "the runner-image table is data, and nothing else would notice it going empty",
+}
+for name, why in SELF_TESTED.items():
+    script = pathlib.Path("scripts/release") / name
+    rec(script.is_file() and "--self-test" in script.read_text(),
+        "{} carries a --self-test".format(name), why)
     rec("{} --self-test".format(name) in pathlib.Path("scripts/release/check.sh").read_text(),
         "check.sh runs {} --self-test".format(name),
         "otherwise nothing ever proves the detectors report a failure when there is one")
+
+# --- self-test: prove the runner-image detector fails when it should --------
+if SELF_TEST:
+    def probe(*runs_on):
+        jobs = {"j{}".format(i): {"runs-on": r} for i, r in enumerate(runs_on)}
+        return all(cond for cond, _, _ in runner_image_checks({"probe.yml": {"jobs": jobs}}))
+
+    for desc, held in (
+        ("the shipping Windows image is recognised", probe("windows-2022")),
+        ("a mistyped label is not", not probe("windows-2202")),
+        ("a retired image is not", not probe("windows-2019")),
+        ("two macOS images in one tree are mixed", not probe("macos-14", "macos-15")),
+        ("two Windows images in one tree are mixed", not probe("windows-2022", "windows-2025")),
+        ("two Linux images in one tree are not", probe("ubuntu-latest", "ubuntu-24.04")),
+        ("a self-hosted label array is left to its own gate",
+         probe(["self-hosted", "linux", "ARM64", "android-device"])),
+    ):
+        emit(held, "self-test: {}".format(desc), "the detector did not behave as stated")
 sys.exit(0)

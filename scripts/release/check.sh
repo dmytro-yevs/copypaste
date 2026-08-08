@@ -374,7 +374,8 @@ group "Workflow wiring"
 # reads a file no job it depends on wrote.
 if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
     WIRING="$(mktemp)"
-    if python3 scripts/release/check-wiring.py > "$WIRING"
+    if python3 scripts/release/check-wiring.py > "$WIRING" \
+       && python3 scripts/release/check-wiring.py --self-test >> "$WIRING"
     then
         while IFS='|' read -r verdict desc detail; do
             [[ -n "${verdict:-}" ]] || continue
