@@ -40,7 +40,7 @@ time and each gets a fresh daemon and a fresh database.
 | `history-render` · `scroll-anchor` · `history-controls` | virtualisation, the row-height rule (INV-5), scroll anchoring (INV-1/6), keyboard navigation, toolbar layout |
 | `sensitive` · `error-strings` | a flagged item's plaintext is absent from `outerHTML`, and no user-facing string carries a filesystem path (INV-10/12) |
 | `bulk-actions` | per-row actions are **absent** in selection mode rather than hidden, and a bulk delete reaches the database |
-| `devices` | the ADR-0007 boundary in a real engine: pairing-unavailable copy and Pair/Add/code/QR controls absent; a CLI-established peer is listed, syncs, exposes the revoke confirmation and unpairs |
+| `devices` | the ADR-0015 boundary in a real engine: pairing-unavailable copy and Pair/Add/code/QR controls absent; a CLI-established peer is listed, syncs, exposes the revoke confirmation and unpairs |
 | `push` | a `copypaste://changed` event crosses the Linux bridge, the list updates inside the poll interval, and a dead daemon degrades to polling |
 | `service-lifecycle` | the offline screen offers to *start* the service, and pressing the button starts a Linux `target/debug` daemon — launchd and Homebrew belong to the macOS layer |
 | `settings` | every tab lays out, a preference reaches layout and survives a reload, and Settings still works with the service down |
@@ -69,7 +69,7 @@ field that did not survive.
 
 ## Surfaces this suite does not reach
 
-- **An in-product pairing ceremony.** ADR-0007 requires Pair and Add-device
+- **An in-product pairing ceremony.** ADR-0015 requires Pair and Add-device
   controls to remain absent until the protocol supplies a bound SAS ceremony.
   `devices` establishes a known-peer fixture through the CLI; that setup is not
   browser coverage for code mint/reveal, QR (INV-13), camera fallback or SAS.
