@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use copypaste_ipc::{EventData, EventKind};
 use tokio::sync::OnceCell;
 
 use super::peers::PeerNode;
@@ -33,6 +34,21 @@ impl Inner {
             .read()
             .expect("settings lock poisoned")
             .clone()
+    }
+
+    pub(super) fn items_event(&self, captured: bool, swept: u32) -> EventData {
+        EventData {
+            event: EventKind::Items,
+            item_count: self.state.store.count().unwrap_or(0),
+            captured,
+            swept,
+        }
+    }
+
+    pub(super) fn publish_items(&self, captured: bool, swept: u32) {
+        if self.events.receiver_count() > 0 {
+            let _ = self.events.send(self.items_event(captured, swept));
+        }
     }
 }
 

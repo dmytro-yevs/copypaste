@@ -255,6 +255,9 @@ fn remember(inner: &Arc<Inner>, outcome: &SyncOutcome) {
     {
         tracing::warn!(error = ?e, "could not record a peer device name");
     }
+    if outcome.stats.received > 0 {
+        inner.publish_items(false, 0);
+    }
 }
 
 /// The one mapping from the node's failures onto this backend's taxonomy.

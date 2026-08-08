@@ -1,8 +1,6 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use copypaste_ipc::{EventData, EventKind};
-
 use super::open::Inner;
 
 const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
@@ -17,14 +15,7 @@ pub(super) fn sweep(inner: &Inner) {
         copypaste_core::now_ms(),
     ) {
         Ok(0) => {}
-        Ok(removed) => {
-            let _ = inner.events.send(EventData {
-                event: EventKind::Items,
-                item_count: inner.state.store.count().unwrap_or(0),
-                captured: false,
-                swept: u32::try_from(removed).unwrap_or(u32::MAX),
-            });
-        }
+        Ok(removed) => inner.publish_items(false, u32::try_from(removed).unwrap_or(u32::MAX)),
         Err(error) => tracing::warn!(?error, "the sensitive-item sweep failed"),
     }
 }
@@ -55,6 +46,7 @@ mod tests {
     use super::super::tests::backend;
     use super::*;
     use crate::backend::Backend;
+    use copypaste_ipc::EventKind;
 
     const SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
 
