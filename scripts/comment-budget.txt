@@ -10,7 +10,6 @@
 crates/copypaste-cli/src/cli.rs
 crates/copypaste-cli/src/error.rs
 crates/copypaste-cloud/src/auth/error.rs
-crates/copypaste-cloud/src/auth/http.rs
 crates/copypaste-cloud/src/auth/mod.rs
 crates/copypaste-cloud/src/crypto/key.rs
 crates/copypaste-cloud/src/crypto/mod.rs

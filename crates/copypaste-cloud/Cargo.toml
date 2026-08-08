@@ -9,6 +9,7 @@ license.workspace = true
 # retry queue, SSE fan-out, supervisor and a second rate limiter, for a service
 # that already exists.
 [dependencies]
+copypaste-clock = { path = "../copypaste-clock" }
 reqwest.workspace = true
 tokio-tungstenite.workspace = true
 tokio.workspace = true

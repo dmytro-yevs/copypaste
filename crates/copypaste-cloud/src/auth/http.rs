@@ -10,7 +10,7 @@
 //! at all, so the shared floor belongs on this side of the edge and there is no
 //! cycle.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use backon::ExponentialBuilder;
 use reqwest::header::HeaderMap;
@@ -121,21 +121,11 @@ fn truncate(text: &str) -> String {
     format!("{}…", &text[..end])
 }
 
-/// Wall clock in milliseconds. Saturating, so a clock before the epoch gives 0
-/// rather than a negative expiry.
-///
 /// The whole crate reads the clock through this: the session expiry here, the
 /// tombstone restamp in [`crate::rest`], and the future-skew refusal in
-/// [`crate::sync`]. One reader means one saturating rule.
-pub(crate) fn now_ms() -> i64 {
-    unix_millis(SystemTime::now())
-}
-
-fn unix_millis(time: SystemTime) -> i64 {
-    time.duration_since(UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
-        .unwrap_or(0)
-}
+/// [`crate::sync`]. One reader means one saturating rule, and it is the
+/// workspace's — [`copypaste_clock`] saturates at both ends.
+pub(crate) use copypaste_clock::now_ms;
 
 #[cfg(test)]
 mod tests {
@@ -224,12 +214,5 @@ mod tests {
         let detail = truncate(&text);
         assert!(detail.ends_with('…'));
         assert!(detail.is_char_boundary(detail.len() - '…'.len_utf8()));
-    }
-
-    #[test]
-    fn cloud_wall_time_saturates_at_the_wire_integer_limit() {
-        let overflow = UNIX_EPOCH + Duration::from_millis(i64::MAX as u64 + 1);
-        assert_eq!(unix_millis(overflow), i64::MAX);
-        assert_eq!(unix_millis(UNIX_EPOCH - Duration::from_millis(1)), 0);
     }
 }

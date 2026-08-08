@@ -43,11 +43,4 @@ pub const DEFAULT_PORT: u16 = 47_654;
 /// mDNS service type used for discovery.
 pub const SERVICE_TYPE: &str = "_copypaste._tcp.local.";
 
-/// Milliseconds since the Unix epoch.
-///
-/// A clock before the epoch reads as 0, which loses every comparison, and
-/// losing is the safe direction for discovery, sync and pairing deadlines.
-pub(crate) fn now_ms() -> i64 {
-    use copypaste_clock::{SystemWallClock, WallClock};
-    SystemWallClock.now_ms()
-}
+pub(crate) use copypaste_clock::now_ms;
