@@ -270,6 +270,10 @@ jobs:
         if: success() || failure()
         run: cargo +1.96 clippy -p copypaste-ui --features embedded-backend --all-targets --locked -- -D warnings
 
+      - name: Android embedded backend contracts
+        if: success() || failure()
+        run: cargo +1.96 test -p copypaste-ui --features embedded-backend backend::embedded --locked
+
       - name: macOS-only code, type-checked here
         # The same argument as the step above, for the other platform. Nothing
         # on this runner compiles `#[cfg(target_os = "macos")]` code, and the
@@ -547,18 +551,9 @@ jobs:
           exit 0
 
   # ---------------------------------------------------------------------------
-  # Windows, for the device secret and nothing else (ADR-0013). It is what the
-  # macOS job's Keychain steps are: proof that the real OS store round-trips,
-  # rather than the assumption that it does.
-  #
-  # `-p copypaste-core` on purpose. The daemon, the CLI and the Tauri bridge are
-  # Unix-socket-only and do not compile here yet; widening this to `--workspace`
-  # before the named-pipe transport lands turns one honest signal into a red job
-  # nobody reads.
-  #
-  # Prerequisite: this job cannot go green until `bundled-sqlcipher` is resolved
-  # on Windows — `libsqlite3-sys` links `-lcrypto` against the build machine's
-  # OpenSSL and wants `OPENSSL_DIR` (ADR-0013, "Build").
+  # Windows owns the DPAPI and named-pipe assertions that no other runner can
+  # execute. The shared contract suite binds the real platform endpoint, so a
+  # green Unix socket run cannot stand in for this job.
   # ---------------------------------------------------------------------------
 
   windows-check:
@@ -579,10 +574,15 @@ jobs:
         with:
           shared-key: windows-2022-1.96
 
-      # `--all-targets` is what type-checks the DPAPI backend and its tests,
-      # which no other runner in this workflow can parse.
-      - name: cargo clippy (Windows paths)
-        run: cargo +1.96 clippy -p copypaste-core --all-targets --locked -- -D warnings
+      - name: cargo clippy (Windows product paths)
+        run: cargo +1.96 clippy -p copypaste-core -p copypaste-ipc -p copypaste-daemon -p copypaste-cli -p copypaste-ui --all-targets --locked -- -D warnings
+
+      - name: Named-pipe and Tauri command contracts
+        run: |
+          cargo +1.96 test -p copypaste-ipc --test method_contract --locked
+          cargo +1.96 test -p copypaste-daemon server::contract_tests --locked
+          cargo +1.96 test -p copypaste-daemon server::pipe::tests --locked
+          cargo +1.96 test -p copypaste-ui tests::every_tauri_command_is_registered_once --locked -- --exact
 
       - name: DPAPI, for real (port manifest 02)
         # These are not `#[ignore]`d, unlike the Keychain set: DPAPI writes

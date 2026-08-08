@@ -350,6 +350,8 @@ mod tests {
         assert!(!requires_ready(&Method::SetConfig {
             patch: copypaste_ipc::ConfigPatch::default()
         }));
+        assert!(!requires_ready(&Method::GetPrivateMode));
+        assert!(!requires_ready(&Method::SetPrivateMode { enabled: true }));
     }
 
     #[test]
