@@ -174,7 +174,12 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Navigation and keyboard input on Android | Android | Verified — a real tap moves between screens, typing filters the list |
 | A sensitive item is absent from the Android document, not obscured (INV-10) | Android | Verified — `e2e-android/` against `outerHTML` and every live input value |
 | No filesystem path in any Android accessible string (INV-12) | Android | Verified — `e2e-android/` sweeps text and the naming attributes |
-| Android UI beyond mount, navigation, typing and those two sweeps | Android | **NOT VERIFIED IN CI** — CDP sees the document only: no pixels, no TalkBack, nothing native |
+| Virtualisation and the INV-5 reservation on Android | Android | Verified — `e2e-android/history-render` measures the window, the spacer and every row box |
+| Scroll anchoring on Android (INV-1, INV-6) | Android | Verified — `e2e-android/scroll-anchor`, reading offset and row window in one evaluation |
+| Settings on Android: tabs, a preference reaching layout, one surviving a reload | Android | Verified — `e2e-android/settings`, through the Tauri store plugin rather than a daemon |
+| Per-row actions absent in selection mode on Android (§3.1.5) | Android | Verified — `e2e-android/bulk-actions`, against the "Item actions" trigger Android renders instead of four buttons |
+| Pairing on Android: minting a code, its QR and SAS (INV-13) | Android | Partial — `e2e-android/devices` drives the mint side and the join form; accepting needs a second device and is not driven |
+| Android UI beyond the rows above | Android | **NOT VERIFIED IN CI** — CDP sees the document only: no pixels, no TalkBack, nothing native. Export, import and push have no Android coverage |
 | The release build exposes no WebView debugger | Android | Verified — `android-smoke-release.sh` fails if the shipped APK publishes `@webview_devtools_remote_<pid>` |
 | The WebView a user's phone actually has | Android | **NOT VERIFIED IN CI** — the emulator's is pinned into the system image; the shipped one updates from Play on its own schedule |
 | VoiceOver and TalkBack | macOS, Android | **NOT VERIFIED IN CI** — no screen reader is driven anywhere |
