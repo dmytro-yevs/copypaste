@@ -156,8 +156,8 @@ pub struct ConfigData {
     /// On macOS this is applied before any representation is read. A non-empty
     /// list fails closed when frontmost-app attribution is unavailable.
     pub excluded_app_bundle_ids: Vec<String>,
-    /// Whether this device advertises itself on the LAN. **Needs a restart** —
-    /// the mDNS registration is made once at start.
+    /// Whether this device advertises itself on the LAN. **Live** — discovery
+    /// is registered and torn down as this changes.
     pub lan_visibility: bool,
     /// Master switch for every sync transport. **Live.**
     pub sync_enabled: bool,
@@ -447,11 +447,25 @@ impl ConfigData {
     }
 
     /// The names of the fields this patch changes that will not take effect
-    /// until the daemon restarts. Empty is the common case.
+    /// until the daemon restarts. Currently always empty.
+    ///
+    /// Read out of [`Self::field_liveness`] rather than kept as a second list:
+    /// when `lan_visibility` became live the two drifted, and the daemon went on
+    /// telling clients to restart for a change it had already applied. A patch
+    /// skips the fields it does not name, so its serialized keys are exactly the
+    /// fields it changes.
     #[must_use]
     pub fn restart_required_by(patch: &ConfigPatch) -> Vec<&'static str> {
-        let _ = patch;
-        Vec::new()
+        let Ok(serde_json::Value::Object(named)) = serde_json::to_value(patch) else {
+            return Vec::new();
+        };
+        Self::field_liveness()
+            .iter()
+            .filter(|(field, liveness)| {
+                *liveness == Liveness::NeedsRestart && named.contains_key(*field)
+            })
+            .map(|(field, _)| *field)
+            .collect()
     }
 
     /// Effective live capture cap for one shared content-type classification.
