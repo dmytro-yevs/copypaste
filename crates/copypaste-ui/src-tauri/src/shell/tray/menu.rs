@@ -207,22 +207,24 @@ impl<R: Runtime> TrayMenu<R> {
     }
 
     pub fn set_private_mode(&self, enabled: bool) {
-        self.apply_private_mode(enabled, None);
+        let _ = self.apply_private_mode(enabled, None);
     }
 
     pub fn reconcile_private_mode(&self, enabled: bool, revision: u64) -> bool {
-        self.apply_private_mode(enabled, Some(revision))
+        self.apply_private_mode(enabled, Some(revision)) == Some(true)
     }
 
-    fn apply_private_mode(&self, enabled: bool, expected_revision: Option<u64>) -> bool {
+    pub fn confirm_private_mode(&self, enabled: bool, revision: u64) -> bool {
+        self.apply_private_mode(enabled, Some(revision)).is_some()
+    }
+
+    fn apply_private_mode(&self, enabled: bool, expected_revision: Option<u64>) -> Option<bool> {
         let Ok(mut state) = self.private_mode_state.lock() else {
-            return false;
+            return None;
         };
-        let Some(changed) = state.apply(enabled, expected_revision) else {
-            return false;
-        };
+        let changed = state.apply(enabled, expected_revision)?;
         if !changed {
-            return false;
+            return Some(false);
         }
         drop(state);
         let _ = self.private_mode.set_text(private_mode_label(enabled));
@@ -232,7 +234,7 @@ impl<R: Runtime> TrayMenu<R> {
             NativeIcon::LockUnlocked
         };
         let _ = self.private_mode.set_native_icon(Some(icon));
-        true
+        Some(true)
     }
 
     /// The clipping id a slot is showing.
