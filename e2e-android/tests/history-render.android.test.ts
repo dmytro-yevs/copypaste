@@ -14,15 +14,20 @@ import { addItems, deleteItems, storedItems } from "../src/harness/bridge.js";
 import { listSnapshot, rowBoxes } from "../src/harness/list.js";
 import {
   ROW,
-  SEARCH,
-  clearField,
   gotoView,
+  resetHistoryFilters,
   scrollListToTop,
   waitFor,
   waitForRows,
 } from "../src/harness/ui.js";
 
-const COUNT = 120;
+/**
+ * Enough rows to virtualise several times over, and no more. The browser layer
+ * seeds 120 into an empty store; this store is a device's, it already holds
+ * whatever earlier runs left, and pushing the total past `PAGE_SIZE` splits the
+ * list into accumulated pages whose count lags the store's after a delete.
+ */
+const COUNT = 60;
 const LONG = "long ".repeat(400);
 
 /**
@@ -53,7 +58,7 @@ let seeded: string[] = [];
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
-  await clearField(app, SEARCH);
+  await resetHistoryFilters(app);
 
   // Alternating lengths: INV-5 says the reservation is a function of the
   // setting, so both must reserve identically.
@@ -74,7 +79,7 @@ beforeAll(async () => {
 }, 300_000);
 
 afterAll(async () => {
-  // The device is not reset between runs. Leaving 120 rows behind would make
+  // The device is not reset between runs. Leaving these rows behind would make
   // the next run's list a different shape, and the run after that a different
   // one again.
   await deleteItems(app, seeded).catch(() => undefined);
@@ -88,25 +93,33 @@ describe("the virtualiser", () => {
     expect(rows.length).toBeLessThan(COUNT);
   });
 
+  /**
+   * Retried rather than read once, and to within a row or two rather than
+   * exactly. The screen learns what the store holds from a 3s poll, and past
+   * `PAGE_SIZE` it holds several accumulated pages — a row deleted from a page
+   * already fetched leaves the two counts differing until the next refetch.
+   * The claim is that the spacer reserves the whole list rather than the
+   * rendered window, which a two-row tolerance cannot hide: the window here is
+   * an order of magnitude smaller than the list.
+   */
   test("reserves the full list height so the scrollbar is real", async () => {
-    // Retried rather than read once: the screen learns what the store holds
-    // from a 3s poll, so the spacer and a fresh `list` describe the same list
-    // only between polls. The property is the equality, not the first sample.
     let seen = "";
     await waitFor(
       async () => {
         const snapshot = await listSnapshot(app);
         const stored = await storedItems(app);
         const reserved = Math.round(snapshot.rows[0]?.height ?? 0);
-        seen = `${snapshot.totalSize}px for ${stored.length} rows of ${reserved}px`;
+        if (reservationFor(reserved) === undefined) return false;
+        const reservedRows = snapshot.totalSize / reserved;
+        seen = `${snapshot.totalSize}px is ${reservedRows} rows of ${reserved}px, store has ${stored.length}`;
         return (
-          reservationFor(reserved) !== undefined &&
-          Math.abs(snapshot.totalSize - stored.length * reserved) < 1 &&
+          Math.abs(reservedRows - stored.length) <= 2 &&
+          reservedRows > snapshot.rows.length * 2 &&
           snapshot.scrollHeight > snapshot.clientHeight
         );
       },
       () => `the spacer never matched the store: ${seen}`,
-      20_000,
+      30_000,
     );
   });
 
