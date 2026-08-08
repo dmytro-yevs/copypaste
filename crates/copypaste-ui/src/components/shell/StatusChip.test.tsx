@@ -31,15 +31,16 @@ beforeEach(() => {
 
 describe("sync status", () => {
   it("reports peer state in the visible and accessible tooltip", async () => {
-    withClient(<StatusChip />);
+    const { user } = withUser(<StatusChip />);
 
     const chip = await screen.findByRole("status", { name: /sync: synced/i });
-    expect(chip.getAttribute("title")).toMatch(/1 paired device/i);
-    expect(chip.getAttribute("title")).toMatch(/last peer sync just now/i);
+    expect(chip.getAttribute("aria-label")).toMatch(/1 paired device/i);
+    expect(chip.getAttribute("aria-label")).toMatch(/last peer sync just now/i);
 
-    const tooltip = screen.getByRole("tooltip", { hidden: true });
+    await user.hover(chip);
+    const tooltip = await screen.findByRole("tooltip", {}, { timeout: 1500 });
     expect(chip.getAttribute("aria-describedby")).toBe(tooltip.id);
-    expect(tooltip.textContent).toBe(chip.getAttribute("title"));
+    expect(chip.getAttribute("aria-label")).toContain(tooltip.textContent);
   });
 
   it("reports the binding thirty-minute peer stall in the global state", async () => {

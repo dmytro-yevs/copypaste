@@ -2,7 +2,7 @@
  * The accessible name carries the same detail as the visible tooltip. Raw
  * backend errors never enter either surface (INV-12).
  */
-import { useId } from "react";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { useIsMutating } from "@tanstack/react-query";
 
 import {
@@ -49,7 +49,6 @@ const chipStatus = (data: StatusData) => ({
 
 export function StatusChip({ attentionOnly = false }: { attentionOnly?: boolean }) {
   const { t } = useTranslation();
-  const tooltipId = useId();
   const setView = useUi((state) => state.setView);
   const setSettingsTab = useUi((state) => state.setSettingsTab);
   const status = useStatus(chipStatus);
@@ -150,49 +149,55 @@ export function StatusChip({ attentionOnly = false }: { attentionOnly?: boolean 
     : undefined;
 
   return (
-    <div
-      role="status"
-      aria-describedby={tooltipId}
-      aria-label={t("shell.status.label", { state: label, detail: tooltip })}
-      title={tooltip}
-      className={cn(
-        "group relative",
-        attentionOnly && "absolute bottom-[calc(100%+var(--s-2))] left-1/2 -translate-x-1/2",
-      )}
-    >
-      <button
-        type="button"
-        onClick={serviceNeedsAttention ? openRecovery : undefined}
-        disabled={!serviceNeedsAttention}
-        aria-label={
-          actionLabel === undefined
-            ? t("shell.status.label", { state: label, detail: tooltip })
-            : `${t("shell.status.label", { state: label, detail: tooltip })} ${actionLabel}`
-        }
-        className={cn(
-          "flex items-center gap-s-2 rounded-full border border-transparent px-s-2 py-s-1 text-xs text-muted-foreground outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
-          serviceNeedsAttention
-            ? "border-warn/20 bg-warn/15 text-warn-strong hover:bg-warn/15"
-            : "disabled:cursor-default",
-          attentionOnly && "shadow-sm",
-        )}
-      >
-        <span
-          aria-hidden="true"
-          className={cn(
-            "size-[var(--sz-badge-dot)] shrink-0 rounded-full",
-            DOT[state],
-          )}
-        />
-        <span className="max-w-44 truncate">{label}</span>
-      </button>
-      <span
-        id={tooltipId}
-        role="tooltip"
-        className="pointer-events-none invisible absolute bottom-full left-0 z-[var(--z-popover)] mb-s-2 w-80 max-w-[calc(100vw-var(--s-8))] rounded-md border border-border-strong bg-popover px-s-3 py-s-2 text-left text-xs text-popover-foreground opacity-0 shadow-2 transition-opacity duration-[var(--dur-fast)] group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100 motion-reduce:transition-none"
-      >
-        {tooltip}
-      </span>
-    </div>
+    <TooltipPrimitive.Provider>
+      <TooltipPrimitive.Root disableHoverableContent>
+        <TooltipPrimitive.Trigger asChild>
+          <div
+            role="status"
+            aria-label={t("shell.status.label", { state: label, detail: tooltip })}
+            className={cn(
+              "relative",
+              attentionOnly && "absolute bottom-[calc(100%+var(--s-2))] left-1/2 -translate-x-1/2",
+            )}
+          >
+            <button
+              type="button"
+              onClick={serviceNeedsAttention ? openRecovery : undefined}
+              disabled={!serviceNeedsAttention}
+              aria-label={
+                actionLabel === undefined
+                  ? t("shell.status.label", { state: label, detail: tooltip })
+                  : `${t("shell.status.label", { state: label, detail: tooltip })} ${actionLabel}`
+              }
+              className={cn(
+                "flex items-center gap-s-2 rounded-full border border-transparent px-s-2 py-s-1 text-xs text-muted-foreground outline-none transition-colors duration-[var(--dur-fast)] focus-visible:ring-[3px] focus-visible:ring-ring",
+                serviceNeedsAttention
+                  ? "border-warn/20 bg-warn/15 text-warn-strong hover:bg-warn/15"
+                  : "disabled:pointer-events-none disabled:cursor-default",
+                attentionOnly && "shadow-sm",
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-[var(--sz-badge-dot)] shrink-0 rounded-full",
+                  DOT[state],
+                )}
+              />
+              <span className="max-w-44 truncate">{label}</span>
+            </button>
+          </div>
+        </TooltipPrimitive.Trigger>
+        <TooltipPrimitive.Portal>
+          <TooltipPrimitive.Content
+            sideOffset={8}
+            collisionPadding={8}
+            className="pointer-events-none z-[var(--z-popover)] w-80 max-w-[calc(100vw-var(--s-8))] rounded-md border border-border-strong bg-popover px-s-3 py-s-2 text-left text-xs text-popover-foreground shadow-2 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95"
+          >
+            {tooltip}
+          </TooltipPrimitive.Content>
+        </TooltipPrimitive.Portal>
+      </TooltipPrimitive.Root>
+    </TooltipPrimitive.Provider>
   );
 }
