@@ -314,6 +314,10 @@ impl Backend for EmbeddedBackend {
         Ok(status)
     }
 
+    async fn shutdown(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Mint a pairing and hand back the code to read out to the other device.
     ///
     /// The peer is stored before the other device has ever been heard from,

@@ -42,8 +42,6 @@ const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const MSG_NOT_INSTALLED: &str = "This build of CopyPaste doesn't include the background service.";
 const MSG_START_FAILED: &str = "The background service could not be started.";
 const MSG_NEVER_READY: &str = "The background service started but didn't finish coming up.";
-const MSG_NOT_OURS: &str =
-    "Another copy of the background service is already running. Quit it, then try again.";
 
 /// How long to wait for a freshly started daemon to answer `status`.
 ///
@@ -133,18 +131,30 @@ impl Supervisor {
         Ok(self.state(backend).await)
     }
 
-    /// Stop what we started, then start again.
+    /// Stop the live daemon, then start the bundled version.
     ///
-    /// Refuses when the live daemon is not ours: see ADR-0004 for why the app
-    /// does not kill processes it did not start, and for the `Method::Shutdown`
-    /// that will close the gap.
+    /// The IPC request is safe for an adopted daemon: socket access already
+    /// grants every destructive history operation, and this avoids signalling
+    /// a pid the app does not own (ADR-0004).
     pub async fn restart<B: Backend>(&self, backend: &B) -> Result<ServiceState> {
         let state = self.state(backend).await;
-        if state.is_live() && !self.holds_child() {
-            return Err(BackendError::Unsupported(MSG_NOT_OURS));
+        if state.is_live() {
+            backend.shutdown().await?;
+            self.await_stopped(backend).await?;
+        }
+        self.start(backend).await
+    }
+
+    /// Gracefully stop the daemon when this app process owns it.
+    pub async fn shutdown<B: Backend>(&self, backend: &B) {
+        if !self.holds_child() {
+            return;
+        }
+        if backend.shutdown().await.is_ok() && self.await_stopped(backend).await.is_ok() {
+            self.take_child();
+            return;
         }
         self.stop();
-        self.start(backend).await
     }
 
     /// Stop the daemon this process started. Safe to call when there is none.
@@ -215,6 +225,22 @@ impl Supervisor {
                 BackendError::Unreachable => BackendError::Internal(MSG_NEVER_READY.into()),
                 other => other,
             })
+    }
+
+    async fn await_stopped<B: Backend>(&self, backend: &B) -> Result<()> {
+        let policy = ExponentialBuilder::new()
+            .with_min_delay(Duration::from_millis(25))
+            .with_max_delay(Duration::from_millis(200))
+            .without_max_times()
+            .with_total_delay(Some(READY_TIMEOUT));
+        (|| async {
+            match backend.status().await {
+                Err(BackendError::Unreachable) => Ok(()),
+                _ => Err(BackendError::Internal(MSG_NEVER_READY.into())),
+            }
+        })
+        .retry(policy)
+        .await
     }
 
     /// Whether we hold a child that is still alive, reaping it if it is not.
@@ -323,20 +349,14 @@ mod tests {
         assert!(sup.take_child().is_none(), "a second daemon was spawned");
     }
 
-    /// ADR-0004's asymmetry. A live daemon we did not start is not ours to
-    /// restart, and the refusal has to say so rather than silently doing
-    /// nothing.
     #[tokio::test]
-    async fn restarting_a_daemon_we_did_not_start_refuses() {
+    async fn restarting_an_adopted_daemon_shuts_it_down_before_starting() {
         let sup = Supervisor::default();
         let err = sup
             .restart(&FakeBackend::running("0.9.9"))
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, BackendError::Unsupported(MSG_NOT_OURS)),
-            "{err:?}"
-        );
+        assert!(matches!(err, BackendError::Unsupported(MSG_NOT_INSTALLED)));
     }
 
     #[tokio::test]
@@ -356,12 +376,7 @@ mod tests {
     /// Every sentence this module can show a user, checked in one place.
     #[test]
     fn no_message_names_a_path() {
-        for message in [
-            MSG_NOT_INSTALLED,
-            MSG_START_FAILED,
-            MSG_NEVER_READY,
-            MSG_NOT_OURS,
-        ] {
+        for message in [MSG_NOT_INSTALLED, MSG_START_FAILED, MSG_NEVER_READY] {
             assert!(!message.contains('/'), "{message}");
             assert!(message.ends_with('.'), "{message}");
             // "daemon" is a developer word; the user-facing name is
