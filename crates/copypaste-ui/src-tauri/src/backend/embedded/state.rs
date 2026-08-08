@@ -175,18 +175,14 @@ mod tests {
     use super::*;
     use crate::backend::Backend;
 
-    #[test]
-    fn the_embedded_open_purge_removes_previously_indexed_sensitive_text() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let store = Store::open(&dir.path().join("copypaste-v2.db"), &[7; 32]).unwrap();
-        let text = "mail alice.smith@example.com about it";
+    fn index_row(store: &Store, id: &str, text: &str) {
         store
             .insert(copypaste_core::NewItem {
-                id: "old-sensitive-index-row".to_string(),
+                id: id.to_string(),
                 content_ciphertext: Vec::new(),
                 nonce: Vec::new(),
                 content_type: "text/plain".to_string(),
-                content_hash: "old-sensitive-index-row".to_string(),
+                content_hash: id.to_string(),
                 is_sensitive: false,
                 search_text: Some(text.to_string()),
                 app_bundle_id: None,
@@ -195,10 +191,34 @@ mod tests {
                 created_at: 1,
             })
             .unwrap();
+    }
+
+    /// The purge takes the high-confidence band and stops there.
+    ///
+    /// Both directions, because only the pair pins the floor: purging what is
+    /// merely flagged costs the user every search that would have found it,
+    /// and `wipe.rs` uses this same email fixture as its canonical
+    /// below-the-floor case.
+    #[test]
+    fn the_embedded_open_purge_removes_secrets_and_leaves_the_merely_flagged() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = Store::open(&dir.path().join("copypaste-v2.db"), &[7; 32]).unwrap();
+        index_row(&store, "above-the-floor", "AKIAIOSFODNN7EXAMPLE is the key");
+        index_row(
+            &store,
+            "below-the-floor",
+            "mail alice.smith@example.com about it",
+        );
+        assert_eq!(store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().len(), 1);
         assert_eq!(store.search("alice", 10).unwrap().len(), 1);
 
-        purge_search_index(&store, &Detector::new().unwrap());
-        assert!(store.search("alice", 10).unwrap().is_empty());
+        assert_eq!(purge_search_index(&store, &Detector::new().unwrap()), 1);
+        assert!(store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty());
+        assert_eq!(
+            store.search("alice", 10).unwrap().len(),
+            1,
+            "a flagged-only row must stay searchable (CLAUDE.md rule 4)"
+        );
     }
 
     /// A detector update must be applied by the same startup helper Android
