@@ -618,17 +618,11 @@ mod tests {
         );
     }
 
-    /// §4's self-write delta, which is a *prediction*: the sentinel is armed
-    /// at `pre + SELF_WRITE_DELTA` before the write, so a wrong number arms it
-    /// at a change count that never arrives.
-    ///
-    /// Split from the suppression test below deliberately. This one says what
-    /// the OS does; that one says what our protocol does with it. Running them
-    /// together let the first assertion mask the second, and the second is the
-    /// one that names the user-visible bug.
+    /// §4's measured self-write delta. Split from the suppression test so the
+    /// OS observation and the user-visible protocol carry separate verdicts.
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn a_self_write_moves_the_count_by_the_predicted_delta() {
+    fn a_self_write_moves_the_count_by_the_measured_delta() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
         write_text("something copied earlier");
@@ -642,9 +636,8 @@ mod tests {
         assert_eq!(
             actual - pre,
             SELF_WRITE_DELTA,
-            "§4 predicts clearContents (+1) then setString:forType: (+1). \
-             Observed {pre} -> {actual}: the sentinel is armed at {} and the \
-             write lands on {actual}, so nothing is ever suppressed",
+            "§4 measured clearContents + setString:forType: as one generation. \
+             Observed {pre} -> {actual}; the sentinel must name {}",
             pre + SELF_WRITE_DELTA
         );
     }
