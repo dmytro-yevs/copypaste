@@ -44,7 +44,7 @@ use tracing::{debug, warn};
 mod attribution;
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{file_capture, Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
+use super::{file_capture, Capture, CapturePolicy, ClipboardSource, Counter, MAX_CAPTURE_BYTES};
 use attribution::{Attribution, FrontmostApp};
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
@@ -150,7 +150,7 @@ fn first_absolute_filename_plist(bytes: &[u8]) -> Option<PathBuf> {
 impl MacOsClipboard {
     pub fn new(data_dir: &Path) -> std::io::Result<Self> {
         Ok(Self {
-            tracker: ChangeTracker::new(),
+            tracker: ChangeTracker::new(Counter::Changes),
             rejected_too_large: 0,
             frontmost: None,
             last_attribution: None,

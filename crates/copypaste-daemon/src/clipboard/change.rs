@@ -14,6 +14,8 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
+use super::Counter;
+
 /// `changeCount` delta at which a burst is reported (§4).
 ///
 /// Kept at 3 although a paste-back is now known to move the count by 1 rather
@@ -108,14 +110,16 @@ impl SelfWriteSentinel {
 pub(super) struct ChangeTracker {
     /// I-2: starts at a sentinel distinguishable from every valid change count.
     cursor: i64,
+    counter: Counter,
     pub(super) sentinel: SelfWriteSentinel,
     pub(super) lost_intermediates: u64,
 }
 
 impl ChangeTracker {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(counter: Counter) -> Self {
         Self {
             cursor: COUNT_NONE,
+            counter,
             sentinel: SelfWriteSentinel::new(),
             lost_intermediates: 0,
         }
@@ -149,7 +153,9 @@ impl ChangeTracker {
 
         // I-4: the delta comes from the *old* cursor value, before advancing.
         // I-2: a cursor still at the sentinel is startup, not a burst.
-        let lost = if self.cursor < 0 {
+        // `Mutations`: dividing the delta told every Windows user that four
+        // items were lost per single copy, on the diagnostics panel.
+        let lost = if self.cursor < 0 || self.counter == Counter::Mutations {
             0
         } else {
             let delta = count - self.cursor;
@@ -188,7 +194,7 @@ mod tests {
 
     #[test]
     fn unchanged_count_is_never_re_offered() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         assert!(matches!(t.observe(7), Change::Fresh { .. }));
         assert_eq!(t.observe(7), Change::Unchanged);
         assert_eq!(t.observe(7), Change::Unchanged);
@@ -197,7 +203,7 @@ mod tests {
     /// I-2 / T-2 — a first poll at an arbitrary change count is not a burst.
     #[test]
     fn first_observation_is_not_a_burst() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         assert_eq!(
             t.observe(4321),
             Change::Fresh {
@@ -210,7 +216,7 @@ mod tests {
     /// T-7 — the threshold boundary. Delta 2 is a paste-back pair, not a burst.
     #[test]
     fn burst_threshold_boundary() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         t.observe(10);
         assert_eq!(
             t.observe(12),
@@ -232,7 +238,7 @@ mod tests {
     /// afterwards.
     #[test]
     fn cursor_advances_after_the_delta_is_computed() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         t.observe(100);
         assert_eq!(
             t.observe(110),
@@ -248,7 +254,7 @@ mod tests {
     /// genuine copy is captured. I-3 — the drop path advanced the cursor.
     #[test]
     fn self_write_sentinel_suppresses_exactly_one_change() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         t.observe(10);
 
         let landed = 10 + SELF_WRITE_DELTA;
@@ -271,7 +277,7 @@ mod tests {
     /// count is what would drop their copy, which is why nothing does.
     #[test]
     fn third_party_write_during_ours_is_still_captured() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         t.observe(10);
 
         let ours = 10 + SELF_WRITE_DELTA;
@@ -287,7 +293,7 @@ mod tests {
     /// defect run 30632553103 found. One armed at or below it is inert.
     #[test]
     fn an_arm_above_the_write_would_swallow_a_genuine_copy() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         t.observe(10);
 
         t.sentinel.arm(12); // what `pre + 2` used to store
@@ -306,7 +312,7 @@ mod tests {
     /// unrelated future capture that happens to land on that change count.
     #[test]
     fn failed_write_clears_the_sentinel() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         t.observe(10);
 
         t.sentinel.arm(10);
@@ -320,7 +326,7 @@ mod tests {
     /// second copy of the protocol.
     #[test]
     fn sentinel_is_shared_not_duplicated() {
-        let mut t = ChangeTracker::new();
+        let mut t = ChangeTracker::new(Counter::Changes);
         t.observe(10);
 
         let landed = 10 + SELF_WRITE_DELTA;

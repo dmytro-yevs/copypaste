@@ -6,10 +6,10 @@
 //! what the do-not-record formats exist to prevent. `clipboard-win` is
 //! arboard's own Windows layer, one level down, and has all three.
 //!
-//! Nothing here has run: the workspace does not build on Windows yet. The state
-//! machine is [`super::change`], covered on any host; what no test has settled
-//! is how far one write of ours moves the sequence number, and whether the
-//! probes see what a password manager writes. Hence the `#[ignore]`d tests.
+//! The state machine is [`super::change`], covered on any host. What only a
+//! Windows session can settle is behind `#[ignore]` below: the sequence number
+//! moves by 5 on a text write and 4 on an image one, and every opt-out marker a
+//! password manager registers is visible to `IsClipboardFormatAvailable`.
 
 use std::time::Instant;
 
@@ -22,7 +22,7 @@ mod transcode;
 
 use super::change::{Change, ChangeTracker};
 use super::windows_optout as optout;
-use super::{file_capture, Capture, CapturePolicy, ClipboardSource};
+use super::{file_capture, Capture, CapturePolicy, ClipboardSource, Counter};
 use attribution::SourceApp;
 use read::{Reading, Representation};
 
@@ -35,14 +35,16 @@ const OPEN_ATTEMPTS: usize = 10;
 
 /// The largest sequence-number delta a write of ours may claim as its own.
 ///
-/// `GetClipboardSequenceNumber` is documented only as "incremented whenever the
-/// contents of the clipboard change", and one write is `EmptyClipboard`
-/// followed by `SetClipboardData` — one bump or two. Beyond that another
-/// application wrote during ours, and claiming its change would suppress the
-/// user's copy as if it were our paste-back (CopyPaste-8yzf).
+/// **Measured on Windows 11 26200**, deterministic over repeated runs. The
+/// number counts *mutations*, not changes, and Windows counts the formats it
+/// synthesises for us: a text write is `EmptyClipboard` + `CF_UNICODETEXT` +
+/// `CF_LOCALE`/`CF_TEXT`/`CF_OEMTEXT` = 5, and an image write is
+/// `EmptyClipboard` + `CF_BITMAP` + `CF_DIB`/`CF_DIBV5` = 4.
 ///
-/// Unverified: no runner has measured the real delta.
-const MAX_SELF_WRITE_DELTA: i64 = 2;
+/// This was 2 — the count v1 recovered from macOS — and every paste-back
+/// therefore exceeded it, disarmed the sentinel and came back as a fresh
+/// capture: the duplicate-on-copy bug (CopyPaste-8yzf), live on every write.
+const MAX_SELF_WRITE_DELTA: i64 = 5;
 
 /// Clipboard formats registered once, not once per tick (§3.12's rule in
 /// Windows spelling: `RegisterClipboardFormatW` interns a name for the life of
@@ -91,7 +93,7 @@ pub struct WindowsClipboard {
 impl WindowsClipboard {
     pub fn new() -> std::io::Result<Self> {
         Ok(Self {
-            tracker: ChangeTracker::new(),
+            tracker: ChangeTracker::new(Counter::Mutations),
             rejected_too_large: 0,
             opt_out: OptOutFormats::register(),
             source_cache: None,
@@ -564,9 +566,15 @@ mod tests {
 
     /// §3.2, the manifest's highest-value rule: a burst must never be returned
     /// *instead of* the surviving value. T-5, T-6.
+    ///
+    /// The telemetry half of §3.2 is not asserted, because Windows cannot
+    /// answer it — [`super::super::change::Counter`] has the measurement. What
+    /// this pins instead is that the counter stays at zero: it read 4 after
+    /// every single copy while the delta was being divided as if it counted
+    /// changes, and that number reaches the user's diagnostics panel.
     #[test]
     #[ignore = "drives the real Windows clipboard"]
-    fn a_burst_reports_its_losses_and_still_returns_the_survivor() {
+    fn a_burst_still_returns_the_survivor_and_invents_no_losses() {
         let _lock = serialised();
         let mut clipboard = WindowsClipboard::new().unwrap();
         write_text("seed");
@@ -580,8 +588,7 @@ mod tests {
             .poll()
             .expect("§3.2: the surviving clipboard value must still be captured");
         assert_eq!(capture.content, "latest");
-        let lost = clipboard.lost_intermediates_count();
-        assert!(lost > 0, "the burst must be reported as telemetry");
+        assert_eq!(clipboard.lost_intermediates_count(), 0);
 
         write_text("after-burst");
         assert_eq!(
@@ -591,7 +598,12 @@ mod tests {
                 .content,
             "after-burst"
         );
-        assert_eq!(clipboard.lost_intermediates_count(), lost);
+        assert_eq!(
+            clipboard.lost_intermediates_count(),
+            0,
+            "one ordinary copy moves the sequence number by five; counting that \
+             as four lost items is the bug this asserts against"
+        );
     }
 
     /// I-5, T-14, T-15, T-16 in Windows spelling. The marker is written

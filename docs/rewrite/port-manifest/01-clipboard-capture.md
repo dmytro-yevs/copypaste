@@ -274,6 +274,14 @@ Each entry: **Rule** / **Why** / **Bug id** / **v1 site**.
   latest.
 - **Bug id.** *(unlabelled "CRITICAL fix" in v1)*
 - **v1 site.** `monitor.rs:431-458`.
+- **Amended for Windows (ADR-0013).** `GetClipboardSequenceNumber` is not the
+  same kind of counter. Measured on Windows 11 26200: it moves once per
+  *mutation*, so one text copy moves it by 5 — `EmptyClipboard`,
+  `CF_UNICODETEXT`, and the `CF_TEXT`/`CF_OEMTEXT`/`CF_LOCALE` Windows
+  synthesises — and one image copy by 4. The delta therefore carries no count of
+  lost values, because the synthesised set depends on what the other application
+  wrote. Windows reports no burst telemetry rather than a number that read 4
+  after every single copy. §3.2 is unaffected: it is about what is captured.
 
 ### 3.2 Burst handling MUST NOT discard the surviving item ⚠ highest-value rule here
 
@@ -688,6 +696,8 @@ keep both properties).
   clipboard's change count jumps to N+5 with text `"latest"` present, then the
   poll returns `"latest"` (and separately reports 4 lost intermediates via
   telemetry). **The poll MUST NOT return a burst-only result.** Guards §3.2.
+  The telemetry half does not bind on Windows, where the counter counts
+  mutations rather than changes (§3.1); the survivor half binds everywhere.
 - **T-6 — burst then normal resumes.** Following T-5, given one further single
   clipboard write `"after-burst"`, when polled, then `"after-burst"` is returned
   as ordinary text.
