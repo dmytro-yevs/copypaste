@@ -291,6 +291,12 @@ if emu:
     rec("schedule" in triggers and "workflow_dispatch" in triggers,
         "android-emulator.yml runs nightly and on demand", repr(sorted(triggers)))
 
+    emulator_matrix = ((ejobs.get("emulator") or {}).get("strategy") or {}).get("matrix") or {}
+    api_matrix = str(emulator_matrix.get("api-level", ""))
+    rec("[24,29,33,34,36]" in api_matrix,
+        "android-emulator.yml schedules the representative API matrix",
+        "expected 24, 29, 33, 34 and 36 in the scheduled matrix: {!r}".format(api_matrix))
+
     # Both legs, and the build flag that separates them. The debug leg must
     # stay debuggable or it loses run-as and every filesystem assertion with
     # it; the release leg must stay *not* debuggable or R8 never runs and it
@@ -330,6 +336,25 @@ if emu:
             "--debug is {} here: {}".format("required" if debug else "what makes R8 not run", build))
         rec(all("--target x86_64" in l for l in build), "{}: builds for the AVD's ABI".format(apk_job),
             "an APK with no x86_64 native library installs and then dies on load: {}".format(build))
+
+release = docs.get("release.yml") or {}
+release_jobs = release.get("jobs") or {}
+hardware = release_jobs.get("android-hardware") or {}
+rec(bool(hardware), "release.yml has a physical arm64 Android gate",
+    "an x86_64 emulator cannot execute the native library users install")
+if hardware:
+    labels = hardware.get("runs-on") or []
+    labels = labels if isinstance(labels, list) else [labels]
+    rec({"self-hosted", "ARM64", "android-device"} <= set(labels),
+        "the Android hardware gate selects the arm64 device runner", repr(labels))
+    publish_needs = (release_jobs.get("publish") or {}).get("needs") or []
+    publish_needs = publish_needs if isinstance(publish_needs, list) else [publish_needs]
+    rec("android-hardware" in publish_needs,
+        "publishing requires the Android hardware gate", repr(publish_needs))
+    bodies = "\n".join(s.get("run") or "" for s in steps(hardware))
+    rec("arm64-v8a" in bodies and "android-smoke-release.sh" in bodies,
+        "the hardware gate verifies arm64 and runs the release smoke harness",
+        "the gate must reject another ABI and exercise the signed APK")
 
 for name in ("android-smoke.sh", "android-smoke-release.sh"):
     smoke = pathlib.Path("scripts/release") / name

@@ -17,7 +17,7 @@ the assertion.
 | Rust | `ci.yml` → `test + clippy (linux)`, `demo.sh` + `demo-p2p.sh` | portable logic against fakes: crypto, storage, detection, merge, IPC framing, CLI | anything a platform API answers |
 | Browser (jsdom) | `ci.yml` → `npm build + test (jsdom)` | component logic, hooks, reducers, catalogue coverage | layout, scrolling, virtualisation, anything crossing the Tauri bridge |
 | Browser (WebKitGTK, Linux) | `browser-webkitgtk.yml` | shared React behaviour in a real engine: rendering, composition, navigation, responsive layout, forms, dialogs, menus, loading/empty/error states, keyboard navigation, focus, the accessibility tree, overflow and scrolling, console errors, behaviour against a real daemon | Tauri commands as shipped, WKWebView, Android WebView, NSPasteboard, Keychain, Keystore, intents, tray or menu bar, global shortcuts, launch at login, native notifications, native window focus or dismissal, platform permissions, packaging, signing, installation |
-| Android | `android-emulator.yml` — the built APK installed on an emulator | Android | macOS |
+| Android | `android-emulator.yml` on x86_64; `release.yml` on a physical arm64 device | Android platform behavior at each API level that ran; the signed release APK and arm64 path at release | macOS; OEM background policy; a Play-updated WebView |
 | macOS | `ci.yml` → `macOS check + platform (arm64)`; `release.yml` → `smoke-macos-dmg.sh` on a tag | macOS | Android |
 
 The browser layer does execute Tauri commands through `wry` on Linux. That is
@@ -56,6 +56,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | `ClipListener` / `ClipQueue` / `CaptureService` | Android | **NOT VERIFIED IN CI** — only the negative case is asserted; no Kotlin unit test exists |
 | Quick Settings tile | Android | **NOT VERIFIED IN CI** — probed, never asserted |
 | Android 12+ clipboard-toast consent gate | Android | **NOT VERIFIED IN CI** — the Rust refusal and the jsdom dialog support it; the OS toast is unobserved |
+| API-level spread | Android | Partial — the scheduled matrix runs API 24, 29, 33, 34 and 36; targeted dispatches run one selected level |
 
 ### Crypto and device secret
 
@@ -65,6 +66,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Device secret in the macOS Keychain | macOS | Verified — throwaway keychain; a self-skipped test fails the job |
 | Device secret in the Android Keystore | Android | Verified — a second launch reopens the same database |
 | The Keychain item survives a re-signed binary (manifest 02 §3.8) | macOS | **NOT VERIFIED IN CI** — REPORTED leg, tag-only |
+| The aarch64 hardware SHA-2 path executes as built | Android | Partial — the signed universal APK must pass on a physical `arm64-v8a` device before a release is published |
 
 ### Storage and detection
 
@@ -140,5 +142,6 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Cask postflight, quarantine removal, re-seal | macOS | Partial — ENFORCED, tag-only; Gatekeeper's verdict is a note |
 | `brew install --cask` as a user runs it | macOS | **NOT VERIFIED IN CI** — `check.sh` round-trips the generators only |
 | Published universal APK: build, R8, release signing, install, launch, no stripped symbol | Android | Partial — the exact signed artifact is checksum-verified and smoke-tested before publication, tag-only |
+| The signed release APK installed on a physical device | Android | Partial — publication depends on a tag-only hardware gate that installs and smoke-tests the exact artifact on one physical `arm64-v8a` device |
 | Notarisation and Gatekeeper acceptance | macOS | **NOT VERIFIED IN CI** — ADR-0001 decided against notarisation; recorded so it is not mistaken for coverage |
 | CLI verbs and `--json` | Rust | Verified |

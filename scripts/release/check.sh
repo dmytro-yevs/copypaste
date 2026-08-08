@@ -653,8 +653,10 @@ cat <<'EOS'
             runtime
           - whether TCC accepts an untrusted self-signed certificate
             (ADR-0001 carries the ten-minute procedure and a table to fill in)
-          - the whole Android job: the NDK, Gradle, the Tauri Android bundler,
-            zipalign/apksigner, and whether the APK installs on a device
+          - the Android build itself: the NDK, Gradle, the Tauri Android
+            bundler, and zipalign/apksigner
+          - the configured arm64 hardware gate; only its labelled runner and
+            attached physical device can execute it
 EOS
 
 printf '\n%s\n' "-----------------------------------------------"

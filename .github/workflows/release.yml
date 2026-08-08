@@ -629,6 +629,51 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # The emulator never executes the aarch64 native library and cannot stand in
+  # for a phone. Publishing therefore waits for this labelled runner, with one
+  # exclusively attached physical arm64 Android device, to run the signed APK.
+  android-hardware:
+    name: Gate release on a physical arm64 Android device
+    needs: [version, android]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: [self-hosted, linux, ARM64, android-device]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android
+          path: dist
+
+      - name: Verify the runner owns one physical arm64 device
+        run: |
+          set -euo pipefail
+          command -v adb >/dev/null 2>&1 || { echo "::error::adb is not installed on the hardware runner"; exit 1; }
+          mapfile -t devices < <(adb devices | awk 'NR > 1 && $2 == "device" { print $1 }')
+          (( ${#devices[@]} == 1 )) || { echo "::error::expected exactly one ready Android device, found ${#devices[@]}"; exit 1; }
+          [[ "${devices[0]}" != emulator-* ]] || { echo "::error::the release gate requires physical hardware, not an emulator"; exit 1; }
+          echo "ANDROID_SERIAL=${devices[0]}" >> "$GITHUB_ENV"
+          abi="$(adb -s "${devices[0]}" shell getprop ro.product.cpu.abi | tr -d '\r')"
+          [[ "$abi" == arm64-v8a ]] || { echo "::error::the release gate requires arm64-v8a, found '$abi'"; exit 1; }
+
+      - name: Smoke-test the signed release APK on hardware
+        env:
+          APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
+          SMOKE_OUT: artifacts/release-android-hardware
+        run: |
+          set -euo pipefail
+          [[ -f "$APK" ]] || { echo "::error::$APK is missing from the Android artifact"; exit 1; }
+          ./scripts/release/android-smoke-release.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-android-hardware-evidence
+          path: artifacts/release-android-hardware
+          if-no-files-found: warn
+          retention-days: 30
+
   # ---------------------------------------------------------------------------
   # Generate the cask and the formula from the artefacts that were actually
   # built, so the checksums come from the files being published rather than
@@ -684,7 +729,7 @@ jobs:
     # android is a hard dependency, not a nice-to-have: ADR-0006 says one
     # release page serves both platforms, and a page that silently serves one is
     # worse than a failed run.
-    needs: [version, supabase-gate, macos, android, android-smoke, packaging]
+    needs: [version, supabase-gate, macos, android, android-smoke, android-hardware, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
