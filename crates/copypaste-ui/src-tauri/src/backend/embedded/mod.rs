@@ -33,12 +33,9 @@
 //!
 //! # Unverified
 //!
-//! Nothing in this file has been run. This host has no Android SDK and no NDK,
-//! so it is compiled — under `--features embedded-backend`, on Linux — and
-//! never executed. Note that the backend `copypaste_core::Keyring` selects here
-//! is *not* the one an Android build selects: on this host it is the `0600`
-//! file, and on Android it is the Keystore-wrapped secret, which no machine in
-//! this project can compile.
+//! Host tests run this backend under `--features embedded-backend` with the
+//! file keystore. Android selects the Keystore-wrapped secret instead, so its
+//! platform binding remains a native-runner assertion.
 
 mod open;
 mod peers;

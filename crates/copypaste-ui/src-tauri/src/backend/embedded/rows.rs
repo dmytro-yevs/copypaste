@@ -177,3 +177,30 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         },
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::backend;
+    use super::*;
+    use crate::backend::Backend;
+
+    #[tokio::test]
+    async fn a_row_moved_under_another_identity_fails_closed_and_redacted() {
+        let (backend, _clipboard, _dir) = backend();
+        let item = backend.add("plaintext that must not escape").await.unwrap();
+        let mut row = backend
+            .inner
+            .state
+            .store
+            .get(&item.id)
+            .unwrap()
+            .expect("the row was stored");
+        row.id = "another-row".into();
+
+        let error = backend.inner.to_wire(row).unwrap_err();
+        assert!(matches!(error, BackendError::Internal(_)), "{error:?}");
+        let shown = serde_json::to_string(&error.ui_error()).unwrap();
+        assert!(!shown.contains("plaintext that must not escape"), "{shown}");
+        assert!(!shown.contains(&item.id), "{shown}");
+    }
+}
