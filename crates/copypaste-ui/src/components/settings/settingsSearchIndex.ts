@@ -59,7 +59,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { tab: "sync", title: "settings.sync.paired.title", description: "settings.sync.paired.description", keywords: ["pair", "devices", "encrypted"] },
   { tab: "sync", title: "settings.sync.now.title", description: "settings.sync.now.description" },
-  { tab: "sync", title: "settings.sync.cloud.title" },
+  { tab: "sync", title: "settings.sync.cloud.title", description: "settings.sync.cloud.description", keywords: ["account", "supabase", "internet"] },
 
   { tab: "storage", title: "settings.storage.stored.title", description: "settings.storage.stored.description" },
   { tab: "storage", title: "settings.transfer.export.title", description: "settings.transfer.export.description" },

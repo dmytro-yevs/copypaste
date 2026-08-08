@@ -30,7 +30,7 @@ export function SyncTab() {
             }
           >
             {unavailable
-              ? t("settings.sync.cloud.badge")
+              ? t("settings.sync.paired.unavailable")
               : count === 0
                 ? t("settings.sync.paired.none")
                 : t("settings.sync.paired.count", { n: count })}
@@ -59,6 +59,7 @@ export function SyncTab() {
 
       <Row
         title={t("settings.sync.cloud.title")}
+        description={t("settings.sync.cloud.description")}
       >
         <Badge variant="secondary">{t("settings.sync.cloud.badge")}</Badge>
       </Row>
