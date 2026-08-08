@@ -28,9 +28,6 @@ copypaste-runtime-log = { path = "../copypaste-runtime-log" }
 clap.workspace = true
 uuid.workspace = true
 directories.workspace = true
-# The sync metadata the item table already holds but `StoredItem` does not
-# carry — see `p2p::meta` for why the daemon opens the same SQLCipher file on
-# its own connection rather than shadowing those columns in a second store.
 rusqlite.workspace = true
 hex.workspace = true
 zeroize.workspace = true
