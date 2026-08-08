@@ -320,9 +320,6 @@ export function useBulkDelete() {
   });
 }
 
-/** Not optimistic. §3.1.6 specifies an optimistic reorder with a revert, and it
- *  needs the drag gesture that does not exist yet: nothing calls this hook, so
- *  there is no move to show early. Wire the two together. */
 export function useReorderPinned() {
   const qc = useQueryClient();
   return useMutation({
