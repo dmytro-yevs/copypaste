@@ -27,10 +27,10 @@ tempfile.workspace = true
 [features]
 typescript = ["dep:ts-rs"]
 
-# The Windows endpoint: `windows-sys` for one constant, `sha2` and `hex` for the
-# per-user pipe name. All three are already resolved in this tree, so these are
-# dependency edges and not new packages.
+# The Windows endpoint. `interprocess` owns connection waiting, listener
+# instance replacement and the Tokio stream adapter; the digest keeps a path
+# and username out of the machine-global pipe name.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation"] }
+interprocess.workspace = true
 sha2.workspace = true
 hex.workspace = true

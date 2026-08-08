@@ -1052,6 +1052,7 @@ dependencies = [
  "hex",
  "if-addrs",
  "image",
+ "interprocess",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
@@ -1067,6 +1068,8 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "widestring",
+ "win-security-identifier",
  "windows-sys 0.61.2",
  "zeroize",
 ]
@@ -1084,6 +1087,7 @@ version = "2.0.0-alpha.4"
 dependencies = [
  "directories",
  "hex",
+ "interprocess",
  "serde",
  "serde_json",
  "sha2",
@@ -1092,7 +1096,6 @@ dependencies = [
  "tokio",
  "ts-rs",
  "unicode-segmentation",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1490,6 +1493,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
 
 [[package]]
+name = "delegate"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "780eb241654bf097afb00fc5f054a09b687dad862e485fdcf8399bb056565370"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1646,6 +1660,12 @@ checksum = "442039f5147480ba31067cb00ada1adae6892028e40e45fc5de7b7df6dcc1b5f"
 dependencies = [
  "const-random",
 ]
+
+[[package]]
+name = "doctest-file"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2db04e74f0a9a93103b50e90b96024c9b2bdca8bce6a632ec71b88736d3d359"
 
 [[package]]
 name = "document-features"
@@ -2847,6 +2867,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "interprocess"
+version = "2.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "798de1433ba514cc6c04c4144c2469af81396e4906195218737c776d47769572"
+dependencies = [
+ "doctest-file",
+ "futures-core",
+ "libc",
+ "recvmsg",
+ "tokio",
+ "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4303,6 +4338,12 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
+
+[[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
 
 [[package]]
 name = "redox_syscall"
@@ -6757,6 +6798,41 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
+name = "win-security-identifier"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbe932761e8be91b9d043f7874931ae7994100c27dbb5f40c15d20622513930b"
+dependencies = [
+ "arrayvec",
+ "autocfg",
+ "delegate",
+ "num_enum",
+ "serde",
+ "smallvec",
+ "thiserror 2.0.19",
+ "version_check",
+ "widestring",
+ "win-security-identifier-parsing",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "win-security-identifier-parsing"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc1e2d6b36beb4c927888fc722eee760cc296c604381fd9d4f83da0cc8a8c7aa"
+dependencies = [
+ "arrayvec",
+ "thiserror 2.0.19",
+]
 
 [[package]]
 name = "winapi"
