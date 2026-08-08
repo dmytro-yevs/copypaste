@@ -92,15 +92,52 @@ build the call is not in the binary, and the default it would have passed is
 `false` anyway (`wry/src/lib.rs`: `#[cfg(not(debug_assertions))] devtools:
 false`).
 
-That is an argument, so both legs assert it instead:
+That is an argument, and a socket cannot settle it. Both workflows run on
+`google_apis` emulator images, which are built `userdebug` and so set
+`ro.debuggable=1`; the WebView provider then enables remote debugging for
+**every** process on the device. Measured on API 36 `sdk_gphone64_x86_64`, both
+endpoints answering `/json/version` and listing an attachable page:
 
-- `android-smoke.sh` requires the debug build to publish the socket. A build
-  that does not fails there, naming this harness, rather than timing out here.
-- `android-smoke-release.sh` requires the shipped build to publish **no** such
-  socket, and fails if one is open.
+| process | `run-as` | serves CDP |
+|---|---|---|
+| the signed, R8'd release APK | refused — not debuggable | yes, as `com.copypaste.app` |
+| `com.android.htmlviewer`, a system package nobody here built | refused | yes |
 
-The detector behind both is `devtools_sockets` in `android-smoke-lib.sh`, with
-fixtures under `--self-test` — including a pid that is a prefix of another
+So run 31229976299 failed on the emulator's behaviour rather than the build's,
+and it failed only once the WebView actually painted — which is why the check
+had been green until then, not because it had ever proved anything.
+
+What the *artefact* says, counting the JNI method names wry emits side by side
+in one function:
+
+| `lib/x86_64/libcopypaste_ui_lib.so` | `setWebContentsDebuggingEnabled` | `setWebViewClient` / `setWebChromeClient` |
+|---|---|---|
+| debug APK | 1 | 1 / 1 |
+| release APK | **0** | 1 / 1 |
+
+The neighbours are what make the zero mean something. They are under no cfg, so
+a scan reporting none of the three read the wrong file rather than a clean
+build.
+
+The two legs therefore assert:
+
+- `android-smoke.sh` — the debug build publishes the socket. That is this
+  harness's precondition and, on these images, nothing more.
+- `android-smoke-release.sh` — the shipped APK carries no
+  `setWebContentsDebuggingEnabled` call at all, **and** nothing answers CDP for
+  our pid unless an app we did not build, which `run-as` also refuses, answers
+  on the same device.
+
+The APK assertion is unconditional. The control would otherwise also excuse a
+build that had switched its own debugger on, which is the case it exists to
+catch.
+
+A device with `ro.debuggable=0` has not been tested here — no such device is
+available to CI. The APK assertion is what carries the property to one.
+
+The detectors are `wry_jni_counts`, `apk_wry_jni_counts`, `devtools_sockets`,
+`devtools_socket_pids` and `devtools_cdp_package` in `android-smoke-lib.sh`,
+with fixtures under `--self-test` — including a pid that is a prefix of another
 process's socket name, which a looser match would report as a leak.
 
 This harness also refuses to start against a non-debuggable package, so it can

@@ -245,12 +245,61 @@ own_map_paths() {   # <maps file> <package>
 #
 # It is an abstract socket named after the pid, so the name is different after
 # every restart and a lookup by a remembered name silently describes nothing.
-# The security property both legs assert with this: wry compiles
-# `setWebContentsDebuggingEnabled` out under
-# `#[cfg(any(debug_assertions, feature = "devtools"))]`, so a release build must
-# publish no such socket at all.
 devtools_sockets() {   # <cat /proc/net/unix output> <pid>
     grep -oE "@webview_devtools_remote_$2\$" <<<"$1"
+}
+
+# Every pid publishing one, ours included.
+#
+# Only `webview_devtools_remote_<digits>`: an emulator also carries the WebView
+# zygote's socket and, on a Google image, Stetho's
+# `@stetho_<package>_devtools_remote` — neither is a Chromium endpoint keyed by
+# pid, and treating them as one would name a process that does not exist.
+devtools_socket_pids() {   # <cat /proc/net/unix output>
+    grep -oE '@webview_devtools_remote_[0-9]+$' <<<"$1" | sed 's/.*_//'
+}
+
+# The three wry JNI method names in a file, as "<name> <count>" lines.
+#
+# Three, not one. `setWebContentsDebuggingEnabled` is the call that turns the
+# remote debugger on and it is compiled out under
+# `#[cfg(any(debug_assertions, feature = "devtools"))]`.
+# `setWebViewClient` and `setWebChromeClient` sit in the same wry function
+# under no cfg at all. Reporting all three is what makes a zero for the first
+# mean "the cfg removed it" instead of "this scan never read the library" —
+# the failure mode of a grep against a path that moved.
+#
+# `grep -a` on the binary rather than strings(1): binutils is not on every
+# machine this runs from, and a missing tool would read as a clean build.
+wry_jni_counts() {   # <file>
+    local name
+    for name in setWebContentsDebuggingEnabled setWebViewClient setWebChromeClient; do
+        printf '%s %s\n' "$name" "$(LC_ALL=C grep -a -o -- "$name" "$1" 2>/dev/null | wc -l | tr -d ' ')"
+    done
+}
+
+# The same counts over every native library packed in an APK, as
+# "<devtools-call> <unconditional-neighbours>".
+#
+# Extracted first, never grepped through the zip. Whether an .so is stored or
+# deflated inside an APK is a packaging flag, and a scan that silently depended
+# on it would start reporting a clean build the day the flag changed.
+apk_wry_jni_counts() {   # <apk>
+    local work call=0 others=0 so name count
+    work="$(mktemp -d)"
+    unzip -o -q "$1" 'lib/*/*.so' -d "$work" 2>/dev/null || true
+    for so in "$work"/lib/*/*.so; do
+        [[ -f "$so" ]] || continue
+        while read -r name count; do
+            if [[ "$name" == setWebContentsDebuggingEnabled ]]; then
+                call=$((call + count))
+            else
+                others=$((others + count))
+            fi
+        done < <(wry_jni_counts "$so")
+    done
+    rm -rf "$work"
+    printf '%s %s' "$call" "$others"
 }
 
 # ---------------------------------------------------------------------------
@@ -289,6 +338,69 @@ app_processes() { adb shell ps -A -o PID,NAME 2>/dev/null | tr -d '\r' | grep -F
 
 has_pid() { [[ -n "$(app_pid)" ]]; }
 no_pid()  { [[ -z "$(app_pid)" ]]; }
+
+# The package a live CDP endpoint names for <pid>, or nothing.
+#
+# A socket name is not an exposure — the mistake e2e-android/ already paid for
+# from the other side. `adb forward` binds the local port whether or not the
+# abstract name is listening, and the connection is then accepted and closed
+# with no bytes, so a check that stops at the name reports a debugger that no
+# debugger could use. This speaks the protocol and reads back who answered.
+#
+# curl missing is not a pass: the caller is handed a name it can never match,
+# so an environment that cannot prove the endpoint dead fails the way an open
+# one does (CLAUDE.md rule 4, fail closed).
+devtools_cdp_package() {   # <pid>
+    local port="${CDP_PROBE_PORT:-19229}" json
+    command -v curl >/dev/null 2>&1 || { printf 'UNPROVEN(no curl)'; return 0; }
+    adb forward "tcp:$port" "localabstract:webview_devtools_remote_$1" >/dev/null 2>&1 || return 0
+    json="$(curl -s --max-time 10 "http://127.0.0.1:$port/json/version" 2>/dev/null)"
+    adb forward --remove "tcp:$port" >/dev/null 2>&1 || true
+    sed -n 's/.*"Android-Package"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$json"
+}
+
+# Started only to *produce* a control; the search below takes any qualifying
+# process, so an image without this package still passes if something else on
+# it serves CDP.
+CONTROL_ACTIVITY="${CONTROL_ACTIVITY:-com.android.htmlviewer/.HTMLViewerActivity}"
+
+# A WebView that is not ours and not debuggable, on this device, answering the
+# same protocol — or nothing.
+#
+# The control for what an endpoint on our own pid cannot answer: whether a
+# devtools endpoint here says anything about our artefact. A `userdebug` image
+# sets `ro.debuggable=1` and the WebView provider then enables remote debugging
+# for every process, so an app nobody here built, which `run-as` also refuses,
+# serving CDP tells that apart from a build that switched its own debugger on.
+# A debuggable control would prove nothing about a non-debuggable one.
+#
+# Finding none returns empty and fails the caller: "could not show the device
+# does this to everyone" must not read as "the build is clean".
+
+control_cdp_package() {
+    local pid pkg i
+    # An explicit component, and a URL that need not resolve: htmlviewer
+    # declares only the `content:` scheme, so nothing resolves this intent by
+    # filter, and a WebView showing an error page is still a WebView publishing
+    # a socket.
+    adb shell am start -a android.intent.action.VIEW \
+        -d file:///data/local/tmp/copypaste-devtools-control.html \
+        -t text/html -n "$CONTROL_ACTIVITY" >/dev/null 2>&1 || true
+
+    for (( i = 0; i < 20; i++ )); do
+        for pid in $(devtools_socket_pids "$(sh_ cat /proc/net/unix)"); do
+            [[ "$pid" == "$(app_pid)" ]] && continue
+            pkg="$(devtools_cdp_package "$pid")"
+            [[ -n "$pkg" && "$pkg" != "$PKG" ]] || continue
+            grep -q uid <<<"$(sh_ run-as "$pkg" id)" && continue
+            adb shell am force-stop "${CONTROL_ACTIVITY%%/*}" >/dev/null 2>&1 || true
+            printf '%s (pid %s)' "$pkg" "$pid"
+            return 0
+        done
+        sleep 1
+    done
+    adb shell am force-stop "${CONTROL_ACTIVITY%%/*}" >/dev/null 2>&1 || true
+}
 
 # Wait up to <secs> for a *function* to succeed. It has to be a function: a
 # command built here would have its arguments expanded once, before the wait.
@@ -524,6 +636,7 @@ self_test() {
     local unix_dump
     unix_dump="$(printf '%s\n' \
         '0000000000000000: 00000002 00000000 00010000 0001 01 14836 @com.android.internal.os.WebViewZygoteInit/069a548f' \
+        '0000000000000000: 00000002 00000000 00010000 0001 01 22902 @stetho_com.google.android.apps.messaging_devtools_remote' \
         '0000000000000000: 00000002 00000000 00010000 0001 01 53464 @webview_devtools_remote_8689' \
         '0000000000000000: 00000002 00000000 00010000 0001 01 53999 @webview_devtools_remote_99999')"
 
@@ -539,6 +652,36 @@ self_test() {
     [[ -z "$(devtools_sockets "$unix_dump" 4242)" ]] \
         && ok "a process that published nothing reports nothing" \
         || bad "a process that published nothing reports nothing"
+
+    [[ "$(devtools_socket_pids "$unix_dump" | tr '\n' ' ')" == "8689 99999 " ]] \
+        && ok "every publishing pid is listed, and only Chromium's sockets" \
+        || bad "every publishing pid is listed, and only Chromium's sockets" \
+               "$(devtools_socket_pids "$unix_dump" | tr '\n' ' ')"
+
+    group "self-test: the devtools call in the artefact"
+
+    # The byte sequences the real scan matches, around filler, because these are
+    # read out of a 20 MB native library and not off a line of their own.
+    local call others
+    printf 'ELF\000\000setWebViewClient\000setWebChromeClient\000RustWebView\000' > "$t/lib-release.so"
+    read -r call others <<<"$(wry_jni_counts "$t/lib-release.so" | awk '
+        $1 == "setWebContentsDebuggingEnabled" { c = $2; next } { o += $2 }
+        END { print c + 0, o + 0 }')"
+    [[ "$call" -eq 0 && "$others" -eq 2 ]] \
+        && ok "a release library reports no devtools call and both neighbours" \
+        || bad "a release library reports no devtools call and both neighbours" "got '$call $others'"
+
+    printf 'ELF\000\000setWebViewClient\000setWebContentsDebuggingEnabled\000setWebChromeClient\000' > "$t/lib-debug.so"
+    [[ "$(wry_jni_counts "$t/lib-debug.so" | awk '$1 == "setWebContentsDebuggingEnabled" { print $2 }')" -eq 1 ]] \
+        && ok "a debug library reports the devtools call" \
+        || bad "a debug library reports the devtools call" "$(wry_jni_counts "$t/lib-debug.so")"
+
+    # The failure this scan is shaped to survive: pointed at the wrong file, it
+    # must not read as a clean build. Zero neighbours is how the caller knows.
+    printf 'ELF\000\000nothing of interest here\000' > "$t/lib-elsewhere.so"
+    [[ "$(wry_jni_counts "$t/lib-elsewhere.so" | awk '{ s += $2 } END { print s + 0 }')" -eq 0 ]] \
+        && ok "a library that is not wry's reports no neighbours either" \
+        || bad "a library that is not wry's reports no neighbours either" "$(wry_jni_counts "$t/lib-elsewhere.so")"
 
     group "self-test: the WebView painted"
 

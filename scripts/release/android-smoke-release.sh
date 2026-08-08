@@ -147,19 +147,52 @@ fi
 # single signal that the plugin surface came through R8 intact.
 assert_painted "$PAINT_TIMEOUT" "$launched_at" "$OUT/release-ui.xml" "$OUT/release.png"
 
-# The security half of the UI harness in e2e-android/. That harness attaches to
-# the WebView over CDP, which is only possible because wry calls
-# setWebContentsDebuggingEnabled under
-# `#[cfg(any(debug_assertions, feature = "devtools"))]`. Nothing in this
-# workspace enables that feature, so the call is not in this binary — asserted
-# here rather than reasoned about, because it is what keeps a remote debugger
-# off the build people install.
-unix_sockets="$(sh_ cat /proc/net/unix)"
-if [[ -n "$pid_now" && -n "$(devtools_sockets "$unix_sockets" "$pid_now")" ]]; then
-    bad "the shipped build publishes no WebView devtools socket" \
-        "$(devtools_sockets "$unix_sockets" "$pid_now") is open on pid $pid_now — anyone with adb can attach a debugger to the WebView"
+# The security half of the UI harness in e2e-android/: that harness attaches to
+# the WebView over CDP and reads the DOM, which on this product is clipboard
+# content. Two assertions follow, and this is the one that travels to a user's
+# device, because it is a property of the artefact.
+#
+# wry emits the only call that can switch the debugger on under
+# `#[cfg(any(debug_assertions, feature = "devtools"))]`, and this workspace
+# enables neither. R8 cannot remove a Rust JNI call, so the native library
+# inside the APK is where it would still show.
+read -r dt_call dt_neighbours <<<"$(apk_wry_jni_counts "$APK")"
+if (( dt_neighbours == 0 )); then
+    bad "the shipped APK carries no setWebContentsDebuggingEnabled call" \
+        "neither unconditional wry JNI name was found in $APK either, so this scan read nothing and proved nothing"
+elif (( dt_call == 0 )); then
+    ok "the shipped APK carries no setWebContentsDebuggingEnabled call"
 else
-    ok "the shipped build publishes no WebView devtools socket"
+    bad "the shipped APK carries no setWebContentsDebuggingEnabled call" \
+        "$dt_call reference(s) in the APK: this build can switch the WebView debugger on, and anything that reaches it reads clipboard content out of the DOM"
+fi
+
+# The device half cannot mean what it looks like on its own. Both workflows run
+# `google_apis` images, which are built `userdebug` and so set
+# `ro.debuggable=1`, and the WebView provider then enables remote debugging for
+# every process on the device. Run 31229976299 failed here on the emulator's
+# endpoint, not the build's. So it is excused only against a live control, and
+# never in place of the assertion above — which is what still catches a build
+# that had switched its own debugger on.
+#
+# The pid is resolved now and not reused from the launch group: the app may
+# have been restarted by anything in between, and a stale pid passes on nothing.
+pid_cdp="$(app_pid)"
+cdp_pkg="$(devtools_cdp_package "${pid_cdp:-0}")"
+printf '        device: ro.debuggable=%s ro.build.type=%s\n' \
+    "$(sh_ getprop ro.debuggable)" "$(sh_ getprop ro.build.type)"
+
+if [[ -z "$cdp_pkg" ]]; then
+    ok "nothing answers the WebView devtools protocol for pid ${pid_cdp:-<gone>}"
+elif [[ "$cdp_pkg" != "$PKG" ]]; then
+    bad "nothing answers the WebView devtools protocol for pid ${pid_cdp:-<gone>}" \
+        "an endpoint named for our pid answered as '$cdp_pkg'"
+elif control="$(control_cdp_package)" && [[ -n "$control" ]]; then
+    ok "the devtools endpoint on pid $pid_cdp is this device's, not this build's"
+    printf '        control: %s serves CDP too, and is not debuggable\n' "$control"
+else
+    bad "the shipped build serves no WebView devtools protocol" \
+        "CDP answered as $PKG on pid $pid_cdp, and no app we did not build serves one on this device — so this endpoint is the build's own, and anything that can reach adb can read clipboard content out of the DOM"
 fi
 
 # ---------------------------------------------------------------------------
