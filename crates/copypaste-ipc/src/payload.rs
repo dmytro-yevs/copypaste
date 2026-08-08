@@ -141,6 +141,8 @@ pub struct DiscoveredDevice {
 /// No URL, no email domain guessing, no token, and no path: everything here is
 /// either a flag or something the user typed themselves.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct CloudStatusData {
     /// A deployment URL and anon key are configured on the daemon.
     pub configured: bool,
@@ -162,6 +164,8 @@ pub struct CloudStatusData {
 
 /// What one cloud round did. Mirrors `copypaste_cloud::SyncStats`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct CloudSyncData {
     pub uploaded: u32,
     pub tombstoned: u32,

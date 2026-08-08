@@ -200,6 +200,10 @@ pub fn run() {
             // state
             commands::status::status,
             commands::status::set_device_name,
+            commands::cloud::cloud_sign_in,
+            commands::cloud::cloud_sign_out,
+            commands::cloud::cloud_status,
+            commands::cloud::cloud_sync_now,
             commands::diagnostics::diagnostics,
             commands::diagnostics::runtime_log_events,
             commands::diagnostics::export_diagnostics_report,
@@ -428,7 +432,7 @@ mod tests {
         assert_eq!(registered_entries.len(), registered.len());
         assert_eq!(annotated, registered);
         assert_eq!(registered, product_command_names());
-        assert_eq!(registered.len(), 56);
+        assert_eq!(registered.len(), 60);
     }
 
     #[test]

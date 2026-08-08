@@ -1,9 +1,17 @@
-import { MonitorSmartphone, RefreshCw } from "lucide-react";
+import { type FormEvent, useState } from "react";
+import { Cloud, LogIn, LogOut, MonitorSmartphone, RefreshCw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Row } from "@/components/settings/Row";
 import { DeviceNameField } from "@/components/devices/DeviceNameField";
+import {
+  useCloudSignIn,
+  useCloudSignOut,
+  useCloudStatus,
+  useCloudSyncNow,
+} from "@/hooks/useCloud";
 import { usePeers, useSyncNow } from "@/hooks/useDevices";
 import { useTranslation } from "@/i18n";
 import { isUnavailable } from "@/lib/errors";
@@ -13,10 +21,32 @@ export function SyncTab() {
   const { t } = useTranslation();
   const peers = usePeers();
   const sync = useSyncNow();
+  const cloud = useCloudStatus();
+  const cloudSignIn = useCloudSignIn();
+  const cloudSignOut = useCloudSignOut();
+  const cloudSync = useCloudSyncNow();
   const setView = useUi((s) => s.setView);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [passphrase, setPassphrase] = useState("");
 
   const unavailable = peers.error !== null && isUnavailable(peers.error);
   const count = peers.data?.length ?? 0;
+  const cloudStatus = cloud.data;
+  const cloudBusy = cloudSignIn.isPending || cloudSignOut.isPending || cloudSync.isPending;
+
+  function submitCloudSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    cloudSignIn.mutate(
+      { email: email.trim(), password: password.trim(), passphrase },
+      {
+        onSuccess: () => {
+          setPassword("");
+          setPassphrase("");
+        },
+      },
+    );
+  }
 
   return (
     <div className="flex flex-col">
@@ -66,9 +96,133 @@ export function SyncTab() {
 
       <Row
         title={t("settings.sync.cloud.title")}
-        description={t("settings.sync.cloud.description")}
+        description={t(
+          cloudStatus?.configured
+            ? "settings.sync.cloud.description"
+            : "settings.sync.cloud.notConfigured",
+        )}
+        badge={
+          <Badge
+            variant={
+              cloud.isError || !cloudStatus?.configured
+                ? "warn"
+                : cloudStatus.signed_in && cloudStatus.key_ready
+                  ? "ok"
+                  : "secondary"
+            }
+          >
+            {t(
+              cloud.isError
+                ? "settings.sync.cloud.badgeUnavailable"
+                : !cloudStatus?.configured
+                  ? "settings.sync.cloud.badgeNotConfigured"
+                  : cloudStatus.signed_in && cloudStatus.key_ready
+                    ? "settings.sync.cloud.badgeConnected"
+                    : "settings.sync.cloud.badgeSignedOut",
+            )}
+          </Badge>
+        }
+        note={
+          cloudStatus?.last_error ? (
+            <span role="status" className="text-xs text-warn-strong">
+              {t("settings.sync.cloud.lastError")}
+            </span>
+          ) : undefined
+        }
       >
-        <Badge variant="secondary">{t("settings.sync.cloud.badge")}</Badge>
+        {cloud.isLoading ? (
+          <span role="status" className="text-sm text-muted-foreground">
+            {t("settings.sync.cloud.loading")}
+          </span>
+        ) : cloud.isError ? (
+          <Button variant="outline" size="sm" onClick={() => void cloud.refetch()}>
+            <RefreshCw aria-hidden="true" />
+            {t("settings.sync.cloud.retry")}
+          </Button>
+        ) : !cloudStatus?.configured ? (
+          <Cloud aria-hidden="true" className="text-muted-foreground" />
+        ) : cloudStatus.signed_in && cloudStatus.key_ready ? (
+          <div className="flex max-w-[360px] flex-col items-end gap-s-2">
+            {cloudStatus.email && (
+              <span className="max-w-full truncate text-xs text-muted-foreground">
+                {cloudStatus.email}
+              </span>
+            )}
+            <div className="flex flex-wrap justify-end gap-s-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={cloudBusy}
+                onClick={() => cloudSync.mutate()}
+              >
+                <RefreshCw aria-hidden="true" />
+                {t(
+                  cloudSync.isPending
+                    ? "settings.sync.cloud.syncing"
+                    : "settings.sync.cloud.syncNow",
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={cloudBusy}
+                onClick={() => cloudSignOut.mutate()}
+              >
+                <LogOut aria-hidden="true" />
+                {t("settings.sync.cloud.signOut")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <form
+            className="grid w-full max-w-[360px] gap-s-2"
+            aria-label={t("settings.sync.cloud.formLabel")}
+            onSubmit={submitCloudSignIn}
+          >
+            <Input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder={t("settings.sync.cloud.email")}
+              aria-label={t("settings.sync.cloud.email")}
+              autoComplete="username"
+              disabled={cloudBusy}
+              required
+            />
+            <Input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder={t("settings.sync.cloud.password")}
+              aria-label={t("settings.sync.cloud.password")}
+              autoComplete="current-password"
+              disabled={cloudBusy}
+              required
+            />
+            <Input
+              type="password"
+              value={passphrase}
+              onChange={(event) => setPassphrase(event.target.value)}
+              placeholder={t("settings.sync.cloud.passphrase")}
+              aria-label={t("settings.sync.cloud.passphrase")}
+              autoComplete="off"
+              disabled={cloudBusy}
+              required
+            />
+            <Button
+              type="submit"
+              size="sm"
+              disabled={cloudBusy || !email.trim() || !password.trim() || !passphrase}
+            >
+              <LogIn aria-hidden="true" />
+              {t(
+                cloudSignIn.isPending
+                  ? "settings.sync.cloud.signingIn"
+                  : "settings.sync.cloud.signIn",
+              )}
+            </Button>
+          </form>
+        )}
       </Row>
     </div>
   );
