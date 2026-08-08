@@ -54,6 +54,12 @@ rec("real-supabase.sh" in gate_body,
 rec("supabase-gate" in closure(release_jobs, "publish"),
     "release.yml blocks publish on the real-Supabase gate")
 
+ci_jobs = docs["ci.yml"].get("jobs") or {}
+documentation = ci_jobs.get("documentation") or {}
+documentation_body = "\n".join(step.get("run") or "" for step in steps(documentation))
+rec("check-docs.py" in documentation_body,
+    "ci.yml gates documentation links and unfinished-work markers")
+
 
 # --- artifacts: names match, and the consumer depends on the producer --------
 for wf, doc in docs.items():

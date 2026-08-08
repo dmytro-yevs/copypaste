@@ -98,6 +98,13 @@ jobs:
       - name: check-comments.sh
         run: ./scripts/check-comments.sh
 
+  documentation:
+    name: documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: python3 scripts/check-docs.py
+
   file-size:
     name: file-size budget
     runs-on: ubuntu-latest

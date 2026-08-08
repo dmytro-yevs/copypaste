@@ -43,7 +43,6 @@ crates/copypaste-core/src/sensitive/validators.rs
 crates/copypaste-core/src/sensitive/wipe.rs
 crates/copypaste-core/src/storage/connection.rs
 crates/copypaste-core/src/storage/items.rs
-crates/copypaste-core/src/storage/legacy.rs
 crates/copypaste-core/src/storage/mod.rs
 crates/copypaste-core/src/storage/model.rs
 crates/copypaste-core/src/storage/page.rs
@@ -118,11 +117,7 @@ crates/copypaste-ui/src-tauri/src/service/mod.rs
 crates/copypaste-ui/src-tauri/src/service/push.rs
 crates/copypaste-ui/src-tauri/src/shell/autostart.rs
 crates/copypaste-ui/src-tauri/src/shell/hotkey.rs
-crates/copypaste-ui/src-tauri/src/shell/tray.rs
 crates/copypaste-ui/src/components/devices/DevicesView.tsx
-crates/copypaste-ui/src/components/devices/PairAcceptDialog.tsx
-crates/copypaste-ui/src/components/devices/PairCreateDialog.tsx
-crates/copypaste-ui/src/components/devices/QrScanner.tsx
 crates/copypaste-ui/src/components/devices/RevokeDialog.tsx
 crates/copypaste-ui/src/components/settings/serviceChoices.ts
 crates/copypaste-ui/src/vite-env.d.ts

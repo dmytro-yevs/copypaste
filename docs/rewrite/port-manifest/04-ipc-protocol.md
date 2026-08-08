@@ -1,5 +1,10 @@
 # Port Manifest 04 — Daemon IPC Protocol (external wire contract)
 
+> **v2 scope:** The method inventory, error taxonomy, readiness semantics and
+> path-redaction rule remain binding. Exact envelopes, version negotiation,
+> legacy verbs and platform transports below describe v1 only; v2 deliberately
+> has no wire compatibility with v0.4.x. See [the manifest scope](README.md).
+
 Harvested from the legacy tree at `crates/copypaste-ipc/**`,
 `crates/copypaste-daemon/src/protocol.rs`, `crates/copypaste-daemon/src/ipc/**`,
 `crates/copypaste-cli/src/ipc.rs`, `crates/copypaste-ui/src-tauri/src/ipc.rs`,
@@ -9,10 +14,8 @@ and `docs/adr/ADR-007-ipc-protocol-versioning.md`.
 
 ## 1. Purpose & scope
 
-This is the **implementation-independent specification** of the CopyPaste daemon's
-local IPC protocol. It is the contract that the following already-shipped artefacts
-depend on and that the rewrite MUST reproduce unless a deliberate, versioned break
-is taken:
+This is the recovered specification of the v1 daemon's local IPC protocol. The
+following table records the consumers that depended on that historical contract:
 
 | Consumer | Location | Nature |
 |---|---|---|
@@ -32,8 +35,8 @@ visible on the wire.
 
 ## 2. Invariants (MUST hold)
 
-These are wire-compatibility requirements. Breaking any of them requires a
-`PROTOCOL_VERSION` bump plus a coordinated CLI/UI release (ADR-007 §Versioning policy).
+These were v1 wire-compatibility requirements. They are reference material for
+v2 except where the manifest scope keeps their behaviour binding.
 
 **I1 — `id` is a JSON string, always.**
 Both `Request.id` and `Response.id` are `String` on the wire (`"1"`, `"req-42"`,
