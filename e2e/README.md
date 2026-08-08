@@ -84,7 +84,8 @@ field that did not survive.
 - Tray, popover, global hotkey, launch-at-login — desktop-shell APIs no
   WebDriver session touches.
 - Everything the policy assigns to the macOS or Android layer. Nothing here
-  substitutes for either.
+  substitutes for either. The Android WebView has its own driven harness in
+  [`e2e-android/`](../e2e-android/README.md); WKWebView has none.
 
 ## Requirements the host must satisfy
 
