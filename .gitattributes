@@ -1,0 +1,3 @@
+config/gitleaks/gitleaks.toml text eol=lf
+config/gitleaks/LICENSE text eol=lf
+crates/copypaste-core/src/sensitive/rules_generated.rs text eol=lf
