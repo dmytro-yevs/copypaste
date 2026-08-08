@@ -100,9 +100,11 @@ describe("the settings navigation", () => {
     withClient(<SettingsView />);
 
     const list = screen.getByRole("tablist");
+    const tabs = screen.getAllByRole("tab");
     expect(list.getAttribute("aria-orientation")).toBe("horizontal");
     expect(list.className).toContain("flex-wrap");
     expect(list.className).toContain("w-full");
+    expect(tabs.every((tab) => tab.className.includes("flex-none"))).toBe(true);
     expect(screen.queryByText("Personal")).toBeNull();
   });
 

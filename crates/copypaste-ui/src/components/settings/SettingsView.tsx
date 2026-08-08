@@ -67,7 +67,12 @@ function TabButton({ tab, desktop }: { tab: SettingsTab; desktop: boolean }) {
     <TabsTrigger
       value={tab.value}
       className={cn(
-        desktop && "w-full justify-start rounded-lg px-s-2 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none",
+        desktop
+          ? "w-full justify-start rounded-lg px-s-2 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none"
+          : // A11Y-15 requires wrapping. The default `flex: 1 1 0%` always
+            // fits one line, and overflowing labels stole neighbouring taps
+            // on API 36.
+            "flex-none",
       )}
     >
       {desktop && <Icon aria-hidden="true" />}
