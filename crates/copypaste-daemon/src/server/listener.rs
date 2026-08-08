@@ -352,6 +352,11 @@ async fn handle_connection(
             break;
         }
     }
+
+    // `interprocess` puts dirty Windows pipes in limbo on drop. Flush before
+    // closing so a response the client already consumed cannot keep the pipe
+    // alive and hide the EOF promised by the read deadline.
+    let _ = tokio::time::timeout(WRITE_TIMEOUT, writer.shutdown()).await;
 }
 
 /// One request, one line, one response line.
