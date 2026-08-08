@@ -67,6 +67,21 @@ impl Cloud {
         }
     }
 
+    pub(crate) fn note_driver_success(&self, meta: &Meta, expected: &Arc<Driver>, at_ms: i64) {
+        let account = self.lock_account();
+        if !account
+            .as_ref()
+            .is_some_and(|account| Arc::ptr_eq(&account.driver, expected))
+        {
+            return;
+        }
+        self.last_sync_ms.store(at_ms, Ordering::Release);
+        *self.lock_error() = None;
+        if let Err(error) = meta.set_state_ms(super::KEY_LAST_SYNC, at_ms) {
+            warn!(?error, "could not record when the cloud round completed");
+        }
+    }
+
     pub(crate) fn invalidate_session(
         &self,
         meta: &Meta,

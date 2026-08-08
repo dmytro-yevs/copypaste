@@ -132,7 +132,8 @@ impl EmbeddedCloud {
             .map_err(|_| BackendError::Invalid(MSG_PASSPHRASE))?;
 
         let previous = inner.state.store.state(KEY_USER_ID).ok().flatten();
-        if previous.as_deref() != Some(&user_id) {
+        let switched = previous.as_deref() != Some(&user_id);
+        if switched {
             inner
                 .state
                 .store
@@ -144,11 +145,18 @@ impl EmbeddedCloud {
             .map_err(|_| BackendError::internal(MSG_STORE))?;
         let key_hex = Zeroizing::new(hex::encode(key.to_bytes()));
         let driver = Arc::new(make_driver(inner, config, key, session));
-        *self.account() = Some(Account {
+        let mut account = self.account();
+        *account = Some(Account {
             email,
             user_id,
             driver,
         });
+        if switched {
+            self.last_sync_ms.store(0, Ordering::Release);
+            let _ = inner.state.store.clear_state(&[KEY_LAST_SYNC]);
+        }
+        *self.error() = None;
+        drop(account);
         if self.persist(&inner.state.store, &key_hex).is_err() {
             self.clear_local(&inner.state.store);
             return Err(BackendError::internal(MSG_STORE));
@@ -189,18 +197,21 @@ impl EmbeddedCloud {
         match outcome {
             Ok(stats) => {
                 let completed = copypaste_core::now_ms();
-                self.last_sync_ms.store(completed, Ordering::Release);
-                *self.error() = None;
-                let _ = inner.state.store.set_state_ms(KEY_LAST_SYNC, completed);
+                self.note_success(&inner.state.store, &driver, completed);
                 let _ = source.commit_upload_floor(started);
+                if stats.applied > 0 {
+                    inner.publish_items(false, 0);
+                }
                 Ok(to_wire(stats))
             }
             Err(error) => {
                 let message = describe(&error);
-                *self.error() = Some(message);
-                if terminal_auth_error(&error) {
-                    self.clear_local(&inner.state.store);
-                }
+                self.record_failure(
+                    &inner.state.store,
+                    &driver,
+                    message,
+                    terminal_auth_error(&error),
+                );
                 Err(BackendError::from_code(
                     Some(if terminal_auth_error(&error) {
                         ErrorCode::AuthFailed
@@ -276,6 +287,40 @@ impl EmbeddedCloud {
                 tracing::warn!(?error, "rotated cloud session was not persisted");
             }
         }
+    }
+
+    fn note_success(&self, store: &copypaste_core::Store, expected: &Arc<Driver>, completed: i64) {
+        let account = self.account();
+        if account
+            .as_ref()
+            .is_some_and(|value| Arc::ptr_eq(&value.driver, expected))
+        {
+            self.last_sync_ms.store(completed, Ordering::Release);
+            *self.error() = None;
+            let _ = store.set_state_ms(KEY_LAST_SYNC, completed);
+        }
+    }
+
+    fn record_failure(
+        &self,
+        store: &copypaste_core::Store,
+        expected: &Arc<Driver>,
+        message: &'static str,
+        terminal: bool,
+    ) {
+        let mut account = self.account();
+        if !account
+            .as_ref()
+            .is_some_and(|value| Arc::ptr_eq(&value.driver, expected))
+        {
+            return;
+        }
+        if terminal {
+            let _expired = account.take();
+            let _ = store.clear_state(CREDENTIAL_KEYS);
+            self.last_sync_ms.store(0, Ordering::Release);
+        }
+        *self.error() = Some(message);
     }
 
     fn clear_local(&self, store: &copypaste_core::Store) {
@@ -421,7 +466,7 @@ fn auth_error(error: AuthError) -> BackendError {
 fn terminal_auth_error(error: &SyncError) -> bool {
     matches!(
         error,
-        SyncError::Unauthorized | SyncError::InvalidCredentials | SyncError::SessionExpired
+        SyncError::InvalidCredentials | SyncError::SessionExpired
     )
 }
 fn describe(error: &SyncError) -> &'static str {
@@ -468,6 +513,27 @@ mod tests {
             wake: Notify::new(),
             poller_started: AtomicBool::new(false),
         }
+    }
+
+    fn driver(
+        cloud: &EmbeddedCloud,
+        state: &super::super::state::BackendState,
+        token: &str,
+    ) -> Arc<Driver> {
+        let config = cloud.config.clone().unwrap();
+        Arc::new(CloudSync::new(
+            SupabaseRest::new(config.clone()),
+            SupabaseAuth::new(config.clone()),
+            SyncKey::from_bytes([9; 32]),
+            config,
+            Session {
+                access_token: token.into(),
+                refresh_token: format!("refresh-{token}"),
+                user_id: "user-1".into(),
+                expires_at_ms: 123_000,
+            },
+            sensitive_guard(&state.detector),
+        ))
     }
 
     #[test]
@@ -531,5 +597,49 @@ mod tests {
         for key in CREDENTIAL_KEYS {
             assert_eq!(state.store.state(key).unwrap(), None);
         }
+    }
+
+    #[test]
+    fn terminal_failure_signs_out_but_preserves_the_status_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let cloud = configured();
+        let driver = driver(&cloud, &state, "access");
+        *cloud.account() = Some(Account {
+            email: "a@example.com".into(),
+            user_id: "user-1".into(),
+            driver: Arc::clone(&driver),
+        });
+        state.store.set_state(KEY_ACCESS, "secret").unwrap();
+
+        cloud.record_failure(&state.store, &driver, MSG_REJECTED, true);
+
+        let status = cloud.status();
+        assert!(!status.signed_in);
+        assert_eq!(status.last_error.as_deref(), Some(MSG_REJECTED));
+        assert_eq!(state.store.state(KEY_ACCESS).unwrap(), None);
+    }
+
+    #[test]
+    fn a_stale_round_cannot_overwrite_the_replacement_accounts_status() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let cloud = configured();
+        let stale = driver(&cloud, &state, "stale");
+        let current = driver(&cloud, &state, "current");
+        *cloud.account() = Some(Account {
+            email: "new@example.com".into(),
+            user_id: "user-1".into(),
+            driver: current,
+        });
+
+        cloud.record_failure(&state.store, &stale, MSG_UNAVAILABLE, true);
+        cloud.note_success(&state.store, &stale, 999);
+
+        let status = cloud.status();
+        assert!(status.signed_in);
+        assert_eq!(status.email.as_deref(), Some("new@example.com"));
+        assert_eq!(status.last_error, None);
+        assert_eq!(status.last_sync_ms, None);
     }
 }

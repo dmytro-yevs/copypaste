@@ -15,7 +15,7 @@ use tracing::{debug, info, warn};
 
 use crate::cloud::refresh::is_terminal_auth_error;
 use crate::cloud::source::StoreSource;
-use crate::cloud::{Driver, KEY_LAST_SYNC};
+use crate::cloud::Driver;
 
 use crate::AppState;
 
@@ -80,10 +80,7 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
     match &outcome {
         Ok(stats) => {
             let at_ms = copypaste_core::now_ms();
-            state.cloud.note_success(at_ms);
-            if let Err(e) = state.meta.set_state_ms(KEY_LAST_SYNC, at_ms) {
-                warn!(error = ?e, "could not record when the round completed");
-            }
+            state.cloud.note_driver_success(&state.meta, &driver, at_ms);
             if let Err(e) = source.commit_upload_floor(started_ms) {
                 warn!(error = ?e, "could not advance the upload floor");
             }
