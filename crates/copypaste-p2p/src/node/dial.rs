@@ -55,7 +55,7 @@ impl Node {
         // authority, but finding out after a full sync round that the pairing
         // cannot be stored would mean this device had already sent its history
         // to a peer it then refuses to know.
-        if self.peers().get(&pairing_id).is_none() && self.peers().len() >= MAX_PAIRINGS {
+        if self.peers().get(&pairing_id).is_none() && self.peers().usable_count() >= MAX_PAIRINGS {
             return Err(NodeError::TooManyPairings);
         }
 
@@ -223,7 +223,7 @@ mod tests {
             .await
             .expect_err("a malformed code must be refused");
         assert_eq!(err, NodeError::BadCode);
-        assert_eq!(node.peers().len(), 0);
+        assert_eq!(node.peers().usable_count(), 0);
     }
 
     #[tokio::test]
@@ -258,7 +258,11 @@ mod tests {
             .await
             .expect_err("an unanswered dial must be refused");
         assert_eq!(err, NodeError::Handshake);
-        assert_eq!(node.peers().len(), 0, "a pairing was persisted anyway");
+        assert_eq!(
+            node.peers().usable_count(),
+            0,
+            "a pairing was persisted anyway"
+        );
     }
 
     #[tokio::test]
@@ -317,7 +321,7 @@ mod tests {
             .await
             .expect_err("past the cap must be refused");
         assert_eq!(err, NodeError::TooManyPairings);
-        assert_eq!(node.peers().len(), MAX_PAIRINGS);
+        assert_eq!(node.peers().usable_count(), MAX_PAIRINGS);
     }
 
     #[tokio::test]

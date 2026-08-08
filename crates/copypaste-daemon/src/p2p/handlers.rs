@@ -319,7 +319,7 @@ mod tests {
             })
             .collect();
         assert_ne!(ids[0], ids[1]);
-        assert_eq!(state.p2p.peers().len(), 2);
+        assert_eq!(state.p2p.peers().usable_count(), 2);
     }
 
     #[tokio::test]
@@ -332,7 +332,7 @@ mod tests {
             response.error.as_deref(),
             Some(NodeError::BadCode.to_string().as_str())
         );
-        assert_eq!(state.p2p.peers().len(), 0);
+        assert_eq!(state.p2p.peers().usable_count(), 0);
     }
 
     /// A well-formed code for a device that is not listening must not leave a
@@ -344,7 +344,11 @@ mod tests {
         // Port 1 on loopback: nothing is listening, so the connect fails fast.
         let response = pair_accept(&state, 1, &code, "127.0.0.1:1").await;
         assert!(!response.ok);
-        assert_eq!(state.p2p.peers().len(), 0, "a pairing was persisted anyway");
+        assert_eq!(
+            state.p2p.peers().usable_count(),
+            0,
+            "a pairing was persisted anyway"
+        );
     }
 
     #[tokio::test]

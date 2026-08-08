@@ -96,7 +96,7 @@ impl std::fmt::Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Node")
             .field("port", &self.port)
-            .field("peers", &self.peers.len())
+            .field("peers", &self.peers.usable_count())
             .finish_non_exhaustive()
     }
 }
@@ -197,9 +197,12 @@ impl Node {
         }
     }
 
+    /// `usable_count`, never `is_empty`: an unredeemed pairing code counts, so
+    /// the device that minted one keeps advertising until the other side
+    /// redeems it. See `PeerStore::usable_count`.
     fn wants_discovery(&self) -> bool {
         self.lan_visible.load(Ordering::Relaxed)
-            && (!self.peers.is_empty()
+            && (self.peers.usable_count() > 0
                 || crate::now_ms() < self.browse_until_ms.load(Ordering::Relaxed))
     }
 
@@ -460,7 +463,7 @@ mod tests {
         let first = node.pair_create("a").unwrap();
         let second = node.pair_create("b").unwrap();
         assert_ne!(first.pairing_id, second.pairing_id);
-        assert_eq!(node.peers().len(), 2);
+        assert_eq!(node.peers().usable_count(), 2);
     }
 
     /// Security review F-13. At the cap the user gets a refusal naming the
@@ -484,7 +487,7 @@ mod tests {
         assert!(err.to_string().contains("unpair"), "{err}");
 
         // Nothing was taken to make room, and unpairing is what unblocks it.
-        assert_eq!(node.peers().len(), crate::peers::MAX_PAIRINGS);
+        assert_eq!(node.peers().usable_count(), crate::peers::MAX_PAIRINGS);
         let existing = node.peers().psks()[0].pairing_id.clone();
         assert!(node.unpair(&existing).unwrap());
         node.pair_create("the replacement")

@@ -421,8 +421,15 @@ impl PeerStore {
 
     /// How many usable pairing credentials are held, including codes that have
     /// not yet been redeemed. This is the capacity count, not the UI list.
+    ///
+    /// **Not named `len`**, because it is not the inverse of [`Self::is_empty`]
+    /// and `clippy::len_zero` cannot tell: it rewrites `len() > 0` to
+    /// `!is_empty()`, which drops the unredeemed codes and so stops a device
+    /// advertising over mDNS during the one window pairing needs it — between
+    /// minting a code and the other device redeeming it. Two names that cannot
+    /// be swapped by a lint.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub fn usable_count(&self) -> usize {
         let Ok(guard) = self.state.read() else {
             tracing::error!("paired-devices store lock is poisoned");
             return 0;
@@ -430,7 +437,8 @@ impl PeerStore {
         usable_count(&guard, now_ms())
     }
 
-    /// Whether this device is paired with anything.
+    /// Whether this device is paired with anything. Established peers only —
+    /// see [`Self::usable_count`] for the count that includes pending codes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.list().is_empty()
@@ -471,7 +479,7 @@ fn usable_count(state: &State, now_ms: i64) -> usize {
 impl fmt::Debug for PeerStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PeerStore")
-            .field("peers", &self.len())
+            .field("peers", &self.usable_count())
             .finish_non_exhaustive()
     }
 }
@@ -517,11 +525,11 @@ mod tests {
         let store = PeerStore::open(&path).expect("open");
         store.upsert(laptop).expect("upsert laptop");
         store.upsert(phone).expect("upsert phone");
-        assert_eq!(store.len(), 2);
+        assert_eq!(store.usable_count(), 2);
 
         // Reopened from disk, everything survives byte for byte.
         let reopened = PeerStore::open(&path).expect("reopen");
-        assert_eq!(reopened.len(), 2);
+        assert_eq!(reopened.usable_count(), 2);
         let got = reopened.get(&laptop_id).expect("laptop present");
         assert_eq!(got.name, "Laptop");
         assert!(got.psk_matches(&laptop_psk));
@@ -578,9 +586,9 @@ mod tests {
         store.upsert(renamed).expect("second write");
 
         // One record, not two, and the file was replaced rather than appended.
-        assert_eq!(store.len(), 1);
+        assert_eq!(store.usable_count(), 1);
         let reopened = PeerStore::open(&path).expect("reopen");
-        assert_eq!(reopened.len(), 1);
+        assert_eq!(reopened.usable_count(), 1);
         let got = reopened.get(&id).expect("present");
         assert_eq!(got.name, "New name");
         assert_eq!(got.last_addr, None);
@@ -802,9 +810,20 @@ mod tests {
         store.upsert(minted).expect("mint");
 
         assert!(store.list().is_empty());
-        assert_eq!(store.len(), 1, "the credential still counts toward the cap");
+        assert_eq!(
+            store.usable_count(),
+            1,
+            "the credential still counts toward the cap"
+        );
         assert!(store.get(&id).is_some(), "the listener still needs the key");
         assert_eq!(store.psks().len(), 1, "the code must remain redeemable");
+
+        // The two counts disagree here, and that is the point: `Node`'s
+        // `wants_discovery` reads `usable_count`, so the minting device keeps
+        // advertising while this code waits to be redeemed. Collapsing them
+        // takes mDNS away from the one window pairing needs it.
+        assert!(store.is_empty(), "no established peer yet");
+        assert_ne!(store.usable_count() == 0, store.is_empty());
     }
 
     /// The other half of INV-28: one redemption. The first session establishes
@@ -833,7 +852,11 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&text).expect("json");
         assert!(value["pending"].get(&id).is_none());
         let store = PeerStore::open(&path).expect("reopen");
-        assert_eq!(store.len(), 1, "an established pairing must not expire");
+        assert_eq!(
+            store.usable_count(),
+            1,
+            "an established pairing must not expire"
+        );
         assert!(store.pending_until(&id).is_none());
         assert!(store.get(&id).is_some());
     }
@@ -1046,7 +1069,7 @@ mod tests {
 
         // Nothing was made room for: every device the user has is still here,
         // still authenticates, and survives a restart.
-        assert_eq!(store.len(), MAX_PAIRINGS);
+        assert_eq!(store.usable_count(), MAX_PAIRINGS);
         assert_eq!(store.psks().len(), MAX_PAIRINGS);
         assert!(store.get(&refused_id).is_none());
         let reopened = PeerStore::open(&path).expect("reopen");
@@ -1134,11 +1157,11 @@ mod tests {
             .flat_map(|h| h.join().expect("thread"))
             .collect();
 
-        assert_eq!(store.len(), expected.len());
+        assert_eq!(store.usable_count(), expected.len());
         // Every write is serialised through the lock, so the final file has all
         // of them — no thread's rewrite dropped another's record.
         let reopened = PeerStore::open(&path).expect("reopen");
-        assert_eq!(reopened.len(), expected.len());
+        assert_eq!(reopened.usable_count(), expected.len());
         for id in expected {
             assert!(reopened.get(&id).is_some(), "lost record {id}");
         }
