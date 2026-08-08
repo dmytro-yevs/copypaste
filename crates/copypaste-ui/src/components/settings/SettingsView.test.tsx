@@ -133,9 +133,65 @@ describe("the settings navigation", () => {
     expect(screen.getByText("Service · What gets kept")).toBeTruthy();
     expect(screen.getByRole("tablist", { name: "Settings sections" })).toBeTruthy();
     const dropdown = screen.getByRole("region", { name: "Settings search results" });
-    expect(dropdown.className).toContain("fixed");
+    const positioner = dropdown.parentElement!;
+    expect(positioner.hasAttribute("data-radix-popper-content-wrapper")).toBe(true);
+    expect(positioner.style.position).toBe("fixed");
+    expect(dropdown.className).toContain("--radix-popover-trigger-width");
+    expect(dropdown.className).toContain("--radix-popover-content-available-height");
     expect(dropdown.dataset.settingsSearchPortal).toBe("true");
-    expect(dropdown.parentElement).toBe(document.body);
+    expect(positioner.parentElement).toBe(document.body);
+  });
+
+  it("keeps focus in the search field while the popover opens", async () => {
+    const { user } = withUser(<SettingsView />);
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+
+    await user.type(search, "privacy");
+
+    expect(document.activeElement).toBe(search);
+    expect(screen.getByRole("region", { name: "Settings search results" })).toBeTruthy();
+  });
+
+  it("moves between the search field and results without clearing the popover", async () => {
+    const { user } = withUser(<SettingsView />);
+    const search = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
+    await user.type(search, "storage quota");
+
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Storage quota/i }));
+
+    await user.keyboard("{Escape}");
+    expect(document.activeElement).toBe(search);
+    expect(search.value).toBe("storage quota");
+    expect(screen.getByRole("region", { name: "Settings search results" })).toBeTruthy();
+  });
+
+  it("keeps the popover open for anchor and focus interactions", async () => {
+    const { user } = withUser(<SettingsView />);
+    const search = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
+    await user.type(search, "privacy");
+
+    await user.click(search);
+    screen.getByRole("tab", { name: "Appearance" }).focus();
+
+    expect(search.value).toBe("privacy");
+    expect(screen.getByRole("region", { name: "Settings search results" })).toBeTruthy();
+  });
+
+  it("dismisses the search popover on Escape or an outside pointer", async () => {
+    const { user } = withUser(<SettingsView />);
+    const search = screen.getByRole<HTMLInputElement>("searchbox", { name: "Search settings" });
+    await user.type(search, "privacy");
+    await user.keyboard("{Escape}");
+
+    expect(search.value).toBe("");
+    expect(document.activeElement).toBe(search);
+
+    await user.type(search, "privacy");
+    await user.click(screen.getByRole("tab", { name: "Appearance" }));
+
+    await waitFor(() => expect(search.value).toBe(""));
+    expect(screen.queryByRole("region", { name: "Settings search results" })).toBeNull();
   });
 
   it("clears a search and restores the settings navigation", async () => {
