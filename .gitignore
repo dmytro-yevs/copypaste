@@ -2,6 +2,7 @@
 /target/
 /dist/
 /artifacts/
+crates/copypaste-ui/src-tauri/binaries/
 
 # Playwright/Chrome-devtools MCP runtime artifacts (regenerated each session)
 .playwright-mcp/
