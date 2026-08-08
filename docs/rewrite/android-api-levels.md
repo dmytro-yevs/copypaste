@@ -64,12 +64,14 @@ Two more that are level-blind by design and correctly so: the `ACTION_SEND` and
 `ACTION_PROCESS_TEXT` doorways read intent extras, not the clipboard, so they
 are ungated and must work at all four. A difference there would be a defect.
 
-The Quick Settings tile is the opposite case. Its click path genuinely branches
-at 34, and the smoke harness only `probe`s it — `add-tile`, `click-tile` and
-"the store changed after the tile probe" all report and none asserts. So the
-single assertion the spread would most reward is the one that does not exist:
-tap the tile, and require the store to change. Until it does, running 33 and 34
-exercises both branches and notices neither.
+The Quick Settings tile was the opposite case, and `android-rungs.sh` has since
+closed it: one `click-tile` has to change the store or the run fails. That
+assertion does branch at 34, so the spread would now notice — except that the
+level runner does not run it. `android-rungs.sh` hard-codes AOSP's API 36
+argument vector `(String callingPackage, String attributionTag, int userId, int
+deviceId)` for its clipboard read, so running the whole script at 29 or 33 would
+fail on the vector rather than on the tile. Running the tile group across the
+spread means splitting it out first.
 
 ## What no level records
 
