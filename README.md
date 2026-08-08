@@ -1,7 +1,6 @@
 # CopyPaste
 
-Encrypted clipboard manager for macOS and Android, with Windows decided as a
-third platform and not yet built
+Encrypted clipboard manager for macOS, Windows and Android
 ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)). One app — Tauri v2 +
 React — over a shared Rust core. On desktop the app talks to a local daemon; on
 Android it links the core in-process
@@ -20,9 +19,10 @@ authority for which layer establishes what. Every requirement has one
 authoritative layer, and one that no run reaches is marked NOT VERIFIED IN CI
 there rather than being credited to a layer that cannot see it.
 
-**Windows appears in neither table.** It is a shipping platform by decision and
-has no code: IPC, secret storage, clipboard capture, the shell and packaging are
-macOS and Android only, and no workflow has a Windows runner
+**Windows now has code and a runner.** IPC, secret storage, clipboard capture,
+the shell and packaging all have a Windows arm, and `windows-check` compiles and
+tests every `cfg(windows)` line in the tree. What that runner cannot do is drive
+a clipboard or show a window, so most of Windows sits in the second table
 ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
 
 ### Works — covered by tests, and by the demo scripts where a script reaches
@@ -32,8 +32,8 @@ macOS and Android only, and no workflow has a Windows runner
 | Crypto | XChaCha20-Poly1305 + HKDF-SHA256, item id bound as AAD, fail-closed, zeroized |
 | Storage | One SQLCipher schema, r2d2 pool, FTS5 search, tombstones, pins, cap eviction |
 | Secret detection | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence bands; a flagged item never reaches the index and never leaves the device. A purge pass at daemon start re-decides the index question for rows captured before a rule existed |
-| Capture | Clipboard behind a trait, so `changeCount` detection, burst handling, self-write suppression and the `org.nspasteboard.*` opt-outs are all tested against the fake source on any host |
-| IPC | `0600` Unix socket, newline-JSON, `LinesCodec` framing; `copypaste-ipc` is the only model of the contract, shared by daemon, CLI and the Tauri bridge |
+| Capture | Clipboard behind a trait, so `changeCount` detection, burst handling, self-write suppression and the `org.nspasteboard.*` and Windows do-not-record opt-outs are all tested against the fake source on any host |
+| IPC | A `0600` Unix socket on macOS and an owner-only named pipe on Windows, behind one `copypaste_ipc::transport` seam; newline-JSON, `LinesCodec` framing. `copypaste-ipc` is the only model of the contract, shared by daemon, CLI and the Tauri bridge |
 | CLI | `crates/copypaste-cli/src/cli.rs` is the verb list — `copypaste --help` prints it. `--json` on any of them, for scripting |
 | Peer sync | Noise `NNpsk0` over TCP, pairing codes, LWW merge, delete-wins |
 | Cloud sync | Supabase auth, PostgREST, Realtime; rows sealed client-side under an Argon2id key and signed under a second key from the same passphrase, so the ordering metadata the backend pages on cannot be forged. Wired to the daemon and the CLI — but see below |
@@ -46,6 +46,10 @@ macOS and Android only, and no workflow has a Windows runner
 |---|---|
 | The macOS shell — tray, popover, global hotkey, launch at login, notification and sound on copy, WKWebView | `macos-check` on `macos-14` runs the real `NSPasteboard` and the real Keychain on every push and pull request, and an empty run fails the job; those two are verified. Nothing anywhere registers a shortcut, posts a notification or renders a frame on WKWebView. [`docs/rewrite/macos-shell-spike.md`](docs/rewrite/macos-shell-spike.md) is the procedure that would falsify each. |
 | Android beyond launch and storage | The nightly emulator run installs debug and release x86_64 test APKs. It establishes launch, a painted WebView, the Keystore secret surviving a restart, an unreadable SQLCipher file, R8 and signing; its release key is ephemeral and that artifact is never published. On a publishable tag, the pipeline checksum-verifies, installs and runs the exact signed universal APK before publication. Rung 2 (the Shizuku shell-uid read), the background capture service, the Quick Settings tile and `FLAG_SECURE` are asserted only negatively or not at all; [`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md) lists what a first device run would falsify. |
+| The Windows shell — tray, popover, global hotkey, launch at login, toast and sound on copy, WebView2 | `windows-check` compiles every `cfg(windows)` line and runs the portable suite, and the popover's placement arithmetic is unit-tested including the bottom-taskbar case. No runner shows a window: nothing registers a shortcut, posts a toast or renders a frame on WebView2. The toast also needs the AppUserModelID that only an installed build carries, so `tauri dev` cannot establish it either. |
+| Windows clipboard capture | The nine tests that drive the real Windows clipboard pass on a Windows 11 26200 developer machine — sequence-number detection, self-write suppression, burst survival, the four do-not-record formats, the size cap and clipboard-owner attribution. They stay `#[ignore]`d, because a run replaces whatever the user had copied, so **no CI run executes them**. Image transcode and file paste-back are unexercised on any Windows host. |
+| The Windows device secret | DPAPI is the one Windows subsystem CI does execute: `windows-check` runs the keystore suite unignored, fails an empty run, and asserts the Credential Manager holds nothing of ours. What no run establishes is behaviour across a Windows password reset or a roaming profile, which is where a DPAPI blob sealed under the login can stop opening. |
+| Windows packaging | `windows-bundle` builds the MSI and the NSIS installer on every run and checksums them, and a guard fails the job if the config ever declares an Authenticode path. They are unsigned, so SmartScreen interstitials them; nobody has installed either, and no run has confirmed the Start Menu shortcut that carries the AppUserModelID. |
 | Cloud sync against Supabase | `scripts/demo-cloud.sh` drives two daemons through sign-in, convergence and sensitive-item refusal against a **local stub** (`scripts/cloud-stub.py`), and no workflow runs it. Nothing has ever spoken to a real project, and no deployment has had `supabase/`'s schema and RLS policies applied. |
 | The app on a shipping engine | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. That is the browser layer: it establishes the shared React app's behaviour and nothing about WKWebView or the Android WebView. |
 | Packaging and release | `release.yml` builds, signs and smoke-installs the DMG on `macos-14`, but only on a tag — so `codesign`, `hdiutil` and the Tauri bundler never run on a pull request, and the smoke script's app-launch and Keychain-after-resign legs report rather than fail. `brew install --cask` as a user runs it is unexercised; `check.sh` round-trips the generators. |
