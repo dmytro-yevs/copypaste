@@ -73,6 +73,10 @@ fn default_protocol_version() -> u32 {
 pub enum Method {
     /// Liveness plus daemon state.
     Status,
+    /// Persist this device's peer-visible display name.
+    SetDeviceName {
+        name: String,
+    },
     /// Most recent items, newest first. Pinned items sort ahead of unpinned.
     ///
     /// Paged by cursor, never by offset. A clipboard manager inserts above the
@@ -345,6 +349,7 @@ mod tests {
         let older = r#"{"version":"2.0.0-alpha.1","protocol_version":1,"item_count":3,
                         "capture_running":true,"clipboard_backend":"fake"}"#;
         let status: StatusData = serde_json::from_str(older).unwrap();
+        assert!(status.device_name.is_empty());
         assert!(!status.private_mode);
         assert_eq!(status.counters, DiagnosticCounters::default());
     }

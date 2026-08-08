@@ -12,10 +12,11 @@ import {
   listPeers,
   rescanDiscovered,
   revokeDevice,
+  setDeviceName,
   syncNow,
   unpair,
 } from "@/lib/ipc";
-import { HISTORY_KEY } from "@/hooks/useHistory";
+import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
 
 export const PEERS_KEY = ["peers"] as const;
 export const DISCOVERED_KEY = ["discovered"] as const;
@@ -86,6 +87,18 @@ export function useRevoke() {
     onSuccess: (_data, peer) => {
       toast.success(t("devices.toast.revoked", { name: peer.name }));
       void qc.invalidateQueries({ queryKey: PEERS_KEY });
+    },
+    onError: (raw) => toast.error(toFriendly(raw)),
+  });
+}
+
+export function useRenameDevice() {
+  const qc = useQueryClient();
+  return useMutation<void, unknown, string>({
+    mutationFn: setDeviceName,
+    onSuccess: async () => {
+      toast.success(t("devices.own.rename.saved"));
+      await qc.invalidateQueries({ queryKey: STATUS_KEY });
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });

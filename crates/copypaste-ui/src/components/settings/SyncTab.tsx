@@ -3,6 +3,7 @@ import { MonitorSmartphone, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Row } from "@/components/settings/Row";
+import { DeviceNameField } from "@/components/devices/DeviceNameField";
 import { usePeers, useSyncNow } from "@/hooks/useDevices";
 import { useTranslation } from "@/i18n";
 import { isUnavailable } from "@/lib/errors";
@@ -19,6 +20,12 @@ export function SyncTab() {
 
   return (
     <div className="flex flex-col">
+      <Row
+        title={t("devices.own.rename.label")}
+        description={t("devices.own.rename.description")}
+      >
+        <DeviceNameField />
+      </Row>
       <Row
         title={t("settings.sync.paired.title")}
         description={t("settings.sync.paired.description")}

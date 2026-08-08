@@ -40,7 +40,9 @@ impl Store {
     pub fn device_identity(&self, name_hint: &str) -> Result<DeviceIdentity, StoreError> {
         let conn = self.conn()?;
         let device_id = load_or_set(&conn, KEY_DEVICE_ID, || uuid::Uuid::new_v4().to_string())?;
-        let device_name = load_or_set(&conn, KEY_DEVICE_NAME, || sanitise_name(name_hint))?;
+        let device_name = load_or_set(&conn, KEY_DEVICE_NAME, || {
+            sanitise_name(name_hint).unwrap_or_else(|| "CopyPaste device".to_string())
+        })?;
         drop(conn);
 
         self.record_device_name(&device_id, &device_name)?;
@@ -53,7 +55,7 @@ impl Store {
     /// Replace the stored device name, returning the sanitised form actually
     /// stored. Cosmetic; takes effect on the next hello.
     pub fn set_device_name(&self, device_id: &str, name: &str) -> Result<String, StoreError> {
-        let name = sanitise_name(name);
+        let name = sanitise_name(name).ok_or(StoreError::InvalidDeviceName)?;
         {
             let conn = self.conn()?;
             conn.execute(
@@ -64,6 +66,19 @@ impl Store {
         }
         self.record_device_name(device_id, &name)?;
         Ok(name)
+    }
+
+    /// Read the local device name without changing first-run identity state.
+    pub fn current_device_name(&self) -> Result<String, StoreError> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT value FROM sync_device_state WHERE key = ?1",
+            [KEY_DEVICE_NAME],
+            |row| row.get(0),
+        )
+        .optional()?
+        .filter(|name: &String| !name.is_empty())
+        .ok_or(StoreError::NotFound)
     }
 
     /// Remember what a device calls itself.
@@ -148,18 +163,14 @@ fn load_or_set(
 ///
 /// `MAX_DEVICE_NAME_BYTES` is a *byte* bound and the name is user-supplied
 /// UTF-8, so the truncation walks characters.
-fn sanitise_name(raw: &str) -> String {
+fn sanitise_name(raw: &str) -> Option<String> {
     let cleaned: String = raw
         .trim()
         .chars()
         .filter(|c| !c.is_control())
         .take(copypaste_p2p::protocol::MAX_DEVICE_NAME_BYTES / 4)
         .collect();
-    if cleaned.is_empty() {
-        "CopyPaste device".to_string()
-    } else {
-        cleaned
-    }
+    (!cleaned.is_empty()).then_some(cleaned)
 }
 
 #[cfg(test)]
@@ -243,8 +254,22 @@ mod tests {
 
     #[test]
     fn a_device_name_is_bounded_and_stripped() {
-        assert_eq!(sanitise_name("  laptop\n "), "laptop");
-        assert_eq!(sanitise_name(""), "CopyPaste device");
-        assert!(sanitise_name(&"x".repeat(500)).len() <= 128);
+        assert_eq!(sanitise_name("  laptop\n ").as_deref(), Some("laptop"));
+        assert_eq!(sanitise_name(""), None);
+        assert!(sanitise_name(&"x".repeat(500)).unwrap().len() <= 128);
+        assert!(matches!(
+            store().set_device_name("device-a", " \n\t "),
+            Err(StoreError::InvalidDeviceName)
+        ));
+    }
+
+    #[test]
+    fn the_current_device_name_follows_a_persisted_rename() {
+        let store = store();
+        let identity = store.device_identity("Old name").unwrap();
+        store
+            .set_device_name(&identity.device_id, "New name")
+            .unwrap();
+        assert_eq!(store.current_device_name().unwrap(), "New name");
     }
 }
