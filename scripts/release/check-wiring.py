@@ -12,8 +12,6 @@ import json, pathlib, re, sys, yaml
 SELF_TEST = "--self-test" in sys.argv
 
 WF = pathlib.Path(".github/workflows")
-docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
-text = {p.name: p.read_text() for p in sorted(WF.glob("*.yml"))}
 
 
 def emit(cond, desc, detail=""):
@@ -44,6 +42,19 @@ def closure(jobs, name):
         seen.add(n)
         stack += as_list(jobs.get(n, {}).get("needs"))
     return seen
+
+
+def min_major(rng):
+    lows = []
+    for alt in rng.split("||"):
+        match = re.search(r"(?:>=?|\^|~)?\s*(\d+)", alt)
+        if match:
+            lows.append(int(match.group(1)))
+    return min(lows) if lows else 0
+
+
+docs = {p.name: yaml.safe_load(p.read_text()) for p in sorted(WF.glob("*.yml"))}
+text = {p.name: p.read_text() for p in sorted(WF.glob("*.yml"))}
 
 
 release_jobs = docs["release.yml"].get("jobs") or {}
@@ -195,18 +206,6 @@ for review in review_steps:
 # so a lockfile can outgrow the runners without anything failing — until the day
 # a dependency uses the syntax it asked for. @zxing/library 0.23.0 raised the
 # floor to 24 while every job pinned 22.
-def min_major(rng):
-    # Lowest major that can satisfy the range: the smallest lower bound across
-    # its `||` alternatives. Deliberately crude — it only has to be right for
-    # the ">= N" / "^N" shapes npm lockfiles actually contain.
-    lows = []
-    for alt in rng.split("||"):
-        m = re.search(r"(?:>=?|\^|~)?\s*(\d+)", alt)
-        if m:
-            lows.append(int(m.group(1)))
-    return min(lows) if lows else 0
-
-
 locks = {}
 for wf, doc in docs.items():
     for jn, j in (doc.get("jobs") or {}).items():
@@ -425,4 +424,24 @@ if SELF_TEST:
          probe(["self-hosted", "linux", "ARM64", "android-device"])),
     ):
         emit(held, "self-test: {}".format(desc), "the detector did not behave as stated")
+
+    fixture = yaml.safe_load(
+        "jobs:\n  build: {}\n  smoke:\n    needs: build\n  publish:\n    needs: [smoke]\n"
+    )["jobs"]
+
+    def rejects_bad_yaml():
+        try:
+            yaml.safe_load("jobs: [")
+        except yaml.YAMLError:
+            return True
+        return False
+
+    for desc, held in (
+        ("needs is followed transitively", closure(fixture, "publish") == {"build", "smoke"}),
+        ("a scalar needs is one dependency", as_list("build") == ["build"]),
+        ("an absent needs is none", as_list(None) == []),
+        ("an engines range takes its lowest alternative", min_major(">=20 || ^24") == 20),
+        ("unparseable workflow YAML is rejected", rejects_bad_yaml()),
+    ):
+        emit(held, "self-test: {}".format(desc), "the helper did not behave as stated")
 sys.exit(0)
