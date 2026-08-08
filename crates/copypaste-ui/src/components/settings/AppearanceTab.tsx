@@ -14,6 +14,7 @@ import { Check } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useTranslation } from "@/i18n";
+import { APPEARANCE_SERIALIZATION } from "@/lib/appearancePrefs";
 import { resolveTheme } from "@/lib/theme";
 import { isAndroidPlatform } from "@/lib/platform";
 import {
@@ -47,12 +48,15 @@ function useSystemTheme(): "dark" | "light" {
   return useSyncExternalStore(
     (notify) => {
       if (!window.matchMedia) return () => {};
-      const media = window.matchMedia("(prefers-color-scheme: dark)");
+      // The contract's query, not a second copy of the string: `resolveTheme`
+      // below reads the same one, and a drift between them would subscribe to
+      // one condition and report another.
+      const media = window.matchMedia(APPEARANCE_SERIALIZATION.systemThemeQuery);
       media.addEventListener("change", notify);
       return () => media.removeEventListener("change", notify);
     },
     () => resolveTheme("system"),
-    () => "dark" as const,
+    () => APPEARANCE_SERIALIZATION.systemThemeFallback,
   );
 }
 
