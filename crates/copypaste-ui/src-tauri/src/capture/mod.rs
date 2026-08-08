@@ -89,6 +89,10 @@ pub trait CaptureControl: Send + Sync + 'static {
     /// Take everything the platform has captured and not yet handed over.
     fn drain(&self) -> Result<Vec<Clip>>;
 
+    /// Stop or resume capture at the platform queue boundary. Enabling drops
+    /// the ambiguous pending batch before any later drain can replay it.
+    fn set_private_mode(&self, enabled: bool) -> Result<()>;
+
     /// Turn background capture on or off. Off is a choice, not a fault.
     fn set_enabled(&self, enabled: bool) -> Result<CaptureSnapshot>;
 

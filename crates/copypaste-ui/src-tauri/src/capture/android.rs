@@ -126,6 +126,12 @@ struct DrainResult {
     probe: ShizukuProbe,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrivateModeArgs {
+    enabled: bool,
+}
+
 impl AndroidCapture {
     fn new(handle: PluginHandle<Wry>) -> Self {
         Self {
@@ -246,6 +252,10 @@ impl CaptureControl for AndroidCapture {
             }
         });
         Ok(result.clips)
+    }
+
+    fn set_private_mode(&self, enabled: bool) -> Result<()> {
+        self.call("setPrivateMode", PrivateModeArgs { enabled }, MSG_BRIDGE)
     }
 
     fn set_enabled(&self, enabled: bool) -> Result<CaptureSnapshot> {

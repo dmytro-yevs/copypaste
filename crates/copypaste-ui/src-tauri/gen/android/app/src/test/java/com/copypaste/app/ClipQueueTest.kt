@@ -1,0 +1,38 @@
+package com.copypaste.app
+
+import org.junit.After
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+class ClipQueueTest {
+    @Before
+    fun resetBefore() = reset()
+
+    @After
+    fun resetAfter() = reset()
+
+    @Test
+    fun privateClipIsNotReplayedWhenDrainRunsAfterModeTurnsOff() {
+        ClipQueue.setPrivateMode(true)
+        ClipQueue.offer("private", "test")
+        ClipQueue.setPrivateMode(false)
+
+        assertTrue(ClipQueue.drain().first.isEmpty())
+    }
+
+    @Test
+    fun persistedPrivateModeDropsAnythingQueuedBeforeRustRestarts() {
+        ClipQueue.offer("private while Rust was down", "test")
+
+        ClipQueue.setPrivateMode(true)
+        ClipQueue.setPrivateMode(false)
+
+        assertTrue(ClipQueue.drain().first.isEmpty())
+    }
+
+    private fun reset() {
+        ClipQueue.setPrivateMode(true)
+        ClipQueue.setPrivateMode(false)
+    }
+}

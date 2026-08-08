@@ -30,7 +30,7 @@ use std::collections::VecDeque;
 
 use copypaste_ipc::EventKind;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Listener, Manager, Runtime};
 
 use crate::backend::{Backend, BackendError, Result, SelectedBackend};
 use crate::model::UiItem;
@@ -54,6 +54,8 @@ pub const EVENT_CAPTURE_STATE: &str = "copypaste://capture-state";
 /// of latency to storage is invisible; what it buys is not needing a JNI
 /// callback into a crate that forbids unsafe code.
 const DRAIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+const PRIVATE_MODE_EVENT: &str = "private-mode-changed";
 
 /// How many clips may wait for a sink that is refusing before the oldest are
 /// counted as lost.
@@ -81,6 +83,33 @@ pub struct CapturedPayload {
 pub struct Buffer {
     queue: VecDeque<Clip>,
     dropped: u64,
+}
+
+struct PrivateGate {
+    desired: bool,
+    applied: Option<bool>,
+    clear_before_public: bool,
+}
+
+impl PrivateGate {
+    fn starting(desired: bool) -> Self {
+        Self {
+            desired,
+            applied: None,
+            clear_before_public: desired,
+        }
+    }
+
+    fn request(&mut self, enabled: bool) {
+        if enabled {
+            self.clear_before_public = true;
+        }
+        self.desired = enabled;
+    }
+
+    fn fail_closed(&self) -> bool {
+        self.desired || self.applied != Some(false)
+    }
 }
 
 impl Buffer {
@@ -171,16 +200,87 @@ pub async fn capture_once<R: Runtime>(
 /// still runs there rather than being `cfg`'d out, because a `cfg` here would
 /// be the second one in a module that exists to have none.
 pub fn spawn<R: Runtime>(app: AppHandle<R>) {
+    let (private_mode_tx, mut private_mode_rx) = tokio::sync::mpsc::unbounded_channel();
+    app.listen(PRIVATE_MODE_EVENT, move |event| {
+        let Ok(enabled) = serde_json::from_str::<bool>(event.payload()) else {
+            tracing::warn!("private mode changed without a boolean value");
+            return;
+        };
+        let _ = private_mode_tx.send(enabled);
+    });
+
     tauri::async_runtime::spawn(async move {
         let mut buffer = Buffer::default();
+        let initial = loop {
+            let backend = app.state::<SelectedBackend>();
+            match backend.get_private_mode().await {
+                Ok(mode) => break mode.private_mode,
+                Err(error) => {
+                    tracing::debug!(%error, "private mode is not available yet");
+                    tokio::time::sleep(DRAIN_INTERVAL).await;
+                }
+            }
+        };
+        let mut private_gate = PrivateGate::starting(initial);
+        synchronize_private_mode(&app, &mut private_gate);
+
+        while let Ok(enabled) = private_mode_rx.try_recv() {
+            private_gate.request(enabled);
+            synchronize_private_mode(&app, &mut private_gate);
+        }
+
+        let mut drain_interval = tokio::time::interval(DRAIN_INTERVAL);
+        drain_interval.tick().await;
         loop {
-            tokio::time::sleep(DRAIN_INTERVAL).await;
-            tick(&app, &mut buffer).await;
+            tokio::select! {
+                Some(enabled) = private_mode_rx.recv() => {
+                    private_gate.request(enabled);
+                    synchronize_private_mode(&app, &mut private_gate);
+                }
+                _ = drain_interval.tick() => {
+                    synchronize_private_mode(&app, &mut private_gate);
+                    tick(&app, &mut buffer, private_gate.fail_closed()).await;
+                }
+            }
         }
     });
 }
 
-async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
+fn synchronize_private_mode<R: Runtime>(app: &AppHandle<R>, gate: &mut PrivateGate) {
+    if gate.applied == Some(gate.desired) {
+        return;
+    }
+
+    if !gate.desired && gate.clear_before_public {
+        let capture = app.state::<SelectedCapture>();
+        if capture.set_private_mode(true).is_err() {
+            gate.applied = None;
+            return;
+        }
+        gate.applied = Some(true);
+        gate.clear_before_public = false;
+    }
+
+    let applied = {
+        let capture = app.state::<SelectedCapture>();
+        capture.set_private_mode(gate.desired)
+    };
+    match applied {
+        Ok(()) => {
+            gate.applied = Some(gate.desired);
+            gate.clear_before_public = false;
+        }
+        Err(error) => {
+            tracing::debug!(%error, "the platform private-mode gate is not available yet");
+            gate.applied = None;
+            if gate.desired {
+                gate.clear_before_public = true;
+            }
+        }
+    }
+}
+
+async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer, private_mode: bool) {
     let taken = {
         let capture = app.state::<SelectedCapture>();
         match capture.drain() {
@@ -191,6 +291,14 @@ async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
             }
         }
     };
+    if private_mode {
+        return;
+    }
+    push_captured(app, buffer, taken);
+    drain_buffer(app, buffer).await;
+}
+
+fn push_captured<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer, taken: Vec<Clip>) {
     let had = buffer.dropped();
     buffer.push_all(taken);
     let lost = buffer.dropped() - had;
@@ -203,6 +311,9 @@ async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
         capture.note_dropped(lost);
         let _ = app.emit(EVENT_CAPTURE_STATE, capture.snapshot());
     }
+}
+
+async fn drain_buffer<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer) {
     if buffer.is_empty() {
         return;
     }
