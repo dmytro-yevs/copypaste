@@ -1,6 +1,6 @@
 ## Install
 
-**macOS** (Apple Silicon):
+**macOS 14 Sonoma or later** (Apple Silicon):
 
 ```sh
 brew tap dmytro-yevs/copypaste
