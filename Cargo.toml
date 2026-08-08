@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/copypaste-clock",
+    "crates/copypaste-fs",
     "tools/sensitive-rules",
     "crates/copypaste-ipc",
     "crates/copypaste-runtime-log",

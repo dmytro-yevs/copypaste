@@ -6,7 +6,6 @@
 //! the index.
 
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -101,26 +100,10 @@ fn read_settings(path: &Path) -> copypaste_ipc::ConfigData {
 }
 
 pub(super) fn write_settings(path: &Path, settings: &copypaste_ipc::ConfigData) -> Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| BackendError::internal(SETTINGS_SAVE_ERROR))?;
-    fs::create_dir_all(parent).map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
     let encoded =
         serde_json::to_vec(settings).map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
-    temporary
-        .write_all(&encoded)
-        .and_then(|_| temporary.flush())
-        .and_then(|_| temporary.as_file().sync_all())
-        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
-    temporary
-        .persist(path)
-        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
-    if let Ok(directory) = fs::File::open(parent) {
-        let _ = directory.sync_all();
-    }
-    Ok(())
+    copypaste_fs::write_atomically(path, &encoded, copypaste_fs::Visibility::Inherited)
+        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))
 }
 
 fn keyring_error(error: CryptoError) -> BackendError {

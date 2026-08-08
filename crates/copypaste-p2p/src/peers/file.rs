@@ -4,13 +4,11 @@
 //! every paired device and decrypt every future sync session, so the file mode
 //! is not hygiene, it is the access control:
 //!
-//! * Written to a temporary file in the same directory and `rename`d over the
-//!   target, so a crash mid-write leaves the previous file intact rather than a
-//!   truncated one. Losing a pairing means re-pairing every device by hand, and
-//!   `CLAUDE.md` rule 4 ranks data loss as the worst outcome.
-//! * `0600` on unix, set on the temporary file *before* any key material goes
-//!   into it, so the keys never exist at a wider mode. `tempfile` already
-//!   creates at `0600`; setting it explicitly lets a test pin the property.
+//! * Replaced through [`copypaste_fs::write_atomically`] at
+//!   [`Visibility::OwnerOnly`], so a crash mid-write leaves the previous file
+//!   intact and the keys never exist at a mode wider than `0600`. Losing a
+//!   pairing means re-pairing every device by hand, and `CLAUDE.md` rule 4 ranks
+//!   data loss as the worst outcome.
 //! * An existing file whose mode is wider than `0600` is reported at `warn`.
 //!
 //! v1 shipped this file with the OPAQUE `PasswordFile` in plaintext inside it,
@@ -19,16 +17,12 @@
 //! 32-byte PSK, but the file is no less sensitive for being smaller.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::Write as _;
 use std::path::Path;
 
+use copypaste_fs::Visibility;
 use zeroize::Zeroizing;
 
 use super::{Peer, PeerStoreError};
-
-/// File mode for the store on unix.
-#[cfg(unix)]
-pub(super) const STORE_MODE: u32 = 0o600;
 
 /// Everything the store holds, in memory and on disk.
 ///
@@ -80,10 +74,6 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
     })
 }
 
-/// Replace the store file in one step: temporary file in the same directory (a
-/// cross-filesystem `rename` is not atomic), `0600` before any bytes go in,
-/// `fsync` the file so the contents are durable before the rename publishes
-/// them, then `fsync` the directory so the rename survives a power loss.
 pub(super) fn write_atomically(path: &Path, state: &State) -> Result<(), PeerStoreError> {
     blocking(|| write_now(path, state))
 }
@@ -111,47 +101,7 @@ fn write_now(path: &Path, state: &State) -> Result<(), PeerStoreError> {
     let json =
         Zeroizing::new(serde_json::to_vec_pretty(&file).map_err(|_| PeerStoreError::Corrupt)?);
 
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
-    if let Some(dir) = dir {
-        std::fs::create_dir_all(dir).map_err(PeerStoreError::Io)?;
-    }
-    let dir = dir.unwrap_or_else(|| Path::new("."));
-
-    let mut tmp = tempfile::NamedTempFile::new_in(dir).map_err(PeerStoreError::Io)?;
-    restrict(tmp.as_file())?;
-    tmp.write_all(&json).map_err(PeerStoreError::Io)?;
-    tmp.as_file().sync_all().map_err(PeerStoreError::Io)?;
-    // `persist` is `rename(2)`: the target either has the old contents or the
-    // new ones, never a mixture and never nothing.
-    tmp.persist(path)
-        .map_err(|err| PeerStoreError::Io(err.error))?;
-    sync_dir(dir);
-    Ok(())
-}
-
-/// `0600`, applied before the file has any content.
-#[cfg(unix)]
-fn restrict(file: &std::fs::File) -> Result<(), PeerStoreError> {
-    use std::os::unix::fs::PermissionsExt as _;
-    file.set_permissions(std::fs::Permissions::from_mode(STORE_MODE))
-        .map_err(PeerStoreError::Io)
-}
-
-/// No-op off unix. Scope is macOS and Android (`CLAUDE.md` rule 5), both of
-/// which are unix; this exists so the crate still builds on a Windows CI
-/// runner rather than as a supported configuration.
-#[cfg(not(unix))]
-fn restrict(_file: &std::fs::File) -> Result<(), PeerStoreError> {
-    Ok(())
-}
-
-/// Make the rename durable. Best-effort: some filesystems refuse to open a
-/// directory for sync, and failing the whole write for that would be worse than
-/// the residual risk of losing the rename to a power cut.
-fn sync_dir(dir: &Path) {
-    if let Ok(handle) = std::fs::File::open(dir) {
-        let _ = handle.sync_all();
-    }
+    copypaste_fs::write_atomically(path, &json, Visibility::OwnerOnly).map_err(PeerStoreError::Io)
 }
 
 pub(super) fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
@@ -235,12 +185,16 @@ mod tests {
         store.upsert(peer("Laptop")).expect("upsert");
 
         let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
-        assert_eq!(mode, STORE_MODE, "file holds PSKs; mode must be 0600");
+        assert_eq!(
+            mode,
+            copypaste_fs::OWNER_ONLY_MODE,
+            "file holds PSKs; mode must be 0600"
+        );
 
         // And a rewrite must not widen it.
         store.upsert(peer("Phone")).expect("second upsert");
         let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
-        assert_eq!(mode, STORE_MODE);
+        assert_eq!(mode, copypaste_fs::OWNER_ONLY_MODE);
     }
 
     #[test]

@@ -52,6 +52,7 @@ base64.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 copypaste-runtime-log = { path = "../../copypaste-runtime-log" }
+copypaste-fs = { path = "../../copypaste-fs" }
 uuid.workspace = true
 tempfile.workspace = true
 ts-rs = { workspace = true, optional = true }
