@@ -21,9 +21,11 @@ export async function rowCount(app: AndroidApp): Promise<number> {
   return count(app, ROW);
 }
 
+/** `message` may be a function so a caller can report the last thing it saw
+ *  rather than only what it wanted. */
 export async function waitFor(
   predicate: () => Promise<boolean>,
-  message: string,
+  message: string | (() => string),
   timeout = 30_000,
 ): Promise<void> {
   const deadline = Date.now() + timeout;
@@ -31,7 +33,7 @@ export async function waitFor(
     if (await predicate()) return;
     await sleep(250);
   }
-  throw new Error(message);
+  throw new Error(typeof message === "function" ? message() : message);
 }
 
 /** Against rendered text, never a catalogue key — a test that matched a key
@@ -60,26 +62,26 @@ export async function waitForRows(
   );
 }
 
-/**
- * Switch screens the way a user does, with a real tap: `ElementHandle.click`
- * scrolls the node into view, hit-tests its box and dispatches through
- * `Input.dispatchMouseEvent`, so a control the layout has covered fails here.
- * A script-side `element.click()` would skip all three.
- */
+/** Switch screens the way a user does — see `tapWhere` for why the tap is
+ *  dispatched at a point this harness computes rather than by `click()`. */
 export async function gotoView(app: AndroidApp, label: string): Promise<void> {
-  await app.withPage(async (page) => {
-    for (const handle of await page.$$(`${NAV} button`)) {
-      if ((await handle.evaluate((node) => node.textContent?.trim())) !== label) continue;
-      await handle.click();
-      await waitFor(
-        async () =>
-          (await handle.evaluate((node) => node.getAttribute("aria-current"))) === "page",
-        `the ${label} screen never became current`,
-      );
-      return;
-    }
-    throw new Error(`no button labelled ${JSON.stringify(label)} inside ${NAV}`);
-  });
+  await tapButton(app, label, { within: NAV });
+  await waitFor(
+    async () =>
+      app.withPage((page) =>
+        page.evaluate(
+          (nav: string, name: string) =>
+            Array.from(document.querySelectorAll(`${nav} button`)).some(
+              (node) =>
+                node.textContent?.trim() === name &&
+                node.getAttribute("aria-current") === "page",
+            ),
+          NAV,
+          label,
+        ),
+      ),
+    `the ${label} screen never became current`,
+  );
 }
 
 /**
@@ -115,6 +117,115 @@ export async function topRowIsMasked(app: AndroidApp): Promise<boolean> {
       ROW,
       MASKED_ROW,
     ),
+  );
+}
+
+export interface LabelledBox {
+  tag: string;
+  width: number;
+  height: number;
+  text: string;
+}
+
+/** Every element carrying this accessible name, with the box it was laid out
+ *  at — so "present" and "rendered" are told apart. The query ignores CSS, so a
+ *  control hidden with `display: none` is still counted. */
+export async function byLabel(app: AndroidApp, label: string): Promise<LabelledBox[]> {
+  return app.withPage((page) =>
+    page.evaluate(
+      (name: string) =>
+        Array.from(document.querySelectorAll(`[aria-label="${name}"]`), (node) => {
+          const el = node as HTMLElement;
+          const rect = el.getBoundingClientRect();
+          return { tag: el.tagName, width: rect.width, height: rect.height, text: el.innerText };
+        }),
+      label,
+    ),
+  );
+}
+
+/**
+ * A real tap at a point taken from the live page and checked against
+ * `document.elementFromPoint` first, so a control that something else covers
+ * fails here rather than being tapped through its cover. That check has
+ * already earned its place: seven settings tabs whose boxes were all correct
+ * and non-overlapping still had one whose centre belonged to its neighbour's
+ * overflowing label.
+ *
+ * `ElementHandle.click` would be the obvious way to do this and is not usable
+ * here. It intersects the element's quads with `Page.getLayoutMetrics`, and
+ * this WebView resizes under the insets — a dialog button 60px above the
+ * bottom of a 1111px viewport was rejected as "not clickable" against metrics
+ * still describing 915.
+ */
+async function tapWhere(
+  app: AndroidApp,
+  scope: string | null,
+  selector: string,
+  label: string | null,
+  index: number,
+): Promise<boolean> {
+  return app.withPage(async (page) => {
+    const point = await page.evaluate(
+      (root: string | null, query: string, name: string | null, nth: number) => {
+        const within = root ? document.querySelector(root) : document;
+        if (!within) return null;
+        const matches = Array.from(within.querySelectorAll(query)).filter((node) => {
+          if (name === null) return true;
+          const el = node as HTMLElement;
+          return el.textContent?.trim() === name || el.getAttribute("aria-label") === name;
+        });
+        // A negative index means "the first one a tap can actually reach":
+        // the list is virtualised, so its first row in document order may be
+        // scrolled under the toolbar while four identical controls below it
+        // are on screen.
+        const candidates = nth < 0 ? matches : matches.slice(nth, nth + 1);
+        for (const node of candidates) {
+          const target = node as HTMLElement;
+          const rect = target.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+          const x = rect.x + rect.width / 2;
+          const y = rect.y + rect.height / 2;
+          if (target.contains(document.elementFromPoint(x, y))) return { x, y };
+        }
+        return null;
+      },
+      scope,
+      selector,
+      label,
+      index,
+    );
+    if (!point) return false;
+    await page.mouse.click(point.x, point.y);
+    return true;
+  });
+}
+
+export async function tapButton(
+  app: AndroidApp,
+  label: string,
+  options: { within?: string; timeout?: number } = {},
+): Promise<void> {
+  const { within, timeout = 15_000 } = options;
+  await waitFor(
+    () => tapWhere(app, within ?? null, "button", label, -1),
+    `no tappable button labelled ${JSON.stringify(label)}${within ? ` inside ${within}` : ""}`,
+    timeout,
+  );
+}
+
+/** The nth match of a selector, for controls a label cannot tell apart — the
+ *  per-row selection checkboxes are all named the same thing. */
+export async function tapNth(
+  app: AndroidApp,
+  selector: string,
+  index: number,
+  timeout = 15_000,
+): Promise<void> {
+  await waitFor(
+    () => tapWhere(app, null, selector, null, index),
+    `no tappable ${selector} at index ${index}`,
+    timeout,
   );
 }
 
