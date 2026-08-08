@@ -25,7 +25,7 @@ Read this file before treating any manifest section as a requirement.
 
 | Manifest | Binding | Now reference only |
 |---|---|---|
-| **01 clipboard-capture** | Nearly all of it. NSPasteboard quirks, `changeCount` and self-write suppression, `org.nspasteboard.*` privacy markers, the `NSFilenamesPboardType` binary plist, burst handling, frontmost-app cache TTL, the 84 acceptance tests | Nothing meaningful — this manifest is about macOS, not about our formats |
+| **01 clipboard-capture** | Text-capture behaviour: pasteboard change detection and self-write suppression, privacy markers, burst handling, text size gates, frontmost-app sensitivity/exclusion, ingest, retention and failure posture | Image, file and rich-text capture. v2 is text-only; their pasteboard formats, extraction, metadata and binary ingest tests remain design reference for a future product decision |
 | **02 crypto** | Security properties: fail-closed on wrong key/AAD/version, AAD must bind item identity, zeroization, constant-time comparison, keychain service naming | Verbatim HKDF info strings, AAD byte layouts, `CHUNK_FORMAT_V1` framing, the QR envelope, `key_version` dispatch, the v1-key-is-the-seed quirk, the repair sweep |
 | **03 storage** | Sensitive-never-in-FTS (all three enforcement layers), tombstone and pinning semantics, TTL/cap eviction, the keyset-pagination ordering contract, SQLCipher raw-key usage | The whole v1→v15 migration ladder, per-version idempotency notes, the `(wall_time / 60)` dedup bucket, `migration_state` |
 | **04 ipc-protocol** | The method catalogue as a *feature* inventory, error-code taxonomy, readiness/degraded-mode semantics, the rule that errors never leak paths | Exact JSON envelope, protocol-version negotiation, legacy verb behaviour, wire-compatibility requirements |
@@ -35,7 +35,7 @@ Read this file before treating any manifest section as a requirement.
 
 Roughly: **manifests 02 and 03 shrink** from byte-exact contracts to design
 references. **04 and 05 lose their wire constraints** but keep their semantics.
-**01 and 07 are untouched** — they were always about behaviour. **06 splits**:
+**01 narrows to the text product and 07 is untouched.** **06 splits**:
 its behaviour and accessibility half is binding in full, its visual half is
 reference only.
 

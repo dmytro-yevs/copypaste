@@ -4,6 +4,24 @@
 subsystem in the library-first rewrite. A rule here exists because a real bug was
 fixed; deleting a rule is a regression unless the deletion is argued explicitly.
 
+### v2 product scope
+
+CopyPaste v2 captures plain text only. An image, file, or rich-text-only
+pasteboard change is acknowledged by the change cursor but is not read or stored.
+When a pasteboard also offers plain text, that text is the one captured value.
+Binary storage, sync, and paste-back may carry a value received from another
+source; they do not make binary clipboard capture a product feature.
+
+The text-applicable rules in this manifest remain binding. The following v1
+capture requirements are reference-only until image or file capture is decided
+as a product feature: I-12..I-16, I-19, I-24..I-27; §3.5..§3.8,
+§3.13..§3.16; the image/file constants in §4; and T-18..T-20, T-22..T-29,
+T-31..T-32, T-35, T-50, T-60..T-71. I-11 is retained in its v2 form: text is
+selected when present and no non-text fallback is captured. I-30 and the rest
+of §5.9 remain binding for text; their image/file wording is reference-only.
+This scope amendment is deliberate, not an assertion that those v1 behaviours
+are implemented.
+
 **Harvested from (v1 source, for traceability only — do NOT port structure):**
 
 | Path | Lines | Role |
@@ -39,8 +57,8 @@ Concretely, five responsibilities:
    reading (or even materialising) its contents when it did not.
 2. **Privacy gating** — decide whether the change is one we are *allowed* to
    observe (password-manager markers, private mode, app exclusion list).
-3. **Extraction** — decide which single representation of a multi-representation
-   pasteboard item to capture (text / image / file), and pull it out.
+3. **Extraction** — read plain text when offered and acknowledge non-text-only
+   changes without materialising them.
 4. **Ingest** — encrypt, deduplicate, stamp identity/ordering metadata, persist,
    prune, broadcast.
 5. **Attribution** — record which application was frontmost at capture time, and
@@ -1072,14 +1090,14 @@ ran all nine ignored pasteboard tests on a real `NSPasteboard`; all nine passed.
 | I-5, §3.4, T-14, T-15, T-16 | All three `org.nspasteboard.*` markers, written *alongside* real text, drop the change and advance the cursor |
 | I-18, I-39, T-30, T-33 | `cap + 1` bytes rejected and counted on the readable counter, `cap` bytes accepted |
 | I-3 | Every drop path this backend has — marker, self-write, empty pasteboard — is polled twice and never re-offers |
+| v2 scope, I-11 | An image-only change is acknowledged without capture; text offered beside an image is captured |
 | Status | `status` from the installed bundle reports `clipboard_backend = nspasteboard`, so a green run cannot be the fake |
 
 ### 7.2 Not covered, and why
 
-- **Image, file and rich-text capture** — I-11..I-16, §3.5, §3.6, §3.7, §3.8,
-  T-17..T-29, T-60..T-71. Not implemented; `Capture::content` is a `String`.
-- **Frontmost attribution and the exclusion gate** — I-7, I-8, §3.9,
-  T-45..T-58. Not implemented.
+- **Image, file and rich-text capture** — reference-only under the v2 scope
+  amendment. Platform tests instead assert non-text changes are acknowledged
+  without capture and plain text wins when offered.
 - **T-10, the poll racing the write.** No seam: `set_contents` performs
   `clearContents` and `setString:forType:` inside one call, so a test cannot
   interleave a poll between them. The pre-stamp that makes T-10 pass is

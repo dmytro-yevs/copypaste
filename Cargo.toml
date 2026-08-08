@@ -75,7 +75,6 @@ base64 = "0.22"
 # store on macOS and Android.
 image = { version = "0.25.10", default-features = false, features = ["png", "tiff"] }
 url = "2"
-plist = "1.10"
 mime_guess = "2"
 # errors, logging, cli, misc
 thiserror = "1"

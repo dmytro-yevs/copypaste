@@ -14,7 +14,6 @@
 //!   the ingest before it returns, and shutdown is observed between ticks, not
 //!   inside one.
 
-use std::io::Read;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -172,65 +171,31 @@ fn ingest_capture(
     capture: crate::clipboard::Capture,
     created_at: i64,
 ) -> Result<Ingested, IngestError> {
+    if crate::clipboard::format::preferred([capture.content_type.as_str()])
+        != Some(copypaste_ipc::content_type::TEXT)
+        || capture.binary_content.is_some()
+        || capture.file_path.is_some()
+        || capture.file_metadata.is_some()
+    {
+        return Err(IngestError::Empty);
+    }
     let settings = state.settings.get().clone();
     let sensitive_floor = capture
         .app_bundle_id
         .as_deref()
         .is_some_and(crate::clipboard::is_password_manager_app);
-    let binary = match (capture.binary_content, capture.file_path) {
-        (Some(bytes), None) => Some((bytes, capture.file_metadata)),
-        (None, Some(path)) => Some((
-            read_file_at_most(&path, settings.capture_limit_bytes(&capture.content_type))?,
-            capture.file_metadata,
-        )),
-        (None, None) => None,
-        (Some(_), Some(_)) => return Err(IngestError::Empty),
-    };
-    match binary {
-        Some((bytes, metadata)) => copypaste_core::ingest_binary_into_with_capture_source(
-            &state.store,
-            &state.keyring,
-            &bytes,
-            &capture.content_type,
-            created_at,
-            sensitive_floor,
-            capture.app_bundle_id.as_deref(),
-            capture.app_name.as_deref(),
-            metadata.as_ref(),
-            &settings,
-        ),
-        None => copypaste_core::ingest_into_with_capture_source(
-            &state.store,
-            &state.detector,
-            &state.keyring,
-            &capture.content,
-            &capture.content_type,
-            created_at,
-            sensitive_floor,
-            capture.app_bundle_id.as_deref(),
-            capture.app_name.as_deref(),
-            &settings,
-        ),
-    }
-}
-
-/// Read through one opened handle, after checking that handle's size.  A
-/// separate `metadata(path)` then `read(path)` lets another process replace a
-/// file between the cap check and read (CopyPaste-b5iz / I-19).
-fn read_file_at_most(path: &std::path::Path, cap: u64) -> Result<Vec<u8>, IngestError> {
-    let mut file = std::fs::File::open(path).map_err(|_| IngestError::Empty)?;
-    if file.metadata().map_err(|_| IngestError::Empty)?.len() > cap {
-        return Err(IngestError::TooLarge);
-    }
-    let mut bytes = Vec::new();
-    file.by_ref()
-        .take(cap.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|_| IngestError::Empty)?;
-    if bytes.len() as u64 > cap {
-        return Err(IngestError::TooLarge);
-    }
-    Ok(bytes)
+    copypaste_core::ingest_into_with_capture_source(
+        &state.store,
+        &state.detector,
+        &state.keyring,
+        &capture.content,
+        &capture.content_type,
+        created_at,
+        sensitive_floor,
+        capture.app_bundle_id.as_deref(),
+        capture.app_name.as_deref(),
+        &settings,
+    )
 }
 
 pub fn ingest(
@@ -275,17 +240,23 @@ mod tests {
     use crate::testutil::test_state;
 
     #[test]
-    fn file_materialization_accepts_the_boundary_and_rejects_one_byte_over() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("payload");
-        std::fs::write(&path, b"four").unwrap();
-        assert_eq!(read_file_at_most(&path, 4).unwrap(), b"four");
-
-        std::fs::write(&path, b"five!").unwrap();
-        assert!(matches!(
-            read_file_at_most(&path, 4),
-            Err(IngestError::TooLarge)
-        ));
+    fn non_text_capture_values_are_not_ingested() {
+        let (state, _dir) = test_state("text-capture-only");
+        let result = ingest_capture(
+            &state,
+            crate::clipboard::Capture {
+                content: String::new(),
+                binary_content: Some(vec![1, 2, 3]),
+                file_path: None,
+                file_metadata: None,
+                content_type: copypaste_ipc::content_type::IMAGE_PNG.to_string(),
+                app_bundle_id: None,
+                app_name: None,
+            },
+            copypaste_core::now_ms(),
+        );
+        assert!(matches!(result, Err(IngestError::Empty)));
+        assert_eq!(state.store.count().unwrap(), 0);
     }
 
     /// The auto-wipe is the only thing in the daemon that deletes an item the

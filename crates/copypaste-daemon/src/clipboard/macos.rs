@@ -34,7 +34,7 @@
 #![allow(unused_unsafe)]
 
 use objc2::rc::{autoreleasepool, Retained};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 use objc2_app_kit::NSPasteboard;
@@ -44,7 +44,7 @@ use tracing::{debug, warn};
 mod attribution;
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{file_capture, Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
+use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
 use attribution::{Attribution, FrontmostApp};
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
@@ -55,7 +55,6 @@ const UTI_TEXT: &str = "public.utf8-plain-text";
 const UTI_PNG: &str = "public.png";
 const UTI_TIFF: &str = "public.tiff";
 const UTI_FILE_URL: &str = "public.file-url";
-const UTI_LEGACY_FILE_NAMES: &str = "NSFilenamesPboardType";
 /// §3.4 — the three `org.nspasteboard.*` opt-out markers, probed as a set.
 /// `ConcealedType` is how 1Password, Bitwarden, KeePassXC and friends say
 /// "this is a secret, do not persist it". Ignoring these writes users'
@@ -77,21 +76,14 @@ const UTI_MARKERS: [&str; 3] = [
 struct Utis {
     text: Retained<NSString>,
     text_probe: Retained<NSArray<NSString>>,
-    png: Retained<NSString>,
-    tiff: Retained<NSString>,
-    image_probe: Retained<NSArray<NSString>>,
     file_url: Retained<NSString>,
-    legacy_file_names: Retained<NSString>,
     markers: Retained<NSArray<NSString>>,
 }
 
 impl Utis {
     fn new() -> Self {
         let text = NSString::from_str(UTI_TEXT);
-        let png = NSString::from_str(UTI_PNG);
-        let tiff = NSString::from_str(UTI_TIFF);
         let file_url = NSString::from_str(UTI_FILE_URL);
-        let legacy_file_names = NSString::from_str(UTI_LEGACY_FILE_NAMES);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
@@ -99,13 +91,9 @@ impl Utis {
         // is not. Taking owned `Retained`s is the supported path for it.
         Self {
             text_probe: NSArray::from_vec(vec![text.clone()]),
-            image_probe: NSArray::from_vec(vec![png.clone(), tiff.clone()]),
             markers: NSArray::from_vec(markers),
             text,
-            png,
-            tiff,
             file_url,
-            legacy_file_names,
         }
     }
 }
@@ -125,26 +113,6 @@ pub struct MacOsClipboard {
     frontmost: Option<(Instant, Option<FrontmostApp>)>,
     last_attribution: Option<Attribution>,
     staging: super::file_materialize::StagingArea,
-}
-
-enum SelectedRepresentation {
-    Data(Retained<NSData>, &'static str),
-    LegacyFileNames(Retained<NSData>),
-}
-
-fn first_absolute_filename_plist(bytes: &[u8]) -> Option<PathBuf> {
-    // `NSFilenamesPboardType` is a binary plist. Reject another encoding rather
-    // than treating arbitrary text as a path, and let parser failures remain a
-    // harmless dropped pasteboard change (CopyPaste-q5ab / I-37).
-    if !bytes.starts_with(b"bplist00") {
-        debug!("legacy filename pasteboard payload was not a binary plist; dropped");
-        return None;
-    }
-    plist::from_bytes::<Vec<String>>(bytes)
-        .ok()?
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|path| path.is_absolute())
 }
 
 impl MacOsClipboard {
@@ -238,40 +206,11 @@ impl ClipboardSource for MacOsClipboard {
                 return None;
             }
 
-            let selected = UTIS.with(|utis| unsafe {
-                if pb.availableTypeFromArray(&utis.text_probe).is_some() {
-                    return pb.dataForType(&utis.text).map(|data| {
-                        SelectedRepresentation::Data(data, copypaste_ipc::content_type::TEXT)
-                    });
-                }
-                // I-12 probes presence before materialising data.  TIFF is
-                // never queried when PNG exists, which preserves I-13.
-                if pb.availableTypeFromArray(&utis.image_probe).is_some() {
-                    if let Some(data) = pb.dataForType(&utis.png) {
-                        return Some(SelectedRepresentation::Data(
-                            data,
-                            copypaste_ipc::content_type::IMAGE_PNG,
-                        ));
-                    }
-                    return pb.dataForType(&utis.tiff).map(|data| {
-                        SelectedRepresentation::Data(data, copypaste_ipc::content_type::IMAGE_TIFF)
-                    });
-                }
-                if let Some(data) = pb.dataForType(&utis.file_url) {
-                    return Some(SelectedRepresentation::Data(
-                        data,
-                        copypaste_ipc::content_type::FILE,
-                    ));
-                }
-                pb.dataForType(&utis.legacy_file_names)
-                    .map(SelectedRepresentation::LegacyFileNames)
+            let data = UTIS.with(|utis| unsafe {
+                pb.availableTypeFromArray(&utis.text_probe)
+                    .and_then(|_| pb.dataForType(&utis.text))
             })?;
-            let (data, content_type, legacy_file_names) = match selected {
-                SelectedRepresentation::Data(data, content_type) => (data, content_type, false),
-                SelectedRepresentation::LegacyFileNames(data) => {
-                    (data, copypaste_ipc::content_type::FILE, true)
-                }
-            };
+            let content_type = copypaste_ipc::content_type::TEXT;
 
             // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
             // multi-GiB item is a multi-GiB allocation. Check first.
@@ -293,44 +232,19 @@ impl ClipboardSource for MacOsClipboard {
             // is a third-party app's bug. §3.6's precedent is lossy
             // conversion rather than dropping the user's copy, and I-37
             // forbids panicking on a malformed payload.
-            if content_type == copypaste_ipc::content_type::TEXT {
-                let content = String::from_utf8_lossy(&bytes).into_owned();
-                if content.is_empty() {
-                    return None;
-                }
-                Some(Capture {
-                    content,
-                    binary_content: None,
-                    file_path: None,
-                    file_metadata: None,
-                    content_type: content_type.to_string(),
-                    app_bundle_id,
-                    app_name,
-                })
-            } else if content_type == copypaste_ipc::content_type::FILE {
-                let path = if legacy_file_names {
-                    first_absolute_filename_plist(&bytes)?
-                } else {
-                    let Ok(url) = url::Url::parse(&String::from_utf8_lossy(&bytes)) else {
-                        return None;
-                    };
-                    let Ok(path) = url.to_file_path() else {
-                        return None;
-                    };
-                    path
-                };
-                file_capture(path, app_bundle_id, app_name)
-            } else {
-                Some(Capture {
-                    content: String::new(),
-                    binary_content: Some(bytes),
-                    file_path: None,
-                    file_metadata: None,
-                    content_type: content_type.to_string(),
-                    app_bundle_id,
-                    app_name,
-                })
+            let content = String::from_utf8_lossy(&bytes).into_owned();
+            if content.is_empty() {
+                return None;
             }
+            Some(Capture {
+                content,
+                binary_content: None,
+                file_path: None,
+                file_metadata: None,
+                content_type: content_type.to_string(),
+                app_bundle_id,
+                app_name,
+            })
         })
     }
 
@@ -521,27 +435,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_filenames_binary_plist_uses_the_first_absolute_path() {
-        let mut bytes = Vec::new();
-        plist::to_writer_binary(
-            &mut bytes,
-            &vec!["relative.txt", "/Users/example/Report.pdf", "/ignored.txt"],
-        )
-        .unwrap();
-
-        assert_eq!(
-            first_absolute_filename_plist(&bytes),
-            Some(PathBuf::from("/Users/example/Report.pdf"))
-        );
-    }
-
-    #[test]
-    fn malformed_or_non_binary_legacy_filename_data_is_dropped() {
-        assert!(first_absolute_filename_plist(b"/Users/example/Report.pdf").is_none());
-        assert!(first_absolute_filename_plist(b"bplist00not-a-plist").is_none());
-    }
-
-    #[test]
     fn source_attribution_preserves_a_name_when_a_helper_has_no_bundle_id() {
         assert_eq!(
             Attribution::from_app(Some(&FrontmostApp {
@@ -640,6 +533,22 @@ mod tests {
              Observed {pre} -> {actual}; the sentinel must name {}",
             pre + SELF_WRITE_DELTA
         );
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn non_text_only_changes_are_acknowledged_without_capture() {
+        let _lock = serialised();
+        let (_data_dir, mut clipboard) = test_clipboard();
+
+        write_types(&[(UTI_PNG, b"not a decoded image")]);
+        assert!(clipboard.poll().is_none());
+        assert!(clipboard.poll().is_none(), "the cursor must still advance");
+
+        write_types(&[(UTI_TEXT, b"plain fallback"), (UTI_PNG, b"ignored")]);
+        let capture = clipboard.poll().expect("plain text must win when offered");
+        assert_eq!(capture.content, "plain fallback");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
     }
 
     /// T-8, T-9 and the Fix-4 / "DUP-ON-COPY" pair, asserted as behaviour

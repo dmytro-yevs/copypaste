@@ -51,9 +51,9 @@ separately ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
 
 ### Product limits
 
-CopyPaste is text-only: it does not capture images, files, rich text, or the
-frontmost application. Manifest 07 treats source application as an independent
-sensitivity signal rather than item metadata.
+CopyPaste is text-only: it does not capture images, files, or rich text.
+Frontmost application identity is retained as provenance and as an independent
+sensitivity signal.
 
 ## Build and run
 
