@@ -339,8 +339,10 @@ impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
 mod tests {
     use std::collections::BTreeSet;
     fn production_source() -> &'static str {
+        let marker = "#[cfg(test)]\r\nmod tests";
         include_str!("lib.rs")
-            .split_once("\n#[cfg(test)]")
+            .split_once(marker)
+            .or_else(|| include_str!("lib.rs").split_once("#[cfg(test)]\nmod tests"))
             .expect("the test module follows production assembly")
             .0
     }
@@ -475,6 +477,9 @@ mod tests {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.windows.conf.json"))
                 .expect("the Windows Tauri config is valid JSON");
+        let release: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.release.conf.json"))
+                .expect("the Windows release config is valid JSON");
 
         assert_eq!(config["bundle"]["targets"], serde_json::json!(["nsis"]));
         assert_eq!(
@@ -488,8 +493,13 @@ mod tests {
         assert_eq!(main["height"], 760);
         assert_eq!(main["minWidth"], 720);
         assert_eq!(main["minHeight"], 460);
+        assert_eq!(main["transparent"], false);
         // INV-35 holds on Windows through SetWindowDisplayAffinity, so the
         // screenshot exclusion must be asserted here as well as on macOS.
         assert_eq!(main["contentProtected"], true);
+        assert_eq!(
+            release["bundle"]["externalBin"],
+            serde_json::json!(["binaries/copypaste", "binaries/copypaste-daemon"])
+        );
     }
 }

@@ -558,17 +558,19 @@ jobs:
           exit 0
 
   # ---------------------------------------------------------------------------
-  # Windows owns the DPAPI and named-pipe assertions that no other runner can
-  # execute. The shared contract suite binds the real platform endpoint, so a
-  # green Unix socket run cannot stand in for this job.
+  # Windows owns the DPAPI and named-pipe assertions, then exercises the
+  # installed product. Missing evidence or cleanup fails the job.
   # ---------------------------------------------------------------------------
 
   windows-check:
-    name: Windows check + device secret (x64)
+    name: Windows workspace + installed product evidence (x64)
     # Pinned rather than `windows-latest` so the toolchain and SDK under test do
     # not move without a commit, matching the macos-14 pin above.
     runs-on: windows-2022
     timeout-minutes: 45
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+      RUSTUP_TOOLCHAIN: "1.96"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -581,15 +583,32 @@ jobs:
         with:
           shared-key: windows-2022-1.96
 
-      - name: cargo clippy (Windows product paths)
-        run: cargo +1.96 clippy -p copypaste-core -p copypaste-ipc -p copypaste-daemon -p copypaste-cli -p copypaste-ui --all-targets --locked -- -D warnings
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
 
-      - name: Named-pipe and Tauri command contracts
+      - name: Confirm OpenSSL's Perl
+        shell: pwsh
         run: |
-          cargo +1.96 test -p copypaste-ipc --test method_contract --locked
-          cargo +1.96 test -p copypaste-daemon server::contract_tests --locked
-          cargo +1.96 test -p copypaste-daemon server::pipe::tests --locked
-          cargo +1.96 test -p copypaste-ui tests::every_tauri_command_is_registered_once --locked -- --exact
+          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
+          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
+
+      # `--all-targets` is what type-checks the DPAPI backend and its tests,
+      # which no other runner in this workflow can parse.
+      - name: cargo clippy (full Windows workspace)
+        run: cargo +1.96 clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: cargo test (full Windows workspace)
+        run: cargo +1.96 test --workspace --locked
+
+      - name: Frontend tests and build
+        working-directory: crates/copypaste-ui
+        run: |
+          npm ci
+          npm test
+          npm run build
 
       - name: DPAPI, for real (port manifest 02)
         # These are not `#[ignore]`d, unlike the Keychain set: DPAPI writes
@@ -631,3 +650,22 @@ jobs:
             exit 1
           }
           Write-Output "no CopyPaste entry in the Credential Manager, as designed"
+
+      - name: Build the complete current-user installer
+        shell: pwsh
+        run: |
+          cargo +1.96 build --release -p copypaste-cli -p copypaste-daemon --locked
+          $bin = "crates/copypaste-ui/src-tauri/binaries"
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          Copy-Item target/release/copypaste.exe "$bin/copypaste-x86_64-pc-windows-msvc.exe"
+          Copy-Item target/release/copypaste-daemon.exe "$bin/copypaste-daemon-x86_64-pc-windows-msvc.exe"
+          Push-Location crates/copypaste-ui
+          npm exec tauri build -- --bundles nsis --config src-tauri/tauri.windows.release.conf.json
+          Pop-Location
+
+      - name: Installer, sidecar, pipe, clipboard and transfer evidence
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem target/release/bundle/nsis/*-setup.exe)
+          if ($installer.Count -ne 1) { throw "expected one NSIS installer, found $($installer.Count)" }
+          ./scripts/release/windows-native-evidence.ps1 -Installer $installer[0].FullName
