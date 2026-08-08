@@ -60,7 +60,7 @@ clipboard-win = { version = "5.4", features = ["std"] }
 # Which process wrote the clipboard: `GetClipboardOwner` gives a window, and
 # these four calls turn it into a process image name. The crates that package
 # this (`active-win-pos-rs` and friends) also return the window title, which is
-# user content we deliberately never read.
+# user content we deliberately never read. See ADR-0016.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
