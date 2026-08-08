@@ -27,6 +27,8 @@
 //! platform binding remains a native-runner assertion.
 
 mod backup;
+mod cloud;
+mod config;
 mod open;
 mod peers;
 mod retention;
@@ -46,7 +48,6 @@ use copypaste_ipc::{
 };
 pub use open::{Clipboard, EmbeddedBackend};
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
-use state::write_settings;
 
 /// Reported in [`StatusData::clipboard_backend`] so a build that is not polling
 /// anything cannot be mistaken for one that is.
@@ -336,6 +337,32 @@ impl Backend for EmbeddedBackend {
         Ok(())
     }
 
+    async fn cloud_sign_in(
+        &self,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+    ) -> Result<copypaste_ipc::CloudStatusData> {
+        self.inner
+            .cloud
+            .sign_in(&self.inner, email, password, passphrase)
+            .await
+    }
+
+    async fn cloud_sign_out(&self) -> Result<copypaste_ipc::CloudStatusData> {
+        self.inner.cloud.sign_out(&self.inner).await;
+        Ok(self.inner.cloud.status())
+    }
+
+    async fn cloud_status(&self) -> Result<copypaste_ipc::CloudStatusData> {
+        self.inner.cloud.ensure_poller(&self.inner);
+        Ok(self.inner.cloud.status())
+    }
+
+    async fn cloud_sync(&self) -> Result<copypaste_ipc::CloudSyncData> {
+        self.inner.cloud.sync_now(&self.inner).await
+    }
+
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
@@ -383,38 +410,11 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn get_config(&self) -> Result<ConfigApplied> {
-        self.blocking(move |inner| {
-            Ok(ConfigApplied {
-                config: inner.settings(),
-                restart_required: Vec::new(),
-            })
-        })
-        .await
+        self.blocking(config::get).await
     }
 
     async fn set_config(&self, patch: ConfigPatch) -> Result<ConfigApplied> {
-        self.blocking(move |inner| {
-            let current = inner.settings();
-            let next = patch
-                .apply(&current)
-                .map_err(|_| BackendError::Invalid(MSG_INVALID_SETTING))?;
-            let restart_required = copypaste_ipc::ConfigData::restart_required_by(&patch)
-                .into_iter()
-                .map(str::to_string)
-                .collect();
-            write_settings(&inner.state.settings_path, &next)?;
-            *inner
-                .state
-                .settings
-                .write()
-                .expect("settings lock poisoned") = next.clone();
-            inner.publish_items(false, 0);
-            Ok(ConfigApplied {
-                config: next,
-                restart_required,
-            })
-        })
-        .await
+        self.blocking(move |inner| config::set(inner, patch)).await
     }
 
     async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {

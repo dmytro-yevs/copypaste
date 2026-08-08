@@ -23,6 +23,7 @@ pub mod appearance;
 pub mod autostart;
 pub mod capture;
 pub mod clipboard;
+pub mod cloud;
 pub mod config;
 pub mod diagnostics;
 mod document;

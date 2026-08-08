@@ -2,6 +2,10 @@
 
 export type ConfigApplied = { config: ConfigData, restart_required: Array<string>, };
 
+export type CloudStatusData = { configured: boolean, signed_in: boolean, key_ready: boolean, email: string | null, last_sync_ms: number | null, last_error: string | null, poll_interval_secs: number, };
+
+export type CloudSyncData = { uploaded: number, tombstoned: number, downloaded: number, applied: number, skipped_sensitive: number, skipped_undecryptable: number, skipped_forged: number, skipped_future: number, skipped_too_large: number, };
+
 export type ConfigData = { private_mode: boolean, poll_interval_ms: number, history_limit: number, storage_quota_bytes: number, retention_days: number, dedup_window_secs: number, max_text_size_bytes: number, max_image_size_bytes: number, max_file_size_bytes: number, max_decoded_image_mb: number, sensitive_ttl_secs: number, excluded_app_bundle_ids: Array<string>, lan_visibility: boolean, sync_enabled: boolean, notify_on_copy: boolean, sound_on_copy: boolean, };
 
 export type ConfigPatch = { private_mode?: boolean | null, poll_interval_ms?: number | null, history_limit?: number | null, storage_quota_bytes?: number | null, retention_days?: number | null, dedup_window_secs?: number | null, max_text_size_bytes?: number | null, max_image_size_bytes?: number | null, max_file_size_bytes?: number | null, max_decoded_image_mb?: number | null, sensitive_ttl_secs?: number | null, excluded_app_bundle_ids?: Array<string> | null, lan_visibility?: boolean | null, sync_enabled?: boolean | null, notify_on_copy?: boolean | null, sound_on_copy?: boolean | null, };

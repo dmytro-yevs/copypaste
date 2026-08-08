@@ -4,6 +4,8 @@
  */
 import { call, hasBridge, hasWebBridge } from "./ipcCall";
 import type {
+  CloudStatusData,
+  CloudSyncData,
   ConfigApplied,
   ConfigPatch,
   DiscoveredDevice,
@@ -22,6 +24,8 @@ import type {
 } from "@/generated/ipc";
 
 export type {
+  CloudStatusData,
+  CloudSyncData,
   ConfigApplied,
   ConfigData,
   ConfigPatch,
@@ -134,6 +138,28 @@ export function getStatus(): Promise<StatusData> {
 
 export function setDeviceName(name: string): Promise<void> {
   return call<void>("set_device_name", { name });
+}
+
+export interface CloudCredentials {
+  email: string;
+  password: string;
+  passphrase: string;
+}
+
+export function cloudSignIn(credentials: CloudCredentials): Promise<CloudStatusData> {
+  return call<CloudStatusData>("cloud_sign_in", { ...credentials });
+}
+
+export function cloudSignOut(): Promise<CloudStatusData> {
+  return call<CloudStatusData>("cloud_sign_out");
+}
+
+export function getCloudStatus(): Promise<CloudStatusData> {
+  return call<CloudStatusData>("cloud_status");
+}
+
+export function syncCloudNow(): Promise<CloudSyncData> {
+  return call<CloudSyncData>("cloud_sync_now");
 }
 
 export function listPeers(): Promise<PeerInfo[]> {

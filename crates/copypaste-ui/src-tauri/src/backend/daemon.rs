@@ -26,20 +26,24 @@
 //! Connecting per call makes "the daemon went away" the same code path as "the
 //! daemon was never there", which is also what the user sees.
 
+mod response;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use copypaste_ipc::transport;
 use copypaste_ipc::{
-    socket_path, BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData,
-    ExportItem, ImagePreview, ImportData, Item, Method, PeerInfo, Request, Response, ResponseData,
-    StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigPatch,
+    DiscoveredDevice, EventData, ExportData, ExportItem, ImagePreview, ImportData, Item, Method,
+    PeerInfo, Request, Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES,
+    PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::{self, Receiver};
 use tokio_util::codec::{Framed, LinesCodec};
 
 use super::{Backend, BackendError, Page, Result};
+use response::*;
 
 /// Ids only have to be unique within this process; the daemon echoes them back
 /// so a reply can be matched to its request.
@@ -107,114 +111,6 @@ impl DaemonBackend {
         }
 
         into_data(response)
-    }
-}
-
-/// Split a reply into payload or failure.
-///
-/// Branches on `error_code`, never on the `error` string (manifest 04, I9).
-pub(super) fn into_data(response: Response) -> Result<Option<ResponseData>> {
-    if response.ok {
-        return Ok(response.data);
-    }
-    Err(BackendError::from_code(
-        response.error_code,
-        response.raw_error_code.as_deref(),
-        response.error.as_deref(),
-    ))
-}
-
-fn expect_page(data: Option<ResponseData>) -> Result<Page> {
-    match data {
-        Some(ResponseData::Page(page)) => Ok(Page::from(page)),
-        _ => Err(BackendError::wrong_shape("a page of items")),
-    }
-}
-
-fn expect_discovered(data: Option<ResponseData>) -> Result<Vec<DiscoveredDevice>> {
-    match data {
-        Some(ResponseData::Discovered(found)) => Ok(found.devices),
-        _ => Err(BackendError::wrong_shape("a list of nearby devices")),
-    }
-}
-
-fn expect_item(data: Option<ResponseData>) -> Result<Item> {
-    match data {
-        Some(ResponseData::Item(item)) => Ok(item),
-        _ => Err(BackendError::wrong_shape("an item")),
-    }
-}
-
-fn expect_image_preview(data: Option<ResponseData>) -> Result<ImagePreview> {
-    match data {
-        Some(ResponseData::ImagePreview(preview)) => Ok(preview),
-        _ => Err(BackendError::wrong_shape("an image preview")),
-    }
-}
-
-fn expect_status(data: Option<ResponseData>) -> Result<StatusData> {
-    match data {
-        Some(ResponseData::Status(status)) => Ok(status),
-        _ => Err(BackendError::wrong_shape("daemon status")),
-    }
-}
-
-fn expect_empty(data: Option<ResponseData>) -> Result<()> {
-    match data {
-        Some(ResponseData::Empty {}) | None => Ok(()),
-        _ => Err(BackendError::wrong_shape("an empty response")),
-    }
-}
-
-fn expect_peers(data: Option<ResponseData>) -> Result<Vec<PeerInfo>> {
-    match data {
-        Some(ResponseData::Peers(peers)) => Ok(peers),
-        _ => Err(BackendError::wrong_shape("a list of devices")),
-    }
-}
-
-fn expect_sync(data: Option<ResponseData>) -> Result<Vec<SyncResult>> {
-    match data {
-        Some(ResponseData::Sync(results)) => Ok(results),
-        _ => Err(BackendError::wrong_shape("a sync report")),
-    }
-}
-
-fn expect_config(data: Option<ResponseData>) -> Result<ConfigApplied> {
-    match data {
-        Some(ResponseData::Config(applied)) => Ok(applied),
-        _ => Err(BackendError::wrong_shape("the service's settings")),
-    }
-}
-
-fn expect_export(data: Option<ResponseData>) -> Result<ExportData> {
-    match data {
-        Some(ResponseData::Export(export)) => Ok(export),
-        _ => Err(BackendError::wrong_shape("an export")),
-    }
-}
-
-fn expect_import(data: Option<ResponseData>) -> Result<ImportData> {
-    match data {
-        Some(ResponseData::Import(result)) => Ok(result),
-        _ => Err(BackendError::wrong_shape("an import report")),
-    }
-}
-
-fn expect_backup(data: Option<ResponseData>) -> Result<BackupData> {
-    match data {
-        Some(ResponseData::Backup(backup)) => Ok(backup),
-        _ => Err(BackendError::wrong_shape("a backup report")),
-    }
-}
-
-/// The fallback keeps an acknowledged clear from becoming a shape error:
-/// `clear` reporting "0 deleted" is right when the daemon omitted a count.
-fn expect_count(data: Option<ResponseData>) -> Result<u64> {
-    match data {
-        Some(ResponseData::Count(count)) => Ok(count),
-        Some(ResponseData::Empty {}) | None => Ok(0),
-        _ => Err(BackendError::wrong_shape("a count")),
     }
 }
 
@@ -319,6 +215,34 @@ impl Backend for DaemonBackend {
             })
             .await?,
         )
+    }
+
+    async fn cloud_sign_in(
+        &self,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+    ) -> Result<CloudStatusData> {
+        expect_cloud_status(
+            self.call(Method::CloudSignIn {
+                email: email.to_string(),
+                password: password.to_string(),
+                passphrase: passphrase.to_string(),
+            })
+            .await?,
+        )
+    }
+
+    async fn cloud_sign_out(&self) -> Result<CloudStatusData> {
+        expect_cloud_status(self.call(Method::CloudSignOut).await?)
+    }
+
+    async fn cloud_status(&self) -> Result<CloudStatusData> {
+        expect_cloud_status(self.call(Method::CloudStatus).await?)
+    }
+
+    async fn cloud_sync(&self) -> Result<CloudSyncData> {
+        expect_cloud_sync(self.call(Method::CloudSyncNow).await?)
     }
 
     async fn shutdown(&self) -> Result<()> {

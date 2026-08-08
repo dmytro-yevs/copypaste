@@ -1,12 +1,3 @@
-/**
- * The tab has three rows and two of them are about *peer* sync, so the one
- * thing worth pinning is that they stay distinguishable:
- *
- * The cloud row's badge is a standing fact about the build. The paired row's is
- * a report on a call that failed. They read the same word and used to be the
- * same catalogue key, which meant a service that could not answer for peers
- * rendered a sentence about accounts.
- */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 
@@ -19,6 +10,23 @@ const listPeers = vi.fn();
 const syncNow = vi.fn();
 const getStatus = vi.fn();
 const setDeviceName = vi.fn();
+const getCloudStatus = vi.fn();
+const cloudSignIn = vi.fn();
+const cloudSignOut = vi.fn();
+const syncCloudNow = vi.fn();
+
+function cloudStatus(overrides = {}) {
+  return {
+    configured: false,
+    signed_in: false,
+    key_ready: false,
+    email: null,
+    last_sync_ms: null,
+    last_error: null,
+    poll_interval_secs: 60,
+    ...overrides,
+  };
+}
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -28,6 +36,10 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     syncNow: (pairingId?: string) => syncNow(pairingId),
     getStatus: () => getStatus(),
     setDeviceName: (name: string) => setDeviceName(name),
+    getCloudStatus: () => getCloudStatus(),
+    cloudSignIn: (credentials: unknown) => cloudSignIn(credentials),
+    cloudSignOut: () => cloudSignOut(),
+    syncCloudNow: () => syncCloudNow(),
   };
 });
 
@@ -36,6 +48,20 @@ beforeEach(() => {
   syncNow.mockReset().mockResolvedValue([]);
   getStatus.mockReset().mockResolvedValue(status());
   setDeviceName.mockReset().mockResolvedValue(undefined);
+  getCloudStatus.mockReset().mockResolvedValue(cloudStatus());
+  cloudSignIn.mockReset().mockResolvedValue(cloudStatus({ configured: true, signed_in: true, key_ready: true }));
+  cloudSignOut.mockReset().mockResolvedValue(cloudStatus({ configured: true }));
+  syncCloudNow.mockReset().mockResolvedValue({
+    uploaded: 1,
+    tombstoned: 0,
+    downloaded: 2,
+    applied: 2,
+    skipped_sensitive: 0,
+    skipped_undecryptable: 0,
+    skipped_forged: 0,
+    skipped_future: 0,
+    skipped_too_large: 0,
+  });
 });
 
 describe("SyncTab", () => {
@@ -71,29 +97,58 @@ describe("SyncTab", () => {
     ).toHaveProperty("disabled", true);
   });
 
-  /** Both rows read "Unavailable" here, and they are saying different things:
-   *  the paired row is reporting this call, the cloud row is stating a fact
-   *  about the build. They are separate catalogue keys for that reason. */
   it("reports a peer list the service could not answer for", async () => {
     listPeers.mockRejectedValue(new IpcFailure("unavailable", false));
     withUser(<SyncTab />);
 
-    await waitFor(() =>
-      expect(
-        screen.getAllByText(en.settings.sync.paired.unavailable),
-      ).toHaveLength(2),
-    );
+    expect(await screen.findByText(en.settings.sync.paired.unavailable)).not.toBeNull();
     expect(
       screen.getByRole("button", { name: en.settings.sync.now.action }),
     ).toHaveProperty("disabled", true);
   });
 
-  /** A badge with nothing beside it says only that something is missing. */
-  it("says why cloud sync is not there", async () => {
+  it("explains when this build has no cloud deployment", async () => {
     withUser(<SyncTab />);
 
     expect(await screen.findByText(en.settings.sync.cloud.title)).not.toBeNull();
-    expect(screen.getByText(en.settings.sync.cloud.description)).not.toBeNull();
-    expect(screen.getByText(en.settings.sync.cloud.badge)).not.toBeNull();
+    expect(screen.getByText(en.settings.sync.cloud.notConfigured)).not.toBeNull();
+    expect(screen.getByText(en.settings.sync.cloud.badgeNotConfigured)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: en.settings.sync.cloud.signIn })).toBeNull();
+  });
+
+  it("signs into a configured deployment without exposing pairing", async () => {
+    getCloudStatus.mockResolvedValue(cloudStatus({ configured: true }));
+    const { user } = withUser(<SyncTab />);
+
+    await user.type(await screen.findByLabelText(en.settings.sync.cloud.email), " me@example.com ");
+    await user.type(screen.getByLabelText(en.settings.sync.cloud.password), " password ");
+    await user.type(screen.getByLabelText(en.settings.sync.cloud.passphrase), "phrase with spaces");
+    await user.click(screen.getByRole("button", { name: en.settings.sync.cloud.signIn }));
+
+    await waitFor(() =>
+      expect(cloudSignIn).toHaveBeenCalledWith({
+        email: "me@example.com",
+        password: "password",
+        passphrase: "phrase with spaces",
+      }),
+    );
+    expect(screen.queryByRole("button", { name: /^pair$/i })).toBeNull();
+  });
+
+  it("offers manual sync and sign out for an unlocked account", async () => {
+    getCloudStatus.mockResolvedValue(
+      cloudStatus({
+        configured: true,
+        signed_in: true,
+        key_ready: true,
+        email: "me@example.com",
+      }),
+    );
+    const { user } = withUser(<SyncTab />);
+
+    await user.click(await screen.findByRole("button", { name: en.settings.sync.cloud.syncNow }));
+    await waitFor(() => expect(syncCloudNow).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button", { name: en.settings.sync.cloud.signOut }));
+    await waitFor(() => expect(cloudSignOut).toHaveBeenCalledTimes(1));
   });
 });
