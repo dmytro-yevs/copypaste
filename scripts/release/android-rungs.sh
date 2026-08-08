@@ -66,8 +66,7 @@ clip_call() {   # <tag> <code> <callingPackage>
 # earlier call has a different layout, and the home screen's search bar is what
 # the tap point is read from.
 foreign_copy() {   # <alphanumeric text>
-    local attempt
-    for attempt in 1 2; do
+    for _ in 1 2; do
         foreign_copy_once "$1" && return 0
     done
     return 1
