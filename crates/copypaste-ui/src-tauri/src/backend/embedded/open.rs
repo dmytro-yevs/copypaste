@@ -23,6 +23,7 @@ pub(super) struct Inner {
     /// does not depend on Tauri's plugin types, and so tests can substitute
     /// one — see `Clipboard`.
     pub(super) clipboard: Box<dyn Clipboard>,
+    pub(super) events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
 }
 
 impl Inner {
@@ -55,13 +56,16 @@ impl EmbeddedBackend {
     /// from `copypaste_ipc::data_dir()`, because on Android the right answer
     /// comes from the Android context and not from `directories`.
     pub fn open(data_dir: &Path, clipboard: Box<dyn Clipboard>) -> Result<Self> {
-        Ok(Self {
-            inner: Arc::new(Inner {
-                state: BackendState::open(data_dir)?,
-                node: OnceCell::new(),
-                clipboard,
-            }),
-        })
+        let (events, _) = tokio::sync::broadcast::channel(64);
+        let inner = Arc::new(Inner {
+            state: BackendState::open(data_dir)?,
+            node: OnceCell::new(),
+            clipboard,
+            events,
+        });
+        super::retention::sweep(&inner);
+        super::retention::start(&inner);
+        Ok(Self { inner })
     }
 
     /// The peer node, started on first use.
