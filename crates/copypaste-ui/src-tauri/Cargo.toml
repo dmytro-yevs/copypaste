@@ -14,6 +14,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Asked only for the Android C compiler's identity, so build.rs can name the
+# compiler-rt archive rather than re-deriving cc's CC_<triple>/TARGET_CC order
+# (CLAUDE.md rule 1). Adds no package: openssl-src and ring resolve it already.
+cc = "1"
 
 [dependencies]
 # The ONE model of the wire contract, shared with the daemon and the CLI. Both
