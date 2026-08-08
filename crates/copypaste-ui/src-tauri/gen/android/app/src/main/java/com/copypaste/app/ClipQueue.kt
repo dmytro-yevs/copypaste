@@ -23,6 +23,7 @@ object ClipQueue {
 
     private val queue = ArrayDeque<Clip>(CAPACITY)
     private var dropped = 0L
+    private var privateMode = false
 
     /** Set by [CapturePlugin.load]; false means nothing is draining this yet. */
     @Volatile
@@ -43,12 +44,24 @@ object ClipQueue {
         sourceAppBundleId: String? = null,
         sourceAppName: String? = null,
     ) {
-        if (text.isBlank()) return
+        if (privateMode || text.isBlank()) return
         queue.addLast(Clip(text, source, System.currentTimeMillis(), sourceAppBundleId, sourceAppName))
         while (queue.size > CAPACITY) {
             queue.removeFirst()
             dropped++
         }
+    }
+
+    @Synchronized
+    fun setPrivateMode(enabled: Boolean) {
+        if (!enabled) {
+            privateMode = false
+            return
+        }
+
+        privateMode = true
+        queue.clear()
+        dropped = 0
     }
 
     /** Everything captured since the last call, oldest first. */
