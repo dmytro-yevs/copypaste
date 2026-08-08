@@ -2,15 +2,11 @@ export const devices = {
   title: "Devices",
 
   pairing: {
-    action: "Pair device",
     createAction: "Show code",
     joinAction: "Join device",
     title: "Pair a device",
-    intro: "Pair devices only when you can verify the security code on both screens.",
     create: "Show a code",
-    createHint: "Display a QR code and a pairing code for the other device.",
     join: "Join with a code",
-    joinHint: "Scan a QR code on Android, or paste the code and address.",
     showTitle: "Scan this on the other device",
     showBody: "This pairing code is secret. It is shown once, so finish pairing before closing this window.",
     joinTitle: "Join another device",
