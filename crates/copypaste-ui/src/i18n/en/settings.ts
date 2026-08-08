@@ -124,6 +124,9 @@ export const settings = {
       none: "None",
       count: "{{n}} paired",
       manage: "Manage devices",
+      /** Said of peer sync, which the service could not answer for. It is not
+       *  the cloud row's badge, which is a standing fact about the build. */
+      unavailable: "Unavailable",
     },
     now: {
       title: "Sync now",
@@ -133,6 +136,8 @@ export const settings = {
     },
     cloud: {
       title: "Cloud sync",
+      description:
+        "Syncing through an account isn't in this build. Paired devices sync directly, without one.",
       badge: "Unavailable",
     },
   },
