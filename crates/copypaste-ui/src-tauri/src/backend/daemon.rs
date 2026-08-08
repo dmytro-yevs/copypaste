@@ -1,10 +1,10 @@
 //! The desktop backend: IPC to the running daemon over the local endpoint
 //! [`copypaste_ipc::transport`] names — a `0600` Unix socket today.
 //!
-//! Deliberately thin. It owns no state, caches nothing and retries nothing —
-//! React Query does all three on the frontend, and a second policy here could
-//! only disagree with it. Every call is one connection, one newline-delimited
-//! JSON request, one typed reply.
+//! Deliberately thin. It owns only its resolved endpoint, caches nothing and
+//! retries nothing — React Query does both on the frontend, and a second policy
+//! here could only disagree with it. Every call is one connection, one
+//! newline-delimited JSON request, one typed reply.
 //!
 //! Three things it does not do, on purpose:
 //!
@@ -26,7 +26,7 @@
 //! Connecting per call makes "the daemon went away" the same code path as "the
 //! daemon was never there", which is also what the user sees.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use copypaste_ipc::transport;
@@ -45,20 +45,34 @@ use super::{Backend, BackendError, Page, Result};
 /// so a reply can be matched to its request.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Talks to the daemon. Holds nothing, so it is trivially `Send + Sync`.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DaemonBackend;
+#[derive(Debug, Clone)]
+pub struct DaemonBackend {
+    endpoint: PathBuf,
+}
+
+impl Default for DaemonBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl DaemonBackend {
     pub fn new() -> Self {
-        Self
+        Self {
+            endpoint: socket_path(),
+        }
+    }
+
+    #[cfg(test)]
+    fn at_endpoint(endpoint: PathBuf) -> Self {
+        Self { endpoint }
     }
 
     /// Send one request and return its payload.
     async fn call(&self, method: Method) -> Result<Option<ResponseData>> {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
-        let stream = transport::connect(&socket_path())
+        let stream = transport::connect(&self.endpoint)
             .await
             .map_err(|_| BackendError::Unreachable)?;
         let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
@@ -410,7 +424,7 @@ impl Backend for DaemonBackend {
     /// owns it and ends when the receiver is dropped, which is what makes the
     /// lifetime the caller's rather than a background task's.
     async fn watch(&self) -> Result<Receiver<EventData>> {
-        let stream = transport::connect(&socket_path())
+        let stream = transport::connect(&self.endpoint)
             .await
             .map_err(|_| BackendError::Unreachable)?;
         let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
@@ -602,10 +616,10 @@ mod tests {
     /// returned content — while publishing a secret to the system pasteboard.
     #[tokio::test]
     async fn revealing_asks_for_the_item_and_never_puts_it_on_the_clipboard() {
-        // No daemon is listening here, so the assertion is about which request
-        // was built rather than about the reply: `Unreachable` proves it tried
-        // to send something, and the only send path `get` has is `Method::Get`.
-        let err = DaemonBackend::new().get("any-id").await.unwrap_err();
+        let dir = tempfile::tempdir().unwrap();
+        let backend = DaemonBackend::at_endpoint(dir.path().join("daemon.sock"));
+        // Keep the assertion independent of a live daemon on the user's endpoint.
+        let err = backend.get("any-id").await.unwrap_err();
         assert!(matches!(err, BackendError::Unreachable), "{err:?}");
 
         let method = serde_json::to_string(&Method::Get { id: "x".into() }).unwrap();
@@ -619,7 +633,10 @@ mod tests {
     /// daemon is listening to answer.
     #[tokio::test]
     async fn reordering_sends_one_request_carrying_the_whole_ordering() {
-        let err = DaemonBackend::new()
+        let dir = tempfile::tempdir().unwrap();
+        let backend = DaemonBackend::at_endpoint(dir.path().join("daemon.sock"));
+        // Keep the assertion independent of a live daemon on the user's endpoint.
+        let err = backend
             .reorder_pinned(&["a".into(), "b".into()])
             .await
             .unwrap_err();
