@@ -18,31 +18,24 @@ export interface RowBox {
  * reserved is visible to the assertions.
  */
 export async function rowBoxes(browser: Browser): Promise<RowBox[]> {
-  return (await browser.execute(function (selector: string) {
-    return Array.prototype.map.call(
-      document.querySelectorAll(selector),
-      function (node) {
-        const el = node as HTMLElement;
-        const rect = el.getBoundingClientRect();
-        const match = /translateY\(([-0-9.]+)px\)/.exec(el.style.transform);
-        return {
-          id: el.id.replace(/^history-row-/, ""),
-          start: match && match[1] !== undefined ? parseFloat(match[1]) : NaN,
-          height: rect.height,
-          active: el.getAttribute("aria-current") === "true",
-          text: el.innerText,
-        };
-      },
-    );
-  }, ROW)) as RowBox[];
+  return (await listSnapshot(browser)).rows;
 }
 
-export async function scroller(browser: Browser): Promise<{
+export interface ScrollBox {
   scrollTop: number;
   scrollHeight: number;
   clientHeight: number;
+  /** The virtualiser's spacer, i.e. the height it reserves for the whole list. */
   totalSize: number;
-}> {
+}
+
+export interface ListSnapshot extends ScrollBox {
+  rows: RowBox[];
+  /** Rendering opportunities since the first snapshot of this session. */
+  frame: number;
+}
+
+export async function scroller(browser: Browser): Promise<ScrollBox> {
   return (await browser.execute(function (selector: string) {
     const el = document.querySelector(selector) as HTMLElement;
     return {
@@ -53,12 +46,122 @@ export async function scroller(browser: Browser): Promise<{
         ? el.firstElementChild.getBoundingClientRect().height
         : NaN,
     };
-  }, HISTORY_LIST)) as {
-    scrollTop: number;
-    scrollHeight: number;
-    clientHeight: number;
-    totalSize: number;
-  };
+  }, HISTORY_LIST)) as ScrollBox;
+}
+
+/**
+ * The scroll offset and the rendered row window from one evaluation, plus a
+ * count of the rendering opportunities the page has had.
+ *
+ * `scroller()` then `rowBoxes()` are two round trips and the list can commit a
+ * render between them, so the assertions would compare an offset and a row
+ * window that never coexisted. The frame counter is what `settledList` needs to
+ * tell "unchanged" apart from "not repainted yet".
+ */
+export async function listSnapshot(browser: Browser): Promise<ListSnapshot> {
+  return (await browser.execute(
+    function (listSelector: string, rowSelector: string) {
+      const win = window as unknown as { __cpFrames?: { n: number } };
+      if (!win.__cpFrames) {
+        const counter = { n: 0 };
+        win.__cpFrames = counter;
+        const tick = () => {
+          counter.n += 1;
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }
+      const el = document.querySelector(listSelector) as HTMLElement | null;
+      return {
+        frame: win.__cpFrames.n,
+        scrollTop: el ? el.scrollTop : NaN,
+        scrollHeight: el ? el.scrollHeight : NaN,
+        clientHeight: el ? el.clientHeight : NaN,
+        totalSize:
+          el && el.firstElementChild
+            ? el.firstElementChild.getBoundingClientRect().height
+            : NaN,
+        rows: Array.prototype.map.call(
+          document.querySelectorAll(rowSelector),
+          function (node) {
+            const row = node as HTMLElement;
+            const rect = row.getBoundingClientRect();
+            const match = /translateY\(([-0-9.]+)px\)/.exec(row.style.transform);
+            return {
+              id: row.id.replace(/^history-row-/, ""),
+              start: match && match[1] !== undefined ? parseFloat(match[1]) : NaN,
+              height: rect.height,
+              active: row.getAttribute("aria-current") === "true",
+              text: row.innerText,
+            };
+          },
+        ),
+      };
+    },
+    HISTORY_LIST,
+    ROW,
+  )) as ListSnapshot;
+}
+
+/** Geometry only. Row text carries a relative age that ticks on its own, so a
+ *  signature including it would never repeat and nothing would ever settle. */
+function signature(snapshot: ListSnapshot): string {
+  const rows = snapshot.rows
+    .map((row) => `${row.id}:${Math.round(row.start)}+${Math.round(row.height)}`)
+    .join(",");
+  return (
+    `${Math.round(snapshot.totalSize)}@${Math.round(snapshot.scrollTop)}` +
+    `/${Math.round(snapshot.scrollHeight)}x${Math.round(snapshot.clientHeight)}[${rows}]`
+  );
+}
+
+const FRAMES_AT_REST = 2;
+
+/**
+ * The first snapshot that satisfies `predicate` and has held its geometry
+ * across at least `FRAMES_AT_REST` rendering opportunities.
+ *
+ * The spacer takes its new height in the render that received the new items;
+ * the row window only moves once the engine has dispatched the scroll event
+ * the clamp produced and React has rendered again. Two equal samples do not
+ * prove that happened, two with frames between them do.
+ *
+ * The settle test is geometry and frames alone, so an assertion that fails
+ * after it fails every time.
+ */
+export async function settledList(
+  browser: Browser,
+  predicate: (snapshot: ListSnapshot) => boolean,
+  options: { describe: string; timeout?: number; interval?: number },
+): Promise<ListSnapshot> {
+  const { describe, timeout = 45_000, interval = 150 } = options;
+  const deadline = Date.now() + timeout;
+  const seen: string[] = [];
+  let previous: ListSnapshot | null = null;
+
+  for (;;) {
+    const snapshot = await listSnapshot(browser);
+    const current = signature(snapshot);
+    if (!seen[seen.length - 1]?.startsWith(current)) {
+      seen.push(`${current}f${snapshot.frame}`);
+    }
+    if (
+      predicate(snapshot) &&
+      previous !== null &&
+      signature(previous) === current &&
+      snapshot.frame - previous.frame >= FRAMES_AT_REST
+    ) {
+      return snapshot;
+    }
+    previous = snapshot;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `${describe}. Observed totalSize@scrollTop/scrollHeightxclientHeight` +
+          `[rows]frame, in order: ${seen.join(" ")}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval));
+  }
 }
 
 export async function scrollTo(browser: Browser, top: number): Promise<void> {
