@@ -19,10 +19,13 @@ now_ms() { python3 -c 'import time; print(time.time_ns() // 1000000)'; }
 cleanup() {
     [[ -n "$APP_PID" ]] && kill "$APP_PID" 2>/dev/null || true
     [[ -n "$STUB_PID" ]] && kill "$STUB_PID" 2>/dev/null || true
+    "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
 }
 
 launch_app() { # <unconfigured|configured>
     pkill -x CopyPaste 2>/dev/null || true
+    "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
+    pkill -f "$APP/Contents/MacOS/copypaste-daemon" 2>/dev/null || true
     if [[ "$1" == configured ]]; then
         COPYPASTE_CLOUD_URL="http://127.0.0.1:$STUB_PORT" \
         COPYPASTE_CLOUD_ANON_KEY="native-evidence" "$BINARY" > "$OUT/app-$1.log" 2>&1 &
