@@ -28,7 +28,7 @@
       "dmg"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.15",
+      "minimumSystemVersion": "14.0",
       "infoPlist": "Info.plist"
     }
   }
