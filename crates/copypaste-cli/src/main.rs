@@ -26,7 +26,6 @@ use copypaste_ipc::{ExportData, Method, Response};
 use error::CliError;
 use std::io::{IsTerminal, Read, Write};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -276,12 +275,7 @@ pub(crate) fn out(text: &str) {
     }
 }
 
-pub(crate) fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
+pub(crate) use copypaste_clock::now_ms;
 
 /// The content for `add`: the argument if given, otherwise stdin.
 fn read_content(text: Option<&str>) -> Result<String, CliError> {
