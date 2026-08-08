@@ -654,6 +654,16 @@ reject "android-ndk-env.sh fails when llvm-ranlib is absent" ./scripts/release/a
 reject "android-ndk-env.sh fails when the NDK is absent"     ./scripts/release/android-ndk-env.sh "$NDKDIR/nope"
 rm -rf "$NDKDIR"
 
+# The 32-bit x86 half. No CI job links i686 — the emulator workflow builds
+# x86_64 only — so losing this hook is invisible until a tag is pushed and
+# :app:rustBuildX86Release fails on undefined __atomic_load_8.
+if grep -q 'print-libgcc-file-name' crates/copypaste-ui/src-tauri/build.rs; then
+    ok "src-tauri/build.rs names the compiler-rt archive for android-x86"
+else
+    bad "src-tauri/build.rs names the compiler-rt archive for android-x86" \
+        "vendored OpenSSL's 64-bit atomics have no provider on i686-linux-android (ADR-0007)"
+fi
+
 if grep -q 'check-macos-linkage.sh' .github/workflows/release.yml; then
     ok "release.yml runs the macOS linkage check"
 else
