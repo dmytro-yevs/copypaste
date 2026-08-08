@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { RuntimeLogViewer } from "@/components/diagnostics/RuntimeLogViewer";
+import { en } from "@/i18n";
 import { withUser } from "@/test/harness";
 
 const getRuntimeLogEvents = vi.fn();
@@ -69,5 +70,24 @@ describe("RuntimeLogViewer", () => {
 
     await waitFor(() => expect(getRuntimeLogEvents).toHaveBeenLastCalledWith(expect.objectContaining({ cursor: "50", limit: 50 })));
     expect(screen.queryByText("Load older events")).toBeNull();
+  });
+
+  /** The viewer authored its own English, including a second copy of the
+   *  service's own failure sentence. */
+  it("reads its filters and its failure state from the catalogue", async () => {
+    getRuntimeLogEvents.mockRejectedValue(new Error("no log"));
+    withUser(<RuntimeLogViewer />);
+
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      en.runtimeLog.loadFailed,
+    );
+    for (const label of Object.values(en.runtimeLog.level)) {
+      if (label === en.runtimeLog.level.label) continue;
+      expect(screen.getByRole("option", { name: label })).not.toBeNull();
+    }
+    expect(
+      screen.getByRole("combobox", { name: en.runtimeLog.process.label }),
+    ).not.toBeNull();
   });
 });
