@@ -65,11 +65,18 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security_Cryptography",
 ] }
 
-# sha2's `asm` backend, for every target that can assemble it. The feature
-# pulls sha2-asm, whose sources are GNU `.S` files that cl.exe rejects, so
-# windows-msvc has to resolve sha2 without it. Feature unification carries this
-# to the rest of the workspace, exactly as the rusqlite tables around it do.
-[target.'cfg(not(windows))'.dependencies]
+# sha2's `asm` backend, aarch64 only — the one target where it buys anything:
+# it selects the ARMv8 crypto extensions, 56 SHA-2 instructions the soft
+# backend does not have. On x86 and x86_64 it replaces sha2's *fallback*
+# compress only; the SHA-NI path is sha2's own runtime-detected `x86` module and
+# never came from here. And on 32-bit x86 that fallback is not
+# position-independent, while Android links every .so with -fPIC:
+# `R_386_32 cannot be used against local symbol` from sha2-asm is what failed
+# :app:rustBuildX86Release and took the whole v2.0.0-alpha.5 release with it.
+# armv7 never had it — sha2 declares sha2-asm for aarch64, x86_64 and x86 only.
+# Windows stays out at any arch: sha2-asm's sources are GNU `.S` files cl.exe
+# rejects.
+[target.'cfg(all(target_arch = "aarch64", not(windows)))'.dependencies]
 sha2 = { workspace = true, features = ["asm"] }
 
 # macOS Keychain backend for the device secret. Target-gated, not feature-gated:
