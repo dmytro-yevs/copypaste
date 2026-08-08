@@ -27,7 +27,11 @@ import {
   POLL_INTERVAL_MIN_MS,
 } from "@/components/settings/serviceChoices";
 import { EVENT_CAPTURE_STATE, EVENT_CAPTURED } from "@/hooks/useCapture";
-import { EVENT_CHANGED, EVENT_PUSH_STATE } from "@/hooks/usePush";
+import {
+  EVENT_AUTOSTART_CHANGED,
+  EVENT_CHANGED,
+  EVENT_PUSH_STATE,
+} from "@/hooks/usePush";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import { PAGE_SIZE, SEARCH_LIMIT } from "@/lib/layout";
 import { DEFAULT_SHORTCUT } from "@/lib/accelerator";
@@ -43,6 +47,7 @@ const P2P_PEERS = "copypaste-p2p/src/peers/mod.rs";
 const PUSH = "copypaste-ui/src-tauri/src/service/push.rs";
 const INTAKE = "copypaste-ui/src-tauri/src/capture/intake.rs";
 const SHORTCUT = "copypaste-ui/src-tauri/src/shell/shortcut.rs";
+const AUTOSTART = "copypaste-ui/src-tauri/src/shell/autostart.rs";
 
 function rust(file: string): string {
   return readFileSync(path.join(CRATES, file), "utf8");
@@ -104,6 +109,12 @@ describe("event names the frontend listens for", () => {
     expect(rustEvents(INTAKE)).toEqual({
       EVENT_CAPTURED,
       EVENT_CAPTURE_STATE,
+    });
+  });
+
+  test(`${AUTOSTART} emits what usePush subscribes to`, () => {
+    expect(rustEvents(AUTOSTART)).toEqual({
+      EVENT_CHANGED: EVENT_AUTOSTART_CHANGED,
     });
   });
 });
