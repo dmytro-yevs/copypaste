@@ -3,7 +3,7 @@
 //! Two sources, in order:
 //!
 //! 1. `COPYPASTE_DAEMON_BIN`, a development and test seam.
-//! 2. A file named `copypaste-daemon` beside our own executable.
+//! 2. `copypaste-daemon` beside our own executable.
 //!
 //! **`PATH` is deliberately not searched.** A clipboard manager that starts the
 //! first `copypaste-daemon` it can find on `PATH` will happily start one a
@@ -17,12 +17,20 @@ use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-/// The file name the release script injects into `Contents/MacOS`.
-const DAEMON_FILE: &str = "copypaste-daemon";
+/// The name the release script injects beside the app executable.
+const DAEMON_STEM: &str = "copypaste-daemon";
 
 /// Overrides the search. For `npm run tauri dev`, the demo scripts and tests,
 /// none of which run from inside a bundle.
 const ENV_OVERRIDE: &str = "COPYPASTE_DAEMON_BIN";
+
+/// `Command::new` appends `.exe` on Windows; `Path::is_file` does not. Probing
+/// the bare stem therefore answers "nothing to start" beside an installed
+/// `copypaste-daemon.exe`, and the UI renders that as `NotInstalled` — an offer
+/// to install a service that is already there.
+fn daemon_file_name() -> String {
+    format!("{DAEMON_STEM}{}", env::consts::EXE_SUFFIX)
+}
 
 /// The daemon binary to start, or `None` when this build has none.
 ///
@@ -45,7 +53,7 @@ pub fn daemon_binary() -> Option<PathBuf> {
 fn resolve(explicit: Option<OsString>, beside: Option<&Path>) -> Option<PathBuf> {
     let candidate = match explicit {
         Some(path) => PathBuf::from(path),
-        None => beside?.join(DAEMON_FILE),
+        None => beside?.join(daemon_file_name()),
     };
     candidate.is_file().then_some(candidate)
 }
@@ -59,7 +67,7 @@ mod tests {
     fn the_override_resolves_only_a_real_file() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("nope");
-        let present = dir.path().join(DAEMON_FILE);
+        let present = dir.path().join(daemon_file_name());
         let as_dir = dir.path().join("daemon-dir");
         fs::write(&present, b"#!/bin/sh\n").unwrap();
         fs::create_dir(&as_dir).unwrap();
@@ -78,13 +86,17 @@ mod tests {
         assert_eq!(resolve(Some(present.clone().into()), None), Some(present));
     }
 
+    /// The sibling is probed under the name this platform actually installs.
+    /// Windows installs `copypaste-daemon.exe`, and probing the bare stem there
+    /// reports an installed service as `NotInstalled`.
     #[test]
-    fn the_sibling_resolves_only_once_the_binary_is_beside_us() {
+    fn the_sibling_probe_uses_the_platform_executable_name() {
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(resolve(None, Some(dir.path())), None);
 
-        let daemon = dir.path().join(DAEMON_FILE);
+        let daemon = dir.path().join(daemon_file_name());
         fs::write(&daemon, b"").unwrap();
         assert_eq!(resolve(None, Some(dir.path())), Some(daemon));
+        assert_eq!(daemon_file_name().ends_with(".exe"), cfg!(windows));
     }
 }
