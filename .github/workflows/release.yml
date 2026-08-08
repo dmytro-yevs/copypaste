@@ -780,8 +780,9 @@ jobs:
           npm run check:native-parity --
           --require macos,android
           --commit ${{ github.sha }}
+          --run-id ${{ github.run_id }}
           --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json
-          --evidence ${{ github.workspace }}/artifacts/native-parity/android/native-evidence.json
+          --evidence ${{ github.workspace }}/artifacts/native-parity/android/release-android-hardware/native-evidence.json
 
   # ---------------------------------------------------------------------------
   # Generate the cask and the formula from the artefacts that were actually

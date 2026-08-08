@@ -55,9 +55,14 @@ record(
 
 gate_commands = "\n".join(str(step.get("run") or "") for step in steps(gate))
 record(
-    "--require macos,android" in gate_commands and gate_commands.count("native-evidence.json") == 2,
+    "--require macos,android" in gate_commands
+    and "--run-id ${{ github.run_id }}" in gate_commands
+    and "artifacts/native-parity/macos/native-evidence.json" in gate_commands
+    and "artifacts/native-parity/android/release-android-hardware/native-evidence.json"
+    in gate_commands
+    and gate_commands.count("native-evidence.json") == 2,
     "release gate requires exactly the two native receipts",
-    "expected --require macos,android and two receipt arguments",
+    "expected the platform set, workflow run ID, and exact macOS and Android receipt paths",
 )
 
 hardware_uploads = [
@@ -83,9 +88,10 @@ record(
 )
 record(
     "inputs.windows_evidence" in str(windows.get("if") or "")
-    and "--require windows" in windows_commands,
+    and "--require windows" in windows_commands
+    and "--run-id ${{ github.run_id }}" in windows_commands,
     "requested Windows evidence runs its own receipt gate",
-    "the Windows job is not conditional or does not validate its receipt",
+    "the Windows job is not conditional or does not validate its run-bound receipt",
 )
 
 for script in ("macos-native-evidence.sh", "android-smoke-release.sh"):

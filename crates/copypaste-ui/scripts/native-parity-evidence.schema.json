@@ -28,7 +28,10 @@
       "required": ["commit", "run_id"],
       "properties": {
         "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-        "run_id": { "type": "string", "minLength": 1, "maxLength": 120 }
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$"
+        }
       }
     },
     "scenario": {
@@ -36,7 +39,9 @@
       "additionalProperties": false,
       "required": ["name", "elapsed_ms", "budget_ms"],
       "properties": {
-        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "name": {
+          "enum": ["native-launch", "release-webview-ready", "windows-native-contracts"]
+        },
         "elapsed_ms": { "type": "integer", "minimum": 0 },
         "budget_ms": { "type": "integer", "minimum": 1 }
       }
@@ -45,7 +50,17 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "type": "string", "minLength": 1, "maxLength": 160 }
+      "items": {
+        "enum": [
+          "installed app launched",
+          "native accessibility tree is non-empty",
+          "signed release app launched",
+          "WebView accessibility content painted",
+          "release smoke assertions passed",
+          "named-pipe contract passed",
+          "DPAPI round-trip passed"
+        ]
+      }
     },
     "artifacts": {
       "type": "array",
@@ -68,12 +83,89 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 240,
-            "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
           },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
           "bytes": { "type": "integer", "minimum": 1 }
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "type": "object", "properties": { "platform": { "const": "macos" } } },
+      "then": {
+        "type": "object",
+        "properties": {
+          "environment": { "const": "hosted-runner" },
+          "scenario": {
+            "type": "object",
+            "properties": {
+              "name": { "const": "native-launch" },
+              "budget_ms": { "const": 3000 }
+            }
+          },
+          "assertions": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              { "contains": { "const": "installed app launched" } },
+              { "contains": { "const": "native accessibility tree is non-empty" } }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "type": "object", "properties": { "platform": { "const": "android" } } },
+      "then": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "type": "object",
+            "properties": {
+              "name": { "const": "release-webview-ready" },
+              "budget_ms": { "const": 115000 }
+            }
+          },
+          "assertions": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "allOf": [
+              { "contains": { "const": "signed release app launched" } },
+              { "contains": { "const": "WebView accessibility content painted" } },
+              { "contains": { "const": "release smoke assertions passed" } }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": { "type": "object", "properties": { "platform": { "const": "windows" } } },
+      "then": {
+        "type": "object",
+        "properties": {
+          "environment": { "const": "hosted-runner" },
+          "scenario": {
+            "type": "object",
+            "properties": {
+              "name": { "const": "windows-native-contracts" },
+              "budget_ms": { "const": 900000 }
+            }
+          },
+          "assertions": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "allOf": [
+              { "contains": { "const": "named-pipe contract passed" } },
+              { "contains": { "const": "DPAPI round-trip passed" } }
+            ]
+          }
+        }
+      }
+    }
+  ]
 }
