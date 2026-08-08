@@ -17,7 +17,7 @@
 //! into a *new* value and the live one is replaced only on success, so a
 //! rejected `set_config` leaves the daemon running exactly as it was.
 
-use std::sync::{RwLock, RwLockReadGuard};
+use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
 use copypaste_ipc::{ConfigData, ConfigError, ConfigPatch};
 use tracing::warn;
@@ -36,6 +36,7 @@ const KEY_SETTINGS: &str = "settings";
 #[derive(Debug)]
 pub struct Settings {
     current: RwLock<ConfigData>,
+    applying: Mutex<()>,
 }
 
 impl Settings {
@@ -67,6 +68,7 @@ impl Settings {
         };
         Self {
             current: RwLock::new(stored.unwrap_or_default()),
+            applying: Mutex::new(()),
         }
     }
 
@@ -74,6 +76,7 @@ impl Settings {
     pub fn defaults() -> Self {
         Self {
             current: RwLock::new(ConfigData::default()),
+            applying: Mutex::new(()),
         }
     }
 
@@ -93,19 +96,20 @@ impl Settings {
     /// Persisting before publishing is deliberate: a value the daemon is acting
     /// on but did not manage to write would come back as its old self at the
     /// next start, which is the more confusing of the two failures.
-    /// One write lock spans all four steps. Reading the current value under a
-    /// separate read lock let two overlapping patches see the same "before",
-    /// so the second write erased the field the first had set — a patch that
-    /// silently loses the other patch's change is the one thing patches exist
-    /// to prevent. `meta.set_state` runs under the lock as a result; settings
-    /// writes are rare and readers only ever block behind one of them.
+    ///
+    /// `applying` serialises the read-modify-write, not the write lock. Two
+    /// overlapping patches once read the same "before" and the second erased
+    /// the field the first had set — the one thing patches exist to prevent —
+    /// but a write lock spanning `meta.set_state` puts a SQLCipher write
+    /// (5 s `busy_timeout`, 10 s pool wait) inside it, and `capture::run`
+    /// reads that lock on the reactor thread. F-LOCK-1, ADR-0016.
     pub fn apply(&self, meta: &Meta, patch: &ConfigPatch) -> Result<ConfigData, SettingsError> {
-        let mut current = self
-            .current
-            .write()
+        let _serialised = self
+            .applying
+            .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        let next = patch.apply(&current)?;
+        let next = patch.apply(&self.get())?;
 
         let encoded = serde_json::to_string(&next).map_err(|e| {
             warn!(error = %e, "settings could not be encoded");
@@ -113,6 +117,10 @@ impl Settings {
         })?;
         meta.set_state(KEY_SETTINGS, &encoded)?;
 
+        let mut current = self
+            .current
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *current = next.clone();
         Ok(next)
     }
@@ -136,6 +144,9 @@ impl From<MetaError> for SettingsError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
     use super::*;
     use crate::testutil::test_state;
 
@@ -211,6 +222,101 @@ mod tests {
             ConfigData::default().history_limit,
             "a rejected patch applied one of its fields"
         );
+    }
+
+    /// F-LOCK-1. A reader holds the lock for the whole of this test; before the
+    /// fix `apply` blocked on `current.write()` and never reached the database,
+    /// so the persisted record stayed on the old value until the guard dropped.
+    #[test]
+    fn the_database_write_happens_outside_the_settings_lock() {
+        let (state, _dir) = test_state("alpha");
+        let held = state.settings.get();
+
+        let writer = {
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || {
+                state.settings.apply(
+                    &state.meta,
+                    &ConfigPatch {
+                        poll_interval_ms: Some(250),
+                        ..Default::default()
+                    },
+                )
+            })
+        };
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut persisted = false;
+        while Instant::now() < deadline {
+            // Never `expect` in this loop: a panic before `drop(held)` parks
+            // the writer on the swap and the join below never returns.
+            let stored = state.meta.state(KEY_SETTINGS).ok().flatten();
+            if stored.is_some_and(|raw| raw.contains("\"poll_interval_ms\":250")) {
+                persisted = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Before the assertion, or a failure deadlocks on the join below.
+        drop(held);
+        writer
+            .join()
+            .expect("the writer thread")
+            .expect("a valid patch");
+
+        assert!(persisted, "the settings write ran inside the read lock");
+    }
+
+    /// The defect the serialising mutex inherited from the write lock: two
+    /// patches that read the same "before" lose one of the two changes.
+    #[test]
+    fn overlapping_patches_do_not_lose_each_others_fields() {
+        let (state, _dir) = test_state("alpha");
+
+        let patches = [
+            ConfigPatch {
+                poll_interval_ms: Some(250),
+                ..Default::default()
+            },
+            ConfigPatch {
+                history_limit: Some(500),
+                ..Default::default()
+            },
+            ConfigPatch {
+                sound_on_copy: Some(true),
+                ..Default::default()
+            },
+            ConfigPatch {
+                notify_on_copy: Some(true),
+                ..Default::default()
+            },
+        ];
+
+        let writers: Vec<_> = patches
+            .into_iter()
+            .map(|patch| {
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || state.settings.apply(&state.meta, &patch))
+            })
+            .collect();
+        for writer in writers {
+            writer
+                .join()
+                .expect("a writer thread")
+                .expect("a valid patch");
+        }
+
+        let current = state.settings.get();
+        assert_eq!(current.poll_interval_ms, 250);
+        assert_eq!(current.history_limit, 500);
+        assert!(current.sound_on_copy);
+        assert!(current.notify_on_copy);
+
+        // And the record on disk is the same value, not the last writer's view
+        // of a "before" somebody else had already moved.
+        let stored: ConfigData =
+            serde_json::from_str(&state.meta.state(KEY_SETTINGS).unwrap().unwrap()).unwrap();
+        assert_eq!(stored, *current);
     }
 
     #[test]
