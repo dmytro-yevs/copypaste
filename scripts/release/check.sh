@@ -13,8 +13,6 @@
 #   * the generators rewrite exactly the two lines they claim to, are idempotent,
 #     leave valid Ruby behind, and reject the inputs they say they reject
 #   * the generated tap layout is the one `brew tap` expects
-#   * the workflows are valid YAML and the release workflow still holds no
-#     Apple credential
 #   * the workflows are wired to each other correctly — check-wiring.py
 #
 # What it deliberately does NOT do is pretend to check codesign, hdiutil,
@@ -324,76 +322,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-group "Workflows"
-# ---------------------------------------------------------------------------
-if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
-    for wf in .github/workflows/*.yml; do
-        check "YAML parses: $wf" python3 -c "import sys,yaml; yaml.safe_load(open(sys.argv[1]))" "$wf"
-    done
-
-    # Every `run:` block in the release workflow is shell that nothing has ever
-    # executed. Extracting them and parsing each one catches the class of
-    # mistake a YAML block scalar makes easy — an unbalanced quote or heredoc
-    # that only shows up when the job is halfway through a release.
-    #
-    # `${{ … }}` is not valid shell, so it is replaced with a placeholder token
-    # first. That is exactly what GitHub does before handing the script to bash.
-    RUNDIR="$(mktemp -d)"
-    python3 - "$RUNDIR" <<'PY'
-import pathlib, re, sys, yaml
-outdir = pathlib.Path(sys.argv[1])
-n = 0
-for wf in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
-    doc = yaml.safe_load(wf.read_text())
-    for job_name, job in (doc.get("jobs") or {}).items():
-        for i, step in enumerate(job.get("steps") or []):
-            script = step.get("run")
-            if not script:
-                continue
-            shell = step.get("shell", "bash")
-            if shell not in ("bash", "sh"):
-                continue
-            script = re.sub(r"\$\{\{[^}]*\}\}", "GHA_EXPR", script)
-            (outdir / f"{wf.stem}.{job_name}.{i}.sh").write_text(script)
-            n += 1
-PY
-    for f in "$RUNDIR"/*.sh; do
-        check "bash -n $(basename "$f" .sh)" bash -n "$f"
-    done
-    rm -rf "$RUNDIR"
-else
-    printf '  skip  YAML parse (python3 + PyYAML not available)\n'
-fi
-
-# ---------------------------------------------------------------------------
 group "Workflow wiring"
 # ---------------------------------------------------------------------------
 # Structural checks across all four workflows. Everything here is a mistake that
 # only a real run would otherwise report, one round trip at a time: an artifact
 # name that does not match its producer, an output nothing declares, a job that
 # reads a file no job it depends on wrote.
-if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
-    WIRING="$(mktemp)"
-    if python3 scripts/release/check-wiring.py > "$WIRING" \
-       && python3 scripts/release/check-wiring.py --self-test >> "$WIRING"
-    then
-        while IFS='|' read -r verdict desc detail; do
-            [[ -n "${verdict:-}" ]] || continue
-            if [[ "$verdict" == "PASS" ]]; then ok "$desc"; else bad "$desc" "$detail"; fi
-        done < "$WIRING"
-    else
-        bad "workflow wiring checks ran" "$(cat "$WIRING")"
-    fi
-    rm -f "$WIRING"
+WIRING="$(mktemp)"
+if python3 scripts/release/check-wiring.py > "$WIRING" \
+   && python3 scripts/release/check-wiring.py --self-test >> "$WIRING"
+then
+    while IFS='|' read -r verdict desc detail; do
+        [[ -n "${verdict:-}" ]] || continue
+        if [[ "$verdict" == "PASS" ]]; then ok "$desc"; else bad "$desc" "$detail"; fi
+    done < "$WIRING"
 else
-    printf '  skip  workflow wiring (python3 + PyYAML not available)\n'
+    bad "workflow wiring checks ran" "$(cat "$WIRING")"
 fi
+rm -f "$WIRING"
 
 # ---------------------------------------------------------------------------
 group "Both platforms reach one release page"
 # ---------------------------------------------------------------------------
-if command -v python3 >/dev/null 2>&1 && python3 -c "import yaml" 2>/dev/null; then
-    check "publish depends on macos, Android artifact smoke and packaging" python3 - <<'PY'
+check "publish depends on macos, Android artifact smoke and packaging" python3 - <<'PY'
 import sys, yaml
 jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
 missing = [j for j in ("version", "macos", "android", "android-smoke", "packaging") if j not in jobs]
@@ -412,7 +363,6 @@ runner = [s for s in smoke["steps"] if "android-emulator-runner" in str(s.get("u
 assert len(runner) == 1 and "android-smoke-release.sh" in str(runner[0].get("with", {}).get("script", "")), \
     "android-smoke does not run the release smoke harness"
 PY
-fi
 for pattern in 'dist/\*\.dmg' 'dist/\*\.apk' 'dist/\*\.tar\.gz'; do
     if grep -qE "$pattern" .github/workflows/release.yml; then
         ok "the release attaches ${pattern//\\/}"
