@@ -55,7 +55,7 @@ export const settings = {
     },
     translucency: {
       title: "Translucency",
-      description: "Controls how much of the macOS window shows through.",
+      description: "Controls how much of the window background shows through.",
     },
   },
 
