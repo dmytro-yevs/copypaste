@@ -310,6 +310,15 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+group "Native shell evidence (ENFORCED)"
+# ---------------------------------------------------------------------------
+if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native; then
+    ok "the installed app produced native accessibility, screenshot, and latency evidence"
+else
+    bad "the installed app produced native accessibility, screenshot, and latency evidence"
+fi
+
+# ---------------------------------------------------------------------------
 printf '\n%s\n' "-----------------------------------------------"
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"
 if [[ "${#NOTES[@]}" -gt 0 ]]; then

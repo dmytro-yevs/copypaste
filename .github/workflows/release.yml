@@ -279,9 +279,6 @@ jobs:
           set -euo pipefail
           ./scripts/release/smoke-macos-dmg.sh "${{ needs.version.outputs.version }}" arm64
 
-      - name: Capture required macOS native evidence
-        run: ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-macos-native-evidence

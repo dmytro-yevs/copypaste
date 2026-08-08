@@ -117,7 +117,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Keyboard navigation, focus, accessibility tree (the 15 A11Y rules) | Browser (WebKitGTK) | Verified as DOM and ARIA |
 | i18n: no catalogue key reaches the screen | Rust, Browser (WebKitGTK) | Verified |
 | Design tokens and contrast | `ci.yml` → `design tokens` | Verified |
-| The app renders on WKWebView | macOS | **NOT VERIFIED IN CI** — the tag-only smoke observes a `WebContent` process, nothing more |
+| The app renders on WKWebView | macOS | **NOT VERIFIED IN CI** — the tag-only smoke now requires native accessibility, screenshot and latency evidence, but no recovered run establishes it yet |
 | The app renders on the Android WebView | Android | Verified — both APK legs fail unless the screen is awake and uiautomator reports named WebView content |
 | Anything about the Android UI beyond a painted screen | Android | **NOT VERIFIED IN CI** |
 | VoiceOver and TalkBack | macOS, Android | **NOT VERIFIED IN CI** — no screen reader is driven anywhere |

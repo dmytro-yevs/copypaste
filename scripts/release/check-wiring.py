@@ -65,6 +65,10 @@ rec("real-supabase.sh" in gate_body,
 rec("supabase-gate" in closure(release_jobs, "publish"),
     "release.yml blocks publish on the real-Supabase gate")
 
+macos_smoke = pathlib.Path("scripts/release/smoke-macos-dmg.sh").read_text()
+rec("macos-native-evidence.sh artifacts/release-macos-native" in macos_smoke,
+    "macOS smoke captures native evidence before removing the installed app")
+
 ci_jobs = docs["ci.yml"].get("jobs") or {}
 documentation = ci_jobs.get("documentation") or {}
 documentation_body = "\n".join(step.get("run") or "" for step in steps(documentation))
