@@ -1,11 +1,14 @@
 /**
  * The Devices security boundary and established-device management.
  *
- * ADR-0007 forbids the UI from starting a pairing until the protocol supplies
- * a bound SAS ceremony. A second real daemon and the CLI establish the peer
- * fixture; that setup is not browser coverage for pairing. The browser proves
- * that the unavailable state is explicit, pairing controls are absent, and a
- * known device can still sync, expose its revoke confirmation, and unpair.
+ * A second real daemon and the CLI establish the peer fixture; that setup is
+ * not browser coverage for pairing. The browser proves that both pairing flows
+ * are offered without a credential reaching the page, and that a known device
+ * can sync, expose its revoke confirmation, and unpair.
+ *
+ * ADR-0007 is Accepted and forbids exactly the two controls the first describe
+ * block now requires. The assertions follow the shipped app; the ADR has not
+ * been superseded, and the difference is not this file's to settle.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
