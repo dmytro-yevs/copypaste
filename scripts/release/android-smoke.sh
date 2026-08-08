@@ -182,8 +182,13 @@ assert_painted "$PAINT_TIMEOUT" "$launched_at" "$OUT/ui-launch1.xml" "$OUT/launc
 # The precondition for e2e-android/, which drives this WebView over CDP. It is
 # asserted here so that a build whose devtools were compiled out fails saying
 # so, instead of the harness timing out on a connection and reading as a UI
-# that never came up. The release leg asserts the opposite, and that is the
-# security property: see android-smoke-release.sh.
+# that never came up.
+#
+# It is that and nothing more. On the `userdebug` emulator images both
+# workflows use, the WebView provider publishes this socket for every process,
+# so its presence here is not evidence that wry enabled it. The security
+# property lives in android-smoke-release.sh, and it is asserted against the
+# APK rather than against a socket.
 unix_sockets="$(sh_ cat /proc/net/unix)"
 webview_socket="$(devtools_sockets "$unix_sockets" "$pid_now")"
 if [[ -n "$webview_socket" ]]; then

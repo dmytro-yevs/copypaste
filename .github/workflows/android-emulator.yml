@@ -26,8 +26,8 @@ name: Android emulator
 # blocks here, so check.sh can parse them, shellcheck them, and run their
 # --self-test — which proves the detectors fail when they should.
 # The debug leg also drives the app's WebView over CDP through `e2e-android/`.
-# The release leg asserts that the debugger socket is absent from the APK
-# people install.
+# The release leg proves the APK carries no call that can enable WebView
+# debugging; userdebug endpoint behavior is checked separately.
 #
 # What this cannot do is exercise rung 2: Shizuku needs a wireless-debugging
 # pairing performed by hand and cannot be granted on a stock emulator. The

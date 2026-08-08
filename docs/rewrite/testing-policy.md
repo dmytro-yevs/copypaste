@@ -30,8 +30,9 @@ assertion never satisfies a UI requirement.
 
 `e2e-android/` attaches to the debug APK's WebView over the Chrome DevTools
 Protocol. It can assert the document, layout and keyboard input, but not pixels,
-TalkBack or native Android surfaces. The release smoke asserts the inverse
-security property: the APK people install publishes no debugger socket.
+TalkBack or native Android surfaces. The release smoke scans the shipped APK's
+native libraries and fails if wry's debugger-enabling call is present. A
+userdebug emulator may still expose CDP independently of the APK.
 
 ## What triggers what
 
@@ -179,7 +180,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | A sensitive item is absent from the Android document | Android | Verified — the harness checks `outerHTML` and every live input value |
 | No filesystem path in any Android accessible string (INV-12) | Android | Verified — the harness sweeps text and naming attributes |
 | Android UI beyond mount, navigation, typing and the two disclosure sweeps | Android | **NOT VERIFIED IN CI** — CDP sees no pixels, TalkBack or native surface |
-| The release APK exposes no WebView debugger | Android | Verified — release smoke rejects the app process's devtools socket |
+| The release APK cannot enable WebView debugging | Android | Verified — release smoke rejects wry's debugger call and fails closed if its neighbouring JNI markers are absent |
 | VoiceOver and TalkBack | macOS, Android | **NOT VERIFIED IN CI** — no screen reader is driven anywhere |
 
 ### Native shell
