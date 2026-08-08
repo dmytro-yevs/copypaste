@@ -749,8 +749,39 @@ jobs:
           path: |
             artifacts/release-android-hardware
             artifacts/release-android-hardware-storage
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
+
+  native-parity:
+    name: Gate publication on native evidence
+    needs: [version, macos, android-hardware]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-macos-native-evidence
+          path: artifacts/native-parity/macos
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-android-hardware-evidence
+          path: artifacts/native-parity/android
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - run: npm ci
+        working-directory: crates/copypaste-ui
+      - name: Validate release-native parity
+        working-directory: crates/copypaste-ui
+        run: >-
+          npm run check:native-parity --
+          --require macos,android
+          --commit ${{ github.sha }}
+          --evidence ${{ github.workspace }}/artifacts/native-parity/macos/native-evidence.json
+          --evidence ${{ github.workspace }}/artifacts/native-parity/android/native-evidence.json
 
   # ---------------------------------------------------------------------------
   # Generate the cask and the formula from the artefacts that were actually
@@ -807,7 +838,7 @@ jobs:
     # android is a hard dependency, not a nice-to-have: ADR-0006 says one
     # release page serves both platforms, and a page that silently serves one is
     # worse than a failed run.
-    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-hardware, packaging]
+    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-hardware, native-parity, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:

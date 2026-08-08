@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://copypaste.invalid/native-parity-evidence.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "platform",
+    "environment",
+    "os_version",
+    "architecture",
+    "source",
+    "scenario",
+    "assertions",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "platform": { "enum": ["macos", "android", "windows"] },
+    "environment": {
+      "enum": ["hosted-runner", "emulator", "physical-device"]
+    },
+    "os_version": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "architecture": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "run_id"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "elapsed_ms", "budget_ms"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "elapsed_ms": { "type": "integer", "minimum": 0 },
+        "budget_ms": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 160 }
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path", "sha256", "bytes"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "screenshot",
+              "accessibility",
+              "measurement",
+              "test-log",
+              "diagnostic-log"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$"
+          },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "bytes": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

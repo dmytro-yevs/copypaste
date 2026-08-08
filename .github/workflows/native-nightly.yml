@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
+    inputs:
+      windows_evidence:
+        description: "Run the Windows native contract evidence gate"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -47,3 +53,85 @@ jobs:
         working-directory: crates/copypaste-ui
       - run: npm run build
         working-directory: crates/copypaste-ui
+
+  windows:
+    name: Windows native evidence (requested)
+    if: github.event_name == 'workflow_dispatch' && inputs.windows_evidence
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - name: Capture Windows native contract evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          Get-Command perl -ErrorAction Stop | Out-Null
+          $out = "artifacts/native-windows"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $log = Join-Path $out "native-tests.log"
+          $timer = [System.Diagnostics.Stopwatch]::StartNew()
+
+          function Invoke-NativeTests([string] $label, [string[]] $arguments) {
+            $lines = cargo @arguments *>&1 | Tee-Object -FilePath $log -Append
+            $status = $LASTEXITCODE
+            if ($status -ne 0) { exit $status }
+            if (($lines -join "`n") -notmatch 'test result: ok\. [1-9][0-9]* passed') {
+              throw "$label matched no passing tests"
+            }
+          }
+
+          Invoke-NativeTests "IPC method contract" @("+1.96", "test", "-p", "copypaste-ipc", "--test", "method_contract", "--locked")
+          Invoke-NativeTests "named-pipe contract" @("+1.96", "test", "-p", "copypaste-daemon", "server::pipe::tests", "--locked")
+          Invoke-NativeTests "DPAPI round-trip" @("+1.96", "test", "-p", "copypaste-core", "crypto::keystore::", "--locked")
+
+          $timer.Stop()
+          $measurement = @{
+            scenario = "windows-native-contracts"
+            elapsed_ms = $timer.ElapsedMilliseconds
+            budget_ms = 900000
+          } | ConvertTo-Json
+          Set-Content -Path (Join-Path $out "latency.json") -Value $measurement -Encoding utf8
+
+          python scripts/release/write-native-evidence.py `
+            --output "$out/native-evidence.json" `
+            --platform windows `
+            --environment hosted-runner `
+            --os-version ([System.Environment]::OSVersion.VersionString) `
+            --architecture $env:PROCESSOR_ARCHITECTURE `
+            --scenario windows-native-contracts `
+            --elapsed-ms $timer.ElapsedMilliseconds `
+            --budget-ms 900000 `
+            --assertion "named-pipe contract passed" `
+            --assertion "DPAPI round-trip passed" `
+            --artifact test-log=native-tests.log `
+            --artifact measurement=latency.json
+      - run: npm ci
+        working-directory: crates/copypaste-ui
+      - name: Validate requested Windows evidence
+        working-directory: crates/copypaste-ui
+        run: >-
+          npm run check:native-parity --
+          --require windows
+          --commit ${{ github.sha }}
+          --evidence ${{ github.workspace }}/artifacts/native-windows/native-evidence.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-native-evidence
+          path: artifacts/native-windows
+          if-no-files-found: error
+          retention-days: 14
