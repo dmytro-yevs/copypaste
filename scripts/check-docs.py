@@ -23,7 +23,11 @@ for path in tracked_files():
     relative = path.relative_to(ROOT).as_posix()
     text = path.read_text(encoding="utf-8-sig")
     historical = relative.startswith("docs/rewrite/port-manifest/")
-    marker_example = relative == "scripts/check-commit-msg.sh"
+    # The scripts that detect these markers have to spell them out.
+    marker_example = relative in {
+        "scripts/check-commit-msg.sh",
+        "scripts/check-feature-ledger.py",
+    }
     if not historical and not marker_example:
         for number, line in enumerate(text.splitlines(), 1):
             if MARKERS.search(line):

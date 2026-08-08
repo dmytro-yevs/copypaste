@@ -1,0 +1,49 @@
+name: Nightly native matrix
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: python3 scripts/check-feature-ledger.py
+
+  android:
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [34, 36]
+    uses: ./.github/workflows/android-emulator.yml
+    with:
+      api-level: ${{ matrix.api-level }}
+      target: google_apis
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-14, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - run: cargo +1.96 test --workspace --locked
+      - run: npm ci
+        working-directory: crates/copypaste-ui
+      - run: npm run build
+        working-directory: crates/copypaste-ui

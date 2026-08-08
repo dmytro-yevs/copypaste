@@ -146,6 +146,7 @@ RUNNER_IMAGES = {
     "macOS": (True, {"macos-14", "macos-15", "macos-latest"}),
     "Windows": (True, {"windows-2022", "windows-2025", "windows-latest"}),
 }
+known = {label for _, labels in RUNNER_IMAGES.values() for label in labels}
 
 
 def runner_image_checks(workflows):
@@ -154,6 +155,16 @@ def runner_image_checks(workflows):
         for jn, j in (doc.get("jobs") or {}).items():
             r = j.get("runs-on")
             if not isinstance(r, str):
+                continue
+            # A job that fans out over `matrix.runner` is spreading itself
+            # across images on purpose, so its labels are validated but left
+            # out of the one-image rule below, which is about what a shipped
+            # artefact is built against.
+            if r == "${{ matrix.runner }}":
+                runners = ((j.get("strategy") or {}).get("matrix") or {}).get("runner") or []
+                yield (bool(runners) and set(runners) <= known,
+                       "{}: {} matrix uses known runner images".format(wf, jn),
+                       repr(runners))
                 continue
             family = next((f for f, (_, labels) in RUNNER_IMAGES.items() if r in labels), None)
             yield (family is not None,
@@ -325,8 +336,12 @@ if emu:
             and any(p.startswith("crates/copypaste-ipc") for p in paths),
             f"android-emulator.yml {event} filter covers the shared frontend and the wire contract",
             "a path filter that omits them hides cross-platform breakage")
-    rec("schedule" in triggers and "workflow_dispatch" in triggers,
-        "android-emulator.yml runs nightly and on demand", repr(sorted(triggers)))
+    nightly_jobs = (docs.get("native-nightly.yml") or {}).get("jobs") or {}
+    android_matrix = (nightly_jobs.get("android") or {}).get("strategy", {}).get("matrix", {})
+    rec("workflow_call" in triggers and "workflow_dispatch" in triggers
+        and set(android_matrix.get("api-level") or []) == {34, 36},
+        "Android runs on a nightly API matrix and on demand",
+        "expected reusable workflow plus nightly API 34/36 matrix")
 
     emulator_matrix = ((ejobs.get("emulator") or {}).get("strategy") or {}).get("matrix") or {}
     api_matrix = str(emulator_matrix.get("api-level", ""))
@@ -413,6 +428,11 @@ if SELF_TEST:
         jobs = {"j{}".format(i): {"runs-on": r} for i, r in enumerate(runs_on)}
         return all(cond for cond, _, _ in runner_image_checks({"probe.yml": {"jobs": jobs}}))
 
+    def probe_matrix(*runners):
+        jobs = {"m": {"runs-on": "${{ matrix.runner }}",
+                      "strategy": {"matrix": {"runner": list(runners)}}}}
+        return all(cond for cond, _, _ in runner_image_checks({"probe.yml": {"jobs": jobs}}))
+
     for desc, held in (
         ("the shipping Windows image is recognised", probe("windows-2022")),
         ("a mistyped label is not", not probe("windows-2202")),
@@ -422,6 +442,9 @@ if SELF_TEST:
         ("two Linux images in one tree are not", probe("ubuntu-latest", "ubuntu-24.04")),
         ("a self-hosted label array is left to its own gate",
          probe(["self-hosted", "linux", "ARM64", "android-device"])),
+        ("a matrix may span two images of one family", probe_matrix("macos-14", "macos-15")),
+        ("a mistyped label in a matrix is not", not probe_matrix("macos-14", "macos-51")),
+        ("an empty matrix is not", not probe_matrix()),
     ):
         emit(held, "self-test: {}".format(desc), "the detector did not behave as stated")
 
