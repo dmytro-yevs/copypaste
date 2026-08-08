@@ -1,7 +1,6 @@
 # CopyPaste
 
-Encrypted clipboard manager for macOS and Android, with Windows decided as a
-third platform and not yet built
+Encrypted clipboard manager for macOS, Android and Windows
 ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)). One app — Tauri v2 +
 React — over a shared Rust core. On desktop the app talks to a local daemon; on
 Android it links the core in-process
@@ -20,10 +19,9 @@ authority for which layer establishes what. Every requirement has one
 authoritative layer, and one that no run reaches is marked NOT VERIFIED IN CI
 there rather than being credited to a layer that cannot see it.
 
-**Windows appears in neither table.** It is a shipping platform by decision and
-has no code: IPC, secret storage, clipboard capture, the shell and packaging are
-macOS and Android only, and no workflow has a Windows runner
-([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
+Windows clipboard capture, DPAPI secret storage and owner-only named-pipe IPC
+are implemented. The shell, packaging and release verification remain tracked
+separately ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
 
 ### Works — covered by tests, and by the demo scripts where a script reaches
 
@@ -32,8 +30,8 @@ macOS and Android only, and no workflow has a Windows runner
 | Crypto | XChaCha20-Poly1305 + HKDF-SHA256, item id bound as AAD, fail-closed, zeroized |
 | Storage | One SQLCipher schema, r2d2 pool, FTS5 search, tombstones, pins, cap eviction |
 | Secret detection | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence bands; a flagged item never reaches the index and never leaves the device. A purge pass at daemon start re-decides the index question for rows captured before a rule existed |
-| Capture | Clipboard behind a trait, so `changeCount` detection, burst handling, self-write suppression and the `org.nspasteboard.*` opt-outs are all tested against the fake source on any host |
-| IPC | `0600` Unix socket, newline-JSON, `LinesCodec` framing; `copypaste-ipc` is the only model of the contract, shared by daemon, CLI and the Tauri bridge |
+| Capture | Native macOS and Windows capture behind one trait, including sequence-based change detection, burst handling, self-write suppression and platform opt-outs |
+| IPC | Owner-only Unix socket or Windows named pipe, newline-JSON, `LinesCodec` framing; `copypaste-ipc` is the shared contract used by daemon, CLI and Tauri |
 | CLI | `crates/copypaste-cli/src/cli.rs` is the verb list — `copypaste --help` prints it. `--json` on any of them, for scripting |
 | Peer sync | Noise `NNpsk0` over TCP, pairing codes, LWW merge, delete-wins |
 | Cloud sync | Supabase auth, PostgREST, Realtime; rows sealed client-side under an Argon2id key and signed under a second key from the same passphrase, so the ordering metadata the backend pages on cannot be forged. Wired to the daemon and the CLI — but see below |

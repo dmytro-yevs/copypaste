@@ -109,7 +109,7 @@ is no second ordering to drift.
 
 ## UI
 
-One Tauri v2 + React app on macOS and Android
+One Tauri v2 + React app on macOS, Android and Windows
 ([ADR-0002](../adr/0002-one-cross-platform-app.md)); `crates/copypaste-ui` is
 the product surface. The bridge is one `Backend` trait with two implementations
 chosen by a compile-time alias
