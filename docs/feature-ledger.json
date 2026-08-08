@@ -56,10 +56,10 @@
       "failure_states": ["restart", "offline", "permission_denied"],
       "performance": {"scenario": "settings-ready", "p95_ms": 500, "measurement": "artifacts/native/{platform}/settings-and-service/latency.json"},
       "native": {
-        "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/settings-and-service/screenshot.png", "ax_log": "artifacts/native/android/settings-and-service/ax.json"},
+        "android": {"scenario": "./scripts/release/android-storage-transfer.sh", "screenshot": "artifacts/android-storage/transfer-persisted.png", "ax_log": "artifacts/android-storage/transfer-persisted.xml"},
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/settings-and-service/screenshot.png", "ax_log": "artifacts/native/macos/settings-and-service/ax.json"}
       },
-      "release_evidence": ["release-android-smoke-evidence", "release-macos-native-evidence"]
+      "release_evidence": ["release-android-storage-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
     }
   ]
 }

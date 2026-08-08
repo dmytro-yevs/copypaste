@@ -387,9 +387,17 @@ if emu:
             "found {} — AVD management is the action's job, not this file's".format(len(runners)))
         for s in runners:
             with_ = s.get("with") or {}
+            runner_script = str(with_.get("script", ""))
             rec(script in str(with_.get("script", "")),
                 "{} runs scripts/release/{}".format(emulator_job, script),
                 "assertions belong in a script check.sh can parse and self-test, not in YAML: {!r}".format(with_.get("script")))
+            rec("android-storage-transfer.sh" in runner_script,
+                "{} runs the native storage transfer scenario".format(emulator_job),
+                "export/import through DocumentsUI must gate both Android build types")
+            if debug:
+                rec("TRANSFER_REQUIRE_RUN_AS=1" in runner_script,
+                    "{} requires ciphertext inspection".format(emulator_job),
+                    "the debuggable leg must fail if it cannot read and inspect the SQLCipher files")
             rec(not s.get("continue-on-error"), "{}: the emulator step can fail the job".format(emulator_job),
                 "continue-on-error would make the whole run decorative")
             rec(str(with_.get("arch")) == "x86_64", "{}: the AVD is x86_64".format(emulator_job), repr(with_.get("arch")))
@@ -426,14 +434,24 @@ if hardware:
     rec("android-hardware" in publish_needs,
         "publishing requires the Android hardware gate", repr(publish_needs))
     bodies = "\n".join(s.get("run") or "" for s in steps(hardware))
-    rec("arm64-v8a" in bodies and "android-smoke-release.sh" in bodies,
-        "the hardware gate verifies arm64 and runs the release smoke harness",
-        "the gate must reject another ABI and exercise the signed APK")
+    rec("arm64-v8a" in bodies and "android-smoke-release.sh" in bodies
+        and "android-storage-transfer.sh" in bodies,
+        "the hardware gate verifies arm64 and runs release smoke plus storage transfer",
+        "the gate must reject another ABI and exercise the signed APK through DocumentsUI")
+
+release_smoke = release_jobs.get("android-smoke") or {}
+release_runner_scripts = [str((step.get("with") or {}).get("script", ""))
+                          for step in steps(release_smoke)
+                          if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")]
+rec(len(release_runner_scripts) == 1 and "android-storage-transfer.sh" in release_runner_scripts[0],
+    "release.yml runs storage transfer against the signed Android artifact",
+    "the release evidence must come from the APK that publish consumes")
 
 NO_DEVICE = "its detectors are the only part checkable without a device, so they have to be checkable"
 SELF_TESTED = {
     "android-smoke.sh": NO_DEVICE,
     "android-smoke-release.sh": NO_DEVICE,
+    "android-storage-transfer.sh": "its accessibility selectors must be fixture-tested without borrowing the owned emulator",
     "android-rungs.sh": NO_DEVICE,
     "check-wiring.py": "the runner-image table is data, and nothing else would notice it going empty",
 }

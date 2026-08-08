@@ -411,11 +411,13 @@ jobs:
           script: |
             set -uo pipefail
             ./scripts/release/android-smoke.sh; smoke=$?
+            SMOKE_OUT=artifacts/android-storage TRANSFER_REQUIRE_RUN_AS=1 \
+              ./scripts/release/android-storage-transfer.sh; storage=$?
             rungs=0
             if [[ "${{ matrix.api-level }}" == "36" ]]; then
               APK= SMOKE_OUT=artifacts/android-rungs ./scripts/release/android-rungs.sh; rungs=$?
             fi
-            [ $smoke -eq 0 ] && [ $rungs -eq 0 ]
+            [ $smoke -eq 0 ] && [ $storage -eq 0 ] && [ $rungs -eq 0 ]
         env:
           APK: dist/copypaste-emulator-x86_64-debug.apk
           SMOKE_OUT: artifacts/android-smoke
@@ -428,6 +430,7 @@ jobs:
           name: android-emulator-evidence-api${{ matrix.api-level }}
           path: |
             artifacts/android-smoke
+            artifacts/android-storage
             artifacts/android-rungs
           if-no-files-found: warn
           retention-days: 14
@@ -626,7 +629,12 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: ./scripts/release/android-smoke-release.sh
+          script: |
+            set -uo pipefail
+            ./scripts/release/android-smoke-release.sh; smoke=$?
+            SMOKE_OUT=artifacts/android-storage-release \
+              ./scripts/release/android-storage-transfer.sh; storage=$?
+            [ $smoke -eq 0 ] && [ $storage -eq 0 ]
         env:
           APK: dist/copypaste-emulator-x86_64-release.apk
           SMOKE_OUT: artifacts/android-smoke-release
@@ -637,6 +645,7 @@ jobs:
           name: android-release-evidence
           path: |
             artifacts/android-smoke-release
+            artifacts/android-storage-release
             dist/r8-mapping.txt
           if-no-files-found: warn
           retention-days: 14

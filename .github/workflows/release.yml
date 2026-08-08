@@ -674,7 +674,12 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: ./scripts/release/android-smoke-release.sh
+          script: |
+            set -uo pipefail
+            ./scripts/release/android-smoke-release.sh; smoke=$?
+            SMOKE_OUT=artifacts/release-android-storage \
+              ./scripts/release/android-storage-transfer.sh; storage=$?
+            [ $smoke -eq 0 ] && [ $storage -eq 0 ]
         env:
           APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
           SMOKE_OUT: artifacts/release-android-smoke
@@ -684,6 +689,14 @@ jobs:
         with:
           name: release-android-smoke-evidence
           path: artifacts/release-android-smoke
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-android-storage-evidence
+          path: artifacts/release-android-storage
           if-no-files-found: error
           retention-days: 14
 
@@ -722,13 +735,20 @@ jobs:
         run: |
           set -euo pipefail
           [[ -f "$APK" ]] || { echo "::error::$APK is missing from the Android artifact"; exit 1; }
-          ./scripts/release/android-smoke-release.sh
+          set +e
+          ./scripts/release/android-smoke-release.sh; smoke=$?
+          SMOKE_OUT=artifacts/release-android-hardware-storage \
+            ./scripts/release/android-storage-transfer.sh; storage=$?
+          set -e
+          [ $smoke -eq 0 ] && [ $storage -eq 0 ]
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: release-android-hardware-evidence
-          path: artifacts/release-android-hardware
+          path: |
+            artifacts/release-android-hardware
+            artifacts/release-android-hardware-storage
           if-no-files-found: warn
           retention-days: 30
 

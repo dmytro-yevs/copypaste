@@ -311,6 +311,9 @@ check "android-smoke.sh --self-test" ./scripts/release/android-smoke.sh --self-t
 # The release leg is a second entry point onto the same detectors. Running its
 # --self-test too is what catches the entry point itself being broken.
 check "android-smoke-release.sh --self-test" ./scripts/release/android-smoke-release.sh --self-test
+# The content-picker scenario uses accessibility labels and DocumentsUI ids.
+# Its fixtures keep a missing label from becoming a successful no-op.
+check "android-storage-transfer.sh --self-test" ./scripts/release/android-storage-transfer.sh --self-test
 # The four surfaces README.md calls unverified, and the same reason again: a
 # parcel reader that never finds a canary, or a flag reader that says SECURE
 # about everything, would turn the rung assertions into decoration.
