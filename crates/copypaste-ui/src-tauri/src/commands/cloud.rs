@@ -1,5 +1,6 @@
 use copypaste_ipc::{CloudStatusData, CloudSyncData};
 use tauri::State;
+use zeroize::Zeroizing;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 
@@ -12,6 +13,8 @@ pub async fn cloud_sign_in(
     password: String,
     passphrase: String,
 ) -> Result<CloudStatusData> {
+    let password = Zeroizing::new(password);
+    let passphrase = Zeroizing::new(passphrase);
     backend
         .cloud_sign_in(email.trim(), &password, &passphrase)
         .await
