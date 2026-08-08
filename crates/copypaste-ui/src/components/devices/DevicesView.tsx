@@ -43,6 +43,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { StateNotice } from "@/components/StateNotice";
 import { PeerRow } from "@/components/devices/PeerRow";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
+import { DeviceNameField } from "@/components/devices/DeviceNameField";
 import {
   MAX_PAIRINGS,
   type PeerHealthMap,
@@ -142,7 +143,9 @@ export function DevicesView() {
                   <Laptop size={18} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{t("devices.own.name")}</p>
+                  <p className="text-sm font-medium">
+                    {own.data?.device_name || t("devices.own.name")}
+                  </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {t("devices.own.description")}
                   </p>
@@ -210,6 +213,9 @@ export function DevicesView() {
                   </div>
                 </dl>
               ) : null}
+              <div className="mt-s-3 border-t border-divider pt-s-3">
+                <DeviceNameField />
+              </div>
             </div>
           </section>
 

@@ -145,6 +145,13 @@ fn expect_status(data: Option<ResponseData>) -> Result<StatusData> {
     }
 }
 
+fn expect_empty(data: Option<ResponseData>) -> Result<()> {
+    match data {
+        Some(ResponseData::Empty {}) | None => Ok(()),
+        _ => Err(BackendError::wrong_shape("an empty response")),
+    }
+}
+
 fn expect_peers(data: Option<ResponseData>) -> Result<Vec<PeerInfo>> {
     match data {
         Some(ResponseData::Peers(peers)) => Ok(peers),
@@ -289,6 +296,15 @@ impl Backend for DaemonBackend {
 
     async fn status(&self) -> Result<StatusData> {
         expect_status(self.call(Method::Status).await?)
+    }
+
+    async fn set_device_name(&self, name: &str) -> Result<()> {
+        expect_empty(
+            self.call(Method::SetDeviceName {
+                name: name.to_string(),
+            })
+            .await?,
+        )
     }
 
     async fn shutdown(&self) -> Result<()> {

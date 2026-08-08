@@ -123,6 +123,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::DeleteAll
         | Method::Pin { .. }
         | Method::ReorderPinned { .. }
+        | Method::SetDeviceName { .. }
         // Peer operations read and write the same history, and pairing needs
         // the device identity that comes out of the same database.
         | Method::PairCreate { .. }
@@ -208,6 +209,7 @@ pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) ->
 pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
     match method {
         Method::Status => items::status(state, id),
+        Method::SetDeviceName { name } => items::set_device_name(state, id, &name),
         Method::List { limit, cursor } => items::list(state, id, limit, cursor.as_deref()),
         Method::Search { query, limit } => items::search(state, id, &query, limit),
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),

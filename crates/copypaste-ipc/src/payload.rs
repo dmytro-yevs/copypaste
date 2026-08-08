@@ -276,6 +276,8 @@ pub struct DiagnosticCounters {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct StatusData {
+    #[serde(default)]
+    pub device_name: String,
     pub version: String,
     pub protocol_version: u32,
     pub item_count: u64,

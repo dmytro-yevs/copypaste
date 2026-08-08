@@ -60,6 +60,7 @@ export function page(
 
 export function status(over: Partial<StatusData> = {}): StatusData {
   return {
+    device_name: "This device",
     version: "2.0.0-alpha.1",
     protocol_version: 1,
     item_count: 3,

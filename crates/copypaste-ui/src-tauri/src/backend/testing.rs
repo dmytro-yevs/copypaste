@@ -167,6 +167,7 @@ impl Backend for FakeBackend {
             Liveness::Unreachable => Err(BackendError::Unreachable),
             Liveness::Failing => Err(BackendError::NotReady),
             Liveness::Running(version) => Ok(StatusData {
+                device_name: "Test device".into(),
                 version: version.clone(),
                 protocol_version: copypaste_ipc::PROTOCOL_VERSION,
                 item_count: 0,
@@ -176,6 +177,10 @@ impl Backend for FakeBackend {
                 counters: copypaste_ipc::DiagnosticCounters::default(),
             }),
         }
+    }
+
+    async fn set_device_name(&self, _name: &str) -> Result<()> {
+        Ok(())
     }
 
     async fn shutdown(&self) -> Result<()> {

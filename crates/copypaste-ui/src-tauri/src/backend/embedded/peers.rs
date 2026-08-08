@@ -56,7 +56,7 @@ impl PeerNode {
             .map_err(|e| BackendError::internal(&format!("could not open paired devices: {e}")))?;
         // Never fatal: a network that filters multicast still pairs and still
         // syncs to an explicit address, which is the common case on a phone.
-        let discovery = match Discovery::dormant(&inner.state.device_name, PORT) {
+        let discovery = match Discovery::dormant(&inner.state.device_name(), PORT) {
             Ok(discovery) => Some(discovery),
             Err(e) => {
                 tracing::warn!(error = %e, "could not start discovery; peers must be given an address");
@@ -216,6 +216,10 @@ impl PeerNode {
     pub(super) fn republish(&self) {
         self.node.republish();
     }
+
+    pub(super) fn set_device_name(&self, device_name: &str) {
+        self.node.set_device_name(device_name);
+    }
 }
 
 /// The TCP port the peer listener binds.
@@ -232,7 +236,7 @@ fn source(inner: &Arc<Inner>) -> StoreSource {
         Arc::clone(&inner.state.keyring),
         Arc::clone(&inner.state.detector),
         inner.state.device_id.clone(),
-        inner.state.device_name.clone(),
+        inner.state.device_name(),
         move || settings.settings(),
     )
 }

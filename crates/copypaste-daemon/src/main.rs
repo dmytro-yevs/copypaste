@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
     // migrated, so it must come second; the peer file and discovery do not
     // depend on either.
     let hostname = gethostname::gethostname().to_string_lossy().into_owned();
-    let mut meta = Meta::open(&store, &hostname).context("resolve this device's identity")?;
+    let meta = Meta::open(&store, &hostname).context("resolve this device's identity")?;
     if let Some(name) = args.device_name.as_deref() {
         meta.set_device_name(name).context("set the device name")?;
     }
@@ -136,7 +136,8 @@ async fn main() -> anyhow::Result<()> {
     // start, so this is the moment it either happens or does not. It is the one
     // setting `ConfigData::field_liveness` marks `NeedsRestart`, and this line
     // is why.
-    let discovery = match Discovery::dormant(meta.device_name(), args.port) {
+    let device_name = meta.device_name();
+    let discovery = match Discovery::dormant(&device_name, args.port) {
         Ok(discovery) => Some(discovery),
         Err(e) => {
             warn!(error = %e, "could not start discovery; peers must be given an address");
@@ -151,7 +152,6 @@ async fn main() -> anyhow::Result<()> {
         info!("LAN visibility is off; not advertising and not browsing");
     }
     let device_id = meta.device_id().to_string();
-    let device_name = meta.device_name().to_string();
     let p2p = P2p::new(peers, discovery, args.port, lan_visibility);
 
     // Cloud sync. Unconfigured is a supported state, and so is configured but

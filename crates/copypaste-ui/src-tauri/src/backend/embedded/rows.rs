@@ -159,6 +159,7 @@ pub(super) fn peer_info(peer: &copypaste_p2p::Peer, online: bool) -> PeerInfo {
 /// because a caller may be probing precisely because storage is unhappy.
 pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
     Ok(copypaste_ipc::StatusData {
+        device_name: inner.state.device_name(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         protocol_version: copypaste_ipc::PROTOCOL_VERSION,
         item_count: inner.state.store.count().unwrap_or(0),

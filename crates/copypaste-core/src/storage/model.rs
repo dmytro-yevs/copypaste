@@ -168,6 +168,9 @@ pub enum StoreError {
     /// repeat the whole history.
     #[error("that page marker is not valid")]
     InvalidCursor,
+
+    #[error("a device name must contain visible text")]
+    InvalidDeviceName,
 }
 
 pub(super) const ITEM_COLUMN_COUNT: usize = 15;

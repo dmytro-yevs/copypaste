@@ -12,7 +12,7 @@
 //! and no daemon.
 
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 
 use mdns_sd::{DaemonEvent, ServiceDaemon, ServiceEvent};
@@ -38,7 +38,7 @@ pub struct Discovery {
     /// created at all — the degraded mode described in the module docs.
     daemon: Mutex<Option<ServiceDaemon>>,
     shared: Arc<Shared>,
-    device_name: String,
+    device_name: RwLock<String>,
     port: u16,
 }
 
@@ -114,7 +114,7 @@ impl Discovery {
         Ok(Self {
             daemon: Mutex::new(None),
             shared: Arc::new(Shared::for_port(port)),
-            device_name: device_name.to_string(),
+            device_name: RwLock::new(device_name.to_string()),
             port,
         })
     }
@@ -124,13 +124,13 @@ impl Discovery {
         if let Some(running) = daemon.as_ref() {
             return self.readvertise(running, pairing_ids);
         }
-        let device_name: &str = &self.device_name;
+        let device_name = self.device_name();
         let port = self.port;
         // Validate and encode before touching the network, so bad input is a
         // clean error rather than a half-started daemon.
-        let info = build_service_info(device_name, device_name, pairing_ids, port)?;
+        let info = build_service_info(&device_name, &device_name, pairing_ids, port)?;
         let registration = Registration {
-            instance: sanitise_instance(device_name).ok_or(DiscoveryError::InvalidDeviceName)?,
+            instance: sanitise_instance(&device_name).ok_or(DiscoveryError::InvalidDeviceName)?,
             fullname: info.get_fullname().to_string(),
         };
 
@@ -181,6 +181,16 @@ impl Discovery {
         self.teardown(&mut lock(&self.daemon));
     }
 
+    pub fn set_device_name(&self, device_name: &str) -> Result<(), DiscoveryError> {
+        sanitise_instance(device_name).ok_or(DiscoveryError::InvalidDeviceName)?;
+        self.stop();
+        *self
+            .device_name
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = device_name.to_string();
+        Ok(())
+    }
+
     #[must_use]
     pub fn is_running(&self) -> bool {
         lock(&self.daemon).is_some()
@@ -211,9 +221,10 @@ impl Discovery {
         let instance = registration
             .as_ref()
             .map(|r| r.instance.clone())
-            .unwrap_or_else(|| self.device_name.clone());
+            .unwrap_or_else(|| self.device_name());
 
-        let mut info = build_service_info(&instance, &self.device_name, pairing_ids, self.port)?;
+        let device_name = self.device_name();
+        let mut info = build_service_info(&instance, &device_name, pairing_ids, self.port)?;
         // The name is already ours; probing again would only conflict with our
         // own records and rename us to "<name> (2)".
         info.set_requires_probe(false);
@@ -249,6 +260,13 @@ impl Discovery {
         // Dropping the daemon closes the browse and monitor channels, so both
         // background threads fall out of their `recv` loops on their own.
         lock(&self.shared.table).clear();
+    }
+
+    fn device_name(&self) -> String {
+        self.device_name
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 
@@ -395,6 +413,18 @@ mod tests {
             ),
             Err(DiscoveryError::InvalidPairingId)
         ));
+    }
+
+    #[test]
+    fn renaming_a_discovery_handle_replaces_its_advertised_name() {
+        let discovery = Discovery::dormant("Old name", crate::DEFAULT_PORT).unwrap();
+        discovery.set_device_name("Kitchen Mac").unwrap();
+        assert_eq!(discovery.device_name(), "Kitchen Mac");
+        assert!(matches!(
+            discovery.set_device_name(" \n "),
+            Err(DiscoveryError::InvalidDeviceName)
+        ));
+        assert_eq!(discovery.device_name(), "Kitchen Mac");
     }
 
     // -- browse loop, driven from a Vec: no network, no daemon ----------------

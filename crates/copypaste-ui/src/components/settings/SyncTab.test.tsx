@@ -13,10 +13,12 @@ import { screen, waitFor } from "@testing-library/react";
 import { SyncTab } from "@/components/settings/SyncTab";
 import { en } from "@/i18n";
 import { IpcFailure } from "@/lib/errors";
-import { peer, withUser } from "@/test/harness";
+import { peer, status, withUser } from "@/test/harness";
 
 const listPeers = vi.fn();
 const syncNow = vi.fn();
+const getStatus = vi.fn();
+const setDeviceName = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -24,12 +26,16 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     ...actual,
     listPeers: () => listPeers(),
     syncNow: (pairingId?: string) => syncNow(pairingId),
+    getStatus: () => getStatus(),
+    setDeviceName: (name: string) => setDeviceName(name),
   };
 });
 
 beforeEach(() => {
   listPeers.mockReset().mockResolvedValue([peer()]);
   syncNow.mockReset().mockResolvedValue([]);
+  getStatus.mockReset().mockResolvedValue(status());
+  setDeviceName.mockReset().mockResolvedValue(undefined);
 });
 
 describe("SyncTab", () => {
@@ -39,6 +45,20 @@ describe("SyncTab", () => {
     expect(await screen.findByText("1 paired")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: en.settings.sync.now.action }));
     expect(syncNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps device naming available without exposing pairing controls", async () => {
+    const { user } = withUser(<SyncTab />);
+    const input = await screen.findByRole("textbox", { name: "Device name" });
+    await waitFor(() => expect(input).toHaveProperty("disabled", false));
+
+    await user.clear(input);
+    await user.type(input, "Office Phone");
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+
+    await waitFor(() => expect(setDeviceName).toHaveBeenCalledWith("Office Phone"));
+    expect(screen.queryByRole("button", { name: /^pair$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^add device$/i })).toBeNull();
   });
 
   it("will not offer to sync nothing", async () => {

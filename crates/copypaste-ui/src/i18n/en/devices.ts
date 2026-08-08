@@ -36,6 +36,13 @@ export const devices = {
     privateMode: "Private mode",
     clipboard: "Clipboard connection",
     clipboardConnected: "Connected through the background service",
+    rename: {
+      label: "Device name",
+      description: "Used to identify this device during sync and network discovery.",
+      action: "Rename",
+      saving: "Saving…",
+      saved: "Device name saved",
+    },
   },
 
   paired: {

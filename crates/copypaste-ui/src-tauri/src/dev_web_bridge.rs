@@ -103,6 +103,11 @@ struct ConfigArgs {
     patch: ConfigPatch,
 }
 
+#[derive(Debug, Deserialize)]
+struct DeviceNameArgs {
+    name: String,
+}
+
 fn failure(error: BackendError) -> (StatusCode, Json<Failure>) {
     let ui = error.ui_error();
     (
@@ -240,6 +245,14 @@ async fn call(
                 .and_then(value)
         }
         "status" => backend.status().await.map_err(failure).and_then(value),
+        "set_device_name" => {
+            let args: DeviceNameArgs = parse(request.args)?;
+            backend
+                .set_device_name(&args.name)
+                .await
+                .map_err(failure)
+                .and_then(value)
+        }
         "service_state" => {
             let result = backend.status().await.map(|status| {
                 let matches_app = status.version == env!("CARGO_PKG_VERSION");
@@ -401,6 +414,7 @@ mod tests {
             "delete_all",
             "set_pinned",
             "status",
+            "set_device_name",
             "service_state",
             "diagnostics",
             "runtime_log_events",

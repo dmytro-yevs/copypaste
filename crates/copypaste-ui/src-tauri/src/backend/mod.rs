@@ -190,6 +190,7 @@ pub trait Backend: Send + Sync + 'static {
     // ---- state -----------------------------------------------------------
 
     async fn status(&self) -> Result<StatusData>;
+    async fn set_device_name(&self, name: &str) -> Result<()>;
 
     /// Ask a separate background service to terminate gracefully.
     ///

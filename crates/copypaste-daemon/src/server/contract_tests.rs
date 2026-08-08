@@ -20,6 +20,9 @@ enum Expected {
 fn expected(method: &Method) -> Expected {
     match method {
         Method::Status => Expected::Data(|data| matches!(data, ResponseData::Status(_))),
+        Method::SetDeviceName { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
+        }
         Method::List { .. } | Method::Search { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Page(_)))
         }
@@ -68,6 +71,9 @@ fn expected(method: &Method) -> Expected {
 fn cases(root: &Path) -> Vec<Method> {
     vec![
         Method::Status,
+        Method::SetDeviceName {
+            name: "contract device".into(),
+        },
         Method::List {
             limit: 10,
             cursor: None,
@@ -214,7 +220,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        34,
+        35,
         "a Method was added without a contract case"
     );
 

@@ -134,6 +134,10 @@ export function getStatus(): Promise<StatusData> {
   return call<StatusData>("status");
 }
 
+export function setDeviceName(name: string): Promise<void> {
+  return call<void>("set_device_name", { name });
+}
+
 export function listPeers(): Promise<PeerInfo[]> {
   return call<PeerInfo[]>("peers");
 }

@@ -286,6 +286,7 @@ mod tests {
 
     fn status(protocol_version: u32, backend: &str) -> StatusData {
         StatusData {
+            device_name: "Test device".into(),
             version: "2.0.0-alpha.1".into(),
             protocol_version,
             item_count: 42,

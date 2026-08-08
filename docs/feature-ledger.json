@@ -34,7 +34,7 @@
     {
       "id": "devices",
       "status": "product",
-      "contracts": ["peers", "unpair", "revoke", "sync_now", "discovered", "rescan"],
+      "contracts": ["set_device_name", "peers", "unpair", "revoke", "sync_now", "discovered", "rescan"],
       "backend_tests": ["cargo test -p copypaste-p2p"],
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["progress", "error", "keyboard", "screen_reader"],

@@ -37,6 +37,7 @@ pub(super) const MSG_TOO_BIG: &str = "the item is larger than the configured siz
 pub(super) const MSG_REORDER_TOO_MANY: &str =
     "too many items in one reorder; a pinned list is never this long";
 pub(super) const MSG_IMAGE_PREVIEW: &str = "an image preview is unavailable for this item";
+pub(super) const MSG_DEVICE_NAME: &str = "device name must contain visible text";
 /// Refused rather than restarted from the top: a load-more that silently began
 /// again would repeat the whole history, and a client cannot tell that from a
 /// list that really does.
@@ -79,8 +80,10 @@ pub(crate) trait Refusal {
 
 impl Refusal for StoreError {
     fn refusal(&self) -> Option<(ErrorCode, &'static str)> {
-        let _ = self;
-        None
+        match self {
+            StoreError::InvalidDeviceName => Some((ErrorCode::InvalidRequest, MSG_DEVICE_NAME)),
+            _ => None,
+        }
     }
 }
 
@@ -146,6 +149,7 @@ mod tests {
         MSG_TOO_BIG,
         MSG_REORDER_TOO_MANY,
         MSG_IMAGE_PREVIEW,
+        MSG_DEVICE_NAME,
         MSG_BAD_CURSOR,
         MSG_IMPORT_EMPTY,
         MSG_IMPORT_TOO_MANY,

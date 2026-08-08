@@ -191,7 +191,7 @@ fn restore_with_purge(
             // disagreeing about what this device is called.
             if let Err(e) = state
                 .meta
-                .record_device_name(state.meta.device_id(), state.meta.device_name())
+                .record_device_name(state.meta.device_id(), &state.meta.device_name())
             {
                 warn!(error = ?e, "could not re-record this device's name after a restore");
             }

@@ -24,6 +24,7 @@ const rescanDiscovered = vi.fn();
 const unpair = vi.fn();
 const revokeDevice = vi.fn();
 const syncNow = vi.fn();
+const setDeviceName = vi.fn();
 
 configure({ asyncUtilTimeout: 15_000 });
 vi.setConfig({ testTimeout: 20_000 });
@@ -39,6 +40,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     unpair: (pairingId: string) => unpair(pairingId),
     revokeDevice: (pairingId: string) => revokeDevice(pairingId),
     syncNow: (pairingId?: string) => syncNow(pairingId),
+    setDeviceName: (name: string) => setDeviceName(name),
   };
 });
 
@@ -52,6 +54,7 @@ beforeEach(() => {
   unpair.mockReset().mockResolvedValue(undefined);
   revokeDevice.mockReset().mockResolvedValue(undefined);
   syncNow.mockReset().mockResolvedValue([]);
+  setDeviceName.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -190,6 +193,34 @@ describe("pairing availability (ADR-0015)", () => {
     expect(
       await screen.findByLabelText(/lost phone\. name reported by the device itself — not verified/i),
     ).toBeTruthy();
+  });
+});
+
+describe("renaming this device", () => {
+  it("saves a trimmed name through the shared status contract", async () => {
+    const { user } = withUser(<DevicesView />);
+    const input = await screen.findByRole("textbox", { name: "Device name" });
+    await waitFor(() => expect(input).toHaveProperty("disabled", false));
+
+    await user.clear(input);
+    await user.type(input, "  Kitchen Mac  ");
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+
+    await waitFor(() => expect(setDeviceName).toHaveBeenCalledWith("Kitchen Mac"));
+    await waitFor(() => expect(getStatus).toHaveBeenCalledTimes(2));
+  });
+
+  it("restores the persisted name when saving fails", async () => {
+    setDeviceName.mockRejectedValue({ code: "internal", retryable: true });
+    const { user } = withUser(<DevicesView />);
+    const input = await screen.findByRole("textbox", { name: "Device name" });
+    await waitFor(() => expect(input).toHaveProperty("disabled", false));
+
+    await user.clear(input);
+    await user.type(input, "Temporary name");
+    await user.click(screen.getByRole("button", { name: "Rename" }));
+
+    await waitFor(() => expect(input).toHaveProperty("value", "This device"));
   });
 });
 

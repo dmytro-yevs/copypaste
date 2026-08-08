@@ -45,6 +45,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
     Response::ok(
         id,
         ResponseData::Status(StatusData {
+            device_name: state.meta.device_name(),
             version: crate::DAEMON_VERSION.to_string(),
             protocol_version: PROTOCOL_VERSION,
             item_count,
@@ -54,6 +55,16 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             counters: state.counters(),
         }),
     )
+}
+
+pub(super) fn set_device_name(state: &AppState, id: u64, name: &str) -> Response {
+    match state.meta.set_device_name(name) {
+        Ok(()) => {
+            state.p2p.node().set_device_name(&state.meta.device_name());
+            Response::ok(id, ResponseData::Empty {})
+        }
+        Err(error) => storage_error(id, "rename device", &error),
+    }
 }
 
 pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) -> Response {
@@ -657,6 +668,29 @@ mod tests {
         assert_eq!(counters.lost_intermediates, 0);
     }
 
+    #[test]
+    fn a_renamed_device_identity_survives_reopening() {
+        let (state, _dir) = test_state("old name");
+        assert!(set_device_name(&state, 1, "  Kitchen Mac  ").ok);
+
+        let reopened = crate::meta::Meta::open(&state.store, "ignored hostname").unwrap();
+        assert_eq!(reopened.device_id(), state.meta.device_id());
+        assert_eq!(reopened.device_name(), "Kitchen Mac");
+        match status(&state, 2).data {
+            Some(ResponseData::Status(status)) => assert_eq!(status.device_name, "Kitchen Mac"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_blank_device_name_is_refused_without_changing_the_identity() {
+        let (state, _dir) = test_state("Office Mac");
+        let response = set_device_name(&state, 1, " \n\t ");
+        assert!(!response.ok);
+        assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
+        assert_eq!(state.meta.device_name(), "Office Mac");
+    }
+
     /// Rule 4. `status` is the one reply a support flow is built on, so a path
     /// reaching it would be pasted into every issue.
     #[test]
@@ -1115,7 +1149,7 @@ mod tests {
         assert_eq!(mine.origin_device_id, state.meta.device_id());
         assert_eq!(
             mine.origin_device_name.as_deref(),
-            Some(state.meta.device_name())
+            Some(state.meta.device_name().as_str())
         );
 
         // A row that arrived from elsewhere must not read as local, and it has
@@ -1157,7 +1191,7 @@ mod tests {
                 let ours = page.items.iter().find(|item| item.id == mine.id).unwrap();
                 assert_eq!(
                     ours.origin_device_name.as_deref(),
-                    Some(state.meta.device_name())
+                    Some(state.meta.device_name().as_str())
                 );
             }
             other => panic!("{other:?}"),

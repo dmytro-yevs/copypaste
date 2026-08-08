@@ -17,8 +17,9 @@ mod error;
 pub use error::MetaError;
 
 use std::collections::HashMap;
+use std::sync::RwLock;
 
-use copypaste_core::{origin_or, Store, StoredItem};
+use copypaste_core::{origin_or, Store, StoreError, StoredItem};
 
 /// Where one item came from, as a user reads it.
 ///
@@ -38,7 +39,7 @@ pub struct Origin {
 pub struct Meta {
     store: Store,
     device_id: String,
-    device_name: String,
+    device_name: RwLock<String>,
 }
 
 impl Meta {
@@ -53,7 +54,7 @@ impl Meta {
         Ok(Self {
             store: store.clone(),
             device_id: identity.device_id,
-            device_name: identity.device_name,
+            device_name: RwLock::new(identity.device_name),
         })
     }
 
@@ -63,13 +64,20 @@ impl Meta {
     }
 
     #[must_use]
-    pub fn device_name(&self) -> &str {
-        &self.device_name
+    pub fn device_name(&self) -> String {
+        self.device_name
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// Replace the stored device name. Cosmetic; takes effect on the next hello.
-    pub fn set_device_name(&mut self, name: &str) -> Result<(), MetaError> {
-        self.device_name = self.store.set_device_name(&self.device_id, name)?;
+    pub fn set_device_name(&self, name: &str) -> Result<(), StoreError> {
+        let name = self.store.set_device_name(&self.device_id, name)?;
+        *self
+            .device_name
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = name;
         Ok(())
     }
 
@@ -82,7 +90,7 @@ impl Meta {
     pub fn here(&self) -> Origin {
         Origin {
             device_id: self.device_id.clone(),
-            device_name: Some(self.device_name.clone()),
+            device_name: Some(self.device_name()),
         }
     }
 
@@ -168,7 +176,7 @@ mod tests {
         assert_eq!(origin.device_id, state.meta.device_id());
         assert_eq!(
             origin.device_name.as_deref(),
-            Some(state.meta.device_name())
+            Some(state.meta.device_name().as_str())
         );
     }
 
