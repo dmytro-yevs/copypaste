@@ -131,6 +131,13 @@ impl Buffer {
         self.queue.push_front(clip);
     }
 
+    fn discard_all(&mut self) -> u64 {
+        let lost = self.queue.len() as u64;
+        self.dropped = self.dropped.saturating_add(lost);
+        self.queue.clear();
+        lost
+    }
+
     /// Clips that were taken from the platform and never stored. Reported, not
     /// swallowed.
     pub fn dropped(&self) -> u64 {
@@ -225,6 +232,10 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
         synchronize_private_mode(&app, &mut private_gate);
 
         while let Ok(enabled) = private_mode_rx.try_recv() {
+            if enabled {
+                let lost = buffer.discard_all();
+                report_dropped(&app, lost);
+            }
             private_gate.request(enabled);
             synchronize_private_mode(&app, &mut private_gate);
         }
@@ -234,6 +245,10 @@ pub fn spawn<R: Runtime>(app: AppHandle<R>) {
         loop {
             tokio::select! {
                 Some(enabled) = private_mode_rx.recv() => {
+                    if enabled {
+                        let lost = buffer.discard_all();
+                        report_dropped(&app, lost);
+                    }
                     private_gate.request(enabled);
                     synchronize_private_mode(&app, &mut private_gate);
                 }
@@ -302,6 +317,10 @@ fn push_captured<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer, taken: Vec
     let had = buffer.dropped();
     buffer.push_all(taken);
     let lost = buffer.dropped() - had;
+    report_dropped(app, lost);
+}
+
+fn report_dropped<R: Runtime>(app: &AppHandle<R>, lost: u64) {
     if lost > 0 {
         tracing::warn!(
             lost,
@@ -454,6 +473,18 @@ mod tests {
         assert_eq!(buffer.pop().unwrap().text, "first");
         assert_eq!(buffer.pop().unwrap().text, "second");
         assert_eq!(buffer.pop().unwrap().text, "third");
+    }
+
+    #[test]
+    fn entering_private_mode_discards_clips_waiting_for_retry() {
+        let mut buffer = Buffer::default();
+        buffer.push_all([clip("failed before private mode")]);
+
+        let lost = buffer.discard_all();
+
+        assert!(buffer.is_empty());
+        assert_eq!(lost, 1);
+        assert_eq!(buffer.dropped(), 1);
     }
 
     /// An overflow is a lost copy. It must be counted, because the user is
