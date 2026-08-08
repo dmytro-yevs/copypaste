@@ -146,6 +146,53 @@ jobs:
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "Building $version (publish=$publish)"
 
+  pairing-e2e:
+    name: Pairing native E2E gate
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      # rust-toolchain.toml outranks the toolchain step's `rustup default`, so
+      # the bare cargo below would build on whatever stable is that week.
+      RUSTUP_TOOLCHAIN: "1.96"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: System dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config xvfb \
+            libwebkit2gtk-4.1-dev webkit2gtk-driver \
+            libgtk-3-dev librsvg2-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: linux-1.96
+          key: pairing-e2e-release
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --version 2.0.6 --locked
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            crates/copypaste-ui/package-lock.json
+            e2e/package-lock.json
+      - name: Build pairing surfaces
+        run: cargo build -p copypaste-ui -p copypaste-daemon -p copypaste-cli --locked
+      - name: Install frontend dependencies
+        working-directory: crates/copypaste-ui
+        run: npm ci
+      - name: Install harness dependencies
+        working-directory: e2e
+        run: npm ci
+      - name: Run pairing gate
+        working-directory: e2e
+        run: npm test -- tests/devices.e2e.test.ts
+
   # ---------------------------------------------------------------------------
   # Build on macOS. arm64 only: the release ships a single aarch64 slice, not a
   # universal binary, matching `depends_on arch: :arm64` in the cask. Homebrew
@@ -729,7 +776,7 @@ jobs:
     # android is a hard dependency, not a nice-to-have: ADR-0006 says one
     # release page serves both platforms, and a page that silently serves one is
     # worse than a failed run.
-    needs: [version, supabase-gate, macos, android, android-smoke, android-hardware, packaging]
+    needs: [version, supabase-gate, pairing-e2e, macos, android, android-smoke, android-hardware, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:

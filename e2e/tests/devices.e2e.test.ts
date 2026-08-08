@@ -48,6 +48,16 @@ beforeAll(async () => {
     "-n",
     "the browser app",
   ]);
+  const wrong = await app.daemon.cli([
+    "pair",
+    "accept",
+    `${minted.code.slice(0, -1)}${minted.code.endsWith("X") ? "Y" : "X"}`,
+    "--addr",
+    `127.0.0.1:${other.peerPort}`,
+  ]);
+  expect(wrong.exitCode).not.toBe(0);
+  expect(await app.daemon.json<PeerInfo[]>(["peers"])).toEqual([]);
+
   await app.daemon.json<unknown>([
     "pair",
     "accept",
@@ -149,6 +159,40 @@ describe("a known device", () => {
     );
   });
 
+  test("moves clipboard history both ways", async () => {
+    const fromApp = `from-app-${Date.now()}`;
+    const fromOther = `from-other-${Date.now()}`;
+    await app.daemon.add(fromApp);
+    await other.add(fromOther);
+
+    await app.daemon.json<unknown>(["sync", "--peer", paired.pairing_id]);
+    await other.json<unknown>(["sync", "--peer", paired.pairing_id]);
+    await app.browser.waitUntil(
+      async () => {
+        const [here, there] = await Promise.all([
+          app.daemon.items(),
+          other.items(),
+        ]);
+        return (
+          here.some((item) => item.content === fromOther) &&
+          there.some((item) => item.content === fromApp)
+        );
+      },
+      { timeout: 45_000, timeoutMsg: "two-way native sync did not converge" },
+    );
+  });
+
+  test("shows a failure and recovers after reconnect", async () => {
+    await other.kill();
+    await clickButton(app.browser, `Sync with ${paired.name} now`);
+    await waitForText(app.browser, "Sync failed", 45_000);
+
+    await other.restart();
+    await clickButton(app.browser, `Sync with ${paired.name} now`);
+    await waitForText(app.browser, "Last sync from here", 45_000);
+    expectNoRawError(await outerHtml(app.browser));
+  });
+
   test("offers the irreversible revoke confirmation", async () => {
     await clickButton(app.browser, `Revoke ${paired.name}`);
 
@@ -166,6 +210,36 @@ describe("a known device", () => {
     expect(await confirm.isEnabled()).toBe(false);
     await clickButton(app.browser, "Cancel", { within: '[role="alertdialog"]' });
     await dialog.waitForDisplayed({ reverse: true, timeout: 10_000 });
+  });
+});
+
+describe("an expired code", () => {
+  test("is refused without leaving a phantom peer", async () => {
+    const expiring = await startDaemon();
+    try {
+      const minted = await expiring.json<PairingData>([
+        "pair",
+        "create",
+        "-n",
+        "expired fixture",
+      ]);
+      await expiring.expirePairing(minted.pairing_id);
+      const result = await app.daemon.cli([
+        "pair",
+        "accept",
+        minted.code,
+        "--addr",
+        `127.0.0.1:${expiring.peerPort}`,
+      ]);
+      expect(result.exitCode).not.toBe(0);
+      expect(
+        (await app.daemon.json<PeerInfo[]>(["peers"])).some(
+          (peer) => peer.pairing_id === minted.pairing_id,
+        ),
+      ).toBe(false);
+    } finally {
+      await expiring.stop();
+    }
   });
 });
 
@@ -192,6 +266,44 @@ describe("unpairing", () => {
         return peers.every((peer) => peer.pairing_id !== paired.pairing_id);
       },
       { timeout: 20_000, timeoutMsg: "the peer store still holds the device" },
+    );
+    await waitForText(app.browser, "No other devices paired");
+  });
+});
+
+describe("revoking", () => {
+  test("blocks a newly established pairing and removes it from the UI", async () => {
+    const minted = await other.json<PairingData>([
+      "pair",
+      "create",
+      "-n",
+      "revoke fixture",
+    ]);
+    await app.daemon.json<unknown>([
+      "pair",
+      "accept",
+      minted.code,
+      "--addr",
+      `127.0.0.1:${other.peerPort}`,
+    ]);
+    const peer = (await app.daemon.json<PeerInfo[]>(["peers"])).find(
+      (candidate) => candidate.pairing_id === minted.pairing_id,
+    );
+    if (!peer) throw new Error("the revoke fixture did not establish");
+    await clickButton(app.browser, "Refresh devices discovered on this network");
+
+    await clickButton(app.browser, `Revoke ${peer.name}`);
+    const acknowledgement = await app.browser.$('label[for="revoke-ack"]');
+    await acknowledgement.waitForClickable({ timeout: 10_000 });
+    await acknowledgement.click();
+    await clickButton(app.browser, "Revoke", { within: '[role="alertdialog"]' });
+
+    await app.browser.waitUntil(
+      async () =>
+        (await app.daemon.json<PeerInfo[]>(["peers"])).every(
+          (candidate) => candidate.pairing_id !== minted.pairing_id,
+        ),
+      { timeout: 20_000, timeoutMsg: "the revoked peer remained in the store" },
     );
     await waitForText(app.browser, "No other devices paired");
   });
