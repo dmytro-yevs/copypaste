@@ -230,3 +230,15 @@ Two constraints worth knowing before editing the seeding:
 The device is not reset between runs; the app keeps its history. Assertions are
 written against the run's own fixtures, never against a row count or a
 position.
+
+## Known flake
+
+`history-controls`'s fixture wait fails intermittently in a full-suite run —
+roughly one run in three or four on a device that has been running the suite
+all day, and never when the file runs alone. The clipping is in the store;
+`add_item` returned its id, and a `list` right after the failure shows it. The
+screen does not. Neither a scroll to the top, nor a remount through Devices and
+back, nor two minutes of waiting brings it on, which rules out the virtualised
+window and the 3s poll and points at the infinite query's accumulated pages
+after a large delete. Unresolved; it is a precondition rather than an
+assertion, so what it costs is the file, not a false green.
