@@ -35,8 +35,12 @@ pub fn now_ms() -> i64 {
 #[must_use]
 pub fn unix_millis(time: SystemTime) -> i64 {
     time.duration_since(UNIX_EPOCH)
-        .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
+        .map(saturating_millis)
         .unwrap_or(0)
+}
+
+fn saturating_millis(duration: std::time::Duration) -> i64 {
+    i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
 }
 
 #[cfg(test)]
@@ -55,7 +59,9 @@ mod tests {
         assert_eq!(unix_millis(UNIX_EPOCH - Duration::from_millis(1)), 0);
         // Wrapping here would produce a negative stamp, which sorts as older
         // than every real item rather than newer.
-        let overflow = UNIX_EPOCH + Duration::from_millis(i64::MAX as u64 + 1);
-        assert_eq!(unix_millis(overflow), i64::MAX);
+        // Windows FILETIME cannot represent the enormous SystemTime needed to
+        // reach this branch, so assert the conversion before constructing it.
+        let overflow = Duration::from_millis(i64::MAX as u64 + 1);
+        assert_eq!(saturating_millis(overflow), i64::MAX);
     }
 }
