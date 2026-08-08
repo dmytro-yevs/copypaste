@@ -55,7 +55,7 @@ use copypaste_core::{
 };
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PeerInfo, StatusData, SyncResult,
 };
 pub use open::{Clipboard, EmbeddedBackend};
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
@@ -323,27 +323,6 @@ impl Backend for EmbeddedBackend {
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
-    }
-
-    /// Mint a pairing and hand back the code to read out to the other device.
-    ///
-    /// The peer is stored before the other device has ever been heard from,
-    /// because the pre-shared key has to be in the listener's candidate list
-    /// before the other half dials in — which is also why this is the operation
-    /// that must not run without a listener.
-    async fn pair_create(&self, name: &str) -> Result<PairingData> {
-        self.node().await?.pair_create(name)
-    }
-
-    /// Consume a code from the other device and prove the pairing works.
-    ///
-    /// The peer is persisted only after a complete session — the node's rule,
-    /// and the reason a failed pairing leaves the paired-device list untouched.
-    async fn pair_accept(&self, code: &str, addr: &str) -> Result<Vec<PeerInfo>> {
-        self.node()
-            .await?
-            .pair_accept(&self.inner, code, addr)
-            .await
     }
 
     /// Known peers, with a best-effort liveness flag from discovery.
@@ -636,42 +615,24 @@ mod tests {
         assert!(!err.ui_error().retryable, "{err:?}");
     }
 
-    /// The whole point of the move: this build can mint a pairing, and the code
-    /// it hands back reconstructs the key the listener will accept.
+    /// ADR-0015. Android is a product surface, and this backend is the whole of
+    /// its API: a pairing verb it does not expose is one the WebView cannot
+    /// reach, whatever the screen renders. Minting and redeeming still live in
+    /// `copypaste-p2p`, which is where their behaviour is tested.
     #[tokio::test]
-    async fn a_minted_pairing_is_a_listener_credential_not_a_device_row() {
+    async fn the_embedded_backend_exposes_no_pairing_verb() {
+        let source = include_str!("mod.rs");
+        for verb in [concat!("fn pair_", "create"), concat!("fn pair_", "accept")] {
+            assert!(!source.contains(verb), "{verb} is reachable on Android");
+        }
+
+        // Revoking is unaffected, and still bars a pairing id this device has
+        // never seen — the case that matters after a device is lost.
         let (backend, _clip, _dir) = backend();
-        let pairing = backend.pair_create("laptop").await.unwrap();
-        assert!(!pairing.code.is_empty());
-        assert_ne!(pairing.code, pairing.pairing_id);
-
-        let token =
-            copypaste_p2p::transport::PairingToken::parse(&pairing.code).expect("a valid code");
-        assert_eq!(token.pairing_id(), pairing.pairing_id);
-
-        assert!(
-            backend.peers().await.unwrap().is_empty(),
-            "a code waiting for another device must not render as this device"
-        );
-
-        // ...and forgetting it removes the key from the listener's candidates.
-        backend.unpair(&pairing.pairing_id).await.unwrap();
-        assert!(backend.peers().await.unwrap().is_empty());
-    }
-
-    /// Revoking is the same gesture as unpairing until you try to use the code
-    /// again, which is the only place the two differ.
-    #[tokio::test]
-    async fn a_revoked_pairing_cannot_be_minted_back_onto_this_device() {
-        let (backend, _clip, _dir) = backend();
-        let pairing = backend.pair_create("stolen phone").await.unwrap();
-
-        backend.revoke(&pairing.pairing_id).await.unwrap();
-        assert!(backend.peers().await.unwrap().is_empty());
+        let token = copypaste_p2p::transport::PairingToken::generate();
+        backend.revoke(&token.pairing_id()).await.unwrap();
 
         let store = copypaste_p2p::peers::PeerStore::open(&backend.inner.state.peers_path).unwrap();
-        let token =
-            copypaste_p2p::transport::PairingToken::parse(&pairing.code).expect("a valid code");
         assert!(
             store
                 .upsert(copypaste_p2p::peers::Peer {
@@ -682,26 +643,8 @@ mod tests {
                     last_seen_ms: 0,
                 })
                 .is_err(),
-            "the code someone kept still enrols the pairing"
+            "a revoked pairing id was enrolled anyway"
         );
-    }
-
-    /// A well-formed code for a device that is not listening must not leave a
-    /// half-made pairing behind.
-    #[tokio::test]
-    async fn a_failed_pairing_stores_nothing() {
-        let (backend, _clip, _dir) = backend();
-        let code = copypaste_p2p::transport::PairingToken::generate().to_code();
-        // Port 1 on loopback: nothing is listening, so the connect fails fast.
-        assert!(backend.pair_accept(&code, "127.0.0.1:1").await.is_err());
-        assert!(backend.peers().await.unwrap().is_empty());
-
-        // A code that is not a code is refused without dialling anything.
-        assert!(backend
-            .pair_accept("not-a-code", "127.0.0.1:1")
-            .await
-            .is_err());
-        assert!(backend.peers().await.unwrap().is_empty());
     }
 
     /// Discovery and sync answer rather than refuse, and an empty answer is a
@@ -715,7 +658,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_live_sync_switch_blocks_manual_pairing_and_sync() {
+    async fn the_live_sync_switch_blocks_sync() {
         let (backend, _clip, _dir) = backend();
         backend
             .set_config(copypaste_ipc::ConfigPatch {
@@ -727,13 +670,6 @@ mod tests {
 
         assert!(matches!(
             backend.sync(None).await.unwrap_err(),
-            BackendError::NotReady
-        ));
-        assert!(matches!(
-            backend
-                .pair_accept("not-a-code", "127.0.0.1:1")
-                .await
-                .unwrap_err(),
             BackendError::NotReady
         ));
     }

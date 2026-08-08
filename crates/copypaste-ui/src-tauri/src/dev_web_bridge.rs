@@ -18,7 +18,7 @@ use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, Method as HttpMethod, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
-use copypaste_ipc::{ConfigPatch, PairingData};
+use copypaste_ipc::ConfigPatch;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -84,17 +84,6 @@ struct BundleIdArgs {
 struct PinArgs {
     id: String,
     pinned: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairCreateArgs {
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PairAcceptArgs {
-    code: String,
-    addr: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -303,23 +292,6 @@ async fn call(
                 .and_then(value)
         }
         "peers" => backend.peers().await.map_err(failure).and_then(value),
-        "pair_create" => {
-            let args: PairCreateArgs = parse(request.args)?;
-            backend
-                .pair_create(&args.name)
-                .await
-                .map(pairing_data)
-                .map_err(failure)
-                .and_then(value)
-        }
-        "pair_accept" => {
-            let args: PairAcceptArgs = parse(request.args)?;
-            backend
-                .pair_accept(&args.code, &args.addr)
-                .await
-                .map_err(failure)
-                .and_then(value)
-        }
         "unpair" => {
             let args: PairingIdArgs = parse(request.args)?;
             backend
@@ -357,14 +329,6 @@ async fn call(
         // daemon and refused for sensitive items.
         _ => Err(invalid_request()),
     }
-}
-
-fn pairing_data(data: PairingData) -> Value {
-    serde_json::json!({
-        "code": data.code,
-        "pairing_id": data.pairing_id,
-        "listen_addr": data.listen_addr,
-    })
 }
 
 fn cors(origin: HeaderValue) -> CorsLayer {
@@ -443,8 +407,6 @@ mod tests {
             "get_config",
             "set_config",
             "peers",
-            "pair_create",
-            "pair_accept",
             "unpair",
             "revoke",
             "sync_now",
@@ -455,6 +417,11 @@ mod tests {
         .collect::<BTreeSet<_>>();
         assert!(!allowed.contains("reveal_item"));
         assert!(!allowed.contains("read_pairing_text"));
+        // ADR-0015: the bridge is a product surface, so it must not name the
+        // pairing verbs either. The CLI reaches the daemon directly.
+        assert!(!allowed.contains("pair_create"));
+        assert!(!allowed.contains("pair_accept"));
+        assert!(!allowed.contains("scan_pairing_qr"));
         assert!(!allowed.contains("export_history"));
     }
 

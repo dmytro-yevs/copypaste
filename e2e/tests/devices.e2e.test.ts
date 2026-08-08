@@ -2,13 +2,15 @@
  * The Devices security boundary and established-device management.
  *
  * A second real daemon and the CLI establish the peer fixture; that setup is
- * not browser coverage for pairing. The browser proves that both pairing flows
- * are offered without a credential reaching the page, and that a known device
- * can sync, expose its revoke confirmation, and unpair.
+ * not browser coverage for pairing. The browser proves that no pairing control
+ * and no credential reach the page at all, and that a known device can sync,
+ * expose its revoke confirmation, and unpair.
  *
- * ADR-0007 is Accepted and forbids exactly the two controls the first describe
- * block now requires. The assertions follow the shipped app; the ADR has not
- * been superseded, and the difference is not this file's to settle.
+ * ADR-0015 and manifest 06 §3.3 hold Pair and Add-device controls off every
+ * product surface until the wire derives a SAS from the handshake and binds
+ * both devices' confirmation to it before anything is persisted. The CLI keeps
+ * `pair create` / `pair accept` — it is the scripting surface, and it is how
+ * this file builds its fixture.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -103,24 +105,55 @@ async function interactiveSurface(): Promise<string> {
   })) as string;
 }
 
-describe("pairing availability (ADR-0007)", () => {
-  test("offers both pairing flows", async () => {
+describe("pairing availability (ADR-0015)", () => {
+  test("says pairing is unavailable rather than failing silently", async () => {
     const text = await visibleText(app.browser);
-    expect(text).toContain("Join device");
-    expect(text).toContain("Show code");
+    expect(text).toMatch(/adding a device isn't available yet/i);
+    expect(text).toMatch(/devices already paired keep syncing/i);
   });
 
-  test("labels pairing controls without exposing a credential", async () => {
+  test("exposes no control that could start a pairing", async () => {
     const controls = await interactiveSurface();
-    expect(controls).toMatch(/join device/i);
-    expect(controls).toMatch(/show code/i);
+    for (const forbidden of [
+      /join device/i,
+      /show code/i,
+      /add device/i,
+      /^pair$/im,
+      /scan qr/i,
+      /paste pairing details/i,
+      /copy pairing details/i,
+    ]) {
+      expect(controls, `a pairing control is reachable: ${forbidden}`).not.toMatch(
+        forbidden,
+      );
+    }
+  });
 
-    const pairingArtifacts = (await app.browser.execute(function () {
+  test("renders no QR, credential field or pairing dialog", async () => {
+    const artifacts = (await app.browser.execute(function () {
       return document.querySelectorAll(
-        'output, #accept-code, #accept-addr, canvas[role="img"]',
+        'output, #accept-code, #accept-addr, #pairing-code, #pairing-address,' +
+          ' #pairing-security-code, canvas, svg[role="img"], [role="dialog"]',
       ).length;
     })) as number;
-    expect(pairingArtifacts).toBe(0);
+    expect(artifacts).toBe(0);
+  });
+
+  /** The credential must be absent from the document, not merely unrendered: a
+   *  blur, a `display: none` or an `aria-label` all leave it in `outerHTML`. */
+  test("never lets a pairing credential reach the page", async () => {
+    const minted = await other.json<PairingData>([
+      "pair",
+      "create",
+      "-n",
+      "leak probe",
+    ]);
+    await clickButton(app.browser, "Refresh devices discovered on this network");
+
+    const html = await outerHtml(app.browser);
+    expect(html).not.toContain(minted.code);
+    expect(html).not.toContain(minted.code.replace(/-/g, ""));
+    expect(html).not.toContain("copypaste://pair");
   });
 });
 

@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PeerInfo, StatusData, SyncResult,
 };
 
 use super::{Backend, BackendError, Page, Result};
@@ -181,14 +181,6 @@ impl Backend for FakeBackend {
     async fn shutdown(&self) -> Result<()> {
         self.shutdown.store(true, Ordering::Relaxed);
         Ok(())
-    }
-
-    async fn pair_create(&self, _name: &str) -> Result<PairingData> {
-        Err(refused())
-    }
-
-    async fn pair_accept(&self, _code: &str, _addr: &str) -> Result<Vec<PeerInfo>> {
-        Err(refused())
     }
 
     async fn peers(&self) -> Result<Vec<PeerInfo>> {

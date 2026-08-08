@@ -23,7 +23,7 @@
 use std::sync::Arc;
 
 use copypaste_core::StoreSource;
-use copypaste_ipc::{DiscoveredDevice, PairingData, PeerInfo, SyncResult};
+use copypaste_ipc::{DiscoveredDevice, PeerInfo, SyncResult};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::{Peer, PeerStore};
 use copypaste_p2p::sync::SyncOutcome;
@@ -94,36 +94,6 @@ impl PeerNode {
             node,
             _shutdown: shutdown,
         })
-    }
-
-    pub(super) fn pair_create(&self, name: &str) -> Result<PairingData> {
-        let pairing = self.node.pair_create(name).map_err(failed)?;
-        Ok(PairingData {
-            // The one and only rendering of the secret, straight into the
-            // reply. Not logged, not stored, not retrievable again.
-            code: pairing.code,
-            pairing_id: pairing.pairing_id,
-            listen_addr: pairing.listen_addr,
-        })
-    }
-
-    pub(super) async fn pair_accept(
-        &self,
-        inner: &Arc<Inner>,
-        code: &str,
-        addr: &str,
-    ) -> Result<Vec<PeerInfo>> {
-        if !inner.settings().sync_enabled {
-            return Err(BackendError::NotReady);
-        }
-        let accepted = self
-            .node
-            .pair_accept(code, addr, &source(inner))
-            .await
-            .map_err(failed)?;
-        remember(inner, &accepted.outcome);
-        let online = self.node.find(&accepted.peer.pairing_id).is_some();
-        Ok(vec![peer_info(&accepted.peer, online)])
     }
 
     pub(super) fn peers(&self) -> Vec<PeerInfo> {

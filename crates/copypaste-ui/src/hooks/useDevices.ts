@@ -6,11 +6,8 @@ import { toFriendly } from "@/lib/errors";
 import { PEERS_POLL_MS, POLL_BACKOFF_MS } from "@/lib/layout";
 import {
   type DiscoveredDevice,
-  type PairingData,
   type PeerInfo,
   type SyncResult,
-  acceptPairing,
-  createPairing,
   listDiscovered,
   listPeers,
   rescanDiscovered,
@@ -63,26 +60,6 @@ export function useRescan() {
   return useMutation<DiscoveredDevice[], unknown, void>({
     mutationFn: () => rescanDiscovered(),
     onSuccess: (devices) => qc.setQueryData(DISCOVERED_KEY, devices),
-    onError: (raw) => toast.error(toFriendly(raw)),
-  });
-}
-
-export function useCreatePairing() {
-  return useMutation<PairingData, unknown, string>({
-    mutationFn: createPairing,
-    onError: (raw) => toast.error(toFriendly(raw)),
-  });
-}
-
-export function useAcceptPairing() {
-  const qc = useQueryClient();
-  return useMutation<PeerInfo[], unknown, { code: string; addr: string }>({
-    mutationFn: ({ code, addr }) => acceptPairing(code, addr),
-    onSuccess: () => {
-      toast.success(t("devices.pairing.joined"));
-      void qc.invalidateQueries({ queryKey: PEERS_KEY });
-      void qc.invalidateQueries({ queryKey: DISCOVERED_KEY });
-    },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
 }

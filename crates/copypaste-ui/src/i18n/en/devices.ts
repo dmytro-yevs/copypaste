@@ -2,28 +2,10 @@ export const devices = {
   title: "Devices",
 
   pairing: {
-    createAction: "Show code",
-    joinAction: "Join device",
-    title: "Pair a device",
-    create: "Show a code",
-    join: "Join with a code",
-    showTitle: "Scan this on the other device",
-    showBody: "This pairing code is secret. It is shown once, so finish pairing before closing this window.",
-    joinTitle: "Join another device",
-    joinBody: "Scan its QR code or enter the displayed pairing code and address.",
-    scan: "Scan QR code",
-    code: "Pairing code",
-    address: "Connection address",
-    securityCode: "Security code",
-    securityCodePlaceholder: "Six characters",
-    verifyBody: "Compare the six-character security code with the other device before accepting the pairing.",
-    verifyJoinBody: "Enter the six-character security code shown on the device that created this pairing. Only confirm when they match.",
-    verifyConfirm: "I compared the security code on both devices.",
-    creating: "Creating a pairing code…",
-    copyDetails: "Copy pairing details",
-    pasteDetails: "Paste pairing details",
-    confirm: "Verify and pair",
-    joined: "Device paired and ready to sync.",
+    unavailable: {
+      title: "Adding a device isn't available yet",
+      body: "Pairing needs a confirmation code that both devices work out from the connection itself, so each side can check it before anything is saved. This app can't do that yet, and a code worked out on one device alone would look like that check without being it. Devices already paired keep syncing normally.",
+    },
   },
 
   unavailable: {
