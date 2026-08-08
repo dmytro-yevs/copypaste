@@ -163,11 +163,6 @@ impl Cloud {
             .map(|account| Arc::clone(&account.driver))
     }
 
-    pub fn note_success(&self, at_ms: i64) {
-        self.last_sync_ms.store(at_ms, Ordering::Release);
-        *self.lock_error() = None;
-    }
-
     /// Ask the poll loop to run a round now.
     pub fn wake(&self) {
         self.wake.notify_one();
@@ -253,6 +248,7 @@ impl Cloud {
         key: SyncKey,
         session: Session,
     ) {
+        let switched = Self::stored_user_id(&state.meta).as_deref() != Some(&user_id);
         let driver = CloudSync::new(
             SupabaseRest::new(config.clone()),
             SupabaseAuth::new(config.clone()),
@@ -261,11 +257,18 @@ impl Cloud {
             session,
             sensitive_guard(state),
         );
-        *self.lock_account() = Some(Account {
+        let mut account = self.lock_account();
+        *account = Some(Account {
             email,
             user_id,
             driver: Arc::new(driver),
         });
+        if switched {
+            self.last_sync_ms.store(0, Ordering::Release);
+            let _ = state.meta.clear_state(&[KEY_LAST_SYNC]);
+        }
+        *self.lock_error() = None;
+        drop(account);
         self.notify_session_changed();
     }
 
@@ -601,8 +604,8 @@ mod tests {
             .unwrap();
 
         let at = 1_700_000_000_000;
-        state.cloud.note_success(at);
-        state.meta.set_state_ms(KEY_LAST_SYNC, at).unwrap();
+        let driver = state.cloud.driver().unwrap();
+        state.cloud.note_driver_success(&state.meta, &driver, at);
 
         let (restarted, _dir) = crate::testutil::reopen(dir, Cloud::new(Some(config())), "alpha");
         assert!(restarted.cloud.restore(&restarted));
@@ -613,6 +616,49 @@ mod tests {
         restarted.cloud.sign_out(&restarted.meta);
         assert_eq!(restarted.meta.state(KEY_LAST_SYNC).unwrap(), None);
         assert_eq!(restarted.cloud.status().last_sync_ms, None);
+    }
+
+    #[test]
+    fn a_stale_round_cannot_overwrite_the_replacement_accounts_status() {
+        let (state, _dir) = test_state_with_cloud("alpha", Cloud::new(Some(config())));
+        state.cloud.install(
+            &state,
+            config(),
+            "old@example.com".into(),
+            "user-1".into(),
+            derive_sync_key("correct horse battery staple", "user-1").unwrap(),
+            session(),
+        );
+        let stale = state.cloud.driver().unwrap();
+        state.cloud.install(
+            &state,
+            config(),
+            "new@example.com".into(),
+            "user-2".into(),
+            derive_sync_key("correct horse battery staple", "user-2").unwrap(),
+            Session {
+                access_token: "access-2".into(),
+                refresh_token: "refresh-2".into(),
+                user_id: "user-2".into(),
+                expires_at_ms: 1_700_000_000_000,
+            },
+        );
+        let current = state.cloud.driver().unwrap();
+        state
+            .cloud
+            .note_driver_failure(&current, "the current account failed");
+
+        state
+            .cloud
+            .note_driver_success(&state.meta, &stale, 1_700_000_000_000);
+
+        let status = state.cloud.status();
+        assert_eq!(status.email.as_deref(), Some("new@example.com"));
+        assert_eq!(status.last_sync_ms, None);
+        assert_eq!(
+            status.last_error.as_deref(),
+            Some("the current account failed")
+        );
     }
 
     #[test]
