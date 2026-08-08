@@ -39,6 +39,7 @@
 
 mod open;
 mod peers;
+mod retention;
 mod rows;
 mod state;
 mod transfer;
@@ -69,7 +70,6 @@ const MSG_NO_ITEM: &str = "That item is no longer there.";
 /// replay the whole history and the caller could not tell.
 const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
-const MSG_NO_WATCH: &str = "Live updates aren't available in this build.";
 const MSG_INVALID_SETTING: &str = "That setting isn't valid.";
 const MSG_NO_BACKUP: &str = "Backup and restore aren't available in this build yet.";
 const MSG_NO_REORDER: &str =
@@ -442,15 +442,21 @@ impl Backend for EmbeddedBackend {
         Err(BackendError::Unsupported(MSG_NO_BACKUP))
     }
 
-    /// There is nothing to subscribe to.
-    ///
-    /// Push exists because on the desktop a *separate process* changes history
-    /// under the app. Here the app is the only writer, so every change is one
-    /// this process just made and React Query has already invalidated. The
-    /// frontend falls back to its poll, which costs nothing on a platform where
-    /// history only changes when the user is looking at it.
+    /// Auto-wipe is the embedded backend's one asynchronous history writer, so
+    /// its deletions use the same event contract as the daemon.
     async fn watch(&self) -> Result<tokio::sync::mpsc::Receiver<EventData>> {
-        Err(BackendError::Unsupported(MSG_NO_WATCH))
+        let mut source = self.inner.events.subscribe();
+        let (sender, receiver) = tokio::sync::mpsc::channel(64);
+        tokio::spawn(async move {
+            loop {
+                match source.recv().await {
+                    Ok(event) if sender.send(event).await.is_err() => break,
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+        Ok(receiver)
     }
 }
 
