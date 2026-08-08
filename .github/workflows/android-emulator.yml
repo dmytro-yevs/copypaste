@@ -54,8 +54,15 @@ on:
     inputs:
       api-level:
         description: "Emulator API level"
-        required: false
+        required: true
         default: "36"
+        type: choice
+        options:
+          - "24"
+          - "29"
+          - "33"
+          - "34"
+          - "36"
       target:
         description: "System image target (google_apis; API 36 has no AOSP image)"
         required: false
@@ -290,10 +297,14 @@ jobs:
   # Linux runners expose but do not make world-writable.
   # ---------------------------------------------------------------------------
   emulator:
-    name: Launch, capture, and read back
+    name: Launch, capture, and read back (API ${{ matrix.api-level }})
     needs: apk
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: ${{ fromJSON(github.event_name == 'schedule' && '[24,29,33,34,36]' || format('[{0}]', inputs.api-level || '36')) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -323,7 +334,7 @@ jobs:
 
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          api-level: ${{ inputs.api-level || '36' }}
+          api-level: ${{ matrix.api-level }}
           target: ${{ inputs.target || 'google_apis' }}
           arch: x86_64
           ram-size: 4096M
@@ -339,7 +350,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: android-emulator-evidence
+          name: android-emulator-evidence-api${{ matrix.api-level }}
           path: artifacts/android-smoke
           if-no-files-found: warn
           retention-days: 14
