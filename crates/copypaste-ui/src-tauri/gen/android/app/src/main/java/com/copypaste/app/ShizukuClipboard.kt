@@ -236,7 +236,7 @@ object ShizukuClipboard {
      * tested.
      */
     fun setToastSuppressed(suppressed: Boolean): Boolean = try {
-        ShellCommand.run("settings put secure clipboard_show_access_notifications ${if (suppressed) 0 else 1}")
+        ShizukuSettings.setClipboardAccessNotifications(suppressed)
         true
     } catch (e: Throwable) {
         Log.w(TAG, "changing the clipboard notice failed", e)
