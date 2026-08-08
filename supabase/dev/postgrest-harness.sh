@@ -65,7 +65,8 @@ JWT_SECRET="${JWT_SECRET:-copypaste-local-harness-secret-not-a-real-key}"
 
 workdir="$(mktemp -d /tmp/copypaste-postgrest-XXXXXX)"
 datadir="$workdir/data"
-mkdir -p "$datadir"
+sockdir="$workdir/sock"
+mkdir -p "$datadir" "$sockdir"
 [[ ${#run_as[@]} -eq 0 ]] || chown -R "${PG_RUN_AS:-postgres}" "$workdir"
 
 cleanup() {
@@ -77,8 +78,13 @@ trap cleanup EXIT
 
 echo "harness: initialising a throwaway cluster in $workdir"
 "${run_as[@]}" "$bindir/initdb" -D "$datadir" -U copypaste_verify --auth=trust >"$workdir/initdb.log" 2>&1
+# `-k` even though every client below speaks TCP: the server still creates a
+# unix socket, and its compiled-in default is /var/run/postgresql, which does
+# not exist on a machine that has only ever had the client package. Without
+# this the cluster dies at startup on the very machines this harness exists to
+# serve — the ones without Docker.
 "${run_as[@]}" "$bindir/pg_ctl" -D "$datadir" -l "$workdir/server.log" \
-    -o "-p $PG_PORT -h 127.0.0.1 -c wal_level=logical -c fsync=off -c full_page_writes=off" \
+    -o "-k $sockdir -p $PG_PORT -h 127.0.0.1 -c wal_level=logical -c fsync=off -c full_page_writes=off" \
     -w start >/dev/null
 
 psql=("${run_as[@]}" "$bindir/psql" -h 127.0.0.1 -p "$PG_PORT" -U copypaste_verify -v ON_ERROR_STOP=1 -X -q)
