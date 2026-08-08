@@ -41,6 +41,9 @@ def main():
             errors.append(f"{feature_id}: status must be product or removed")
         classified.extend(feature.get("contracts", []))
         if feature.get("status") == "product":
+            release_evidence = feature.get("release_evidence", [])
+            if "release-android-hardware-evidence" not in release_evidence:
+                errors.append(f"{feature_id}: release evidence missing physical Android smoke")
             for platform in ("android", "macos"):
                 scenario = feature.get("native", {}).get(platform, {})
                 for field in ("scenario", "screenshot", "ax_log"):
