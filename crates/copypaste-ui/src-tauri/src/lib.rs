@@ -220,10 +220,11 @@ pub fn run() {
             commands::service::hide_window,
             commands::service::show_main_window,
             commands::protection::set_allow_screenshots,
-            // desktop global shortcut
             commands::shortcut::get_default_shortcut,
             commands::shortcut::get_shortcut,
             commands::shortcut::set_shortcut,
+            commands::autostart::get_open_at_login,
+            commands::autostart::set_open_at_login,
             // the service's own settings
             commands::config::get_config,
             commands::config::set_config,
@@ -463,5 +464,32 @@ mod tests {
         assert_eq!(main["minHeight"], 460);
         assert_eq!(main["skipTaskbar"], false);
         assert_eq!(main["transparent"], true);
+    }
+
+    /// The Start Menu shortcut created by NSIS provides the AppUserModelID
+    /// required for toast delivery. `currentUser` keeps installation and the
+    /// HKCU launch-at-login entry under the same user's control. The window
+    /// block is repeated because platform config replaces the base array.
+    #[test]
+    fn windows_ships_an_installer_and_a_sized_main_window() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.conf.json"))
+                .expect("the Windows Tauri config is valid JSON");
+
+        assert_eq!(config["bundle"]["targets"], serde_json::json!(["nsis"]));
+        assert_eq!(
+            config["bundle"]["windows"]["nsis"]["installMode"],
+            "currentUser"
+        );
+
+        let main = &config["app"]["windows"][0];
+        assert_eq!(main["label"], "main");
+        assert_eq!(main["width"], 1100);
+        assert_eq!(main["height"], 760);
+        assert_eq!(main["minWidth"], 720);
+        assert_eq!(main["minHeight"], 460);
+        // INV-35 holds on Windows through SetWindowDisplayAffinity, so the
+        // screenshot exclusion must be asserted here as well as on macOS.
+        assert_eq!(main["contentProtected"], true);
     }
 }

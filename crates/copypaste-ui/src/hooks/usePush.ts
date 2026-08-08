@@ -12,6 +12,7 @@ import { listen } from "@tauri-apps/api/event";
 import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
 import { PEERS_KEY } from "@/hooks/useDevices";
 import { CONFIG_KEY } from "@/hooks/useServiceConfig";
+import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";
 import { hasBridge } from "@/lib/ipc";
 
 /** Must match `service::push::EVENT_CHANGED`, which has a test asserting it. */
@@ -20,6 +21,9 @@ export const EVENT_CHANGED = "copypaste://changed";
 export const EVENT_PUSH_STATE = "copypaste://push-state";
 /** Emitted by the native tray after the daemon persisted its confirmed value. */
 export const EVENT_PRIVATE_MODE_CHANGED = "private-mode-changed";
+/** Must match `shell::autostart::EVENT_CHANGED`. The tray menu can change this
+ *  setting without Settings ever being open. */
+export const EVENT_AUTOSTART_CHANGED = "autostart-changed";
 
 /** What the bridge sends on a change. Carries no clipboard content: a
  *  subscriber re-reads through the ordinary commands. */
@@ -76,6 +80,13 @@ export function usePush(): boolean {
       void qc.invalidateQueries({ queryKey: CONFIG_KEY });
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
+    }).then(keep);
+
+    // The payload is the observed state, but the query is re-read rather than
+    // written from it: one place decides what this setting is, the same rule
+    // the change event above follows.
+    void listen<boolean>(EVENT_AUTOSTART_CHANGED, () => {
+      void qc.invalidateQueries({ queryKey: OPEN_AT_LOGIN_KEY });
     }).then(keep);
 
     return () => {

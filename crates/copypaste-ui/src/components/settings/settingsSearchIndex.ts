@@ -33,6 +33,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { tab: "list", title: "settings.list.allowScreenshots.title", description: "settings.list.allowScreenshots.description", keywords: ["screen recording", "privacy"] },
 
   { tab: "shortcut", title: "settings.shortcut.title", description: "settings.shortcut.description", keywords: ["hotkey", "keyboard", "quick paste"] },
+  { tab: "shortcut", section: "settings.startup.title", title: "settings.startup.openAtLogin.title", description: "settings.startup.openAtLogin.description", keywords: ["autostart", "login", "sign in", "boot", "launch", "start with windows", "login items"], platforms: ["desktop"] },
 
   { tab: "service", section: "settings.service.groups.capture.title", title: "settings.service.privateMode.title", description: "settings.service.privateMode.description" },
   { tab: "service", section: "settings.service.groups.capture.title", title: "settings.service.poll.title", description: "settings.service.poll.description" },
