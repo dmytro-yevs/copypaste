@@ -118,7 +118,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | i18n: no catalogue key reaches the screen | Rust, Browser (WebKitGTK) | Verified |
 | Design tokens and contrast | `ci.yml` → `design tokens` | Verified |
 | The app renders on WKWebView | macOS | **NOT VERIFIED IN CI** — the tag-only smoke observes a `WebContent` process, nothing more |
-| The app renders on the Android WebView | Android | Partial — `assert_painted` degrades to `NOT ASSERTED` when the screen is asleep or uiautomator returns no dump |
+| The app renders on the Android WebView | Android | Verified — both APK legs fail unless the screen is awake and uiautomator reports named WebView content |
 | Anything about the Android UI beyond a painted screen | Android | **NOT VERIFIED IN CI** |
 | VoiceOver and TalkBack | macOS, Android | **NOT VERIFIED IN CI** — no screen reader is driven anywhere |
 
