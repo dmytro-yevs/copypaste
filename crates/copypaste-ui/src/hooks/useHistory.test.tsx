@@ -141,6 +141,51 @@ describe("the idle poll reads the head, not every loaded page", () => {
   });
 });
 
+/**
+ * bdac.2. Once the poll moved to the head query (F-UI-1) the paged query is
+ * refetched only when the user asks for a page, so it cannot observe a service
+ * that stops after the first load. Reading its error is how the app came to
+ * render "Nothing copied yet" over a dead daemon instead of the screen that
+ * offers to start it.
+ */
+describe("the query that polls is the one that reports the service", () => {
+  it("reports a poll that fails after the first page already loaded", async () => {
+    listItems.mockImplementation(async () => page(items(0)));
+
+    const { client, Wrapper } = wrapper();
+    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(0));
+    expect(result.current.error).toBeNull();
+
+    listItems.mockImplementation(async () => {
+      throw new IpcFailure("offline", true);
+    });
+    await client.refetchQueries({ queryKey: HISTORY_HEAD_KEY });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeInstanceOf(IpcFailure);
+  });
+
+  it("clears it when the poll reaches the service again", async () => {
+    listItems.mockImplementation(async () => {
+      throw new IpcFailure("offline", true);
+    });
+
+    const { client, Wrapper } = wrapper();
+    const { result } = renderHook(() => useHistory(""), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    // A service started from outside the app: only the head poll notices, so an
+    // error latched on the paged query would keep the recovery screen up over a
+    // service that is answering.
+    listItems.mockImplementation(async () => page(items(2)));
+    await client.refetchQueries({ queryKey: HISTORY_HEAD_KEY });
+
+    await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
+    expect(result.current.error).toBeNull();
+  });
+});
+
 describe("load-more merges rather than replacing (INV-4 / AT-7)", () => {
   it("keeps every loaded page across the next poll", async () => {
     const page1 = items(PAGE_SIZE);
