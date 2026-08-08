@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
+
+use copypaste_fs::Visibility;
 
 use crate::sync::SyncCursor;
 
@@ -121,19 +122,16 @@ impl CursorStore {
     }
 }
 
+/// `fsync`ed before the rename publishes it, unlike the copy this replaced: a
+/// rename that outlives its own contents leaves a file that will not parse, and
+/// [`CursorStore::open`] answers that by resetting every cursor to zero — a full
+/// re-exchange with every peer.
 fn write_atomically(path: &Path, peers: &BTreeMap<String, Record>) -> Result<(), std::io::Error> {
     let json = serde_json::to_vec(&CursorFile {
         peers: peers.clone(),
     })
     .map_err(std::io::Error::other)?;
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
-    if let Some(dir) = dir {
-        std::fs::create_dir_all(dir)?;
-    }
-    let mut tmp = tempfile::NamedTempFile::new_in(dir.unwrap_or_else(|| Path::new(".")))?;
-    tmp.write_all(&json)?;
-    tmp.persist(path).map_err(|err| err.error)?;
-    Ok(())
+    copypaste_fs::write_atomically(path, &json, Visibility::Inherited)
 }
 
 #[cfg(test)]

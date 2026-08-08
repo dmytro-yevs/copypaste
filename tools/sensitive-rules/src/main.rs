@@ -108,12 +108,8 @@ fn verify_bytes(label: &str, bytes: &[u8], expected: &str) -> Result<()> {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path.parent().context("output path has no parent")?;
-    fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    let temporary = path.with_extension("tmp");
-    fs::write(&temporary, bytes).with_context(|| format!("write {}", temporary.display()))?;
-    fs::rename(&temporary, path).with_context(|| format!("replace {}", path.display()))?;
-    Ok(())
+    copypaste_fs::write_atomically(path, bytes, copypaste_fs::Visibility::Inherited)
+        .with_context(|| format!("replace {}", path.display()))
 }
 
 #[cfg(test)]
