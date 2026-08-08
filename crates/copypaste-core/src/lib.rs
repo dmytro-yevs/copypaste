@@ -37,7 +37,7 @@ pub use storage::{
     IndexedText, Ingest, ItemCursor, NewItem, Page, RestoreError, Store, StoreError, StoredItem,
     Version,
 };
-pub use sync::{MergeError, OpenVersionError, RemoteVersion, StoreSource};
+pub use sync::{local_winner_stamp, MergeError, OpenVersionError, RemoteVersion, StoreSource};
 pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};
 
 /// Milliseconds since the Unix epoch.

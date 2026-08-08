@@ -189,6 +189,79 @@ fn local_version(store: &Store, item_id: &str) -> Result<Option<Version>, MergeE
     })
 }
 
+fn stored_summary(local: &Version, here: &str) -> ItemSummary {
+    ItemSummary {
+        item_id: local.id.clone(),
+        created_at: local.created_at,
+        deleted: local.deleted,
+        content_hash: local.content_hash.clone(),
+        origin_device_id: origin_or(&local.origin_device_id, here).to_string(),
+        pinned: local.pinned,
+        pin_order: local.pin_order,
+        pin_updated_at: local.pin_updated_at,
+    }
+}
+
+fn remote_summary(
+    incoming: &RemoteVersion<'_>,
+    content_hash: String,
+    pin_state: Option<(bool, Option<f64>, i64)>,
+) -> ItemSummary {
+    ItemSummary {
+        item_id: incoming.item_id.to_string(),
+        created_at: incoming.created_at,
+        deleted: incoming.deleted,
+        content_hash,
+        origin_device_id: incoming.origin_device_id.to_string(),
+        pinned: pin_state.is_some_and(|state| state.0),
+        pin_order: pin_state.and_then(|state| state.1),
+        pin_updated_at: pin_state.map_or(0, |state| state.2),
+    }
+}
+
+fn remote_content_hash(incoming: &RemoteVersion<'_>, local: Option<&Version>) -> String {
+    if incoming.deleted {
+        return incoming
+            .content_hash
+            .map(str::to_owned)
+            .or_else(|| local.map(|value| value.content_hash.clone()))
+            .unwrap_or_default();
+    }
+    let content = incoming
+        .binary_content
+        .unwrap_or(incoming.content.as_bytes());
+    if copypaste_ipc::content_type::is_binary(incoming.content_type) {
+        crate::binary::content_hash(&crate::binary::content_digest(content))
+    } else {
+        crate::storage::compute_content_hash(content)
+    }
+}
+
+/// The current local winner's stamp when an incoming version must be republished.
+pub fn local_winner_stamp(
+    store: &Store,
+    here: &str,
+    incoming: &RemoteVersion<'_>,
+) -> Result<Option<i64>, MergeError> {
+    let Some(local) = local_version(store, incoming.item_id)? else {
+        return Ok(None);
+    };
+    let mine = stored_summary(&local, here);
+    let remote = remote_summary(incoming, remote_content_hash(incoming, Some(&local)), None);
+    let same_version = mine.created_at == remote.created_at
+        && mine.content_hash == remote.content_hash
+        && mine.deleted == remote.deleted
+        && mine.origin_device_id == remote.origin_device_id;
+    Ok((!same_version
+        && merge_decision(
+            &mine,
+            &mine.origin_device_id,
+            &remote,
+            &remote.origin_device_id,
+        ) == MergeDecision::KeepLocal)
+        .then_some(local.created_at))
+}
+
 /// Shapes that are never stored, whichever transport carried them. Checked by
 /// the entry points so the local row is read exactly once per incoming item.
 fn payload_is_refused(incoming: &RemoteVersion<'_>) -> bool {
@@ -320,28 +393,14 @@ fn apply_remote_version_with_pin_state(
         }
     };
 
-    let remote = ItemSummary {
-        item_id: incoming.item_id.to_string(),
-        created_at: incoming.created_at,
-        deleted: incoming.deleted,
-        content_hash: content_hash.to_string(),
-        origin_device_id: incoming.origin_device_id.to_string(),
-        pinned: pin_state.is_some_and(|state| state.0),
-        pin_order: pin_state.and_then(|state| state.1),
-        pin_updated_at: pin_state.map_or(0, |state| state.2),
-    };
+    let remote = remote_summary(
+        incoming,
+        content_hash.to_string(),
+        pin_state.map(|state| (state.0, state.1, state.2)),
+    );
 
     if let Some(local) = local {
-        let mine = ItemSummary {
-            item_id: local.id.clone(),
-            created_at: local.created_at,
-            deleted: local.deleted,
-            content_hash: local.content_hash.clone(),
-            origin_device_id: origin_or(&local.origin_device_id, here).to_string(),
-            pinned: local.pinned,
-            pin_order: local.pin_order,
-            pin_updated_at: local.pin_updated_at,
-        };
+        let mine = stored_summary(local, here);
         if merge_decision(
             &mine,
             origin_or(&local.origin_device_id, here),

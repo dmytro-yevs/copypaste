@@ -214,17 +214,28 @@ impl CloudSource for StoreSource {
     }
 
     fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
-        let Some(local) = self
-            .inner
-            .state
-            .store
-            .version(&incoming.item_id)
-            .map_err(source_error)?
-        else {
-            return Ok(false);
-        };
-        if local.created_at > incoming.created_at {
-            self.inner.note_version_written(local.created_at);
+        let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
+            .then(|| String::from_utf8_lossy(&incoming.content));
+        let stamp = copypaste_core::local_winner_stamp(
+            &self.inner.state.store,
+            &self.inner.state.device_id,
+            &RemoteVersion {
+                item_id: &incoming.item_id,
+                content: text.as_deref().unwrap_or(""),
+                binary_content: (!incoming.deleted
+                    && !copypaste_ipc::content_type::is_text(&incoming.content_type))
+                .then_some(incoming.content.as_slice()),
+                payload_metadata: incoming.payload_metadata.as_deref(),
+                content_type: &incoming.content_type,
+                created_at: incoming.created_at,
+                deleted: incoming.deleted,
+                content_hash: None,
+                origin_device_id: &incoming.origin_device_id,
+            },
+        )
+        .map_err(|_| SyncError::Source(copypaste_core::sync::MSG_STORE))?;
+        if let Some(stamp) = stamp {
+            self.inner.note_version_written(stamp);
             return Ok(true);
         }
         Ok(false)
@@ -365,6 +376,57 @@ mod tests {
         cloud.commit_upload_floor(9_000).unwrap();
 
         assert_eq!(cloud.upload_floor().unwrap(), 1_000);
+        assert_eq!(cloud.upload_floor_item_id().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn an_equal_timestamp_local_tombstone_is_republished_to_cloud() {
+        let (backend, _clipboard, _dir) = backend();
+        let cloud = StoreSource::new(&backend.inner);
+        let peer = crate::backend::embedded::peers::source(&backend.inner);
+        let text = "deleted locally";
+        peer.apply(SyncItem {
+            item_id: "same-stamp-delete".into(),
+            content: text.into(),
+            binary_content: Vec::new(),
+            payload_metadata: None,
+            content_type: copypaste_ipc::content_type::TEXT.into(),
+            created_at: 1_000,
+            deleted: false,
+            content_hash: content_hash(text),
+            origin_device_id: "peer-device".into(),
+            pinned: false,
+            pin_order: None,
+            pin_updated_at: 0,
+        })
+        .unwrap();
+        backend
+            .inner
+            .state
+            .store
+            .delete("same-stamp-delete")
+            .unwrap();
+        let tombstone = backend
+            .inner
+            .state
+            .store
+            .version("same-stamp-delete")
+            .unwrap()
+            .unwrap();
+        set_floor(&cloud, tombstone.created_at + 50_000, "z");
+
+        assert!(cloud
+            .requeue_local_winner(&LocalItem {
+                item_id: "same-stamp-delete".into(),
+                content: text.as_bytes().to_vec(),
+                content_type: copypaste_ipc::content_type::TEXT.into(),
+                payload_metadata: None,
+                created_at: tombstone.created_at,
+                deleted: false,
+                origin_device_id: "cloud-device".into(),
+            })
+            .unwrap());
+        assert_eq!(cloud.upload_floor().unwrap(), tombstone.created_at);
         assert_eq!(cloud.upload_floor_item_id().unwrap(), None);
     }
 }
