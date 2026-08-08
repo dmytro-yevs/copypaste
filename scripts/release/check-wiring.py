@@ -434,6 +434,7 @@ NO_DEVICE = "its detectors are the only part checkable without a device, so they
 SELF_TESTED = {
     "android-smoke.sh": NO_DEVICE,
     "android-smoke-release.sh": NO_DEVICE,
+    "android-rungs.sh": NO_DEVICE,
     "check-wiring.py": "the runner-image table is data, and nothing else would notice it going empty",
 }
 for name, why in SELF_TESTED.items():
