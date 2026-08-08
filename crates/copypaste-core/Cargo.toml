@@ -43,6 +43,9 @@ regex.workspace = true
 unicode-normalization.workspace = true
 iban_validate.workspace = true
 image.workspace = true
+# Owner-only staging files close the restore validation/swap race. This crate
+# already ships through both product backends, so the dependency graph is unchanged.
+tempfile.workspace = true
 
 # Declared here as well as in the Android target table below, and optional only
 # here: that is what lets `--features android-keystore-typecheck` compile the
@@ -117,7 +120,6 @@ android-native-keyring-store = "1"
 android-keystore-typecheck = ["dep:keyring-core", "dep:android-native-keyring-store"]
 
 [dev-dependencies]
-tempfile.workspace = true
 # Benchmark harness (CLAUDE.md rule 1 — the alternative was a hand-rolled timing
 # loop, which is the wheel this rule is about). `default-features = false` drops
 # `plotters` and `rayon`: the report those draw is not worth ~30 transitive

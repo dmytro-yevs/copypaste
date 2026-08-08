@@ -137,6 +137,9 @@ pub struct StoredItem {
 /// `r2d2` errors do not embed one either, so these are safe to show a user.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("database file operation failed")]
+    File(#[from] std::io::Error),
+
     #[error("database error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 

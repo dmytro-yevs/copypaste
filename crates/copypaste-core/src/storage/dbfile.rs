@@ -11,6 +11,7 @@
 //! and it must be literal in the SQL rather than bound (see
 //! [`attach_key_literal`]).
 
+use std::io::Write;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -18,6 +19,17 @@ use zeroize::Zeroizing;
 
 use super::connection::{apply_connection_pragmas, apply_key, validate_key};
 use super::model::StoreError;
+
+const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_device_name"];
+
+#[derive(Debug, thiserror::Error)]
+pub enum RestoreError {
+    #[error("the backup is not valid for this device")]
+    InvalidBackup(#[source] StoreError),
+
+    #[error("the restore could not be completed")]
+    Failed(#[source] StoreError),
+}
 
 /// Open `path` with `db_key` and prove the key works before returning.
 ///
@@ -86,6 +98,112 @@ impl super::Store {
         conn.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()])?;
         Ok(())
     }
+
+    /// Stage and validate a same-device encrypted backup, then atomically replace history.
+    pub fn restore_from(
+        &self,
+        src: &Path,
+        db_key: &[u8; 32],
+        detector: &crate::Detector,
+    ) -> Result<crate::PurgeReport, RestoreError> {
+        let staged = self
+            .stage_restore_candidate(src)
+            .map_err(RestoreError::Failed)?;
+        let candidate =
+            open_validated(staged.path(), db_key).map_err(RestoreError::InvalidBackup)?;
+        verify_integrity(&candidate).map_err(RestoreError::InvalidBackup)?;
+        verify_schema(&candidate).map_err(RestoreError::InvalidBackup)?;
+        let tables = user_tables(&candidate)
+            .map_err(StoreError::from)
+            .map_err(RestoreError::InvalidBackup)?;
+        if RESTORED_TABLES
+            .iter()
+            .any(|required| !tables.iter().any(|table| table == required))
+            || tables
+                .iter()
+                .any(|table| !super::schema::is_current_table(table))
+        {
+            return Err(RestoreError::InvalidBackup(StoreError::InvalidSchema));
+        }
+        drop(candidate);
+
+        let mut conn = self.conn().map_err(RestoreError::Failed)?;
+        let attach = format!(
+            "ATTACH DATABASE ?1 AS restore_src KEY {}",
+            attach_key_literal(db_key).as_str()
+        );
+        conn.execute(&attach, [staged.path().to_string_lossy().as_ref()])
+            .map_err(StoreError::from)
+            .map_err(RestoreError::Failed)?;
+        let result = (|| -> rusqlite::Result<crate::PurgeReport> {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            for table in RESTORED_TABLES {
+                tx.execute(&format!("DELETE FROM {table}"), [])?;
+            }
+            tx.execute(
+                "INSERT INTO clipboard_items SELECT * FROM restore_src.clipboard_items",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO clipboard_fts (rowid, id, content_text) \
+                 SELECT ci.fts_rowid, fts.id, fts.content_text FROM restore_src.clipboard_fts fts \
+                 JOIN restore_src.clipboard_items ci ON ci.id = fts.id \
+                 WHERE ci.deleted = 0 AND ci.is_sensitive = 0 \
+                   AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO sync_device_name SELECT * FROM restore_src.sync_device_name",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO sync_device_name (device_id, name) \
+                 SELECT id.value, name.value \
+                 FROM sync_device_state id, sync_device_state name \
+                 WHERE id.key = 'device_id' AND name.key = 'device_name' \
+                 ON CONFLICT(device_id) DO UPDATE SET name = excluded.name",
+                [],
+            )?;
+            let report = crate::purge_indexed_secrets_in_transaction(&tx, detector)?;
+            tx.commit()?;
+            Ok(report)
+        })();
+        let _ = conn.execute("DETACH DATABASE restore_src", []);
+        result
+            .map_err(StoreError::from)
+            .map_err(RestoreError::Failed)
+    }
+
+    fn stage_restore_candidate(&self, src: &Path) -> Result<tempfile::NamedTempFile, StoreError> {
+        let mut staged = match self.path.as_deref().and_then(|path| path.parent()) {
+            Some(parent) => tempfile::Builder::new()
+                .prefix(".copypaste-restore-")
+                .tempfile_in(parent)?,
+            None => tempfile::NamedTempFile::new()?,
+        };
+        let mut source = std::fs::File::open(src)?;
+        std::io::copy(&mut source, staged.as_file_mut())?;
+        staged.as_file_mut().flush()?;
+        Ok(staged)
+    }
+}
+
+fn user_tables(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') \
+         AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+    )?;
+    let all = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(all
+        .into_iter()
+        .filter(|name| {
+            !name.strip_prefix("clipboard_fts_").is_some_and(|suffix| {
+                matches!(suffix, "data" | "idx" | "content" | "docsize" | "config")
+            })
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -192,5 +310,152 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1);
         conn.execute("DETACH DATABASE src", []).unwrap();
+    }
+
+    #[test]
+    fn restore_validates_before_replacing_live_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        store.insert(item("backup row", T0)).unwrap();
+        let backup = dir.path().join("history.backup");
+        store.backup_to(&backup).unwrap();
+        store.insert(item("later row", T0 + 1)).unwrap();
+
+        store
+            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
+            .unwrap();
+        assert_eq!(store.count().unwrap(), 1);
+
+        drop(store);
+        let store = Store::open(&dir.path().join("copypaste-v2.db"), &KEY).unwrap();
+        assert_eq!(store.count().unwrap(), 1, "restore did not survive reopen");
+
+        let junk = dir.path().join("junk.backup");
+        std::fs::write(&junk, b"not a database").unwrap();
+        assert!(store
+            .restore_from(&junk, &KEY, &crate::Detector::new().unwrap())
+            .is_err());
+        assert_eq!(store.count().unwrap(), 1, "failed restore changed history");
+    }
+
+    #[test]
+    fn restore_with_another_devices_key_preserves_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        store.insert(item("keep", T0)).unwrap();
+        let foreign = dir.path().join("foreign.backup");
+        let other = Store::open(&foreign, &OTHER_KEY).unwrap();
+        other.insert(item("foreign", T0)).unwrap();
+        drop(other);
+
+        assert!(store
+            .restore_from(&foreign, &KEY, &crate::Detector::new().unwrap())
+            .is_err());
+        assert_eq!(store.count().unwrap(), 1);
+    }
+
+    #[test]
+    fn restore_rejects_nonexistent_schema_objects_and_preserves_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        store.insert(item("backup row", T0)).unwrap();
+        let backup = dir.path().join("invalid-schema.backup");
+        store.backup_to(&backup).unwrap();
+
+        let conn = open_validated(&backup, &KEY).unwrap();
+        conn.execute("CREATE TABLE clipboard_live_count (count INTEGER)", [])
+            .unwrap();
+        drop(conn);
+        store.insert(item("live row", T0 + 1)).unwrap();
+
+        assert!(matches!(
+            store.restore_from(&backup, &KEY, &crate::Detector::new().unwrap()),
+            Err(RestoreError::InvalidBackup(StoreError::InvalidSchema))
+        ));
+        assert_eq!(store.count().unwrap(), 2);
+    }
+
+    #[test]
+    fn restore_reasserts_the_current_device_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        let identity = store.device_identity("Backup name").unwrap();
+        let backup = dir.path().join("old-name.backup");
+        store.backup_to(&backup).unwrap();
+        store
+            .set_device_name(&identity.device_id, "Current name")
+            .unwrap();
+
+        store
+            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
+            .unwrap();
+
+        assert_eq!(store.current_device_name().unwrap(), "Current name");
+        let names = store
+            .device_names(std::slice::from_ref(&identity.device_id))
+            .unwrap();
+        assert_eq!(names[&identity.device_id], "Current name");
+    }
+
+    #[test]
+    fn restore_purges_sensitive_search_text_before_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        let restored = store.insert(item("ordinary row", T0)).unwrap();
+        let conn = store.conn().unwrap();
+        let rowid: i64 = conn
+            .query_row(
+                "SELECT fts_rowid FROM clipboard_items WHERE id = ?1",
+                [&restored.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_fts (rowid, id, content_text) VALUES (?1, ?2, ?3)",
+            rusqlite::params![rowid, &restored.id, "AKIAIOSFODNN7EXAMPLE"],
+        )
+        .unwrap();
+        drop(conn);
+        let backup = dir.path().join("sensitive-index.backup");
+        store.backup_to(&backup).unwrap();
+        store.delete_all().unwrap();
+
+        let report = store
+            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
+            .unwrap();
+
+        assert_eq!(report.purged, 1);
+        assert!(store.get(&restored.id).unwrap().is_some());
+        assert!(store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn restore_failure_rolls_back_every_live_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        store.device_identity("Backup name").unwrap();
+        store.insert(item("restored row", T0)).unwrap();
+        let backup = dir.path().join("rollback.backup");
+        store.backup_to(&backup).unwrap();
+
+        store.delete_all().unwrap();
+        store.insert(item("live rollback anchor", T0 + 1)).unwrap();
+        let conn = store.conn().unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_restored_name BEFORE INSERT ON sync_device_name
+             BEGIN SELECT RAISE(ABORT, 'injected restore failure'); END;",
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(matches!(
+            store.restore_from(&backup, &KEY, &crate::Detector::new().unwrap()),
+            Err(RestoreError::Failed(_))
+        ));
+        assert_eq!(store.count().unwrap(), 1);
+        assert_eq!(store.search("rollback anchor", 10).unwrap().len(), 1);
+        assert!(store.search("restored row", 10).unwrap().is_empty());
     }
 }
