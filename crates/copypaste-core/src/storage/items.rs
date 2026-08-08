@@ -84,7 +84,7 @@ impl Store {
         // The caller's id, not a fresh one: the ciphertext is already sealed
         // against it (see `NewItem::id`).
         let id = item.id.clone();
-        let mut conn = self.conn().map_err(StoreError::from)?;
+        let mut conn = self.conn()?;
         let tx = write_tx(&mut conn).map_err(StoreError::from)?;
 
         // The probe and the bump share the insert's transaction, so no third
