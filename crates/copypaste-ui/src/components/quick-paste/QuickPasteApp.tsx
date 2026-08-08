@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
-import fuzzysort from "fuzzysort";
 import {
   ClipboardList,
   Play,
@@ -29,6 +28,7 @@ import {
   type ItemPage,
 } from "@/lib/ipc";
 import { classifyError } from "@/lib/errors";
+import { rankFuzzy } from "@/lib/fuzzy";
 import { isAndroid } from "@/lib/platform";
 import { readPrefs } from "@/store/prefs";
 
@@ -107,17 +107,10 @@ export function QuickPasteApp() {
     );
   }, []);
 
-  const items = useMemo(() => {
-    const needle = query.trim();
-    const all = history.data?.items ?? [];
-    if (needle.length === 0) return all;
-
-    return all
-      .map((item, index) => ({ item, index, match: fuzzysort.single(needle, searchLabel(item)) }))
-      .filter((entry): entry is typeof entry & { match: NonNullable<typeof entry.match> } => entry.match !== null)
-      .sort((left, right) => right.match.score - left.match.score || left.index - right.index)
-      .map(({ item }) => item);
-  }, [history.data?.items, query]);
+  const items = useMemo(
+    () => rankFuzzy(history.data?.items ?? [], query, (item) => [searchLabel(item)]),
+    [history.data?.items, query],
+  );
 
   const selectedIndex = Math.max(0, items.findIndex((item) => item.id === selectedId));
 
