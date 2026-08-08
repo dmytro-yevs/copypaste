@@ -18,6 +18,7 @@ import type {
   Item,
   ItemPage,
   PeerInfo,
+  PrivateModeData,
   ServiceState,
   StatusData,
   SyncResult,
@@ -42,6 +43,7 @@ export type {
   ItemPage,
   Liveness,
   PeerInfo,
+  PrivateModeData,
   ServiceState,
   StatusData,
   SyncResult,
@@ -273,6 +275,14 @@ export function getConfig(): Promise<ConfigApplied> {
 
 export function setConfig(patch: ConfigPatch): Promise<ConfigApplied> {
   return call<ConfigApplied>("set_config", { patch });
+}
+
+export function getPrivateMode(): Promise<PrivateModeData> {
+  return call<PrivateModeData>("get_private_mode");
+}
+
+export function setPrivateMode(enabled: boolean): Promise<PrivateModeData> {
+  return call<PrivateModeData>("set_private_mode", { enabled });
 }
 
 /** INV-12 held by the shape of the command: the platform's own panel asks and

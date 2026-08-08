@@ -48,8 +48,8 @@ use std::path::Path;
 
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigPatch, DiscoveredDevice,
-    EventData, ExportData, ExportItem, ImagePreview, ImportData, Item, PeerInfo, StatusData,
-    SyncResult,
+    EventData, ExportData, ExportItem, ImagePreview, ImportData, Item, PeerInfo, PrivateModeData,
+    StatusData, SyncResult,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -141,8 +141,8 @@ pub trait Backend: Send + Sync + 'static {
         content: &str,
         _app_bundle_id: Option<&str>,
         _app_name: Option<&str>,
-    ) -> Result<Item> {
-        self.add(content).await
+    ) -> Result<Option<Item>> {
+        self.add(content).await.map(Some)
     }
 
     /// Fetch one item by id, including a sensitive one's plaintext.
@@ -267,6 +267,12 @@ pub trait Backend: Send + Sync + 'static {
     /// the moment of the change rather than afterwards
     /// ([`copypaste_ipc::ConfigData::field_liveness`]).
     async fn set_config(&self, patch: ConfigPatch) -> Result<ConfigApplied>;
+
+    /// Read the authoritative capture gate without fetching unrelated settings.
+    async fn get_private_mode(&self) -> Result<PrivateModeData>;
+
+    /// Persist the capture gate and return the value the backend kept.
+    async fn set_private_mode(&self, enabled: bool) -> Result<PrivateModeData>;
 
     // ---- transfer and database administration ----------------------------
 

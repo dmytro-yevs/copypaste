@@ -232,6 +232,8 @@ pub fn run() {
             // the service's own settings
             commands::config::get_config,
             commands::config::set_config,
+            commands::config::get_private_mode,
+            commands::config::set_private_mode,
             // history in and out of a file
             commands::transfer::export_history,
             commands::transfer::prepare_import_history,
@@ -432,7 +434,7 @@ mod tests {
         assert_eq!(registered_entries.len(), registered.len());
         assert_eq!(annotated, registered);
         assert_eq!(registered, product_command_names());
-        assert_eq!(registered.len(), 60);
+        assert_eq!(registered.len(), 62);
     }
 
     #[test]

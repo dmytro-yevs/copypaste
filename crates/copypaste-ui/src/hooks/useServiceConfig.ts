@@ -25,14 +25,18 @@ import {
   cancelImportHistory,
   exportHistory,
   getConfig,
+  getPrivateMode,
   prepareImportHistory,
   restartService,
   restoreDatabase,
   setConfig,
+  setPrivateMode,
+  type PrivateModeData,
 } from "@/lib/ipc";
 import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
 
 export const CONFIG_KEY = ["config"] as const;
+export const PRIVATE_MODE_KEY = ["private-mode"] as const;
 
 /** No poll. These change when this app or the CLI changes them, and a settings
  *  screen re-reading every few seconds would fight the control the user is
@@ -56,6 +60,31 @@ export function useSetServiceConfig() {
     onError: (raw) => {
       toast.error(toFriendly(raw));
       void qc.invalidateQueries({ queryKey: CONFIG_KEY });
+    },
+  });
+}
+
+export function usePrivateMode() {
+  return useQuery<PrivateModeData>({
+    queryKey: PRIVATE_MODE_KEY,
+    queryFn: getPrivateMode,
+    retry: false,
+  });
+}
+
+export function useSetPrivateMode() {
+  const qc = useQueryClient();
+  return useMutation<PrivateModeData, unknown, boolean>({
+    mutationFn: setPrivateMode,
+    onSuccess: (confirmed) => {
+      qc.setQueryData(PRIVATE_MODE_KEY, confirmed);
+      void qc.invalidateQueries({ queryKey: CONFIG_KEY });
+      void qc.invalidateQueries({ queryKey: HISTORY_KEY });
+      void qc.invalidateQueries({ queryKey: STATUS_KEY });
+    },
+    onError: (raw) => {
+      toast.error(toFriendly(raw));
+      void qc.invalidateQueries({ queryKey: PRIVATE_MODE_KEY });
     },
   });
 }
