@@ -166,14 +166,14 @@ impl StoreSource {
     }
 
     /// Decrypt one stored row for sending. See [`open_version`].
-    #[must_use]
+    #[must_use = "authentication failures must be handled"]
     pub fn open(&self, row: &StoredItem) -> Result<String, OpenVersionError> {
         open_version(&self.keyring, row)
     }
 
     /// Decrypt the raw payload for a transport.  Unlike [`Self::open`], this
     /// retains image and file bytes exactly.
-    #[must_use]
+    #[must_use = "authentication failures must be handled"]
     pub fn open_bytes(&self, row: &StoredItem) -> Result<Vec<u8>, OpenVersionError> {
         super::open_version_bytes(&self.keyring, row)
     }
