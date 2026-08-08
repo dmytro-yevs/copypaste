@@ -26,6 +26,7 @@
 //! file keystore. Android selects the Keystore-wrapped secret instead, so its
 //! platform binding remains a native-runner assertion.
 
+mod backup;
 mod open;
 mod peers;
 mod retention;
@@ -60,10 +61,6 @@ const MSG_NO_ITEM: &str = "That item is no longer there.";
 const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
 const MSG_INVALID_SETTING: &str = "That setting isn't valid.";
-const MSG_BACKUP_FAILED: &str = "The encrypted backup couldn't be created.";
-const MSG_RESTORE_FAILED: &str =
-    "The restore could not be completed; this device's history is unchanged.";
-
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
         let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
@@ -437,31 +434,11 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn backup(&self, dest: &Path) -> Result<BackupData> {
-        let dest = dest.to_owned();
-        self.blocking(move |inner| {
-            inner
-                .state
-                .store
-                .backup_to(&dest)
-                .map_err(|_| BackendError::internal(MSG_BACKUP_FAILED))?;
-            let size_bytes = std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
-            Ok(BackupData { size_bytes })
-        })
-        .await
+        backup::backup(self, dest).await
     }
 
     async fn restore(&self, src: &Path) -> Result<()> {
-        let src = src.to_owned();
-        self.blocking(move |inner| {
-            inner
-                .state
-                .store
-                .restore_from(&src, &inner.state.keyring.db_key(), &inner.state.detector)
-                .map_err(|_| BackendError::internal(MSG_RESTORE_FAILED))?;
-            inner.publish_items(false, 0);
-            Ok(())
-        })
-        .await
+        backup::restore(self, src).await
     }
 
     /// Auto-wipe is the embedded backend's one asynchronous history writer, so
@@ -759,38 +736,6 @@ mod tests {
         let error = backend.set_device_name(" \n ").await.unwrap_err();
         assert!(matches!(error, BackendError::Invalid(_)));
         assert_eq!(backend.status().await.unwrap().device_name, before);
-    }
-
-    #[tokio::test]
-    async fn backup_and_restore_round_trip_in_process() {
-        let (backend, _clip, _dir) = backend();
-        backend.add("survives restart").await.unwrap();
-        let device_id = backend.inner.state.device_id.clone();
-        let backup = _dir.path().join("history.cpbak");
-        assert!(backend.backup(&backup).await.unwrap().size_bytes > 0);
-        backend.set_device_name("Current phone").await.unwrap();
-        backend.clear().await.unwrap();
-        backend.restore(&backup).await.unwrap();
-        assert_eq!(backend.list(10, None).await.unwrap().items.len(), 1);
-        assert_eq!(backend.status().await.unwrap().device_name, "Current phone");
-        let names = backend
-            .inner
-            .state
-            .store
-            .device_names(std::slice::from_ref(&device_id))
-            .unwrap();
-        assert_eq!(names[&device_id], "Current phone");
-    }
-
-    #[tokio::test]
-    async fn invalid_restore_preserves_live_history_and_hides_paths() {
-        let (backend, _clip, dir) = backend();
-        backend.add("keep this").await.unwrap();
-        let bad = dir.path().join("broken.cpbak");
-        std::fs::write(&bad, b"bad").unwrap();
-        let shown = backend.restore(&bad).await.unwrap_err().to_string();
-        assert!(!shown.contains('/'));
-        assert_eq!(backend.list(10, None).await.unwrap().items.len(), 1);
     }
 
     /// Rung 0 has no value at all unless this works: the share sheet, the
