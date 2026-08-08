@@ -104,6 +104,20 @@ const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 /// match a detector rule. Users may still explicitly exclude an app entirely.
 pub(crate) use copypaste_core::sensitive::is_password_manager_app;
 
+/// What a backend's change counter counts, and so whether §4's burst
+/// arithmetic over it means anything.
+///
+/// Measured on Windows 11 26200: `GetClipboardSequenceNumber` moves once per
+/// *mutation* — `EmptyClipboard`, each `SetClipboardData`, and each format
+/// Windows synthesises — so one text copy moves it by 5, and no divisor
+/// recovers a count of values because that set depends on what the *other*
+/// application wrote. macOS `changeCount` moves once per change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Counter {
+    Changes,
+    Mutations,
+}
+
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capture {

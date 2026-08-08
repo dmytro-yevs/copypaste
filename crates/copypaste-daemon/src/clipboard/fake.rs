@@ -22,7 +22,7 @@ use std::time::SystemTime;
 use tracing::{debug, warn};
 
 use super::change::{Change, ChangeTracker, SELF_WRITE_DELTA};
-use super::{Capture, CapturePolicy, ClipboardSource};
+use super::{Capture, CapturePolicy, ClipboardSource, Counter};
 
 /// Environment variable naming a file the [`FakeClipboard`] watches.
 const FAKE_CLIPBOARD_ENV: &str = "COPYPASTE_FAKE_CLIPBOARD";
@@ -68,7 +68,7 @@ impl FakeClipboard {
 
     fn in_memory() -> Self {
         Self {
-            tracker: ChangeTracker::new(),
+            tracker: ChangeTracker::new(Counter::Changes),
             change_count: 0,
             contents: None,
             watched: None,
