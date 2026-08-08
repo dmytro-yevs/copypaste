@@ -47,12 +47,6 @@ export type {
 /** Stable UI name retained for the Rust `ImportData` response DTO. */
 export type ImportReport = ImportData;
 
-export interface PairingData {
-  readonly code: string;
-  readonly pairing_id: string;
-  readonly listen_addr: string | null;
-}
-
 export { hasBridge };
 
 /** The IPC protocol version this build speaks. A daemon reporting anything
@@ -144,18 +138,6 @@ export function listPeers(): Promise<PeerInfo[]> {
   return call<PeerInfo[]>("peers");
 }
 
-export function createPairing(name: string): Promise<PairingData> {
-  return call<PairingData>("pair_create", { name });
-}
-
-export function acceptPairing(code: string, addr: string): Promise<PeerInfo[]> {
-  return call<PeerInfo[]>("pair_accept", { code, addr });
-}
-
-export function scanPairingQr(): Promise<string | null> {
-  return call<string | null>("scan_pairing_qr");
-}
-
 export function unpair(pairingId: string): Promise<void> {
   return call<void>("unpair", { pairingId });
 }
@@ -173,13 +155,6 @@ export function revokeDevice(pairingId: string): Promise<void> {
 export function copyText(text: string): Promise<void> {
   if (hasWebBridge()) return navigator.clipboard.writeText(text);
   return call<void>("copy_text", { text });
-}
-
-/** Reads pairing credentials only after an explicit Paste action. The native
- * command keeps arbitrary page code from receiving permanent clipboard access. */
-export function readPairingText(): Promise<string> {
-  if (hasWebBridge()) return navigator.clipboard.readText();
-  return call<string>("read_pairing_text");
 }
 
 export function syncNow(pairingId?: string): Promise<SyncResult[]> {

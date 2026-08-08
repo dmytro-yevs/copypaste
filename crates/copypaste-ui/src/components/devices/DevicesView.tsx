@@ -17,9 +17,15 @@
  * **There is no "revoked" row.** A revoked pairing leaves the list in exactly
  * the state an unpaired one does, so rendering the two differently would mean
  * inventing a distinction the wire cannot make.
+ *
+ * **No Pair or Add-device control** (ADR-0015, manifest 06 §3.3). The wire
+ * persists a pairing as it accepts it and can bind neither device's decision to
+ * a handshake-derived SAS, so any control here could only stage a ceremony it
+ * cannot complete. The screen says pairing is unavailable instead; established
+ * devices are still listed, synced, unpaired and revoked.
  */
-import { useEffect, useState } from "react";
-import { Laptop, Link2, LoaderCircle, QrCode, RefreshCw, TriangleAlert } from "lucide-react";
+import { useState } from "react";
+import { Laptop, Link2, LoaderCircle, RefreshCw, ShieldAlert, TriangleAlert } from "lucide-react";
 
 import {
   AlertDialog,
@@ -37,7 +43,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { StateNotice } from "@/components/StateNotice";
 import { PeerRow } from "@/components/devices/PeerRow";
 import { RevokeDialog } from "@/components/devices/RevokeDialog";
-import { PairingDialog } from "@/components/devices/PairingDialog";
 import {
   MAX_PAIRINGS,
   type PeerHealthMap,
@@ -59,7 +64,6 @@ import { cn } from "@/lib/cn";
 import { classifyError, friendlyError } from "@/lib/errors";
 import { longAge } from "@/lib/format";
 import type { PeerInfo } from "@/lib/ipc";
-import { useUi } from "@/store/ui";
 
 export function DevicesView() {
   const { t } = useTranslation();
@@ -73,19 +77,7 @@ export function DevicesView() {
 
   const [confirmUnpair, setConfirmUnpair] = useState<PeerInfo | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<PeerInfo | null>(null);
-  const [pairingOpen, setPairingOpen] = useState(false);
-  const [pairingFlow, setPairingFlow] = useState<"create" | "join">("join");
-  const [pairingAddress, setPairingAddress] = useState<string | null>(null);
   const [health, setHealth] = useState<PeerHealthMap>({});
-  const pairingUri = useUi((state) => state.pairingUri);
-  const setPairingUri = useUi((state) => state.setPairingUri);
-
-  useEffect(() => {
-    if (pairingUri) {
-      setPairingFlow("join");
-      setPairingOpen(true);
-    }
-  }, [pairingUri]);
 
   const errorKind = peers.error ? classifyError(peers.error) : null;
   const ownErrorKind = own.error ? classifyError(own.error) : null;
@@ -108,12 +100,6 @@ export function DevicesView() {
       onSuccess: (results) =>
         setHealth((previous) => noteSync(previous, results)),
     });
-
-  function openPairing(flow: "create" | "join", address: string | null = null) {
-    setPairingFlow(flow);
-    setPairingAddress(address);
-    setPairingOpen(true);
-  }
 
   if (errorKind === "offline" || ownErrorKind === "offline") {
     return <ServiceOffline />;
@@ -138,14 +124,6 @@ export function DevicesView() {
           {t(
             sync.isPending ? "devices.actions.syncing" : "devices.actions.syncAll",
           )}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => openPairing("join")} disabled={full}>
-          <Link2 aria-hidden="true" />
-          {t("devices.pairing.joinAction")}
-        </Button>
-        <Button size="sm" onClick={() => openPairing("create")} disabled={full}>
-          <QrCode aria-hidden="true" />
-          {t("devices.pairing.createAction")}
         </Button>
       </header>
 
@@ -246,6 +224,14 @@ export function DevicesView() {
                 </span>
               )}
             </div>
+
+            {errorKind === null && (
+              <StateNotice
+                icon={ShieldAlert}
+                title={t("devices.pairing.unavailable.title")}
+                body={t("devices.pairing.unavailable.body")}
+              />
+            )}
 
             {peers.isPending ? (
               <EmptyState
@@ -403,19 +389,6 @@ export function DevicesView() {
                         <dd className="mt-0.5 font-medium">{longAge(device.last_seen_ms)}</dd>
                       </div>
                     </dl>
-                    {!device.paired && (
-                      <div className="mt-s-3 flex justify-end">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={full}
-                          onClick={() => openPairing("join", device.addr)}
-                        >
-                          <Link2 aria-hidden="true" />
-                          {t("devices.pairing.joinAction")}
-                        </Button>
-                      </div>
-                    )}
                   </li>
                 ))}
               </ul>
@@ -473,14 +446,6 @@ export function DevicesView() {
           revoke.mutate(peer);
           setConfirmRevoke(null);
         }}
-      />
-      <PairingDialog
-        open={pairingOpen}
-        onOpenChange={setPairingOpen}
-        flow={pairingFlow}
-        initialAddress={pairingAddress}
-        incomingUri={pairingUri}
-        onIncomingUsed={() => setPairingUri(null)}
       />
     </div>
   );

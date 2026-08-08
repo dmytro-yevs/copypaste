@@ -52,8 +52,6 @@ pub mod dev_web_bridge;
 pub mod model;
 #[cfg(target_os = "android")]
 pub mod network_discovery;
-#[cfg(target_os = "android")]
-pub mod pairing_scanner;
 pub mod service;
 pub mod shell;
 pub mod source_app_icon;
@@ -101,7 +99,6 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(capture::android::init())
-        .plugin(pairing_scanner::plugin())
         .plugin(network_discovery::plugin())
         .plugin(shell::appearance::android::plugin())
         // `set_content_protected` is a no-op on Android (tao gates it to macOS
@@ -238,9 +235,6 @@ pub fn run() {
             commands::transfer::restore_database,
             // peers
             commands::peers::peers,
-            commands::peers::pair_create,
-            commands::peers::pair_accept,
-            commands::peers::scan_pairing_qr,
             commands::peers::unpair,
             commands::peers::revoke,
             commands::peers::sync_now,
@@ -248,7 +242,6 @@ pub fn run() {
             commands::peers::rescan,
             // the clipboard, for text the WebView already holds
             commands::clipboard::copy_text,
-            commands::clipboard::read_pairing_text,
         ])
         .build(tauri::generate_context!())
         .expect("could not start CopyPaste")

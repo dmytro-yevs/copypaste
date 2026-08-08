@@ -24,9 +24,6 @@ const rescanDiscovered = vi.fn();
 const unpair = vi.fn();
 const revokeDevice = vi.fn();
 const syncNow = vi.fn();
-const createPairing = vi.fn();
-const acceptPairing = vi.fn();
-const readPairingText = vi.fn();
 
 configure({ asyncUtilTimeout: 15_000 });
 vi.setConfig({ testTimeout: 20_000 });
@@ -42,9 +39,6 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     unpair: (pairingId: string) => unpair(pairingId),
     revokeDevice: (pairingId: string) => revokeDevice(pairingId),
     syncNow: (pairingId?: string) => syncNow(pairingId),
-    createPairing: (name: string) => createPairing(name),
-    acceptPairing: (code: string, addr: string) => acceptPairing(code, addr),
-    readPairingText: () => readPairingText(),
   };
 });
 
@@ -58,15 +52,6 @@ beforeEach(() => {
   unpair.mockReset().mockResolvedValue(undefined);
   revokeDevice.mockReset().mockResolvedValue(undefined);
   syncNow.mockReset().mockResolvedValue([]);
-  createPairing.mockReset().mockResolvedValue({
-    code: "pairing-code",
-    pairing_id: "ABC123pairing",
-    listen_addr: "192.168.1.2:7420",
-  });
-  acceptPairing.mockReset().mockResolvedValue([]);
-  readPairingText.mockReset().mockResolvedValue(
-    "copypaste://pair?code=pairing-code&id=ABC123pairing&addr=192.168.1.2%3A7420",
-  );
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -145,28 +130,59 @@ describe("cutting a device off", () => {
   });
 });
 
-describe("pairing availability", () => {
-  it("opens a verified QR and manual pairing ceremony", async () => {
-    const { user } = withUser(<DevicesView />);
+/**
+ * ADR-0015 and manifest 06 §3.3: no Pair or Add-device control may be rendered
+ * until the wire derives a SAS from the handshake and binds both devices'
+ * confirmation to it before anything is persisted. These assert the *absence*
+ * of the control, because a disabled or hidden one is still a control — and the
+ * shipped dialog's "security code" was the first six characters of the pairing
+ * id, which travels in the same QR as the credential and so verified nothing.
+ */
+describe("pairing availability (ADR-0015)", () => {
+  it("offers no way to start a pairing", async () => {
+    withUser(<DevicesView />);
+    await screen.findByText("Lost Phone");
 
-    await user.click(await screen.findByRole("button", { name: /show code/i }));
-    await screen.findByRole("dialog");
-    await waitFor(() => expect(createPairing).toHaveBeenCalledWith("This device"));
-    expect(await screen.findByText("pairing-code")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /copy pairing details/i })).toBeTruthy();
+    // Anchored: "Unpair <name>" is a legitimate button whose accessible name
+    // contains "pair", and an unanchored pattern would match it.
+    for (const label of [
+      /^show code$/i,
+      /^join device$/i,
+      /^add device$/i,
+      /^pair$/i,
+      /scan qr/i,
+    ]) {
+      expect(screen.queryByRole("button", { name: label })).toBeNull();
+    }
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
 
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    await user.click(await screen.findByRole("button", { name: /join device/i }));
-    const joinBody = screen.getByRole("region", { name: "Join another device" });
-    expect(joinBody.className).toContain("min-h-0");
-    expect(joinBody.className).toContain("overflow-y-auto");
-    await user.click(await screen.findByRole("button", { name: /paste pairing details/i }));
-    expect((screen.getByLabelText("Pairing code") as HTMLInputElement).value).toBe("pairing-code");
-    expect((screen.getByLabelText("Connection address") as HTMLInputElement).value).toBe("192.168.1.2:7420");
-    expect((screen.getByLabelText("Security code") as HTMLInputElement).value).toBe("ABC123");
-    expect((screen.getByRole("button", { name: /verify and pair/i }) as HTMLButtonElement).disabled).toBe(true);
-    await user.click(screen.getByRole("checkbox"));
-    expect((screen.getByRole("button", { name: /verify and pair/i }) as HTMLButtonElement).disabled).toBe(false);
+  it("says why, without naming a code or a credential", async () => {
+    withUser(<DevicesView />);
+    const notice = await screen.findByText(/adding a device isn't available yet/i);
+    expect(notice).toBeTruthy();
+
+    // The explanation must not read as a transient outage the user can retry,
+    // and must not teach a credential vocabulary the screen no longer offers.
+    const body = document.body.textContent ?? "";
+    expect(body).toMatch(/devices already paired keep syncing/i);
+    expect(body).not.toMatch(/pairing code/i);
+    expect(body).not.toMatch(/security code/i);
+    expect(body).not.toMatch(/QR/);
+  });
+
+  it("renders no QR, no credential field and no copy affordance", async () => {
+    withUser(<DevicesView />);
+    await screen.findByText("Lost Phone");
+
+    expect(document.querySelector("svg[role='img']")).toBeNull();
+    expect(document.querySelector("canvas")).toBeNull();
+    expect(screen.queryByLabelText(/pairing code/i)).toBeNull();
+    expect(screen.queryByLabelText(/connection address/i)).toBeNull();
+    expect(screen.queryByLabelText(/security code/i)).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /copy pairing details/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /paste pairing details/i })).toBeNull();
   });
 
   it("marks device-reported names as unverified for assistive technology", async () => {
@@ -226,7 +242,9 @@ describe("the supported device surfaces", () => {
     await waitFor(() => expect(rescanDiscovered).toHaveBeenCalledOnce());
   });
 
-  it("offers a safe join flow for an unpaired discovered device", async () => {
+  /** A discovered device is still listed — it is how a user confirms the other
+   *  device is on the network — but nothing on the row can start a pairing. */
+  it("lists an unpaired discovered device without offering to join it", async () => {
     listDiscovered.mockResolvedValue([
       {
         discovery_id: "nearby-1",
@@ -236,7 +254,7 @@ describe("the supported device surfaces", () => {
         paired: false,
       },
     ]);
-    const { user } = withUser(<DevicesView />);
+    withUser(<DevicesView />);
 
     expect(
       await screen.findByLabelText(
@@ -244,11 +262,8 @@ describe("the supported device surfaces", () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText("192.168.1.55:7420")).toBeTruthy();
-    const join = screen.getAllByRole("button", { name: /join device/i });
-    expect(join).toHaveLength(2);
-    await user.click(join[1]);
-    const address = await screen.findByLabelText("Connection address");
-    expect((address as HTMLInputElement).value).toBe("192.168.1.55:7420");
+    expect(screen.queryByRole("button", { name: /^join device$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^pair$/i })).toBeNull();
   });
 });
 

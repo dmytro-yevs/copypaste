@@ -5,7 +5,6 @@
  */
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 
 import { BannerBar } from "@/components/shell/Banners";
 import { Boundary } from "@/components/shell/Boundary";
@@ -90,30 +89,6 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, []);
-
-  useEffect(() => {
-    if (!hasBridge()) return;
-    let unlisten: (() => void) | undefined;
-    const receive = (urls: string[]) => {
-      const pairingUri = urls.find((url) => {
-        try {
-          const parsed = new URL(url);
-          return parsed.protocol === "copypaste:" && parsed.hostname === "pair";
-        } catch {
-          return false;
-        }
-      });
-      if (pairingUri) {
-        useUi.getState().setPairingUri(pairingUri);
-        useUi.getState().setView("devices");
-      }
-    };
-    void getCurrent().then((urls) => urls && receive(urls)).catch(() => {});
-    void onOpenUrl(receive).then((detach) => {
-      unlisten = detach;
-    }).catch(() => {});
-    return () => unlisten?.();
   }, []);
 
   // Subscribes *once*: v1 accumulated a matchMedia listener per re-apply

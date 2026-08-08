@@ -29,14 +29,12 @@ interface UiStore {
   settingsTab: string | null;
   query: string;
   activeId: string | null;
-  pairingUri: string | null;
   dismissed: readonly BannerId[];
 
   setView: (view: unknown) => void;
   setSettingsTab: (tab: string | null) => void;
   setQuery: (query: string) => void;
   setActiveId: (id: string | null) => void;
-  setPairingUri: (uri: string | null) => void;
   dismiss: (id: BannerId) => void;
   isDismissed: (id: BannerId) => boolean;
 }
@@ -46,14 +44,12 @@ export const useUi = create<UiStore>()((set, get) => ({
   settingsTab: null,
   query: "",
   activeId: null,
-  pairingUri: null,
   dismissed: [],
 
   setView: (view) => set({ view: resolveView(view) }),
   setSettingsTab: (settingsTab) => set({ settingsTab }),
   setQuery: (query) => set({ query }),
   setActiveId: (activeId) => set({ activeId }),
-  setPairingUri: (pairingUri) => set({ pairingUri }),
   // Dismissed for this session only: the condition is live, and a new launch
   // should say so again.
   dismiss: (id) =>

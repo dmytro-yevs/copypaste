@@ -23,3 +23,25 @@ devices. Pairing may return only with a protocol/API that supplies all of:
   clipboard copy path.
 
 This is a product-security boundary, not a temporary UI styling limitation.
+
+## Consequences
+
+A Pair/Join dialog reached the app regardless, and was removed rather than
+kept: it copied the 52-character credential and a `copypaste://pair?code=…`
+URI to the system clipboard, and the "security code" it asked both users to
+compare was the first six characters of the pairing id — which is derived from
+the credential and travels in the same QR, so it verified nothing while looking
+exactly like a ceremony that does. Comparing it would have taught the gesture
+without ever buying the property.
+
+The controls are absent, not disabled, and `pair_create`/`pair_accept` are
+absent from the `Backend` trait, the Tauri command list and the dev web bridge
+— a verb the WebView can name is a verb a compromised renderer can call. The
+`copypaste://pair` deep link no longer opens anything. `PairCreate`/`PairAccept`
+stay on the daemon's IPC surface for the CLI, which is the scripting surface and
+not a product one (`CLAUDE.md` rule 6).
+
+Re-entry needs all four bullets above, and the SAS in the first one has to come
+from the Noise transcript — `snow` exposes it as `HandshakeState::get_handshake_hash`,
+which must be captured before `into_transport_mode`, since `TransportState` does
+not carry it. Nothing short of that is a partial step towards this decision.

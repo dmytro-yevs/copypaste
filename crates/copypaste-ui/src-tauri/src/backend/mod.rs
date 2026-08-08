@@ -48,7 +48,7 @@ use std::path::Path;
 
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, PairingData, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PeerInfo, StatusData, SyncResult,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -198,13 +198,12 @@ pub trait Backend: Send + Sync + 'static {
     async fn shutdown(&self) -> Result<()>;
 
     // ---- peers -----------------------------------------------------------
-
-    /// Mint a pairing code on this device. The code is a secret and is
-    /// returned exactly once.
-    async fn pair_create(&self, name: &str) -> Result<PairingData>;
-
-    /// Consume a code minted on another device and complete the pairing.
-    async fn pair_accept(&self, code: &str, addr: &str) -> Result<Vec<PeerInfo>>;
+    //
+    // No `pair_create`/`pair_accept`. ADR-0015 and manifest 06 §3.3 keep
+    // pairing off every product surface until the wire can derive a SAS from
+    // the handshake and bind both devices' confirmation to it before anything
+    // is persisted. Absent from the trait rather than refused in it: a method
+    // the WebView can name is a method a compromised renderer can call.
 
     /// Known peers and when each was last reachable.
     async fn peers(&self) -> Result<Vec<PeerInfo>>;
