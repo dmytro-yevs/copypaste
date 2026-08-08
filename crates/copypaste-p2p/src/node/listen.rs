@@ -269,8 +269,8 @@ mod tests {
             .await
             .expect("the code and listener must establish a pairing");
 
-        assert_eq!(a.peers().len(), 1);
-        assert_eq!(b.peers().len(), 1);
+        assert_eq!(a.peers().usable_count(), 1);
+        assert_eq!(b.peers().usable_count(), 1);
         assert_eq!(accepted.peer.pairing_id, pairing.pairing_id);
         assert!(accepted.peer.last_addr.is_some());
         assert!(a_source

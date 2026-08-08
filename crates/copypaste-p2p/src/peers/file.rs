@@ -205,7 +205,7 @@ mod tests {
         for i in 0..12 {
             store.upsert(peer(&format!("device-{i}"))).expect("upsert");
             let reopened = PeerStore::open(&path).expect("file must always parse");
-            assert_eq!(reopened.len(), i + 1);
+            assert_eq!(reopened.usable_count(), i + 1);
         }
     }
 
@@ -222,7 +222,7 @@ mod tests {
             store.upsert(peer("Laptop")).expect("upsert");
             store.upsert(peer("Phone")).expect("upsert");
         });
-        assert_eq!(PeerStore::open(&path).expect("reopen").len(), 2);
+        assert_eq!(PeerStore::open(&path).expect("reopen").usable_count(), 2);
     }
 
     #[cfg(unix)]
@@ -299,6 +299,6 @@ mod tests {
         let store = PeerStore::open(&path).expect("open");
         store.upsert(peer("Laptop")).expect("upsert");
         assert!(path.exists());
-        assert_eq!(PeerStore::open(&path).expect("reopen").len(), 1);
+        assert_eq!(PeerStore::open(&path).expect("reopen").usable_count(), 1);
     }
 }
