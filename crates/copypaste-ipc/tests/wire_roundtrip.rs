@@ -103,6 +103,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             capture_running: true,
             clipboard_backend: "fake".into(),
             private_mode: false,
+            private_mode_epoch: 0,
             counters: DiagnosticCounters::default(),
         }),
         ResponseData::Export(ExportData {
@@ -177,7 +178,10 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             skipped_future: 8,
             skipped_too_large: 9,
         }),
-        ResponseData::PrivateMode(PrivateModeData { private_mode: true }),
+        ResponseData::PrivateMode(PrivateModeData {
+            private_mode: true,
+            private_mode_epoch: 7,
+        }),
         ResponseData::Empty {},
     ];
 

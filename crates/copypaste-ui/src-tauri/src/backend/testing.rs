@@ -174,6 +174,7 @@ impl Backend for FakeBackend {
                 capture_running: true,
                 clipboard_backend: "fake".into(),
                 private_mode: false,
+                private_mode_epoch: 0,
                 counters: copypaste_ipc::DiagnosticCounters::default(),
             }),
         }
@@ -244,6 +245,7 @@ impl Backend for FakeBackend {
     async fn get_private_mode(&self) -> Result<PrivateModeData> {
         Ok(PrivateModeData {
             private_mode: false,
+            private_mode_epoch: 0,
         })
     }
 

@@ -31,11 +31,7 @@ pub(super) struct Inner {
 
 impl Inner {
     pub(super) fn settings(&self) -> copypaste_ipc::ConfigData {
-        self.state
-            .settings
-            .read()
-            .expect("settings lock poisoned")
-            .clone()
+        self.state.settings.snapshot().config
     }
 
     pub(super) fn items_event(&self, captured: bool, swept: u32) -> EventData {
