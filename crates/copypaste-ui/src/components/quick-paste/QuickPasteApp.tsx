@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ClipboardList,
   Play,
@@ -25,21 +26,15 @@ import {
   setAllowScreenshots,
   setPinned,
   type Item,
-  type ItemPage,
 } from "@/lib/ipc";
 import { classifyError } from "@/lib/errors";
 import { rankFuzzy } from "@/lib/fuzzy";
+import { POLL_ACTIVE_MS, POLL_BACKOFF_MS } from "@/lib/layout";
 import { isAndroid } from "@/lib/platform";
 import { readPrefs } from "@/store/prefs";
 
 const LIMIT = 50;
-type RefreshTrigger = "mount" | "focus" | "poll" | "retry";
-
-type HistoryState = {
-  data: ItemPage | null;
-  error: unknown;
-  isLoading: boolean;
-};
+const QUICK_PASTE_KEY = ["quick-paste", "items"] as const;
 
 declare global {
   interface Window {
@@ -79,33 +74,31 @@ export function QuickPasteApp() {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pinPendingId, setPinPendingId] = useState<string | null>(null);
-  const [history, setHistory] = useState<HistoryState>({ data: null, error: null, isLoading: true });
   const keyboardNavigation = useRef(false);
   const lastKeyboardMove = useRef(0);
   const scrolling = useRef(false);
   const scrollIdleTimer = useRef<number | null>(null);
   const hideInFlight = useRef(false);
   const hideGuardTimer = useRef<number | null>(null);
-  const requestSequence = useRef(0);
   const cacheGeneration = useRef(0);
+  const qc = useQueryClient();
+  // A hidden popup holds nothing, so the query is switched off rather than
+  // merely left unpolled: `enabled` is what stops the poll, a focus refetch or
+  // an in-flight read from repopulating a window the user cannot see.
+  const [holding, setHolding] = useState(true);
+  const holdingRef = useRef(true);
 
-  const refreshHistory = useCallback((trigger: RefreshTrigger) => {
-    // INV-33: each independent refresh source owns a monotonic sequence. A
-    // delayed older daemon response must not overwrite newer popup contents.
-    void trigger;
-    const sequence = ++requestSequence.current;
-    setHistory((current) => ({ ...current, error: null, isLoading: current.data === null }));
-    void listItems(LIMIT, null).then(
-      (data) => {
-        if (sequence !== requestSequence.current) return;
-        setHistory({ data, error: null, isLoading: false });
-      },
-      (error: unknown) => {
-        if (sequence !== requestSequence.current) return;
-        setHistory((current) => ({ ...current, error, isLoading: false }));
-      },
-    );
-  }, []);
+  const history = useQuery({
+    queryKey: QUICK_PASTE_KEY,
+    queryFn: () => listItems(LIMIT, null),
+    enabled: holding,
+    refetchInterval: (q) =>
+      q.state.status === "error" ? POLL_BACKOFF_MS : POLL_ACTIVE_MS,
+    // Showing the popup is driven explicitly below, and React Query's own focus
+    // refetch would read the daemon a second time for the same appearance.
+    refetchOnWindowFocus: false,
+  });
+  const { refetch } = history;
 
   const items = useMemo(
     () => rankFuzzy(history.data?.items ?? [], query, (item) => [searchLabel(item)]),
@@ -114,26 +107,43 @@ export function QuickPasteApp() {
 
   const selectedIndex = Math.max(0, items.findIndex((item) => item.id === selectedId));
 
-  const refreshForShow = useCallback((trigger: Extract<RefreshTrigger, "mount" | "focus">) => {
+  const applyShownPrefs = useCallback(() => {
     const prefs = readPrefs();
     applyAppearance(prefs);
     setPreviewLinesPopup(prefs.previewLinesPopup);
     setHistoryPreviewLines(prefs.previewLines);
     void setAllowScreenshots(prefs.allowScreenshots).catch(() => {});
-    refreshHistory(trigger);
     window.setTimeout(() => searchRef.current?.focus(), 50);
-  }, [refreshHistory]);
+  }, []);
+
+  /** Re-enabling already refetches, so only a popup that never stopped holding
+   *  needs to be asked. */
+  const refreshForShow = useCallback(() => {
+    applyShownPrefs();
+    if (holdingRef.current) {
+      // Cancelled first so the refetch is a new read rather than a join onto
+      // the one already in flight: INV-33 wants the newest answer on show, and
+      // a cold-start fetch is deduplicated onto without this.
+      void qc.cancelQueries({ queryKey: QUICK_PASTE_KEY });
+      void qc.refetchQueries({ queryKey: QUICK_PASTE_KEY });
+      return;
+    }
+    holdingRef.current = true;
+    setHolding(true);
+  }, [applyShownPrefs, qc]);
 
   const releaseHiddenCache = useCallback(() => {
-    // Invalidate an in-flight response before clearing state: a hidden popup
-    // must never be repopulated by a request that began while it was visible.
-    requestSequence.current += 1;
+    holdingRef.current = false;
+    setHolding(false);
     cacheGeneration.current += 1;
     setSelectedId(null);
     setQuery("");
     setPinPendingId(null);
-    setHistory({ data: null, error: null, isLoading: true });
-  }, []);
+    // Cancel before removing: a read that began while the popup was visible
+    // must not land in the cache of one the user can no longer see (INV-33).
+    void qc.cancelQueries({ queryKey: QUICK_PASTE_KEY });
+    qc.removeQueries({ queryKey: QUICK_PASTE_KEY });
+  }, [qc]);
 
   useEffect(() => {
     window.__copypasteFreeMemory = releaseHiddenCache;
@@ -145,27 +155,24 @@ export function QuickPasteApp() {
   }, [releaseHiddenCache]);
 
   useEffect(() => {
-    refreshForShow("mount");
+    // Mount is not a refresh: the query above already reads on its first
+    // render, and asking again here would double every cold start.
+    applyShownPrefs();
     const onVisibility = () => {
-      if (document.visibilityState === "visible") refreshForShow("focus");
+      if (document.visibilityState === "visible") refreshForShow();
       else releaseHiddenCache();
     };
-    const onFocus = () => refreshForShow("focus");
-    const poll = window.setInterval(() => {
-      if (document.visibilityState === "visible") refreshHistory("poll");
-    }, 3000);
-    window.addEventListener("focus", onFocus);
+    window.addEventListener("focus", refreshForShow);
     window.addEventListener("blur", releaseHiddenCache);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       if (scrollIdleTimer.current !== null) window.clearTimeout(scrollIdleTimer.current);
       if (hideGuardTimer.current !== null) window.clearTimeout(hideGuardTimer.current);
-      window.clearInterval(poll);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refreshForShow);
       window.removeEventListener("blur", releaseHiddenCache);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [refreshForShow, refreshHistory, releaseHiddenCache]);
+  }, [applyShownPrefs, refreshForShow, releaseHiddenCache]);
 
   useEffect(() => {
     if (items.some((item) => item.id === selectedId)) return;
@@ -205,7 +212,7 @@ export function QuickPasteApp() {
   const restart = async () => {
     try {
       await restartService();
-      refreshHistory("retry");
+      void refetch();
     } catch {
       toast.error("Couldn’t restart the clipboard service.", {
         action: { label: "Retry", onClick: () => void restart() },
@@ -240,7 +247,7 @@ export function QuickPasteApp() {
       setPinPendingId(id);
       try {
         await setPinned(id, pinned);
-        if (cacheGeneration.current === generation) refreshHistory("retry");
+        if (cacheGeneration.current === generation) void refetch();
       } catch (error: unknown) {
         console.error("Quick Paste pin failed", error);
         if (cacheGeneration.current === generation) {
@@ -252,7 +259,7 @@ export function QuickPasteApp() {
         if (cacheGeneration.current === generation) setPinPendingId(null);
       }
     },
-    [refreshHistory],
+    [refetch],
   );
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -330,7 +337,7 @@ export function QuickPasteApp() {
       </div>
 
       <div ref={listRef} role="list" onScroll={noteScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-0.5">
-        {history.isLoading ? (
+        {history.isPending ? (
           <EmptyState
             busy
             title="Loading clipboard history"
@@ -358,7 +365,7 @@ export function QuickPasteApp() {
             tone="danger"
             title="Couldn't load clipboard history"
             body="Try again. If this keeps happening, open Settings to view diagnostics."
-            action={{ label: "Try again", icon: RefreshCw, onClick: () => refreshHistory("retry") }}
+            action={{ label: "Try again", icon: RefreshCw, onClick: () => void refetch() }}
           />
         ) : items.length === 0 ? (
           <EmptyState
@@ -405,7 +412,7 @@ export function QuickPasteApp() {
           <Settings2 size={16} aria-hidden="true" />
         </button>
         <p aria-live="polite" className="shrink-0 tabular-nums">
-          {history.isLoading
+          {history.isPending
             ? "Loading…"
             : searching
               ? `${items.length} of ${history.data?.items.length ?? 0}`
