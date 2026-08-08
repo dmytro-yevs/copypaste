@@ -9,7 +9,7 @@ import { closeDevtools } from "./devtools.js";
 import { freshNonce, ordinaryFor, secretFor } from "./fixtures.js";
 import {
   SEARCH,
-  clearField,
+  resetHistoryFilters,
   gotoView,
   scrollListToTop,
   topRowIsMasked,
@@ -71,7 +71,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
     // including a search filter from a previous run that would hide this run's
     // fixtures and read as "the item was never ingested".
     await gotoView(app, "History");
-    await clearField(app, SEARCH);
+    await resetHistoryFilters(app);
 
     // One share at a time, each confirmed on screen before the next. Two
     // `am start`s in a row reach IntakeActivity while the first is still

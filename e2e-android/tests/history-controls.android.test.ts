@@ -14,13 +14,13 @@ import { rowBoxes } from "../src/harness/list.js";
 import {
   SEARCH,
   clearField,
+  resetHistoryFilters,
   count,
   gotoView,
-  scrollListToTop,
   tapButton,
   waitFor,
   waitForRows,
-  waitForText,
+  waitForTopRowText,
 } from "../src/harness/ui.js";
 
 /** Every control the toolbar offers. Named by what a screen reader reads, so
@@ -40,7 +40,7 @@ let marker = "";
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
-  await clearField(app, SEARCH);
+  await resetHistoryFilters(app);
 
   marker = `controls-${Date.now()}`;
   seeded = await addItems(app, [
@@ -50,11 +50,7 @@ beforeAll(async () => {
     `${marker} more plain words`,
   ]);
   await waitForRows(app, 4);
-  // The previous file may have left the list scrolled: a virtualised list
-  // renders a window, so a just-seeded row at the top is not in the document
-  // until the viewport is there.
-  await scrollListToTop(app);
-  await waitForText(app, `${marker} more plain words`);
+  await waitForTopRowText(app, `${marker} more plain words`);
 }, 300_000);
 
 afterAll(async () => {

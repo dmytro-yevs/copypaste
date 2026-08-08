@@ -20,7 +20,7 @@ import { rowBoxes } from "../src/harness/list.js";
 import { addItems, deleteItems } from "../src/harness/bridge.js";
 import {
   SEARCH,
-  clearField,
+  resetHistoryFilters,
   gotoView,
   scrollListToTop,
   tapButton,
@@ -51,7 +51,13 @@ function expectReservedFor(lines: 1 | 2, heights: number[]): boolean {
   return height >= ROW_HEIGHT[lines] && height < ROW_HEIGHT[lines] + TITLE_LINE_PX;
 }
 
-const TAB = '[role="tab"]';
+/**
+ * The settings tabs only — not the ones a pane brings with it. Diagnostics has
+ * its own tab strip, and a document-wide `[role="tab"]` picks up "Overview"
+ * the moment that pane is opened, then tries to open it as a settings section.
+ */
+const TABLIST = '[role="tablist"]:not([role="tabpanel"] *)';
+const TAB = `${TABLIST} > [role="tab"]`;
 
 let app: AndroidApp;
 let seeded: string[] = [];
@@ -59,7 +65,7 @@ let seeded: string[] = [];
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
-  await clearField(app, SEARCH);
+  await resetHistoryFilters(app);
   seeded = await addItems(app, [`a settings fixture ${Date.now()}`, `another one ${Date.now()}`]);
   await waitForRows(app, 2);
   // The previous file may have left the list scrolled: a virtualised list
@@ -91,7 +97,7 @@ async function tabLabels(): Promise<string[]> {
 }
 
 async function openTab(label: string): Promise<void> {
-  await tapButton(app, label);
+  await tapButton(app, label, { within: TABLIST });
   await waitFor(
     async () =>
       app.withPage((page) =>
@@ -138,11 +144,17 @@ describe("the tabs", () => {
 
     for (const label of labels) {
       await openTab(label);
-      const pane = await panel();
-      expect(pane, label).not.toBeNull();
-      expect(pane!.height, label).toBeGreaterThan(20);
-      expect(pane!.width, label).toBeGreaterThan(100);
-      expect(pane!.text.length, label).toBeGreaterThan(20);
+      // Waited for, not sampled: Diagnostics fills in from a command and was
+      // measured mid-flight at exactly its heading.
+      let pane: Awaited<ReturnType<typeof panel>> = null;
+      await waitFor(
+        async () => {
+          pane = await panel();
+          return pane !== null && pane.height > 20 && pane.width > 100 && pane.text.length > 20;
+        },
+        () => `the ${label} pane never laid out with content: ${JSON.stringify(pane)}`,
+        20_000,
+      );
     }
   }, 120_000);
 
@@ -159,7 +171,9 @@ describe("the tabs", () => {
   test("every tab is laid out, unclipped, and answers a tap at its own centre", async () => {
     const strip = await app.withPage((page) =>
       page.evaluate((selector: string) => {
-        const list = document.querySelector('[role="tablist"]') as HTMLElement | null;
+        const list = document.querySelector(
+          '[role="tablist"]:not([role="tabpanel"] *)',
+        ) as HTMLElement | null;
         if (!list) return null;
         return {
           wrap: getComputedStyle(list).flexWrap,

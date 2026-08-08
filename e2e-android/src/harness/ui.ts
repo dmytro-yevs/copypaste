@@ -50,6 +50,47 @@ export async function waitForText(
   );
 }
 
+/**
+ * Wait for a seeded row's text with the viewport put back to the top on every
+ * attempt.
+ *
+ * The list is virtualised, so a row that exists is in the document only while
+ * the window is over it — and the window moves on its own: a previous file's
+ * cleanup deleting a hundred rows re-lays the list out underneath. Scrolling
+ * once before waiting is not enough, because the move can come afterwards.
+ */
+export async function waitForTopRowText(
+  app: AndroidApp,
+  needle: string,
+  timeout = 60_000,
+): Promise<void> {
+  const deadline = Date.now() + timeout;
+  for (let attempt = 0; Date.now() < deadline; attempt += 1) {
+    // Remount before trying again. Scrolling is not always enough: the list is
+    // an infinite query holding every page it has fetched, and after a large
+    // delete those pages can go on describing the list as it was until
+    // something refetches the first one from scratch.
+    if (attempt > 0) {
+      await gotoView(app, "Devices");
+      await gotoView(app, "History");
+    }
+    try {
+      await waitFor(
+        async () => {
+          await scrollListToTop(app);
+          return (await visibleText(app)).includes(needle);
+        },
+        "not on screen yet",
+        Math.max(2_000, Math.min(15_000, deadline - Date.now())),
+      );
+      return;
+    } catch {
+      /* remount and look again */
+    }
+  }
+  throw new Error(`never rendered ${JSON.stringify(needle)} at the top of the list`);
+}
+
 export async function waitForRows(
   app: AndroidApp,
   atLeast = 1,
@@ -97,6 +138,31 @@ export async function scrollListToTop(app: AndroidApp): Promise<void> {
       list.scrollTop = 0;
       list.dispatchEvent(new Event("scroll", { bubbles: true }));
     }, HISTORY_LIST),
+  );
+}
+
+/**
+ * Put the toolbar back to showing everything, newest first.
+ *
+ * Nothing restarts the app between test files or between runs, so the toolbar
+ * keeps whatever the last one left in it. A kind filter still set to Links
+ * hides every plain clipping the next file seeds, and the failure it produces
+ * says the item was never ingested.
+ */
+export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
+  await clearField(app, SEARCH);
+  await app.withPage((page) =>
+    page.evaluate(() => {
+      for (const label of ["Filter by kind", "Sort order"]) {
+        const select = document.querySelector(
+          `[aria-label="${label}"]`,
+        ) as HTMLSelectElement | null;
+        const first = select?.options[0]?.value;
+        if (!select || first === undefined || select.value === first) continue;
+        select.value = first;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }),
   );
 }
 

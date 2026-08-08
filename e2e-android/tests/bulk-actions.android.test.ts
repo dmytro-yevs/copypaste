@@ -22,17 +22,17 @@ import { rowBoxes } from "../src/harness/list.js";
 import {
   SEARCH,
   byLabel,
-  clearField,
+  resetHistoryFilters,
   count,
   gotoView,
   rowCount,
-  scrollListToTop,
   tapButton,
   tapNth,
   visibleText,
   waitFor,
   waitForRows,
   waitForText,
+  waitForTopRowText,
 } from "../src/harness/ui.js";
 
 const BULK_BAR = '[role="region"][aria-label="Selection actions"]';
@@ -50,7 +50,7 @@ let marker = "";
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
-  await clearField(app, SEARCH);
+  await resetHistoryFilters(app);
 
   marker = `bulk-${Date.now()}`;
   seeded = await addItems(
@@ -58,11 +58,7 @@ beforeAll(async () => {
     ["alpha", "beta", "gamma", "delta"].map((word) => `${marker} ${word}`),
   );
   await waitForRows(app, 4);
-  // The previous file may have left the list scrolled: a virtualised list
-  // renders a window, so a just-seeded row at the top is not in the document
-  // until the viewport is there.
-  await scrollListToTop(app);
-  await waitForText(app, `${marker} delta`);
+  await waitForTopRowText(app, `${marker} delta`);
 }, 300_000);
 
 afterAll(async () => {
