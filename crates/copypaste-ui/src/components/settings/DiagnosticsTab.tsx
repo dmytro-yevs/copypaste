@@ -77,12 +77,12 @@ export function DiagnosticsTab() {
   return (
     <Tabs value={tab} onValueChange={setTab} className="flex min-h-full flex-col gap-s-4">
       <TabsList
-        aria-label="Diagnostics views"
+        aria-label={t("settings.diagnostics.views")}
         equalWidth
         className="w-fit max-w-full self-center"
       >
-        <TabsTrigger value="overview">Overview</TabsTrigger>
-        <TabsTrigger value="events">Runtime events</TabsTrigger>
+        <TabsTrigger value="overview">{t("settings.diagnostics.overview")}</TabsTrigger>
+        <TabsTrigger value="events">{t("runtimeLog.title")}</TabsTrigger>
       </TabsList>
       <TabsContent value="overview">
         <div className="flex flex-col gap-s-4">
