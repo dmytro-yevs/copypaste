@@ -71,7 +71,7 @@ copypaste-core = { path = "../../copypaste-core", optional = true }
 copypaste-p2p = { path = "../../copypaste-p2p", optional = true }
 copypaste-cloud = { path = "../../copypaste-cloud", optional = true }
 hex = { workspace = true, optional = true }
-zeroize = { workspace = true, optional = true }
+zeroize.workspace = true
 # `src/android_context.rs` only: the one JNI entry point in this crate, which
 # hands the app context to `ndk-context` so the core's Android Keystore backend
 # can find it. Both crates are already in the tree under tao; neither is a new
@@ -130,7 +130,7 @@ ndk-context = "0.1"
 # Compile the in-process backend on a host that is not Android. Exists so this
 # code is type-checked somewhere: without it the whole Android path would be
 # dead text on every machine the project is actually built on.
-embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:copypaste-cloud", "dep:hex", "dep:zeroize", "dep:jni", "dep:ndk-context"]
+embedded-backend = ["dep:copypaste-core", "dep:copypaste-p2p", "dep:copypaste-cloud", "dep:hex", "dep:jni", "dep:ndk-context"]
 typescript = ["dep:ts-rs", "copypaste-ipc/typescript"]
 # Never enabled by Tauri or Android builds. This exists solely for the local
 # browser preview, which cannot speak the daemon's private Unix socket.
