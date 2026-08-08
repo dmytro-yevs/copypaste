@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use copypaste_core::storage::{attach_key_literal, open_validated};
 use copypaste_core::{
     purge_indexed_secrets_in_transaction, verify_integrity, verify_schema, Detector, PurgeReport,
+    StoreError,
 };
 use copypaste_ipc::{BackupData, ErrorCode, Response, ResponseData};
 use rusqlite::{Connection, Transaction};
@@ -86,14 +87,7 @@ pub(super) fn backup(state: &AppState, id: u64, dest_path: &str) -> Response {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_NO_DIR);
     }
 
-    let conn = match open_validated(state.db_path(), &state.keyring.db_key()) {
-        Ok(conn) => conn,
-        Err(e) => return failed(id, "open the database for backup", e, MSG_BACKUP_FAILED),
-    };
-    // `VACUUM INTO` rather than a file copy: it takes a consistent snapshot
-    // through the pager while other connections are writing, and under
-    // SQLCipher the copy is encrypted with the same key.
-    if let Err(e) = conn.execute("VACUUM INTO ?1", [dest.to_string_lossy().as_ref()]) {
+    if let Err(e) = state.store.backup_to(&dest) {
         // A partial file from a failed VACUUM would look like a backup.
         let _ = std::fs::remove_file(&dest);
         return failed(id, "VACUUM INTO", e, MSG_BACKUP_FAILED);
@@ -254,11 +248,11 @@ fn swap(
     key: &[u8; 32],
     detector: &Detector,
     purge: RestorePurge,
-) -> Result<PurgeReport, crate::meta::MetaError> {
+) -> Result<PurgeReport, StoreError> {
     let mut conn = open_validated(db_path, key)?;
     // The raw-key form has to be literal in the clause — see
-    // `copypaste_core::storage::attach_key_literal` for why binding it would
-    // silently derive a different key.
+    // `attach_key_literal` for why binding it would silently derive a
+    // different key.
     let attach = format!(
         "ATTACH DATABASE ?1 AS restore_src KEY {}",
         attach_key_literal(key).as_str()
@@ -598,6 +592,27 @@ mod tests {
         let response = restore_from(&mine, &foreign, true);
         assert!(!response.ok);
         assert_eq!(contents(&mine), ["mine"]);
+    }
+
+    #[test]
+    fn a_restore_swap_refuses_to_open_the_live_database_with_the_wrong_key() {
+        let (state, dir) = test_state("alpha");
+        add(&state, "live history");
+        let backup = dir.path().join("history.backup");
+        assert!(backup_to(&state, &backup).ok);
+
+        let wrong_key = copypaste_core::Keyring::from_secret(&[0x55; 32]).db_key();
+        let error = swap(
+            state.db_path(),
+            &backup,
+            &wrong_key,
+            state.detector.as_ref(),
+            purge_indexed_secrets_in_transaction,
+        )
+        .expect_err("the live database must never fall back to an unkeyed open");
+
+        assert!(matches!(error, StoreError::InvalidKey));
+        assert_eq!(contents(&state), ["live history"]);
     }
 
     #[test]
