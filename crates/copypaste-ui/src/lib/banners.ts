@@ -1,11 +1,11 @@
 /**
  * INV-17: only one alert banner is visible at a time. v1 de-conflicted four
  * independent `role="alert"` mechanisms with a ternary chain, and when the
- * chain was wrong they stacked (CopyPaste-8ebg.39).
+ * chain was wrong they stacked (CopyPaste-8ebg.39). One condition reaches the
+ * banner now, so the chain that failed cannot be rebuilt by accident: a second
+ * one belongs here, ranked, and not in a component's own ternary.
  *
- * Losers are not discarded: the next call returns the highest-priority
- * condition still true, so a banner appears the moment the one above it clears
- * (AT-25). No banner text is ever derived from an error object (INV-12).
+ * No banner text is ever derived from an error object (INV-12).
  */
 import { t } from "@/i18n";
 

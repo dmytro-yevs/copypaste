@@ -104,7 +104,6 @@ export const history = {
     imageLoading: "Loading image preview",
     imageUnavailable: "Image preview unavailable",
     empty: "This item has no text.",
-    reveal: "Reveal",
     hide: "Hide again",
     copy: "Copy",
     copyImage: "Copy image",
