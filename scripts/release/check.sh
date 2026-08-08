@@ -314,6 +314,9 @@ check "android-smoke-release.sh --self-test" ./scripts/release/android-smoke-rel
 # The content-picker scenario uses accessibility labels and DocumentsUI ids.
 # Its fixtures keep a missing label from becoming a successful no-op.
 check "android-storage-transfer.sh --self-test" ./scripts/release/android-storage-transfer.sh --self-test
+check "android-cloud-evidence.sh --self-test" ./scripts/release/android-cloud-evidence.sh --self-test
+check "macos-cloud-evidence.sh --self-test" ./scripts/release/macos-cloud-evidence.sh --self-test
+check "check-feature-ledger.py --self-test" python3 scripts/check-feature-ledger.py --self-test
 # The four surfaces README.md calls unverified, and the same reason again: a
 # parcel reader that never finds a canary, or a flag reader that says SECURE
 # about everything, would turn the rung assertions into decoration.
@@ -365,8 +368,11 @@ smoke = jobs["android-smoke"]
 assert "android" in smoke["needs"], "android-smoke does not wait for Android artifact"
 assert "publish" in str(smoke.get("if", "")), "android-smoke does not run for a publishable release"
 download = [s for s in smoke["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact")]
-assert len(download) == 1 and download[0].get("with", {}).get("name") == "android", \
+download_names = [step.get("with", {}).get("name") for step in download]
+assert download_names.count("android") == 1, \
     "android-smoke does not download the published Android artifact"
+assert "android-cloud-evidence-apk" in download_names, \
+    "android-smoke does not download the configured cloud evidence APK"
 runner = [s for s in smoke["steps"] if "android-emulator-runner" in str(s.get("uses", ""))]
 assert len(runner) == 1 and "android-smoke-release.sh" in str(runner[0].get("with", {}).get("script", "")), \
     "android-smoke does not run the release smoke harness"

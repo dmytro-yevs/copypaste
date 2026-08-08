@@ -317,6 +317,11 @@ if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native; th
 else
     bad "the installed app produced native accessibility, screenshot, and latency evidence"
 fi
+if ./scripts/release/macos-cloud-evidence.sh artifacts/release-macos-cloud; then
+    ok "the installed app produced cloud account lifecycle evidence"
+else
+    bad "the installed app produced cloud account lifecycle evidence"
+fi
 
 # ---------------------------------------------------------------------------
 printf '\n%s\n' "-----------------------------------------------"
