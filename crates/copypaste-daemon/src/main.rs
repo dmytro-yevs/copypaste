@@ -132,10 +132,6 @@ async fn main() -> anyhow::Result<()> {
     }
     let settings = Settings::load(&meta);
     let peers = PeerStore::open(&peers_path).context("open the paired-device list")?;
-    // `lan_visibility` is read once, here: the mDNS registration is made at
-    // start, so this is the moment it either happens or does not. It is the one
-    // setting `ConfigData::field_liveness` marks `NeedsRestart`, and this line
-    // is why.
     let device_name = meta.device_name();
     let discovery = match Discovery::dormant(&device_name, args.port) {
         Ok(discovery) => Some(discovery),

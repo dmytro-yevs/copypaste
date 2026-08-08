@@ -1,8 +1,4 @@
 /**
- * Liveness is shown at the field it belongs to, never as a note at the bottom
- * of the pane: that is read after the user has already concluded the switch did
- * nothing.
- *
  * `sensitive_ttl_secs` ships at `0` because a silent irreversible delete is
  * CLAUDE.md rule 4's worst outcome — v1 shipped 30 seconds beside a tab that
  * showed the sweep had run, v2 carried the number without the interface. This
@@ -50,17 +46,15 @@ import { primaryOf } from "@/lib/capture";
 import { isUnavailable } from "@/lib/errors";
 import { captureArm, captureRefresh, captureSetEnabled, type ConfigPatch } from "@/lib/ipc";
 
-/** The field `ConfigData::field_liveness` marks `NeedsRestart`. Named rather
- *  than inferred from an empty list: the badge has to be on the row before
- *  anyone touches it. */
-const NEEDS_RESTART = "lan_visibility";
-
 export function ServiceTab() {
   const { t } = useTranslation();
   const config = useServiceConfig();
   const save = useSetServiceConfig();
   const restart = useRestartService();
   const status = useStatus();
+  // Dormant: `ConfigData::field_liveness` marks every field live today. It reads
+  // the daemon's answer rather than naming a field, which is why the badge that
+  // named `lan_visibility` outlived the fact that it needed a restart.
   const [pending, setPending] = useState(false);
 
   const apply = (patch: ConfigPatch) => {
@@ -113,6 +107,27 @@ export function ServiceTab() {
 
   return (
     <div className="flex flex-col gap-s-4">
+      {pending && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-s-2 text-xs text-warn-strong"
+        >
+          {t("settings.service.liveness.pending")}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={restart.isPending}
+            onClick={() => restart.mutate()}
+          >
+            <RotateCw aria-hidden="true" />
+            {t(
+              restart.isPending
+                ? "settings.service.liveness.restarting"
+                : "settings.service.liveness.restart",
+            )}
+          </Button>
+        </div>
+      )}
       <CaptureControls />
       <Section
         title={t("settings.service.groups.capture.title")}
@@ -296,39 +311,10 @@ export function ServiceTab() {
         <SwitchRow
           title={t("settings.service.lan.title")}
           description={t("settings.service.lan.description")}
-          id={NEEDS_RESTART}
+          id="lan-visibility"
           checked={data.lan_visibility}
           disabled={busy}
           onChange={(lan_visibility) => apply({ lan_visibility })}
-          badge={
-            <Badge variant="info">
-              {t("settings.service.liveness.needsRestart")}
-            </Badge>
-          }
-          note={
-            pending ? (
-              <span className="flex flex-wrap items-center gap-s-2 text-xs text-warn-strong">
-                {t("settings.service.liveness.pending")}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={restart.isPending}
-                  onClick={() => restart.mutate()}
-                >
-                  <RotateCw aria-hidden="true" />
-                  {t(
-                    restart.isPending
-                      ? "settings.service.liveness.restarting"
-                      : "settings.service.liveness.restart",
-                  )}
-                </Button>
-              </span>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                {t("settings.service.liveness.needsRestartWhy")}
-              </span>
-            )
-          }
         />
       </Section>
     </div>
