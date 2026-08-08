@@ -183,6 +183,27 @@ impl Backend for FakeBackend {
         Ok(())
     }
 
+    async fn cloud_sign_in(
+        &self,
+        _email: &str,
+        _password: &str,
+        _passphrase: &str,
+    ) -> Result<copypaste_ipc::CloudStatusData> {
+        Err(refused())
+    }
+
+    async fn cloud_sign_out(&self) -> Result<copypaste_ipc::CloudStatusData> {
+        Err(refused())
+    }
+
+    async fn cloud_status(&self) -> Result<copypaste_ipc::CloudStatusData> {
+        Err(refused())
+    }
+
+    async fn cloud_sync(&self) -> Result<copypaste_ipc::CloudSyncData> {
+        Err(refused())
+    }
+
     async fn shutdown(&self) -> Result<()> {
         self.shutdown.store(true, Ordering::Relaxed);
         Ok(())

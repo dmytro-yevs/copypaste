@@ -4,6 +4,7 @@ use std::sync::Arc;
 use copypaste_ipc::{EventData, EventKind};
 use tokio::sync::OnceCell;
 
+use super::cloud::EmbeddedCloud;
 use super::peers::PeerNode;
 use super::state::BackendState;
 use super::{BackendError, Result};
@@ -25,6 +26,7 @@ pub(super) struct Inner {
     /// one — see `Clipboard`.
     pub(super) clipboard: Box<dyn Clipboard>,
     pub(super) events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
+    pub(super) cloud: EmbeddedCloud,
 }
 
 impl Inner {
@@ -73,15 +75,20 @@ impl EmbeddedBackend {
     /// comes from the Android context and not from `directories`.
     pub fn open(data_dir: &Path, clipboard: Box<dyn Clipboard>) -> Result<Self> {
         let (events, _) = tokio::sync::broadcast::channel(64);
+        let state = BackendState::open(data_dir)?;
+        let cloud = EmbeddedCloud::open(&state);
         let inner = Arc::new(Inner {
-            state: BackendState::open(data_dir)?,
+            state,
             node: OnceCell::new(),
             clipboard,
             events,
+            cloud,
         });
         super::retention::sweep(&inner);
         super::retention::start(&inner);
-        Ok(Self { inner })
+        let backend = Self { inner };
+        backend.inner.cloud.ensure_poller(&backend.inner);
+        Ok(backend)
     }
 
     /// The peer node, started on first use.

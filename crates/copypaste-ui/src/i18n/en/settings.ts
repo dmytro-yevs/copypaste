@@ -156,9 +156,32 @@ export const settings = {
     },
     cloud: {
       title: "Cloud sync",
-      description:
-        "Syncing through an account isn't in this build. Paired devices sync directly, without one.",
-      badge: "Unavailable",
+      description: "Syncs encrypted history through your configured account.",
+      notConfigured:
+        "This build has no cloud deployment configured. Direct device sync still works.",
+      badgeUnavailable: "Unavailable",
+      badgeNotConfigured: "Not configured",
+      badgeConnected: "Connected",
+      badgeSignedOut: "Signed out",
+      loading: "Checking account…",
+      retry: "Try again",
+      lastError: "The last cloud sync failed. Try again or sign in again.",
+      formLabel: "Cloud account sign in",
+      email: "Email",
+      password: "Password",
+      passphrase: "Sync passphrase",
+      signIn: "Sign in",
+      signingIn: "Signing in…",
+      signOut: "Sign out",
+      syncNow: "Sync cloud now",
+      syncing: "Syncing…",
+      toast: {
+        signedIn: "Cloud sync connected",
+        signedOut: "Signed out of cloud sync",
+        synced: "Cloud sync finished: {{uploaded}} uploaded, {{downloaded}} downloaded",
+        syncedWithSkips:
+          "Cloud sync finished: {{uploaded}} uploaded, {{downloaded}} downloaded, {{skipped}} skipped",
+      },
     },
   },
 

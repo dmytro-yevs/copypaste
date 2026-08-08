@@ -1160,12 +1160,14 @@ dependencies = [
  "backon",
  "base64 0.22.1",
  "cc",
+ "copypaste-cloud",
  "copypaste-core",
  "copypaste-fs",
  "copypaste-ipc",
  "copypaste-p2p",
  "copypaste-runtime-log",
  "futures-util",
+ "hex",
  "jni",
  "ndk-context",
  "objc2 0.5.2",
@@ -1193,6 +1195,7 @@ dependencies = [
  "tracing",
  "ts-rs",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

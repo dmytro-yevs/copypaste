@@ -47,8 +47,9 @@
 use std::path::Path;
 
 use copypaste_ipc::{
-    BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, PeerInfo, StatusData, SyncResult,
+    BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigPatch, DiscoveredDevice,
+    EventData, ExportData, ExportItem, ImagePreview, ImportData, Item, PeerInfo, StatusData,
+    SyncResult,
 };
 use tokio::sync::mpsc::Receiver;
 
@@ -191,6 +192,16 @@ pub trait Backend: Send + Sync + 'static {
 
     async fn status(&self) -> Result<StatusData>;
     async fn set_device_name(&self, name: &str) -> Result<()>;
+
+    async fn cloud_sign_in(
+        &self,
+        email: &str,
+        password: &str,
+        passphrase: &str,
+    ) -> Result<CloudStatusData>;
+    async fn cloud_sign_out(&self) -> Result<CloudStatusData>;
+    async fn cloud_status(&self) -> Result<CloudStatusData>;
+    async fn cloud_sync(&self) -> Result<CloudSyncData>;
 
     /// Ask a separate background service to terminate gracefully.
     ///
