@@ -641,7 +641,8 @@ only controls whether the aside safety copy is deleted on success.
 > session and its settings, and a restore must not make this device start
 > claiming to be the one the backup came from. A backup holding a table this
 > build does not know how to restore is refused rather than partially applied.
-> Implemented in `crates/copypaste-daemon/src/server/dbadmin.rs`.
+> Implemented once in `crates/copypaste-core/src/storage/dbfile.rs`; the daemon
+> and embedded backends only adapt its result to their client contracts.
 
 `reset_database` sets `ready = true` and clears `degraded_reason` in-place on
 success — the daemon recovers without a restart. The `reset` field is retained

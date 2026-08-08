@@ -54,7 +54,9 @@ mod state;
 mod store;
 mod versions;
 
-pub use dbfile::{attach_key_literal, open_validated, verify_integrity, verify_schema};
+pub use dbfile::{
+    attach_key_literal, open_validated, verify_integrity, verify_schema, RestoreError,
+};
 pub use identity::DeviceIdentity;
 pub use model::{Ingest, NewItem, StoreError, StoredItem};
 pub use page::{ItemCursor, Page};

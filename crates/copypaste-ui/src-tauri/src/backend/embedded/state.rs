@@ -140,7 +140,8 @@ fn keyring_error(error: CryptoError) -> BackendError {
 fn store_open_error(error: StoreError) -> BackendError {
     let message = format!("could not open history: {error}");
     let code = match error {
-        StoreError::Sqlite(_)
+        StoreError::File(_)
+        | StoreError::Sqlite(_)
         | StoreError::Pool(_)
         | StoreError::Migration(_)
         | StoreError::InvalidKey

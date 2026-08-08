@@ -64,7 +64,6 @@ crates/copypaste-daemon/src/notify.rs
 crates/copypaste-daemon/src/p2p/handlers.rs
 crates/copypaste-daemon/src/p2p/mod.rs
 crates/copypaste-daemon/src/p2p/poll.rs
-crates/copypaste-daemon/src/server/dbadmin.rs
 crates/copypaste-daemon/src/server/halted.rs
 crates/copypaste-daemon/src/server/listener.rs
 crates/copypaste-daemon/src/server/messages.rs

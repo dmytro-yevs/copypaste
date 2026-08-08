@@ -1,7 +1,8 @@
 //! The [`Store`] handle: what it takes to get a keyed, migrated, pooled
 //! connection, and nothing about what is then done with it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
@@ -21,6 +22,7 @@ use super::schema::migrate;
 #[derive(Clone)]
 pub struct Store {
     pool: Pool<SqliteConnectionManager>,
+    pub(super) path: Option<Arc<PathBuf>>,
 }
 
 impl std::fmt::Debug for Store {
@@ -54,7 +56,10 @@ impl Store {
         drop(conn);
 
         let pool = build_pool(SqliteConnectionManager::file(path), db_key, false)?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            path: Some(Arc::new(path.to_owned())),
+        })
     }
 
     /// Opens a private in-memory database. A named shared-cache URI, because
@@ -77,7 +82,7 @@ impl Store {
         let mut conn = pool.get()?;
         migrate(&mut conn)?;
         drop(conn);
-        Ok(Self { pool })
+        Ok(Self { pool, path: None })
     }
 
     /// Checks a connection out of the pool. `pub(super)` so the query modules

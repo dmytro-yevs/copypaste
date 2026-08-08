@@ -434,6 +434,10 @@ pub(super) fn verify_schema(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+pub(super) fn is_current_table(name: &str) -> bool {
+    TABLES.iter().any(|table| table.name == name)
+}
+
 fn verify_table(conn: &Connection, expected: &Table) -> Result<(), StoreError> {
     let sql: Option<String> = conn
         .query_row(

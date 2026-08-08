@@ -5,17 +5,6 @@
 //! and no second process (ADR-0002). The store, the keyring and the peer file
 //! are opened inside the app and the same operations run inline.
 //!
-//! # What this file will not do, and why that matters
-//!
-//! Two operations — `backup` and `restore` — return
-//! [`BackendError::Unsupported`] rather than an implementation, and they name
-//! one fix between them: the validate-then-swap lives inside the
-//! `copypaste-daemon` binary, which has no `[lib]` target, so approximating it
-//! here would be the second implementation CLAUDE.md rule 1 exists to stop —
-//! and a file copy that looks like a restore and is not is data loss. They
-//! refuse **together** on purpose: a backup this device could write but not
-//! read back is worse than no backup, because its key never leaves this device.
-//!
 //! Pairing, syncing, discovery, export, import, `set_config` and
 //! `reorder_pinned` used to be on that list. They are not any more:
 //! `copypaste_p2p::Node` owns the listener and the four peer operations,
@@ -71,7 +60,9 @@ const MSG_NO_ITEM: &str = "That item is no longer there.";
 const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
 const MSG_INVALID_SETTING: &str = "That setting isn't valid.";
-const MSG_NO_BACKUP: &str = "Backup and restore aren't available in this build yet.";
+const MSG_BACKUP_FAILED: &str = "The encrypted backup couldn't be created.";
+const MSG_RESTORE_FAILED: &str =
+    "The restore could not be completed; this device's history is unchanged.";
 
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
@@ -445,21 +436,32 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
-    /// Needs the daemon's validate-then-swap, and must not be approximated.
-    ///
-    /// A backup is `VACUUM INTO` against the live pager, and a restore is a
-    /// staged copy opened with this device's real key, integrity-checked and
-    /// swapped inside one transaction (`server::dbadmin`). A plain file copy
-    /// would look like both and be neither: it can capture a torn page, and it
-    /// can replace a working history with a file that turns out not to open.
-    /// Data loss is the worst outcome (CLAUDE.md rule 4), so this refuses
-    /// rather than approximates.
-    async fn backup(&self, _dest: &Path) -> Result<BackupData> {
-        Err(BackendError::Unsupported(MSG_NO_BACKUP))
+    async fn backup(&self, dest: &Path) -> Result<BackupData> {
+        let dest = dest.to_owned();
+        self.blocking(move |inner| {
+            inner
+                .state
+                .store
+                .backup_to(&dest)
+                .map_err(|_| BackendError::internal(MSG_BACKUP_FAILED))?;
+            let size_bytes = std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
+            Ok(BackupData { size_bytes })
+        })
+        .await
     }
 
-    async fn restore(&self, _src: &Path) -> Result<()> {
-        Err(BackendError::Unsupported(MSG_NO_BACKUP))
+    async fn restore(&self, src: &Path) -> Result<()> {
+        let src = src.to_owned();
+        self.blocking(move |inner| {
+            inner
+                .state
+                .store
+                .restore_from(&src, &inner.state.keyring.db_key(), &inner.state.detector)
+                .map_err(|_| BackendError::internal(MSG_RESTORE_FAILED))?;
+            inner.publish_items(false, 0);
+            Ok(())
+        })
+        .await
     }
 
     /// Auto-wipe is the embedded backend's one asynchronous history writer, so
@@ -759,26 +761,36 @@ mod tests {
         assert_eq!(backend.status().await.unwrap().device_name, before);
     }
 
-    /// The refusals must read as structural, not transient: a user must not be
-    /// told to try again at something that will never work in this build.
-    ///
-    /// Both, never one: a backup this device can write but not read back is
-    /// worse than no backup, because the key never leaves the device.
     #[tokio::test]
-    async fn the_unimplemented_operations_say_so_plainly() {
+    async fn backup_and_restore_round_trip_in_process() {
         let (backend, _clip, _dir) = backend();
-        for err in [
-            backend.backup(Path::new("anywhere")).await.unwrap_err(),
-            backend.restore(Path::new("anywhere")).await.unwrap_err(),
-        ] {
-            assert!(
-                matches!(err, BackendError::Unsupported(_)),
-                "expected a structural refusal, got {err:?}"
-            );
-            let shown = err.to_string();
-            assert!(!shown.contains("try again"), "reads as transient: {shown}");
-            assert!(!shown.contains('/'), "a path reached the user: {shown}");
-        }
+        backend.add("survives restart").await.unwrap();
+        let device_id = backend.inner.state.device_id.clone();
+        let backup = _dir.path().join("history.cpbak");
+        assert!(backend.backup(&backup).await.unwrap().size_bytes > 0);
+        backend.set_device_name("Current phone").await.unwrap();
+        backend.clear().await.unwrap();
+        backend.restore(&backup).await.unwrap();
+        assert_eq!(backend.list(10, None).await.unwrap().items.len(), 1);
+        assert_eq!(backend.status().await.unwrap().device_name, "Current phone");
+        let names = backend
+            .inner
+            .state
+            .store
+            .device_names(std::slice::from_ref(&device_id))
+            .unwrap();
+        assert_eq!(names[&device_id], "Current phone");
+    }
+
+    #[tokio::test]
+    async fn invalid_restore_preserves_live_history_and_hides_paths() {
+        let (backend, _clip, dir) = backend();
+        backend.add("keep this").await.unwrap();
+        let bad = dir.path().join("broken.cpbak");
+        std::fs::write(&bad, b"bad").unwrap();
+        let shown = backend.restore(&bad).await.unwrap_err().to_string();
+        assert!(!shown.contains('/'));
+        assert_eq!(backend.list(10, None).await.unwrap().items.len(), 1);
     }
 
     /// Rung 0 has no value at all unless this works: the share sheet, the
