@@ -40,6 +40,24 @@ struct Shown {
     ids: Vec<String>,
 }
 
+#[derive(Debug, Default)]
+struct PrivateModeState {
+    enabled: bool,
+    revision: u64,
+}
+
+impl PrivateModeState {
+    fn apply(&mut self, enabled: bool, expected_revision: Option<u64>) -> Option<bool> {
+        if expected_revision.is_some_and(|revision| revision != self.revision) {
+            return None;
+        }
+        self.revision = self.revision.wrapping_add(1);
+        let changed = self.enabled != enabled;
+        self.enabled = enabled;
+        Some(changed)
+    }
+}
+
 pub struct TrayMenu<R: Runtime> {
     pub menu: Menu<R>,
     pub autostart: IconMenuItem<R>,
@@ -49,7 +67,7 @@ pub struct TrayMenu<R: Runtime> {
     slots: Vec<IconMenuItem<R>>,
     placeholder: IconMenuItem<R>,
     shown: Mutex<Shown>,
-    private_mode_enabled: Mutex<bool>,
+    private_mode_state: Mutex<PrivateModeState>,
 }
 
 impl<R: Runtime> TrayMenu<R> {
@@ -166,7 +184,7 @@ impl<R: Runtime> TrayMenu<R> {
                 placeholder: true,
                 ..Shown::default()
             }),
-            private_mode_enabled: Mutex::new(false),
+            private_mode_state: Mutex::new(PrivateModeState::default()),
         })
     }
 
@@ -178,16 +196,35 @@ impl<R: Runtime> TrayMenu<R> {
     }
 
     pub fn private_mode_enabled(&self) -> bool {
-        self.private_mode_enabled
+        self.private_mode_snapshot().0
+    }
+
+    pub fn private_mode_snapshot(&self) -> (bool, u64) {
+        self.private_mode_state
             .lock()
-            .map(|enabled| *enabled)
-            .unwrap_or(false)
+            .map(|state| (state.enabled, state.revision))
+            .unwrap_or((false, 0))
     }
 
     pub fn set_private_mode(&self, enabled: bool) {
-        if let Ok(mut current) = self.private_mode_enabled.lock() {
-            *current = enabled;
+        self.apply_private_mode(enabled, None);
+    }
+
+    pub fn reconcile_private_mode(&self, enabled: bool, revision: u64) -> bool {
+        self.apply_private_mode(enabled, Some(revision))
+    }
+
+    fn apply_private_mode(&self, enabled: bool, expected_revision: Option<u64>) -> bool {
+        let Ok(mut state) = self.private_mode_state.lock() else {
+            return false;
+        };
+        let Some(changed) = state.apply(enabled, expected_revision) else {
+            return false;
+        };
+        if !changed {
+            return false;
         }
+        drop(state);
         let _ = self.private_mode.set_text(private_mode_label(enabled));
         let icon = if enabled {
             NativeIcon::LockLocked
@@ -195,6 +232,7 @@ impl<R: Runtime> TrayMenu<R> {
             NativeIcon::LockUnlocked
         };
         let _ = self.private_mode.set_native_icon(Some(icon));
+        true
     }
 
     /// The clipping id a slot is showing.
@@ -219,10 +257,6 @@ impl<R: Runtime> TrayMenu<R> {
         };
         let _ = self.status.set_text(status);
         let _ = self.status.set_native_icon(Some(icon));
-
-        if let Ok(config) = backend.get_config().await {
-            self.set_private_mode(config.config.private_mode);
-        }
 
         // The page carries plaintext, which is exactly why `Clipping` and not
         // this function decides what a menu may say about it.
@@ -312,5 +346,15 @@ mod tests {
         assert_eq!(autostart_label(false), text::OPEN_AT_LOGIN_OFF);
         assert_eq!(private_mode_label(true), text::PRIVATE_MODE_ON);
         assert_eq!(private_mode_label(false), text::PRIVATE_MODE_OFF);
+    }
+
+    #[test]
+    fn a_confirmed_broadcast_invalidates_an_older_reconciliation() {
+        let mut state = PrivateModeState::default();
+        let stale_revision = state.revision;
+
+        assert_eq!(state.apply(true, None), Some(true));
+        assert_eq!(state.apply(false, Some(stale_revision)), None);
+        assert!(state.enabled);
     }
 }

@@ -14,6 +14,7 @@
 mod menu;
 #[cfg(target_os = "macos")]
 mod menu_image_visibility;
+mod private_mode;
 mod recent;
 mod text;
 
@@ -88,6 +89,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         follower.set_autostart(autostart::is_enabled(&handle));
     });
 
+    private_mode::spawn(app.clone(), Arc::clone(&tray_menu), BACKSTOP);
     spawn_refresh(app.clone(), tray_menu);
     Ok(())
 }
@@ -111,25 +113,28 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, tray_menu: &Arc<TrayMenu<R>>, i
         menu::ID_PRIVATE_MODE => {
             let previous = tray_menu.private_mode_enabled();
             let wanted = !previous;
+            tray_menu.set_private_mode(wanted);
             let menu = Arc::clone(tray_menu);
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 let backend = app.state::<SelectedBackend>();
-                match backend
+                let applied = match backend
                     .set_config(copypaste_ipc::ConfigPatch {
                         private_mode: Some(wanted),
                         ..Default::default()
                     })
                     .await
                 {
-                    Ok(applied) => {
-                        menu.set_private_mode(applied.config.private_mode);
-                        let _ = app.emit("private-mode-changed", applied.config.private_mode);
-                    }
+                    Ok(applied) => Some(applied.config.private_mode),
                     Err(error) => {
                         tracing::warn!(%error, "could not change private mode");
-                        menu.set_private_mode(previous);
+                        None
                     }
+                };
+                let update = private_mode::toggle_update(previous, applied);
+                menu.set_private_mode(update.value);
+                if update.broadcast {
+                    let _ = app.emit(private_mode::EVENT_CHANGED, update.value);
                 }
             });
         }
