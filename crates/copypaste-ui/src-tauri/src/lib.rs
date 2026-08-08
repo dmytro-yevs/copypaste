@@ -1,14 +1,16 @@
-//! CopyPaste — one Tauri v2 app for macOS and Android (ADR-0002).
+//! CopyPaste — one Tauri v2 app for macOS, Windows and Android (ADR-0002,
+//! ADR-0013).
 //!
 //! This file does one job: assemble the app. The parts it assembles are:
 //!
 //! * [`capture`] — the Android clipboard ladder (rung 0 and rung 2), and the
 //!   one state that says whether it is actually working. On macOS it is a
 //!   constant, so the same commands and the same status component serve both.
-//! * [`backend`] — one command surface over two backends. macOS talks IPC to
-//!   the daemon over its `0600` Unix socket; Android runs `copypaste-core` and
-//!   `copypaste-p2p` in the app process, because Android hosts no daemon. The
-//!   choice is a compile-time type alias, [`backend::SelectedBackend`].
+//! * [`backend`] — one command surface over two backends. Desktop talks IPC to
+//!   the daemon — a `0600` Unix socket on macOS, an owner-only named pipe on
+//!   Windows; Android runs `copypaste-core` and `copypaste-p2p` in the app
+//!   process, because Android hosts no daemon. The choice is a compile-time
+//!   type alias, [`backend::SelectedBackend`].
 //! * [`commands`] — the `#[tauri::command]` surface, written once against that
 //!   alias and containing no `cfg` at all. Identical command names and shapes
 //!   on both platforms is what stops the React side growing platform branches.
@@ -21,12 +23,13 @@
 //!
 //! # What has been verified, and what has not
 //!
-//! This host is Linux with no macOS SDK and no Android SDK. So:
+//! CI is Linux with no macOS SDK and no Android SDK; a Windows runner compiles
+//! and tests this crate but mounts no window. So:
 //!
-//! * The **desktop** path compiles and its tests run here. It has not been run
-//!   on macOS, so the tray, the popover behaviour, the hotkey and
-//!   launch-at-login are unexercised — they are correct by API reading, not by
-//!   observation.
+//! * The **desktop** path compiles and its tests run on Linux and on Windows.
+//!   No runner has shown a window, so the tray, the popover behaviour, the
+//!   hotkey and launch-at-login are unexercised on both — they are correct by
+//!   API reading, not by observation.
 //! * The **Android** path compiles only under `--features embedded-backend`,
 //!   on Linux, which type-checks it but exercises nothing Android-specific. It
 //!   has never been built for an Android target and `cargo tauri android` has
