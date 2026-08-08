@@ -183,9 +183,13 @@ describe("manifest 05 §5.4: a remote change three pages down still reaches the 
 });
 
 describe("private-mode convergence", () => {
-  it("invalidates the dedicated private-mode query after a native toggle", async () => {
+  it("patches cached mode without fabricating an epoch before invalidation", async () => {
     const client = testClient();
-    client.setQueryData(PRIVATE_MODE_KEY, { private_mode: false });
+    client.setQueryDefaults(PRIVATE_MODE_KEY, { gcTime: Infinity });
+    client.setQueryData(PRIVATE_MODE_KEY, {
+      private_mode: false,
+      private_mode_epoch: 41,
+    });
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const Wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -198,7 +202,31 @@ describe("private-mode convergence", () => {
     for (const handler of handlers.get(EVENT_PRIVATE_MODE_CHANGED) ?? []) {
       handler({ payload: true as never });
     }
-    expect(client.getQueryData(PRIVATE_MODE_KEY)).toEqual({ private_mode: true });
+    expect(client.getQueryData(PRIVATE_MODE_KEY)).toEqual({
+      private_mode: true,
+      private_mode_epoch: 41,
+    });
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: PRIVATE_MODE_KEY }),
+    );
+  });
+
+  it("does not create epochless cache data when no private mode is cached", async () => {
+    const client = testClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    renderHook(() => usePush(), { wrapper: Wrapper });
+
+    await waitFor(() =>
+      expect(handlers.get(EVENT_PRIVATE_MODE_CHANGED)).toHaveLength(1),
+    );
+    for (const handler of handlers.get(EVENT_PRIVATE_MODE_CHANGED) ?? []) {
+      handler({ payload: true as never });
+    }
+
+    expect(client.getQueryData(PRIVATE_MODE_KEY)).toBeUndefined();
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: PRIVATE_MODE_KEY }),
     );

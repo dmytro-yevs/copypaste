@@ -77,9 +77,11 @@ export function usePush(): boolean {
     }).then(keep);
 
     void listen<boolean>(EVENT_PRIVATE_MODE_CHANGED, (event) => {
-      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, {
-        private_mode: event.payload,
-      });
+      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, (cached) =>
+        cached === undefined
+          ? undefined
+          : { ...cached, private_mode: event.payload },
+      );
       void qc.invalidateQueries({ queryKey: PRIVATE_MODE_KEY });
       void qc.invalidateQueries({ queryKey: CONFIG_KEY });
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });

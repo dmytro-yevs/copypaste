@@ -85,19 +85,31 @@ export function useSetPrivateMode() {
       await qc.cancelQueries({ queryKey: PRIVATE_MODE_KEY });
       const previous = qc.getQueryData<PrivateModeData>(PRIVATE_MODE_KEY);
       qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, {
-        ...previous,
         private_mode: enabled,
+        private_mode_epoch: previous?.private_mode_epoch ?? 0,
       });
       return { previous };
     },
     onSuccess: (confirmed) => {
-      qc.setQueryData(PRIVATE_MODE_KEY, confirmed);
+      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, (cached) =>
+        cached !== undefined &&
+        cached.private_mode_epoch > confirmed.private_mode_epoch
+          ? cached
+          : confirmed,
+      );
     },
     onError: (raw, _enabled, context) => {
-      if (context?.previous === undefined) {
-        qc.removeQueries({ queryKey: PRIVATE_MODE_KEY, exact: true });
-      } else {
-        qc.setQueryData(PRIVATE_MODE_KEY, context.previous);
+      const cached = qc.getQueryData<PrivateModeData>(PRIVATE_MODE_KEY);
+      const previous = context?.previous;
+      if (previous === undefined) {
+        if (cached?.private_mode_epoch === 0) {
+          qc.removeQueries({ queryKey: PRIVATE_MODE_KEY, exact: true });
+        }
+      } else if (
+        cached === undefined ||
+        cached.private_mode_epoch <= previous.private_mode_epoch
+      ) {
+        qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, previous);
       }
       toast.error(toFriendly(raw), { duration: 3500 });
     },
