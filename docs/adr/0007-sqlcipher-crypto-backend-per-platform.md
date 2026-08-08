@@ -123,6 +123,22 @@ executable before the build starts, and `check.sh` runs it against a fake NDK
 and asserts the exact variable names, because a misspelled one is not an error,
 only a variable nobody reads.
 
+**So do the 32-bit x86 atomics.** `threads_pthread.c`'s RCU uses 64-bit
+atomics, which only `i686-linux-android` resolves out of line. Nothing on the
+link line answers those calls: rustc passes `-nodefaultlibs`, so clang
+contributes no compiler-rt; Rust's `compiler_builtins` carries no `__atomic_*`;
+and the NDK's `libatomic.a` is a comment saying the family moved into
+`libclang_rt.builtins-*.a`, so the `-latomic` the target spec already passes
+resolves nothing. `:app:rustBuildX86Release` failed on undefined
+`__atomic_load_8` and took v2.0.0-alpha.5 with it.
+
+`crates/copypaste-ui/src-tauri/build.rs` asks the Android compiler for
+`-print-libgcc-file-name` and puts that archive on the link line, for
+`target_arch = "x86"` alone. It is a build script and not `.cargo/config.toml`
+because the Tauri build sets `CARGO_ENCODED_RUSTFLAGS` — measured, to
+`-landroid -llog -lOpenSLES` — and that outranks `target.<triple>.rustflags`
+outright, so a config entry would have been read past in silence.
+
 ## Alternatives rejected
 
 **Vendor OpenSSL on every target.** One backend everywhere, and it needs no
