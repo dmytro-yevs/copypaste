@@ -1,4 +1,4 @@
-//! Peer commands: pair, peers, unpair, revoke, sync, discovery.
+//! Peer commands: peers, unpair, revoke, sync, discovery.
 //!
 //! What a devices screen needs, and what these are shaped to give it:
 //!
@@ -8,55 +8,19 @@
 //! | forget one, or cut it off | [`unpair`] / [`revoke`] |
 //! | sync now, with per-device results | [`sync_now`] |
 //! | the devices on this network | [`discovered`] / [`rescan`] |
-//! | add one | [`pair_create`] / [`pair_accept`] |
 //!
-//! **The last row is not settled.** ADR-0007 is Accepted and says no Pair or
-//! Add-device control may be exposed until the wire supplies a handshake-derived
-//! SAS, a peer-visible confirm before persistence, and an idempotent abort. The
-//! wire supplies none of the three: [`pair_accept`] persists as it accepts, and
-//! the six characters the dialog compares come from the pairing id. Either the
-//! ADR is superseded by a decision written down, or these two go.
+//! **There is no row for adding one.** ADR-0015 keeps Pair and Add-device
+//! controls off every product surface until the wire derives a SAS from the
+//! handshake and binds both devices' confirmation before persistence.
+//! `PairCreate`/`PairAccept` stay on the daemon's IPC surface for the CLI; they
+//! are absent here and from `Backend`, so the WebView has no name to call.
 
 use tauri::State;
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
 use crate::model::{UiDiscovered, UiPeer, UiSyncResult};
-use copypaste_ipc::PairingData;
 
 type Result<T> = std::result::Result<T, BackendError>;
-
-/// Create a one-time pairing credential for another device.
-#[tauri::command]
-pub async fn pair_create(backend: State<'_, SelectedBackend>, name: String) -> Result<PairingData> {
-    backend.pair_create(name.trim()).await
-}
-
-/// Confirm a pairing credential with the device that created it.
-#[tauri::command]
-pub async fn pair_accept(
-    backend: State<'_, SelectedBackend>,
-    code: String,
-    addr: String,
-) -> Result<Vec<UiPeer>> {
-    backend.pair_accept(code.trim(), addr.trim()).await
-}
-
-/// Open Android's QR scanner. Desktop still supports pasting the same QR text.
-#[cfg(target_os = "android")]
-#[tauri::command]
-pub async fn scan_pairing_qr(
-    scanner: State<'_, crate::pairing_scanner::AndroidPairingScanner>,
-) -> Result<Option<String>> {
-    scanner.scan().await
-}
-
-#[cfg(not(target_os = "android"))]
-#[tauri::command]
-pub async fn scan_pairing_qr() -> Result<Option<String>> {
-    Err(BackendError::Unsupported(
-        "QR scanning is available on Android. Paste the pairing code on this device.",
-    ))
-}
 
 /// Known devices and when each was last reachable.
 ///

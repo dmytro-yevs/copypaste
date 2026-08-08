@@ -32,8 +32,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData,
-    ExportItem, ImagePreview, ImportData, Item, Method, PairingData, PeerInfo, Request, Response,
-    ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
+    ExportItem, ImagePreview, ImportData, Item, Method, PeerInfo, Request, Response, ResponseData,
+    StatusData, SyncResult, MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::{self, Receiver};
@@ -142,13 +142,6 @@ fn expect_status(data: Option<ResponseData>) -> Result<StatusData> {
     match data {
         Some(ResponseData::Status(status)) => Ok(status),
         _ => Err(BackendError::wrong_shape("daemon status")),
-    }
-}
-
-fn expect_pairing(data: Option<ResponseData>) -> Result<PairingData> {
-    match data {
-        Some(ResponseData::Pairing(pairing)) => Ok(pairing),
-        _ => Err(BackendError::wrong_shape("a pairing code")),
     }
 }
 
@@ -301,25 +294,6 @@ impl Backend for DaemonBackend {
     async fn shutdown(&self) -> Result<()> {
         self.call(Method::Shutdown).await?;
         Ok(())
-    }
-
-    async fn pair_create(&self, name: &str) -> Result<PairingData> {
-        expect_pairing(
-            self.call(Method::PairCreate {
-                name: name.to_string(),
-            })
-            .await?,
-        )
-    }
-
-    async fn pair_accept(&self, code: &str, addr: &str) -> Result<Vec<PeerInfo>> {
-        expect_peers(
-            self.call(Method::PairAccept {
-                code: code.to_string(),
-                addr: addr.to_string(),
-            })
-            .await?,
-        )
     }
 
     async fn peers(&self) -> Result<Vec<PeerInfo>> {
@@ -542,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn peers_and_pairings_deserialise() {
+    fn peers_deserialise() {
         let peers = expect_peers(
             into_data(parse(
                 r#"{"id":1,"ok":true,"data":{"peers":[{"pairing_id":"p1","name":"laptop",
@@ -553,15 +527,26 @@ mod tests {
         .unwrap();
         assert_eq!(peers[0].name, "laptop");
         assert!(peers[0].online);
+    }
 
-        let pairing = expect_pairing(
-            into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"pairing":{"code":"ABC-DEF","pairing_id":"p1","listen_addr":"10.0.0.1:47654"}}}"#,
-            ))
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(pairing.code, "ABC-DEF");
+    /// ADR-0015: this backend is a product surface, so it must not be able to
+    /// mint or redeem a pairing at all. A `Method` it never constructs is a
+    /// method no WebView call can reach.
+    ///
+    /// The needles are assembled by `concat!` so that this test's own source
+    /// does not contain the string it searches for.
+    #[test]
+    fn the_backend_names_no_pairing_verb() {
+        let source = include_str!("daemon.rs");
+        for verb in [
+            concat!("Method::", "PairCreate"),
+            concat!("Method::", "PairAccept"),
+        ] {
+            assert!(
+                !source.contains(verb),
+                "{verb} is reachable from the app backend"
+            );
+        }
     }
 
     #[test]
