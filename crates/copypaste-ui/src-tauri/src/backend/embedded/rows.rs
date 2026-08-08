@@ -158,6 +158,7 @@ pub(super) fn peer_info(peer: &copypaste_p2p::Peer, online: bool) -> PeerInfo {
 /// Never fails: an unreadable count is reported as zero rather than an error,
 /// because a caller may be probing precisely because storage is unhappy.
 pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
+    let settings = inner.state.settings.snapshot();
     Ok(copypaste_ipc::StatusData {
         device_name: inner.state.device_name(),
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -168,7 +169,8 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         // status line that history is growing when it is not.
         capture_running: false,
         clipboard_backend: super::BACKEND_NAME.to_string(),
-        private_mode: inner.settings().private_mode,
+        private_mode: settings.config.private_mode,
+        private_mode_epoch: settings.private_mode_epoch,
         // Android has no daemon poller, but it does run the same startup FTS
         // purge as the daemon. Surface that one counter rather than claiming
         // the purge never happened.

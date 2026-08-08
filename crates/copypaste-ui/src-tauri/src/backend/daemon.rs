@@ -457,12 +457,13 @@ mod tests {
     fn private_mode_uses_the_daemons_confirmed_value() {
         let mode = expect_private_mode(
             into_data(parse(
-                r#"{"id":1,"ok":true,"data":{"private_mode":{"private_mode":true}}}"#,
+                r#"{"id":1,"ok":true,"data":{"private_mode":{"private_mode":true,"private_mode_epoch":4}}}"#,
             ))
             .unwrap(),
         )
         .unwrap();
         assert!(mode.private_mode);
+        assert_eq!(mode.private_mode_epoch, 4);
     }
 
     #[test]

@@ -294,6 +294,8 @@ pub struct StatusData {
     /// the tray converge without a second settings round-trip.
     #[serde(default)]
     pub private_mode: bool,
+    /// CopyPaste-48k0: lets pollers detect intervening private-mode writes.
+    pub private_mode_epoch: u64,
 
     /// What has been refused, missed or deleted since the daemon started.
     ///
@@ -314,6 +316,7 @@ pub struct StatusData {
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PrivateModeData {
     pub private_mode: bool,
+    pub private_mode_epoch: u64,
 }
 
 /// An item as seen by clients. Content is plaintext here: it is decrypted by

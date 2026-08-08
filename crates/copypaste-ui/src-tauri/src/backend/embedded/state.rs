@@ -5,7 +5,6 @@
 //! better than blocking access to encrypted history when SQLite cannot read
 //! the index.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -14,6 +13,8 @@ use copypaste_core::{purge_indexed_secrets, CryptoError, Detector, Keyring, Stor
 use copypaste_ipc::ErrorCode;
 
 use crate::backend::{BackendError, Result};
+
+use super::settings::EmbeddedSettings;
 
 /// First-run name on Android, where the hostname is only `localhost`.
 const DEVICE_NAME_HINT: &str = "CopyPaste phone";
@@ -30,8 +31,7 @@ pub(super) struct BackendState {
     /// Where the paired-device list lives. The `PeerStore` itself belongs to
     /// the node, which owns it by value.
     pub(super) peers_path: PathBuf,
-    pub(super) settings: RwLock<copypaste_ipc::ConfigData>,
-    pub(super) settings_path: PathBuf,
+    pub(super) settings: EmbeddedSettings,
     /// Search-index rows removed by this process's startup purge. Kept so the
     /// status/diagnostics surface tells the same truth as the daemon does.
     pub(super) index_purged: u64,
@@ -69,7 +69,6 @@ impl BackendState {
         // opening the user's clips (the daemon follows the same rule).
         let index_purged = purge_search_index(&store, &detector);
 
-        let settings_path = data_dir.join("settings-v2.json");
         Ok(Self {
             store,
             keyring: Arc::new(keyring),
@@ -78,8 +77,7 @@ impl BackendState {
             device_name: RwLock::new(identity.device_name),
             // The name from the shared crate, as the daemon uses.
             peers_path: data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
-            settings: RwLock::new(read_settings(&settings_path)),
-            settings_path,
+            settings: EmbeddedSettings::open(data_dir.join("settings-v2.json")),
             index_purged,
         })
     }
@@ -107,22 +105,6 @@ impl BackendState {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = name.clone();
         Ok(name)
     }
-}
-
-const SETTINGS_SAVE_ERROR: &str = "CopyPaste couldn't save these settings.";
-
-fn read_settings(path: &Path) -> copypaste_ipc::ConfigData {
-    fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
-}
-
-pub(super) fn write_settings(path: &Path, settings: &copypaste_ipc::ConfigData) -> Result<()> {
-    let encoded =
-        serde_json::to_vec(settings).map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))?;
-    copypaste_fs::write_atomically(path, &encoded, copypaste_fs::Visibility::Inherited)
-        .map_err(|_| BackendError::internal(SETTINGS_SAVE_ERROR))
 }
 
 fn keyring_error(error: CryptoError) -> BackendError {

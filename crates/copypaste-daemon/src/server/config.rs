@@ -61,16 +61,18 @@ pub(super) fn set(state: &AppState, id: u64, patch: &ConfigPatch) -> Response {
 }
 
 pub(super) fn private_mode(state: &AppState, id: u64) -> Response {
+    let settings = state.settings.get();
     Response::ok(
         id,
         ResponseData::PrivateMode(PrivateModeData {
-            private_mode: state.settings.get().private_mode,
+            private_mode: settings.private_mode,
+            private_mode_epoch: settings.private_mode_epoch(),
         }),
     )
 }
 
 pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Response {
-    match state.settings.apply(
+    match state.settings.apply_with_epoch(
         &state.meta,
         &ConfigPatch {
             private_mode: Some(enabled),
@@ -80,7 +82,8 @@ pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Resp
         Ok(config) => Response::ok(
             id,
             ResponseData::PrivateMode(PrivateModeData {
-                private_mode: config.private_mode,
+                private_mode: config.config.private_mode,
+                private_mode_epoch: config.private_mode_epoch,
             }),
         ),
         Err(e @ SettingsError::Invalid(_)) => {
@@ -105,6 +108,13 @@ mod tests {
     fn applied(response: Response) -> ConfigApplied {
         match response.data {
             Some(ResponseData::Config(applied)) => applied,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn private_mode_data(response: Response) -> PrivateModeData {
+        match response.data {
+            Some(ResponseData::PrivateMode(mode)) => mode,
             other => panic!("{other:?}"),
         }
     }
@@ -222,20 +232,28 @@ mod tests {
     #[test]
     fn private_mode_is_persistent_and_has_a_narrow_ipc_surface() {
         let (state, dir) = test_state("private-mode");
-        let response = call(&state, Method::SetPrivateMode { enabled: true });
-        let enabled = match response.data {
-            Some(ResponseData::PrivateMode(mode)) => mode.private_mode,
+        let first = private_mode_data(call(&state, Method::SetPrivateMode { enabled: true }));
+        assert!(first.private_mode);
+        assert_eq!(first.private_mode_epoch, 1);
+
+        let second = private_mode_data(call(&state, Method::SetPrivateMode { enabled: true }));
+        assert!(second.private_mode);
+        assert_eq!(second.private_mode_epoch, 2);
+        let read = private_mode_data(call(&state, Method::GetPrivateMode));
+        assert_eq!(read.private_mode_epoch, second.private_mode_epoch);
+
+        let status = match call(&state, Method::Status).data {
+            Some(ResponseData::Status(status)) => status,
             other => panic!("{other:?}"),
         };
-        assert!(enabled);
+        assert_eq!(status.private_mode, read.private_mode);
+        assert_eq!(status.private_mode_epoch, read.private_mode_epoch);
         drop(state);
 
         let (restarted, _dir) =
             crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "private-mode");
-        let response = call(&restarted, Method::GetPrivateMode);
-        match response.data {
-            Some(ResponseData::PrivateMode(mode)) => assert!(mode.private_mode),
-            other => panic!("{other:?}"),
-        }
+        let restarted_mode = private_mode_data(call(&restarted, Method::GetPrivateMode));
+        assert!(restarted_mode.private_mode);
+        assert_eq!(restarted_mode.private_mode_epoch, 0);
     }
 }

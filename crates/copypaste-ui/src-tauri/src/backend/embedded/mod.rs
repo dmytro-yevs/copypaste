@@ -821,7 +821,7 @@ mod tests {
         assert!(confirmed.private_mode);
         assert!(backend.status().await.unwrap().private_mode);
         let saved: copypaste_ipc::ConfigData =
-            serde_json::from_slice(&std::fs::read(&backend.inner.state.settings_path).unwrap())
+            serde_json::from_slice(&std::fs::read(backend.inner.state.settings.path()).unwrap())
                 .unwrap();
         assert!(saved.private_mode);
         assert!(backend
@@ -837,6 +837,66 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn concurrent_private_mode_and_config_patches_preserve_both_writes() {
+        let (backend, _clip, _dir) = backend();
+        let start = Arc::new(tokio::sync::Barrier::new(3));
+
+        let mode_backend = backend.clone();
+        let mode_start = Arc::clone(&start);
+        let mode = tokio::spawn(async move {
+            mode_start.wait().await;
+            mode_backend.set_private_mode(true).await.unwrap()
+        });
+
+        let config_backend = backend.clone();
+        let config_start = Arc::clone(&start);
+        let config = tokio::spawn(async move {
+            config_start.wait().await;
+            config_backend
+                .set_config(ConfigPatch {
+                    poll_interval_ms: Some(250),
+                    ..ConfigPatch::default()
+                })
+                .await
+                .unwrap()
+        });
+
+        start.wait().await;
+        let (mode, config) = tokio::join!(mode, config);
+        assert!(mode.unwrap().private_mode);
+        assert_eq!(config.unwrap().config.poll_interval_ms, 250);
+
+        let current = backend.get_config().await.unwrap().config;
+        assert!(current.private_mode);
+        assert_eq!(current.poll_interval_ms, 250);
+        let persisted: copypaste_ipc::ConfigData =
+            serde_json::from_slice(&std::fs::read(backend.inner.state.settings.path()).unwrap())
+                .unwrap();
+        assert_eq!(persisted, current);
+    }
+
+    #[tokio::test]
+    async fn private_mode_and_epoch_converge_across_reads_and_restart() {
+        let (backend, _clipboard, _dir) = backend();
+        let first = backend.set_private_mode(true).await.unwrap();
+        let second = backend.set_private_mode(true).await.unwrap();
+        assert_eq!(first.private_mode_epoch, 1);
+        assert_eq!(second.private_mode_epoch, 2);
+
+        let read = backend.get_private_mode().await.unwrap();
+        let status = backend.status().await.unwrap();
+        assert_eq!(read.private_mode_epoch, second.private_mode_epoch);
+        assert_eq!(status.private_mode_epoch, second.private_mode_epoch);
+        assert_eq!(status.private_mode, read.private_mode);
+
+        let path = backend.inner.state.settings.path().to_path_buf();
+        drop(backend);
+        let restarted = settings::EmbeddedSettings::open(path).snapshot();
+        assert!(restarted.config.private_mode);
+        assert_eq!(restarted.private_mode_epoch, 0);
     }
 
     /// The same text twice is one row. Not because this file says so — the

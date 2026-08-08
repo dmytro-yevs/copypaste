@@ -42,6 +42,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
         }
     };
 
+    let settings = state.settings.get();
     Response::ok(
         id,
         ResponseData::Status(StatusData {
@@ -51,7 +52,8 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             item_count,
             capture_running: state.capture_running(),
             clipboard_backend: state.backend_name().to_string(),
-            private_mode: state.settings.get().private_mode,
+            private_mode: settings.private_mode,
+            private_mode_epoch: settings.private_mode_epoch(),
             counters: state.counters(),
         }),
     )
