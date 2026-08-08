@@ -400,6 +400,26 @@ the after-side of the item-cap fix, whose before-side is the 331 µs above.
 
 ---
 
+## 5.2 F-CORE-6, the late-sealed insert — **no after-measurement**
+
+`insert_or_bump_late_sealed` evaluates the payload closure inside the
+transaction that has already taken the dedup decision, so a re-copy pays no
+HKDF, no AEAD pass and no plaintext clone. `is_sensitive`, `content_hash` and
+the AAD-bound item id stay eager, because the dedup decision needs them.
+
+Only the before-baseline exists. Duplicate ingest, p50, history 2000, on a
+contended host:
+
+| Payload | Before |
+|---|---|
+| 256 B | 351 µs |
+| 4 KiB | 365 µs |
+| 64 KiB | 1448 µs |
+| 1 MiB | 24.1 ms |
+
+The saving is argued from what the code no longer executes, not observed. Take
+the after-number on a quiet host before quoting a figure for this change.
+
 ## 6. Merging a peer's session — **S**
 
 Host M, `cargo bench --bench sync`, load 3.7 to 5.3, both trees. The unit is a
