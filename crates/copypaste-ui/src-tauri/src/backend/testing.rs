@@ -6,6 +6,7 @@
 //! reached one by accident fails rather than passing on a default.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use copypaste_ipc::{
@@ -29,6 +30,7 @@ enum Liveness {
 #[derive(Debug)]
 pub struct FakeBackend {
     liveness: Liveness,
+    shutdown: AtomicBool,
     page: Mutex<Page>,
     /// `None` when `add` refuses, which is the default: a test that stored
     /// something by accident should fail rather than pass on a stub.
@@ -39,6 +41,7 @@ impl FakeBackend {
     fn with(liveness: Liveness) -> Self {
         Self {
             liveness,
+            shutdown: AtomicBool::new(false),
             page: Mutex::new(Page::default()),
             added: None,
         }
@@ -157,6 +160,9 @@ impl Backend for FakeBackend {
     }
 
     async fn status(&self) -> Result<StatusData> {
+        if self.shutdown.load(Ordering::Relaxed) {
+            return Err(BackendError::Unreachable);
+        }
         match &self.liveness {
             Liveness::Unreachable => Err(BackendError::Unreachable),
             Liveness::Failing => Err(BackendError::NotReady),
@@ -170,6 +176,11 @@ impl Backend for FakeBackend {
                 counters: copypaste_ipc::DiagnosticCounters::default(),
             }),
         }
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        self.shutdown.store(true, Ordering::Relaxed);
+        Ok(())
     }
 
     async fn pair_create(&self, _name: &str) -> Result<PairingData> {

@@ -301,6 +301,11 @@ impl Backend for DaemonBackend {
         expect_status(self.call(Method::Status).await?)
     }
 
+    async fn shutdown(&self) -> Result<()> {
+        self.call(Method::Shutdown).await?;
+        Ok(())
+    }
+
     async fn pair_create(&self, name: &str) -> Result<PairingData> {
         expect_pairing(
             self.call(Method::PairCreate {

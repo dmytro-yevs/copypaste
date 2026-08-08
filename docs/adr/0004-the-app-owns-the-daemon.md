@@ -57,24 +57,16 @@ A daemon answering with the same version is adopted silently, whoever started
 it. That is the case after `brew services` started it, and it is correct: it is
 the same code.
 
-## What is still missing, and why it is a request rather than a workaround
+## Stopping through the IPC contract
 
-**The app cannot stop a daemon it did not start.** `std::process::Child` can
-only signal its own children, and nothing on the wire says "shut down". So the
-version-mismatch state currently explains rather than fixes: it names the
-condition and offers Restart, and Restart can only complete for a daemon this
-app process started.
+`Method::Shutdown` acknowledges the request before it signals the daemon's
+shared shutdown channel. The app uses it for an owned daemon on exit and for an
+adopted, mismatched daemon before restart. It adds no authority: the socket is
+`0600`, so any client that can call it can already delete the entire history.
 
-The fix is `Method::Shutdown` in `copypaste-ipc` plus a dispatcher arm — a
-request to the crate that owns them, not something to work around here. It adds
-no authority: the socket is `0600`, so any client that can call it can already
-delete the entire history.
-
-**Stopping is `SIGKILL`, not `SIGTERM`.** `std::process::Child::kill` is the
-only signal `std` sends, and adding `nix` for one syscall buys a dependency that
-`Method::Shutdown` makes dead on arrival. SQLite is in WAL mode, so an abrupt
-stop is recoverable, and the daemon clears a stale socket on its next bind. This
-is a stated cost, not a claim that it is ideal.
+`Child::kill` remains the bounded fallback when an owned daemon cannot answer
+or does not finish stopping. The app never applies that fallback to an adopted
+process because it has no child handle for one.
 
 ## Rejected alternatives
 

@@ -262,7 +262,8 @@ pub fn run() {
                     push.stop();
                 }
                 if let Some(supervisor) = app.try_state::<Supervisor>() {
-                    supervisor.stop();
+                    let backend = app.state::<SelectedBackend>();
+                    tauri::async_runtime::block_on(supervisor.shutdown(backend.inner()));
                 }
             }
         });

@@ -190,6 +190,12 @@ pub trait Backend: Send + Sync + 'static {
 
     async fn status(&self) -> Result<StatusData>;
 
+    /// Ask a separate background service to terminate gracefully.
+    ///
+    /// The embedded Android backend has no separate process and treats this as
+    /// a no-op.
+    async fn shutdown(&self) -> Result<()>;
+
     // ---- peers -----------------------------------------------------------
 
     /// Mint a pairing code on this device. The code is a secret and is
