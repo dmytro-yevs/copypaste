@@ -20,7 +20,7 @@ mod transcode;
 
 use super::change::{Change, ChangeTracker};
 use super::windows_optout as optout;
-use super::{file_capture, Capture, CapturePolicy, ClipboardSource};
+use super::{Capture, CapturePolicy, ClipboardSource};
 use attribution::SourceApp;
 use read::{Reading, Representation};
 
@@ -293,9 +293,7 @@ impl ClipboardSource for WindowsClipboard {
         }
 
         let reading = read::representation(policy);
-        // Held no longer than the read: while this is open, every other
-        // application's copy and paste blocks, so the transcode below happens
-        // after it is closed.
+        // Holding this open blocks every other application's copy and paste.
         drop(clipboard);
 
         let representation = match reading {
@@ -306,40 +304,16 @@ impl ClipboardSource for WindowsClipboard {
             }
             Reading::Nothing => return None,
         };
-        match representation {
-            Representation::Text(content) => Some(Capture {
-                content,
-                binary_content: None,
-                file_path: None,
-                file_metadata: None,
-                content_type: copypaste_ipc::content_type::TEXT.to_string(),
-                app_bundle_id,
-                app_name,
-            }),
-            Representation::Bitmap(bitmap) => {
-                let Some(png) =
-                    transcode::bitmap_to_png(&bitmap, policy.settings.max_decoded_image_mb)
-                else {
-                    debug!("the clipboard image could not be transcoded; dropped");
-                    return None;
-                };
-                let cap = policy.limit_bytes(copypaste_ipc::content_type::IMAGE_PNG);
-                if png.len() as u64 > cap {
-                    self.reject_too_large(png.len() as u64, cap);
-                    return None;
-                }
-                Some(Capture {
-                    content: String::new(),
-                    binary_content: Some(png),
-                    file_path: None,
-                    file_metadata: None,
-                    content_type: copypaste_ipc::content_type::IMAGE_PNG.to_string(),
-                    app_bundle_id,
-                    app_name,
-                })
-            }
-            Representation::File(path) => file_capture(path, app_bundle_id, app_name),
-        }
+        let Representation::Text(content) = representation;
+        Some(Capture {
+            content,
+            binary_content: None,
+            file_path: None,
+            file_metadata: None,
+            content_type: copypaste_ipc::content_type::TEXT.to_string(),
+            app_bundle_id,
+            app_name,
+        })
     }
 
     fn changed(&mut self) -> bool {
@@ -361,11 +335,7 @@ impl ClipboardSource for WindowsClipboard {
         _metadata: Option<&copypaste_core::FileMetadata>,
     ) -> anyhow::Result<()> {
         if content_type == copypaste_ipc::content_type::FILE {
-            // Not "cannot": not implemented. A file paste-back needs the staged
-            // plaintext directory, and `clipboard::file_materialize` is written
-            // against `rustix` file descriptors. Refusing is the honest
-            // outcome; converting the bytes to text would corrupt the user's
-            // clipboard, which is what the port forbids.
+            // File paste-back needs a managed plaintext staging directory.
             return Err(anyhow::anyhow!(
                 "this build cannot paste a file back on Windows"
             ));
@@ -498,6 +468,25 @@ mod tests {
             clipboard.poll().is_none(),
             "T-4: an unchanged clipboard must yield nothing"
         );
+    }
+
+    #[test]
+    #[ignore = "drives the real Windows clipboard"]
+    fn non_text_only_changes_are_acknowledged_without_capture() {
+        let _lock = serialised();
+        let mut clipboard = WindowsClipboard::new().unwrap();
+
+        write_formats(&[(formats::CF_DIB, b"not a decoded image")]);
+        assert!(clipboard.poll().is_none());
+        assert!(clipboard.poll().is_none(), "the cursor must still advance");
+
+        write_formats(&[
+            (formats::CF_UNICODETEXT, &utf16("plain fallback")),
+            (formats::CF_DIB, b"ignored"),
+        ]);
+        let capture = clipboard.poll().expect("plain text must win when offered");
+        assert_eq!(capture.content, "plain fallback");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
     }
 
     /// The measurement `MAX_SELF_WRITE_DELTA` is a guess about. A delta beyond

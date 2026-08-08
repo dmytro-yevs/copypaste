@@ -8,8 +8,6 @@
 //!
 //! Every function here requires the caller to hold the clipboard open.
 
-use std::path::PathBuf;
-
 use clipboard_win::{formats, raw};
 use tracing::debug;
 
@@ -21,10 +19,6 @@ const SIZE_SLACK: u64 = 4096;
 /// One representation, read but not yet converted.
 pub(super) enum Representation {
     Text(String),
-    /// A whole BMP file — file header, info header, bits — which is what
-    /// `raw::get_bitmap` renders the clipboard's bitmap into.
-    Bitmap(Vec<u8>),
-    File(PathBuf),
 }
 
 pub(super) enum Reading {
@@ -38,16 +32,11 @@ pub(super) enum Reading {
     Nothing,
 }
 
-/// I-11: one representation, chosen in text, image, file order.
+/// v2 captures plain text only. Other formats are acknowledged by the parent
+/// change cursor without being materialised.
 pub(super) fn representation(policy: CapturePolicy<'_>) -> Reading {
     if raw::is_format_avail(formats::CF_UNICODETEXT) {
         return text(policy);
-    }
-    if raw::is_format_avail(formats::CF_DIB) {
-        return image(policy);
-    }
-    if raw::is_format_avail(formats::CF_HDROP) {
-        return file();
     }
     Reading::Nothing
 }
@@ -91,48 +80,4 @@ fn text(policy: CapturePolicy<'_>) -> Reading {
         return Reading::Nothing;
     }
     Reading::Got(Representation::Text(text))
-}
-
-fn image(policy: CapturePolicy<'_>) -> Reading {
-    // Sized through `CF_DIB` and read through `CF_BITMAP`: Windows synthesises
-    // each from the other, so availability of one implies both, and `GlobalSize`
-    // on a GDI bitmap handle is the case clipboard-win's own `size_unsafe`
-    // warns can crash.
-    let Some(dib_bytes) = raw::size(formats::CF_DIB) else {
-        return Reading::Nothing;
-    };
-    // Gated against the *decoded* budget rather than the stored-image cap: a
-    // DIB is uncompressed, so a screenshot that stores as a 400 KiB PNG arrives
-    // here as several MiB, and gating it on the PNG cap would reject ordinary
-    // screenshots. The encoded PNG is checked against that cap once it exists.
-    let budget = u64::from(policy.settings.max_decoded_image_mb).saturating_mul(1024 * 1024);
-    let dib_bytes = dib_bytes.get() as u64;
-    if dib_bytes > budget {
-        return Reading::TooLarge {
-            bytes: dib_bytes,
-            cap: budget,
-        };
-    }
-
-    let mut bitmap = Vec::new();
-    if raw::get_bitmap(&mut bitmap).is_err() {
-        debug!("the clipboard image could not be read; the change was dropped");
-        return Reading::Nothing;
-    }
-    Reading::Got(Representation::Bitmap(bitmap))
-}
-
-fn file() -> Reading {
-    let mut paths: Vec<PathBuf> = Vec::new();
-    if raw::get_file_list_path(&mut paths).is_err() {
-        debug!("the clipboard file list could not be read; the change was dropped");
-        return Reading::Nothing;
-    }
-    // One item per change, as on macOS: the first absolute path.
-    paths
-        .into_iter()
-        .find(|path| path.is_absolute())
-        .map_or(Reading::Nothing, |path| {
-            Reading::Got(Representation::File(path))
-        })
 }
