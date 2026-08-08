@@ -22,8 +22,8 @@ pub mod pipe;
 /// What a caller is told when the platform has no transport.
 ///
 /// It names no path: the socket path discloses the local username
-/// (CLAUDE.md rule 4), and this string reaches a user through the CLI's and the
-/// app's connect-failure paths.
+/// (security requirement), and this string reaches a user through the CLI's
+/// and the app's connect-failure paths.
 pub const MSG_UNSUPPORTED: &str = "local IPC is not implemented on this platform yet";
 
 /// The one failure a platform with no transport returns.
