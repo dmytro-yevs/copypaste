@@ -74,17 +74,38 @@ export function usePrivateMode() {
 
 export function useSetPrivateMode() {
   const qc = useQueryClient();
-  return useMutation<PrivateModeData, unknown, boolean>({
+  return useMutation<
+    PrivateModeData,
+    unknown,
+    boolean,
+    { previous: PrivateModeData | undefined }
+  >({
     mutationFn: setPrivateMode,
+    onMutate: async (enabled) => {
+      await qc.cancelQueries({ queryKey: PRIVATE_MODE_KEY });
+      const previous = qc.getQueryData<PrivateModeData>(PRIVATE_MODE_KEY);
+      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, {
+        ...previous,
+        private_mode: enabled,
+      });
+      return { previous };
+    },
     onSuccess: (confirmed) => {
       qc.setQueryData(PRIVATE_MODE_KEY, confirmed);
+    },
+    onError: (raw, _enabled, context) => {
+      if (context?.previous === undefined) {
+        qc.removeQueries({ queryKey: PRIVATE_MODE_KEY, exact: true });
+      } else {
+        qc.setQueryData(PRIVATE_MODE_KEY, context.previous);
+      }
+      toast.error(toFriendly(raw), { duration: 3500 });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: PRIVATE_MODE_KEY });
       void qc.invalidateQueries({ queryKey: CONFIG_KEY });
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
       void qc.invalidateQueries({ queryKey: STATUS_KEY });
-    },
-    onError: (raw) => {
-      toast.error(toFriendly(raw));
-      void qc.invalidateQueries({ queryKey: PRIVATE_MODE_KEY });
     },
   });
 }
