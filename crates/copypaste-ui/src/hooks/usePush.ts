@@ -13,7 +13,7 @@ import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
 import { PEERS_KEY } from "@/hooks/useDevices";
 import { CONFIG_KEY, PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";
-import { hasBridge } from "@/lib/ipc";
+import { hasBridge, type PrivateModeData } from "@/lib/ipc";
 
 /** Must match `service::push::EVENT_CHANGED`, which has a test asserting it. */
 export const EVENT_CHANGED = "copypaste://changed";
@@ -76,7 +76,10 @@ export function usePush(): boolean {
       if (event.payload.live) void qc.invalidateQueries({ queryKey: HISTORY_KEY });
     }).then(keep);
 
-    void listen<boolean>(EVENT_PRIVATE_MODE_CHANGED, () => {
+    void listen<boolean>(EVENT_PRIVATE_MODE_CHANGED, (event) => {
+      qc.setQueryData<PrivateModeData>(PRIVATE_MODE_KEY, {
+        private_mode: event.payload,
+      });
       void qc.invalidateQueries({ queryKey: PRIVATE_MODE_KEY });
       void qc.invalidateQueries({ queryKey: CONFIG_KEY });
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });

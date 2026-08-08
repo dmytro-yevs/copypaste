@@ -13,7 +13,7 @@
  * assertions here are about what the control says, not about what it stores.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 
 import { ServiceTab } from "@/components/settings/ServiceTab";
 import { IpcFailure } from "@/lib/errors";
@@ -239,13 +239,34 @@ describe("writing one", () => {
     expect(setConfig).not.toHaveBeenCalled();
   });
 
+  it("updates the accessible private-mode switch before the service settles", async () => {
+    let settle: ((value: { private_mode: boolean }) => void) | undefined;
+    setPrivateMode.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+    const { user } = withUser(<ServiceTab />);
+    const control = await screen.findByRole("switch", { name: "Private mode" });
+    getPrivateMode.mockResolvedValue({ private_mode: true });
+
+    await user.click(control);
+
+    await waitFor(() => expect(control.getAttribute("aria-checked")).toBe("true"));
+    expect(control.hasAttribute("disabled")).toBe(true);
+    await act(async () => settle?.({ private_mode: true }));
+    await waitFor(() => expect(control.hasAttribute("disabled")).toBe(false));
+    expect(control.getAttribute("aria-checked")).toBe("true");
+  });
+
   it("offers the persisted private-mode control on Android", async () => {
     getStatus.mockResolvedValue(status({ clipboard_backend: "android-inprocess" }));
     withUser(<ServiceTab />);
     expect(await screen.findByRole("switch", { name: "Private mode" })).toBeTruthy();
   });
 
-  it("renders the backend echo instead of assuming the requested value", async () => {
+  it("settles to the backend echo instead of assuming the requested value", async () => {
     setPrivateMode.mockResolvedValue({ private_mode: false });
     const { user } = withUser(<ServiceTab />);
     const control = await screen.findByRole("switch", { name: "Private mode" });

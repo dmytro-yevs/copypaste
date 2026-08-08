@@ -185,6 +185,7 @@ describe("manifest 05 §5.4: a remote change three pages down still reaches the 
 describe("private-mode convergence", () => {
   it("invalidates the dedicated private-mode query after a native toggle", async () => {
     const client = testClient();
+    client.setQueryData(PRIVATE_MODE_KEY, { private_mode: false });
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const Wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -197,6 +198,7 @@ describe("private-mode convergence", () => {
     for (const handler of handlers.get(EVENT_PRIVATE_MODE_CHANGED) ?? []) {
       handler({ payload: true as never });
     }
+    expect(client.getQueryData(PRIVATE_MODE_KEY)).toEqual({ private_mode: true });
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: PRIVATE_MODE_KEY }),
     );
