@@ -66,7 +66,7 @@ pub fn verify_integrity(conn: &Connection) -> Result<(), StoreError> {
 /// Refuse a candidate whose version, tables, columns, or declared types do
 /// not exactly match the schema this build writes.
 pub fn verify_schema(conn: &Connection) -> Result<(), StoreError> {
-    super::schema::verify_schema(conn)
+    super::schema_verify::verify_schema(conn)
 }
 
 /// The raw key rendered for an `ATTACH … KEY` clause.
@@ -121,7 +121,7 @@ impl super::Store {
             .any(|required| !tables.iter().any(|table| table == required))
             || tables
                 .iter()
-                .any(|table| !super::schema::is_current_table(table))
+                .any(|table| !super::schema_verify::is_current_table(table))
         {
             return Err(RestoreError::InvalidBackup(StoreError::InvalidSchema));
         }
