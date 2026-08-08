@@ -9,8 +9,11 @@
 
 use std::io::{self, Write as _};
 use std::path::Path;
+use std::sync::Mutex;
 
 use tempfile::NamedTempFile;
+
+static REPLACE: Mutex<()> = Mutex::new(());
 
 /// Mode [`Visibility::OwnerOnly`] applies on unix.
 #[cfg(unix)]
@@ -33,17 +36,18 @@ pub enum Visibility {
 /// Replace `path` with `bytes` in one observable step, creating the parent
 /// directory if it is missing.
 ///
-/// A reader sees the previous contents or the new ones, never a mixture and
-/// never nothing: the temporary file is in the same directory (a
-/// cross-filesystem `rename` is not atomic) and is `fsync`ed *before* the rename
-/// publishes it, and the directory is `fsync`ed after, so the rename itself
-/// survives a power loss.
+/// Readers see the previous contents or the new ones, never a mixture or gap.
+/// The same-directory temporary is synced before rename and the directory after.
+///
+/// Concurrent calls in this process are serialized. Multiple processes writing
+/// the same target are outside this API's ownership contract.
 ///
 /// # Errors
 ///
 /// Any I/O failure. The previous contents survive all of them.
 pub fn write_atomically(path: &Path, bytes: &[u8], visibility: Visibility) -> io::Result<()> {
     write_with(path, bytes, visibility, |tmp, target| {
+        let _replace = REPLACE.lock().unwrap_or_else(|error| error.into_inner());
         tmp.persist(target).map(|_| ()).map_err(|err| err.error)
     })
 }
@@ -97,6 +101,7 @@ fn sync_dir(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
 
     fn temp_entries(dir: &Path) -> usize {
         std::fs::read_dir(dir).expect("read_dir").count()
@@ -114,6 +119,38 @@ mod tests {
             // The temporary file is gone, so the target is the only entry.
             assert_eq!(temp_entries(dir.path()), 1);
         }
+    }
+
+    #[test]
+    fn concurrent_writers_publish_one_complete_value_without_collisions() {
+        const WRITERS: usize = 16;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = Arc::new(dir.path().join("state.json"));
+        let barrier = Arc::new(Barrier::new(WRITERS));
+        let values: Vec<Vec<u8>> = (0..WRITERS)
+            .map(|writer| vec![writer as u8; 256 * 1024])
+            .collect();
+
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = values
+                .iter()
+                .map(|value| {
+                    let path = Arc::clone(&path);
+                    let barrier = Arc::clone(&barrier);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        write_atomically(&path, value, Visibility::Inherited)
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().expect("writer panicked").expect("write");
+            }
+        });
+
+        let stored = std::fs::read(path.as_path()).expect("read");
+        assert!(values.contains(&stored));
+        assert_eq!(temp_entries(dir.path()), 1);
     }
 
     #[test]
