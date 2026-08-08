@@ -219,6 +219,8 @@ export const settings = {
   diagnostics: {
     loading: "Reading the service…",
     unavailable: "Diagnostics are unavailable.",
+    views: "Diagnostics views",
+    overview: "Overview",
 
     running: {
       title: "What is running",
