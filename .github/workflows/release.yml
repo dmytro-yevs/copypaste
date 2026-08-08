@@ -286,6 +286,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-macos-cloud-evidence
+          path: artifacts/release-macos-cloud
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Checksums
         run: |
           set -euo pipefail
@@ -483,6 +490,19 @@ jobs:
 
           npm run tauri -- android build --apk
 
+          outputs="src-tauri/gen/android/app/build/outputs/apk"
+          published="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
+          [[ -n "$published" ]] || { echo "::error::the universal release APK was not produced"; exit 1; }
+          cp "$published" "${RUNNER_TEMP}/copypaste-release-unsigned.apk"
+          find "$outputs" -type f -name '*.apk' -delete
+
+          COPYPASTE_CLOUD_URL=http://10.0.2.2:47800 \
+          COPYPASTE_CLOUD_ANON_KEY=native-evidence \
+            npm run tauri -- android build --apk --target x86_64
+          configured="$(find "$outputs" -name '*release*.apk' ! -name '*universal*' -print -quit)"
+          [[ -n "$configured" ]] || { echo "::error::the configured x86_64 evidence APK was not produced"; exit 1; }
+          cp "$configured" "${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
+
       - name: Locate and sign the APK
         env:
           VERSION: ${{ needs.version.outputs.version }}
@@ -493,28 +513,14 @@ jobs:
           EXPECTED_CERT_FILE: packaging/android/release-cert.sha256
         run: |
           set -euo pipefail
-          outputs="crates/copypaste-ui/src-tauri/gen/android/app/build/outputs/apk"
-          if [[ ! -d "$outputs" ]]; then
-            echo "::error::no APK output directory at $outputs — the Gradle build produced nothing"
-            exit 1
-          fi
-
-          # The universal APK is the one a person can download and install on
-          # any device. Per-ABI splits are smaller and are not what a release
-          # page wants.
-          # `-print -quit` rather than `| head -n1`: under `set -o pipefail`,
-          # head exiting first kills find with SIGPIPE, the pipeline reports
-          # 141, and the step dies with no message at all.
-          unsigned="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
-          if [[ -z "$unsigned" ]]; then
-            echo "::error::no universal release APK under $outputs. Found:"
-            find "$outputs" -name '*.apk' | sed 's/^/::error::  /'
-            exit 1
-          fi
+          unsigned="${RUNNER_TEMP}/copypaste-release-unsigned.apk"
+          cloud_unsigned="${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
+          [[ -f "$unsigned" && -f "$cloud_unsigned" ]] \
+            || { echo "::error::the staged release APKs are missing"; exit 1; }
           echo "Built: $unsigned"
 
           tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
-          mkdir -p dist
+          mkdir -p dist evidence-dist
 
           # Report what the APK claims about itself before signing it. The macOS
           # job makes the same check on CFBundleShortVersionString: a version
@@ -568,7 +574,17 @@ jobs:
             --key-pass "pass:${KEY_PASSWORD}" \
             --out "$out" \
             "${out}.aligned"
-          rm -f "${out}.aligned" "$keystore"
+          cloud_out="evidence-dist/copypaste-cloud-evidence-x86_64-release.apk"
+          "${tools}/zipalign" -p -f 4 "$cloud_unsigned" "${cloud_out}.aligned"
+          "${tools}/apksigner" sign \
+            --ks "$keystore" \
+            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:${KEY_PASSWORD}" \
+            --out "$cloud_out" \
+            "${cloud_out}.aligned"
+          rm -f "${out}.aligned" "${cloud_out}.aligned" "$keystore"
+          "${tools}/apksigner" verify "$cloud_out"
 
           signer_report="$("${tools}/apksigner" verify --verbose --print-certs "$out")"
           printf '%s\n' "$signer_report"
@@ -619,6 +635,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-cloud-evidence-apk
+          path: evidence-dist/copypaste-cloud-evidence-x86_64-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
   # ---------------------------------------------------------------------------
   # Test the signed universal artifact, not a separately assembled emulator
   # APK. This job downloads exactly what `publish` will later download, checks
@@ -639,6 +662,11 @@ jobs:
         with:
           name: android
           path: dist
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-cloud-evidence-apk
+          path: evidence-dist
 
       - name: Verify the release artifact identity
         env:
@@ -679,7 +707,11 @@ jobs:
             ./scripts/release/android-smoke-release.sh; smoke=$?
             SMOKE_OUT=artifacts/release-android-storage \
               ./scripts/release/android-storage-transfer.sh; storage=$?
-            [ $smoke -eq 0 ] && [ $storage -eq 0 ]
+            APK_UNCONFIGURED="$APK" \
+            CLOUD_EVIDENCE_APK=evidence-dist/copypaste-cloud-evidence-x86_64-release.apk \
+            CLOUD_OUT=artifacts/release-android-cloud \
+              ./scripts/release/android-cloud-evidence.sh --all; cloud=$?
+            [ $smoke -eq 0 ] && [ $storage -eq 0 ] && [ $cloud -eq 0 ]
         env:
           APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
           SMOKE_OUT: artifacts/release-android-smoke
@@ -697,6 +729,14 @@ jobs:
         with:
           name: release-android-storage-evidence
           path: artifacts/release-android-storage
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: release-android-cloud-evidence
+          path: artifacts/release-android-cloud
           if-no-files-found: error
           retention-days: 14
 

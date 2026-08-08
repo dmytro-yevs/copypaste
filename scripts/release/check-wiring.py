@@ -68,6 +68,8 @@ rec("supabase-gate" in closure(release_jobs, "publish"),
 macos_smoke = pathlib.Path("scripts/release/smoke-macos-dmg.sh").read_text()
 rec("macos-native-evidence.sh artifacts/release-macos-native" in macos_smoke,
     "macOS smoke captures native evidence before removing the installed app")
+rec("macos-cloud-evidence.sh artifacts/release-macos-cloud" in macos_smoke,
+    "macOS smoke captures the cloud account lifecycle from the installed app")
 
 ci_jobs = docs["ci.yml"].get("jobs") or {}
 documentation = ci_jobs.get("documentation") or {}
@@ -452,12 +454,54 @@ release_runner_scripts = [str((step.get("with") or {}).get("script", ""))
 rec(len(release_runner_scripts) == 1 and "android-storage-transfer.sh" in release_runner_scripts[0],
     "release.yml runs storage transfer against the signed Android artifact",
     "the release evidence must come from the APK that publish consumes")
+rec(len(release_runner_scripts) == 1 and "android-cloud-evidence.sh --all" in release_runner_scripts[0],
+    "release.yml captures configured and unconfigured Android cloud evidence",
+    "the signed release APK and configured evidence APK must run in the release emulator gate")
+release_uploads = [str((step.get("with") or {}).get("name", ""))
+                   for step in steps(release_smoke)
+                   if (step.get("uses") or "").startswith("actions/upload-artifact")]
+rec("release-android-cloud-evidence" in release_uploads,
+    "release.yml uploads dedicated Android cloud evidence",
+    repr(release_uploads))
+
+if emu:
+    debug_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
+                              for step in steps((emu.get("jobs") or {}).get("emulator") or {})
+                              if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner"))
+    configured_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
+                                   for step in steps((emu.get("jobs") or {}).get("release-emulator") or {})
+                                   if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner"))
+    rec("android-cloud-evidence.sh --unconfigured" in debug_scripts,
+        "android-emulator.yml captures the unconfigured cloud state",
+        "the debug emulator leg must retain the build-without-deployment state")
+    rec("android-cloud-evidence.sh --configured" in configured_scripts,
+        "android-emulator.yml captures the configured cloud lifecycle",
+        "the minified emulator fixture must exercise sign-in, sync, offline, and sign-out")
+
+cloud_scenarios = {
+    "android-cloud-evidence.sh": pathlib.Path("scripts/release/android-cloud-evidence.sh").read_text(),
+    "macos-cloud-evidence.sh": pathlib.Path("scripts/release/macos-cloud-evidence.sh").read_text(),
+}
+for name, body in cloud_scenarios.items():
+    required_states = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"}
+    rec(all("capture_state {}".format(state) in body for state in required_states),
+        "{} captures every cloud evidence state".format(name),
+        "required states: {}".format(sorted(required_states)))
+    required_actions = {"Sign in", "Connected", "Sync cloud now", "skipped", "The last cloud sync failed", "Sign out"}
+    rec(all(action in body for action in required_actions),
+        "{} drives the cloud account lifecycle".format(name),
+        "required actions: {}".format(sorted(required_actions)))
+    rec("cloud_latency_write" in body and body.count("cloud_latency_record") >= 4,
+        "{} writes measured cloud latency evidence".format(name),
+        "status, sign-in, sync, and offline error must each be timed")
 
 NO_DEVICE = "its detectors are the only part checkable without a device, so they have to be checkable"
 SELF_TESTED = {
     "android-smoke.sh": NO_DEVICE,
     "android-smoke-release.sh": NO_DEVICE,
     "android-storage-transfer.sh": "its accessibility selectors must be fixture-tested without borrowing the owned emulator",
+    "android-cloud-evidence.sh": "its accessibility selectors and latency verdicts must be fixture-tested without a device",
+    "macos-cloud-evidence.sh": "its accessibility evidence and latency verdicts must be fixture-tested off macOS",
     "android-rungs.sh": NO_DEVICE,
     "check-wiring.py": "the runner-image table is data, and nothing else would notice it going empty",
 }
@@ -468,6 +512,11 @@ for name, why in SELF_TESTED.items():
     rec("{} --self-test".format(name) in pathlib.Path("scripts/release/check.sh").read_text(),
         "check.sh runs {} --self-test".format(name),
         "otherwise nothing ever proves the detectors report a failure when there is one")
+ledger_check = pathlib.Path("scripts/check-feature-ledger.py").read_text()
+release_check = pathlib.Path("scripts/release/check.sh").read_text()
+rec("--self-test" in ledger_check and "check-feature-ledger.py --self-test" in release_check,
+    "the feature-ledger cloud schema carries a wired self-test",
+    "the schema detector must prove it rejects a missing native cloud state")
 
 # --- self-test: prove the runner-image detector fails when it should --------
 if SELF_TEST:

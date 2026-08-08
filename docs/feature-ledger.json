@@ -49,7 +49,7 @@
     {
       "id": "settings-and-service",
       "status": "product",
-      "contracts": ["set_native_theme", "system_accent", "status", "diagnostics", "runtime_log_events", "export_diagnostics_report", "export_support_bundle", "service_state", "start_service", "restart_service", "hide_window", "show_main_window", "set_allow_screenshots", "get_default_shortcut", "get_shortcut", "set_shortcut", "get_open_at_login", "set_open_at_login", "get_config", "set_config", "export_history", "prepare_import_history", "apply_import_history", "cancel_import_history", "backup_database", "restore_database", "cloud_sign_in", "cloud_sign_out", "cloud_status", "cloud_sync_now"],
+      "contracts": ["set_native_theme", "system_accent", "status", "diagnostics", "runtime_log_events", "export_diagnostics_report", "export_support_bundle", "service_state", "start_service", "restart_service", "hide_window", "show_main_window", "set_allow_screenshots", "get_default_shortcut", "get_shortcut", "set_shortcut", "get_open_at_login", "set_open_at_login", "get_config", "set_config", "export_history", "prepare_import_history", "apply_import_history", "cancel_import_history", "backup_database", "restore_database"],
       "backend_tests": ["cargo test --workspace"],
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["loading", "saved", "error", "keyboard", "screen_reader"],
@@ -60,6 +60,31 @@
         "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/settings-and-service/screenshot.png", "ax_log": "artifacts/native/macos/settings-and-service/ax.json"}
       },
       "release_evidence": ["release-android-storage-evidence", "release-android-hardware-evidence", "release-macos-native-evidence"]
+    },
+    {
+      "id": "cloud-account",
+      "status": "product",
+      "contracts": ["cloud_sign_in", "cloud_sign_out", "cloud_status", "cloud_sync_now"],
+      "backend_tests": ["cargo test -p copypaste-cloud -p copypaste-ui"],
+      "ui_tests": ["npm --prefix crates/copypaste-ui test -- SyncTab"],
+      "accessibility_states": ["unconfigured", "signed_out", "connected", "sync_result", "offline_error", "screen_reader"],
+      "failure_states": ["restart", "offline", "authentication_rejected"],
+      "performance": {"scenario": "cloud-account-lifecycle", "p95_ms": 60000, "measurement": "artifacts/native/{platform}/cloud/latency.json"},
+      "native": {
+        "android": {
+          "scenario": "./scripts/release/android-cloud-evidence.sh --all",
+          "screenshot": "artifacts/native/android/cloud/signed-in/screenshot.png",
+          "ax_log": "artifacts/native/android/cloud/signed-in/ax.xml",
+          "evidence_states": ["unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"]
+        },
+        "macos": {
+          "scenario": "./scripts/release/macos-cloud-evidence.sh",
+          "screenshot": "artifacts/native/macos/cloud/signed-in/screenshot.png",
+          "ax_log": "artifacts/native/macos/cloud/signed-in/ax.txt",
+          "evidence_states": ["unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"]
+        }
+      },
+      "release_evidence": ["release-android-cloud-evidence", "release-macos-cloud-evidence"]
     }
   ]
 }

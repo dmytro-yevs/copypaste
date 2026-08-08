@@ -96,6 +96,7 @@ on:
       - "design/**"
       - "scripts/release/android-*.sh"
       - "e2e-android/**"
+      - "scripts/release/native-cloud-evidence-lib.sh"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -114,6 +115,7 @@ on:
       - "design/**"
       - "scripts/release/android-*.sh"
       - "e2e-android/**"
+      - "scripts/release/native-cloud-evidence-lib.sh"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -440,6 +442,7 @@ jobs:
             artifacts/android-ui
             artifacts/android-storage
             artifacts/android-rungs
+            artifacts/android-cloud-unconfigured
           if-no-files-found: warn
           retention-days: 14
 
@@ -530,7 +533,9 @@ jobs:
           npm ci
           # No --debug: this is the build type R8 runs on, which is the whole
           # reason this job exists.
-          npm run tauri -- android build --apk --target x86_64
+          COPYPASTE_CLOUD_URL=http://10.0.2.2:47800 \
+          COPYPASTE_CLOUD_ANON_KEY=native-evidence \
+            npm run tauri -- android build --apk --target x86_64
 
       - name: Prove R8 ran, then sign it so it can be installed
         run: |
@@ -642,7 +647,9 @@ jobs:
             ./scripts/release/android-smoke-release.sh; smoke=$?
             SMOKE_OUT=artifacts/android-storage-release \
               ./scripts/release/android-storage-transfer.sh; storage=$?
-            [ $smoke -eq 0 ] && [ $storage -eq 0 ]
+            CLOUD_EVIDENCE_APK="$APK" CLOUD_OUT=artifacts/android-cloud-configured \
+              ./scripts/release/android-cloud-evidence.sh --configured; cloud=$?
+            [ $smoke -eq 0 ] && [ $storage -eq 0 ] && [ $cloud -eq 0 ]
         env:
           APK: dist/copypaste-emulator-x86_64-release.apk
           SMOKE_OUT: artifacts/android-smoke-release
@@ -654,6 +661,7 @@ jobs:
           path: |
             artifacts/android-smoke-release
             artifacts/android-storage-release
+            artifacts/android-cloud-configured
             dist/r8-mapping.txt
           if-no-files-found: warn
           retention-days: 14
