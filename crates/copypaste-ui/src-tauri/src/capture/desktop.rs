@@ -59,6 +59,10 @@ impl CaptureControl for DesktopCapture {
         Ok(Vec::new())
     }
 
+    fn set_private_mode(&self, _enabled: bool) -> Result<()> {
+        Ok(())
+    }
+
     fn set_enabled(&self, _enabled: bool) -> Result<CaptureSnapshot> {
         Err(BackendError::Unsupported(MSG_NO_LADDER))
     }

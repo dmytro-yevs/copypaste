@@ -275,6 +275,12 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun setPrivateMode(invoke: Invoke) {
+        ClipQueue.setPrivateMode(invoke.getArgs().optBoolean("enabled", false))
+        invoke.resolve(JSObject())
+    }
+
+    @Command
     fun setToastSuppressed(invoke: Invoke) {
         // The acknowledgement gate has already run on the Rust side; reaching
         // here means the user was shown what this does and agreed.
