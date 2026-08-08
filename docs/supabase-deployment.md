@@ -4,10 +4,10 @@ Everything the server side of cloud sync is: one table, its policies, its
 Realtime configuration, and a retention job. It lives in `supabase/` and is
 applied with the Supabase CLI.
 
-The client is `crates/copypaste-cloud` — 7,500 lines, 156 tests, and until now
-not one of them has spoken to a real Supabase project. `crates/copypaste-cloud/src/rest/mod.rs`
-carries the SQL contract in its module docs; this deployment is built from that
-contract, and every place it deviates is listed in [Deviations](#deviations-from-the-contract-in-restmodrs).
+The client is `crates/copypaste-cloud`. Its release integration test speaks to
+a disposable local Supabase project through the same GoTrue, PostgREST, and
+Realtime clients the product uses. `crates/copypaste-cloud/src/rest/mod.rs`
+carries the SQL contract this deployment implements.
 
 ```
 supabase/
@@ -19,6 +19,7 @@ supabase/
     …120300_retention.sql         TTL + per-account cap, the role that may run it, the schedule
   seed.sql                        two local accounts (no rows — see below)
   tests/                          assertions, plain SQL, runnable by psql anywhere
+    real-supabase.sh              disposable full-stack release gate
   dev/verify-schema.sh            applies everything to a throwaway cluster and runs the assertions
   dev/smoke.sh                    the same round trip through PostgREST and GoTrue
   dev/postgrest-harness.sh        runs smoke.sh against a real PostgREST, without Docker
@@ -53,18 +54,13 @@ payload sizes, timing, delete activity) is a real disclosure on its own.
 | The client's `select=`, `order=`, `created_at=gte.` and keyset query strings are accepted verbatim | **verified** — same run |
 | A row with no `signature` is refused by the deployment, not just by the client | **verified** — same run |
 | The publishable key on its own reaches nothing | **verified** — same run |
-| GoTrue password sign-in against the seeded accounts | **not verified** |
-| Realtime delivers `postgres_changes` for the client's join frame | **not verified** |
-| `supabase start` / `supabase db reset` | **not verified** |
+| GoTrue sign-in, RLS, Realtime, encrypted convergence, paging, tombstones, sensitive refusal | **verified on every release** — `tests/real-supabase.sh` |
+| `supabase start` / `supabase db reset` | **verified on every release** — same gate |
 
-The container this was built in has a Docker client but no reachable registry
-and no Supabase CLI, so nothing that needs an image was run. What *was* run: a
-stock PostgreSQL 16 server with `auth.uid()`, `auth.users` and the API roles
-stubbed (`supabase/dev/harness/00-supabase-stubs.sql`), and — since PostgREST
-ships as a single binary — a real PostgREST 12.2.3 on top of it, with JWTs
-minted locally in place of GoTrue. That is enough to prove the SQL, the
-policies, and the request shapes. It is not enough to prove anything about
-GoTrue, Realtime, or the platform's own PostgREST configuration.
+The ordinary CI schema job remains the fast PostgreSQL-only check. The release
+workflow additionally starts the official local stack from empty, runs all SQL
+assertions, then runs `crates/copypaste-cloud/tests/real_supabase.rs`. Publishing
+depends on that job, so a failed platform contract cannot produce a release.
 
 **The upsert assumption held.** `?on_conflict=user_id,item_id` resolves with no
 `user_id` in the request body: the column default fills it before the conflict
@@ -85,6 +81,7 @@ wired up *to*.
 supabase start                      # needs Docker
 supabase db reset                   # migrations + seed
 supabase/dev/smoke.sh               # round trip through the API
+supabase/tests/real-supabase.sh      # full release gate; starts and stops the stack
 psql "$(supabase status -o json | jq -r .DB_URL)" -f supabase/tests/01_schema_audit.sql
 ```
 
