@@ -16,8 +16,12 @@ fail() { printf '  ✗ %s\n' "$1" >&2; FAILED=1; }
 FAILED=0
 
 # Strip comments and the diff git appends under --verbose.
+#
+# `read` returns non-zero on a final line with no newline, so without the `||`
+# the loop body never runs for it. git writes .git/MERGE_MSG unterminated and
+# it is a single line, which made every merge arrive here as "empty subject".
 LINES=()
-while IFS= read -r line; do
+while IFS= read -r line || [[ -n "$line" ]]; do
     LINES[${#LINES[@]}]="$line"
 done < <(sed -e '/^#/d' -e '/^diff --git /,$d' "$MSG_FILE")
 
