@@ -1,78 +1,23 @@
-//! Backup and restore of the encrypted history database.
+//! IPC adaptation for the core encrypted backup and atomic restore API.
 //!
-//! # Restore is validate-then-swap, and the order is the whole point
-//!
-//! Restoring is the most destructive thing this product does. Phase A copies the
-//! backup to a staging file beside the database, opens it **with this device's
-//! real key**, runs `integrity_check`, and refuses anything whose schema version
-//! or table set is not the one this build writes. Nothing has been touched at
-//! that point, so a corrupt file, a file from another device, or a file that is
-//! not a database at all leaves a working history exactly as it was
-//! (`CopyPaste-8wbt`, `crh3.6`, `crh3.2`).
-//!
-//! Phase B is one SQLite transaction over an `ATTACH`ed staging database, not a
-//! file swap. Manifest 04 §4.11 describes v1's Phase B as "quiesce, move the
-//! live DB aside, copy in, reopen, and rebuild the r2d2 read pool", and the
-//! manifest has been amended alongside this file to record the change. The
-//! reason is inodes: the store's pool and `crate::meta` both hold open
-//! connections to the live file, so renaming a new file over it leaves every
-//! existing connection reading — and writing — an unlinked one. Doing it in a
-//! transaction keeps every connection valid, makes rollback the database's job
-//! rather than ours, and removes the `-wal`/`-shm` juggling a rename needs.
-//!
-//! # What a restore does not replace
-//!
-//! `sync_device_state` is deliberately left alone: it holds this device's
-//! identity, its cloud session and its settings. A restore brings back history;
-//! it must not make this device start claiming to be the one the backup came
-//! from, and it must not silently change how the daemon behaves.
-//!
-//! # No path reaches a client
-//!
-//! Every failure here maps to a fixed sentence in [`super::messages`]. The
-//! caller supplied the path and already knows it; putting it in a reply is how
-//! it ends up in a log or a screenshot (CLAUDE.md rule 4).
+//! Restore leaves `sync_device_state` untouched, so this device keeps its
+//! identity, cloud session and settings. Every failure maps to a fixed sentence
+//! because a client-visible path discloses the local username.
 
 use std::path::{Path, PathBuf};
 
-use copypaste_core::storage::{attach_key_literal, open_validated};
-use copypaste_core::{
-    purge_indexed_secrets_in_transaction, verify_integrity, verify_schema, Detector, PurgeReport,
-    StoreError,
-};
+use copypaste_core::RestoreError;
 use copypaste_ipc::{BackupData, ErrorCode, Response, ResponseData};
-use rusqlite::{Connection, Transaction};
 use tracing::{info, warn};
+
+#[cfg(test)]
+use copypaste_core::storage::open_validated;
 
 use super::messages::{
     MSG_BACKUP_EXISTS, MSG_BACKUP_FAILED, MSG_BACKUP_NO_DIR, MSG_BAD_PATH, MSG_NEEDS_CONFIRM,
     MSG_RESTORE_FAILED, MSG_RESTORE_NOT_A_BACKUP, MSG_RESTORE_NOT_FOUND,
 };
 use crate::AppState;
-
-/// Tables a restore replaces, in delete order (children first is not an issue
-/// here — there are no foreign keys between them — but a stable order keeps the
-/// transaction readable).
-///
-/// `sync_device_state` is absent on purpose; see the module header.
-///
-/// `sync_device_name` **is** restored, with the items, because the two are one
-/// fact: `clipboard_items.origin_device_id` is a device id, and restoring the
-/// id without the name it resolves to leaves every restored peer item labelled
-/// with a bare UUID. Nothing keys off a name, so a stale row costs a label at
-/// worst.
-const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_device_name"];
-
-/// Every table this build knows how to restore, including the ones it leaves in
-/// place. A backup containing anything else is refused rather than partially
-/// restored: a table added by a later build would otherwise be silently
-/// dropped, and the user would not find out until they needed it.
-const KNOWN_TABLES: &[&str] = &[
-    "clipboard_items",
-    "clipboard_fts",
-    "sync_device_name",
-    "sync_device_state",
-];
 
 pub(super) fn backup(state: &AppState, id: u64, dest_path: &str) -> Response {
     let Some(dest) = clean_path(dest_path) else {
@@ -90,7 +35,7 @@ pub(super) fn backup(state: &AppState, id: u64, dest_path: &str) -> Response {
     if let Err(e) = state.store.backup_to(&dest) {
         // A partial file from a failed VACUUM would look like a backup.
         let _ = std::fs::remove_file(&dest);
-        return failed(id, "VACUUM INTO", e, MSG_BACKUP_FAILED);
+        return failed(id, "write the backup", e, MSG_BACKUP_FAILED);
     }
 
     // The backup is ciphertext, but it is a whole history: owner-only, like the
@@ -105,24 +50,6 @@ pub(super) fn backup(state: &AppState, id: u64, dest_path: &str) -> Response {
 }
 
 pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) -> Response {
-    restore_with_purge(
-        state,
-        id,
-        src_path,
-        confirm,
-        purge_indexed_secrets_in_transaction,
-    )
-}
-
-type RestorePurge = for<'tx> fn(&Transaction<'tx>, &Detector) -> rusqlite::Result<PurgeReport>;
-
-fn restore_with_purge(
-    state: &AppState,
-    id: u64,
-    src_path: &str,
-    confirm: bool,
-    purge: RestorePurge,
-) -> Response {
     if !confirm {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_NEEDS_CONFIRM);
     }
@@ -132,45 +59,18 @@ fn restore_with_purge(
     if !src.is_file() {
         return Response::err(id, ErrorCode::NotFound, MSG_RESTORE_NOT_FOUND);
     }
-    let key = state.keyring.db_key();
-    let staging = staging_path(state.db_path());
-    // A leftover from a previous crash is not a reason to refuse.
-    remove_database(&staging);
-
-    let outcome: Result<(), &'static str> = (|| {
-        // ---- Phase A: validate. Nothing live is touched. -------------------
-        std::fs::copy(&src, &staging).map_err(|e| {
-            warn!(error = %e, "could not stage the backup");
-            MSG_RESTORE_FAILED
-        })?;
-        validate(&staging, &key)?;
-
-        // ---- Phase B: swap, in one transaction. ----------------------------
-        let report = swap(
-            state.db_path(),
-            &staging,
-            &key,
-            state.detector.as_ref(),
-            purge,
-        )
-        .map_err(|e| {
-            warn!(error = ?e, "restore transaction failed; the database is unchanged");
-            MSG_RESTORE_FAILED
-        })?;
-        if report.purged > 0 {
-            info!(
-                purged = report.purged,
-                scanned = report.scanned,
-                "removed sensitive restored search entries"
-            );
-        }
-        Ok(())
-    })();
-
-    remove_database(&staging);
-
-    match outcome {
-        Ok(()) => {
+    match state
+        .store
+        .restore_from(&src, &state.keyring.db_key(), &state.detector)
+    {
+        Ok(report) => {
+            if report.purged > 0 {
+                info!(
+                    purged = report.purged,
+                    scanned = report.scanned,
+                    "removed sensitive restored search entries"
+                );
+            }
             // Every restored row is "written below the cloud cursor" as far as
             // the upload floor is concerned — their stamps are older than it —
             // so without this the restored history would never leave the device
@@ -178,159 +78,18 @@ fn restore_with_purge(
             if let Ok(Some(oldest)) = state.store.oldest_version_ms() {
                 crate::cloud::note_version_written(state, oldest);
             }
-            // The name table came from the backup, so this device's own row in
-            // it is whatever it was called then. The *authority* on that name is
-            // `sync_device_state`, which a restore leaves alone (see the module
-            // header), so re-assert the row rather than leave the two
-            // disagreeing about what this device is called.
-            if let Err(e) = state
-                .meta
-                .record_device_name(state.meta.device_id(), &state.meta.device_name())
-            {
-                warn!(error = ?e, "could not re-record this device's name after a restore");
-            }
             state.note_local_change();
             info!("restored the history database from a backup");
             Response::ok(id, ResponseData::Empty {})
         }
-        Err(message) => {
-            let code = if message == MSG_RESTORE_NOT_A_BACKUP {
-                ErrorCode::InvalidRequest
-            } else {
-                ErrorCode::Internal
-            };
-            Response::err(id, code, message)
+        Err(RestoreError::InvalidBackup(error)) => {
+            warn!(error = ?error, "the backup failed validation");
+            Response::err(id, ErrorCode::InvalidRequest, MSG_RESTORE_NOT_A_BACKUP)
         }
-    }
-}
-
-/// Prove the candidate is a database this build wrote, with this device's key.
-fn validate(staging: &Path, key: &[u8; 32]) -> Result<(), &'static str> {
-    // `open_validated` applies the key and proves it opens the file; a wrong key
-    // — a backup from another device, or a keychain that has been reset — comes
-    // back as `InvalidKey` rather than as a fallback read.
-    let conn = open_validated(staging, key).map_err(|e| {
-        warn!(error = ?e, "the backup did not open with this device's key");
-        MSG_RESTORE_NOT_A_BACKUP
-    })?;
-
-    verify_integrity(&conn).map_err(|e| {
-        warn!(error = ?e, "integrity_check failed on the backup");
-        MSG_RESTORE_NOT_A_BACKUP
-    })?;
-
-    verify_schema(&conn).map_err(|e| {
-        warn!(error = ?e, "the backup schema does not match this build");
-        MSG_RESTORE_NOT_A_BACKUP
-    })?;
-
-    let tables = user_tables(&conn).map_err(|_| MSG_RESTORE_NOT_A_BACKUP)?;
-    for required in RESTORED_TABLES {
-        if !tables.iter().any(|name| name == required) {
-            warn!(missing = required, "the backup is missing a required table");
-            return Err(MSG_RESTORE_NOT_A_BACKUP);
+        Err(RestoreError::Failed(error)) => {
+            warn!(error = ?error, "restore failed; the database is unchanged");
+            Response::err(id, ErrorCode::Internal, MSG_RESTORE_FAILED)
         }
-    }
-    if let Some(unknown) = tables
-        .iter()
-        .find(|name| !KNOWN_TABLES.contains(&name.as_str()))
-    {
-        warn!(table = %unknown, "the backup holds a table this build cannot restore");
-        return Err(MSG_RESTORE_NOT_A_BACKUP);
-    }
-    Ok(())
-}
-
-/// Replace the restored tables' contents from `staging`, atomically.
-fn swap(
-    db_path: &Path,
-    staging: &Path,
-    key: &[u8; 32],
-    detector: &Detector,
-    purge: RestorePurge,
-) -> Result<PurgeReport, StoreError> {
-    let mut conn = open_validated(db_path, key)?;
-    // The raw-key form has to be literal in the clause — see
-    // `attach_key_literal` for why binding it would silently derive a
-    // different key.
-    let attach = format!(
-        "ATTACH DATABASE ?1 AS restore_src KEY {}",
-        attach_key_literal(key).as_str()
-    );
-    conn.execute(&attach, [staging.to_string_lossy().as_ref()])?;
-
-    let result = (|| -> rusqlite::Result<PurgeReport> {
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        for table in RESTORED_TABLES {
-            tx.execute(&format!("DELETE FROM {table}"), [])?;
-        }
-        tx.execute(
-            "INSERT INTO clipboard_items SELECT * FROM restore_src.clipboard_items",
-            [],
-        )?;
-        // Named columns, not `*`: an fts5 table's `*` includes the hidden rank
-        // and table-name columns, which are not insertable.
-        tx.execute(
-            "INSERT INTO clipboard_fts (rowid, id, content_text) \
-             SELECT ci.fts_rowid, fts.id, fts.content_text FROM restore_src.clipboard_fts fts \
-             JOIN restore_src.clipboard_items ci ON ci.id = fts.id \
-             WHERE ci.deleted = 0 AND ci.is_sensitive = 0 \
-               AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
-            [],
-        )?;
-        tx.execute(
-            "INSERT INTO sync_device_name SELECT * FROM restore_src.sync_device_name",
-            [],
-        )?;
-        let report = purge(&tx, detector)?;
-        tx.commit()?;
-        Ok(report)
-    })();
-
-    // Detached whether or not the transaction committed; a rolled-back
-    // transaction leaves the live database exactly as it was.
-    let _ = conn.execute("DETACH DATABASE restore_src", []);
-    result.map_err(Into::into)
-}
-
-/// User tables, excluding SQLite's own and the known fts5 shadow tables.
-fn user_tables(conn: &Connection) -> rusqlite::Result<Vec<String>> {
-    let mut stmt = conn.prepare(
-        "SELECT name FROM sqlite_master \
-          WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
-    )?;
-    let all: Vec<String> = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<rusqlite::Result<_>>()?;
-
-    // fts5 owns these five tables. An arbitrary table with the same prefix is
-    // not a shadow table and must remain visible to the unknown-table check.
-    Ok(all
-        .iter()
-        .filter(|name| !is_fts_shadow_table(name))
-        .cloned()
-        .collect())
-}
-
-fn is_fts_shadow_table(name: &str) -> bool {
-    name.strip_prefix("clipboard_fts_")
-        .is_some_and(|suffix| matches!(suffix, "data" | "idx" | "content" | "docsize" | "config"))
-}
-
-/// Where the candidate is staged: beside the database, so the copy and the
-/// final transaction are on the same filesystem and the same permissions.
-fn staging_path(db_path: &Path) -> PathBuf {
-    let mut name = db_path.as_os_str().to_os_string();
-    name.push(".restore-staging");
-    PathBuf::from(name)
-}
-
-/// Remove a database and the two files SQLite keeps beside it.
-fn remove_database(path: &Path) {
-    for suffix in ["", "-wal", "-shm"] {
-        let mut name = path.as_os_str().to_os_string();
-        name.push(suffix);
-        let _ = std::fs::remove_file(PathBuf::from(name));
     }
 }
 
@@ -437,27 +196,6 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
-    }
-
-    fn fail_after_partial_restore_purge(
-        tx: &Transaction<'_>,
-        _detector: &Detector,
-    ) -> rusqlite::Result<PurgeReport> {
-        let restored: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM clipboard_fts WHERE content_text = ?1",
-            [RESTORED_SECRET],
-            |row| row.get(0),
-        )?;
-        assert_eq!(restored, 1, "the failure must be injected after the swap");
-        assert_eq!(
-            tx.execute(
-                "DELETE FROM clipboard_fts WHERE content_text = ?1",
-                [RESTORED_SECRET],
-            )?,
-            1,
-            "the injected purge must partially mutate the transaction"
-        );
-        Err(rusqlite::Error::InvalidQuery)
     }
 
     #[test]
@@ -595,27 +333,6 @@ mod tests {
     }
 
     #[test]
-    fn a_restore_swap_refuses_to_open_the_live_database_with_the_wrong_key() {
-        let (state, dir) = test_state("alpha");
-        add(&state, "live history");
-        let backup = dir.path().join("history.backup");
-        assert!(backup_to(&state, &backup).ok);
-
-        let wrong_key = copypaste_core::Keyring::from_secret(&[0x55; 32]).db_key();
-        let error = swap(
-            state.db_path(),
-            &backup,
-            &wrong_key,
-            state.detector.as_ref(),
-            purge_indexed_secrets_in_transaction,
-        )
-        .expect_err("the live database must never fall back to an unkeyed open");
-
-        assert!(matches!(error, StoreError::InvalidKey));
-        assert_eq!(contents(&state), ["live history"]);
-    }
-
-    #[test]
     fn a_restore_requires_confirmation_and_an_existing_file() {
         let (state, dir) = test_state("alpha");
         add(&state, "untouched");
@@ -653,10 +370,21 @@ mod tests {
         let dest = dir.path().join("history.backup");
         assert!(backup_to(&state, &dest).ok);
 
+        state.meta.set_device_name("Current alpha").unwrap();
         add(&state, "later");
         assert!(restore_from(&state, &dest, true).ok);
 
         assert_eq!(state.meta.device_id(), device_id);
+        assert_eq!(state.meta.device_name(), "Current alpha");
+        assert_eq!(
+            state
+                .store
+                .device_names(&[device_id])
+                .unwrap()
+                .values()
+                .next(),
+            Some(&"Current alpha".to_string())
+        );
         assert_eq!(state.settings.get().poll_interval_ms, 250);
     }
 
@@ -747,56 +475,6 @@ mod tests {
     }
 
     #[test]
-    fn a_post_swap_purge_failure_rolls_back_and_a_retry_is_safe() {
-        let (state, dir) = test_state("alpha");
-        let leaked = add(&state, "restored history row");
-        replace_index_text(&state, &leaked, RESTORED_SECRET);
-        add(&state, "ordinary restored search marker");
-        let backup = dir.path().join("history.backup");
-        assert!(backup_to(&state, &backup).ok);
-
-        state.store.delete_all().unwrap();
-        add(&state, "live rollback anchor");
-        assert!(deleted(&state, &leaked));
-
-        let failed = restore_with_purge(
-            &state,
-            1,
-            backup.to_string_lossy().as_ref(),
-            true,
-            fail_after_partial_restore_purge,
-        );
-
-        assert!(!failed.ok);
-        assert_eq!(failed.error_code, Some(ErrorCode::Internal));
-        assert_eq!(failed.error.as_deref(), Some(MSG_RESTORE_FAILED));
-        assert_eq!(contents(&state), ["live rollback anchor"]);
-        assert!(deleted(&state, &leaked), "the restored row must roll back");
-        assert_eq!(fts_rows(&state, &leaked), 0);
-        assert_eq!(state.store.search("rollback anchor", 10).unwrap().len(), 1);
-        assert!(state.store.search(RESTORED_SECRET, 10).unwrap().is_empty());
-
-        let retry = restore_from(&state, &backup, true);
-        assert!(retry.ok, "{:?}", retry.error);
-        assert!(!deleted(&state, &leaked), "the retry must commit the row");
-        assert_eq!(fts_rows(&state, &leaked), 0);
-        assert!(state.store.search(RESTORED_SECRET, 10).unwrap().is_empty());
-        assert!(state
-            .store
-            .search("rollback anchor", 10)
-            .unwrap()
-            .is_empty());
-        assert_eq!(
-            state
-                .store
-                .search("ordinary restored search marker", 10)
-                .unwrap()
-                .len(),
-            1
-        );
-    }
-
-    #[test]
     fn a_restore_drops_polluted_non_text_fts_rows() {
         let (state, dir) = test_state("alpha");
         let image = crate::capture::ingest(&state, "opaque image bytes", "image/png")
@@ -824,16 +502,5 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fts_rows, 0);
-    }
-
-    #[test]
-    fn fts_shadow_tables_are_not_mistaken_for_tables_of_ours() {
-        let (state, _dir) = test_state("alpha");
-        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
-        let mut tables = user_tables(&conn).unwrap();
-        tables.sort();
-        let mut expected: Vec<String> = KNOWN_TABLES.iter().map(|s| (*s).to_string()).collect();
-        expected.sort();
-        assert_eq!(tables, expected);
     }
 }
