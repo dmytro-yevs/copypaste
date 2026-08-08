@@ -69,7 +69,7 @@ pub fn open_version_bytes(
 
 /// Open a text version for the P2P wire. Binary callers must use
 /// [`open_version_bytes`] so arbitrary bytes can never be lossily stringified.
-#[must_use]
+#[must_use = "authentication failures must be handled"]
 pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Result<String, OpenVersionError> {
     if !copypaste_ipc::content_type::is_text(&row.content_type) {
         return Err(OpenVersionError::MissingPayload);
