@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCcw, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Row } from "@/components/settings/Row";
@@ -39,7 +40,6 @@ export function ShortcutTab() {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [saved, setSaved] = useState<"saved" | "reset" | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const resetTooltipId = useId();
 
   const current = useQuery({
     queryKey: SHORTCUT_KEY,
@@ -63,6 +63,7 @@ export function ShortcutTab() {
       setSaved(accelerator === fallback ? "reset" : "saved");
     },
   });
+  const resetDisabled = bound === fallback || save.isPending;
   const unavailable =
     (current.error !== null && isUnavailable(current.error)) ||
     (save.error !== null && isUnavailable(save.error));
@@ -108,6 +109,17 @@ export function ShortcutTab() {
   const accessibleName = capturing
     ? t("settings.shortcut.capturingName")
     : t("settings.shortcut.current", { accelerator: bound });
+  const resetButton = (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label={t("settings.shortcut.reset")}
+      disabled={resetDisabled}
+      onClick={() => save.mutate(fallback)}
+    >
+      <RotateCcw aria-hidden="true" />
+    </Button>
+  );
 
   return (
     <div className="flex flex-col">
@@ -142,25 +154,26 @@ export function ShortcutTab() {
             )}
           </button>
 
-          <div className="group relative">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("settings.shortcut.reset")}
-              aria-describedby={resetTooltipId}
-              disabled={bound === fallback || save.isPending}
-              onClick={() => save.mutate(fallback)}
-            >
-              <RotateCcw aria-hidden="true" />
-            </Button>
-            <span
-              id={resetTooltipId}
-              role="tooltip"
-              className="pointer-events-none invisible absolute bottom-[calc(100%+var(--s-2))] left-1/2 z-[var(--z-popover)] -translate-x-1/2 whitespace-nowrap rounded-md border border-border-strong bg-popover px-s-2 py-s-1 text-xs text-popover-foreground opacity-0 shadow-lg transition-opacity duration-[var(--dur-fast)] group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 motion-reduce:transition-none"
-            >
-              {t("settings.shortcut.reset")}
-            </span>
-          </div>
+          <TooltipPrimitive.Provider>
+            <TooltipPrimitive.Root disableHoverableContent>
+              <TooltipPrimitive.Trigger asChild>
+                {resetDisabled ? (
+                  <span className="inline-flex">{resetButton}</span>
+                ) : (
+                  resetButton
+                )}
+              </TooltipPrimitive.Trigger>
+              <TooltipPrimitive.Portal>
+                <TooltipPrimitive.Content
+                  sideOffset={8}
+                  collisionPadding={8}
+                  className="pointer-events-none z-[var(--z-popover)] whitespace-nowrap rounded-md border border-border-strong bg-popover px-s-2 py-s-1 text-xs text-popover-foreground shadow-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:zoom-in-95"
+                >
+                  {t("settings.shortcut.reset")}
+                </TooltipPrimitive.Content>
+              </TooltipPrimitive.Portal>
+            </TooltipPrimitive.Root>
+          </TooltipPrimitive.Provider>
         </div>
       </Row>
 

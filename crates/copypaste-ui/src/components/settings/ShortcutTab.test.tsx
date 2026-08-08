@@ -46,15 +46,36 @@ describe("desktop shortcut settings", () => {
 
   it("uses the backend default for reset", async () => {
     const { user } = withUser(<ShortcutTab />);
-    await screen.findByRole("button", { name: /current shortcut/i });
+    const capture = await screen.findByRole("button", {
+      name: /current shortcut: cmdorctrl\+shift\+p/i,
+    });
     const reset = screen.getByRole("button", { name: /reset to default/i });
     expect(reset.textContent).toBe("");
     expect(reset.querySelector("svg")).toBeTruthy();
-    expect(reset.getAttribute("aria-describedby")).toBeTruthy();
+    capture.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(reset);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(reset.getAttribute("aria-describedby")).toBe(tooltip.id);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
     await user.click(reset);
     await waitFor(() =>
       expect(setShortcut).toHaveBeenCalledWith("CmdOrCtrl+Shift+V"),
     );
     expect((await screen.findByRole("status")).textContent).toContain("Reset to default");
+  });
+
+  it("keeps the reset tooltip discoverable while the control is disabled", async () => {
+    getShortcut.mockResolvedValue("CmdOrCtrl+Shift+V");
+    const { user } = withUser(<ShortcutTab />);
+    const reset = await screen.findByRole("button", { name: /reset to default/i });
+    const trigger = reset.parentElement!;
+
+    expect((reset as HTMLButtonElement).disabled).toBe(true);
+    await user.hover(trigger);
+    expect((await screen.findByRole("tooltip", {}, { timeout: 1500 })).textContent).toBe(
+      "Reset to default",
+    );
   });
 });
