@@ -50,6 +50,11 @@ ts-rs = { version = "=12.0.1", default-features = false, features = ["serde-comp
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 futures-util = "0.3"
+# Windows named pipes, including listener instance replacement and owned
+# security descriptors. Target-gated at each consumer.
+interprocess = { version = "2.4", features = ["tokio"] }
+widestring = "1"
+win-security-identifier = "0.2"
 # retry/backoff — ONE implementation (v1 had six). `backon`, not `backoff`:
 # backoff 0.4 is unmaintained (RUSTSEC-2025-0012, which names this as the
 # replacement) and pulled unmaintained `instant` in with it (RUSTSEC-2024-0384).
