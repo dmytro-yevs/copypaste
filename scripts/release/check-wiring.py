@@ -304,8 +304,23 @@ if emu:
             "found {} — AVD management is the action's job, not this file's".format(len(runners)))
         for s in runners:
             with_ = s.get("with") or {}
-            rec(script in str(with_.get("script", "")),
-                "{} runs scripts/release/{}".format(emulator_job, script),
+            # One level of indirection is allowed: the emulator action runs
+            # every LINE of `script:` in its own `sh -c`, so composing several
+            # legs and combining their statuses cannot be done in YAML at all.
+            # What must stay true is that the assertions live in a script this
+            # file can parse and self-test — so if the YAML names a composer,
+            # that composer has to invoke the leg.
+            yaml_script = str(with_.get("script", ""))
+            invoked = script in yaml_script
+            via = ""
+            if not invoked:
+                for cand in re.findall(r"scripts/release/([A-Za-z0-9._-]+\.sh)", yaml_script):
+                    cpath = pathlib.Path("scripts") / "release" / cand
+                    if cpath.exists() and script in cpath.read_text(encoding="utf-8"):
+                        invoked, via = True, " (via {})".format(cand)
+                        break
+            rec(invoked,
+                "{} runs scripts/release/{}{}".format(emulator_job, script, via),
                 "assertions belong in a script check.sh can parse and self-test, not in YAML: {!r}".format(with_.get("script")))
             rec(not s.get("continue-on-error"), "{}: the emulator step can fail the job".format(emulator_job),
                 "continue-on-error would make the whole run decorative")
