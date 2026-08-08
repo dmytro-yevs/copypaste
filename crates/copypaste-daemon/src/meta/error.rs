@@ -35,14 +35,6 @@ impl From<StoreError> for MetaError {
     }
 }
 
-pub(crate) fn is_not_a_database(e: &rusqlite::Error) -> bool {
-    matches!(
-        e,
-        rusqlite::Error::SqliteFailure(err, _)
-            if err.code == rusqlite::ErrorCode::NotADatabase
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
