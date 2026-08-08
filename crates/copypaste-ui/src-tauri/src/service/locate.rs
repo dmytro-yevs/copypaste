@@ -14,7 +14,8 @@
 //! that location.
 
 use std::env;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 /// The file name the release script injects into `Contents/MacOS`.
 const DAEMON_FILE: &str = "copypaste-daemon";
@@ -29,12 +30,24 @@ const ENV_OVERRIDE: &str = "COPYPASTE_DAEMON_BIN";
 /// a bundle whose injection step was skipped both reach it, and the UI has
 /// copy for it.
 pub fn daemon_binary() -> Option<PathBuf> {
-    if let Some(explicit) = env::var_os(ENV_OVERRIDE) {
-        let path = PathBuf::from(explicit);
-        return path.is_file().then_some(path);
-    }
-    let sibling = env::current_exe().ok()?.parent()?.join(DAEMON_FILE);
-    sibling.is_file().then_some(sibling)
+    let exe = env::current_exe().ok();
+    resolve(
+        env::var_os(ENV_OVERRIDE),
+        exe.as_deref().and_then(Path::parent),
+    )
+}
+
+/// Both inputs are passed in so that nothing under test has to set the
+/// override, which is process-global: cargo runs tests on parallel threads, and
+/// the test that used `set_var` raced every other test reading the service
+/// state, turning `NotInstalled` into `Stopped` about once in 300 runs (CI run
+/// 31243843538).
+fn resolve(explicit: Option<OsString>, beside: Option<&Path>) -> Option<PathBuf> {
+    let candidate = match explicit {
+        Some(path) => PathBuf::from(path),
+        None => beside?.join(DAEMON_FILE),
+    };
+    candidate.is_file().then_some(candidate)
 }
 
 #[cfg(test)]
@@ -42,9 +55,6 @@ mod tests {
     use super::*;
     use std::fs;
 
-    /// One test, not three, because the override is process-global and cargo
-    /// runs tests on parallel threads: three tests setting the same variable
-    /// would race each other rather than assert anything.
     #[test]
     fn the_override_resolves_only_a_real_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -54,16 +64,27 @@ mod tests {
         fs::write(&present, b"#!/bin/sh\n").unwrap();
         fs::create_dir(&as_dir).unwrap();
 
-        env::set_var(ENV_OVERRIDE, &missing);
-        assert_eq!(daemon_binary(), None, "a missing override must not resolve");
-
+        assert_eq!(
+            resolve(Some(missing.into()), None),
+            None,
+            "a missing override must not resolve"
+        );
         // A stray `copypaste-daemon/` directory is not something to spawn.
-        env::set_var(ENV_OVERRIDE, &as_dir);
-        assert_eq!(daemon_binary(), None, "a directory must not resolve");
+        assert_eq!(
+            resolve(Some(as_dir.into()), None),
+            None,
+            "a directory must not resolve"
+        );
+        assert_eq!(resolve(Some(present.clone().into()), None), Some(present));
+    }
 
-        env::set_var(ENV_OVERRIDE, &present);
-        assert_eq!(daemon_binary(), Some(present));
+    #[test]
+    fn the_sibling_resolves_only_once_the_binary_is_beside_us() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(resolve(None, Some(dir.path())), None);
 
-        env::remove_var(ENV_OVERRIDE);
+        let daemon = dir.path().join(DAEMON_FILE);
+        fs::write(&daemon, b"").unwrap();
+        assert_eq!(resolve(None, Some(dir.path())), Some(daemon));
     }
 }
