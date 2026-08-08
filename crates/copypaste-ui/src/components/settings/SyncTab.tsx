@@ -38,7 +38,7 @@ export function SyncTab() {
   function submitCloudSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     cloudSignIn.mutate(
-      { email: email.trim(), password: password.trim(), passphrase },
+      { email: email.trim(), password, passphrase },
       {
         onSuccess: () => {
           setPassword("");
@@ -212,7 +212,7 @@ export function SyncTab() {
             <Button
               type="submit"
               size="sm"
-              disabled={cloudBusy || !email.trim() || !password.trim() || !passphrase}
+              disabled={cloudBusy || !email.trim() || !password || !passphrase}
             >
               <LogIn aria-hidden="true" />
               {t(
