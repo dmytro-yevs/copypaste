@@ -135,6 +135,7 @@ impl Backend for EmbeddedBackend {
             match outcome {
                 Ok(ingested) => {
                     let item = inner.to_wire(ingested.into_item())?;
+                    inner.note_version_written(item.created_at);
                     inner.publish_items(false, 0);
                     Ok(item)
                 }
@@ -191,6 +192,7 @@ impl Backend for EmbeddedBackend {
             match outcome {
                 Ok(ingested) => {
                     let item = inner.to_wire(ingested.into_item())?;
+                    inner.note_version_written(item.created_at);
                     inner.publish_items(true, 0);
                     Ok(item)
                 }
@@ -247,11 +249,13 @@ impl Backend for EmbeddedBackend {
     async fn delete(&self, id: &str) -> Result<()> {
         let id = id.to_string();
         self.blocking(move |inner| {
+            let mutation_started = copypaste_core::now_ms();
             // Read first so an unknown id is `not_found` rather than a silent
             // success: a client that deleted nothing needs to know it deleted
             // nothing. Same rule as the daemon's `items::delete`.
             match inner.state.store.delete(&id) {
                 Ok(true) => {
+                    inner.note_version_written(mutation_started);
                     inner.publish_items(false, 0);
                     Ok(())
                 }
@@ -264,12 +268,14 @@ impl Backend for EmbeddedBackend {
 
     async fn clear(&self) -> Result<u64> {
         self.blocking(move |inner| {
+            let mutation_started = copypaste_core::now_ms();
             let removed = inner
                 .state
                 .store
                 .delete_all()
                 .map_err(|_| BackendError::internal("history could not be cleared"))?;
             if removed > 0 {
+                inner.note_version_written(mutation_started);
                 inner.publish_items(false, 0);
             }
             Ok(removed)
@@ -424,8 +430,10 @@ impl Backend for EmbeddedBackend {
 
     async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData> {
         self.blocking(move |inner| {
+            let oldest = items.iter().map(|item| item.created_at).min();
             let imported = transfer::import(inner, items)?;
             if imported.inserted > 0 {
+                inner.note_oldest_version(oldest);
                 inner.publish_items(false, 0);
             }
             Ok(imported)

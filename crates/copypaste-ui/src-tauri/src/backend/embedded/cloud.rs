@@ -1,3 +1,4 @@
+mod cursor;
 mod source;
 
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -14,6 +15,7 @@ use zeroize::Zeroizing;
 
 use super::open::Inner;
 use super::{BackendError, Result};
+use cursor::{UploadCursor, UploadFloor};
 use source::StoreSource;
 
 type Driver = CloudSync<SupabaseRest, SupabaseAuth>;
@@ -58,6 +60,7 @@ pub(super) struct EmbeddedCloud {
     account: Mutex<Option<Account>>,
     last_sync_ms: AtomicI64,
     last_error: Mutex<Option<&'static str>>,
+    upload_cursor: UploadCursor,
     wake: Notify,
     poller_started: AtomicBool,
 }
@@ -69,6 +72,7 @@ impl EmbeddedCloud {
             account: Mutex::new(None),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
+            upload_cursor: UploadCursor::new(),
             wake: Notify::new(),
             poller_started: AtomicBool::new(false),
         };
@@ -135,10 +139,8 @@ impl EmbeddedCloud {
                 .set_state_all(&[(KEY_WATERMARK, "0"), (KEY_WATERMARK_ITEM, "")])
                 .map_err(|_| BackendError::internal(MSG_STORE))?;
         }
-        inner
-            .state
-            .store
-            .set_state_all(&[(KEY_UPLOAD_FLOOR, "0"), (KEY_UPLOAD_FLOOR_ITEM, "")])
+        self.upload_cursor
+            .reset(&inner.state.store)
             .map_err(|_| BackendError::internal(MSG_STORE))?;
         let key_hex = Zeroizing::new(hex::encode(key.to_bytes()));
         let driver = Arc::new(make_driver(inner, config, key, session));
@@ -298,6 +300,26 @@ impl EmbeddedCloud {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
     }
+
+    pub(super) fn note_version_written(&self, inner: &Inner, created_at: i64) {
+        self.upload_cursor
+            .note_version_written(&inner.state.store, created_at);
+    }
+
+    fn upload_floor_epoch(&self) -> u64 {
+        self.upload_cursor.epoch()
+    }
+
+    fn commit_upload_floor(
+        &self,
+        inner: &Inner,
+        started: &UploadFloor,
+        started_epoch: u64,
+        candidate: &UploadFloor,
+    ) -> std::result::Result<(), copypaste_core::StoreError> {
+        self.upload_cursor
+            .commit(&inner.state.store, started, started_epoch, candidate)
+    }
 }
 
 async fn poll(inner: Weak<Inner>) {
@@ -442,6 +464,7 @@ mod tests {
             account: Mutex::new(None),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
+            upload_cursor: UploadCursor::new(),
             wake: Notify::new(),
             poller_started: AtomicBool::new(false),
         }
