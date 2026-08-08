@@ -144,7 +144,11 @@ impl Backend for EmbeddedBackend {
                 &settings,
             );
             match outcome {
-                Ok(ingested) => inner.to_wire(ingested.into_item()),
+                Ok(ingested) => {
+                    let item = inner.to_wire(ingested.into_item())?;
+                    inner.publish_items(false, 0);
+                    Ok(item)
+                }
                 // Both refusals are the user's own configuration answering, so
                 // they are reported as invalid input rather than as a fault —
                 // and neither is retryable with the same content.
@@ -196,7 +200,11 @@ impl Backend for EmbeddedBackend {
                 &settings,
             );
             match outcome {
-                Ok(ingested) => inner.to_wire(ingested.into_item()),
+                Ok(ingested) => {
+                    let item = inner.to_wire(ingested.into_item())?;
+                    inner.publish_items(true, 0);
+                    Ok(item)
+                }
                 Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
                 Err(IngestError::TooLarge) => Err(BackendError::Invalid(MSG_TOO_LARGE)),
                 Err(error) => {
@@ -254,7 +262,10 @@ impl Backend for EmbeddedBackend {
             // success: a client that deleted nothing needs to know it deleted
             // nothing. Same rule as the daemon's `items::delete`.
             match inner.state.store.delete(&id) {
-                Ok(true) => Ok(()),
+                Ok(true) => {
+                    inner.publish_items(false, 0);
+                    Ok(())
+                }
                 Ok(false) => Err(BackendError::NotFound(MSG_NO_ITEM)),
                 Err(_) => Err(BackendError::internal("that item could not be deleted")),
             }
@@ -264,11 +275,15 @@ impl Backend for EmbeddedBackend {
 
     async fn clear(&self) -> Result<u64> {
         self.blocking(move |inner| {
-            inner
+            let removed = inner
                 .state
                 .store
                 .delete_all()
-                .map_err(|_| BackendError::internal("history could not be cleared"))
+                .map_err(|_| BackendError::internal("history could not be cleared"))?;
+            if removed > 0 {
+                inner.publish_items(false, 0);
+            }
+            Ok(removed)
         })
         .await
     }
@@ -281,6 +296,7 @@ impl Backend for EmbeddedBackend {
                 Ok(false) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
                 Err(_) => return Err(BackendError::internal("that item could not be changed")),
             }
+            inner.publish_items(false, 0);
             // Reply with the updated row so the caller need not re-list.
             inner.fetch(&id)
         })
@@ -296,12 +312,15 @@ impl Backend for EmbeddedBackend {
     async fn reorder_pinned(&self, ids: &[String]) -> Result<()> {
         let ids = ids.to_vec();
         self.blocking(move |inner| {
-            inner
+            let renumbered = inner
                 .state
                 .store
                 .reorder_pinned(&ids)
-                .map(|_| ())
-                .map_err(|_| BackendError::internal("the pinned order could not be changed"))
+                .map_err(|_| BackendError::internal("the pinned order could not be changed"))?;
+            if renumbered > 0 {
+                inner.publish_items(false, 0);
+            }
+            Ok(())
         })
         .await
     }
@@ -401,6 +420,7 @@ impl Backend for EmbeddedBackend {
                 .settings
                 .write()
                 .expect("settings lock poisoned") = next.clone();
+            inner.publish_items(false, 0);
             Ok(ConfigApplied {
                 config: next,
                 restart_required,
@@ -415,8 +435,14 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData> {
-        self.blocking(move |inner| transfer::import(inner, items))
-            .await
+        self.blocking(move |inner| {
+            let imported = transfer::import(inner, items)?;
+            if imported.inserted > 0 {
+                inner.publish_items(false, 0);
+            }
+            Ok(imported)
+        })
+        .await
     }
 
     /// Needs the daemon's validate-then-swap, and must not be approximated.
@@ -440,13 +466,19 @@ impl Backend for EmbeddedBackend {
     /// its deletions use the same event contract as the daemon.
     async fn watch(&self) -> Result<tokio::sync::mpsc::Receiver<EventData>> {
         let mut source = self.inner.events.subscribe();
+        let inner = std::sync::Arc::clone(&self.inner);
         let (sender, receiver) = tokio::sync::mpsc::channel(64);
         tokio::spawn(async move {
             loop {
-                match source.recv().await {
-                    Ok(event) if sender.send(event).await.is_err() => break,
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                let event = match source.recv().await {
+                    Ok(event) => event,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        inner.items_event(false, 0)
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                if sender.send(event).await.is_err() {
+                    break;
                 }
             }
         });
@@ -863,5 +895,74 @@ mod tests {
     async fn clearing_an_empty_history_is_a_success_reporting_zero() {
         let (backend, _clip, _dir) = backend();
         assert_eq!(backend.clear().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn mutations_are_delivered_in_commit_order() {
+        let (backend, _clip, _dir) = backend();
+        let mut events = backend.watch().await.unwrap();
+        let first = backend.add("ordered").await.unwrap();
+        backend.add_captured("captured", None, None).await.unwrap();
+        backend.delete(&first.id).await.unwrap();
+
+        let added = events.recv().await.unwrap();
+        let captured = events.recv().await.unwrap();
+        let deleted = events.recv().await.unwrap();
+        assert_eq!(
+            (added.event, added.item_count),
+            (copypaste_ipc::EventKind::Items, 1)
+        );
+        assert_eq!(
+            (captured.event, captured.item_count),
+            (copypaste_ipc::EventKind::Items, 2)
+        );
+        assert_eq!(
+            (deleted.event, deleted.item_count),
+            (copypaste_ipc::EventKind::Items, 1)
+        );
+        assert!(!added.captured);
+        assert!(captured.captured);
+        assert!(!deleted.captured);
+    }
+
+    #[tokio::test]
+    async fn lag_is_coalesced_into_the_current_item_count() {
+        let (backend, _clip, _dir) = backend();
+        let mut events = backend.watch().await.unwrap();
+        for _ in 0..200 {
+            let _ = backend.inner.events.send(EventData {
+                event: copypaste_ipc::EventKind::Peers,
+                item_count: u64::MAX,
+                captured: true,
+                swept: u32::MAX,
+            });
+        }
+
+        loop {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+                .await
+                .expect("the coalesced event stayed silent")
+                .expect("the change stream closed");
+            if event.item_count == 0 {
+                assert_eq!(event.event, copypaste_ipc::EventKind::Items);
+                assert!(!event.captured);
+                assert_eq!(event.swept, 0);
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_subscription_can_restart_after_its_receiver_is_dropped() {
+        let (backend, _clip, _dir) = backend();
+        drop(backend.watch().await.unwrap());
+
+        let mut restarted = backend.watch().await.unwrap();
+        backend.add("after restart").await.unwrap();
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), restarted.recv())
+            .await
+            .expect("the restarted stream stayed silent")
+            .expect("the restarted stream closed");
+        assert_eq!(event.item_count, 1);
     }
 }
