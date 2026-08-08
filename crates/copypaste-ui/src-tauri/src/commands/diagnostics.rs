@@ -5,15 +5,10 @@
 //! service that stops between them renders as running with no counters, which
 //! is the state the panel exists to make legible.
 
-use std::io::Write;
-#[cfg(all(unix, not(target_os = "android")))]
-use std::os::unix::fs::OpenOptionsExt as _;
-
 use tauri::{AppHandle, Runtime, State};
-use tauri_plugin_fs::{FsExt as _, OpenOptions};
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
-use crate::commands::transfer::save_panel_file;
+use crate::commands::document;
 use crate::service::diagnostics::{Diagnostics, HistoryRead};
 use crate::service::Supervisor;
 
@@ -71,20 +66,11 @@ pub async fn export_diagnostics_report<R: Runtime>(
     let history_read = history_read(backend.inner()).await;
     let report = Diagnostics::new(service, status, history_read).report;
 
-    let Some(dest) = save_panel_file(&app, REPORT_NAME).await else {
+    let Some(dest) = document::save_panel_file(&app, REPORT_NAME).await else {
         return Ok(false);
     };
 
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(all(unix, not(target_os = "android")))]
-    options.mode(0o600);
-    let mut file = app
-        .fs()
-        .open(dest, options)
-        .map_err(|_| BackendError::Internal(MSG_REPORT_NOT_WRITTEN.into()))?;
-    file.write_all(report.as_bytes())
-        .map_err(|_| BackendError::Internal(MSG_REPORT_NOT_WRITTEN.into()))?;
+    document::write_picked(&app, dest, report.as_bytes(), MSG_REPORT_NOT_WRITTEN)?;
     Ok(true)
 }
 
@@ -117,19 +103,10 @@ pub async fn export_support_bundle<R: Runtime>(
     };
     let bundle = format_support_bundle(&diagnostics, &app_events, daemon_events.as_deref());
 
-    let Some(dest) = save_panel_file(&app, BUNDLE_NAME).await else {
+    let Some(dest) = document::save_panel_file(&app, BUNDLE_NAME).await else {
         return Ok(false);
     };
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(all(unix, not(target_os = "android")))]
-    options.mode(0o600);
-    let mut file = app
-        .fs()
-        .open(dest, options)
-        .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?;
-    file.write_all(bundle.as_bytes())
-        .map_err(|_| BackendError::Internal(MSG_BUNDLE_NOT_WRITTEN.into()))?;
+    document::write_picked(&app, dest, bundle.as_bytes(), MSG_BUNDLE_NOT_WRITTEN)?;
     Ok(true)
 }
 
