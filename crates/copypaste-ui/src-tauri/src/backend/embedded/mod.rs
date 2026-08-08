@@ -7,26 +7,26 @@
 //!
 //! # What this file will not do, and why that matters
 //!
-//! Four operations — `set_config`, `backup`, `restore` and `reorder_pinned` —
-//! return [`BackendError::Unsupported`] rather than an implementation. Each is a
+//! Three operations — `backup`, `restore` and `reorder_pinned` — return
+//! [`BackendError::Unsupported`] rather than an implementation. Each is a
 //! deliberate refusal with its reason on the method. `backup` and `restore`
 //! still name the same fix: the validate-then-swap lives inside the
 //! `copypaste-daemon` binary, which has no `[lib]` target, so approximating it
 //! here would be the second implementation CLAUDE.md rule 1 exists to stop —
 //! and a file copy that looks like a restore and is not is data loss.
 //!
-//! Pairing, syncing, discovery, export and import used to be on that list. They
-//! are not any more: `copypaste_p2p::Node` owns the listener and the four peer
-//! operations, `copypaste_core::StoreSource` is the history behind them, and
-//! `copypaste_core::transfer` owns the skip accounting and the
+//! Settings, pairing, syncing, discovery, export and import used to be on that
+//! list. They are not any more: `copypaste_p2p::Node` owns the listener and the
+//! four peer operations, `copypaste_core::StoreSource` is the history behind
+//! them, and `copypaste_core::transfer` owns the skip accounting and the
 //! detector-re-runs-on-import rule — the same node, the same source and the same
 //! two transfer functions the daemon runs (ADR-0003, [`peers`]).
 //!
 //! # What it does do
 //!
 //! Everything reachable through the library API as it stands: the read paths,
-//! ingest, the clipboard write, delete/clear/pin, status, export and import, and
-//! the whole of peer pairing, sync and LAN discovery.
+//! ingest, the clipboard write, delete/clear/pin, status, settings, export and
+//! import, and the whole of peer pairing, sync and LAN discovery.
 //!
 //! # Unverified
 //!
