@@ -589,6 +589,34 @@ reject "android-ndk-env.sh fails when llvm-ranlib is absent" ./scripts/release/a
 reject "android-ndk-env.sh fails when the NDK is absent"     ./scripts/release/android-ndk-env.sh "$NDKDIR/nope"
 rm -rf "$NDKDIR"
 
+if grep -q 'android-link-abis.sh' .github/workflows/android-emulator.yml; then
+    ok "android-emulator.yml links every ABI the release links"
+else
+    bad "android-emulator.yml links every ABI the release links" \
+        "only release.yml builds non-emulator ABIs, and only on a tag (ADR-0017)"
+fi
+
+if grep -q 'no-undefined' scripts/release/android-link-abis.sh; then
+    ok "android-link-abis.sh rejects unresolved symbols"
+else
+    bad "android-link-abis.sh rejects unresolved symbols" \
+        "an unresolved symbol otherwise becomes a .so that fails at dlopen"
+fi
+
+LINK_TRIPLES="$(sed -n 's/^TRIPLES=(\([^)]*\)).*/\1/p' scripts/release/android-link-abis.sh)"
+NDKENV_TRIPLES="$(sed -n 's/^TRIPLES=(\([^)]*\)).*/\1/p' scripts/release/android-ndk-env.sh)"
+if [[ -n "$LINK_TRIPLES" && "$LINK_TRIPLES" == "$NDKENV_TRIPLES" ]]; then
+    ok "android-link-abis.sh links every ABI android-ndk-env.sh names"
+else
+    bad "android-link-abis.sh links every ABI android-ndk-env.sh names" \
+        "link-abis has [$LINK_TRIPLES], ndk-env has [$NDKENV_TRIPLES]"
+fi
+
+reject "android-link-abis.sh fails when NDK_HOME is unset" \
+    env -u NDK_HOME ./scripts/release/android-link-abis.sh
+reject "android-link-abis.sh fails when NDK_HOME is not a directory" \
+    env NDK_HOME=/nonexistent ./scripts/release/android-link-abis.sh
+
 if grep -q 'check-macos-linkage.sh' .github/workflows/release.yml; then
     ok "release.yml runs the macOS linkage check"
 else
