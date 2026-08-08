@@ -184,6 +184,7 @@ impl Client {
     async fn call_raw(&mut self, line: &str) -> Response {
         self.writer.write_all(line.as_bytes()).await.unwrap();
         self.writer.write_all(b"\n").await.unwrap();
+        self.writer.flush().await.unwrap();
         tokio::time::timeout(Duration::from_secs(5), self.next())
             .await
             .expect("the local transport must answer")
