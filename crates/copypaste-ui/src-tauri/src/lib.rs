@@ -376,6 +376,7 @@ mod tests {
                 .expect("the macOS Tauri config is valid JSON");
         let main = &config["app"]["windows"][0];
 
+        assert_eq!(config["bundle"]["macOS"]["minimumSystemVersion"], "14.0");
         assert_eq!(main["label"], "main");
         assert_eq!(main["width"], 1100);
         assert_eq!(main["height"], 760);
