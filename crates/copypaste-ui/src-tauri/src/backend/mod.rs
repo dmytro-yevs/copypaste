@@ -181,9 +181,10 @@ pub trait Backend: Send + Sync + 'static {
     /// device has pinned C between them, while a full ordering either applies
     /// or is refused.
     ///
-    /// Storage can already express this — `pin_order` is a `REAL` column that
-    /// `set_pinned` appends to — so this is the only missing link in parity
-    /// finding 19.
+    /// Ids that are no longer pinned are ignored rather than refused, so a
+    /// list read a moment before a sync round still applies. Pinned rows the
+    /// caller did not name keep their relative order and sort after the ones
+    /// it did.
     async fn reorder_pinned(&self, ids: &[String]) -> Result<()>;
 
     // ---- state -----------------------------------------------------------

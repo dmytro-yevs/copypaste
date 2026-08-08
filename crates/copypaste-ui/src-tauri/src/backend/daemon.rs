@@ -45,11 +45,6 @@ use super::{Backend, BackendError, Page, Result};
 /// so a reply can be matched to its request.
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Why `reorder_pinned` refuses. See the method for the full argument.
-const MSG_NO_REORDER: &str =
-    "Reordering pinned items isn't available yet. Pinned items keep the order they \
-     were pinned in.";
-
 /// Talks to the daemon. Holds nothing, so it is trivially `Send + Sync`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DaemonBackend;
@@ -286,16 +281,17 @@ impl Backend for DaemonBackend {
         )
     }
 
-    /// Blocked on a wire verb that does not exist.
+    /// One request carrying the whole ordering, never N pin toggles.
     ///
-    /// `copypaste_ipc::Method` has no reorder, so there is nothing to send.
-    /// The alternative — unpin and re-pin every item in the wanted order —
-    /// would work by accident of `set_pinned` appending at `MAX(pin_order) + 1`
-    /// and is not worth having: it is N round trips, it is not atomic, and a
-    /// failure halfway leaves the pinned section in an order the user never
-    /// asked for. Refusing keeps the gap visible (parity finding 19).
-    async fn reorder_pinned(&self, _ids: &[String]) -> Result<()> {
-        Err(BackendError::Unsupported(MSG_NO_REORDER))
+    /// Unpinning and re-pinning in the wanted order would work by accident of
+    /// `set_pinned` appending at `MAX(pin_order) + 1`, and is the thing not to
+    /// do: N round trips, not atomic, and a failure halfway leaves the pinned
+    /// section in an order the user never asked for. `Method::ReorderPinned`
+    /// is applied by `Store::reorder_pinned` in one transaction.
+    async fn reorder_pinned(&self, ids: &[String]) -> Result<()> {
+        self.call(Method::ReorderPinned { ids: ids.to_vec() })
+            .await?;
+        Ok(())
     }
 
     async fn status(&self) -> Result<StatusData> {
@@ -616,16 +612,24 @@ mod tests {
         assert!(!method.contains("copy"), "{method}");
     }
 
-    /// Refusing has to leave the user something true to do, and must not read
-    /// as a transient failure they could retry away.
+    /// The whole ordering goes in one request. A reorder assembled out of pin
+    /// toggles would be N round trips and not atomic, so the guard is that
+    /// nothing here sends `pin` — proven by which verb is built, since no
+    /// daemon is listening to answer.
     #[tokio::test]
-    async fn reordering_refuses_structurally_rather_than_faking_it() {
+    async fn reordering_sends_one_request_carrying_the_whole_ordering() {
         let err = DaemonBackend::new()
             .reorder_pinned(&["a".into(), "b".into()])
             .await
             .unwrap_err();
-        assert!(matches!(err, BackendError::Unsupported(_)), "{err:?}");
-        assert!(!MSG_NO_REORDER.contains('/'));
+        assert!(matches!(err, BackendError::Unreachable), "{err:?}");
+
+        let method = serde_json::to_string(&Method::ReorderPinned {
+            ids: vec!["a".into(), "b".into()],
+        })
+        .unwrap();
+        assert!(method.contains("\"reorder_pinned\""), "{method}");
+        assert!(!method.contains("\"pin\""), "{method}");
     }
 
     /// Parity finding 17: a page that dropped rows has to say how many, or a
