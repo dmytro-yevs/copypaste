@@ -54,8 +54,9 @@ payload sizes, timing, delete activity) is a real disclosure on its own.
 | The client's `select=`, `order=`, `created_at=gte.` and keyset query strings are accepted verbatim | **verified** — same run |
 | A row with no `signature` is refused by the deployment, not just by the client | **verified** — same run |
 | The publishable key on its own reaches nothing | **verified** — same run |
-| GoTrue sign-in, RLS, Realtime, encrypted convergence, paging, tombstones, sensitive refusal | **verified on every release** — `tests/real-supabase.sh` |
-| `supabase start` / `supabase db reset` | **verified on every release** — same gate |
+| GoTrue sign-in, Realtime, encrypted convergence | **never verified.** `tests/real-supabase.sh` covers them and blocks publish, but it landed after `v2.0.0-alpha.5` and has not run once. Nothing here has ever spoken to an account service. |
+| The rows above, end to end through the real platform rather than a harness | **never verified** — same gate. Each has narrower coverage listed above; none of it involves GoTrue or the platform's own PostgREST configuration. |
+| `supabase start` / `supabase db reset` | **never verified** — same gate |
 
 The ordinary CI schema job remains the fast PostgreSQL-only check. The release
 workflow additionally starts the official local stack from empty, runs all SQL
