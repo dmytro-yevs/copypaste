@@ -17,5 +17,11 @@ and `npm --prefix crates/copypaste-ui run dev:native` on macOS. Run the scenario
 named by the feature ledger and retain its evidence under `artifacts/native/`;
 the nightly and release workflows upload the same evidence shape.
 
+Run `npm --prefix crates/copypaste-ui run test:native-parity` to exercise the
+fail-closed receipt gate without native hardware. Release publication requires
+same-commit macOS and physical Android receipts. Windows native-contract
+evidence is available only through the `native-nightly.yml` manual dispatch;
+it does not claim Windows UI or packaging coverage.
+
 Incomplete records fail validation. Do not encode completion with TODOs,
 waivers, placeholders, skipped assertions, or green jobs that lack evidence.

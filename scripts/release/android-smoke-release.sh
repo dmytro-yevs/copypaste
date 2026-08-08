@@ -40,8 +40,9 @@ group "Preflight"
 # ---------------------------------------------------------------------------
 command -v adb >/dev/null 2>&1 || { echo "  FATAL adb is not on PATH"; exit 1; }
 adb wait-for-device
+sdk="$(sh_ getprop ro.build.version.sdk)"
 abi="$(sh_ getprop ro.product.cpu.abi)"
-printf '  device: API %s, %s\n' "$(sh_ getprop ro.build.version.sdk)" "$abi"
+printf '  device: API %s, %s\n' "$sdk" "$abi"
 
 [[ -f "$APK" ]] || { echo "  FATAL APK not found at '${APK:-<unset>}'"; exit 1; }
 printf '  apk: %s (%s bytes)\n' "$APK" "$(stat -c %s "$APK")"
@@ -146,6 +147,7 @@ fi
 # and a WebView that mounts, loads its assets and renders them is the strongest
 # single signal that the plugin surface came through R8 intact.
 assert_painted "$PAINT_TIMEOUT" "$launched_at" "$OUT/release-ui.xml" "$OUT/release.png"
+paint_elapsed_ms=$(((SECONDS - launched_at) * 1000))
 
 # ---------------------------------------------------------------------------
 group "3. Native code is mapped"
@@ -215,5 +217,42 @@ note "rung 2 on the shipped build" \
      "Shizuku cannot be granted on a stock emulator; the debug leg asserts the honest consequence and this leg does not repeat it"
 
 dump_logcat release-final
+
+if [[ $FAIL -eq 0 ]]; then
+    paint_budget_ms=$(((SETTLE_SECS + PAINT_TIMEOUT) * 1000))
+    python3 - "$OUT/latency.json" "$paint_elapsed_ms" "$paint_budget_ms" <<'PY'
+import json, pathlib, sys
+pathlib.Path(sys.argv[1]).write_text(json.dumps({
+    "scenario": "release-webview-ready",
+    "elapsed_ms": int(sys.argv[2]),
+    "budget_ms": int(sys.argv[3]),
+}) + "\n")
+PY
+    serial="$(adb get-serialno | tr -d '\r')"
+    environment=physical-device
+    [[ "$serial" == emulator-* ]] && environment=emulator
+    if python3 scripts/release/write-native-evidence.py \
+        --output "$OUT/native-evidence.json" \
+        --platform android \
+        --environment "$environment" \
+        --os-version "API $sdk" \
+        --architecture "$abi" \
+        --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
+        --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
+        --scenario release-webview-ready \
+        --elapsed-ms "$paint_elapsed_ms" \
+        --budget-ms "$paint_budget_ms" \
+        --assertion "signed release app launched" \
+        --assertion "WebView accessibility content painted" \
+        --assertion "release smoke assertions passed" \
+        --artifact screenshot=release.png \
+        --artifact accessibility=release-ui.xml \
+        --artifact measurement=latency.json \
+        --artifact diagnostic-log=release-final.log; then
+        ok "native evidence receipt was written"
+    else
+        bad "native evidence receipt was written"
+    fi
+fi
 summary
 [[ $FAIL -eq 0 ]]

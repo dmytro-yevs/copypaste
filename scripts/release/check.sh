@@ -337,7 +337,8 @@ group "Workflow wiring"
 # reads a file no job it depends on wrote.
 WIRING="$(mktemp)"
 if python3 scripts/release/check-wiring.py > "$WIRING" \
-   && python3 scripts/release/check-wiring.py --self-test >> "$WIRING"
+   && python3 scripts/release/check-wiring.py --self-test >> "$WIRING" \
+   && python3 scripts/release/check-native-parity-wiring.py >> "$WIRING"
 then
     while IFS='|' read -r verdict desc detail; do
         [[ -n "${verdict:-}" ]] || continue

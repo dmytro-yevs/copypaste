@@ -19,6 +19,7 @@ the assertion.
 | Browser (WebKitGTK, Linux) | `browser-webkitgtk.yml` | shared React behaviour in a real engine: rendering, composition, navigation, responsive layout, forms, dialogs, menus, loading/empty/error states, keyboard navigation, focus, the accessibility tree, overflow and scrolling, console errors, behaviour against a real daemon | Tauri commands as shipped, WKWebView, Android WebView, NSPasteboard, Keychain, Keystore, intents, tray or menu bar, global shortcuts, launch at login, native notifications, native window focus or dismissal, platform permissions, packaging, signing, installation |
 | Android | `android-emulator.yml` on x86_64; `release.yml` on a physical arm64 device | Android platform behavior at each API level that ran; the signed release APK and arm64 path at release | macOS; OEM background policy; a Play-updated WebView |
 | macOS | `ci.yml` → `macOS check + platform (arm64)`; `release.yml` → `smoke-macos-dmg.sh` on a tag | macOS | Android |
+| Windows | `ci.yml` → `Windows check + device secret (x64)`; user-requested `native-nightly.yml` evidence | DPAPI and named-pipe behavior on Windows | Windows packaging or UI behavior |
 
 The browser layer does execute Tauri commands through `wry` on Linux. That is
 useful and it is not verification: the shipped bridges are WKWebView and the
@@ -36,8 +37,17 @@ with no path filter. `android-emulator.yml` runs nightly, on demand, and on any
 push or pull request touching those shared paths or the Android tree.
 
 `native-nightly.yml` runs Android API 34/36 and macOS 14/15 matrices each night.
+Its optional Windows evidence job runs only when a workflow dispatch explicitly
+requests it; the receipt covers native contracts, not an unbuilt Windows UI.
 `release.yml` runs on a tag. Everything it alone proves — installing the DMG,
 launching the bundle, the cask — is therefore post-hoc, and is marked below.
+
+Publication also waits for the native-parity gate. It verifies checksummed,
+same-commit receipts from the macOS smoke and the physical Android smoke, and
+fails when either platform or its measured evidence is absent. The macOS
+receipt producer has not been validated from this Windows recovery environment;
+until a macOS run succeeds, WKWebView remains **NOT VERIFIED IN CI** as recorded
+below.
 
 ## What an emulator is not
 

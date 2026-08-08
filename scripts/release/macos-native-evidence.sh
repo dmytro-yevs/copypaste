@@ -28,3 +28,20 @@ PY
 test -s "$out/ax.log"
 test -s "$out/screenshot.png"
 test -s "$out/latency.json"
+
+python3 scripts/release/write-native-evidence.py \
+  --output "$out/native-evidence.json" \
+  --platform macos \
+  --environment hosted-runner \
+  --os-version "$(sw_vers -productVersion)" \
+  --architecture "$(uname -m)" \
+  --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
+  --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
+  --scenario native-launch \
+  --elapsed-ms "$((ready_ms - start_ms))" \
+  --budget-ms 3000 \
+  --assertion "installed app launched" \
+  --assertion "native accessibility tree is non-empty" \
+  --artifact screenshot=screenshot.png \
+  --artifact accessibility=ax.log \
+  --artifact measurement=latency.json
