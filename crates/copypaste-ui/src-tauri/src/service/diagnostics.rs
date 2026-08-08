@@ -241,6 +241,7 @@ mod tests {
             capture_running: true,
             clipboard_backend: "macos-pasteboard".into(),
             private_mode: false,
+            private_mode_epoch: 0,
             counters: DiagnosticCounters {
                 rejected_too_large: 3,
                 lost_intermediates: 1,

@@ -347,11 +347,18 @@ mod tests {
     #[test]
     fn a_status_without_optional_fields_decodes_with_defaults() {
         let older = r#"{"version":"2.0.0-alpha.1","protocol_version":1,"item_count":3,
-                        "capture_running":true,"clipboard_backend":"fake"}"#;
+                        "capture_running":true,"clipboard_backend":"fake",
+                        "private_mode_epoch":0}"#;
         let status: StatusData = serde_json::from_str(older).unwrap();
         assert!(status.device_name.is_empty());
         assert!(!status.private_mode);
+        assert_eq!(status.private_mode_epoch, 0);
         assert_eq!(status.counters, DiagnosticCounters::default());
+    }
+
+    #[test]
+    fn private_mode_epoch_is_required_for_convergence() {
+        assert!(serde_json::from_str::<PrivateModeData>(r#"{"private_mode":true}"#).is_err());
     }
 
     /// The reason fields were added within protocol v1. A client that speaks

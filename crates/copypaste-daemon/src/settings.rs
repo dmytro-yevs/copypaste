@@ -17,6 +17,7 @@
 //! into a *new* value and the live one is replaced only on success, so a
 //! rejected `set_config` leaves the daemon running exactly as it was.
 
+use std::ops::Deref;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
 use copypaste_ipc::{ConfigData, ConfigError, ConfigPatch};
@@ -35,8 +36,35 @@ const KEY_SETTINGS: &str = "settings";
 /// staleness this is meant to remove.
 #[derive(Debug)]
 pub struct Settings {
-    current: RwLock<ConfigData>,
+    current: RwLock<SettingsState>,
     applying: Mutex<()>,
+}
+
+#[derive(Debug)]
+struct SettingsState {
+    config: ConfigData,
+    private_mode_epoch: u64,
+}
+
+pub(crate) struct SettingsReadGuard<'a>(RwLockReadGuard<'a, SettingsState>);
+
+impl SettingsReadGuard<'_> {
+    pub(crate) fn private_mode_epoch(&self) -> u64 {
+        self.0.private_mode_epoch
+    }
+}
+
+impl Deref for SettingsReadGuard<'_> {
+    type Target = ConfigData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.config
+    }
+}
+
+pub(crate) struct SettingsApplied {
+    pub(crate) config: ConfigData,
+    pub(crate) private_mode_epoch: u64,
 }
 
 impl Settings {
@@ -67,7 +95,10 @@ impl Settings {
             }
         };
         Self {
-            current: RwLock::new(stored.unwrap_or_default()),
+            current: RwLock::new(SettingsState {
+                config: stored.unwrap_or_default(),
+                private_mode_epoch: 0,
+            }),
             applying: Mutex::new(()),
         }
     }
@@ -75,7 +106,10 @@ impl Settings {
     #[cfg(test)]
     pub fn defaults() -> Self {
         Self {
-            current: RwLock::new(ConfigData::default()),
+            current: RwLock::new(SettingsState {
+                config: ConfigData::default(),
+                private_mode_epoch: 0,
+            }),
             applying: Mutex::new(()),
         }
     }
@@ -85,10 +119,12 @@ impl Settings {
     /// Lock recovery rather than propagation, as everywhere else in the daemon:
     /// a poisoned lock means some other task panicked between validating and
     /// storing, and the value under it is whole either way.
-    pub fn get(&self) -> RwLockReadGuard<'_, ConfigData> {
-        self.current
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    pub(crate) fn get(&self) -> SettingsReadGuard<'_> {
+        SettingsReadGuard(
+            self.current
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
     }
 
     /// Validate, store, and make live — in that order.
@@ -104,12 +140,33 @@ impl Settings {
     /// (5 s `busy_timeout`, 10 s pool wait) inside it, and `capture::run`
     /// reads that lock on the reactor thread. F-LOCK-1, ADR-0016.
     pub fn apply(&self, meta: &Meta, patch: &ConfigPatch) -> Result<ConfigData, SettingsError> {
+        self.apply_with_epoch(meta, patch)
+            .map(|applied| applied.config)
+    }
+
+    pub(crate) fn apply_with_epoch(
+        &self,
+        meta: &Meta,
+        patch: &ConfigPatch,
+    ) -> Result<SettingsApplied, SettingsError> {
         let _serialised = self
             .applying
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        let next = patch.apply(&self.get())?;
+        let (next, next_epoch) = {
+            let current = self.get();
+            let next = patch.apply(&current)?;
+            let next_epoch = if patch.private_mode.is_some() {
+                current
+                    .private_mode_epoch()
+                    .checked_add(1)
+                    .ok_or(SettingsError::Store)?
+            } else {
+                current.private_mode_epoch()
+            };
+            (next, next_epoch)
+        };
 
         let encoded = serde_json::to_string(&next).map_err(|e| {
             warn!(error = %e, "settings could not be encoded");
@@ -121,8 +178,12 @@ impl Settings {
             .current
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *current = next.clone();
-        Ok(next)
+        current.config = next.clone();
+        current.private_mode_epoch = next_epoch;
+        Ok(SettingsApplied {
+            config: next,
+            private_mode_epoch: next_epoch,
+        })
     }
 }
 

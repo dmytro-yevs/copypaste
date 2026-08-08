@@ -293,6 +293,7 @@ mod tests {
             capture_running: true,
             clipboard_backend: backend.into(),
             private_mode: false,
+            private_mode_epoch: 0,
             counters: copypaste_ipc::DiagnosticCounters::default(),
         }
     }
