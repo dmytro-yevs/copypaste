@@ -234,6 +234,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            crates/copypaste-ui/src-tauri/gen/android/**/*.gradle*
+            crates/copypaste-ui/src-tauri/gen/android/**/gradle-wrapper.properties
 
       - name: Install the pinned SDK components
         run: |
@@ -457,6 +461,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
+          cache-dependency-path: |
+            crates/copypaste-ui/src-tauri/gen/android/**/*.gradle*
+            crates/copypaste-ui/src-tauri/gen/android/**/gradle-wrapper.properties
 
       - name: Install the pinned SDK components
         run: |
