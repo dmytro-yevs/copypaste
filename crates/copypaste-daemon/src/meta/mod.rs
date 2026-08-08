@@ -14,7 +14,6 @@
 
 mod error;
 
-pub(crate) use error::is_not_a_database;
 pub use error::MetaError;
 
 use std::collections::HashMap;
