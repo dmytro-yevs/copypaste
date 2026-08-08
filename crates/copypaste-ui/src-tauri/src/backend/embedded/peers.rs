@@ -220,6 +220,20 @@ impl PeerNode {
     pub(super) fn set_device_name(&self, device_name: &str) {
         self.node.set_device_name(device_name);
     }
+
+    pub(super) fn note_cloud_version_applied(&self, created_at: i64) {
+        self.node.cursors().note_applied("", created_at);
+    }
+
+    #[cfg(test)]
+    pub(super) fn record_cursor(&self, pairing_id: &str, since_ms: i64) {
+        self.node.cursors().record_session(pairing_id, since_ms);
+    }
+
+    #[cfg(test)]
+    pub(super) fn cursor(&self, pairing_id: &str) -> copypaste_p2p::sync::SyncCursor {
+        self.node.cursors().get(pairing_id)
+    }
 }
 
 /// The TCP port the peer listener binds.
@@ -229,8 +243,9 @@ const PORT: u16 = copypaste_p2p::DEFAULT_PORT;
 ///
 /// Built per operation, as the daemon builds it: it is three `Arc` clones and a
 /// pool handle, and a source parked on the backend it reads is a cycle.
-fn source(inner: &Arc<Inner>) -> StoreSource {
+pub(super) fn source(inner: &Arc<Inner>) -> StoreSource {
     let settings = Arc::clone(inner);
+    let hooked = Arc::downgrade(inner);
     StoreSource::with_retention_settings(
         inner.state.store.clone(),
         Arc::clone(&inner.state.keyring),
@@ -239,6 +254,11 @@ fn source(inner: &Arc<Inner>) -> StoreSource {
         inner.state.device_name(),
         move || settings.settings(),
     )
+    .on_applied(move |created_at| {
+        if let Some(inner) = hooked.upgrade() {
+            inner.note_version_written(created_at);
+        }
+    })
 }
 
 /// Remember what the device on the other end of a session calls itself.

@@ -32,6 +32,7 @@ pub(super) async fn restore(backend: &EmbeddedBackend, src: &Path) -> Result<()>
                 .store
                 .restore_from(&src, &inner.state.keyring.db_key(), &inner.state.detector)
                 .map_err(|_| BackendError::internal(MSG_RESTORE_FAILED))?;
+            inner.note_oldest_version(inner.state.store.oldest_version_ms().ok().flatten());
             inner.publish_items(false, 0);
             Ok(())
         })

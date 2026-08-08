@@ -52,6 +52,22 @@ impl Inner {
             let _ = self.events.send(self.items_event(captured, swept));
         }
     }
+
+    pub(super) fn note_version_written(&self, created_at: i64) {
+        self.cloud.note_version_written(self, created_at);
+    }
+
+    pub(super) fn note_oldest_version(&self, created_at: Option<i64>) {
+        if let Some(created_at) = created_at {
+            self.note_version_written(created_at);
+        }
+    }
+
+    pub(super) fn note_cloud_version_applied(&self, created_at: i64) {
+        if let Some(node) = self.node.get() {
+            node.note_cloud_version_applied(created_at);
+        }
+    }
 }
 
 /// Whatever can put text on the system clipboard.
