@@ -141,7 +141,8 @@ try:
 except OSError:
     pass
 
-paths = [p for p in tracked() if not only or p in only]
+tracked_paths = tracked()
+paths = [p for p in tracked_paths if not only or p in only]
 
 new, worse, fixed = [], [], []
 for path in sorted(paths):
@@ -150,6 +151,9 @@ for path in sorted(paths):
         new.append((path, f))
     elif not f and path in baseline:
         fixed.append(path)
+
+if not only:
+    fixed.extend(sorted(baseline - set(tracked_paths)))
 
 for path, f in new:
     print(f"OVER  {path}")
