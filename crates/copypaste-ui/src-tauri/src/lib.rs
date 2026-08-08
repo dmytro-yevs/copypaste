@@ -338,7 +338,7 @@ mod tests {
     use std::collections::BTreeSet;
     fn production_source() -> &'static str {
         include_str!("lib.rs")
-            .split_once("\n#[cfg(test)]\nmod tests")
+            .split_once("\n#[cfg(test)]")
             .expect("the test module follows production assembly")
             .0
     }
