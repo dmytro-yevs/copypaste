@@ -70,6 +70,7 @@ interface HistoryListProps {
   /** Copy and then dismiss the window — the ⌘1–⌘9 path. */
   onQuickCopy: (item: Item) => void;
   onTogglePin: (item: Item) => void;
+  onReorderPinned: (ids: readonly string[]) => void;
   onDelete: (item: Item) => void;
   onOpen: (item: Item) => void;
   onLoadMore: () => void;
@@ -93,6 +94,7 @@ export function HistoryList({
   onCopy,
   onQuickCopy,
   onTogglePin,
+  onReorderPinned,
   onDelete,
   onOpen,
   onLoadMore,
@@ -264,6 +266,30 @@ export function HistoryList({
       ? items.findIndex((item) => item.id === activeId)
       : -1;
     const item = index >= 0 ? items[index] : undefined;
+
+    if (
+      event.altKey &&
+      item?.pinned &&
+      (event.key === "ArrowUp" || event.key === "ArrowDown")
+    ) {
+      const pinned = items.filter((candidate) => candidate.pinned);
+      const pinnedIndex = pinned.findIndex((candidate) => candidate.id === item.id);
+      const destination = pinnedIndex + (event.key === "ArrowUp" ? -1 : 1);
+      if (destination >= 0 && destination < pinned.length) {
+        event.preventDefault();
+        [pinned[pinnedIndex], pinned[destination]] = [
+          pinned[destination]!,
+          pinned[pinnedIndex]!,
+        ];
+        onReorderPinned(pinned.map((candidate) => candidate.id));
+        setAnnouncement(
+          `${rowLabel(item, originLabel(item, markedRef.current))} moved ${
+            event.key === "ArrowUp" ? "up" : "down"
+          }`,
+        );
+      }
+      return;
+    }
 
     switch (event.key) {
       case "ArrowDown":

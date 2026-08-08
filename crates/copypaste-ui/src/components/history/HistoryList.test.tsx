@@ -53,6 +53,7 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
     onCopy,
     onQuickCopy,
     onTogglePin: vi.fn(),
+    onReorderPinned: vi.fn(),
     onDelete,
     onOpen: vi.fn(),
     onLoadMore: vi.fn(),
@@ -79,6 +80,44 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
 }
 
 describe("list semantics", () => {
+  it.each(["macOS", "Android"])(
+    "reorders pinned rows with Option/Alt+Arrow on %s",
+    () => {
+      const data = items(3).map((item) => ({ ...item, pinned: true }));
+      const onReorderPinned = vi.fn();
+      setup(3, { items: data, activeId: data[1]!.id, onReorderPinned });
+
+      fireEvent.keyDown(screen.getByRole("list"), { key: "ArrowUp", altKey: true });
+
+      expect(onReorderPinned).toHaveBeenCalledWith([
+        data[1]!.id,
+        data[0]!.id,
+        data[2]!.id,
+      ]);
+      expect(screen.getByTestId("history-announcer").textContent).toContain("moved up");
+    },
+  );
+
+  it("does not reorder an unpinned row or move a pin past an edge", () => {
+    const data = items(3).map((item, index) => ({ ...item, pinned: index < 2 }));
+    const onReorderPinned = vi.fn();
+    const view = setup(3, { items: data, activeId: data[0]!.id, onReorderPinned });
+    const list = screen.getByRole("list");
+
+    fireEvent.keyDown(list, { key: "ArrowUp", altKey: true });
+    view.rerender(
+      <HistoryList
+        {...view.props}
+        items={data}
+        activeId={data[2]!.id}
+        onReorderPinned={onReorderPinned}
+      />,
+    );
+    fireEvent.keyDown(list, { key: "ArrowDown", altKey: true });
+
+    expect(onReorderPinned).not.toHaveBeenCalled();
+  });
+
   it("is a list of listitems, not a listbox of options (INV-8)", () => {
     setup();
     expect(screen.getByRole("list", { name: "Clipboard history" })).toBeTruthy();

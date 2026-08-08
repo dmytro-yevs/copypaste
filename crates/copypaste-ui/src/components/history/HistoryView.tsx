@@ -9,7 +9,7 @@ import { RevealNotice } from "@/components/history/RevealNotice";
 import { SearchBar } from "@/components/history/SearchBar";
 import { SkippedNotice } from "@/components/history/SkippedNotice";
 import { markedOrigins, originLabel } from "@/components/history/origin";
-import { useCopy, usePin, useStatus } from "@/hooks/useHistory";
+import { useCopy, usePin, useReorderPinned, useStatus } from "@/hooks/useHistory";
 import type { StatusData } from "@/lib/ipc";
 import { useHistoryController } from "@/hooks/useHistoryController";
 import { useHistorySelection } from "@/hooks/useHistorySelection";
@@ -44,14 +44,38 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
   const reveal = useReveal();
   const copy = useCopy();
   const pin = usePin();
+  const reorder = useReorderPinned();
   const status = useStatus(captureModes);
 
   const [confirmClear, setConfirmClear] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [bulkCopying, setBulkCopying] = useState(false);
+  const [optimisticPinned, setOptimisticPinned] = useState<readonly string[] | null>(null);
 
   const selection = bulk.selection;
-  const items = history.items;
+  const items = useMemo(() => {
+    if (optimisticPinned === null) return history.items;
+    const positions = new Map(optimisticPinned.map((id, index) => [id, index]));
+    const pinned = history.items.filter((item) => item.pinned);
+    pinned.sort(
+      (a, b) =>
+        (positions.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
+        (positions.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+    let nextPinned = 0;
+    return history.items.map((item) => (item.pinned ? pinned[nextPinned++]! : item));
+  }, [history.items, optimisticPinned]);
+
+  const reorderPinned = useCallback(
+    (ids: readonly string[]) => {
+      setOptimisticPinned(ids);
+      reorder.mutate(ids, {
+        onError: () => setOptimisticPinned(null),
+        onSuccess: () => setOptimisticPinned(null),
+      });
+    },
+    [reorder],
+  );
 
   // Resolved from the id on every render, never held: a poll can replace the
   // array while the view is open, and an item deleted underneath the reader
@@ -204,6 +228,7 @@ export function HistoryView({ pushLive = false }: HistoryViewProps) {
           onCopy: copy.mutate,
           onQuickCopy: quickCopy,
           onTogglePin: pin.mutate,
+          onReorderPinned: reorderPinned,
           onDelete: history.remove,
           onOpen: openDetail,
           onLoadMore: history.loadMore,
