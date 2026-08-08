@@ -51,6 +51,67 @@ be exact about its edges.
 - **Any macOS requirement.** Same rule as every other layer: WKWebView is not
   this engine, and nothing here substitutes for that layer.
 
+## What is driven
+
+| File | What only a running program on this engine can show |
+|---|---|
+| `attach` | the harness reaches our package's WebView and nothing else's |
+| `interaction` | navigation under a real tap, keyboard input, rows with real boxes |
+| `leaks` | INV-10 and INV-12 against `outerHTML` and the accessible surface |
+| `history-render` | virtualisation, the INV-5 reservation, clipping, INV-8's list semantics |
+| `scroll-anchor` | INV-1 when the list grows under the viewport, INV-6 when it shrinks |
+| `settings` | the Android tab set, A11Y-15's wrapping row, a preference reaching layout, and one surviving a reload through the Tauri store plugin |
+| `bulk-actions` | per-row actions **absent** in selection mode, and a bulk delete reaching the store |
+| `history-controls` | every toolbar control laid out inside a 412px screen at its promised touch target, and the kind filter narrowing the list |
+| `devices` | the pairing ceremony end to end on the mint side — code, QR, SAS — and the code leaving the document when the dialog closes |
+
+### Seeding
+
+`src/harness/bridge.ts` puts items in through `window.__TAURI_INTERNALS__.invoke`.
+The browser layer has a daemon and a CLI to seed with; Android has neither, and
+the bridge is the same command the screen calls, so an item seeded through it
+arrives exactly as a copied one would. Intents remain the doorway for the
+sensitive fixture, because that path is itself under test.
+
+Each file deletes what it seeded. The device is not reset between runs, and
+150 rows left behind change the shape of the list the next run measures.
+
+## What is deliberately not ported
+
+- **`daemon-config` and `service-lifecycle` do not apply.** Both drive a daemon
+  over a Unix socket, and Android has no daemon — the core is linked in-process
+  (ADR-0003). There is no offline screen offering to start a service and no
+  second process to configure. `GetConfig`/`SetConfig` still exist behind the
+  bridge, and the Android surface for them is the Service and Background
+  capture tabs, which `settings` covers.
+- **A pairing that completes.** `devices` mints a code, renders the QR and the
+  SAS, and asserts the join form; accepting needs a second device on the
+  network, which the browser layer supplies as a CLI fixture and a phone has no
+  counterpart for.
+- **`export-import` and `push`.** Not reached, for budget rather than for a
+  reason of principle. `export-import` drives the CLI on the browser layer and
+  would have to be re-expressed against the Storage surface, which Android does
+  not show; `push` needs a `copypaste://changed` emitter, which on Android is
+  the in-process core rather than a daemon.
+- **Keyboard navigation of the list.** `history-render` on the browser layer
+  asserts Arrow/Home/End/Escape/Ctrl+F. Those are desktop bindings on a screen
+  with no keyboard; the Android file asserts the list's ARIA contract instead
+  and leaves the bindings to the layer whose users have keys.
+
+## Two things this layer found that the others could not
+
+- **A tab a tap could not reach.** `TabsTrigger` carries `flex-1`, which is
+  `flex: 1 1 0%`, and a hypothetical main size of zero always fits — so
+  A11Y-15's wrapping row never wrapped, seven `nowrap` labels shared 412px and
+  overflowed onto each other. Every box was correct and non-overlapping;
+  only `elementFromPoint` knew that the centre of Service belonged to
+  Background capture. Fixed by giving the Android trigger `flex-none`.
+- **The reservation is a floor here, not a height.** `HistoryList` sets
+  `minHeight` on Android where desktop gets `height`, so the virtualiser
+  measures the row back and a one-line row settles at 68px against a 67px
+  reservation. INV-5's actual claim — same height for every row, decided by the
+  setting — is unaffected, and the tests assert the band rather than equality.
+
 ## Attaching, and the one thing that goes wrong
 
 The WebView publishes an abstract Unix socket named
