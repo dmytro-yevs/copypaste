@@ -25,6 +25,9 @@ name: Android emulator
 # The assertions are in scripts/release/android-smoke*.sh rather than in `run:`
 # blocks here, so check.sh can parse them, shellcheck them, and run their
 # --self-test — which proves the detectors fail when they should.
+# The debug leg also drives the app's WebView over CDP through `e2e-android/`.
+# The release leg asserts that the debugger socket is absent from the APK
+# people install.
 #
 # What this cannot do is exercise rung 2: Shizuku needs a wireless-debugging
 # pairing performed by hand and cannot be granted on a stock emulator. The
@@ -92,6 +95,7 @@ on:
       - "crates/copypaste-p2p/**"
       - "design/**"
       - "scripts/release/android-*.sh"
+      - "e2e-android/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -109,6 +113,7 @@ on:
       - "crates/copypaste-p2p/**"
       - "design/**"
       - "scripts/release/android-*.sh"
+      - "e2e-android/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -389,6 +394,16 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e-android/package-lock.json
+
+      - name: Install the UI harness
+        working-directory: e2e-android
+        run: npm ci
+
       - name: Enable KVM
         run: |
           set -euo pipefail
@@ -408,19 +423,11 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: |
-            set -uo pipefail
-            ./scripts/release/android-smoke.sh; smoke=$?
-            SMOKE_OUT=artifacts/android-storage TRANSFER_REQUIRE_RUN_AS=1 \
-              ./scripts/release/android-storage-transfer.sh; storage=$?
-            rungs=0
-            if [[ "${{ matrix.api-level }}" == "36" ]]; then
-              APK= SMOKE_OUT=artifacts/android-rungs ./scripts/release/android-rungs.sh; rungs=$?
-            fi
-            [ $smoke -eq 0 ] && [ $storage -eq 0 ] && [ $rungs -eq 0 ]
+          script: bash ./scripts/release/android-emulator-legs.sh
         env:
           APK: dist/copypaste-emulator-x86_64-debug.apk
           SMOKE_OUT: artifacts/android-smoke
+          HARNESS_OUT: ${{ github.workspace }}/artifacts/android-ui
 
       # Always: a failed assertion is exactly when the logcat, the screenshot
       # and the pulled database are worth having.
@@ -430,6 +437,7 @@ jobs:
           name: android-emulator-evidence-api${{ matrix.api-level }}
           path: |
             artifacts/android-smoke
+            artifacts/android-ui
             artifacts/android-storage
             artifacts/android-rungs
           if-no-files-found: warn
