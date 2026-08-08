@@ -4,18 +4,11 @@ export const common = {
   close: "Close",
   cancel: "Cancel",
   tryAgain: "Try again",
-  dismiss: "Dismiss",
   on: "On",
   off: "Off",
   unknown: "Unknown",
   noValue: "—",
   saving: "Saving…",
-  /** A destructive dialog's affirmative. Deliberately not "OK": the button
-   *  should say what it does, so it can be read without the sentence above it
-   *  (A11Y-3). */
-  replace: "Replace",
-  continue: "Continue",
-  back: "Back",
   done: "Done",
   copy: "Copy",
 } as const;

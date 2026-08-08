@@ -5,7 +5,8 @@
  * * Export is not destructive but it *leaks* — every clip as readable text —
  *   and the opt-in for flagged items sits inside the dialog, the second ask.
  * * Import parses first, then asks with the real item count before storing.
- * * Restore replaces everything, pinned included, so its action says "Replace".
+ * * Restore replaces everything, pinned included, so the dialog names what goes
+ *   and its affirmative names the next step rather than saying "OK" (A11Y-3).
  *
  * No path enters this component, so none can reach the DOM (INV-12).
  */
