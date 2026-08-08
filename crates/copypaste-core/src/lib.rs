@@ -43,7 +43,4 @@ pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};
 ///
 /// One helper, called everywhere. v1 had several time sources and a
 /// clock-skew bug that came from mixing them.
-pub fn now_ms() -> i64 {
-    use copypaste_clock::{SystemWallClock, WallClock};
-    SystemWallClock.now_ms()
-}
+pub use copypaste_clock::now_ms;
