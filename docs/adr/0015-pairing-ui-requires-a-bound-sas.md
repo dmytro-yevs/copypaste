@@ -1,4 +1,4 @@
-# 0007 — Pairing UI requires a bound SAS ceremony
+# 0015 — Pairing UI requires a bound SAS ceremony
 
 **Status:** Accepted — 2026-08-01
 

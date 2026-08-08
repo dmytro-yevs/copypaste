@@ -625,7 +625,7 @@ Never "daemon" (bdac.34/36). American spelling ("initializing") in newer strings
 
 ### 3.3 Pairing — QR modal and SAS modal
 
-> **Current product decision (ADR-0007).** The v2 backend currently persists a
+> **Current product decision (ADR-0015).** The v2 backend currently persists a
 > pairing before it can bind either device's decision to a SAS and has no safe
 > abort state machine. Until that API exists, Pair/Add-device controls are not
 > rendered on any platform. The Devices view still manages known devices. The
