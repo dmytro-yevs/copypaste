@@ -29,6 +29,8 @@
 //! pin the whole set.
 
 mod config;
+#[cfg(test)]
+mod contract_tests;
 mod dbadmin;
 pub(crate) mod dispatch;
 mod halted;
