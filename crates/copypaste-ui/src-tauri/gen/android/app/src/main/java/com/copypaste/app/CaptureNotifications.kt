@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 
 /**
  * The notification that says background capture stopped.
@@ -31,9 +33,11 @@ object CaptureNotifications {
     const val EXTRA_REARM = "com.copypaste.app.REARM"
 
     fun isPermissionGranted(context: Context): Boolean =
-        Build.VERSION.SDK_INT < 33 ||
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -59,9 +63,8 @@ object CaptureNotifications {
 
     /** Android 13+ blocks ordinary notifications until this runtime grant. */
     fun canPost(context: Context): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
+        NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+            isPermissionGranted(context)
 
     fun ongoing(context: Context, text: String): Notification =
         builder(context, CHANNEL_STATUS)

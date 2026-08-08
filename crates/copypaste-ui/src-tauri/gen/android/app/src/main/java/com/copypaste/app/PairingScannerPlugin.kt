@@ -3,6 +3,7 @@ package com.copypaste.app
 import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
@@ -26,12 +27,14 @@ class PairingScannerPlugin(private val activity: Activity) : Plugin(activity) {
             }
 
             scanInFlight = true
-            if (activity.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            if (
+                ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+            ) {
                 startScan(invoke)
             } else {
                 permissionInvoke = invoke
-                active = this@PairingScannerPlugin
-                activity.requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
+                (activity as MainActivity).requestCameraPermission(::onCameraPermissionResult)
             }
         }
     }
@@ -71,17 +74,5 @@ class PairingScannerPlugin(private val activity: Activity) : Plugin(activity) {
     private fun complete(invoke: Invoke, error: String) {
         scanInFlight = false
         invoke.resolve(JSObject().put("error", error))
-    }
-
-    companion object {
-        private const val CAMERA_PERMISSION_REQUEST = 4921
-        private var active: PairingScannerPlugin? = null
-
-        fun onRequestPermissionsResult(requestCode: Int, granted: Boolean) {
-            if (requestCode == CAMERA_PERMISSION_REQUEST) {
-                active?.onCameraPermissionResult(granted)
-                active = null
-            }
-        }
     }
 }

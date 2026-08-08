@@ -1,12 +1,31 @@
 package com.copypaste.app
 
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
+  private var notificationPermissionResult: ((Boolean) -> Unit)? = null
+  private var cameraPermissionResult: ((Boolean) -> Unit)? = null
+
+  private val notificationPermission = registerForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    notificationPermissionResult
+      ?.also { notificationPermissionResult = null }
+      ?.invoke(granted)
+  }
+
+  private val cameraPermission = registerForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    cameraPermissionResult
+      ?.also { cameraPermissionResult = null }
+      ?.invoke(granted)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Before super.onCreate, which is where Tauri's setup runs: that setup
     // opens the history database, and opening it needs the device secret out
@@ -32,17 +51,13 @@ class MainActivity : TauriActivity() {
     setIntent(intent)
   }
 
-  override fun onRequestPermissionsResult(
-    requestCode: Int,
-    permissions: Array<out String>,
-    grantResults: IntArray,
-  ) {
-    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-    val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-    CapturePlugin.onRequestPermissionsResult(requestCode, granted)
-    PairingScannerPlugin.onRequestPermissionsResult(
-      requestCode,
-      granted,
-    )
+  fun requestNotificationPermission(onResult: (Boolean) -> Unit) {
+    notificationPermissionResult = onResult
+    notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+  }
+
+  fun requestCameraPermission(onResult: (Boolean) -> Unit) {
+    cameraPermissionResult = onResult
+    cameraPermission.launch(android.Manifest.permission.CAMERA)
   }
 }

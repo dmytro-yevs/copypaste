@@ -1,6 +1,5 @@
 package com.copypaste.app
 
-import android.Manifest
 import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
@@ -126,11 +125,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             // pending so a granted dialog continues the user's original arm,
             // instead of making the control look as though it did nothing.
             pendingArm = PendingArm(invoke, title, body)
-            active = this@CapturePlugin
-            activity.requestPermissions(
-                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                NOTIFICATION_PERMISSION_REQUEST,
-            )
+            (activity as MainActivity).requestNotificationPermission(::onNotificationPermissionResult)
             return
         }
 
@@ -334,7 +329,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     companion object {
-        private const val NOTIFICATION_PERMISSION_REQUEST = 4920
         private const val SHIZUKU_PERMISSION_REQUEST = 4919
         private const val SHIZUKU_PERMISSION_TIMEOUT_MS = 30_000L
         private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
@@ -349,11 +343,6 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             }
         }
 
-        fun onRequestPermissionsResult(requestCode: Int, granted: Boolean) {
-            if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
-                active?.onNotificationPermissionResult(granted)
-            }
-        }
     }
 
     private fun onShizukuPermissionResult(granted: Boolean) {
