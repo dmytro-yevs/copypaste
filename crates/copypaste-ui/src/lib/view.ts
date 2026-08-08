@@ -9,6 +9,7 @@
 import fuzzysort from "fuzzysort";
 
 import { originOf } from "@/components/history/origin";
+import { rankFuzzy } from "@/lib/fuzzy";
 import { t } from "@/i18n";
 import { type Kind, kindOf, previewOf } from "@/lib/format";
 import type { Item } from "@/lib/ipc";
@@ -175,27 +176,13 @@ export function fuzzyItems(
   query: string,
   targets?: FuzzyTargets,
 ): readonly Item[] {
-  const needle = query.trim();
-  if (!needle) return items;
-
-  return items
-    .filter((item) => !item.is_sensitive && item.content !== null)
-    .map((item, index) => ({
-      item,
-      index,
-      match: fuzzysort.single(
-        needle,
-        targets?.prepare(item) ?? previewOf(item.content ?? ""),
-      ),
-    }))
-    .filter(
-      (entry): entry is typeof entry & {
-        match: NonNullable<typeof entry.match>;
-      } =>
-        entry.match !== null,
-    )
-    .sort((a, b) => b.match.score - a.match.score || a.index - b.index)
-    .map((entry) => entry.item);
+  return rankFuzzy(items, query, (item) =>
+    // A sensitive item has no plaintext to search (INV-10), and one that is
+    // still masked must not be reachable by guessing at its content.
+    item.is_sensitive || item.content === null
+      ? [null]
+      : [targets?.prepare(item) ?? previewOf(item.content)],
+  );
 }
 
 export function mergeSearchResults(

@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTranslation } from "@/i18n";
+import { rankFuzzy } from "@/lib/fuzzy";
 import type { SettingsSearchItem, SettingsSearchTab } from "@/components/settings/settingsSearchIndex";
 
 export interface ResolvedSettingsSearchItem {
@@ -255,34 +256,29 @@ export function SettingsSearchResults({
   return createPortal(content, document.body, resultId);
 }
 
+/** Scored per field rather than over one joined haystack, so "storage quota"
+ *  ranks the row it names above one that merely contains both words. */
 export function resolveSettingsSearch(
   items: readonly SettingsSearchItem[],
   tabLabels: ReadonlyMap<SettingsSearchTab, string>,
   translate: (key: string) => string,
   query: string,
-) {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return [];
+): readonly ResolvedSettingsSearchItem[] {
+  if (query.trim().length === 0) return [];
 
-  return items
-    .map<ResolvedSettingsSearchItem>((item) => ({
-      item,
-      tabLabel: tabLabels.get(item.tab) ?? item.tab,
-      sectionLabel: item.section ? translate(item.section) : undefined,
-      title: translate(item.title),
-      description: item.description ? translate(item.description) : undefined,
-    }))
-    .filter((result) => {
-      const haystack = [
-        result.tabLabel,
-        result.sectionLabel,
-        result.title,
-        result.description,
-        ...(result.item.keywords ?? []),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLocaleLowerCase();
-      return haystack.includes(needle);
-    });
+  const resolved = items.map<ResolvedSettingsSearchItem>((item) => ({
+    item,
+    tabLabel: tabLabels.get(item.tab) ?? item.tab,
+    sectionLabel: item.section ? translate(item.section) : undefined,
+    title: translate(item.title),
+    description: item.description ? translate(item.description) : undefined,
+  }));
+
+  return rankFuzzy(resolved, query, (result) => [
+    result.title,
+    result.description,
+    result.sectionLabel,
+    result.tabLabel,
+    ...(result.item.keywords ?? []),
+  ]);
 }
