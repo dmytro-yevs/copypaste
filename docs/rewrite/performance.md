@@ -329,6 +329,24 @@ hoisting it does not remove it. **F-STOR-3 was reverted.** The 202 µs to 166 µ
 above is what is left, and the only candidate for it is F-STOR-4's
 `PRAGMA optimize`.
 
+### 5.1 Payload-size sweep — **no target baseline yet**
+
+The depth sweep above holds rows at 512 bytes, so it cannot expose a change
+whose cost is per byte rather than per row. `storage/payload` holds depth at 32
+and sweeps 512 B, 64 KiB, 1 MiB and 4 MiB through `insert`, `bump`, `upsert`
+and the byte-cap gate. The two separate axes avoid an unaffordable matrix:
+8 000 four-MiB rows would require 32 GB before FTS duplication and encryption.
+
+```sh
+cargo bench -p copypaste-core --bench storage -- 'storage/(sweep|payload)'
+```
+
+Read the byte-cap gate on both axes. Its `SUM(LENGTH(...))` should climb with
+row count but stay flat across payload sizes because SQLite obtains a blob's
+length from the record header. The payload group was smoke-run in WSL2 to
+prove it discriminates the bump and insert paths, but that host is not a
+release target; the first run on host M remains the baseline.
+
 ---
 
 ## 6. Merging a peer's session — **S**
