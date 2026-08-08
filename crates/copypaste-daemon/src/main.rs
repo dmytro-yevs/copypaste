@@ -8,7 +8,6 @@ mod capture;
 mod cli;
 mod clipboard;
 mod cloud;
-mod dbfile;
 mod meta;
 mod notify;
 mod p2p;

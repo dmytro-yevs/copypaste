@@ -35,6 +35,7 @@
 
 use std::path::{Path, PathBuf};
 
+use copypaste_core::storage::{attach_key_literal, open_validated};
 use copypaste_core::{
     purge_indexed_secrets_in_transaction, verify_integrity, verify_schema, Detector, PurgeReport,
 };
@@ -46,7 +47,6 @@ use super::messages::{
     MSG_BACKUP_EXISTS, MSG_BACKUP_FAILED, MSG_BACKUP_NO_DIR, MSG_BAD_PATH, MSG_NEEDS_CONFIRM,
     MSG_RESTORE_FAILED, MSG_RESTORE_NOT_A_BACKUP, MSG_RESTORE_NOT_FOUND,
 };
-use crate::dbfile;
 use crate::AppState;
 
 /// Tables a restore replaces, in delete order (children first is not an issue
@@ -86,7 +86,7 @@ pub(super) fn backup(state: &AppState, id: u64, dest_path: &str) -> Response {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_NO_DIR);
     }
 
-    let conn = match dbfile::open(state.db_path(), &state.keyring.db_key()) {
+    let conn = match open_validated(state.db_path(), &state.keyring.db_key()) {
         Ok(conn) => conn,
         Err(e) => return failed(id, "open the database for backup", e, MSG_BACKUP_FAILED),
     };
@@ -212,10 +212,10 @@ fn restore_with_purge(
 
 /// Prove the candidate is a database this build wrote, with this device's key.
 fn validate(staging: &Path, key: &[u8; 32]) -> Result<(), &'static str> {
-    // `dbfile::open` applies the key and proves it opens the file; a wrong key
+    // `open_validated` applies the key and proves it opens the file; a wrong key
     // — a backup from another device, or a keychain that has been reset — comes
     // back as `InvalidKey` rather than as a fallback read.
-    let conn = dbfile::open(staging, key).map_err(|e| {
+    let conn = open_validated(staging, key).map_err(|e| {
         warn!(error = ?e, "the backup did not open with this device's key");
         MSG_RESTORE_NOT_A_BACKUP
     })?;
@@ -255,13 +255,13 @@ fn swap(
     detector: &Detector,
     purge: RestorePurge,
 ) -> Result<PurgeReport, crate::meta::MetaError> {
-    let mut conn = dbfile::open(db_path, key)?;
+    let mut conn = open_validated(db_path, key)?;
     // The raw-key form has to be literal in the clause — see
-    // `dbfile::attach_key_literal` for why binding it would silently derive a
-    // different key.
+    // `copypaste_core::storage::attach_key_literal` for why binding it would
+    // silently derive a different key.
     let attach = format!(
         "ATTACH DATABASE ?1 AS restore_src KEY {}",
-        dbfile::attach_key_literal(key).as_str()
+        attach_key_literal(key).as_str()
     );
     conn.execute(&attach, [staging.to_string_lossy().as_ref()])?;
 
@@ -403,7 +403,7 @@ mod tests {
     }
 
     fn replace_index_text(state: &AppState, id: &str, text: &str) {
-        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
         conn.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])
             .unwrap();
         conn.execute(
@@ -414,7 +414,7 @@ mod tests {
     }
 
     fn fts_rows(state: &AppState, id: &str) -> i64 {
-        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
         conn.query_row(
             "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
             [id],
@@ -424,7 +424,7 @@ mod tests {
     }
 
     fn dangling_fts_pointers(state: &AppState) -> i64 {
-        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
         conn.query_row(
             "SELECT COUNT(*) FROM clipboard_items ci \
               WHERE ci.fts_rowid IS NOT NULL \
@@ -436,7 +436,7 @@ mod tests {
     }
 
     fn deleted(state: &AppState, id: &str) -> bool {
-        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
         conn.query_row(
             "SELECT deleted FROM clipboard_items WHERE id = ?1",
             [id],
@@ -535,7 +535,7 @@ mod tests {
         let backup = dir.path().join("wrong-version.backup");
         assert!(backup_to(&state, &backup).ok);
 
-        let conn = dbfile::open(&backup, &state.keyring.db_key()).unwrap();
+        let conn = open_validated(&backup, &state.keyring.db_key()).unwrap();
         conn.pragma_update(None, "user_version", 2).unwrap();
         drop(conn);
 
@@ -551,7 +551,7 @@ mod tests {
         let backup = dir.path().join("wrong-column-type.backup");
         assert!(backup_to(&state, &backup).ok);
 
-        let conn = dbfile::open(&backup, &state.keyring.db_key()).unwrap();
+        let conn = open_validated(&backup, &state.keyring.db_key()).unwrap();
         conn.execute_batch(
             "DROP TABLE sync_device_name;
              CREATE TABLE sync_device_name (
@@ -574,7 +574,7 @@ mod tests {
         let backup = dir.path().join("unknown-table.backup");
         assert!(backup_to(&state, &backup).ok);
 
-        let conn = dbfile::open(&backup, &state.keyring.db_key()).unwrap();
+        let conn = open_validated(&backup, &state.keyring.db_key()).unwrap();
         conn.execute("CREATE TABLE clipboard_fts_unrecognised (value TEXT)", [])
             .unwrap();
         drop(conn);
@@ -787,7 +787,7 @@ mod tests {
         let image = crate::capture::ingest(&state, "opaque image bytes", "image/png")
             .unwrap()
             .into_item();
-        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
         conn.execute(
             "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
             rusqlite::params![&image.id, "private image caption"],
@@ -800,7 +800,7 @@ mod tests {
         assert!(restore_from(&state, &dest, true).ok);
         assert!(state.store.search("caption", 10).unwrap().is_empty());
 
-        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
         let fts_rows: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
@@ -814,7 +814,7 @@ mod tests {
     #[test]
     fn fts_shadow_tables_are_not_mistaken_for_tables_of_ours() {
         let (state, _dir) = test_state("alpha");
-        let conn = dbfile::open(state.db_path(), &state.keyring.db_key()).unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
         let mut tables = user_tables(&conn).unwrap();
         tables.sort();
         let mut expected: Vec<String> = KNOWN_TABLES.iter().map(|s| (*s).to_string()).collect();
