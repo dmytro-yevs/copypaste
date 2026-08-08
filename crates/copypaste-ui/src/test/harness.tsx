@@ -75,6 +75,7 @@ export function status(over: Partial<StatusData> = {}): StatusData {
     },
     ...over,
     private_mode: over.private_mode ?? false,
+    private_mode_epoch: over.private_mode_epoch ?? 0,
   };
 }
 
