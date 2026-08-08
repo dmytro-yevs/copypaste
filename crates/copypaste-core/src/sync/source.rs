@@ -30,7 +30,7 @@ use tracing::warn;
 
 use super::merge::{
     apply_remote_p2p_version_with_pin_stamp, apply_remote_version, open_version, MergeError,
-    RemoteVersion,
+    OpenVersionError, RemoteVersion,
 };
 use super::MSG_STORE;
 use crate::sensitive::Detector;
@@ -167,14 +167,14 @@ impl StoreSource {
 
     /// Decrypt one stored row for sending. See [`open_version`].
     #[must_use]
-    pub fn open(&self, row: &StoredItem) -> Option<String> {
+    pub fn open(&self, row: &StoredItem) -> Result<String, OpenVersionError> {
         open_version(&self.keyring, row)
     }
 
     /// Decrypt the raw payload for a transport.  Unlike [`Self::open`], this
     /// retains image and file bytes exactly.
     #[must_use]
-    pub fn open_bytes(&self, row: &StoredItem) -> Option<Vec<u8>> {
+    pub fn open_bytes(&self, row: &StoredItem) -> Result<Vec<u8>, OpenVersionError> {
         super::open_version_bytes(&self.keyring, row)
     }
 
@@ -248,9 +248,9 @@ impl StoreSource {
         let (content, binary_content) = if row.deleted {
             (String::new(), Vec::new())
         } else if copypaste_ipc::content_type::is_binary(&row.content_type) {
-            (String::new(), self.open_bytes(&row)?)
+            (String::new(), self.open_bytes(&row).ok()?)
         } else {
-            (self.open(&row)?, Vec::new())
+            (self.open(&row).ok()?, Vec::new())
         };
         Some(SyncItem {
             content,
@@ -855,10 +855,30 @@ mod tests {
         add(&f, "readable", "readable", 2_000);
 
         let source = f.source();
+        let foreign = f.store.version("foreign").unwrap().unwrap();
+        assert_eq!(
+            source.open(&foreign),
+            Err(OpenVersionError::AuthenticationFailed)
+        );
         let served = source
             .fetch(&["foreign".to_string(), "readable".to_string()])
             .unwrap();
         assert_eq!(served.len(), 1);
         assert_eq!(served[0].item_id, "readable");
+    }
+
+    #[test]
+    fn a_missing_payload_is_not_reported_as_an_authentication_failure() {
+        let f = fixture_named("alpha");
+        add(&f, "missing", "present in storage", 1_000);
+        let source = f.source();
+        let mut row = f.store.version("missing").unwrap().unwrap();
+
+        row.content_ciphertext.clear();
+        assert_eq!(source.open(&row), Err(OpenVersionError::MissingPayload));
+
+        row.content_ciphertext.push(1);
+        row.nonce.clear();
+        assert_eq!(source.open(&row), Err(OpenVersionError::MissingPayload));
     }
 }
