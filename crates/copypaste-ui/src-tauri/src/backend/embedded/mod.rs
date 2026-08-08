@@ -7,20 +7,23 @@
 //!
 //! # What this file will not do, and why that matters
 //!
-//! Three operations — `backup`, `restore` and `reorder_pinned` — return
-//! [`BackendError::Unsupported`] rather than an implementation. Each is a
-//! deliberate refusal with its reason on the method. `backup` and `restore`
-//! still name the same fix: the validate-then-swap lives inside the
+//! Two operations — `backup` and `restore` — return
+//! [`BackendError::Unsupported`] rather than an implementation, and they name
+//! one fix between them: the validate-then-swap lives inside the
 //! `copypaste-daemon` binary, which has no `[lib]` target, so approximating it
 //! here would be the second implementation CLAUDE.md rule 1 exists to stop —
-//! and a file copy that looks like a restore and is not is data loss.
+//! and a file copy that looks like a restore and is not is data loss. They
+//! refuse **together** on purpose: a backup this device could write but not
+//! read back is worse than no backup, because its key never leaves this device.
 //!
-//! Settings, pairing, syncing, discovery, export and import used to be on that
-//! list. They are not any more: `copypaste_p2p::Node` owns the listener and the
-//! four peer operations, `copypaste_core::StoreSource` is the history behind
-//! them, and `copypaste_core::transfer` owns the skip accounting and the
-//! detector-re-runs-on-import rule — the same node, the same source and the same
-//! two transfer functions the daemon runs (ADR-0003, [`peers`]).
+//! Pairing, syncing, discovery, export, import, `set_config` and
+//! `reorder_pinned` used to be on that list. They are not any more:
+//! `copypaste_p2p::Node` owns the listener and the four peer operations,
+//! `copypaste_core::StoreSource` is the history behind them,
+//! `copypaste_core::transfer` owns the skip accounting and the
+//! detector-re-runs-on-import rule, and `Store::reorder_pinned` owns the pinned
+//! ordering — the same node, the same source and the same functions the daemon
+//! runs (ADR-0003, [`peers`]).
 //!
 //! # What it does do
 //!
@@ -72,9 +75,6 @@ const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
 const MSG_INVALID_SETTING: &str = "That setting isn't valid.";
 const MSG_NO_BACKUP: &str = "Backup and restore aren't available in this build yet.";
-const MSG_NO_REORDER: &str =
-    "Reordering pinned items isn't available yet. Pinned items keep the order they \
-     were pinned in.";
 
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
@@ -290,16 +290,23 @@ impl Backend for EmbeddedBackend {
         .await
     }
 
-    /// Needs `Store::reorder_pinned`, which does not exist.
+    /// `Store::reorder_pinned` — the same transaction the daemon reaches
+    /// through `Method::ReorderPinned`, not a second one derived here.
     ///
-    /// The `pin_order` column is there and `set_pinned` maintains it, but
-    /// rewriting the order is a transaction over the whole pinned section and
-    /// belongs beside the other `pin_order` writes in `copypaste-core`, not
-    /// re-derived here. Same refusal as the daemon backend, same reason
-    /// (parity finding 19) — so both platforms are missing exactly one thing
-    /// rather than one platform quietly growing a second implementation.
-    async fn reorder_pinned(&self, _ids: &[String]) -> Result<()> {
-        Err(BackendError::Unsupported(MSG_NO_REORDER))
+    /// An id the caller named that is gone or no longer pinned is ignored
+    /// rather than refused; the core method owns that rule so both platforms
+    /// keep it. A count of zero is therefore success, not a miss.
+    async fn reorder_pinned(&self, ids: &[String]) -> Result<()> {
+        let ids = ids.to_vec();
+        self.blocking(move |inner| {
+            inner
+                .state
+                .store
+                .reorder_pinned(&ids)
+                .map(|_| ())
+                .map_err(|_| BackendError::internal("the pinned order could not be changed"))
+        })
+        .await
     }
 
     async fn status(&self) -> Result<StatusData> {
@@ -580,6 +587,41 @@ mod tests {
         ));
     }
 
+    /// The pinned section reads back in the order asked for, and the gesture
+    /// survives an id that a sync round removed between the read and the drop
+    /// — the case that would otherwise lose a reorder the user just made.
+    #[tokio::test]
+    async fn the_pinned_section_takes_the_order_it_is_given() {
+        let (backend, _clip, _dir) = backend();
+        let mut ids = Vec::new();
+        for content in ["first", "second", "third"] {
+            let item = backend.add(content).await.unwrap();
+            backend.set_pinned(&item.id, true).await.unwrap();
+            ids.push(item.id);
+        }
+
+        let reversed: Vec<String> = ids.iter().rev().cloned().collect();
+        backend.reorder_pinned(&reversed).await.unwrap();
+        let pinned: Vec<String> = backend
+            .list(50, None)
+            .await
+            .unwrap()
+            .items
+            .into_iter()
+            .filter(|item| item.pinned)
+            .map(|item| item.id)
+            .collect();
+        assert_eq!(pinned, reversed);
+
+        let mut stale = reversed.clone();
+        stale.insert(0, "gone-in-a-sync-round".to_string());
+        backend.reorder_pinned(&stale).await.unwrap();
+        assert_eq!(pinned.len(), 3, "the gesture must not drop a live pin");
+    }
+
+    /// A missing device is `peer_not_found`, never the item-shaped `not_found`
+    /// — the split `BackendError::from_code` makes, so the pairing screen can
+    /// say "that device is gone" instead of "that item is gone".
     #[tokio::test]
     async fn an_unknown_peer_is_not_found() {
         let (backend, _clip, _dir) = backend();
@@ -588,10 +630,10 @@ mod tests {
             backend.unpair("nope").await.unwrap_err(),
             BackendError::NotFound(_)
         ));
-        assert!(matches!(
-            backend.sync(Some("nope")).await.unwrap_err(),
-            BackendError::NotFound(_)
-        ));
+
+        let err = backend.sync(Some("nope")).await.unwrap_err();
+        assert_eq!(err.ui_error().code, "peer_not_found", "{err:?}");
+        assert!(!err.ui_error().retryable, "{err:?}");
     }
 
     /// The whole point of the move: this build can mint a pairing, and the code
@@ -716,14 +758,13 @@ mod tests {
 
     /// The refusals must read as structural, not transient: a user must not be
     /// told to try again at something that will never work in this build.
+    ///
+    /// Both, never one: a backup this device can write but not read back is
+    /// worse than no backup, because the key never leaves the device.
     #[tokio::test]
     async fn the_unimplemented_operations_say_so_plainly() {
         let (backend, _clip, _dir) = backend();
         for err in [
-            backend
-                .set_config(ConfigPatch::default())
-                .await
-                .unwrap_err(),
             backend.backup(Path::new("anywhere")).await.unwrap_err(),
             backend.restore(Path::new("anywhere")).await.unwrap_err(),
         ] {
