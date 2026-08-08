@@ -199,7 +199,7 @@ impl Node {
 
     fn wants_discovery(&self) -> bool {
         self.lan_visible.load(Ordering::Relaxed)
-            && (self.peers.len() > 0
+            && (!self.peers.is_empty()
                 || crate::now_ms() < self.browse_until_ms.load(Ordering::Relaxed))
     }
 
