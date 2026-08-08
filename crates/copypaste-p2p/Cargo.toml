@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 copypaste-clock = { path = "../copypaste-clock" }
+copypaste-fs = { path = "../copypaste-fs" }
 snow.workspace = true
 mdns-sd.workspace = true
 data-encoding.workspace = true

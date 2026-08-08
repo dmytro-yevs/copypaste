@@ -1072,6 +1072,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "copypaste-fs"
+version = "2.0.0-alpha.4"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "copypaste-ipc"
 version = "2.0.0-alpha.4"
 dependencies = [
@@ -1093,6 +1100,7 @@ name = "copypaste-p2p"
 version = "2.0.0-alpha.4"
 dependencies = [
  "copypaste-clock",
+ "copypaste-fs",
  "criterion",
  "data-encoding",
  "futures-util",
@@ -1132,6 +1140,7 @@ name = "copypaste-sensitive-rules"
 version = "2.0.0-alpha.4"
 dependencies = [
  "anyhow",
+ "copypaste-fs",
  "regex",
  "reqwest 0.12.28",
  "serde",
@@ -1148,6 +1157,7 @@ dependencies = [
  "backon",
  "base64 0.22.1",
  "copypaste-core",
+ "copypaste-fs",
  "copypaste-ipc",
  "copypaste-p2p",
  "copypaste-runtime-log",
