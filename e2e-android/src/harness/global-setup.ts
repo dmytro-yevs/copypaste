@@ -4,7 +4,7 @@ import path from "node:path";
 import type { TestProject } from "vitest/node";
 
 import { PACKAGE, adb, isDebuggable, launchMain, shareText } from "./adb.js";
-import { attachToApp } from "./app.js";
+import { attachToApp, type AndroidApp } from "./app.js";
 import { closeDevtools } from "./devtools.js";
 import { freshNonce, ordinaryFor, secretFor } from "./fixtures.js";
 import {
@@ -13,12 +13,32 @@ import {
   gotoView,
   scrollListToTop,
   topRowIsMasked,
+  visibleText,
   waitFor,
   waitForRows,
-  waitForText,
 } from "./ui.js";
 
 const OUT = process.env.HARNESS_OUT ?? "artifacts/android-ui";
+
+const SHARE_ATTEMPTS = 3;
+
+async function shareUntil(
+  app: AndroidApp,
+  text: string,
+  arrived: () => Promise<boolean>,
+): Promise<void> {
+  for (let attempt = 1; attempt <= SHARE_ATTEMPTS; attempt += 1) {
+    await shareText(text);
+    await launchMain();
+    try {
+      await waitFor(arrived, "not yet", 25_000);
+      return;
+    } catch {
+      /* dropped on the way in; send it again */
+    }
+  }
+  throw new Error(`the shared clipping never reached the screen after ${SHARE_ATTEMPTS} attempts`);
+}
 
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
   const devices = (await adb("devices"))
@@ -57,20 +77,19 @@ export default async function setup(project: TestProject): Promise<() => Promise
     // `am start`s in a row reach IntakeActivity while the first is still
     // finishing and the second is dropped — silently, because `am` reports
     // that it started the activity either way.
-    await shareText(secret);
-    await launchMain();
-    await waitFor(
-      async () => {
-        await scrollListToTop(app);
-        return topRowIsMasked(app);
-      },
-      "the shared credential never became the newest row, masked",
-      60_000,
-    );
-
-    await shareText(ordinary);
-    await launchMain();
-    await waitForText(app, ordinary, 60_000);
+    //
+    // Confirmed and *re-sent* if it does not arrive: waiting longer does not
+    // help a share that was dropped, and one that is dropped fails the whole
+    // run in global setup. Measured on API 36 with a few dozen rows already in
+    // the store, the second share is the one that goes missing.
+    await shareUntil(app, secret, async () => {
+      await scrollListToTop(app);
+      return topRowIsMasked(app);
+    });
+    await shareUntil(app, ordinary, async () => {
+      await scrollListToTop(app);
+      return (await visibleText(app)).includes(ordinary);
+    });
     await waitForRows(app, 2, 60_000);
 
     mkdirSync(OUT, { recursive: true });
