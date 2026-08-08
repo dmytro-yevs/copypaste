@@ -49,7 +49,7 @@
     {
       "id": "settings-and-service",
       "status": "product",
-      "contracts": ["set_native_theme", "system_accent", "status", "diagnostics", "runtime_log_events", "export_diagnostics_report", "export_support_bundle", "service_state", "start_service", "restart_service", "hide_window", "show_main_window", "set_allow_screenshots", "get_default_shortcut", "get_shortcut", "set_shortcut", "get_config", "set_config", "export_history", "prepare_import_history", "apply_import_history", "cancel_import_history", "backup_database", "restore_database"],
+      "contracts": ["set_native_theme", "system_accent", "status", "diagnostics", "runtime_log_events", "export_diagnostics_report", "export_support_bundle", "service_state", "start_service", "restart_service", "hide_window", "show_main_window", "set_allow_screenshots", "get_default_shortcut", "get_shortcut", "set_shortcut", "get_open_at_login", "set_open_at_login", "get_config", "set_config", "export_history", "prepare_import_history", "apply_import_history", "cancel_import_history", "backup_database", "restore_database"],
       "backend_tests": ["cargo test --workspace"],
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["loading", "saved", "error", "keyboard", "screen_reader"],
