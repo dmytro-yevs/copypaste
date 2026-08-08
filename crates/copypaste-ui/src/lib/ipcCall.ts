@@ -2,9 +2,9 @@
  * The only place `invoke` is called.
  *
  * A command the bridge does not route and an operation a build cannot perform
- * (`Unsupported` — Android has no pairing) both classify as `unavailable`:
- * "this build cannot" and "the service is down" are different things to be
- * told, and only one is worth retrying.
+ * (`Unsupported` — no backend reorders pinned items) both classify as
+ * `unavailable`: "this build cannot" and "the service is down" are different
+ * things to be told, and only one is worth retrying.
  */
 import { invoke } from "@tauri-apps/api/core";
 

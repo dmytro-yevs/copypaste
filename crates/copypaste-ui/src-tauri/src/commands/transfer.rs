@@ -317,10 +317,12 @@ async fn open_panel<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PathBuf>> {
 /// A picked location as a path this process can open.
 ///
 /// Android's document picker answers with a `content://` URI rather than a
-/// path, and the service's file operations take paths. Refusing plainly beats
-/// handing something down that cannot be opened — and it is the same refusal
-/// the in-process backend already makes for these four operations, so the user
-/// is told once rather than twice.
+/// path, and the service's file operations take paths.
+///
+/// It refuses more than it has to: `export` and `import` are implemented on the
+/// in-process backend and reachable only through this panel, so on Android they
+/// fail here instead. Closing that means carrying the [`FilePath`] down to the
+/// native file plugin, as [`save_panel_file`] does for the diagnostics report.
 fn to_path(chosen: Option<FilePath>) -> Result<Option<PathBuf>> {
     match chosen {
         None => Ok(None),

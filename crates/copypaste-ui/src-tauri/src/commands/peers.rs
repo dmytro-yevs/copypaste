@@ -1,25 +1,21 @@
-//! Peer commands: pair, peers, unpair, sync.
+//! Peer commands: pair, peers, unpair, revoke, sync, discovery.
 //!
-//! These exist because CLAUDE.md rule 6 says a feature is not done until it has
-//! a UI, and names *this exact feature* as the case the rule was written from:
-//! the transport, the merge, discovery, the daemon wiring and the CLI verbs all
-//! landed while the only way to pair two devices was to type a command into a
-//! terminal.
-//!
-//! What a pairing screen needs, and what these five commands are shaped to
-//! give it:
+//! What a devices screen needs, and what these are shaped to give it:
 //!
 //! | screen state | command |
 //! |---|---|
 //! | the list of known devices | [`peers`] |
-//! | forget one | [`unpair`] |
+//! | forget one, or cut it off | [`unpair`] / [`revoke`] |
 //! | sync now, with per-device results | [`sync_now`] |
 //! | the devices on this network | [`discovered`] / [`rescan`] |
+//! | add one | [`pair_create`] / [`pair_accept`] |
 //!
-//! Pair-create and pair-accept are intentionally **not** Tauri commands. The
-//! current wire cannot bind a peer-visible SAS decision before persistence;
-//! exposing a credential-returning command would invite a non-compliant UI.
-//! ADR-0007 records the re-entry requirements.
+//! **The last row is not settled.** ADR-0007 is Accepted and says no Pair or
+//! Add-device control may be exposed until the wire supplies a handshake-derived
+//! SAS, a peer-visible confirm before persistence, and an idempotent abort. The
+//! wire supplies none of the three: [`pair_accept`] persists as it accepts, and
+//! the six characters the dialog compares come from the pairing id. Either the
+//! ADR is superseded by a decision written down, or these two go.
 
 use tauri::State;
 
