@@ -373,7 +373,9 @@ jobs:
           # the order is load-bearing and so is `set -e`: without it the UI run
           # would report last and a failed smoke test would look green.
           script: |
-            set -euo pipefail
+            # dash, not bash: the emulator-runner action runs this with
+            # /usr/bin/sh, which has no `pipefail`. Nothing here pipes.
+            set -eu
             ./scripts/release/android-smoke.sh
             npm --prefix e2e-android test
         env:
