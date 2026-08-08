@@ -380,14 +380,7 @@ jobs:
           # one must not hide the other. That is why there is no `set -e`: the
           # statuses are collected and the last line is what fails the job.
           script: |
-            # dash, not bash: the emulator-runner action runs this with
-            # /usr/bin/sh, which has no `pipefail`. Nothing here pipes, and the
-            # three legs collect their own statuses so all three always run.
-            set -u
-            ./scripts/release/android-smoke.sh; smoke=$?
-            npm --prefix e2e-android test; ui=$?
-            APK= SMOKE_OUT=artifacts/android-rungs ./scripts/release/android-rungs.sh; rungs=$?
-            [ $smoke -eq 0 ] && [ $ui -eq 0 ] && [ $rungs -eq 0 ]
+            ./scripts/release/android-emulator-legs.sh
         env:
           APK: dist/copypaste-emulator-x86_64-debug.apk
           SMOKE_OUT: artifacts/android-smoke
