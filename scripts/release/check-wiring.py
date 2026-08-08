@@ -388,14 +388,20 @@ if emu:
         for s in runners:
             with_ = s.get("with") or {}
             runner_script = str(with_.get("script", ""))
-            rec(script in str(with_.get("script", "")),
+            runner_sources = [runner_script]
+            for candidate in re.findall(r"scripts/release/([A-Za-z0-9._-]+\.sh)", runner_script):
+                candidate_path = pathlib.Path("scripts") / "release" / candidate
+                if candidate_path.exists():
+                    runner_sources.append(candidate_path.read_text(encoding="utf-8"))
+            runner_source = "\n".join(runner_sources)
+            rec(script in runner_source,
                 "{} runs scripts/release/{}".format(emulator_job, script),
                 "assertions belong in a script check.sh can parse and self-test, not in YAML: {!r}".format(with_.get("script")))
-            rec("android-storage-transfer.sh" in runner_script,
+            rec("android-storage-transfer.sh" in runner_source,
                 "{} runs the native storage transfer scenario".format(emulator_job),
                 "export/import through DocumentsUI must gate both Android build types")
             if debug:
-                rec("TRANSFER_REQUIRE_RUN_AS=1" in runner_script,
+                rec("TRANSFER_REQUIRE_RUN_AS=1" in runner_source,
                     "{} requires ciphertext inspection".format(emulator_job),
                     "the debuggable leg must fail if it cannot read and inspect the SQLCipher files")
             rec(not s.get("continue-on-error"), "{}: the emulator step can fail the job".format(emulator_job),
