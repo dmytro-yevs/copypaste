@@ -30,17 +30,16 @@
 //! all three skip counts, always, including when they are zero.
 
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::BufReader;
 use std::path::Path;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use copypaste_ipc::{ExportData, ExportItem, ImportData};
 use serde::Serialize;
 use tauri::{AppHandle, Runtime, State};
-use tauri_plugin_dialog::{DialogExt, FilePath};
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
+use crate::commands::document;
 
 type Result<T> = std::result::Result<T, BackendError>;
 
@@ -181,13 +180,13 @@ pub async fn export_history<R: Runtime>(
     // says so instead of asking where to put nothing.
     let data = backend.export(0, include_sensitive).await?;
 
-    let Some(dest) = save_panel(&app, EXPORT_NAME).await? else {
+    let Some(dest) = document::save_panel_file(&app, EXPORT_NAME).await else {
         return Ok(None);
     };
 
     let encoded = serde_json::to_string_pretty(&data)
         .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
-    write_owner_only(&dest, encoded.as_bytes())?;
+    document::write_picked(&app, dest, encoded.as_bytes(), MSG_NOT_WRITTEN)?;
 
     Ok(Some(ExportReport::from(&data)))
 }
@@ -199,10 +198,17 @@ pub async fn prepare_import_history<R: Runtime>(
     pending: State<'_, PendingImportState>,
 ) -> Result<Option<ImportPreview>> {
     pending.clear()?;
-    let Some(src) = open_panel(&app).await? else {
+    let Some(src) = document::open_panel_file(&app).await else {
         return Ok(None);
     };
-    Ok(Some(preview_file(&pending, &src)?))
+    let local = document::picked_to_temp(
+        &app,
+        src,
+        MAX_IMPORT_FILE_BYTES,
+        MSG_IMPORT_TOO_LARGE,
+        MSG_UNREADABLE,
+    )?;
+    Ok(Some(preview_file(&pending, local.path())?))
 }
 
 /// Consume one prepared import and route every item through ordinary ingest.
@@ -249,16 +255,16 @@ pub async fn backup_database<R: Runtime>(
     app: AppHandle<R>,
     backend: State<'_, SelectedBackend>,
 ) -> Result<Option<u64>> {
-    let Some(dest) = save_panel(&app, BACKUP_NAME).await? else {
+    let Some(dest) = document::save_panel_file(&app, BACKUP_NAME).await else {
         return Ok(None);
     };
-    // The service refuses to overwrite — the obvious mistake is naming the live
-    // database, and copying onto it would be a wipe. Checking here as well
-    // turns the panel's "replace?" into an answer the user gets straight away.
-    if dest.exists() {
-        return Err(BackendError::Invalid(MSG_BACKUP_EXISTS));
-    }
-    Ok(Some(backend.backup(&dest).await?.size_bytes))
+    let dir = tempfile::tempdir().map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
+    let local = dir.path().join(BACKUP_NAME);
+    let report = backend.backup(&local).await?;
+    let mut backup =
+        File::open(&local).map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
+    document::copy_to_picked(&app, dest, &mut backup, MSG_NOT_WRITTEN)?;
+    Ok(Some(report.size_bytes))
 }
 
 /// Replace this device's history with a backup.
@@ -275,86 +281,14 @@ pub async fn restore_database<R: Runtime>(
     app: AppHandle<R>,
     backend: State<'_, SelectedBackend>,
 ) -> Result<bool> {
-    let Some(src) = open_panel(&app).await? else {
+    let Some(src) = document::open_panel_file(&app).await else {
         return Ok(false);
     };
-    backend.restore(&src).await?;
+    let local =
+        document::picked_to_temp(&app, src, u64::MAX, MSG_IMPORT_TOO_LARGE, MSG_UNREADABLE)?;
+    backend.restore(local.path()).await?;
     Ok(true)
 }
-
-/// Ask where to write, and answer `None` if the user closed the panel.
-async fn save_panel<R: Runtime>(app: &AppHandle<R>, name: &str) -> Result<Option<PathBuf>> {
-    to_path(save_panel_file(app, name).await)
-}
-
-/// Choose a destination without allowing its location to cross the WebView.
-///
-/// Diagnostics also exports through this panel. It needs the original
-/// [`FilePath`] so Android's `content://` URI can be opened by the native file
-/// plugin instead of being incorrectly treated as a desktop path.
-pub(crate) async fn save_panel_file<R: Runtime>(
-    app: &AppHandle<R>,
-    name: &str,
-) -> Option<FilePath> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog()
-        .file()
-        .set_file_name(name)
-        .save_file(move |chosen| {
-            let _ = tx.send(chosen);
-        });
-    rx.await.unwrap_or(None)
-}
-
-async fn open_panel<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PathBuf>> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().pick_file(move |chosen| {
-        let _ = tx.send(chosen);
-    });
-    to_path(rx.await.unwrap_or(None))
-}
-
-/// A picked location as a path this process can open.
-///
-/// Android's document picker answers with a `content://` URI rather than a
-/// path, and the service's file operations take paths.
-///
-/// It refuses more than it has to: `export` and `import` are implemented on the
-/// in-process backend and reachable only through this panel, so on Android they
-/// fail here instead. Closing that means carrying the [`FilePath`] down to the
-/// native file plugin, as [`save_panel_file`] does for the diagnostics report.
-fn to_path(chosen: Option<FilePath>) -> Result<Option<PathBuf>> {
-    match chosen {
-        None => Ok(None),
-        Some(picked) => picked
-            .into_path()
-            .map(Some)
-            .map_err(|_| BackendError::Unsupported(MSG_NO_PLACE)),
-    }
-}
-
-/// Write owner-only, and create rather than truncate-in-place.
-///
-/// An export is every clipping the user has, in plaintext. The default mode
-/// would be world-readable on a shared machine, and the mode has to be set at
-/// `open` rather than after the write, or there is a window in which it is not.
-fn write_owner_only(dest: &PathBuf, bytes: &[u8]) -> Result<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    // **Unverified off unix**: there the file inherits the chosen directory's
-    // ACL, which the sentence above is not a claim about.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(dest)
-        .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))?;
-    file.write_all(bytes)
-        .map_err(|_| BackendError::Internal(MSG_NOT_WRITTEN.into()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
