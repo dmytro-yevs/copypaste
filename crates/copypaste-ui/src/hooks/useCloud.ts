@@ -29,6 +29,9 @@ export function useCloudSignIn() {
   const qc = useQueryClient();
   return useMutation<CloudStatusData, unknown, CloudCredentials>({
     mutationFn: cloudSignIn,
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: CLOUD_STATUS_KEY });
+    },
     onSuccess: (status) => {
       qc.setQueryData(CLOUD_STATUS_KEY, status);
       toast.success(t("settings.sync.cloud.toast.signedIn"));
@@ -41,6 +44,9 @@ export function useCloudSignOut() {
   const qc = useQueryClient();
   return useMutation<CloudStatusData, unknown, void>({
     mutationFn: cloudSignOut,
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: CLOUD_STATUS_KEY });
+    },
     onSuccess: (status) => {
       qc.setQueryData(CLOUD_STATUS_KEY, status);
       toast.success(t("settings.sync.cloud.toast.signedOut"));
