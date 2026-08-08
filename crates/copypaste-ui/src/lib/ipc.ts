@@ -293,9 +293,20 @@ export function getShortcut(): Promise<string> {
   return call<string>("get_shortcut");
 }
 
-/** The bridge refuses the five media keys with a test each;
- *  `captureAccelerator` refuses them here too so the user learns why before
- *  spending a round trip. */
+/** The bridge refuses the media keys its platform cannot bind, with a test
+ *  each; `captureAccelerator` refuses the same set here so the user learns why
+ *  before spending a round trip. */
 export function setShortcut(accelerator: string): Promise<void> {
   return call<void>("set_shortcut", { accelerator });
+}
+
+export function getOpenAtLogin(): Promise<boolean> {
+  return call<boolean>("get_open_at_login");
+}
+
+/** Answers with the state the system reports afterwards, not the one asked
+ *  for — Windows can accept the registry write while Task Manager's Startup
+ *  list still holds the app off. */
+export function setOpenAtLogin(enabled: boolean): Promise<boolean> {
+  return call<boolean>("set_open_at_login", { enabled });
 }

@@ -8,20 +8,24 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SHORTCUT,
   MEDIA_KEYS,
+  WINDOWS_UNBINDABLE_KEYS,
   acceleratorGlyphs,
   captureAccelerator,
 } from "./accelerator";
 
-function press(over: Partial<KeyboardEvent>) {
-  return captureAccelerator({
-    code: "",
-    key: "",
-    metaKey: false,
-    ctrlKey: false,
-    altKey: false,
-    shiftKey: false,
-    ...over,
-  } as KeyboardEvent);
+function press(over: Partial<KeyboardEvent>, windows = false) {
+  return captureAccelerator(
+    {
+      code: "",
+      key: "",
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      ...over,
+    } as KeyboardEvent,
+    windows,
+  );
 }
 
 describe("layout independence (AT-56)", () => {
@@ -97,6 +101,39 @@ describe("media keys are refused", () => {
       expect(result.reason).toMatch(/update/);
     }
   });
+
+  /** Windows uses `RegisterHotKey`, which costs no permission and has a
+   *  `VK_MEDIA_*` code for these. Refusing them there would be enforcing a
+   *  macOS constraint on a machine that does not have it. */
+  it.each(MEDIA_KEYS.filter((key) => !WINDOWS_UNBINDABLE_KEYS.includes(key)))(
+    "%s is accepted on Windows",
+    (code) => {
+      expect(press({ code, key: code, ctrlKey: true }, true)).toEqual({
+        kind: "accelerator",
+        value: `CmdOrCtrl+${code}`,
+      });
+    },
+  );
+
+  /** The two `global-hotkey`'s Windows `key_to_vk` cannot map. Refused here so
+   *  the user is told why, rather than being told the key is already taken. */
+  it.each(WINDOWS_UNBINDABLE_KEYS)("%s is refused on Windows", (code) => {
+    const result = press({ code, key: code, ctrlKey: true }, true);
+    expect(result.kind).toBe("refused");
+    if (result.kind === "refused") {
+      expect(result.reason).toMatch(/Windows/);
+      expect(result.reason).not.toMatch(/Accessibility/);
+    }
+  });
+
+  it("asks for a modifier in words a Windows keyboard has engraved on it", () => {
+    const result = press({ code: "KeyV", key: "v" }, true);
+    expect(result.kind).toBe("refused");
+    if (result.kind === "refused") {
+      expect(result.reason).toMatch(/Ctrl/);
+      expect(result.reason).not.toMatch(/⌘/);
+    }
+  });
 });
 
 describe("modifier order is fixed", () => {
@@ -121,11 +158,23 @@ describe("modifier order is fixed", () => {
 
 describe("display is separate from the value (A11Y-13)", () => {
   it("renders one keycap per token, so F1 does not become two", () => {
-    expect(acceleratorGlyphs("CmdOrCtrl+Shift+F1")).toEqual(["⌘", "⇧", "F1"]);
+    expect(acceleratorGlyphs("CmdOrCtrl+Shift+F1", false)).toEqual(["⌘", "⇧", "F1"]);
   });
 
   it("passes an unmapped token through rather than dropping it", () => {
-    expect(acceleratorGlyphs("CmdOrCtrl+Q")).toEqual(["⌘", "Q"]);
+    expect(acceleratorGlyphs("CmdOrCtrl+Q", false)).toEqual(["⌘", "Q"]);
+  });
+
+  /** `CmdOrCtrl` is registered as Control off macOS, so ⌘ on a Windows keycap
+   *  names a key that is neither on the keyboard nor the one that is bound. */
+  it("spells the keycaps the way the platform does", () => {
+    expect(acceleratorGlyphs("CmdOrCtrl+Shift+V", true)).toEqual([
+      "Ctrl",
+      "Shift",
+      "V",
+    ]);
+    expect(acceleratorGlyphs("Alt+Return", true)).toEqual(["Alt", "Enter"]);
+    expect(acceleratorGlyphs("Alt+Return", false)).toEqual(["⌥", "↩"]);
   });
 
   it("has a default that matches the one the backend registers", () => {

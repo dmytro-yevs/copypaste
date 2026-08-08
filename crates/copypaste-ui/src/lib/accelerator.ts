@@ -5,11 +5,12 @@
  * AZERTY layout records the same physical binding.
  */
 import { t } from "@/i18n";
+import { isWindowsPlatform } from "@/lib/platform";
 
 export const DEFAULT_SHORTCUT = "CmdOrCtrl+Shift+V";
 
 /**
- * Refused. `global-hotkey` binds ordinary keys through Carbon
+ * Refused on macOS. `global-hotkey` binds ordinary keys through Carbon
  * `RegisterEventHotKey` (no permission needed) but falls back to an active
  * `CGEventTap` for exactly these five, which needs Accessibility — and per
  * ADR-0001 an ad-hoc-signed app loses that grant on every update, so the
@@ -19,6 +20,17 @@ export const MEDIA_KEYS: readonly string[] = [
   "MediaPlayPause",
   "MediaTrackNext",
   "MediaTrackPrevious",
+  "MediaFastForward",
+  "MediaRewind",
+];
+
+/**
+ * Windows binds media keys with `RegisterHotKey` and no permission at all, so
+ * only the two that `global-hotkey`'s `key_to_vk` has no `VK_` constant for are
+ * refused. `shell::hotkey::refusal` draws the same line; a mismatch would
+ * either offer a key the backend rejects or hide one it would have taken.
+ */
+export const WINDOWS_UNBINDABLE_KEYS: readonly string[] = [
   "MediaFastForward",
   "MediaRewind",
 ];
@@ -68,10 +80,12 @@ function keyFrom(event: Pick<KeyboardEvent, "code" | "key">): string | null {
 
 /**
  * Modifier order is fixed (`CmdOrCtrl`, `Alt`, `Shift`, key); `metaKey` and
- * `ctrlKey` both map to `CmdOrCtrl`, Tauri's cross-platform alias.
+ * `ctrlKey` both map to `CmdOrCtrl`, Tauri's cross-platform alias — which the
+ * hotkey parser resolves to Command on macOS and Control everywhere else.
  */
 export function captureAccelerator(
   event: Pick<KeyboardEvent, "code" | "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
+  windows = isWindowsPlatform(),
 ): CaptureResult {
   if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey) {
     return { kind: "cancelled" };
@@ -80,8 +94,16 @@ export function captureAccelerator(
 
   const key = keyFrom(event);
   if (key === null) return { kind: "incomplete" };
-  if (MEDIA_KEYS.includes(key)) {
-    return { kind: "refused", reason: t("settings.shortcut.refusal.mediaKeys") };
+  const refused = windows ? WINDOWS_UNBINDABLE_KEYS : MEDIA_KEYS;
+  if (refused.includes(key)) {
+    return {
+      kind: "refused",
+      reason: t(
+        windows
+          ? "settings.shortcut.refusal.noKeyCode"
+          : "settings.shortcut.refusal.mediaKeys",
+      ),
+    };
   }
 
   const parts: string[] = [];
@@ -92,7 +114,11 @@ export function captureAccelerator(
   if (parts.length === 0) {
     return {
       kind: "refused",
-      reason: t("settings.shortcut.refusal.needsModifier"),
+      reason: t(
+        windows
+          ? "settings.shortcut.refusal.needsModifierWindows"
+          : "settings.shortcut.refusal.needsModifier",
+      ),
     };
   }
 
@@ -100,7 +126,7 @@ export function captureAccelerator(
   return { kind: "accelerator", value: parts.join("+") };
 }
 
-const GLYPHS: Record<string, string> = {
+const MAC_GLYPHS: Record<string, string> = {
   CmdOrCtrl: "⌘",
   Cmd: "⌘",
   Command: "⌘",
@@ -125,10 +151,43 @@ const GLYPHS: Record<string, string> = {
 };
 
 /**
+ * A Windows keyboard has no ⌘, ⌥ or ⇧ engraved on it, and `CmdOrCtrl` is
+ * registered there as **Control** — so the macOS table does not merely look
+ * foreign, it names a different key from the one that is bound.
+ */
+const WINDOWS_GLYPHS: Record<string, string> = {
+  CmdOrCtrl: "Ctrl",
+  Cmd: "Win",
+  Command: "Win",
+  Meta: "Win",
+  Super: "Win",
+  Ctrl: "Ctrl",
+  Control: "Ctrl",
+  Alt: "Alt",
+  Option: "Alt",
+  Shift: "Shift",
+  Return: "Enter",
+  Enter: "Enter",
+  Backspace: "Backspace",
+  Delete: "Del",
+  Escape: "Esc",
+  Space: "Space",
+  Tab: "Tab",
+  Up: "↑",
+  Down: "↓",
+  Left: "←",
+  Right: "→",
+};
+
+/**
  * Split on `+` rather than per character, so `F1` stays one keycap. A11Y-13:
  * display only — the accessible name uses the raw accelerator, which screen
  * readers handle far better than `⌘⇧V`.
  */
-export function acceleratorGlyphs(accelerator: string): string[] {
-  return accelerator.split("+").map((token) => GLYPHS[token] ?? token);
+export function acceleratorGlyphs(
+  accelerator: string,
+  windows = isWindowsPlatform(),
+): string[] {
+  const glyphs = windows ? WINDOWS_GLYPHS : MAC_GLYPHS;
+  return accelerator.split("+").map((token) => glyphs[token] ?? token);
 }

@@ -4,12 +4,19 @@ import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import { useHistory } from "@/hooks/useHistory";
-import { EVENT_CHANGED, usePush, type ChangePayload } from "@/hooks/usePush";
+import { useOpenAtLogin } from "@/hooks/useOpenAtLogin";
+import {
+  EVENT_AUTOSTART_CHANGED,
+  EVENT_CHANGED,
+  usePush,
+  type ChangePayload,
+} from "@/hooks/usePush";
 import { PAGE_SIZE } from "@/lib/layout";
 import { items, page, testClient } from "@/test/harness";
 
 const listItems = vi.fn();
 const searchItems = vi.fn();
+const getOpenAtLogin = vi.fn();
 const hasBridge = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
@@ -18,11 +25,12 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     ...actual,
     listItems: (...args: unknown[]) => listItems(...args),
     searchItems: (...args: unknown[]) => searchItems(...args),
+    getOpenAtLogin: () => getOpenAtLogin(),
     hasBridge: () => hasBridge(),
   };
 });
 
-type Handler = (event: { payload: ChangePayload }) => void;
+type Handler = (event: { payload: never }) => void;
 const handlers = new Map<string, Handler[]>();
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -40,7 +48,15 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 function emitChanged(payload: ChangePayload) {
-  for (const handler of handlers.get(EVENT_CHANGED) ?? []) handler({ payload });
+  for (const handler of handlers.get(EVENT_CHANGED) ?? []) {
+    handler({ payload: payload as never });
+  }
+}
+
+function emitAutostartChanged(payload: boolean) {
+  for (const handler of handlers.get(EVENT_AUTOSTART_CHANGED) ?? []) {
+    handler({ payload: payload as never });
+  }
 }
 
 function threePages() {
@@ -63,11 +79,41 @@ function mounted(client = testClient()) {
   );
 }
 
+function mountedOpenAtLogin(client = testClient()) {
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return renderHook(
+    () => {
+      usePush();
+      return useOpenAtLogin();
+    },
+    { wrapper: Wrapper },
+  );
+}
+
 beforeEach(() => {
   handlers.clear();
   listItems.mockReset();
   searchItems.mockReset();
+  getOpenAtLogin.mockReset();
   hasBridge.mockReset().mockReturnValue(true);
+});
+
+describe("native launch-at-login changes", () => {
+  it("re-reads the system state instead of trusting the event payload", async () => {
+    let systemState = false;
+    getOpenAtLogin.mockImplementation(async () => systemState);
+
+    const { result } = mountedOpenAtLogin();
+    await waitFor(() => expect(result.current.data).toBe(false));
+
+    systemState = true;
+    emitAutostartChanged(false);
+
+    await waitFor(() => expect(result.current.data).toBe(true));
+    expect(getOpenAtLogin).toHaveBeenCalledTimes(2);
+  });
 });
 
 afterEach(() => vi.restoreAllMocks());
