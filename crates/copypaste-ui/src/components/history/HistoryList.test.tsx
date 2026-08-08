@@ -9,10 +9,11 @@
  *   A11Y-14         the announcer is not inside role="list"
  */
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 
-import { HistoryList, quickSlot } from "@/components/history/HistoryList";
+import { HistoryList } from "@/components/history/HistoryList";
+import { quickSlot } from "@/components/history/historyKeyboard";
 import { items, withClient } from "@/test/harness";
 import type { Selection } from "@/hooks/useSelection";
 import type { Item } from "@/lib/ipc";
@@ -80,6 +81,16 @@ function setup(count = 5, over: Partial<Parameters<typeof HistoryList>[0]> = {})
 }
 
 describe("list semantics", () => {
+  it("exposes a named touch drag handle only for pinned rows", () => {
+    const data = items(2).map((item, index) => ({ ...item, pinned: index === 0 }));
+    setup(2, { items: data, activeId: data[0]!.id });
+
+    const handle = screen.getByRole("button", { name: "Reorder pinned item" });
+    expect(handle.title).toBe("Reorder pinned item");
+    expect(handle.className).toContain("touch-none");
+    expect(screen.getAllByRole("button", { name: "Reorder pinned item" })).toHaveLength(1);
+  });
+
   it.each(["macOS", "Android"])(
     "reorders pinned rows with Option/Alt+Arrow on %s",
     () => {
@@ -161,6 +172,28 @@ describe("list semantics", () => {
     const active = rows.find((row) => row.id === `history-row-${data[1]!.id}`);
     expect(active?.getAttribute("aria-current")).toBe("true");
     expect(active?.getAttribute("aria-selected")).toBeNull();
+  });
+
+  it("keeps the selected pinned row current while a drag is canceled", async () => {
+    const data = items(2).map((item) => ({ ...item, pinned: true }));
+    setup(2, { items: data, activeId: data[1]!.id });
+    const handle = screen.getAllByRole("button", {
+      name: "Reorder pinned item",
+    })[1]!;
+
+    fireEvent.keyDown(handle, { key: "Enter", code: "Enter" });
+    await waitFor(() =>
+      expect(
+        document
+          .getElementById(`history-row-${data[1]!.id}`)
+          ?.hasAttribute("data-dnd-dragging"),
+      ).toBe(true),
+    );
+    fireEvent.keyDown(document, { key: "ArrowUp", code: "ArrowUp" });
+    fireEvent.keyDown(document, { key: "Escape", code: "Escape" });
+
+    expect(document.getElementById(`history-row-${data[1]!.id}`)?.getAttribute("aria-current"))
+      .toBe("true");
   });
 
   it("announces the active row's label (AT-12)", () => {
@@ -352,6 +385,22 @@ describe("selection mode", () => {
 });
 
 describe("load more", () => {
+  it("keeps list scrolling active when pinned rows have touch handles", () => {
+    const onLoadMore = vi.fn();
+    const data = items(2).map((item) => ({ ...item, pinned: true }));
+    const { listRef } = setup(2, { items: data, onLoadMore });
+    Object.defineProperties(listRef.current!, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1000 },
+      scrollTop: { configurable: true, writable: true, value: 550 },
+    });
+
+    fireEvent.scroll(listRef.current!);
+
+    expect(listRef.current!.className).toContain("overflow-y-auto");
+    expect(onLoadMore).toHaveBeenCalledOnce();
+  });
+
   /**
    * A filtered list can be three rows long with a thousand unpaged matches
    * behind it, and three rows do not scroll — so the near-bottom trigger alone

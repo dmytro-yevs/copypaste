@@ -124,8 +124,6 @@ export function setPinned(id: string, pinned: boolean): Promise<Item> {
   return call<Item>("set_pinned", { id, pinned });
 }
 
-/** Not routed yet: `copypaste_ipc::Method` has no reorder verb, so the bridge
- *  refuses with `unavailable` and the drag handles stay hidden. */
 export function reorderPinned(ids: readonly string[]): Promise<void> {
   return call<void>("reorder_pinned", { ids });
 }

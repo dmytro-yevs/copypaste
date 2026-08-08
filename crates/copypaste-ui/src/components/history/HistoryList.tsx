@@ -30,6 +30,13 @@ import {
   rowHeight,
 } from "@/lib/layout";
 import { HistoryRow, rowLabel } from "@/components/history/HistoryRow";
+import { quickSlot } from "@/components/history/historyKeyboard";
+import {
+  keyboardPinnedOrder,
+  PinnedReorderProvider,
+  type SortableBindings,
+  SortablePinned,
+} from "@/components/history/PinnedReorder";
 import {
   markedOrigins,
   originLabel,
@@ -38,19 +45,7 @@ import {
 } from "@/components/history/origin";
 import type { Selection } from "@/hooks/useSelection";
 
-/** ⌘1–⌘9 only; there is no ⌘0 and no second row of ten. */
-export const QUICK_SLOTS = 9;
 const GROUP_HEADER_PX = 32;
-
-/** Inactive while a search is running (manifest §3.5.3): the digits address
- *  positions in the history, and a filtered list renumbers them under the
- *  user's fingers between keystrokes. */
-export function quickSlot(key: string, searching: boolean): number | null {
-  if (searching) return null;
-  const digit = Number.parseInt(key, 10);
-  if (!Number.isInteger(digit) || digit < 1 || digit > QUICK_SLOTS) return null;
-  return digit - 1;
-}
 
 interface HistoryListProps {
   items: readonly Item[];
@@ -135,6 +130,15 @@ export function HistoryList({
     });
     return rows;
   }, [groupedByDevice, items, t]);
+
+  const pinnedIds = useMemo(
+    () => items.filter((item) => item.pinned).map((item) => item.id),
+    [items],
+  );
+  const pinnedPositions = useMemo(
+    () => new Map(pinnedIds.map((id, index) => [id, index])),
+    [pinnedIds],
+  );
 
   const anchorIds = useMemo(
     () =>
@@ -241,6 +245,7 @@ export function HistoryList({
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (items.length === 0) return;
+    if ((event.target as Element).closest("[data-reorder-handle]")) return;
 
     // Before the switch: with the modifier held the digits are unambiguous.
     if (event.metaKey || event.ctrlKey) {
@@ -272,16 +277,11 @@ export function HistoryList({
       item?.pinned &&
       (event.key === "ArrowUp" || event.key === "ArrowDown")
     ) {
-      const pinned = items.filter((candidate) => candidate.pinned);
-      const pinnedIndex = pinned.findIndex((candidate) => candidate.id === item.id);
-      const destination = pinnedIndex + (event.key === "ArrowUp" ? -1 : 1);
-      if (destination >= 0 && destination < pinned.length) {
+      const direction = event.key === "ArrowUp" ? -1 : 1;
+      const order = keyboardPinnedOrder(items, item.id, direction);
+      if (order) {
         event.preventDefault();
-        [pinned[pinnedIndex], pinned[destination]] = [
-          pinned[destination]!,
-          pinned[pinnedIndex]!,
-        ];
-        onReorderPinned(pinned.map((candidate) => candidate.id));
+        onReorderPinned(order);
         setAnnouncement(
           `${rowLabel(item, originLabel(item, markedRef.current))} moved ${
             event.key === "ArrowUp" ? "up" : "down"
@@ -362,18 +362,19 @@ export function HistoryList({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div
-        ref={listRef}
-        role="list"
-        aria-label={t("history.list.label")}
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        onScroll={onScroll}
-        data-active-descendant={
-          activeRendered ? `history-row-${activeId}` : undefined
-        }
-        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-s-2 pb-s-2 outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring"
-      >
+      <PinnedReorderProvider ids={pinnedIds} onReorder={onReorderPinned}>
+        <div
+          ref={listRef}
+          role="list"
+          aria-label={t("history.list.label")}
+          tabIndex={0}
+          onKeyDown={onKeyDown}
+          onScroll={onScroll}
+          data-active-descendant={
+            activeRendered ? `history-row-${activeId}` : undefined
+          }
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-s-2 pb-s-2 outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring"
+        >
         <div
           className="relative w-full"
           style={{ height: virtualizer.getTotalSize() }}
@@ -400,7 +401,7 @@ export function HistoryList({
             }
             const item = items[entry.itemIndex];
             if (!item) return null;
-            return (
+            const renderItem = (sortable?: SortableBindings) => (
               <div
                 key={row.key}
                 id={`history-row-${item.id}`}
@@ -408,9 +409,20 @@ export function HistoryList({
                 // The name lives on the row's own button; naming the wrapper
                 // too would announce every row twice.
                 aria-current={item.id === activeId ? "true" : undefined}
-                className="absolute top-0 left-0 w-full"
+                className="absolute top-0 left-0 w-full data-[dragging=true]:opacity-60 data-[drop-target=true]:ring-2 data-[drop-target=true]:ring-brand-2"
                 data-index={row.index}
-                ref={isAndroidPlatform() ? virtualizer.measureElement : undefined}
+                data-dragging={sortable?.dragging || undefined}
+                data-drop-target={sortable?.dropTarget || undefined}
+                ref={
+                  sortable || isAndroidPlatform()
+                    ? (element) => {
+                        sortable?.elementRef(element);
+                        if (isAndroidPlatform() && element) {
+                          virtualizer.measureElement(element);
+                        }
+                      }
+                    : undefined
+                }
                 style={{
                   // Android image previews preserve their aspect ratio at the
                   // available row width. Let TanStack remeasure after the
@@ -438,8 +450,15 @@ export function HistoryList({
                   onDelete={onDelete}
                   onReveal={onReveal}
                   onOpen={onOpen}
+                  reorderHandleRef={sortable?.handleRef}
                 />
               </div>
+            );
+            const pinnedIndex = pinnedPositions.get(item.id);
+            return pinnedIndex === undefined ? renderItem() : (
+              <SortablePinned key={row.key} id={item.id} index={pinnedIndex}>
+                {renderItem}
+              </SortablePinned>
             );
           })}
         </div>
@@ -462,7 +481,8 @@ export function HistoryList({
             </Button>
           </div>
         )}
-      </div>
+        </div>
+      </PinnedReorderProvider>
 
       {/* INV-9 / A11Y-14: a sibling of the list, never a child of it. */}
       <div
