@@ -45,7 +45,6 @@ gethostname = "1"
 base64.workspace = true
 url.workspace = true
 tempfile.workspace = true
-mime_guess.workspace = true
 
 # flock(2) around the socket-bind critical section (CopyPaste-ah1m), and the
 # `*at` syscalls the file-drop staging directory is built from. A maintained
