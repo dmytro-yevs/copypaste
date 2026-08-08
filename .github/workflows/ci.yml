@@ -77,7 +77,7 @@ jobs:
       # as long as it existed and nothing noticed, because its only exercise
       # was the messages that happened to reach it.
       - name: scripts/check-commit-msg.test.sh
-        run: ./scripts/check-commit-msg.test.sh
+        run: bash ./scripts/check-commit-msg.test.sh
 
       - name: check each commit in the range
         # Only on pull requests: the range is the PR's own commits, and
