@@ -296,6 +296,24 @@ rec(bool(installed) and listed == installed,
     "android-ndk-env.sh covers every Android target the job installs",
     "script has {}, the toolchain step installs {}".format(sorted(listed), sorted(installed)))
 
+# --- Gradle dependency cache ------------------------------------------------
+for wf, doc in docs.items():
+    for jn, j in (doc.get("jobs") or {}).items():
+        if not any("android build" in (s.get("run") or "") for s in steps(j)):
+            continue
+        java = [s for s in steps(j) if (s.get("uses") or "").startswith("actions/setup-java")]
+        rec(len(java) == 1, "{}: {} configures Java exactly once".format(wf, jn),
+            "found {} setup-java steps".format(len(java)))
+        for setup in java:
+            with_ = setup.get("with") or {}
+            rec(with_.get("cache") == "gradle",
+                "{}: {} caches Gradle dependencies".format(wf, jn),
+                "setup-java cache is {!r}".format(with_.get("cache")))
+            paths = str(with_.get("cache-dependency-path", ""))
+            rec("gen/android" in paths and "gradle-wrapper.properties" in paths,
+                "{}: {} keys the Gradle cache from Android build files".format(wf, jn),
+                "cache-dependency-path is {!r}".format(paths or None))
+
 # --- shell discipline in the workflows nothing has ever run -----------------
 for wf in ("release.yml", "android-emulator.yml"):
     for jn, j in ((docs.get(wf) or {}).get("jobs") or {}).items():
