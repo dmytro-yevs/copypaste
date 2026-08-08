@@ -20,12 +20,7 @@ export const settingsService = {
     },
   },
 
-  /** Shown at the field, not in a footnote: `lan_visibility` is the one
-   *  setting `ConfigData::field_liveness` marks as read once at start. */
   liveness: {
-    needsRestart: "Needs a restart",
-    needsRestartWhy:
-      "This takes effect after the service restarts.",
     pending: "Saved. It takes effect after the service restarts.",
     restart: "Restart the service",
     restarting: "Restarting…",
