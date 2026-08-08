@@ -16,7 +16,7 @@ use tracing::debug;
 use crate::clipboard::CapturePolicy;
 
 /// Allowance on the pre-read text gate, in bytes. See [`text`].
-const SIZE_SLACK: u64 = 16;
+const SIZE_SLACK: u64 = 4096;
 
 /// One representation, read but not yet converted.
 pub(super) enum Representation {
@@ -61,8 +61,8 @@ fn text(policy: CapturePolicy<'_>) -> Reading {
     // I-18 in UTF-16 arithmetic. The clipboard holds UTF-16 and the cap counts
     // UTF-8 bytes, so one code unit is at least one UTF-8 byte and twice the cap
     // is what cannot possibly fit. The slack is the terminating NUL and whatever
-    // `GlobalSize` rounds the allocation up to: without it a payload of exactly
-    // `cap` characters is rejected on its two spare bytes. This gate exists to
+    // `GlobalSize` rounds the allocation up to: a real Windows heap rounded an
+    // exact-boundary allocation by more than 16 bytes. This gate exists to
     // bound the copy, not to enforce the cap — that happens exactly, below, on
     // the converted string — so it errs towards reading.
     if utf16_bytes > cap.saturating_mul(2).saturating_add(SIZE_SLACK) {
