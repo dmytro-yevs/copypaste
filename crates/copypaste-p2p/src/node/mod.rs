@@ -237,6 +237,17 @@ impl Node {
         }
     }
 
+    pub fn set_device_name(&self, device_name: &str) {
+        let Some(discovery) = self.discovery.as_ref() else {
+            return;
+        };
+        if let Err(e) = discovery.set_device_name(device_name) {
+            warn!(error = %e, "could not update the discovery device name");
+            return;
+        }
+        self.republish();
+    }
+
     /// Where a peer should dial this device, when that can be determined.
     #[must_use]
     pub fn listen_addr(&self) -> Option<String> {

@@ -234,6 +234,7 @@ mod tests {
 
     fn status() -> StatusData {
         StatusData {
+            device_name: "Test device".into(),
             version: "2.0.0-alpha.1".into(),
             protocol_version: PROTOCOL_VERSION,
             item_count: 42,

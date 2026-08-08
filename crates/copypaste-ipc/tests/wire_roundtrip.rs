@@ -96,6 +96,7 @@ fn assert_tagged_round_trip(data: ResponseData) {
 fn every_response_data_variant_has_a_distinct_round_trip() {
     let variants = vec![
         ResponseData::Status(StatusData {
+            device_name: "Laptop".into(),
             version: "2.0.0".into(),
             protocol_version: PROTOCOL_VERSION,
             item_count: 1,
@@ -290,6 +291,26 @@ fn export_request_fields_default_to_safe_values() {
             limit: 0,
             include_sensitive: false
         }
+    ));
+}
+
+#[test]
+fn device_name_request_is_typed_and_round_trips() {
+    let request = Request {
+        id: 9,
+        protocol_version: PROTOCOL_VERSION,
+        method: Method::SetDeviceName {
+            name: "Kitchen Mac".into(),
+        },
+    };
+    let wire = serde_json::to_value(&request).unwrap();
+    assert_eq!(wire["method"], "set_device_name");
+    assert_eq!(wire["params"]["name"], "Kitchen Mac");
+
+    let decoded: Request = serde_json::from_value(wire).unwrap();
+    assert!(matches!(
+        decoded.method,
+        Method::SetDeviceName { name } if name == "Kitchen Mac"
     ));
 }
 

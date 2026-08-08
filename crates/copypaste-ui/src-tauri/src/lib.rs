@@ -199,6 +199,7 @@ pub fn run() {
             commands::history::reorder_pinned,
             // state
             commands::status::status,
+            commands::status::set_device_name,
             commands::diagnostics::diagnostics,
             commands::diagnostics::runtime_log_events,
             commands::diagnostics::export_diagnostics_report,
@@ -424,7 +425,7 @@ mod tests {
         assert_eq!(registered_entries.len(), registered.len());
         assert_eq!(annotated, registered);
         assert_eq!(registered, product_command_names());
-        assert_eq!(registered.len(), 53);
+        assert_eq!(registered.len(), 54);
     }
 
     #[test]

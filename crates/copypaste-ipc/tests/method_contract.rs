@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 fn wire_name(method: &Method) -> &'static str {
     match method {
         Method::Status => "status",
+        Method::SetDeviceName { .. } => "set_device_name",
         Method::List { .. } => "list",
         Method::Search { .. } => "search",
         Method::Copy { .. } => "copy",
@@ -45,6 +46,7 @@ fn wire_name(method: &Method) -> &'static str {
 fn catalog() -> Vec<Value> {
     vec![
         json!({"method":"status"}),
+        json!({"method":"set_device_name","params":{"name":"Kitchen Mac"}}),
         json!({"method":"list","params":{"limit":10,"cursor":null}}),
         json!({"method":"search","params":{"query":"needle","limit":10}}),
         json!({"method":"copy","params":{"id":"item"}}),
@@ -93,7 +95,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
         let encoded = serde_json::to_value(&method).unwrap();
         assert_eq!(encoded, fixture, "wire contract drifted for {name}");
     }
-    assert_eq!(names.len(), 34);
+    assert_eq!(names.len(), 35);
 }
 
 #[test]

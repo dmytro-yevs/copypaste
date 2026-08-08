@@ -8,7 +8,7 @@
 
 use tauri::{AppHandle, State};
 
-use crate::backend::{Backend, BackendError, SelectedBackend};
+use crate::backend::{Backend, BackendError, Result, SelectedBackend};
 use crate::model::UiStatus;
 
 #[cfg(any(target_os = "android", test))]
@@ -43,6 +43,11 @@ pub async fn status(
     let _ = app;
 
     Ok(status)
+}
+
+#[tauri::command]
+pub async fn set_device_name(backend: State<'_, SelectedBackend>, name: String) -> Result<()> {
+    backend.set_device_name(&name).await
 }
 
 #[cfg(any(target_os = "android", test))]

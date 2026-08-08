@@ -291,7 +291,9 @@ impl SyncSource for StoreSource {
     }
 
     fn device_name(&self) -> String {
-        self.device_name.clone()
+        self.store
+            .current_device_name()
+            .unwrap_or_else(|_| self.device_name.clone())
     }
 
     fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
@@ -442,6 +444,25 @@ mod tests {
         assert_eq!(summaries[0].origin_device_id, source.device_id());
         assert!(!summaries[0].pinned);
         assert_eq!(summaries[0].pin_order, None);
+    }
+
+    #[test]
+    fn a_long_lived_source_reads_the_current_device_name() {
+        let f = fixture();
+        let identity = f.store.device_identity("Old name").unwrap();
+        let source = StoreSource::new(
+            f.store.clone(),
+            Arc::clone(&f.keyring),
+            Arc::clone(&f.detector),
+            identity.device_id.clone(),
+            identity.device_name,
+            copypaste_ipc::ConfigData::default(),
+        );
+
+        f.store
+            .set_device_name(&identity.device_id, "New name")
+            .unwrap();
+        assert_eq!(source.device_name(), "New name");
     }
 
     #[test]

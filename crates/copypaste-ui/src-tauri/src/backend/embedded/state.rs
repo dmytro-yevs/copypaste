@@ -15,11 +15,7 @@ use copypaste_ipc::ErrorCode;
 
 use crate::backend::{BackendError, Result};
 
-/// What this device tells peers it is called, on first run only.
-///
-/// Cosmetic and peer-visible. Android has no hostname worth reading — it is
-/// `localhost` — and there is no rename screen yet, so this is the honest
-/// placeholder rather than a guess dressed up as a device name.
+/// First-run name on Android, where the hostname is only `localhost`.
 const DEVICE_NAME_HINT: &str = "CopyPaste phone";
 
 pub(super) struct BackendState {
@@ -28,10 +24,9 @@ pub(super) struct BackendState {
     // for as long as the peer listener runs.
     pub(super) keyring: Arc<Keyring>,
     pub(super) detector: Arc<Detector>,
-    /// This device's sync identity, resolved once from the history database and
-    /// then fixed: merge key 4 and every hello depend on it not moving.
+    /// This device's sync identity. The id is fixed; the display name is not.
     pub(super) device_id: String,
-    pub(super) device_name: String,
+    device_name: RwLock<String>,
     /// Where the paired-device list lives. The `PeerStore` itself belongs to
     /// the node, which owns it by value.
     pub(super) peers_path: PathBuf,
@@ -80,13 +75,37 @@ impl BackendState {
             keyring: Arc::new(keyring),
             detector: Arc::new(detector),
             device_id: identity.device_id,
-            device_name: identity.device_name,
+            device_name: RwLock::new(identity.device_name),
             // The name from the shared crate, as the daemon uses.
             peers_path: data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
             settings: RwLock::new(read_settings(&settings_path)),
             settings_path,
             index_purged,
         })
+    }
+
+    pub(super) fn device_name(&self) -> String {
+        self.device_name
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    pub(super) fn set_device_name(&self, name: &str) -> Result<String> {
+        let name =
+            self.store
+                .set_device_name(&self.device_id, name)
+                .map_err(|error| match error {
+                    StoreError::InvalidDeviceName => {
+                        BackendError::Invalid("A device name must contain visible text.")
+                    }
+                    _ => BackendError::internal("the device name could not be saved"),
+                })?;
+        *self
+            .device_name
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = name.clone();
+        Ok(name)
     }
 }
 
@@ -128,7 +147,8 @@ fn store_open_error(error: StoreError) -> BackendError {
         | StoreError::IntegrityCheckFailed
         | StoreError::InvalidSchema
         | StoreError::NotFound
-        | StoreError::InvalidCursor => ErrorCode::Internal,
+        | StoreError::InvalidCursor
+        | StoreError::InvalidDeviceName => ErrorCode::Internal,
     };
     BackendError::from_code(Some(code), None, Some(&message))
 }

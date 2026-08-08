@@ -318,6 +318,17 @@ impl Backend for EmbeddedBackend {
         Ok(status)
     }
 
+    async fn set_device_name(&self, name: &str) -> Result<()> {
+        let name = name.to_string();
+        let stored = self
+            .blocking(move |inner| inner.state.set_device_name(&name))
+            .await?;
+        if let Some(node) = self.inner.node.get() {
+            node.set_device_name(&stored);
+        }
+        Ok(())
+    }
+
     async fn shutdown(&self) -> Result<()> {
         Ok(())
     }
@@ -687,6 +698,33 @@ mod tests {
 
         let listed = backend.list(50, None).await.unwrap();
         assert_eq!(listed.items[0].origin_device_id, item.origin_device_id);
+    }
+
+    #[tokio::test]
+    async fn a_renamed_identity_is_persisted_by_the_embedded_backend() {
+        let (backend, _clip, _dir) = backend();
+        let device_id = backend.inner.state.device_id.clone();
+        backend.set_device_name("  Kitchen Phone  ").await.unwrap();
+
+        let stored = backend
+            .inner
+            .state
+            .store
+            .device_identity("ignored hostname")
+            .unwrap();
+        let status = backend.status().await.unwrap();
+        assert_eq!(stored.device_id, device_id);
+        assert_eq!(stored.device_name, "Kitchen Phone");
+        assert_eq!(status.device_name, "Kitchen Phone");
+    }
+
+    #[tokio::test]
+    async fn the_embedded_backend_refuses_a_blank_device_name() {
+        let (backend, _clip, _dir) = backend();
+        let before = backend.status().await.unwrap().device_name;
+        let error = backend.set_device_name(" \n ").await.unwrap_err();
+        assert!(matches!(error, BackendError::Invalid(_)));
+        assert_eq!(backend.status().await.unwrap().device_name, before);
     }
 
     /// The refusals must read as structural, not transient: a user must not be
