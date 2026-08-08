@@ -23,8 +23,6 @@ use std::sync::{Arc, Mutex};
 use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, SyncError};
 use copypaste_core::sync::blocking;
 use copypaste_core::RemoteVersion;
-use copypaste_p2p::protocol::ItemSummary;
-use copypaste_p2p::sync::{merge_decision, MergeDecision};
 use tracing::warn;
 
 use crate::cloud::{
@@ -195,22 +193,7 @@ impl CloudSource for StoreSource {
                 })
                 .map_err(|e| SyncError::Source(e.message()))?;
 
-            if !applied {
-                // The account may still hold the losing row (for example a
-                // stale upsert raced this device's earlier push). Re-offer the
-                // actual local winner next round. An exact self echo is the
-                // normal push-then-pull path and must not pull the floor back:
-                // doing so would manufacture a duplicate second upload on
-                // every healthy round.
-                let local = self
-                    .state
-                    .store
-                    .version(&item.item_id)
-                    .map_err(source_error)?;
-                if let Some(local) = local.filter(|local| !self.is_self_echo(local, &item)) {
-                    crate::cloud::note_version_written(&self.state, local.created_at);
-                }
-            } else {
+            if applied {
                 self.state
                     .p2p
                     .node()
@@ -263,55 +246,28 @@ impl CloudSource for StoreSource {
 
     fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
         blocking(|| {
-            let Some(local) = self
-                .shared
-                .store()
-                .version(&incoming.item_id)
-                .map_err(source_error)?
-            else {
-                return Ok(false);
-            };
-
-            let remote_hash = if incoming.deleted {
-                local.content_hash.clone()
-            } else {
-                copypaste_core::storage::compute_content_hash(&incoming.content)
-            };
-            let local_origin =
-                copypaste_core::origin_or(&local.origin_device_id, self.state.meta.device_id());
-            let local_version = ItemSummary {
-                item_id: local.id.clone(),
-                created_at: local.created_at,
-                content_hash: local.content_hash.clone(),
-                deleted: local.deleted,
-                origin_device_id: local_origin.to_string(),
-                pinned: local.pinned,
-                pin_order: local.pin_order,
-                pin_updated_at: local.pin_updated_at,
-            };
-            let remote_version = ItemSummary {
-                item_id: incoming.item_id.clone(),
-                created_at: incoming.created_at,
-                content_hash: remote_hash,
-                deleted: incoming.deleted,
-                origin_device_id: incoming.origin_device_id.clone(),
-                pinned: false,
-                pin_order: None,
-                pin_updated_at: 0,
-            };
-            let same_version = local_version.created_at == remote_version.created_at
-                && local_version.content_hash == remote_version.content_hash
-                && local_version.deleted == remote_version.deleted
-                && local_origin == incoming.origin_device_id;
-            if !same_version
-                && merge_decision(
-                    &local_version,
-                    local_origin,
-                    &remote_version,
-                    &incoming.origin_device_id,
-                ) == MergeDecision::KeepLocal
-            {
-                crate::cloud::note_version_written(&self.state, local.created_at);
+            let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
+                .then(|| String::from_utf8_lossy(&incoming.content));
+            let stamp = copypaste_core::local_winner_stamp(
+                self.shared.store(),
+                self.state.meta.device_id(),
+                &RemoteVersion {
+                    item_id: &incoming.item_id,
+                    content: text.as_deref().unwrap_or(""),
+                    binary_content: (!incoming.deleted
+                        && !copypaste_ipc::content_type::is_text(&incoming.content_type))
+                    .then_some(incoming.content.as_slice()),
+                    payload_metadata: incoming.payload_metadata.as_deref(),
+                    content_type: &incoming.content_type,
+                    created_at: incoming.created_at,
+                    deleted: incoming.deleted,
+                    content_hash: None,
+                    origin_device_id: &incoming.origin_device_id,
+                },
+            )
+            .map_err(|error| SyncError::Source(error.message()))?;
+            if let Some(stamp) = stamp {
+                crate::cloud::note_version_written(&self.state, stamp);
                 return Ok(true);
             }
             Ok(false)
@@ -374,21 +330,6 @@ impl CloudSource for StoreSource {
                 ])
                 .map_err(source_error)
         })
-    }
-}
-
-impl StoreSource {
-    fn is_self_echo(&self, local: &copypaste_core::StoredItem, incoming: &LocalItem) -> bool {
-        local.created_at == incoming.created_at
-            && local.deleted == incoming.deleted
-            && local.content_type == incoming.content_type
-            && copypaste_core::origin_or(&local.origin_device_id, self.state.meta.device_id())
-                == incoming.origin_device_id
-            && (local.deleted
-                || self
-                    .shared
-                    .open(local)
-                    .is_ok_and(|content| content.as_bytes() == incoming.content))
     }
 }
 
@@ -757,10 +698,10 @@ mod tests {
         let mut stale = local.clone();
         stale.created_at -= 1;
         stale.origin_device_id = "device-b".into();
-        assert!(matches!(
-            source.apply_remote(stale).unwrap(),
-            Applied::Declined(_)
-        ));
+        let Applied::Declined(stale) = source.apply_remote(stale).unwrap() else {
+            panic!("the older remote version should lose")
+        };
+        source.requeue_local_winner(&stale).unwrap();
         assert_eq!(
             source.upload_floor().unwrap(),
             local.created_at,
@@ -776,10 +717,10 @@ mod tests {
             .meta
             .set_state_ms(KEY_UPLOAD_FLOOR, passed_floor)
             .unwrap();
-        assert!(matches!(
-            source.apply_remote(local).unwrap(),
-            Applied::Declined(_)
-        ));
+        let Applied::Declined(local) = source.apply_remote(local).unwrap() else {
+            panic!("the self echo should be unchanged")
+        };
+        source.requeue_local_winner(&local).unwrap();
         assert_eq!(
             source.upload_floor().unwrap(),
             passed_floor,
