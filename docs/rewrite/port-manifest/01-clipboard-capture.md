@@ -294,14 +294,12 @@ Each entry: **Rule** / **Why** / **Bug id** / **v1 site**.
 
 - **Rule.** The writer and the reader share one atomic "expected change count"
   cell, with sentinel `-1` = "no pending self-write". The protocol:
-  1. Writer reads `pre = changeCount`.
-  2. Writer stores `pre + 2` into the cell **before** touching the pasteboard.
-     (`clearContents` increments by 1; `setString/setData:forType:` increments by 1.)
-  3. Writer performs `clearContents` + `set…:forType:`.
-  4. Writer reads `actual = changeCount`. **Only if `actual == pre + 2`** does it
-     overwrite the cell with `actual`.
-  5. On *any* write failure or error return, the writer resets the cell to `-1`.
-  6. The poller, on seeing `changeCount == cell` (and `cell >= 0`), advances the
+  1. Writer calls `clearContents` and stores its returned change count in the
+     cell before making the new content visible.
+  2. Writer performs `set…:forType:`. On macOS 14 this stays in the generation
+     opened by `clearContents`; the complete write moves `changeCount` by 1.
+  3. On *any* write failure or error return, the writer resets the cell to `-1`.
+  4. The poller, on seeing `changeCount == cell` (and `cell >= 0`), advances the
      cursor, records nothing, and **consumes** the sentinel by resetting it to `-1`.
   Use acquire/release ordering on this cell.
 - **The `+2` is wrong on macOS 14, measured.** `clearContents` +
@@ -311,23 +309,21 @@ Each entry: **Rule** / **Why** / **Bug id** / **v1 site**.
   that never arrives: our own paste-back is captured as a fresh item — the
   duplicate-on-copy bug this protocol exists to prevent — and the stale
   sentinel then suppresses whichever genuine copy next lands on `pre + 2`.
-  Both halves of §3.3 fail from one wrong constant. The protocol is otherwise
-  as described; only the number is wrong, and `clearContents` returns the
-  change count it produced, so the writer need not predict one at all.
-- **Why (step 2, pre-stamp).** The original code stamped the change count
+  Both halves of §3.3 failed from one wrong constant. `clearContents` returns
+  the generation the content will carry, so the writer no longer predicts it.
+- **Why (step 1, pre-stamp).** The original code stamped the change count
   *after* the write. A poll landing in the window between the write and the
   stamp saw an incremented `changeCount` with an unset sentinel, and recorded the
   just-pasted item as a brand-new capture — the duplicate-on-copy bug.
-- **Why (step 4, conditional post-stamp).** If a third-party app wrote to the
-  pasteboard between our write and our read, `actual > pre + 2`. Unconditionally
-  storing `actual` would stamp *their* change count, causing the monitor to
-  suppress **their** content as if it were ours — silently dropping a genuine
-  user copy.
-- **Why (step 5, reset on error).** A stale sentinel that is never consumed
+- **Why (no post-stamp).** A third-party write may land while ours is in
+  progress. Replacing the sentinel with the final observed count would stamp
+  *their* generation and silently drop a genuine user copy; the count returned
+  by `clearContents` is left unchanged and becomes inert once the counter rises.
+- **Why (step 3, reset on error).** A stale sentinel that is never consumed
   permanently suppresses a future genuine capture that happens to land on that
   change count.
-- **Why (step 6, consume once).** The suppression is for exactly one change.
-- **Bug id.** Fix-4 / "DUP-ON-COPY"; conditional post-stamp = **CopyPaste-8yzf**.
+- **Why (step 4, consume once).** The suppression is for exactly one change.
+- **Bug id.** Fix-4 / "DUP-ON-COPY"; third-party race = **CopyPaste-8yzf**.
 - **v1 site.** `monitor.rs:32-36`, `monitor.rs:412-429`;
   `handlers_items_paste.rs:118-136`, `:189-243`, `:339-348`, `:394-400`.
 - **Also note.** The same sentinel is reused (not duplicated) by sync auto-apply
@@ -1062,17 +1058,16 @@ daemon from inside the bundle and asserts that a `pbcopy` reaches the history.
 
 ### 7.1 Covered by something that runs
 
-First run: CI 30632553103, `macos-14` (macOS 14.8.7, session `Aqua`). Five of
-the six pasteboard tests passed on the first attempt. The sixth found a live
-defect and has since been split in two, so that "what the OS does" and "what
-our protocol does with it" carry separate verdicts — both rows below fail until
-the constant is fixed.
+CI 30632553103 on `macos-14` (macOS 14.8.7, session `Aqua`) reproduced the
+defect: five pasteboard tests passed and the self-write test failed. After the
+test was split and the writer began arming from `clearContents`, CI 31244586601
+ran all nine ignored pasteboard tests on a real `NSPasteboard`; all nine passed.
 
 | Rules | What is driven |
 |---|---|
 | I-1, I-2, T-4, T-21 | A write by another process moves `changeCount`; the poll returns the exact UTF-8; a second poll returns nothing; a first poll is not a burst |
-| §4 | **FAILS.** The self-write delta is measured on the real pasteboard: it is **1**, not the 2 the sentinel is armed with |
-| §3.3, T-8, T-9 | **FAILS, as a consequence.** Our own paste-back comes back as a capture, and the sentinel left armed at an unreachable count then eats the next genuine copy |
+| §4 | The real pasteboard moves by **1**, and the sentinel names the count returned by `clearContents` rather than predicting it |
+| §3.3, T-8, T-9 | Our own paste-back is suppressed once; the next genuine copy is captured |
 | §3.2, T-5, T-6 | Three fast writes: the survivor is returned, the losses are counted, capture resumes |
 | I-5, §3.4, T-14, T-15, T-16 | All three `org.nspasteboard.*` markers, written *alongside* real text, drop the change and advance the cursor |
 | I-18, I-39, T-30, T-33 | `cap + 1` bytes rejected and counted on the readable counter, `cap` bytes accepted |
