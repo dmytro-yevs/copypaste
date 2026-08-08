@@ -57,6 +57,14 @@ jobs:
           components: rustfmt
       - run: cargo +1.96 fmt --all --check
 
+  feature-ledger:
+    name: product feature ledger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Reject incomplete features and unclassified Tauri commands
+        run: python3 scripts/check-feature-ledger.py
+
   commit-messages:
     name: commit messages
     runs-on: ubuntu-latest

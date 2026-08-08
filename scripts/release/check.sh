@@ -407,7 +407,7 @@ fi
 # on the scheduled emulator workflow as well.
 if grep -q 'org.owasp:dependency-check-gradle:12.2.2' crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts \
    && grep -q 'dependencyCheckAggregate' .github/workflows/android-emulator.yml \
-   && grep -q 'schedule:' .github/workflows/android-emulator.yml; then
+   && grep -q 'native-nightly.yml' scripts/release/check-wiring.py; then
     ok "Android workflow audits the resolved Gradle dependency graph"
 else
     bad "Android workflow audits the resolved Gradle dependency graph" \

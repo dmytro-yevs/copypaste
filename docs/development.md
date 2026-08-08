@@ -1,0 +1,21 @@
+# Product development
+
+Run `python3 scripts/check-feature-ledger.py` before opening a pull request. The
+machine-readable record is `docs/feature-ledger.json`; every shipped Tauri
+command must belong to exactly one feature.
+
+A product feature lands as one change containing its shared backend/Tauri
+contract, macOS and Android behavior, UI and accessibility states, unit and
+contract tests, and a hands-on scenario for each platform. Each scenario must
+produce a screenshot, accessibility-tree or screen-reader log, and measured
+latency against a stated p95 budget. Restart, offline, one relevant failure,
+and release evidence are mandatory. A platform may be absent only when the
+capability is removed from the product and the ledger marks it `removed`.
+
+Use `npm --prefix crates/copypaste-ui run dev:android` for the Android emulator
+and `npm --prefix crates/copypaste-ui run dev:native` on macOS. Run the scenario
+named by the feature ledger and retain its evidence under `artifacts/native/`;
+the nightly and release workflows upload the same evidence shape.
+
+Incomplete records fail validation. Do not encode completion with TODOs,
+waivers, placeholders, skipped assertions, or green jobs that lack evidence.

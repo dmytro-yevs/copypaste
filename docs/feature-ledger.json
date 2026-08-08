@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "history",
+      "status": "product",
+      "contracts": ["list", "search", "add_item", "copy_item", "copy_item_as_plain_text", "reveal_item", "copy_items", "get_image_preview", "get_source_app_icon", "list_installed_source_apps", "delete_item", "delete_all", "set_pinned", "reorder_pinned"],
+      "backend_tests": ["cargo test -p copypaste-ipc -p copypaste-core"],
+      "ui_tests": ["npm --prefix crates/copypaste-ui test"],
+      "accessibility_states": ["loading", "empty", "error", "keyboard", "screen_reader"],
+      "failure_states": ["restart", "offline", "timeout"],
+      "performance": {"scenario": "history-first-paint", "p95_ms": 500, "measurement": "artifacts/native/{platform}/history/latency.json"},
+      "native": {
+        "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/history/screenshot.png", "ax_log": "artifacts/native/android/history/ax.json"},
+        "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/history/screenshot.png", "ax_log": "artifacts/native/macos/history/ax.json"}
+      },
+      "release_evidence": ["release-android-smoke-evidence", "release-macos-native-evidence"]
+    },
+    {
+      "id": "capture",
+      "status": "product",
+      "contracts": ["capture_state", "capture_refresh", "capture_arm", "capture_disarm", "capture_set_enabled", "capture_now", "capture_toast_explanation", "capture_set_toast_suppressed", "copy_text", "read_pairing_text"],
+      "backend_tests": ["cargo test -p copypaste-core clipboard"],
+      "ui_tests": ["npm --prefix crates/copypaste-ui test"],
+      "accessibility_states": ["permission_required", "disabled", "error", "screen_reader"],
+      "failure_states": ["restart", "offline", "permission_denied"],
+      "performance": {"scenario": "capture-to-history", "p95_ms": 750, "measurement": "artifacts/native/{platform}/capture/latency.json"},
+      "native": {
+        "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/capture/screenshot.png", "ax_log": "artifacts/native/android/capture/ax.json"},
+        "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/capture/screenshot.png", "ax_log": "artifacts/native/macos/capture/ax.json"}
+      },
+      "release_evidence": ["release-android-smoke-evidence", "release-macos-native-evidence"]
+    },
+    {
+      "id": "devices",
+      "status": "product",
+      "contracts": ["peers", "pair_create", "pair_accept", "scan_pairing_qr", "unpair", "revoke", "sync_now", "discovered", "rescan"],
+      "backend_tests": ["cargo test -p copypaste-p2p"],
+      "ui_tests": ["npm --prefix crates/copypaste-ui test"],
+      "accessibility_states": ["pairing", "progress", "error", "keyboard", "screen_reader"],
+      "failure_states": ["restart", "offline", "wrong_code"],
+      "performance": {"scenario": "devices-list", "p95_ms": 750, "measurement": "artifacts/native/{platform}/devices/latency.json"},
+      "native": {
+        "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/devices/screenshot.png", "ax_log": "artifacts/native/android/devices/ax.json"},
+        "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/devices/screenshot.png", "ax_log": "artifacts/native/macos/devices/ax.json"}
+      },
+      "release_evidence": ["release-android-smoke-evidence", "release-macos-native-evidence"]
+    },
+    {
+      "id": "settings-and-service",
+      "status": "product",
+      "contracts": ["set_native_theme", "system_accent", "status", "diagnostics", "runtime_log_events", "export_diagnostics_report", "export_support_bundle", "service_state", "start_service", "restart_service", "hide_window", "show_main_window", "set_allow_screenshots", "get_default_shortcut", "get_shortcut", "set_shortcut", "get_config", "set_config", "export_history", "prepare_import_history", "apply_import_history", "cancel_import_history", "backup_database", "restore_database"],
+      "backend_tests": ["cargo test --workspace"],
+      "ui_tests": ["npm --prefix crates/copypaste-ui test"],
+      "accessibility_states": ["loading", "saved", "error", "keyboard", "screen_reader"],
+      "failure_states": ["restart", "offline", "permission_denied"],
+      "performance": {"scenario": "settings-ready", "p95_ms": 500, "measurement": "artifacts/native/{platform}/settings-and-service/latency.json"},
+      "native": {
+        "android": {"scenario": "./scripts/release/android-smoke.sh", "screenshot": "artifacts/native/android/settings-and-service/screenshot.png", "ax_log": "artifacts/native/android/settings-and-service/ax.json"},
+        "macos": {"scenario": "./scripts/release/smoke-macos-dmg.sh", "screenshot": "artifacts/native/macos/settings-and-service/screenshot.png", "ax_log": "artifacts/native/macos/settings-and-service/ax.json"}
+      },
+      "release_evidence": ["release-android-smoke-evidence", "release-macos-native-evidence"]
+    }
+  ]
+}

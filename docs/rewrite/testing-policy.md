@@ -35,6 +35,7 @@ can break either platform, so it must run every platform layer. `ci.yml`
 with no path filter. `android-emulator.yml` runs nightly, on demand, and on any
 push or pull request touching those shared paths or the Android tree.
 
+`native-nightly.yml` runs Android API 34/36 and macOS 14/15 matrices each night.
 `release.yml` runs on a tag. Everything it alone proves — installing the DMG,
 launching the bundle, the cask — is therefore post-hoc, and is marked below.
 

@@ -366,3 +366,13 @@ git worktree add -b "codex/$task_slug" \
 Codex app worktrees created before these repository rules are loaded may have a
 generated parent directory. Do not rename them in place; apply the branch rule
 and use this convention for every worktree created explicitly afterward.
+
+## 12. Product Definition of Done
+
+Every product feature is one cross-platform change. Update
+`docs/feature-ledger.json`; `scripts/check-feature-ledger.py` rejects Tauri
+commands without an owner and product entries without Android and macOS native
+scenarios, UI/accessibility states, tests, failure coverage, measured latency,
+and release evidence. A missing platform means removing the capability from
+the product and marking it `removed`, not leaving a TODO, waiver, placeholder,
+or skipped green check. See `docs/development.md` for the maintained commands.

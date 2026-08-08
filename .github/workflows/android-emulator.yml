@@ -50,6 +50,15 @@ name: Android emulator
 # once it has passed on its own, not before.
 
 on:
+  workflow_call:
+    inputs:
+      api-level:
+        required: true
+        type: string
+      target:
+        required: false
+        type: string
+        default: google_apis
   workflow_dispatch:
     inputs:
       api-level:
@@ -67,9 +76,6 @@ on:
         description: "System image target (google_apis; API 36 has no AOSP image)"
         required: false
         default: "google_apis"
-  schedule:
-    # 04:17 UTC. Off the hour because everything else in the world is on it.
-    - cron: "17 4 * * *"
   # GitHub's workflow parser rejects YAML anchors, so the two lists are written
   # out twice and have to be kept identical by hand.
   push:
@@ -113,7 +119,7 @@ concurrency:
   # the default branch's ref, and a cancelled run reports as cancelled rather
   # than failed — so one silently erasing the other's Android signal is
   # invisible.
-  group: android-emulator-${{ github.ref }}-${{ github.event_name }}
+  group: android-emulator-${{ github.ref }}-${{ github.event_name }}-${{ inputs.api-level || '36' }}
   cancel-in-progress: true
 
 permissions:
