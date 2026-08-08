@@ -133,7 +133,7 @@ pub async fn store<B: Backend>(backend: &B, clip: &Clip) -> Result<Option<UiItem
             clip.source_app_name.as_deref(),
         )
         .await?;
-    Ok(Some(item.into()))
+    Ok(item.map(Into::into))
 }
 
 /// Capture the clipboard right now and store it — the Quick Settings tile and

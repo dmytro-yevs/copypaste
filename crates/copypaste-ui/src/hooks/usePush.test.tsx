@@ -5,9 +5,11 @@ import { QueryClientProvider } from "@tanstack/react-query";
 
 import { useHistory } from "@/hooks/useHistory";
 import { useOpenAtLogin } from "@/hooks/useOpenAtLogin";
+import { PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import {
   EVENT_AUTOSTART_CHANGED,
   EVENT_CHANGED,
+  EVENT_PRIVATE_MODE_CHANGED,
   usePush,
   type ChangePayload,
 } from "@/hooks/usePush";
@@ -176,6 +178,27 @@ describe("manifest 05 §5.4: a remote change three pages down still reaches the 
       expect(
         result.current.data?.items.find((entry) => entry.id === target)?.pinned,
       ).toBe(true),
+    );
+  });
+});
+
+describe("private-mode convergence", () => {
+  it("invalidates the dedicated private-mode query after a native toggle", async () => {
+    const client = testClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    renderHook(() => usePush(), { wrapper: Wrapper });
+
+    await waitFor(() =>
+      expect(handlers.get(EVENT_PRIVATE_MODE_CHANGED)).toHaveLength(1),
+    );
+    for (const handler of handlers.get(EVENT_PRIVATE_MODE_CHANGED) ?? []) {
+      handler({ payload: true as never });
+    }
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: PRIVATE_MODE_KEY }),
     );
   });
 });

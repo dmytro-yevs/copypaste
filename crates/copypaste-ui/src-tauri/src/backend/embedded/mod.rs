@@ -28,11 +28,11 @@
 
 mod backup;
 mod cloud;
-mod config;
 mod open;
 mod peers;
 mod retention;
 mod rows;
+mod settings;
 mod state;
 mod transfer;
 
@@ -44,7 +44,7 @@ use copypaste_core::{
 };
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
 pub use open::{Clipboard, EmbeddedBackend};
 use rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
@@ -61,7 +61,6 @@ const MSG_NO_ITEM: &str = "That item is no longer there.";
 /// replay the whole history and the caller could not tell.
 const MSG_BAD_CURSOR: &str = "That page marker isn't one this app issued.";
 const MSG_NO_PEER: &str = "That device isn't paired.";
-const MSG_INVALID_SETTING: &str = "That setting isn't valid.";
 impl Backend for EmbeddedBackend {
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page> {
         let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
@@ -158,12 +157,15 @@ impl Backend for EmbeddedBackend {
         content: &str,
         app_bundle_id: Option<&str>,
         app_name: Option<&str>,
-    ) -> Result<Item> {
+    ) -> Result<Option<Item>> {
         let content = content.to_string();
         let app_bundle_id = app_bundle_id.map(str::to_owned);
         let app_name = app_name.map(str::to_owned);
         self.blocking(move |inner| {
             let settings = inner.settings();
+            if settings.private_mode {
+                return Ok(None);
+            }
             let excluded = app_bundle_id.as_ref().is_some_and(|id| {
                 settings
                     .excluded_app_bundle_ids
@@ -171,7 +173,7 @@ impl Backend for EmbeddedBackend {
                     .any(|excluded| excluded.eq_ignore_ascii_case(id))
             });
             if excluded {
-                return Err(BackendError::Invalid("copies from this app are excluded"));
+                return Ok(None);
             }
 
             let sensitive_floor = app_bundle_id
@@ -194,7 +196,7 @@ impl Backend for EmbeddedBackend {
                     let item = inner.to_wire(ingested.into_item())?;
                     inner.note_version_written(item.created_at);
                     inner.publish_items(true, 0);
-                    Ok(item)
+                    Ok(Some(item))
                 }
                 Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
                 Err(IngestError::TooLarge) => Err(BackendError::Invalid(MSG_TOO_LARGE)),
@@ -416,11 +418,19 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn get_config(&self) -> Result<ConfigApplied> {
-        self.blocking(config::get).await
+        settings::get(self).await
     }
 
     async fn set_config(&self, patch: ConfigPatch) -> Result<ConfigApplied> {
-        self.blocking(move |inner| config::set(inner, patch)).await
+        settings::set(self, patch).await
+    }
+
+    async fn get_private_mode(&self) -> Result<PrivateModeData> {
+        settings::get_private_mode(self).await
+    }
+
+    async fn set_private_mode(&self, enabled: bool) -> Result<PrivateModeData> {
+        settings::set_private_mode(self, enabled).await
     }
 
     async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {
@@ -772,7 +782,8 @@ mod tests {
                 Some("Writer"),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .expect("capture was enabled");
         assert_eq!(
             item.source_app_bundle_id.as_deref(),
             Some("com.example.writer")
@@ -791,17 +802,41 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(
-            backend
-                .add_captured(
-                    "do not retain",
-                    Some("com.example.private"),
-                    Some("Private")
-                )
-                .await,
-            Err(BackendError::Invalid(_))
-        ));
+        assert!(backend
+            .add_captured(
+                "do not retain",
+                Some("com.example.private"),
+                Some("Private")
+            )
+            .await
+            .unwrap()
+            .is_none());
         assert!(backend.list(50, None).await.unwrap().items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn private_mode_suppresses_embedded_capture_without_replay() {
+        let (backend, _clip, _dir) = backend();
+        let confirmed = backend.set_private_mode(true).await.unwrap();
+        assert!(confirmed.private_mode);
+        assert!(backend.status().await.unwrap().private_mode);
+        let saved: copypaste_ipc::ConfigData =
+            serde_json::from_slice(&std::fs::read(&backend.inner.state.settings_path).unwrap())
+                .unwrap();
+        assert!(saved.private_mode);
+        assert!(backend
+            .add_captured("not retained", None, None)
+            .await
+            .unwrap()
+            .is_none());
+
+        backend.set_private_mode(false).await.unwrap();
+        assert!(backend.list(50, None).await.unwrap().items.is_empty());
+        assert!(backend
+            .add_captured("retained later", None, None)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     /// The same text twice is one row. Not because this file says so — the

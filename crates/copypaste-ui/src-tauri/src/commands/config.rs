@@ -23,7 +23,7 @@
 //! Nothing here is secret and nothing here is a path, so both types cross the
 //! bridge verbatim — unlike an item, which has plaintext to drop (`crate::model`).
 
-use copypaste_ipc::{ConfigApplied, ConfigPatch};
+use copypaste_ipc::{ConfigApplied, ConfigPatch, PrivateModeData};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::backend::{Backend, BackendError, SelectedBackend};
@@ -59,6 +59,22 @@ pub async fn set_config(
         let _ = app.emit("private-mode-changed", applied.config.private_mode);
     }
     Ok(applied)
+}
+
+#[tauri::command]
+pub async fn get_private_mode(backend: State<'_, SelectedBackend>) -> Result<PrivateModeData> {
+    backend.get_private_mode().await
+}
+
+#[tauri::command]
+pub async fn set_private_mode(
+    app: AppHandle,
+    backend: State<'_, SelectedBackend>,
+    enabled: bool,
+) -> Result<PrivateModeData> {
+    let confirmed = backend.set_private_mode(enabled).await?;
+    let _ = app.emit("private-mode-changed", confirmed.private_mode);
+    Ok(confirmed)
 }
 
 #[cfg(test)]

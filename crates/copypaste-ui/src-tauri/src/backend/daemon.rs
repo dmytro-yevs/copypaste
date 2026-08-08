@@ -35,8 +35,8 @@ use copypaste_ipc::transport;
 use copypaste_ipc::{
     socket_path, BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigPatch,
     DiscoveredDevice, EventData, ExportData, ExportItem, ImagePreview, ImportData, Item, Method,
-    PeerInfo, Request, Response, ResponseData, StatusData, SyncResult, MAX_FRAME_BYTES,
-    PROTOCOL_VERSION,
+    PeerInfo, PrivateModeData, Request, Response, ResponseData, StatusData, SyncResult,
+    MAX_FRAME_BYTES, PROTOCOL_VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::{self, Receiver};
@@ -295,6 +295,14 @@ impl Backend for DaemonBackend {
         expect_config(self.call(Method::SetConfig { patch }).await?)
     }
 
+    async fn get_private_mode(&self) -> Result<PrivateModeData> {
+        expect_private_mode(self.call(Method::GetPrivateMode).await?)
+    }
+
+    async fn set_private_mode(&self, enabled: bool) -> Result<PrivateModeData> {
+        expect_private_mode(self.call(Method::SetPrivateMode { enabled }).await?)
+    }
+
     async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {
         expect_export(
             self.call(Method::Export {
@@ -443,6 +451,18 @@ mod tests {
             into_data(parse(r#"{"id":1,"ok":true,"data":{"empty":{}}}"#)).unwrap()
         )
         .is_err());
+    }
+
+    #[test]
+    fn private_mode_uses_the_daemons_confirmed_value() {
+        let mode = expect_private_mode(
+            into_data(parse(
+                r#"{"id":1,"ok":true,"data":{"private_mode":{"private_mode":true}}}"#,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(mode.private_mode);
     }
 
     #[test]

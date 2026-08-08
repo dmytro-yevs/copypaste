@@ -11,7 +11,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { HISTORY_KEY, STATUS_KEY } from "@/hooks/useHistory";
 import { PEERS_KEY } from "@/hooks/useDevices";
-import { CONFIG_KEY } from "@/hooks/useServiceConfig";
+import { CONFIG_KEY, PRIVATE_MODE_KEY } from "@/hooks/useServiceConfig";
 import { OPEN_AT_LOGIN_KEY } from "@/hooks/useOpenAtLogin";
 import { hasBridge } from "@/lib/ipc";
 
@@ -77,6 +77,7 @@ export function usePush(): boolean {
     }).then(keep);
 
     void listen<boolean>(EVENT_PRIVATE_MODE_CHANGED, () => {
+      void qc.invalidateQueries({ queryKey: PRIVATE_MODE_KEY });
       void qc.invalidateQueries({ queryKey: CONFIG_KEY });
       void qc.invalidateQueries({ queryKey: HISTORY_KEY });
       void qc.invalidateQueries({ queryKey: STATUS_KEY });

@@ -310,6 +310,8 @@ pub struct StatusData {
 
 /// The private capture gate's authoritative value.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PrivateModeData {
     pub private_mode: bool,
 }

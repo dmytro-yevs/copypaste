@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use copypaste_ipc::{
     BackupData, ConfigApplied, ConfigPatch, DiscoveredDevice, EventData, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, PeerInfo, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
 
 use super::{Backend, BackendError, Page, Result};
@@ -238,6 +238,16 @@ impl Backend for FakeBackend {
     }
 
     async fn set_config(&self, _patch: ConfigPatch) -> Result<ConfigApplied> {
+        Err(refused())
+    }
+
+    async fn get_private_mode(&self) -> Result<PrivateModeData> {
+        Ok(PrivateModeData {
+            private_mode: false,
+        })
+    }
+
+    async fn set_private_mode(&self, _enabled: bool) -> Result<PrivateModeData> {
         Err(refused())
     }
 
