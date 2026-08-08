@@ -7,7 +7,7 @@ emulator you already have, and what the result does and does not mean.
 
 Observed: on 2026-08-08 this procedure ran the debug leg green on
 `copypaste-api36` (API 36, x86_64, google_apis) — **31 assertions passed, 0
-failed**, exit 0. Per `HANDOFF.md` the Android job had never reached its
+failed**, exit 0. The Android job had never reached its
 reporting stage in CI, so that is the first end-to-end result this harness has
 produced anywhere. It was taken against an APK built from a tree that predates
 the performance package, so it says the harness works; it does not certify the

@@ -12,7 +12,7 @@ behind a platform cfg with **every** other side implemented.
 
 **Linux desktop is still not a shipped target.** It stays a test surface —
 `browser-webkitgtk.yml` drives the app through WebKitGTK, and that is the whole
-of its purpose. HANDOFF.md's diagnosis of the `glib 0.18.5` advisory rests on
+of its purpose. [ADR-0014](0014-accept-the-glib-advisory-as-unshipped.md)'s diagnosis of the `glib 0.18.5` advisory rests on
 that distinction: the GTK stack is unshipped, so the alert is not a shipped
 exposure. Windows becoming shippable does not promote Linux.
 
