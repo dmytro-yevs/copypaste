@@ -1,6 +1,7 @@
 # Build artifacts
 /target/
 /dist/
+/artifacts/
 
 # Playwright/Chrome-devtools MCP runtime artifacts (regenerated each session)
 .playwright-mcp/

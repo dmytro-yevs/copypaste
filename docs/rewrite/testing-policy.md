@@ -39,6 +39,44 @@ push or pull request touching those shared paths or the Android tree.
 `release.yml` runs on a tag. Everything it alone proves — installing the DMG,
 launching the bundle, the cask — is therefore post-hoc, and is marked below.
 
+## What an emulator is not
+
+The emulator layer is a Google APIs system image on `ubuntu-24.04`, x86_64,
+with no vendor software on it. Three requirements sit outside that at every
+API level.
+A green Android job says nothing about any of them, and each has its row in the
+matrix.
+
+- **The aarch64 hardware SHA-2 backend.** Every Android device we ship to is
+  arm64; the emulator is x86_64 and takes the x86 path, so those instructions
+  never execute in any run, here or in CI. Static disassembly of the aarch64
+  artifact is the only check available without arm64 hardware, and it is what
+  caught the `asm` feature being off once already — count `SHA256H`,
+  `SHA256H2`, `SHA256SU0`, `SHA256SU1` in the built object. **Count on this
+  tree: 56** in the `aarch64-linux-android` `sha2-asm` archive — 16, 16, 12 and
+  12 in that order — against 0 for the x86_64 control. Taken with `cargo build`
+  and `llvm-objdump`: `cargo check` emits no object code and counts 0 for both.
+  It establishes that the instructions ship, not that they execute; on x86_64
+  they cannot.
+- **OEM background restrictions.** Stock AOSP applies none of the vendor battery
+  management that decides whether the capture service is still alive an hour
+  after the user last opened the app. That is where a clipboard manager dies in
+  the field, and no runner reproduces it.
+- **The Play-updated System WebView.** The emulator's WebView is the one pinned
+  into its system image. On a user's phone it updates from Play independently of
+  the OS, so any behaviour that turns on the WebView version — including which
+  one the shipped app gets — is unobserved.
+
+### API levels
+
+Clipboard access is API-gated — background reads at 10 (29), the notification
+runtime permission at 13 (33), foreground service types at 14 (34) — so one API
+level is one point on that curve
+([android-clipboard-access.md](android-clipboard-access.md)). The scheduled
+matrix runs API 24, 29, 33, 34 and 36; dispatches select one level. The rungs
+harness runs only on API 36 because its shell clipboard transaction uses that
+level's argument vector.
+
 ## Matrix
 
 `Verified` — the authoritative layer runs it on every push or pull request.
@@ -53,10 +91,12 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | A real `pbcopy` reaches history through the shipped bundle | macOS | Partial — ENFORCED in `smoke-macos-dmg.sh`, tag-only |
 | Capture pipeline against the fake source | Rust | Verified |
 | `ACTION_SEND` / `ACTION_PROCESS_TEXT` reach SQLCipher | Android | Partial — debug leg only; the release leg has no `run-as` and prints `NOT ASSERTED` |
-| Rung 2: Shizuku shell-uid clipboard read | Android | **NOT VERIFIED IN CI** — pairing cannot be granted on a stock emulator |
-| `ClipListener` / `ClipQueue` / `CaptureService` | Android | **NOT VERIFIED IN CI** — only the negative case is asserted; no Kotlin unit test exists |
-| Quick Settings tile | Android | **NOT VERIFIED IN CI** — probed, never asserted |
+| Rung 2: the shell-uid clipboard read | Android | Partial — the API 36 leg reads a foreign clip as uid 2000 without focus; Shizuku's binder proxy and listener still need pairing on a phone |
+| `ClipListener` / `ClipQueue` | Android | **NOT VERIFIED IN CI** — the listener never registers without Shizuku; no Kotlin unit test exists |
+| `CaptureService` | Android | Partial — the API 36 leg proves it stays stopped and makes no claim when no listener exists; nothing asserts positive capture through it |
+| Quick Settings tile | Android | Partial — the API 36 leg requires one tile click to persist a foreign clip in encrypted history |
 | Android 12+ clipboard-toast consent gate | Android | **NOT VERIFIED IN CI** — the Rust refusal and the jsdom dialog support it; the OS toast is unobserved |
+| Capture surviving OEM battery policy | Android | **NOT VERIFIED IN CI** — stock AOSP applies no vendor background restrictions; this needs a phone left idle |
 | API-level spread | Android | Partial — the scheduled matrix runs API 24, 29, 33, 34 and 36; targeted dispatches run one selected level |
 
 ### Crypto and device secret
@@ -133,7 +173,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Launch at login | macOS | **NOT VERIFIED IN CI** |
 | Notification on copy | macOS | **NOT VERIFIED IN CI** — nothing posts or asserts one |
 | Sound on copy | macOS | **NOT VERIFIED IN CI** — the `should_play` gate is Rust-verified; the spawn is not |
-| Screen-capture protection, INV-35 (`contentProtected`, `FLAG_SECURE`) | macOS, Android | **NOT VERIFIED IN CI** — the jsdom test covers the preference toggle only |
+| Screen-capture protection, INV-35 (`contentProtected`, `FLAG_SECURE`) | macOS, Android | Partial — the Android API 36 leg finds `FLAG_SECURE` in twenty window dumps, with another window read as unprotected by the same reader. macOS `contentProtected` remains unasserted |
 
 ### Packaging
 

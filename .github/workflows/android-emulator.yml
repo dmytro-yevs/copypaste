@@ -408,7 +408,14 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: ./scripts/release/android-smoke.sh
+          script: |
+            set -uo pipefail
+            ./scripts/release/android-smoke.sh; smoke=$?
+            rungs=0
+            if [[ "${{ matrix.api-level }}" == "36" ]]; then
+              APK= SMOKE_OUT=artifacts/android-rungs ./scripts/release/android-rungs.sh; rungs=$?
+            fi
+            [ $smoke -eq 0 ] && [ $rungs -eq 0 ]
         env:
           APK: dist/copypaste-emulator-x86_64-debug.apk
           SMOKE_OUT: artifacts/android-smoke
@@ -419,7 +426,9 @@ jobs:
         if: always()
         with:
           name: android-emulator-evidence-api${{ matrix.api-level }}
-          path: artifacts/android-smoke
+          path: |
+            artifacts/android-smoke
+            artifacts/android-rungs
           if-no-files-found: warn
           retention-days: 14
 
