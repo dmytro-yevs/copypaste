@@ -1,3 +1,13 @@
+/**
+ * Driving the screen: find it, wait for it, tap it, type into it.
+ *
+ * Past the 300-line trigger. The seam considered is reading versus acting —
+ * `visibleText`/`count`/`byLabel` against `tapButton`/`typeInto`/`scrollTo`.
+ * They are not separable yet: every act here waits for what it acted on, so
+ * the acting half would import the reading half wholesale and the split would
+ * move lines rather than concerns. Extract when something acts without
+ * waiting, or when a second engine needs the reading half alone.
+ */
 import { sleep } from "./adb.js";
 import type { AndroidApp } from "./app.js";
 
