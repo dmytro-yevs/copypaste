@@ -37,7 +37,7 @@ install_and_open() { # <apk>
 open_cloud() {
     tap_selector "Settings" "$OUT/settings-nav.xml" || return 1
     tap_selector "Sync" "$OUT/settings-sync.xml" || return 1
-    find_scrolling "Cloud sync" "$OUT/cloud-visible.xml" down
+    find_scrolling "Cloud sync" "$OUT/cloud-visible.xml" up
 }
 
 capture_state() { # <state>
