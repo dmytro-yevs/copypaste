@@ -36,12 +36,13 @@ import {
   STORAGE_QUOTA_BYTES,
 } from "@/components/settings/serviceChoices";
 import {
+  usePrivateMode,
   useRestartService,
   useServiceConfig,
+  useSetPrivateMode,
   useSetServiceConfig,
 } from "@/hooks/useServiceConfig";
 import { useCaptureMutation, useCaptureState } from "@/hooks/useCapture";
-import { useStatus } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { primaryOf } from "@/lib/capture";
 import { isUnavailable } from "@/lib/errors";
@@ -51,11 +52,9 @@ export function ServiceTab() {
   const { t } = useTranslation();
   const config = useServiceConfig();
   const save = useSetServiceConfig();
+  const privateMode = usePrivateMode();
+  const savePrivateMode = useSetPrivateMode();
   const restart = useRestartService();
-  const status = useStatus();
-  // Dormant: `ConfigData::field_liveness` marks every field live today. It reads
-  // the daemon's answer rather than naming a field, which is why the badge that
-  // named `lan_visibility` outlived the fact that it needed a restart.
   const [pending, setPending] = useState(false);
 
   const apply = (patch: ConfigPatch) => {
@@ -66,7 +65,8 @@ export function ServiceTab() {
     });
   };
 
-  if (config.error !== null && isUnavailable(config.error)) {
+  const loadError = config.error ?? privateMode.error;
+  if (loadError !== null && isUnavailable(loadError)) {
     return (
       <StateNotice
         icon={TriangleAlert}
@@ -77,23 +77,27 @@ export function ServiceTab() {
   }
 
   const data = config.data?.config;
-  if (data === undefined) {
+  const privateModeEnabled = privateMode.data?.private_mode;
+  if (data === undefined || privateModeEnabled === undefined) {
     return (
       <StateNotice
-        icon={config.error !== null ? TriangleAlert : LoaderCircle}
-        busy={config.error === null}
-        tone={config.error !== null ? "danger" : "info"}
+        icon={loadError !== null ? TriangleAlert : LoaderCircle}
+        busy={loadError === null}
+        tone={loadError !== null ? "danger" : "info"}
         title={
-          config.error !== null
+          loadError !== null
             ? t("errors.offline")
             : t("settings.service.loading")
         }
         action={
-          config.error !== null
+          loadError !== null
             ? {
                 label: t("common.tryAgain"),
                 icon: RotateCw,
-                onClick: () => void config.refetch(),
+                onClick: () => {
+                  void config.refetch();
+                  void privateMode.refetch();
+                },
               }
             : undefined
         }
@@ -101,10 +105,8 @@ export function ServiceTab() {
     );
   }
 
-  const busy = save.isPending;
+  const busy = save.isPending || savePrivateMode.isPending;
   const sweeping = data.sensitive_ttl_secs > 0;
-  const supportsPrivateMode =
-    status.data !== undefined && status.data.clipboard_backend !== "android-inprocess";
 
   return (
     <div className="flex flex-col gap-s-4">
@@ -134,16 +136,14 @@ export function ServiceTab() {
         title={t("settings.service.groups.capture.title")}
         description={t("settings.service.groups.capture.description")}
       >
-        {supportsPrivateMode && (
-          <SwitchRow
-            title={t("settings.service.privateMode.title")}
-            description={t("settings.service.privateMode.description")}
-            id="private-mode"
-            checked={data.private_mode}
-            disabled={busy}
-            onChange={(private_mode) => apply({ private_mode })}
-          />
-        )}
+        <SwitchRow
+          title={t("settings.service.privateMode.title")}
+          description={t("settings.service.privateMode.description")}
+          id="private-mode"
+          checked={privateModeEnabled}
+          disabled={busy}
+          onChange={(enabled) => savePrivateMode.mutate(enabled)}
+        />
 
         <ChoiceRow
           title={t("settings.service.poll.title")}

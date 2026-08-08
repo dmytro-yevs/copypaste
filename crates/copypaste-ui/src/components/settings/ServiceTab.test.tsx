@@ -22,6 +22,8 @@ import { captureSnapshot, status, withUser } from "@/test/harness";
 
 const getConfig = vi.fn();
 const setConfig = vi.fn();
+const getPrivateMode = vi.fn();
+const setPrivateMode = vi.fn();
 const getStatus = vi.fn();
 const captureState = vi.fn();
 const captureArm = vi.fn();
@@ -34,6 +36,8 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     ...actual,
     getConfig: () => getConfig(),
     setConfig: (patch: ConfigPatch) => setConfig(patch),
+    getPrivateMode: () => getPrivateMode(),
+    setPrivateMode: (enabled: boolean) => setPrivateMode(enabled),
     getStatus: () => getStatus(),
     captureState: () => captureState(),
     captureArm: () => captureArm(),
@@ -72,6 +76,10 @@ const applied = (
 beforeEach(() => {
   getConfig.mockReset().mockResolvedValue(applied());
   setConfig.mockReset().mockImplementation(() => Promise.resolve(applied()));
+  getPrivateMode.mockReset().mockResolvedValue({ private_mode: false });
+  setPrivateMode
+    .mockReset()
+    .mockImplementation((enabled: boolean) => Promise.resolve({ private_mode: enabled }));
   getStatus.mockReset().mockResolvedValue(status());
   captureState.mockReset().mockResolvedValue(captureSnapshot());
   captureArm.mockReset().mockResolvedValue(captureSnapshot());
@@ -227,16 +235,23 @@ describe("writing one", () => {
   it("persists private mode through the service", async () => {
     const { user } = withUser(<ServiceTab />);
     await user.click(await screen.findByRole("switch", { name: "Private mode" }));
-    await waitFor(() =>
-      expect(setConfig.mock.calls[0]![0]).toEqual({ private_mode: true }),
-    );
+    await waitFor(() => expect(setPrivateMode).toHaveBeenCalledWith(true));
+    expect(setConfig).not.toHaveBeenCalled();
   });
 
-  it("does not offer an unpersisted private-mode control on Android", async () => {
+  it("offers the persisted private-mode control on Android", async () => {
     getStatus.mockResolvedValue(status({ clipboard_backend: "android-inprocess" }));
     withUser(<ServiceTab />);
-    expect(await screen.findByRole("combobox", { name: "Check the clipboard every" })).toBeTruthy();
-    expect(screen.queryByRole("switch", { name: "Private mode" })).toBeNull();
+    expect(await screen.findByRole("switch", { name: "Private mode" })).toBeTruthy();
+  });
+
+  it("renders the backend echo instead of assuming the requested value", async () => {
+    setPrivateMode.mockResolvedValue({ private_mode: false });
+    const { user } = withUser(<ServiceTab />);
+    const control = await screen.findByRole("switch", { name: "Private mode" });
+    await user.click(control);
+    await waitFor(() => expect(setPrivateMode).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(control.getAttribute("aria-checked")).toBe("false"));
   });
 });
 

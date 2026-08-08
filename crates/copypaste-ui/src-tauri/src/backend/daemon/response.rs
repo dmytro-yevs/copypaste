@@ -1,6 +1,7 @@
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredDevice, ExportData,
-    ImagePreview, ImportData, Item, PeerInfo, Response, ResponseData, StatusData, SyncResult,
+    ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, Response, ResponseData, StatusData,
+    SyncResult,
 };
 
 use super::super::{BackendError, Page, Result};
@@ -91,6 +92,13 @@ pub(super) fn expect_config(data: Option<ResponseData>) -> Result<ConfigApplied>
     match data {
         Some(ResponseData::Config(applied)) => Ok(applied),
         _ => Err(BackendError::wrong_shape("the service's settings")),
+    }
+}
+
+pub(super) fn expect_private_mode(data: Option<ResponseData>) -> Result<PrivateModeData> {
+    match data {
+        Some(ResponseData::PrivateMode(mode)) => Ok(mode),
+        _ => Err(BackendError::wrong_shape("the private-mode setting")),
     }
 }
 
