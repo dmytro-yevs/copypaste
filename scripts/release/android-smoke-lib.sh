@@ -349,8 +349,8 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
     probe "the screenshot" "$shot bytes — size says nothing here, see the artifact"
 
     if [[ "$AWAKE" != yes ]]; then
-        note "that the WebView painted the CopyPaste UI" \
-             "the screen was '${WAKEFULNESS:-unreported}', so an empty hierarchy says nothing about the UI"
+        bad "the WebView painted a UI with content" \
+            "screen state was '${WAKEFULNESS:-unreported}', so native paint could not be observed; screenshot $shot bytes"
     elif [[ -n "$painted_at" ]] && ! looks_like_error_page "$first"; then
         ok "the WebView painted a UI with content"
         # Printed on the way past, so the timeout has a measured margin rather
@@ -364,8 +364,8 @@ assert_painted() {   # <timeout> <launched_at> <dump path> <screenshot path>
     elif (( dumps == 0 )); then
         # A tool that never answered is not a UI that never painted, and calling
         # it one would send the next round after the wrong thing.
-        note "that the WebView painted the CopyPaste UI" \
-             "uiautomator produced no dump in ${timeout}s, so there was nothing to read; the screenshot is $shot bytes"
+        bad "the WebView painted a UI with content" \
+            "uiautomator produced no dump in ${timeout}s, so native paint could not be observed; screenshot $shot bytes"
     else
         bad "the WebView painted a UI with content" \
             "$dumps dumps over ${timeout}s and the WebView subtree held $kids nodes, $named named; screenshot $shot bytes (${first})"
@@ -554,6 +554,27 @@ self_test() {
     looks_like_error_page "Clipboard history" \
         && bad "ordinary UI text is not an error page" \
         || ok "ordinary UI text is not an error page"
+
+    local paint_verdict
+    paint_verdict="$(
+        adb() { return 1; }
+        AWAKE=no WAKEFULNESS="" OUT="$t" assert_painted 0 0 "$t/paint-unobserved.xml" "$t/paint-unobserved.png"
+    )"
+    [[ "$paint_verdict" == *"FAIL  the WebView painted a UI with content"* \
+       && "$paint_verdict" == *"screen state was 'unreported'"* \
+       && "$paint_verdict" == *"screenshot 0 bytes"* ]] \
+        && ok "missing screen-state observability fails paint with diagnostics" \
+        || bad "missing screen-state observability fails paint with diagnostics" "$paint_verdict"
+
+    paint_verdict="$(
+        adb() { return 1; }
+        AWAKE=yes WAKEFULNESS="mWakefulness=Awake" OUT="$t" assert_painted 0 0 "$t/paint-no-dump.xml" "$t/paint-no-dump.png"
+    )"
+    [[ "$paint_verdict" == *"FAIL  the WebView painted a UI with content"* \
+       && "$paint_verdict" == *"uiautomator produced no dump in 0s"* \
+       && "$paint_verdict" == *"screenshot 0 bytes"* ]] \
+        && ok "missing hierarchy observability fails paint with diagnostics" \
+        || bad "missing hierarchy observability fails paint with diagnostics" "$paint_verdict"
 
     group "self-test: keystore detection"
 
