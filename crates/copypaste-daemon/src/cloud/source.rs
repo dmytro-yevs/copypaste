@@ -151,8 +151,8 @@ impl CloudSource for StoreSource {
                     Vec::new()
                 } else {
                     match self.shared.open_bytes(&row) {
-                        Some(content) => content,
-                        None => continue,
+                        Ok(content) => content,
+                        Err(_) => continue,
                     }
                 };
                 items.push(LocalItem {
@@ -388,7 +388,7 @@ impl StoreSource {
                 || self
                     .shared
                     .open(local)
-                    .is_some_and(|content| content.as_bytes() == incoming.content))
+                    .is_ok_and(|content| content.as_bytes() == incoming.content))
     }
 }
 

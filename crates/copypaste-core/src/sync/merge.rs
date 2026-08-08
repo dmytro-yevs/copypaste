@@ -15,28 +15,42 @@ use crate::sensitive::Detector;
 use crate::storage::{origin_or, IncomingItem, Store, StoredItem, Version};
 use crate::Keyring;
 
-/// Open a stored version under the local item key, ready to leave the device.
-///
-/// `None` means "do not send this one": a tombstone carries no payload by rule
-/// (manifest 05 T-4) and is handled by the caller, while an unreadable row or a
-/// live row with no ciphertext must not fail a whole session — the rest of the
-/// history is still worth syncing.
-#[must_use]
-pub fn open_version_bytes(keyring: &Keyring, row: &StoredItem) -> Option<Vec<u8>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenVersionError {
+    MissingPayload,
+    AuthenticationFailed,
+    InvalidPayload,
+}
+
+fn open_error(error: &crate::CryptoError) -> OpenVersionError {
+    if matches!(error, crate::CryptoError::AuthFailed) {
+        OpenVersionError::AuthenticationFailed
+    } else {
+        OpenVersionError::InvalidPayload
+    }
+}
+
+/// An unreadable row is reported to the caller, which may skip that row while
+/// continuing the sync session with unrelated history.
+pub fn open_version_bytes(
+    keyring: &Keyring,
+    row: &StoredItem,
+) -> Result<Vec<u8>, OpenVersionError> {
     if row.content_ciphertext.is_empty() {
         warn!(id = %row.id, "live item has no payload; not sending it");
-        return None;
+        return Err(OpenVersionError::MissingPayload);
     }
     if copypaste_ipc::content_type::is_binary(&row.content_type) {
-        return crate::open_binary(&row.content_ciphertext, &keyring.item_key(), &row.id)
-            .map_err(
-                |e| warn!(id = %row.id, error = ?e, "skipping binary item that failed to decrypt"),
-            )
-            .ok();
+        return crate::open_binary(&row.content_ciphertext, &keyring.item_key(), &row.id).map_err(
+            |e| {
+                warn!(id = %row.id, error = ?e, "skipping binary item that could not be opened");
+                open_error(&e)
+            },
+        );
     }
     if row.nonce.is_empty() {
         warn!(id = %row.id, "text item has no nonce; not sending it");
-        return None;
+        return Err(OpenVersionError::MissingPayload);
     }
     // The item id is the AAD, exactly as the read paths use it.
     match crate::decrypt(
@@ -45,10 +59,10 @@ pub fn open_version_bytes(keyring: &Keyring, row: &StoredItem) -> Option<Vec<u8>
         &keyring.item_key(),
         &row.id,
     ) {
-        Ok(plaintext) => Some(plaintext),
+        Ok(plaintext) => Ok(plaintext),
         Err(e) => {
-            warn!(id = %row.id, error = ?e, "skipping an item that failed to decrypt");
-            None
+            warn!(id = %row.id, error = ?e, "skipping an item that could not be opened");
+            Err(open_error(&e))
         }
     }
 }
@@ -56,11 +70,12 @@ pub fn open_version_bytes(keyring: &Keyring, row: &StoredItem) -> Option<Vec<u8>
 /// Open a text version for the P2P wire. Binary callers must use
 /// [`open_version_bytes`] so arbitrary bytes can never be lossily stringified.
 #[must_use]
-pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Option<String> {
+pub fn open_version(keyring: &Keyring, row: &StoredItem) -> Result<String, OpenVersionError> {
     if !copypaste_ipc::content_type::is_text(&row.content_type) {
-        return None;
+        return Err(OpenVersionError::MissingPayload);
     }
-    String::from_utf8(open_version_bytes(keyring, row)?).ok()
+    String::from_utf8(open_version_bytes(keyring, row)?)
+        .map_err(|_| OpenVersionError::InvalidPayload)
 }
 
 /// One version of one item, arriving from another device.
@@ -718,7 +733,7 @@ mod tests {
         let stored = f.store.version("shared").unwrap().unwrap();
         assert_eq!(
             open_version(&f.keyring, &stored).as_deref(),
-            Some("new content")
+            Ok("new content")
         );
         assert!(stored.pinned);
         assert_eq!(stored.pin_updated_at, 300);
