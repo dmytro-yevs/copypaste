@@ -320,9 +320,9 @@ export function useBulkDelete() {
   });
 }
 
-/** Not optimistic, though §3.1.6 specifies an optimistic reorder with a revert:
- *  while the bridge refuses the verb, an optimistic move would show a new order
- *  and take it away, which reads as the app losing the user's change. */
+/** Not optimistic. §3.1.6 specifies an optimistic reorder with a revert, and it
+ *  needs the drag gesture that does not exist yet: nothing calls this hook, so
+ *  there is no move to show early. Wire the two together. */
 export function useReorderPinned() {
   const qc = useQueryClient();
   return useMutation({
