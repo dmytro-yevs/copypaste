@@ -116,19 +116,23 @@ describe("SyncTab", () => {
     expect(screen.queryByRole("button", { name: en.settings.sync.cloud.signIn })).toBeNull();
   });
 
-  it("signs into a configured deployment without exposing pairing", async () => {
+  it.each([
+    ["leading", " password"],
+    ["trailing", "password "],
+    ["whitespace-only", "   "],
+  ])("preserves a %s-space password exactly", async (_kind, password) => {
     getCloudStatus.mockResolvedValue(cloudStatus({ configured: true }));
     const { user } = withUser(<SyncTab />);
 
     await user.type(await screen.findByLabelText(en.settings.sync.cloud.email), " me@example.com ");
-    await user.type(screen.getByLabelText(en.settings.sync.cloud.password), " password ");
+    await user.type(screen.getByLabelText(en.settings.sync.cloud.password), password);
     await user.type(screen.getByLabelText(en.settings.sync.cloud.passphrase), "phrase with spaces");
     await user.click(screen.getByRole("button", { name: en.settings.sync.cloud.signIn }));
 
     await waitFor(() =>
       expect(cloudSignIn).toHaveBeenCalledWith({
         email: "me@example.com",
-        password: "password",
+        password,
         passphrase: "phrase with spaces",
       }),
     );
