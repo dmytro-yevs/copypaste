@@ -1,7 +1,7 @@
 //! The clipboard source port — the seam v1 never had.
 //!
 //! Port manifest 01 (`docs/rewrite/port-manifest/01-clipboard-capture.md`) is
-//! binding in full for this subsystem because it describes macOS behaviour.
+//! binding for v2's text-capture scope. Its image and file rules are reference.
 //!
 //! Its own top finding (§6.7) is that v1's monitor called
 //! `NSPasteboard.generalPasteboard` directly, so roughly two thirds of the
@@ -44,7 +44,7 @@
 //!   before any representation is read.
 //! - **§3.9** a short-lived frontmost-app cache, private-mode and exclusion
 //!   gates; known password-manager origins are persisted as sensitive.
-//! - **I-11** one representation is selected in text, image, file order.
+//! - **I-11** text is captured when offered; non-text-only changes are ignored.
 //! - **I-18** `NSData.length` checked before the bytes are copied out.
 //! - **I-39 / §6.5** rejections are counted and readable, not just logged.
 //! - **§3.12** the invariant UTI strings are built once, not once per tick.
@@ -59,7 +59,7 @@ mod fake;
 // every syscall in it is `rustix::fs`, which has no Windows implementation.
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod file_materialize;
-mod format;
+pub(crate) mod format;
 /// The Windows opt-out vocabulary. Built everywhere, like `change`, because the
 /// decision it encodes is the one that must not regress unnoticed.
 #[cfg(any(target_os = "windows", test))]
