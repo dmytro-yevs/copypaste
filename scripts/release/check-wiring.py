@@ -37,6 +37,15 @@ def closure(jobs, name):
     return seen
 
 
+release_jobs = docs["release.yml"].get("jobs") or {}
+gate = release_jobs.get("supabase-gate") or {}
+gate_body = "\n".join(step.get("run") or "" for step in steps(gate))
+rec("real-supabase.sh" in gate_body,
+    "release.yml runs the disposable real-Supabase gate")
+rec("supabase-gate" in closure(release_jobs, "publish"),
+    "release.yml blocks publish on the real-Supabase gate")
+
+
 # --- artifacts: names match, and the consumer depends on the producer --------
 for wf, doc in docs.items():
     jobs = doc.get("jobs") or {}

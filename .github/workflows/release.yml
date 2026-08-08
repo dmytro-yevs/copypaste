@@ -81,6 +81,20 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  supabase-gate:
+    name: Real Supabase integration gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: supabase/setup-cli@3c2f5e2ae34c34e428e8e206e2c4d21fa2d20fbf # v2.1.1
+        with:
+          version: latest
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Exercise the disposable Supabase stack
+        run: bash supabase/tests/real-supabase.sh
+
   # ---------------------------------------------------------------------------
   # Resolve the version once, so the tag, the workspace manifest, the DMG
   # filename, the cask and the formula cannot disagree with each other.
@@ -670,7 +684,7 @@ jobs:
     # android is a hard dependency, not a nice-to-have: ADR-0006 says one
     # release page serves both platforms, and a page that silently serves one is
     # worse than a failed run.
-    needs: [version, macos, android, android-smoke, packaging]
+    needs: [version, supabase-gate, macos, android, android-smoke, packaging]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
