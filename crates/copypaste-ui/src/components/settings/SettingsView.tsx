@@ -67,7 +67,15 @@ function TabButton({ tab, desktop }: { tab: SettingsTab; desktop: boolean }) {
     <TabsTrigger
       value={tab.value}
       className={cn(
-        desktop && "w-full justify-start rounded-lg px-s-2 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none",
+        desktop
+          ? "w-full justify-start rounded-lg px-s-2 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none"
+          : // A11Y-15 wants this row to wrap, and the trigger's default
+            // `flex-1` is `flex: 1 1 0%`: a hypothetical main size of zero
+            // always fits, so the line never breaks and seven tabs share 412px
+            // instead. Their labels are `nowrap`, so they overflow onto their
+            // neighbours and the overflowing text takes the tap — measured on
+            // API 36, the centre of Service hit-tested to Background capture.
+            "flex-none",
       )}
     >
       {desktop && <Icon aria-hidden="true" />}
