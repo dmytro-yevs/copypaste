@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { copyText } from "@/lib/ipc";
+import { t } from "@/i18n";
 import { isAndroid } from "@/lib/platform";
 import {
   getRuntimeLogEvents,
@@ -18,13 +19,13 @@ import {
 
 const PAGE_SIZE = 50;
 
-const LEVELS: readonly { value: RuntimeLogLevel | "all"; label: string }[] = [
-  { value: "all", label: "All levels" },
-  { value: "error", label: "Errors" },
-  { value: "warn", label: "Warnings" },
-  { value: "info", label: "Info" },
-  { value: "debug", label: "Debug" },
-  { value: "trace", label: "Trace" },
+const LEVELS: readonly (RuntimeLogLevel | "all")[] = [
+  "all",
+  "error",
+  "warn",
+  "info",
+  "debug",
+  "trace",
 ];
 
 function timeLabel(timestamp: number): string {
@@ -115,14 +116,14 @@ export function RuntimeLogViewer() {
 
   const copy = (event: RuntimeLogEvent) => {
     void copyText(rowText(event))
-      .then(() => toast.success("Log entry copied"))
-      .catch(() => toast.error("Couldn’t copy this log entry."));
+      .then(() => toast.success(t("runtimeLog.toast.entryCopied")))
+      .catch(() => toast.error(t("runtimeLog.toast.entryCopyFailed")));
   };
 
   const copyLoaded = () => {
     void copyText(events.map(rowText).join("\n"))
-      .then(() => toast.success("Loaded log events copied"))
-      .catch(() => toast.error("Couldn’t copy loaded log events."));
+      .then(() => toast.success(t("runtimeLog.toast.loadedCopied")))
+      .catch(() => toast.error(t("runtimeLog.toast.loadedCopyFailed")));
   };
 
   const handleScroll = () => {
@@ -135,41 +136,60 @@ export function RuntimeLogViewer() {
   };
 
   return (
-    <section aria-label="Runtime events" className="flex h-full min-h-0 flex-1 flex-col gap-s-3">
+    <section
+      aria-label={t("runtimeLog.title")}
+      className="flex h-full min-h-0 flex-1 flex-col gap-s-3"
+    >
       <div className={android ? "flex flex-wrap items-center gap-s-2" : "flex flex-nowrap items-center gap-s-2"}>
-        <label className="sr-only" htmlFor="runtime-log-search">Search runtime events</label>
+        <label className="sr-only" htmlFor="runtime-log-search">
+          {t("runtimeLog.search.label")}
+        </label>
         <Input
           id="runtime-log-search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search runtime events"
+          placeholder={t("runtimeLog.search.label")}
           className={android ? "min-w-48 flex-1 bg-panel" : "min-w-0 flex-1 bg-panel"}
         />
-        <label className="sr-only" htmlFor="runtime-log-level">Level</label>
+        <label className="sr-only" htmlFor="runtime-log-level">
+          {t("runtimeLog.level.label")}
+        </label>
         <NativeSelect
           id="runtime-log-level"
           value={level}
           onChange={(event) => setLevel(event.target.value as RuntimeLogLevel | "all")}
           className="w-36"
         >
-          {LEVELS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          {LEVELS.map((option) => (
+            <option key={option} value={option}>
+              {t(`runtimeLog.level.${option}`)}
+            </option>
+          ))}
         </NativeSelect>
         {!android && (
           <>
-            <label className="sr-only" htmlFor="runtime-log-process">Process</label>
+            <label className="sr-only" htmlFor="runtime-log-process">
+              {t("runtimeLog.process.label")}
+            </label>
             <NativeSelect
               id="runtime-log-process"
               value={process}
               onChange={(event) => setProcess(event.target.value as RuntimeLogProcess | "all")}
               className="w-42"
             >
-              <option value="all">All processes</option>
-              <option value="app">App</option>
-              <option value="daemon">Service</option>
+              <option value="all">{t("runtimeLog.process.all")}</option>
+              <option value="app">{t("runtimeLog.process.app")}</option>
+              <option value="daemon">{t("runtimeLog.process.daemon")}</option>
             </NativeSelect>
           </>
         )}
-        <Button size="icon-sm" variant="ghost" onClick={() => void logs.refetch()} aria-label="Refresh runtime events" title="Refresh runtime events">
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void logs.refetch()}
+          aria-label={t("runtimeLog.refresh")}
+          title={t("runtimeLog.refresh")}
+        >
           <RefreshCw aria-hidden="true" />
         </Button>
         <Button
@@ -180,8 +200,8 @@ export function RuntimeLogViewer() {
             : "bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground"}
           onClick={() => setFollow((value) => !value)}
           aria-pressed={follow}
-          aria-label={follow ? "Pause live updates" : "Resume live updates"}
-          title={follow ? "Pause live updates" : "Resume live updates"}
+          aria-label={t(follow ? "runtimeLog.pause" : "runtimeLog.resume")}
+          title={t(follow ? "runtimeLog.pause" : "runtimeLog.resume")}
         >
           {follow ? <Radio aria-hidden="true" /> : <Pause aria-hidden="true" />}
         </Button>
@@ -190,8 +210,8 @@ export function RuntimeLogViewer() {
           variant="ghost"
           onClick={copyLoaded}
           disabled={events.length === 0}
-          aria-label="Copy loaded log events"
-          title="Copy loaded log events"
+          aria-label={t("runtimeLog.copyLoaded")}
+          title={t("runtimeLog.copyLoaded")}
         >
           <ClipboardCopy aria-hidden="true" />
         </Button>
@@ -199,15 +219,16 @@ export function RuntimeLogViewer() {
 
       {logs.isPending ? (
         <div className="flex min-h-40 items-center justify-center gap-s-2 text-sm text-muted-foreground">
-          <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> Loading runtime events…
+          <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />{" "}
+          {t("runtimeLog.loading")}
         </div>
       ) : logs.isError ? (
         <div role="alert" className="flex min-h-40 items-center justify-center text-sm text-err-strong">
-          Runtime events couldn’t be loaded.
+          {t("runtimeLog.loadFailed")}
         </div>
       ) : events.length === 0 ? (
         <div className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
-          No runtime events match these filters.
+          {t("runtimeLog.noMatch")}
         </div>
       ) : (
         <>
@@ -215,7 +236,7 @@ export function RuntimeLogViewer() {
             ref={scrollRef}
             role="log"
             aria-live="off"
-            aria-label="Runtime event list"
+            aria-label={t("runtimeLog.list")}
             onScroll={handleScroll}
             className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-divider bg-panel"
           >
@@ -240,7 +261,9 @@ export function RuntimeLogViewer() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
                         <span className={levelClass(event.level)}>{event.level.toUpperCase()}</span>
-                        <span className="text-muted-foreground">{event.process === "daemon" ? "Service" : "App"}</span>
+                        <span className="text-muted-foreground">
+                        {t(event.process === "daemon" ? "runtimeLog.process.daemon" : "runtimeLog.process.app")}
+                      </span>
                         <span className="truncate font-mono text-muted-foreground">{event.target}</span>
                       </div>
                       <p className="mt-0.5 break-words text-sm text-foreground">{event.message}</p>
@@ -250,7 +273,7 @@ export function RuntimeLogViewer() {
                       variant="ghost"
                       className="transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
                       onClick={() => copy(event)}
-                      aria-label="Copy log entry"
+                      aria-label={t("runtimeLog.copyEntry")}
                     >
                       <ClipboardCopy aria-hidden="true" />
                     </Button>
@@ -265,7 +288,10 @@ export function RuntimeLogViewer() {
                   aria-live="polite"
                 >
                   {logs.isFetchingNextPage && (
-                    <><LoaderCircle className="mr-1.5 size-3 animate-spin" aria-hidden="true" /> Loading older events…</>
+                    <>
+                      <LoaderCircle className="mr-1.5 size-3 animate-spin" aria-hidden="true" />{" "}
+                      {t("runtimeLog.loadingOlder")}
+                    </>
                   )}
                 </div>
               )}

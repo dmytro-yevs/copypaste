@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import { QuickPasteApp } from "@/components/quick-paste/QuickPasteApp";
+import { en } from "@/i18n";
 import { IpcFailure } from "@/lib/errors";
 import { rowHeight } from "@/lib/layout";
 import { absoluteTime } from "@/lib/format";
@@ -400,5 +401,58 @@ describe("Quick Paste", () => {
     expect(hideWindow).not.toHaveBeenCalled();
 
     toaster.remove();
+  });
+});
+
+/**
+ * The popup used to author its own English. Every sentence it can show is now
+ * the catalogue's, which is what subjects it to the INV-12 path rules and the
+ * plural pairing that `catalogue.test.ts` enforces.
+ */
+describe("the popup reads its text from the catalogue", () => {
+  it("names the surface, the field and the settings affordance from it", async () => {
+    withUser(<QuickPasteApp />);
+
+    expect(screen.getByRole("main", { name: en.quickPaste.title })).not.toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: en.quickPaste.search.label }),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: en.quickPaste.settings })).not.toBeNull();
+    await screen.findByRole("listitem");
+  });
+
+  /** One item read "1 items" while the count was assembled by hand. */
+  it("counts a single item in the singular", async () => {
+    listItems.mockResolvedValue(page([item()]));
+    withUser(<QuickPasteApp />);
+
+    expect(await screen.findByText("1 item")).not.toBeNull();
+  });
+
+  it("puts the user's own search text in the no-results title, and nothing else", async () => {
+    const { user } = withUser(<QuickPasteApp />);
+    await screen.findByRole("listitem");
+
+    await user.type(
+      screen.getByRole("textbox", { name: en.quickPaste.search.label }),
+      "nothingmatchesthis",
+    );
+
+    expect(
+      await screen.findByText(
+        en.quickPaste.noResults.title.replace("{{query}}", "nothingmatchesthis"),
+      ),
+    ).not.toBeNull();
+    expect(screen.getByText(en.quickPaste.noResults.body)).not.toBeNull();
+  });
+
+  it("takes the offline and pin failures from it rather than authoring them", async () => {
+    listItems.mockRejectedValue(new IpcFailure("offline", true));
+    withUser(<QuickPasteApp />);
+
+    expect(await screen.findByText(en.quickPaste.offline.title)).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: en.quickPaste.offline.action }),
+    ).not.toBeNull();
   });
 });

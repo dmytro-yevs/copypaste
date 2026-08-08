@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 
 import { type Item } from "@/lib/ipc";
+import { t } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { KIND_TEXT_CLASS, kindOf } from "@/lib/format";
 import { imagePreviewHeight, imageRowHeight, rowHeight } from "@/lib/layout";
@@ -22,10 +23,10 @@ function isImage(item: Item) {
 }
 
 function label(item: Item) {
-  if (item.is_sensitive) return "Sensitive content";
-  if (isImage(item)) return "Image";
-  if (item.content_type.toLowerCase() === "file") return "File";
-  return item.content?.trim() || "Empty item";
+  if (item.is_sensitive) return t("quickPaste.row.sensitive");
+  if (isImage(item)) return t("quickPaste.row.image");
+  if (item.content_type.toLowerCase() === "file") return t("quickPaste.row.file");
+  return item.content?.trim() || t("quickPaste.row.empty");
 }
 
 interface QuickPasteRowProps {
@@ -98,7 +99,7 @@ export function QuickPasteRow({
           type="button"
           tabIndex={-1}
           onClick={onCopy}
-          aria-label={`Copy ${image ? "image" : text}`}
+          aria-label={`${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : text}`}
           className="flex min-w-0 self-stretch flex-col items-start rounded-sm text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
         >
         {image ? (
@@ -139,7 +140,9 @@ export function QuickPasteRow({
             <span className="truncate">{source.label}</span>
           </span>
           <TimestampToggle createdAt={item.created_at} />
-          {item.pinned && <Pin size={11} aria-label="Pinned" className="text-brand-2" />}
+          {item.pinned && (
+            <Pin size={11} aria-label={t("quickPaste.row.pinned")} className="text-brand-2" />
+          )}
         </span>
       </div>
       {shortcut !== null && (
@@ -152,8 +155,8 @@ export function QuickPasteRow({
       )}
       <button
         type="button"
-        aria-label={item.pinned ? "Unpin" : "Pin"}
-        title={item.pinned ? "Unpin" : "Pin"}
+        aria-label={t(item.pinned ? "quickPaste.row.unpin" : "quickPaste.row.pin")}
+        title={t(item.pinned ? "quickPaste.row.unpin" : "quickPaste.row.pin")}
         disabled={pinPending}
         onClick={onTogglePin}
         className="flex size-[var(--sz-iconbtn)] shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring disabled:opacity-50"

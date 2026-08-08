@@ -28,6 +28,7 @@ import {
   type Item,
 } from "@/lib/ipc";
 import { classifyError } from "@/lib/errors";
+import { t } from "@/i18n";
 import { rankFuzzy } from "@/lib/fuzzy";
 import { POLL_ACTIVE_MS, POLL_BACKOFF_MS } from "@/lib/layout";
 import { isAndroid } from "@/lib/platform";
@@ -42,10 +43,12 @@ declare global {
   }
 }
 
+/** What the fuzzy search matches against. A flagged clip is matched as its mask
+ *  and not its text, so a search can never confirm a withheld value. */
 function searchLabel(item: Item): string {
   if (item.is_sensitive) return "••••••••";
-  if (item.content_type.toLowerCase().startsWith("image/")) return "[Image]";
-  if (item.content_type.toLowerCase() === "file") return "[File]";
+  if (item.content_type.toLowerCase().startsWith("image/")) return t("quickPaste.row.image");
+  if (item.content_type.toLowerCase() === "file") return t("quickPaste.row.file");
   return item.content ?? "";
 }
 
@@ -214,8 +217,8 @@ export function QuickPasteApp() {
       await restartService();
       void refetch();
     } catch {
-      toast.error("Couldn’t restart the clipboard service.", {
-        action: { label: "Retry", onClick: () => void restart() },
+      toast.error(t("quickPaste.toast.restartFailed"), {
+        action: { label: t("quickPaste.toast.retry"), onClick: () => void restart() },
       });
     }
   };
@@ -233,8 +236,11 @@ export function QuickPasteApp() {
         console.error("Quick Paste copy failed", error);
         if (cacheGeneration.current !== generation) return;
         // Keep the result visible rather than pretending the clipboard changed.
-        toast.error("Couldn’t copy that item.", {
-          action: { label: "Retry", onClick: () => void copyAndDismiss(item, plainText) },
+        toast.error(t("quickPaste.toast.copyFailed"), {
+          action: {
+            label: t("quickPaste.toast.retry"),
+            onClick: () => void copyAndDismiss(item, plainText),
+          },
         });
       }
     },
@@ -251,9 +257,15 @@ export function QuickPasteApp() {
       } catch (error: unknown) {
         console.error("Quick Paste pin failed", error);
         if (cacheGeneration.current === generation) {
-          toast.error(`Couldn’t ${pinned ? "pin" : "unpin"} that item.`, {
-            action: { label: "Retry", onClick: () => void changePin(id, pinned) },
-          });
+          toast.error(
+            t(pinned ? "quickPaste.toast.pinFailed" : "quickPaste.toast.unpinFailed"),
+            {
+              action: {
+                label: t("quickPaste.toast.retry"),
+                onClick: () => void changePin(id, pinned),
+              },
+            },
+          );
         }
       } finally {
         if (cacheGeneration.current === generation) setPinPendingId(null);
@@ -315,7 +327,7 @@ export function QuickPasteApp() {
 
   return (
     <main
-      aria-label="Quick Paste"
+      aria-label={t("quickPaste.title")}
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background p-3 text-foreground shadow-xl"
       onKeyDown={onKeyDown}
       onBlur={dismissOnRootBlur}
@@ -330,8 +342,8 @@ export function QuickPasteApp() {
           ref={searchRef}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          aria-label="Search clipboard history"
-          placeholder="Search clipboard history"
+          aria-label={t("quickPaste.search.label")}
+          placeholder={t("quickPaste.search.label")}
           className="h-11 flex-1 rounded-xl bg-secondary py-0 pl-9 pr-3"
         />
       </div>
@@ -340,42 +352,50 @@ export function QuickPasteApp() {
         {history.isPending ? (
           <EmptyState
             busy
-            title="Loading clipboard history"
-            body="Looking for your recent copies."
+            title={t("quickPaste.loading.title")}
+            body={t("quickPaste.loading.body")}
           />
         ) : historyError === "offline" ? (
           <EmptyState
             icon={PlugZap}
             tone="attention"
-            title="The clipboard service isn't running"
-            body="Start it to see and copy recent items."
-            action={{ label: "Restart service", icon: Play, onClick: () => void restart() }}
+            title={t("quickPaste.offline.title")}
+            body={t("quickPaste.offline.body")}
+            action={{
+              label: t("quickPaste.offline.action"),
+              icon: Play,
+              onClick: () => void restart(),
+            }}
           />
         ) : historyError === "not_ready" ? (
           <EmptyState
             busy
             icon={PlugZap}
             tone="info"
-            title="Starting clipboard service"
-            body="Your recent copies will appear as soon as it is ready."
+            title={t("quickPaste.starting.title")}
+            body={t("quickPaste.starting.body")}
           />
         ) : history.error ? (
           <EmptyState
             icon={TriangleAlert}
             tone="danger"
-            title="Couldn't load clipboard history"
-            body="Try again. If this keeps happening, open Settings to view diagnostics."
-            action={{ label: "Try again", icon: RefreshCw, onClick: () => void refetch() }}
+            title={t("quickPaste.failed.title")}
+            body={t("quickPaste.failed.body")}
+            action={{
+              label: t("common.tryAgain"),
+              icon: RefreshCw,
+              onClick: () => void refetch(),
+            }}
           />
         ) : items.length === 0 ? (
           <EmptyState
             icon={searching ? SearchX : ClipboardList}
-            title={searching ? `No matches for “${query}”` : "Nothing copied yet"}
-            body={
+            title={
               searching
-                ? "Try a different word or clear the search."
-                : "Copies from your device will appear here."
+                ? t("quickPaste.noResults.title", { query })
+                : t("quickPaste.empty.title")
             }
+            body={t(searching ? "quickPaste.noResults.body" : "quickPaste.empty.body")}
           />
         ) : (
           items.map((item, index) => (
@@ -398,13 +418,16 @@ export function QuickPasteApp() {
       <footer className="mt-2 flex h-8 shrink-0 items-center gap-2 border-t border-border pt-1 text-xs text-muted-foreground">
         <button
           type="button"
-          aria-label="Open Settings"
-          title="Open Settings"
+          aria-label={t("quickPaste.settings")}
+          title={t("quickPaste.settings")}
           className="flex size-[var(--sz-iconbtn)] shrink-0 items-center justify-center rounded-md hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring"
           onClick={() =>
             void openSettingsFromQuickPaste().catch(() =>
-              toast.error("Couldn’t open Settings.", {
-                action: { label: "Retry", onClick: () => void openSettingsFromQuickPaste() },
+              toast.error(t("quickPaste.toast.settingsFailed"), {
+                action: {
+                  label: t("quickPaste.toast.retry"),
+                  onClick: () => void openSettingsFromQuickPaste(),
+                },
               }),
             )
           }
@@ -413,12 +436,18 @@ export function QuickPasteApp() {
         </button>
         <p aria-live="polite" className="shrink-0 tabular-nums">
           {history.isPending
-            ? "Loading…"
+            ? t("quickPaste.count.loading")
             : searching
-              ? `${items.length} of ${history.data?.items.length ?? 0}`
+              ? t("quickPaste.count.partial", {
+                  shown: items.length,
+                  total: history.data?.items.length ?? 0,
+                })
               : (history.data?.total ?? 0) > items.length
-                ? `${items.length} of ${history.data?.total}`
-                : `${items.length} items`}
+                ? t("quickPaste.count.partial", {
+                    shown: items.length,
+                    total: history.data?.total ?? 0,
+                  })
+                : t("quickPaste.count.all", { count: items.length })}
         </p>
       </footer>
     </main>
