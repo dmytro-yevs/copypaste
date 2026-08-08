@@ -11,13 +11,19 @@ import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 
-import { HISTORY_HEAD_KEY, HISTORY_KEY, useHistory } from "@/hooks/useHistory";
+import {
+  HISTORY_HEAD_KEY,
+  HISTORY_KEY,
+  useHistory,
+  useReorderPinned,
+} from "@/hooks/useHistory";
 import { IpcFailure } from "@/lib/errors";
 import { PAGE_SIZE } from "@/lib/layout";
 import { item, items, page, testClient } from "@/test/harness";
 
 const listItems = vi.fn();
 const searchItems = vi.fn();
+const reorderPinned = vi.fn();
 
 vi.mock("@/lib/ipc", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ipc")>();
@@ -25,6 +31,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => {
     ...actual,
     listItems: (...args: unknown[]) => listItems(...args),
     searchItems: (...args: unknown[]) => searchItems(...args),
+    reorderPinned: (...args: unknown[]) => reorderPinned(...args),
   };
 });
 
@@ -38,9 +45,24 @@ function wrapper(client = testClient()) {
 beforeEach(() => {
   listItems.mockReset();
   searchItems.mockReset();
+  reorderPinned.mockReset();
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe("pinned reorder IPC", () => {
+  it("sends the complete stable order in one mutation", async () => {
+    reorderPinned.mockResolvedValue(undefined);
+    const { Wrapper } = wrapper();
+    const { result } = renderHook(() => useReorderPinned(), { wrapper: Wrapper });
+    const ids = ["pin-c", "pin-a", "pin-b"];
+
+    await result.current.mutateAsync(ids);
+
+    expect(reorderPinned).toHaveBeenCalledOnce();
+    expect(reorderPinned).toHaveBeenCalledWith(ids);
+  });
+});
 
 describe("an idle poll produces no new data (INV-2 / AT-5)", () => {
   it("hands back the identical array when the service returns identical rows", async () => {

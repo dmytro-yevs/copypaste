@@ -24,7 +24,54 @@ class NoopResizeObserver implements ResizeObserver {
   disconnect(): void {}
 }
 
+class NoopIntersectionObserver implements IntersectionObserver {
+  readonly root = null;
+  readonly rootMargin = "0px";
+  readonly scrollMargin = "0px";
+  readonly thresholds = [0];
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+
 vi.stubGlobal("ResizeObserver", NoopResizeObserver);
+vi.stubGlobal("IntersectionObserver", NoopIntersectionObserver);
+
+if (!window.PointerEvent) {
+  class PointerEventStub extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    readonly isPrimary: boolean;
+
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+      this.pointerType = init.pointerType ?? "mouse";
+      this.isPrimary = init.isPrimary ?? true;
+    }
+  }
+  Object.defineProperty(window, "PointerEvent", {
+    configurable: true,
+    value: PointerEventStub,
+  });
+  vi.stubGlobal("PointerEvent", PointerEventStub);
+}
+
+if (!window.matchMedia) {
+  window.matchMedia = (query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
 
 const storage = new Map<string, string>();
 const localStorageStub: Storage = {
@@ -90,4 +137,20 @@ if (!Element.prototype.hasPointerCapture) {
 }
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
+}
+if (!Element.prototype.getAnimations) {
+  Element.prototype.getAnimations = () => [];
+}
+if (!Element.prototype.animate) {
+  Element.prototype.animate = () =>
+    ({
+      cancel: () => {},
+      finished: Promise.resolve(),
+    }) as unknown as Animation;
+}
+if (!Document.prototype.getAnimations) {
+  Document.prototype.getAnimations = () => [];
+}
+if (!Document.prototype.elementFromPoint) {
+  Document.prototype.elementFromPoint = () => null;
 }

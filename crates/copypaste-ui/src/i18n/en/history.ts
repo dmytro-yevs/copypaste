@@ -80,6 +80,7 @@ export const history = {
     copy: "Copy to clipboard",
     pin: "Pin item",
     unpin: "Unpin item",
+    reorder: "Reorder pinned item",
     delete: "Delete item",
     pinnedBadge: "Pinned",
     sensitiveBadge: "· Sensitive",

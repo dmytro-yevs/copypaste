@@ -11,6 +11,7 @@
 import { memo, useMemo } from "react";
 import {
   CloudOff,
+  GripVertical,
   LoaderCircle,
   MonitorSmartphone,
   Pin,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { HistoryImagePreview } from "@/components/history/HistoryImagePreview";
 import { SourceAppIcon } from "@/components/history/SourceAppIcon";
 import { TimestampToggle } from "@/components/history/TimestampToggle";
@@ -87,6 +89,7 @@ interface HistoryRowProps {
   onDelete: (item: Item) => void;
   onReveal: (item: Item) => void;
   onOpen: (item: Item) => void;
+  reorderHandleRef?: (element: Element | null) => void;
 }
 
 function HistoryRowImpl({
@@ -106,6 +109,7 @@ function HistoryRowImpl({
   onDelete,
   onReveal,
   onOpen,
+  reorderHandleRef,
 }: HistoryRowProps) {
   const { t: tr } = useTranslation();
   // `kindOf` is a chain of regexes and `previewOf` a pass over the item's whole
@@ -301,15 +305,32 @@ function HistoryRowImpl({
           tab stop, and a Delete beside a checkbox is one misclick from
           destroying the wrong thing (§3.1.5). */}
       {!selecting && (
-        <HistoryRowActions
-          item={item}
-          android={android}
-          active={active}
-          onCopy={onCopy}
-          onTogglePin={onTogglePin}
-          onDelete={onDelete}
-          onOpen={onOpen}
-        />
+        <div className="flex shrink-0 items-center gap-0.5">
+          {item.pinned && reorderHandleRef && (
+            <Button
+              ref={reorderHandleRef}
+              type="button"
+              variant="ghost"
+              size="icon"
+              tabIndex={active ? 0 : -1}
+              aria-label={tr("history.row.reorder")}
+              title={tr("history.row.reorder")}
+              data-reorder-handle
+              className="touch-none cursor-grab active:cursor-grabbing"
+            >
+              <GripVertical aria-hidden="true" />
+            </Button>
+          )}
+          <HistoryRowActions
+            item={item}
+            android={android}
+            active={active}
+            onCopy={onCopy}
+            onTogglePin={onTogglePin}
+            onDelete={onDelete}
+            onOpen={onOpen}
+          />
+        </div>
       )}
     </div>
   );

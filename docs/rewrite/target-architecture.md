@@ -117,10 +117,15 @@ chosen by a compile-time alias
 
 | Concern | Where it goes |
 |---|---|
-| List virtualisation, overlays, focus management, styling, icons | The React ecosystem — `@tanstack/react-virtual`, Radix, Tailwind v4, shadcn/ui, `lucide-react`. Wrapping any of them in a house abstraction is the v1 mistake in a new language. |
+| List virtualisation, accessible reorder, overlays, focus management, styling, icons | The React ecosystem — `@tanstack/react-virtual`, `@dnd-kit/react`, Radix, Tailwind v4, shadcn/ui, `lucide-react`. Wrapping any of them in a house abstraction is the v1 mistake in a new language. |
 | Server state — history, status, mutations | The Rust core over the IPC contract, via `@tanstack/react-query`. The app re-implements no polling, caching or merge; the daemon is the authority. |
 | Client state | `zustand`, and never a second copy of what the daemon owns. |
 | Menu bar, popover, global hotkey, launch at login | Tauri's own tray and window APIs, `tauri-plugin-global-shortcut`, `tauri-plugin-autostart`. The one thing `shell/` adds is a *policy*: refusing the shortcuts that would cost an Accessibility grant, which no upstream crate knows to do. |
+
+`@dnd-kit/react` adds a pre-1.0 API and its DOM/state packages to the frontend
+audit surface. That cost is accepted because the maintained React 19 adapter
+owns pointer, touch, keyboard, auto-scroll and screen-reader drag behaviour,
+including virtual lists; custom gesture state would duplicate all of it.
 
 **The Rust core is unaffected by the UI decision.** `copypaste-core`,
 `copypaste-daemon`, `copypaste-ipc`, `copypaste-p2p` and `copypaste-cloud` sit
