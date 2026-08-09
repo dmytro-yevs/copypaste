@@ -316,6 +316,7 @@ check "android-smoke-release.sh --self-test" ./scripts/release/android-smoke-rel
 check "android-storage-transfer.sh --self-test" ./scripts/release/android-storage-transfer.sh --self-test
 check "android-cloud-evidence.sh --self-test" ./scripts/release/android-cloud-evidence.sh --self-test
 check "macos-cloud-evidence.sh --self-test" ./scripts/release/macos-cloud-evidence.sh --self-test
+check "macos-native-evidence.sh --self-test" ./scripts/release/macos-native-evidence.sh --self-test
 check "check-feature-ledger.py --self-test" python3 scripts/check-feature-ledger.py --self-test
 # The four surfaces README.md calls unverified, and the same reason again: a
 # parcel reader that never finds a canary, or a flag reader that says SECURE
