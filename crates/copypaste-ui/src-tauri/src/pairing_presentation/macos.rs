@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use dispatch2::DispatchQueue;
 use image::{DynamicImage, ImageFormat, Luma};
-use objc2::AnyThread;
+use objc2::ClassType;
 use objc2_app_kit::{
     NSAccessibility, NSAlert, NSAlertFirstButtonReturn, NSAlertSecondButtonReturn,
     NSAlertThirdButtonReturn, NSImage, NSImageView, NSSecureTextField, NSTextField, NSView,
@@ -173,7 +173,9 @@ unsafe fn alert(
     buttons: &[&str],
 ) -> objc2::rc::Retained<NSAlert> {
     let alert = NSAlert::new(mtm);
-    alert.window().setSharingType(NSWindowSharingType::None);
+    alert
+        .window()
+        .setSharingType(NSWindowSharingType::NSWindowSharingNone);
     alert.setMessageText(&NSString::from_str(title));
     alert.setInformativeText(&NSString::from_str(message));
     for button in buttons {
