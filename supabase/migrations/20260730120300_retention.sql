@@ -157,7 +157,9 @@ begin
 end;
 $$;
 
+grant create on schema private to copypaste_retention;
 alter function private.enforce_retention() owner to copypaste_retention;
+revoke create on schema private from copypaste_retention;
 
 -- SECURITY DEFINER functions are executable by PUBLIC by default. This one
 -- deletes rows across every account.
