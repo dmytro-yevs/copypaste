@@ -162,7 +162,7 @@ impl PeerNode {
             }
         }
         let known_device = (status.phase == PairingPhase::Confirmed)
-            .then(|| status.pairing_id.as_deref())
+            .then_some(status.pairing_id.as_deref())
             .flatten()
             .and_then(|pairing_id| self.node.peers().get(pairing_id))
             .map(|peer| peer_info(&peer, self.node.find(&peer.pairing_id).is_some()));
