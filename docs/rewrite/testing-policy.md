@@ -181,6 +181,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | No filesystem path in any Android accessible string (INV-12) | Android | Verified — the harness sweeps text and naming attributes |
 | Android UI beyond mount, navigation, typing and the two disclosure sweeps | Android | **NOT VERIFIED IN CI** — CDP sees no pixels, TalkBack or native surface |
 | The release APK cannot enable WebView debugging | Android | Verified — release smoke rejects wry's debugger call and fails closed if its neighbouring JNI markers are absent |
+| Android native accessibility surface | Android | Partial — the pre-publication release job fails when the native tree cannot be observed, exposes fewer than three named nodes, has no actions, or exposes unnamed actions |
 | VoiceOver and TalkBack surfaces | macOS, Android | Partial — the macOS release job fails when the native accessibility surface cannot be observed, has no menu bar, or exposes no named elements; gestures and speech output remain **NOT VERIFIED IN CI** |
 
 ### Native shell

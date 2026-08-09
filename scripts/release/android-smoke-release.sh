@@ -149,6 +149,13 @@ fi
 assert_painted "$PAINT_TIMEOUT" "$launched_at" "$OUT/release-ui.xml" "$OUT/release.png"
 paint_elapsed_ms=$(((SECONDS - launched_at) * 1000))
 
+if native_ax="$(PKG="$PKG" SMOKE_OUT="$OUT" NATIVE_AX_TREE="$OUT/release-ui.xml" \
+    "$(dirname "${BASH_SOURCE[0]}")/android-native-accessibility.sh" 2>&1)"; then
+    ok "$native_ax"
+else
+    bad "the native Android accessibility surface is observable and usable" "$native_ax"
+fi
+
 # The security half of the UI harness in e2e-android/: that harness attaches to
 # the WebView over CDP and reads the DOM, which on this product is clipboard
 # content. Two assertions follow, and this is the one that travels to a user's
