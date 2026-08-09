@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, inject, test } from "vitest";
 
 import { PACKAGE } from "../src/harness/adb.js";
 import { attachToApp, type AndroidApp } from "../src/harness/app.js";
+import { addItems, deleteItems } from "../src/harness/bridge.js";
 import { ordinaryFor, secretFor } from "../src/harness/fixtures.js";
 import {
   accessibleSurface,
@@ -16,25 +17,31 @@ import {
   clearField,
   count,
   gotoView,
+  reloadHistoryWith,
   waitForRows,
   waitForText,
 } from "../src/harness/ui.js";
 
 const nonce = inject("nonce");
-const secret = secretFor(nonce);
-const ordinary = ordinaryFor(nonce);
+const leakNonce = String((Number(nonce) + 1) % 1_000_000_000).padStart(9, "0");
+const secret = secretFor(leakNonce);
+const ordinary = ordinaryFor(leakNonce);
 
 let app: AndroidApp;
+let seeded: string[] = [];
 
 beforeAll(async () => {
   app = await attachToApp();
   await gotoView(app, "History");
   await clearField(app, SEARCH);
+  seeded = await addItems(app, [secret, ordinary]);
+  await reloadHistoryWith(app, ordinary);
   await waitForRows(app, 1);
   await waitForText(app, ordinary);
 }, 180_000);
 
 afterAll(async () => {
+  await deleteItems(app, seeded).catch(() => undefined);
   await app?.detach();
 });
 

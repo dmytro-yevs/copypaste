@@ -262,3 +262,65 @@ export async function clearField(app: AndroidApp, selector: string): Promise<voi
     `${selector} still holds text after clearing it`,
   );
 }
+
+/** Restore the toolbar state a shared device may retain between files or runs. */
+export async function resetHistoryFilters(app: AndroidApp): Promise<void> {
+  await clearField(app, SEARCH);
+  await app.withPage((page) =>
+    page.evaluate(() => {
+      for (const label of ["Filter by kind", "Sort order"]) {
+        const select = document.querySelector(
+          `[aria-label="${label}"]`,
+        ) as HTMLSelectElement | null;
+        const first = select?.options[0]?.value;
+        if (!select || first === undefined || select.value === first) continue;
+        select.value = first;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }),
+  );
+}
+
+/**
+ * Isolate a suite's rows through the product search path. A unique query reads
+ * the store directly and cannot inherit stale pages from another suite.
+ */
+export async function filterHistoryTo(
+  app: AndroidApp,
+  query: string,
+  expectedText: string,
+): Promise<void> {
+  await resetHistoryFilters(app);
+  await typeInto(app, SEARCH, query);
+  await waitFor(
+    async () =>
+      (await fieldValue(app, SEARCH)) === query &&
+      (await visibleText(app)).includes(expectedText),
+    `history search never rendered ${JSON.stringify(expectedText)}`,
+    60_000,
+  );
+  await scrollListToTop(app);
+}
+
+/** Start the history view with a new query cache after seeding through the bridge. */
+export async function reloadHistoryWith(
+  app: AndroidApp,
+  expectedText: string,
+): Promise<void> {
+  await app.withPage(async (page) => {
+    await page.reload({ waitUntil: "domcontentloaded" });
+  });
+  await waitFor(
+    async () => (await count(app, `${NAV} button`)) > 0,
+    "the WebView never mounted after reload",
+    60_000,
+  );
+  await gotoView(app, "History");
+  await resetHistoryFilters(app);
+  await scrollListToTop(app);
+  await waitFor(
+    async () => (await visibleText(app)).includes(expectedText),
+    `fresh history query never rendered ${JSON.stringify(expectedText)}`,
+    60_000,
+  );
+}
