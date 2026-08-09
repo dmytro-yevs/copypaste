@@ -1130,8 +1130,10 @@ name = "copypaste-runtime-log"
 version = "2.0.0-alpha.4"
 dependencies = [
  "anyhow",
+ "copypaste-clock",
  "copypaste-ipc",
  "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-appender",

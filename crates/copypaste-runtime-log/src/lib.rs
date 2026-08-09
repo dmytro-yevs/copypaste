@@ -5,7 +5,6 @@ use std::{
     fs,
     io::{self, Read as _, Seek as _, SeekFrom},
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use copypaste_ipc::redact::scrub_paths;
@@ -319,10 +318,7 @@ where
         let mut message = Message::default();
         event.record(&mut message);
         let metadata = event.metadata();
-        let timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
+        let timestamp_ms = copypaste_clock::now_ms();
         writeln!(
             writer,
             "{timestamp_ms} {} {}: {}",
@@ -384,6 +380,20 @@ mod tests {
 
         assert_eq!(message.text.as_deref(), Some("capture failed"));
         assert_ne!(message.text.as_deref(), Some("token=secret-value"));
+    }
+
+    #[test]
+    fn runtime_event_serializes_timestamp_as_a_number() {
+        let event = RuntimeEvent {
+            timestamp_ms: i64::MAX as u64,
+            level: LogLevel::Info,
+            process: Process::App,
+            target: "copypaste::capture".to_owned(),
+            message: "capture started".to_owned(),
+        };
+
+        let json = serde_json::to_value(event).unwrap();
+        assert_eq!(json["timestamp_ms"], serde_json::json!(i64::MAX));
     }
 
     #[test]
