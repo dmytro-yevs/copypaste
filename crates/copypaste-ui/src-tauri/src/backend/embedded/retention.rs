@@ -21,12 +21,8 @@ pub(super) fn sweep(inner: &Inner) {
 }
 
 pub(super) fn start(inner: &Arc<Inner>) {
-    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
-        tracing::warn!("the embedded retention timer could not start without a runtime");
-        return;
-    };
     let inner = Arc::downgrade(inner);
-    runtime.spawn(run(inner));
+    tauri::async_runtime::spawn(run(inner));
 }
 
 async fn run(inner: Weak<Inner>) {
@@ -49,6 +45,44 @@ mod tests {
     use copypaste_ipc::EventKind;
 
     const SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
+
+    #[test]
+    fn a_no_runtime_open_starts_periodic_sensitive_retention() {
+        let (backend, _clipboard, _dir) = backend();
+        tauri::async_runtime::block_on(backend.set_config(copypaste_ipc::ConfigPatch {
+            sensitive_ttl_secs: Some(1),
+            ..Default::default()
+        }))
+        .unwrap();
+
+        let mut events = backend.inner.events.subscribe();
+        let created_at = copypaste_core::now_ms().saturating_sub(2_000);
+        let item = copypaste_core::ingest_into(
+            &backend.inner.state.store,
+            &backend.inner.state.detector,
+            &backend.inner.state.keyring,
+            SECRET,
+            copypaste_ipc::content_type::TEXT,
+            created_at,
+            &backend.inner.settings(),
+        )
+        .unwrap()
+        .into_item();
+        assert!(item.is_sensitive);
+        assert!(backend.inner.state.store.get(&item.id).unwrap().is_some());
+
+        let event = tauri::async_runtime::block_on(async {
+            tokio::time::timeout(Duration::from_secs(3), events.recv())
+                .await
+                .expect("the periodic sweep did not run")
+                .unwrap()
+        });
+        assert_eq!(event.event, EventKind::Items);
+        assert_eq!(event.item_count, 0);
+        assert!(!event.captured);
+        assert_eq!(event.swept, 1);
+        assert!(backend.inner.state.store.get(&item.id).unwrap().is_none());
+    }
 
     #[tokio::test]
     async fn an_expired_secret_emits_a_non_capture_sweep_event() {
