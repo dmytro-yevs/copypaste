@@ -422,10 +422,9 @@ mod tests {
 
     fn configured() -> Arc<EmbeddedCloud> {
         Arc::new(EmbeddedCloud {
-            config: Some(copypaste_cloud::CloudConfig {
-                url: "https://example.invalid".into(),
-                anon_key: "anon".into(),
-            }),
+            config: Some(
+                copypaste_cloud::CloudConfig::new("https://example.invalid", "anon").unwrap(),
+            ),
             account: AccountSlot::default(),
             account_revision: std::sync::atomic::AtomicU64::new(0),
             last_sync_ms: std::sync::atomic::AtomicI64::new(0),

@@ -153,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
     // Cloud sync. Unconfigured is a supported state, and so is configured but
     // signed out: `Cloud::restore` reads back an account only if a previous run
     // signed in, and reports nothing when it did not.
-    let config = cloud_config(&args);
+    let config = cloud_config(&args).context("validate cloud configuration")?;
     let cloud_configured = config.is_some();
     let cloud = Cloud::new(config);
 

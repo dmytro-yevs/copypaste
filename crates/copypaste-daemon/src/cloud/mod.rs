@@ -356,10 +356,7 @@ mod tests {
     }
 
     fn config() -> CloudConfig {
-        CloudConfig {
-            url: "https://example.supabase.co".into(),
-            anon_key: "anon".into(),
-        }
+        CloudConfig::new("https://example.supabase.co", "anon").unwrap()
     }
 
     fn session() -> Session {

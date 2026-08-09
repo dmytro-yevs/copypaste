@@ -252,10 +252,7 @@ mod tests {
     /// A URL that resolves nowhere: these tests assert the paths that never
     /// reach the network, and the one that does must fail rather than hang.
     fn config() -> CloudConfig {
-        CloudConfig {
-            url: "http://127.0.0.1:1".into(),
-            anon_key: "anon".into(),
-        }
+        CloudConfig::new_loopback("http://127.0.0.1:1", "anon").unwrap()
     }
 
     fn row_at_zero(key: &SyncKey) -> CloudItem {

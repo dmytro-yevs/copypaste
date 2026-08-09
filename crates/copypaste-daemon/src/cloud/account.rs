@@ -387,10 +387,7 @@ mod tests {
     use crate::testutil::test_state_with_cloud;
 
     fn config() -> CloudConfig {
-        CloudConfig {
-            url: "https://example.invalid".into(),
-            anon_key: "anon".into(),
-        }
+        CloudConfig::new("https://example.invalid", "anon").unwrap()
     }
 
     fn session(user_id: &str, token: &str) -> Session {

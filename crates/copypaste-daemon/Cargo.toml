@@ -79,6 +79,7 @@ security-framework.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+copypaste-cloud = { path = "../copypaste-cloud", features = ["test-endpoints"] }
 
 # The pipe's access list. These maintained wrappers own token/SID querying,
 # SDDL memory and listener instance creation.

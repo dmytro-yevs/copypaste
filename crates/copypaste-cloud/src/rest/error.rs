@@ -286,11 +286,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_network_failure_reports_no_url() {
-        let rest = SupabaseRest::new(CloudConfig {
-            url: "http://127.0.0.1:1".into(),
-            anon_key: ANON.into(),
-        })
-        .with_retry_policy(fast_retry());
+        let rest =
+            SupabaseRest::new(CloudConfig::new_loopback("http://127.0.0.1:1", ANON).unwrap())
+                .with_retry_policy(fast_retry());
         let err = rest.fetch_since(TOKEN, 0, None, 10).await.unwrap_err();
         assert!(matches!(err, RestError::Network(_)), "{err:?}");
         assert!(!format!("{err}").contains('/'));

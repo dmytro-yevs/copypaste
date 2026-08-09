@@ -6,15 +6,13 @@
 
 use std::fmt;
 
-use backon::{ExponentialBuilder, Retryable};
-use reqwest::Client;
-use url::Url;
-
 use super::error::{classify, RestError};
 use super::item::{validate_item_id, CloudItem};
 use super::{CONFLICT_TARGET, MAX_PAGE_LIMIT, REST_TIMEOUT, SELECT_COLUMNS, TABLE, UPSERT_CHUNK};
 use crate::auth::transient_backoff;
 use crate::CloudConfig;
+use backon::{ExponentialBuilder, Retryable};
+use reqwest::Client;
 
 /// PostgREST client for one Supabase project.
 #[derive(Clone)]
@@ -27,7 +25,7 @@ pub struct SupabaseRest {
 impl fmt::Debug for SupabaseRest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SupabaseRest")
-            .field("url", &self.config.url)
+            .field("url", &self.config.url())
             .finish_non_exhaustive()
     }
 }
@@ -117,7 +115,7 @@ impl SupabaseRest {
         let body = self
             .send(token, || {
                 self.http
-                    .get(&url)
+                    .get(url.clone())
                     .query(&query)
                     .header("Accept", "application/json")
             })
@@ -160,7 +158,7 @@ impl SupabaseRest {
             let payload = serde_json::to_value(chunk).map_err(|_| RestError::Malformed)?;
             self.send(token, || {
                 self.http
-                    .post(&url)
+                    .post(url.clone())
                     .query(&[("on_conflict", CONFLICT_TARGET)])
                     .header("Prefer", "resolution=merge-duplicates,return=minimal")
                     .json(&payload)
@@ -173,14 +171,9 @@ impl SupabaseRest {
         Ok(written)
     }
 
-    fn table_url(&self) -> String {
+    fn table_url(&self) -> url::Url {
         let path = format!("/rest/v1/{TABLE}");
-        Url::parse(&self.config.url)
-            .and_then(|base| base.join(&path))
-            .map(Into::into)
-            // As in auth, let reqwest turn invalid configuration into its
-            // existing URL-redacted network error instead of panicking here.
-            .unwrap_or_else(|_| self.config.url.clone())
+        self.config.endpoint(&path)
     }
 
     /// Send a prepared request under the shared retry policy.
@@ -198,7 +191,7 @@ impl SupabaseRest {
         let attempt = || async move {
             let sent = build()
                 .timeout(REST_TIMEOUT)
-                .header("apikey", self.config.anon_key.as_str())
+                .header("apikey", self.config.anon_key())
                 .bearer_auth(token)
                 .send()
                 .await;
@@ -236,6 +229,7 @@ mod tests {
     use super::super::testkit::{client, item, key, query_pairs, value_of, ANON, TOKEN};
     use super::*;
     use crate::auth::stub::{header as request_header, json as request_json, Reply, Stub};
+    use url::Url;
     use wiremock::matchers::{header as header_match, headers, method, path, query_param};
     use wiremock::Mock;
 
@@ -243,12 +237,15 @@ mod tests {
 
     #[test]
     fn table_url_join_preserves_an_ipv6_authority() {
-        let rest = SupabaseRest::new(CloudConfig {
-            url: "https://[2001:db8::1]:8443/nested%20base/?stale=true#old".into(),
-            anon_key: ANON.into(),
-        });
+        let rest = SupabaseRest::new(
+            CloudConfig::new(
+                "https://[2001:db8::1]:8443/nested%20base/?stale=true#old",
+                ANON,
+            )
+            .unwrap(),
+        );
         assert_eq!(
-            rest.table_url(),
+            rest.table_url().as_str(),
             "https://[2001:db8::1]:8443/rest/v1/clipboard_items"
         );
     }
@@ -607,10 +604,9 @@ mod tests {
 
     #[test]
     fn debug_for_the_client_shows_no_key_material() {
-        let rest = SupabaseRest::new(CloudConfig {
-            url: "https://project.supabase.co".into(),
-            anon_key: "anon-secret-looking-key".into(),
-        });
+        let rest = SupabaseRest::new(
+            CloudConfig::new("https://project.supabase.co", "anon-secret-looking-key").unwrap(),
+        );
         assert!(!format!("{rest:?}").contains("anon-secret-looking-key"));
     }
 }

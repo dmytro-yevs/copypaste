@@ -25,11 +25,8 @@ pub(super) fn fast_retry() -> ExponentialBuilder {
 }
 
 pub(super) fn client(stub: &Stub) -> SupabaseAuth {
-    SupabaseAuth::new(CloudConfig {
-        url: stub.base_url.clone(),
-        anon_key: ANON.to_string(),
-    })
-    .with_retry_policy(fast_retry())
+    SupabaseAuth::new(CloudConfig::new_loopback(&stub.base_url, ANON).unwrap())
+        .with_retry_policy(fast_retry())
 }
 
 pub(super) fn session_body(access: &str, refresh: &str, expires_in: i64) -> String {

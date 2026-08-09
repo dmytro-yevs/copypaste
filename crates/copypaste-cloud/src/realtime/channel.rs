@@ -41,12 +41,14 @@ pub(super) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 /// channel whose replication subscription is still starting delivers nothing
 /// (manifest 05 §4.8).
 pub(super) async fn open_channel(
-    base_url: &str,
+    mut url: Url,
     anon_key: &str,
     access_token: &str,
     user_id: &str,
 ) -> Result<WsStream, RealtimeError> {
-    let url = websocket_url(base_url, anon_key);
+    url.query_pairs_mut()
+        .append_pair("apikey", anon_key)
+        .append_pair("vsn", "2.0.0");
     let mut request = url
         .as_str()
         .into_client_request()
@@ -219,35 +221,6 @@ fn confirms_subscription(payload: &Value, user_id: &str) -> Result<(), RealtimeE
     }
 }
 
-/// `https://…` / `http://…` -> the authenticated realtime websocket endpoint.
-///
-/// A non-`http` scheme is passed through untouched so a `ws://` loopback URL
-/// works in a test harness.
-pub(super) fn websocket_url(base: &str, anon_key: &str) -> String {
-    let Ok(mut base_url) = Url::parse(base) else {
-        return base.to_owned();
-    };
-    match base_url.scheme() {
-        "https" => base_url
-            .set_scheme("wss")
-            .expect("https and wss are both hierarchical schemes"),
-        "http" => base_url
-            .set_scheme("ws")
-            .expect("http and ws are both hierarchical schemes"),
-        _ => {}
-    }
-    let Ok(mut endpoint) = base_url.join("/realtime/v1/websocket") else {
-        return base.to_owned();
-    };
-    // The local Supabase gateway reads `apikey` from the query before proxying
-    // the upgrade. Phoenix V2 is the five-element array serializer.
-    endpoint
-        .query_pairs_mut()
-        .append_pair("apikey", anon_key)
-        .append_pair("vsn", "2.0.0");
-    endpoint.into()
-}
-
 /// The `sub` claim of a JWT, without verifying it.
 ///
 /// We are not authenticating anything here — the server does that, and it holds
@@ -293,6 +266,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
     use super::*;
+    use crate::CloudConfig;
 
     const HEADER: &str = "e30";
     const SIGNATURE: &str = "c2lnbmF0dXJl";
@@ -513,30 +487,45 @@ mod tests {
     }
 
     #[test]
-    fn the_websocket_url_is_derived_from_the_rest_url() {
+    fn the_websocket_url_is_derived_from_validated_configuration() {
         assert_eq!(
-            websocket_url("https://proj.supabase.co", "anon.jwt"),
-            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
+            CloudConfig::new("https://proj.supabase.co", "anon.jwt")
+                .unwrap()
+                .realtime_endpoint()
+                .as_str(),
+            "wss://proj.supabase.co/realtime/v1/websocket"
         );
         // A trailing slash must not double up.
         assert_eq!(
-            websocket_url("https://proj.supabase.co/", "anon.jwt"),
-            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
+            CloudConfig::new("https://proj.supabase.co/", "anon.jwt")
+                .unwrap()
+                .realtime_endpoint()
+                .as_str(),
+            "wss://proj.supabase.co/realtime/v1/websocket"
         );
         assert_eq!(
-            websocket_url("http://127.0.0.1:54321", "anon.jwt"),
-            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
+            CloudConfig::new_loopback("http://127.0.0.1:54321", "anon.jwt")
+                .unwrap()
+                .realtime_endpoint()
+                .as_str(),
+            "ws://127.0.0.1:54321/realtime/v1/websocket"
         );
         assert_eq!(
-            websocket_url("ws://127.0.0.1:54321/harness/", "anon.jwt"),
-            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
+            CloudConfig::new_loopback("ws://127.0.0.1:54321/harness/", "anon.jwt")
+                .unwrap()
+                .realtime_endpoint()
+                .as_str(),
+            "ws://127.0.0.1:54321/realtime/v1/websocket"
         );
         assert_eq!(
-            websocket_url(
+            CloudConfig::new(
                 "https://[2001:db8::1]:8443/nested%20base/?apikey=must-go#fragment",
-                "replacement key"
-            ),
-            "wss://[2001:db8::1]:8443/realtime/v1/websocket?apikey=replacement+key&vsn=2.0.0"
+                "replacement key",
+            )
+            .unwrap()
+            .realtime_endpoint()
+            .as_str(),
+            "wss://[2001:db8::1]:8443/realtime/v1/websocket"
         );
     }
 
@@ -574,13 +563,10 @@ mod tests {
         });
 
         let client = tokio::spawn(async move {
-            open_channel(
-                &format!("ws://{address}"),
-                "anon.jwt",
-                &token_for(USER),
-                USER,
-            )
-            .await
+            let endpoint = CloudConfig::new_loopback(format!("ws://{address}"), "anon.jwt")
+                .unwrap()
+                .realtime_endpoint();
+            open_channel(endpoint, "anon.jwt", &token_for(USER), USER).await
         });
         joined_rx.await.unwrap();
         tokio::task::yield_now().await;

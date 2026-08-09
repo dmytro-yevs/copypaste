@@ -52,9 +52,10 @@ pub(super) struct EmbeddedCloud {
 }
 
 impl EmbeddedCloud {
-    pub(super) fn open(state: &super::state::BackendState) -> Self {
+    pub(super) fn open(state: &super::state::BackendState) -> Result<Self> {
         let cloud = Self {
-            config: cloud_config(),
+            config: cloud_config()
+                .map_err(|_| BackendError::internal("Cloud sync is misconfigured."))?,
             account: AccountSlot::default(),
             account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),
@@ -65,7 +66,7 @@ impl EmbeddedCloud {
             shutdown: CancellationToken::new(),
         };
         cloud.restore(state);
-        cloud
+        Ok(cloud)
     }
 
     pub(super) fn status(&self) -> CloudStatusData {
@@ -248,7 +249,7 @@ impl EmbeddedCloud {
     }
 }
 
-fn cloud_config() -> Option<CloudConfig> {
+fn cloud_config() -> std::result::Result<Option<CloudConfig>, copypaste_cloud::CloudConfigError> {
     fn value(build: Option<&str>, runtime: &str) -> Option<String> {
         build
             .map(str::to_owned)
@@ -256,13 +257,16 @@ fn cloud_config() -> Option<CloudConfig> {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
     }
-    Some(CloudConfig {
-        url: value(option_env!("COPYPASTE_CLOUD_URL"), "COPYPASTE_CLOUD_URL")?,
-        anon_key: value(
-            option_env!("COPYPASTE_CLOUD_ANON_KEY"),
-            "COPYPASTE_CLOUD_ANON_KEY",
-        )?,
-    })
+    let Some(url) = value(option_env!("COPYPASTE_CLOUD_URL"), "COPYPASTE_CLOUD_URL") else {
+        return Ok(None);
+    };
+    let Some(anon_key) = value(
+        option_env!("COPYPASTE_CLOUD_ANON_KEY"),
+        "COPYPASTE_CLOUD_ANON_KEY",
+    ) else {
+        return Ok(None);
+    };
+    CloudConfig::new(url, anon_key).map(Some)
 }
 
 fn make_driver(inner: &Arc<Inner>, config: CloudConfig, key: SyncKey, session: Session) -> Driver {
@@ -333,10 +337,7 @@ mod tests {
 
     fn configured() -> EmbeddedCloud {
         EmbeddedCloud {
-            config: Some(CloudConfig {
-                url: "https://example.invalid".into(),
-                anon_key: "public-anon".into(),
-            }),
+            config: Some(CloudConfig::new("https://example.invalid", "public-anon").unwrap()),
             account: AccountSlot::default(),
             account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),

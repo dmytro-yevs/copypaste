@@ -35,10 +35,7 @@ pub(super) fn key() -> SyncKey {
 }
 
 pub(super) fn config() -> CloudConfig {
-    CloudConfig {
-        url: "https://proj.supabase.invalid".into(),
-        anon_key: "anon".into(),
-    }
+    CloudConfig::new("https://proj.supabase.invalid", "anon").unwrap()
 }
 
 pub(super) fn session(access: &str) -> Session {
