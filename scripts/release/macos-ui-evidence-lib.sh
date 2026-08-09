@@ -31,7 +31,7 @@ mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
 
-mac_ax() { # <ready|surface|dump|press|set> [label] [value]
+mac_ax() { # <ready|surface|dump|find|press|set> [label] [value]
     [[ -n "${MAC_APP_PID:-}" ]] || {
         echo "macOS accessibility target PID is unavailable" >&2
         return 1
@@ -69,10 +69,25 @@ on run argv
                 set helpText to ""
                 set valueText to ""
                 try
-                    set roleText to role of elementRef as text
-                end try
-                try
                     set nameText to name of elementRef as text
+                end try
+                if actionMode is "find" and nameText contains targetLabel then
+                    try
+                        set roleText to role of elementRef as text
+                    end try
+                    try
+                        set descriptionText to description of elementRef as text
+                    end try
+                    try
+                        set helpText to help of elementRef as text
+                    end try
+                    try
+                        set valueText to value of elementRef as text
+                    end try
+                    return roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
+                end if
+                try
+                    set roleText to role of elementRef as text
                 end try
                 if actionMode is "surface" then
                     set end of outputLines to roleText & tab & nameText
@@ -88,6 +103,10 @@ on run argv
                     end try
                     if actionMode is "dump" then
                         set end of outputLines to roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
+                    else if actionMode is "find" then
+                        if descriptionText contains targetLabel or helpText contains targetLabel or valueText contains targetLabel then
+                            return roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
+                        end if
                     else if nameText is targetLabel or descriptionText is targetLabel or helpText is targetLabel or valueText is targetLabel then
                         if actionMode is "press" then
                             try
@@ -124,8 +143,7 @@ mac_ax_contains() { # <dump> <label>
 mac_wait_label() { # <label> <dump> [timeout]
     local label="$1" dump="$2" timeout="${3:-30}" started="$SECONDS"
     while (( SECONDS - started < timeout )); do
-        mac_ax dump > "$dump" 2>/dev/null || true
-        mac_ax_contains "$dump" "$label" && return 0
+        mac_ax find "$label" > "$dump" 2>/dev/null && return 0
         sleep 1
     done
     return 1
@@ -139,7 +157,8 @@ mac_capture_state() { # <directory>
 }
 
 mac_ui_self_test() {
-    local fixture="$1/ax.txt" app="$1/Test.app" binary pid
+    local fixture="$1/ax.txt" probe="$1/probe.txt" absent="$1/absent.txt"
+    local app="$1/Test.app" binary pid press_result set_result
     local PLIST_BUDDY="$1/plist-reader"
 
     mkdir -p "$app/Contents/MacOS"
@@ -165,6 +184,7 @@ mac_ui_self_test() {
             ready) printf 'ok\n' ;;
             surface) printf 'AXMenuBar\tCopyPaste\nAXMenuBarItem\tCopyPaste\n' ;;
             dump) printf 'AXButton\tSign in\t\t\t\nAXStaticText\tConnected\t\t\t\n' ;;
+            find) [[ "$4" == "skipped" ]] && printf 'AXStaticText\tCloud sync finished: 1 skipped\t\t\t\n' ;;
             press) [[ "$4" == "Sign in" ]] && printf 'ok\n' ;;
             set) [[ "$4" == "Email" && "$5" == "native@example.test" ]] && printf 'ok\n' ;;
             *) return 1 ;;
@@ -174,8 +194,16 @@ mac_ui_self_test() {
     mac_ax ready >/dev/null
     mac_ax surface > "$1/surface.txt"
     mac_ax dump > "$fixture"
-    mac_ax press "Sign in" >/dev/null
-    mac_ax set "Email" "native@example.test" >/dev/null
+    mac_wait_label "skipped" "$probe" 1
+    if mac_ax find "Skipped" > "$absent"; then
+        bad "absent label probes return failure"
+    elif [[ -s "$absent" ]]; then
+        bad "absent label probes emit no evidence"
+    else
+        ok "absent label probes fail without evidence"
+    fi
+    press_result="$(mac_ax press "Sign in")"
+    set_result="$(mac_ax set "Email" "native@example.test")"
     unset -f osascript
     mac_ax_contains "$1/surface.txt" "AXMenuBar" \
         && ok "the full native surface retains menu bar evidence" \
@@ -186,6 +214,12 @@ mac_ui_self_test() {
     mac_ax_contains "$fixture" "Sign in" \
         && ok "an accessible action is found for the launched PID" \
         || bad "an accessible action is found for the launched PID"
+    [[ "$(cat "$probe")" == $'AXStaticText\tCloud sync finished: 1 skipped\t\t\t' ]] \
+        && ok "label probes retain the matched accessibility row" \
+        || bad "label probes retain the matched accessibility row"
+    [[ "$press_result" == "ok" && "$set_result" == "ok" ]] \
+        && ok "accessibility actions retain their result shapes" \
+        || bad "accessibility actions retain their result shapes"
     grep -Fq 'set focused of elementRef to true' "${BASH_SOURCE[0]}" \
         && grep -Fq 'keystroke inputValue' "${BASH_SOURCE[0]}" \
         && ok "field input dispatches keyboard events" \
