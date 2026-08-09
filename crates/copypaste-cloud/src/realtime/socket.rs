@@ -58,7 +58,7 @@ enum Exit {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
     first: WsStream,
-    url: String,
+    base_url: String,
     anon_key: String,
     mut token: watch::Receiver<String>,
     user_id: String,
@@ -97,7 +97,7 @@ pub(super) async fn run(
 
         // Read the token at each attempt, not once at startup.
         let current = token.borrow_and_update().clone();
-        match open_channel(&url, &anon_key, &current, &user_id).await {
+        match open_channel(&base_url, &anon_key, &current, &user_id).await {
             Ok(ws) => {
                 stream = Some(ws);
                 // The gap is not replayed. Say so, so the subscriber polls
