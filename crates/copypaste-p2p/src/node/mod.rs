@@ -25,6 +25,8 @@ mod channel;
 mod dial;
 mod error;
 mod listen;
+mod pairing;
+mod pairing_ceremony;
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -34,12 +36,16 @@ use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use crate::discovery::{DiscoveredPeer, Discovery};
-use crate::peers::{CursorStore, Peer, PeerStore, PeerStoreError, DEFAULT_CURSOR_FILE_NAME};
+use crate::peers::{CursorStore, Peer, PeerStore, DEFAULT_CURSOR_FILE_NAME};
 use crate::sync::SyncOutcome;
 
 pub use channel::{NoiseChannel, READ_TIMEOUT, SESSION_TIMEOUT};
 pub use error::NodeError;
 pub use listen::{bind, listen};
+pub use pairing::{
+    PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus, PAIRING_CONFIRM_TIMEOUT,
+    PAIRING_INVITE_TTL,
+};
 
 /// How many peers may be mid-session at once, inbound.
 ///
@@ -90,6 +96,7 @@ pub struct Node {
     sessions: Arc<Semaphore>,
     browse_until_ms: AtomicI64,
     lan_visible: AtomicBool,
+    pairing: pairing::PairingManager,
 }
 
 impl std::fmt::Debug for Node {
@@ -132,6 +139,7 @@ impl Node {
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
             browse_until_ms: AtomicI64::new(0),
             lan_visible: AtomicBool::new(lan_visible),
+            pairing: pairing::PairingManager::new(),
         };
         node.republish();
         node
@@ -203,6 +211,7 @@ impl Node {
     fn wants_discovery(&self) -> bool {
         self.lan_visible.load(Ordering::Relaxed)
             && (self.peers.usable_count() > 0
+                || self.pairing.is_active()
                 || crate::now_ms() < self.browse_until_ms.load(Ordering::Relaxed))
     }
 
@@ -270,33 +279,14 @@ impl Node {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = advertised;
     }
 
-    /// Mint a pairing and hand back the code to read out to the other device.
-    ///
-    /// The peer is stored *now*, before the other device has ever been heard
-    /// from, because the pre-shared key has to be in the listener's candidate
-    /// list before the other half dials in. `name` is a placeholder until the
-    /// first session, which is where the peer's own device name arrives.
+    /// Legacy spelling for an in-memory pairing invitation.
     pub fn pair_create(&self, name: &str) -> Result<NewPairing, NodeError> {
-        let token = crate::transport::PairingToken::generate();
-        let pairing_id = token.pairing_id();
-
-        self.peers
-            .upsert(Peer {
-                pairing_id: pairing_id.clone(),
-                name: placeholder_name(name),
-                psk: token.psk(),
-                last_addr: None,
-                last_seen_ms: 0,
-            })
-            .map_err(store_error)?;
-        self.republish();
-
+        let _ = name;
+        let invite = self.pair_create_invite()?;
         Ok(NewPairing {
-            // The one and only rendering of the secret. Not logged, not
-            // stored, not retrievable again.
-            code: token.to_code(),
-            pairing_id,
-            listen_addr: self.listen_addr(),
+            code: invite.code,
+            pairing_id: invite.pairing_id,
+            listen_addr: invite.listen_addr,
         })
     }
 
@@ -337,19 +327,6 @@ impl Node {
         };
         if let Err(e) = self.peers.upsert(updated) {
             warn!(error = %e, "could not record a successful peer session");
-        }
-    }
-}
-
-/// A failure to save a pairing, as the caller should hear it. A full list is
-/// the one case with a remedy the user can carry out, so it keeps its own
-/// sentence instead of arriving as "could not be updated".
-pub(super) fn store_error(e: PeerStoreError) -> NodeError {
-    match e {
-        PeerStoreError::TooManyPairings => NodeError::TooManyPairings,
-        e => {
-            warn!(error = %e, "could not store a pairing");
-            NodeError::PeerStore
         }
     }
 }
@@ -402,12 +379,12 @@ mod tests {
     }
 
     #[test]
-    fn unpairing_the_last_device_stops_mdns() {
+    fn cancelling_the_last_invite_stops_mdns() {
         let (node, _dir) = node_with_discovery();
-        let pairing = node.pair_create("laptop").expect("mint a pairing");
+        node.pair_create("laptop").expect("mint a pairing");
         assert!(browsing(&node));
 
-        assert!(node.unpair(&pairing.pairing_id).unwrap());
+        assert_eq!(node.pair_cancel().phase, PairingPhase::Cancelled);
         assert!(!browsing(&node));
     }
 
@@ -430,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_pairing_is_stored_before_the_other_device_dials_in() {
+    fn a_new_pairing_is_memory_only_before_both_devices_confirm() {
         let (node, _dir) = node();
         let pairing = node.pair_create("laptop").unwrap();
 
@@ -439,12 +416,9 @@ mod tests {
 
         let token = crate::transport::PairingToken::parse(&pairing.code).expect("a valid code");
         assert_eq!(token.pairing_id(), pairing.pairing_id);
-        let stored = node
-            .peers()
-            .get(&pairing.pairing_id)
-            .expect("the peer must be stored immediately");
-        assert!(stored.psk_matches(&token.psk()));
-        assert_eq!(stored.name, "laptop");
+        assert!(node.peers().get(&pairing.pairing_id).is_none());
+        assert!(node.peers().psks().is_empty());
+        assert_eq!(node.pair_progress().phase, PairingPhase::WaitingForPeer);
     }
 
     /// The code is a secret; nothing may render it but `to_code`.
@@ -460,21 +434,33 @@ mod tests {
     #[test]
     fn unpairing_removes_the_key_from_the_listeners_candidates() {
         let (node, _dir) = node();
-        let pairing = node.pair_create("laptop").unwrap();
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "laptop".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+            })
+            .unwrap();
         assert_eq!(node.peers().psks().len(), 1);
 
-        assert!(node.unpair(&pairing.pairing_id).unwrap());
+        assert!(node.unpair(&pairing_id).unwrap());
         assert!(node.peers().psks().is_empty());
-        assert!(!node.unpair(&pairing.pairing_id).unwrap());
+        assert!(!node.unpair(&pairing_id).unwrap());
     }
 
     #[test]
-    fn two_pairings_are_independent() {
+    fn only_one_pairing_ceremony_runs_at_a_time() {
         let (node, _dir) = node();
         let first = node.pair_create("a").unwrap();
+        assert_eq!(node.pair_create("b").unwrap_err(), NodeError::PairingBusy);
+        node.pair_cancel();
         let second = node.pair_create("b").unwrap();
         assert_ne!(first.pairing_id, second.pairing_id);
-        assert_eq!(node.peers().usable_count(), 2);
+        assert_eq!(node.peers().usable_count(), 0);
     }
 
     /// Security review F-13. At the cap the user gets a refusal naming the
@@ -483,7 +469,15 @@ mod tests {
     fn minting_past_the_pairing_cap_is_refused_with_a_reason() {
         let (node, _dir) = node();
         for i in 0..crate::peers::MAX_PAIRINGS {
-            node.pair_create(&format!("device-{i}"))
+            let token = crate::transport::PairingToken::generate();
+            node.peers()
+                .upsert(Peer {
+                    pairing_id: token.pairing_id(),
+                    name: format!("device-{i}"),
+                    psk: token.psk(),
+                    last_addr: None,
+                    last_seen_ms: 1,
+                })
                 .expect("up to the cap");
         }
 

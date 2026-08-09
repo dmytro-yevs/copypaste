@@ -20,6 +20,11 @@ fn wire_name(method: &Method) -> &'static str {
         Method::ReorderPinned { .. } => "reorder_pinned",
         Method::PairCreate { .. } => "pair_create",
         Method::PairAccept { .. } => "pair_accept",
+        Method::PairCreateInvite => "pair_create_invite",
+        Method::PairJoin { .. } => "pair_join",
+        Method::PairProgress => "pair_progress",
+        Method::PairConfirm { .. } => "pair_confirm",
+        Method::PairCancel => "pair_cancel",
         Method::Unpair { .. } => "unpair",
         Method::Revoke { .. } => "revoke",
         Method::Peers => "peers",
@@ -60,6 +65,11 @@ fn catalog() -> Vec<Value> {
         json!({"method":"reorder_pinned","params":{"ids":["item"]}}),
         json!({"method":"pair_create","params":{"name":"device"}}),
         json!({"method":"pair_accept","params":{"code":"code","addr":"127.0.0.1:1"}}),
+        json!({"method":"pair_create_invite"}),
+        json!({"method":"pair_join","params":{"code":"code","addr":"127.0.0.1:1"}}),
+        json!({"method":"pair_progress"}),
+        json!({"method":"pair_confirm","params":{"accept":true}}),
+        json!({"method":"pair_cancel"}),
         json!({"method":"unpair","params":{"pairing_id":"peer"}}),
         json!({"method":"revoke","params":{"pairing_id":"peer"}}),
         json!({"method":"peers"}),
@@ -95,7 +105,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
         let encoded = serde_json::to_value(&method).unwrap();
         assert_eq!(encoded, fixture, "wire contract drifted for {name}");
     }
-    assert_eq!(names.len(), 35);
+    assert_eq!(names.len(), 40);
 }
 
 #[test]

@@ -76,6 +76,7 @@ pub struct Session {
     framed: Framed<TcpStream, LengthDelimitedCodec>,
     noise: TransportState,
     peer_addr: SocketAddr,
+    handshake_hash: [u8; 32],
     /// Reused plaintext staging buffer, allocated once at
     /// [`MAX_NOISE_PLAINTEXT`] so it never reallocates — a growing `Vec` leaves
     /// copies of old plaintext in freed heap that nothing will ever zeroize.
@@ -237,6 +238,17 @@ impl Session {
         self.peer_addr
     }
 
+    /// Six display digits bound to this exact authenticated Noise handshake.
+    #[must_use]
+    pub fn pairing_sas(&self) -> String {
+        let value = u32::from_be_bytes(
+            self.handshake_hash[..4]
+                .try_into()
+                .expect("the handshake hash has four prefix bytes"),
+        ) % 1_000_000;
+        format!("{value:06}")
+    }
+
     /// Whether an authentication or framing failure has made this session
     /// unusable. A poisoned session returns [`TransportError::Malformed`] from
     /// every call; reconnect instead.
@@ -262,11 +274,13 @@ impl Session {
         framed: Framed<TcpStream, LengthDelimitedCodec>,
         noise: TransportState,
         peer_addr: SocketAddr,
+        handshake_hash: [u8; 32],
     ) -> Self {
         Self {
             framed,
             noise,
             peer_addr,
+            handshake_hash,
             plain: Zeroizing::new(vec![0u8; MAX_NOISE_PLAINTEXT]),
             cipher: vec![0u8; MAX_NOISE_MESSAGE],
             poisoned: false,
