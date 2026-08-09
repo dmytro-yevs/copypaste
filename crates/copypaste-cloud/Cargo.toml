@@ -13,6 +13,7 @@ copypaste-clock = { path = "../copypaste-clock" }
 reqwest.workspace = true
 tokio-tungstenite.workspace = true
 tokio.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 futures-util = { workspace = true, features = ["sink"] }
 serde.workspace = true
 serde_json.workspace = true
