@@ -11,19 +11,19 @@ idling** — plus a per-stage breakdown of the capture and read paths.
 
 ## 0. Method, and which numbers leave this host
 
-Two hosts appear below and they are not interchangeable. Every table names
+Three hosts appear below and they are not interchangeable. Every table names
 which one it was taken on.
 
-| | Host L | Host M |
-|---|---|---|
-| Machine | Linux 6.18.5 container, 4 vCPU, 16 GB | Apple M4, 10 cores, macOS 27.0 (Darwin 27.0) |
-| Shared with | other agents; load recorded per measurement | five other agents building concurrently; load recorded per measurement |
-| Toolchain | `cargo 1.96.1`, `--release` for the daemon, `bench` profile for the microbenchmarks | `cargo` stable aarch64, same profiles |
-| Daemon counters | `/proc/<pid>/stat`, `/proc/<pid>/task/*/status` | `proc_pid_rusage` and `ps -M` (`scripts/profile/darwin-rusage.py`) — Darwin has no `/proc` |
-| Clipboard backend | **the fake one.** `NSPasteboard` and Android's `ClipboardManager` do not exist there | the real `NSPasteboard` |
+| | Host L | Host M | Host W |
+|---|---|---|---|
+| Machine | Linux 6.18.5 container, 4 vCPU, 16 GB | Apple M4, 10 cores, macOS 27.0 (Darwin 27.0) | Windows 11 Pro 10.0.26200, Intel i7-13700K, 16 cores / 24 threads, 64 GB |
+| Shared with | other agents; load recorded per measurement | five other agents building concurrently; load recorded per measurement | other Orca worktrees; no core isolation |
+| Toolchain | `cargo 1.96.1`, `--release` for the daemon, `bench` profile for the microbenchmarks | `cargo` stable aarch64, same profiles | `cargo 1.97.1` x86_64 MSVC, bench profile |
+| Daemon counters | `/proc/<pid>/stat`, `/proc/<pid>/task/*/status` | `proc_pid_rusage` and `ps -M` (`scripts/profile/darwin-rusage.py`) — Darwin has no `/proc` | not used |
+| Clipboard backend | **the fake one.** `NSPasteboard` and Android's `ClipboardManager` do not exist there | the real `NSPasteboard` | not exercised by the storage measurement |
 
 `criterion 0.8` (dev-dependency, `default-features = false`) is the
-microbenchmark harness on both. Not measured on either: battery, anything on a
+microbenchmark harness on all three. Not measured: battery, anything on a
 phone, wall-clock latency of the Tauri/React render.
 
 **The Darwin wakeup counter is not the Linux one.** Host L counts context
@@ -335,7 +335,7 @@ hoisting it does not remove it. **F-STOR-3 was reverted.** The 202 µs to 166 µ
 above is what is left, and the only candidate for it is F-STOR-4's
 `PRAGMA optimize`.
 
-### 5.1 Payload-size sweep — **no target baseline yet**
+### 5.1 Retention and payload sweeps — **Windows target baseline**
 
 The depth sweep above holds rows at 512 bytes, so it cannot expose a change
 whose cost is per byte rather than per row. `storage/payload` holds depth at 32
@@ -347,11 +347,29 @@ and the byte-cap gate. The two separate axes avoid an unaffordable matrix:
 cargo bench -p copypaste-core --bench storage -- 'storage/(sweep|payload)'
 ```
 
-Read the byte-cap gate on both axes. Its `SUM(LENGTH(...))` should climb with
-row count but stay flat across payload sizes because SQLite obtains a blob's
-length from the record header. The payload group was smoke-run in WSL2 to
-prove it discriminates the bump and insert paths, but that host is not a
-release target; the first run on host M remains the baseline.
+Host W, 2026-08-09. These are medians from the configured Criterion runs; its
+reported 95% confidence intervals bracket every value below.
+
+| retention gate, nothing to do | 500 rows | 2 000 rows | 8 000 rows |
+|---|---:|---:|---:|
+| item cap | 12.010 µs | 12.589 µs | 12.140 µs |
+| byte cap | 39.759 µs | 105.81 µs | 340.69 µs |
+
+The item-cap gate stays within 4.8% while history grows 16×. It now reads the
+transactionally maintained singleton instead of counting live rows. The byte
+cap remains the control: its `SUM(LENGTH(...))` still scales with row count.
+
+| 32-row payload sweep | 512 B | 64 KiB | 1 MiB | 4 MiB |
+|---|---:|---:|---:|---:|
+| insert | 1.2802 ms | 5.1240 ms | 49.124 ms | 245.88 ms |
+| bump | 18.886 µs | 57.143 µs | 1.8097 ms | 6.0287 ms |
+| upsert | 1.3672 ms | 4.9035 ms | 80.358 ms | 286.53 ms |
+| byte-cap gate | 22.476 µs | 17.615 µs | 17.502 µs | 17.811 µs |
+
+The write paths scale with payload size and the byte-cap gate does not: SQLite
+obtains a blob's length from the record header rather than reading its overflow
+pages. This is the first release-target payload baseline; the earlier WSL2 run
+was only a smoke test.
 
 ---
 

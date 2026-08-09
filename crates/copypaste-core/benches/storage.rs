@@ -165,12 +165,19 @@ fn upsert(c: &mut Criterion) {
     group.finish();
 }
 
-fn byte_cap(c: &mut Criterion) {
+/// Retention gates with nothing to delete, read across depth rather than as
+/// isolated timings. A gate that climbs with history depth scans on capture.
+fn retention(c: &mut Criterion) {
     let mut group = c.benchmark_group("storage/sweep");
     for history in HISTORIES {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = primed(dir.path(), history);
 
+        group.bench_with_input(
+            BenchmarkId::new("cap_nothing_to_do", history),
+            &history,
+            |b, &history| b.iter(|| store.evict_over_cap(black_box(history as u64))),
+        );
         group.bench_with_input(
             BenchmarkId::new("byte_cap_nothing_to_do", history),
             &history,
@@ -253,7 +260,7 @@ criterion_group!(
     summaries,
     insert_or_bump,
     upsert,
-    byte_cap,
+    retention,
     payloads
 );
 criterion_main!(benches);
