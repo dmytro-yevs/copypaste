@@ -101,7 +101,7 @@ describe("native pairing boundary", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("opens native presentation and submits confirmation once", async () => {
+  it("keeps decision controls when native confirmation is unavailable", async () => {
     const awaiting = ceremony({
       ceremony_id: "ceremony-3",
       role: "initiator",
@@ -121,12 +121,13 @@ describe("native pairing boundary", () => {
       }),
     );
     await waitFor(() => expect(confirmPairing).toHaveBeenCalledOnce());
-    expect(await screen.findByText(/decision was sent/i)).toBeTruthy();
     expect(
-      screen.queryByRole("button", {
+      screen.getByRole("button", {
         name: "Codes match — confirm pairing in the native view",
       }),
-    ).toBeNull();
+    ).toBeTruthy();
+    expect(screen.queryByText(/decision was sent/i)).toBeNull();
+    expect(screen.getByText(/protected pairing view didn't open/i)).toBeTruthy();
   });
 
   it("rejects a mismatched code and reaches the terminal state", async () => {
@@ -179,6 +180,127 @@ describe("native pairing boundary", () => {
 
     expect(await screen.findByText("Pairing cancelled")).toBeTruthy();
     expect(cancelPairing).toHaveBeenCalledWith();
+  });
+
+  it("aborts an active ceremony when the panel unmounts", async () => {
+    getPairingProgress.mockResolvedValue(
+      ceremony({
+        ceremony_id: "ceremony-unmount",
+        role: "responder",
+        state: "waiting_for_peer",
+        presentation: "presented",
+      }),
+    );
+    const { unmount } = withUser(<PairingPanel disabled={false} />);
+
+    expect(await screen.findByText("Waiting for the other device")).toBeTruthy();
+    unmount();
+
+    await waitFor(() => expect(cancelPairing).toHaveBeenCalledOnce());
+    expect(cancelPairing).toHaveBeenCalledWith();
+  });
+
+  it("fences a stale mutation from a newer ceremony and its polling", async () => {
+    const oldCeremony = ceremony({
+      ceremony_id: "ceremony-old",
+      role: "initiator",
+      state: "awaiting_confirmation",
+      presentation: "unavailable",
+    });
+    const newCeremony = ceremony({
+      ceremony_id: "ceremony-new",
+      role: "responder",
+      state: "waiting_for_peer",
+    });
+    let resolveOldPresentation!: (value: PairingCeremony) => void;
+    presentPairing.mockReturnValueOnce(
+      new Promise<PairingCeremony>((resolve) => {
+        resolveOldPresentation = resolve;
+      }),
+    );
+    getPairingProgress
+      .mockResolvedValueOnce(oldCeremony)
+      .mockResolvedValueOnce(newCeremony)
+      .mockResolvedValue(
+        ceremony({
+          ...newCeremony,
+          state: "confirmed",
+          known_device: { name: "New phone", last_seen_ms: 91, online: true },
+        }),
+      );
+    const client = testClient();
+    const first = withUser(<PairingPanel disabled={false} />, client);
+
+    await first.user.click(
+      await screen.findByRole("button", { name: "Show details" }),
+    );
+    first.unmount();
+    withUser(<PairingPanel disabled={false} />, client);
+    expect(await screen.findByText("Waiting for the other device")).toBeTruthy();
+
+    resolveOldPresentation(
+      ceremony({
+        ...oldCeremony,
+        state: "timed_out",
+        presentation: "presented",
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "New phone is now paired and ready to sync.",
+        {},
+        { timeout: 2_000 },
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Pairing timed out")).toBeNull();
+    expect(getPairingProgress).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores a stale poll without stopping the current ceremony poll", async () => {
+    const current = ceremony({
+      ceremony_id: "ceremony-current",
+      role: "responder",
+      state: "waiting_for_peer",
+    });
+    let resolveStalePoll!: (value: PairingCeremony) => void;
+    getPairingProgress
+      .mockResolvedValueOnce(current)
+      .mockReturnValueOnce(
+        new Promise<PairingCeremony>((resolve) => {
+          resolveStalePoll = resolve;
+        }),
+      )
+      .mockResolvedValue(
+        ceremony({
+          ...current,
+          state: "confirmed",
+          known_device: { name: "Current phone", last_seen_ms: 92, online: true },
+        }),
+      );
+    withUser(<PairingPanel disabled={false} />);
+
+    expect(await screen.findByText("Waiting for the other device")).toBeTruthy();
+    await waitFor(() => expect(getPairingProgress).toHaveBeenCalledTimes(2), {
+      timeout: 1_500,
+    });
+    resolveStalePoll(
+      ceremony({
+        ceremony_id: "ceremony-stale",
+        role: "initiator",
+        state: "timed_out",
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "Current phone is now paired and ready to sync.",
+        {},
+        { timeout: 2_000 },
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Pairing timed out")).toBeNull();
+    expect(getPairingProgress).toHaveBeenCalledTimes(3);
   });
 });
 
