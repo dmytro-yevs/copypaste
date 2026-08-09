@@ -261,8 +261,10 @@ jobs:
           [[ -d "$ndk" ]] || { echo "::error::sdkmanager did not install ndk;${NDK_VERSION}"; exit 1; }
           [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] \
             || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
-          [[ -x "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/aapt2" ]] \
-            || { echo "::error::build-tools;${BUILD_TOOLS_VERSION} did not install"; exit 1; }
+          for tool in aapt2 apksigner; do
+            [[ -x "${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/${tool}" ]] \
+              || { echo "::error::${tool} is missing from build-tools;${BUILD_TOOLS_VERSION}"; exit 1; }
+          done
 
           for tool in perl make; do
             command -v "$tool" >/dev/null 2>&1 \
@@ -350,6 +352,9 @@ jobs:
           badging="$("${tools}/aapt2" dump badging "$apk")"
           grep -q "application-debuggable" <<<"$badging" \
             || { echo "::error::the APK is not debuggable; run-as would refuse and every filesystem assertion would be lost"; exit 1; }
+          bash scripts/release/android-artifact-check.sh \
+            --apk "$apk" --build-type debug \
+            --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner"
 
           libs="$(unzip -l "$apk")"
           grep -q 'lib/x86_64/libcopypaste_ui_lib.so' <<<"$libs" \
@@ -413,6 +418,13 @@ jobs:
       - name: Install the UI harness
         working-directory: e2e-android
         run: npm ci
+
+      - name: Resolve the debug application identity
+        run: |
+          set -euo pipefail
+          package="$(node scripts/release/android-metadata.mjs --field debugApplicationId)"
+          echo "PKG=$package" >> "$GITHUB_ENV"
+          echo "COPYPASTE_PACKAGE=$package" >> "$GITHUB_ENV"
 
       - name: Enable KVM
         run: |
@@ -537,6 +549,18 @@ jobs:
           set -euo pipefail
           cd crates/copypaste-ui
           npm ci
+          previous="$(node ../../scripts/release/android-metadata.mjs --previous-fixture)"
+          previous_config="${RUNNER_TEMP}/copypaste-previous-tauri.json"
+          COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 \
+            node ../../scripts/release/android-metadata.mjs \
+              --version "$previous" --write-overlay "$previous_config"
+          GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.daemon=false" \
+            npm run tauri -- android build --apk --target x86_64 --config "$previous_config"
+          outputs="src-tauri/gen/android/app/build/outputs/apk"
+          previous_apk="$(find "$outputs" -name '*release*.apk' -print -quit)"
+          [[ -n "$previous_apk" ]] || { echo "::error::the upgrade fixture APK was not produced"; exit 1; }
+          cp "$previous_apk" "${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
+          find "$outputs" -type f -name '*.apk' -delete
           # No --debug: this is the build type R8 runs on, which is the whole
           # reason this job exists.
           COPYPASTE_CLOUD_URL=http://10.0.2.2:47800 \
@@ -557,6 +581,8 @@ jobs:
             exit 1
           fi
           echo "Built: $unsigned"
+          previous_unsigned="${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
+          [[ -f "$previous_unsigned" ]] || { echo "::error::the upgrade fixture APK is missing"; exit 1; }
 
           # R8 writes a mapping file and only when it runs. Asserted, because a
           # release APK that was somehow not minified would make this whole leg
@@ -592,8 +618,23 @@ jobs:
             --ks "$keystore" --ks-pass "pass:${pass}" \
             --ks-key-alias emulator-test --key-pass "pass:${pass}" \
             --out "$out" "${out}.aligned"
-          rm -f "${out}.aligned" "$keystore"
+          previous_out="dist/copypaste-emulator-x86_64-previous.apk"
+          "${tools}/zipalign" -p -f 4 "$previous_unsigned" "${previous_out}.aligned"
+          "${tools}/apksigner" sign \
+            --ks "$keystore" --ks-pass "pass:${pass}" \
+            --ks-key-alias emulator-test --key-pass "pass:${pass}" \
+            --out "$previous_out" "${previous_out}.aligned"
+          rm -f "${out}.aligned" "${previous_out}.aligned" "$keystore"
           "${tools}/apksigner" verify "$out"
+          "${tools}/apksigner" verify "$previous_out"
+
+          bash scripts/release/android-artifact-check.sh \
+            --apk "$out" --build-type release \
+            --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner"
+          previous="$(node scripts/release/android-metadata.mjs --previous-fixture)"
+          COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 bash scripts/release/android-artifact-check.sh \
+            --apk "$previous_out" --build-type release --version "$previous" \
+            --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner"
 
           # Travels with the APK: an obfuscated stack trace in the emulator log
           # is unreadable without it, and that is exactly the log this leg
@@ -606,6 +647,7 @@ jobs:
           name: android-release-apk
           path: |
             dist/copypaste-emulator-x86_64-release.apk
+            dist/copypaste-emulator-x86_64-previous.apk
             dist/r8-mapping.txt
           if-no-files-found: error
           retention-days: 7
@@ -618,6 +660,14 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -646,17 +696,14 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: |
-            set -uo pipefail
-            ./scripts/release/android-smoke-release.sh; smoke=$?
-            SMOKE_OUT=artifacts/android-storage-release \
-              ./scripts/release/android-storage-transfer.sh; storage=$?
-            CLOUD_EVIDENCE_APK="$APK" CLOUD_OUT=artifacts/android-cloud-configured \
-              ./scripts/release/android-cloud-evidence.sh --configured; cloud=$?
-            [ $smoke -eq 0 ] && [ $storage -eq 0 ] && [ $cloud -eq 0 ]
+          script: bash ./scripts/release/android-release-emulator-legs.sh
         env:
           APK: dist/copypaste-emulator-x86_64-release.apk
+          PREVIOUS_APK: dist/copypaste-emulator-x86_64-previous.apk
           SMOKE_OUT: artifacts/android-smoke-release
+          STORAGE_OUT: artifacts/android-storage-release
+          CLOUD_MODE: configured
+          CLOUD_OUT: artifacts/android-cloud-configured
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

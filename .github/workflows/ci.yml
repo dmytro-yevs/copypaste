@@ -170,6 +170,14 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
+
       - uses: raven-actions/actionlint@3a24062651993d40fed1019b58ac6fbdfbf276cc # v2.0.1
 
       - name: scripts/release/check.sh

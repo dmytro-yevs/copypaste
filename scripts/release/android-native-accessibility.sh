@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-PKG="${PKG:-com.copypaste.app}"
+metadata_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/android-metadata.mjs"
+PKG="${PKG:-$(node "$metadata_tool" --field releaseApplicationId)}"
 OUT="${SMOKE_OUT:-artifacts/android-smoke}"
 
 check_tree() {

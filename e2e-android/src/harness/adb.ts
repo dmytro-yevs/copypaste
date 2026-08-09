@@ -1,8 +1,16 @@
 import { execa } from "execa";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-export const PACKAGE = process.env.COPYPASTE_PACKAGE ?? "com.copypaste.app";
-export const MAIN_ACTIVITY = `${PACKAGE}/.MainActivity`;
-export const INTAKE_ACTIVITY = `${PACKAGE}/.IntakeActivity`;
+const metadataTool = fileURLToPath(new URL("../../../scripts/release/android-metadata.mjs", import.meta.url));
+const APP_NAMESPACE = execFileSync(
+  process.execPath,
+  [metadataTool, "--field", "releaseApplicationId"],
+  { encoding: "utf8" },
+).trim();
+export const PACKAGE = process.env.COPYPASTE_PACKAGE ?? APP_NAMESPACE;
+export const MAIN_ACTIVITY = `${PACKAGE}/${APP_NAMESPACE}.MainActivity`;
+export const INTAKE_ACTIVITY = `${PACKAGE}/${APP_NAMESPACE}.IntakeActivity`;
 
 /**
  * `adb` from the SDK the emulator came from, not whatever is on PATH: a second

@@ -14,7 +14,9 @@
 #   probe          an observation kept for the next round, not a gate
 set -uo pipefail
 
-PKG="${PKG:-com.copypaste.app}"
+metadata_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/android-metadata.mjs"
+APP_NAMESPACE="$(node "$metadata_tool" --field releaseApplicationId)"
+PKG="${PKG:-$APP_NAMESPACE}"
 OUT="${SMOKE_OUT:-artifacts/android-smoke}"
 
 PASS=0

@@ -13,8 +13,8 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
 
 APK="${APK:-}"
-MAIN="$PKG/.MainActivity"
-INTAKE="$PKG/.IntakeActivity"
+MAIN="$PKG/$APP_NAMESPACE.MainActivity"
+INTAKE="$PKG/$APP_NAMESPACE.IntakeActivity"
 
 # How long a debug build may take to reach a steady state on an emulator.
 # Generous on purpose: the Rust half is unoptimised here, and a flaky timeout
@@ -387,8 +387,8 @@ grep -q 'Capturing from every app' <<<"$notifs" \
     || ok "no notification claims background capture"
 
 group "Probes for the next round"
-tile_add="$(sh_ cmd statusbar add-tile "$PKG/.CaptureTileService")"
-tile_click="$(sh_ cmd statusbar click-tile "$PKG/.CaptureTileService")"
+tile_add="$(sh_ cmd statusbar add-tile "$PKG/$APP_NAMESPACE.CaptureTileService")"
+tile_click="$(sh_ cmd statusbar click-tile "$PKG/$APP_NAMESPACE.CaptureTileService")"
 probe "the Quick Settings tile" "add: ${tile_add:-<no output>} / click: ${tile_click:-<no output>}"
 probe "adb can set the primary clip" "$(sh_ cmd clipboard set-primary-clip --text CopyPasteTileProbe 2>&1 | head -n 1)"
 sleep 8
