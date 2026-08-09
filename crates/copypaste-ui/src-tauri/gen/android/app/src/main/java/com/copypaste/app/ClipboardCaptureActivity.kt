@@ -19,7 +19,7 @@ class ClipboardCaptureActivity : Activity() {
             ?.getItemAt(0)
             ?.coerceToText(this)
             ?.toString()
-        if (!text.isNullOrBlank()) queueClip(text, "tile")
+        if (!text.isNullOrBlank()) queueClip(text, CaptureSource.TILE)
         finish()
     }
 }

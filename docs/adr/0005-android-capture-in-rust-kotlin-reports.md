@@ -22,9 +22,10 @@ This is ADR-0002's lesson applied to the one place the platform genuinely needs
 native code. That ADR deleted ~2,500 lines of Kotlin because no machine in this
 project could compile them. The line here is not "no Kotlin" — a Quick Settings
 tile and a binder proxy cannot be written in Rust — it is **no decisions in the
-part nothing can compile**. Concretely, `capture::model` holds 12 tests over
-the state machine and the wording; the Kotlin holds none, because there is
-nothing in it to test.
+part nothing can compile**. `capture::model` tests the state machine and the
+wording. Kotlin's one contract test serialises its production DTOs into a
+checked fixture that Rust consumes; it tests the bridge shape without moving
+policy into Kotlin.
 
 The same reasoning puts the loss notification's *wording* in Rust and its
 *posting* in Kotlin: the text is passed down at arm time so the binder death
@@ -96,10 +97,6 @@ themselves.
 
 ## Unverified
 
-No part of the Android build has been compiled or run. This host has no SDK and
-no NDK: `tauri android init` needed a stubbed `ANDROID_HOME`/`NDK_HOME` to
-generate `gen/android`, `dl.google.com` is unreachable from here so no SDK can
-be installed, and `cargo check --target aarch64-linux-android` stops at
-SQLCipher for want of an NDK `clang`. `docs/rewrite/android-spike.md` is the
-checklist for the first run on a real phone, ordered by what is most likely to
-be wrong.
+The bridge DTOs compile in Android debug unit-test variants, and their fixture
+guard is attached to debug APK assembly. Rung 2 still needs pairing and capture
+evidence on a real phone; `docs/rewrite/android-spike.md` remains its checklist.

@@ -15,7 +15,7 @@ class ClipQueueTest {
     @Test
     fun privateClipIsNotReplayedWhenDrainRunsAfterModeTurnsOff() {
         ClipQueue.setPrivateMode(true)
-        ClipQueue.offer("private", "test")
+        ClipQueue.offer("private", CaptureSource.IN_APP)
         ClipQueue.setPrivateMode(false)
 
         assertTrue(ClipQueue.drain().first.isEmpty())
@@ -23,7 +23,7 @@ class ClipQueueTest {
 
     @Test
     fun persistedPrivateModeDropsAnythingQueuedBeforeRustRestarts() {
-        ClipQueue.offer("private while Rust was down", "test")
+        ClipQueue.offer("private while Rust was down", CaptureSource.IN_APP)
 
         ClipQueue.setPrivateMode(true)
         ClipQueue.setPrivateMode(false)

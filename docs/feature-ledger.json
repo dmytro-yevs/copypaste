@@ -20,7 +20,7 @@
       "id": "capture",
       "status": "product",
       "contracts": ["capture_state", "capture_refresh", "capture_arm", "capture_disarm", "capture_set_enabled", "capture_now", "capture_toast_explanation", "capture_set_toast_suppressed", "copy_text"],
-      "backend_tests": ["cargo test -p copypaste-core clipboard"],
+      "backend_tests": ["cargo test -p copypaste-core clipboard", "cd crates/copypaste-ui/src-tauri/gen/android && ./gradlew :app:testArmDebugUnitTest"],
       "ui_tests": ["npm --prefix crates/copypaste-ui test"],
       "accessibility_states": ["permission_required", "disabled", "error", "screen_reader"],
       "failure_states": ["restart", "offline", "permission_denied"],

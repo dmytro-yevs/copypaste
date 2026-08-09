@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("rust")
 }
 
@@ -76,6 +77,11 @@ dependencies {
     implementation("com.google.zxing:core:3.5.4")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
+    // The typed bridge replaces hand-built JSONObject keys. The runtime jar is
+    // the cost of making Kotlin's wire model executable instead of duplicating
+    // it in Rust; 1.9.0 is the maintained line built for Kotlin 2.2.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+
     // Rung 2. AGENTS.md rule 1: the maintained client library, not a
     // hand-rolled binder proxy — `ShizukuBinderWrapper` and
     // `SystemServiceHelper` are exactly the two pieces we would otherwise be
@@ -99,3 +105,11 @@ dependencies {
 }
 
 apply(from = "tauri.build.gradle.kts")
+
+// The Android CI entry point assembles the debug APK. Keep the Kotlin fixture
+// guard on that maintained surface instead of relying on a manual Gradle call.
+tasks.matching { it.name.startsWith("assemble") && it.name.endsWith("Debug") }
+    .configureEach {
+        val variant = name.removePrefix("assemble").removeSuffix("Debug")
+        finalizedBy(tasks.matching { it.name == "test${variant}DebugUnitTest" })
+    }

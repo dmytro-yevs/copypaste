@@ -114,6 +114,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Capture pipeline against the fake source | Rust | Verified |
 | `ACTION_SEND` / `ACTION_PROCESS_TEXT` reach SQLCipher | Android | Partial — debug leg only; the release leg has no `run-as` and prints `NOT ASSERTED`. `e2e-android/` follows an `ACTION_SEND` onto the screen |
 | Rung 2: the shell-uid clipboard read | Android | Partial — the API 36 leg reads a foreign clip as uid 2000 without focus; Shizuku's binder proxy and listener still need pairing on a phone |
+| Kotlin → Rust capture bridge shape | Rust, Android | Verified — the debug APK build runs the Kotlin serializer/fixture guard, and the Rust workspace test strictly consumes that fixture |
 | `ClipListener` / `ClipQueue` | Android | **NOT VERIFIED IN CI** — the listener never registers without Shizuku; no Kotlin unit test exists |
 | `CaptureService` | Android | Partial — the API 36 leg proves it stays stopped and makes no claim when no listener exists; nothing asserts positive capture through it |
 | Quick Settings tile | Android | Partial — the API 36 leg requires one tile click to persist a foreign clip in encrypted history |

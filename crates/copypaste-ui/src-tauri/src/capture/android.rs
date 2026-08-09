@@ -17,9 +17,11 @@ use tauri::{Manager, Wry};
 
 use crate::backend::{BackendError, Result};
 
+use super::contract::{
+    AndroidArmResult, AndroidDrainResult, AndroidProbeResult, AndroidReadResult,
+};
 use super::model::{
-    AndroidArmResult, AndroidProbeResult, CaptureModel, CaptureSnapshot, CaptureSource, Clip,
-    ReadOutcome, ShizukuProbe, LOST_BODY, LOST_TITLE,
+    CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome, LOST_BODY, LOST_TITLE,
 };
 use super::CaptureControl;
 
@@ -101,29 +103,6 @@ struct SuppressArgs {
     suppressed: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReadResult {
-    outcome: ReadOutcome,
-    text: Option<String>,
-    at_ms: i64,
-    focused: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DrainResult {
-    clips: Vec<Clip>,
-    /// Clips Kotlin's own queue had to discard. Added to the model's count so
-    /// there is one number for "copies that were not saved".
-    dropped: u64,
-    /// The probe rides along, so the once-a-second drain is also the liveness
-    /// backstop and there is no second poll. The push signal — the binder death
-    /// recipient — still fires first; this only bounds how long the in-app
-    /// state can disagree with it.
-    probe: ShizukuProbe,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PrivateModeArgs {
@@ -203,9 +182,9 @@ impl CaptureControl for AndroidCapture {
         };
         let result: AndroidArmResult = self.call("arm", args, MSG_ARM)?;
         Ok(self.with(|model| {
-            model.set_enabled(result.status.enabled);
-            model.set_probe(result.status.probe);
-            model.record_armed(result.status.listening);
+            model.set_enabled(result.enabled);
+            model.set_probe(result.probe);
+            model.record_armed(result.listening);
             model.record_read(result.outcome, result.focused, copypaste_core::now_ms());
             model.snapshot()
         }))
@@ -220,7 +199,7 @@ impl CaptureControl for AndroidCapture {
     }
 
     fn read_now(&self, source: CaptureSource) -> Result<Option<Clip>> {
-        let result: ReadResult = self.call("readNow", (), MSG_BRIDGE)?;
+        let result: AndroidReadResult = self.call("readNow", (), MSG_BRIDGE)?;
         // Recorded, but `focused` is true for this path by construction, so it
         // cannot promote the state to `Working`. See `model::record_read`.
         self.with(|model| model.record_read(result.outcome, result.focused, result.at_ms));
@@ -234,7 +213,7 @@ impl CaptureControl for AndroidCapture {
     }
 
     fn drain(&self) -> Result<Vec<Clip>> {
-        let result: DrainResult = self.call("drain", (), MSG_BRIDGE)?;
+        let result: AndroidDrainResult = self.call("drain", (), MSG_BRIDGE)?;
         self.with(|model| {
             model.set_probe(result.probe);
             model.record_dropped(result.dropped);

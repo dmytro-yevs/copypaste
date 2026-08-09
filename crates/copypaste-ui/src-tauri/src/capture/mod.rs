@@ -1,46 +1,17 @@
-//! Android clipboard capture — the four-rung ladder, rung 0 and rung 2.
+//! Android clipboard capture orchestration for rung 0 and rung 2.
 //!
-//! `docs/rewrite/android-clipboard-access.md` is the specification; this module
-//! is its implementation, and ADR-0005 records what shape the implementation
-//! took and why. The one-paragraph version: Android 10 removed the only moment
-//! worth capturing, so rung 0 buys capture back with gestures that give the app
-//! focus — the share sheet, the text-selection action, a Quick Settings tile,
-//! plus the Mac's history over sync — and rung 2 buys real background capture
-//! by making the binder call as the shell uid through Shizuku.
+//! `docs/rewrite/android-clipboard-access.md` specifies the ladder. Kotlin
+//! reports platform facts through `contract`; [`model`] owns every decision
+//! and user-facing sentence. [`CaptureControl`] keeps commands platform-neutral.
 //!
-//! # The split between here and Kotlin
-//!
-//! ADR-0002 deleted ~2,500 lines of Kotlin that no machine in this project
-//! could compile. That failure is easy to repeat here, because the platform
-//! genuinely needs a native layer. So the line is drawn hard:
-//!
-//! * **Kotlin reports facts.** Is Shizuku installed, is it running, did a read
-//!   return, here is the text. It contains no policy and no user-facing
-//!   sentence it invented.
-//! * **[`model`] decides what the facts mean**, in ordinary Rust that compiles
-//!   and is tested on a Linux host with no SDK, including every sentence the
-//!   user reads.
-//!
-//! # Why a trait, when only one platform has a ladder
-//!
-//! The same reason [`crate::backend`] has one: `crate::commands` must contain
-//! no `cfg`, so the command names and shapes are identical on both platforms
-//! and the React side never branches. macOS answers with the one state it has —
-//! the background service captures everything — and the status surface renders
-//! that with the same component.
-//!
-//! # Unverified
-//!
-//! Everything Android-specific. This host has no SDK and no NDK — `cargo check
-//! --target aarch64-linux-android` stops at SQLCipher for want of an NDK
-//! `clang` — so [`android`] has never been compiled, the Kotlin under
-//! `gen/android/app/src/main/java/` has never been compiled, and the central
-//! claim (that a binder call as the shell uid reads the clipboard with no
-//! focus) is derived from AOSP source and has never been observed.
-//! `docs/rewrite/android-spike.md` is the checklist for the first device run.
+//! The bridge DTOs compile in Android debug unit-test variants. The Shizuku
+//! binder path still needs paired-device evidence; `docs/rewrite/android-spike.md`
+//! is that checklist.
 
 use crate::backend::Result;
 
+#[cfg(any(target_os = "android", test))]
+mod contract;
 pub mod intake;
 pub mod messages;
 pub mod model;

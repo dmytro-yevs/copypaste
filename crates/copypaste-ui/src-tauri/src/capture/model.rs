@@ -124,7 +124,7 @@ pub enum NextStep {
 
 /// What Kotlin found when it looked.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShizukuProbe {
     /// `Build.VERSION.SDK_INT >= 30`: wireless debugging can be paired from the
     /// phone itself, with no computer.
@@ -134,6 +134,7 @@ pub struct ShizukuProbe {
     /// it again.
     pub running: bool,
     pub permission: bool,
+    pub enabled: bool,
     /// `Settings.Secure.CLIPBOARD_SHOW_ACCESS_NOTIFICATIONS == 0`. Read, never
     /// assumed: another app or the user may have set it.
     pub toast_suppressed: bool,
@@ -143,16 +144,6 @@ pub struct ShizukuProbe {
     /// that follows the tap and false afterwards. That is what makes re-arming
     /// one tap (android doc §5 rule 4) instead of a hunt through settings.
     pub rearm_requested: bool,
-}
-
-/// The status fields every Kotlin command returning a probe must include.
-#[cfg(any(target_os = "android", test))]
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AndroidProbeResult {
-    pub probe: ShizukuProbe,
-    pub enabled: bool,
-    pub listening: bool,
 }
 
 /// What one read attempt did.
@@ -170,20 +161,9 @@ pub enum ReadOutcome {
     Refused,
 }
 
-/// The result of Kotlin's `arm` command.
-#[cfg(any(target_os = "android", test))]
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AndroidArmResult {
-    #[serde(flatten)]
-    pub status: AndroidProbeResult,
-    pub outcome: ReadOutcome,
-    pub focused: bool,
-}
-
 /// One clip Kotlin captured and has not handed over yet.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Clip {
     pub text: String,
     pub source: CaptureSource,
@@ -492,6 +472,7 @@ mod tests {
             installed: true,
             running: true,
             permission: true,
+            enabled: true,
             toast_suppressed: false,
             rearm_requested: false,
         }
@@ -795,47 +776,5 @@ mod tests {
         assert!(json.contains(r#""state":"working""#), "{json}");
         assert!(json.contains(r#""nextStep":"none""#), "{json}");
         assert!(json.contains(r#""lastReadOkAt":1700000000000"#), "{json}");
-    }
-
-    /// The Kotlin side sends these; a rename on either side must fail here
-    /// rather than at runtime on a phone nobody has.
-    #[test]
-    fn the_kotlin_payloads_deserialise_from_the_json_kotlin_sends() {
-        let probe: ShizukuProbe = serde_json::from_str(
-            r#"{"supported":true,"installed":true,"running":true,"permission":false,
-                "enabled":true,"toastSuppressed":false,"rearmRequested":true}"#,
-        )
-        .unwrap();
-        assert!(probe.running && !probe.permission && probe.rearm_requested);
-
-        let status: AndroidProbeResult = serde_json::from_str(
-            r#"{"probe":{"supported":true,"installed":true,"running":true,"permission":true,
-                "toastSuppressed":false,"rearmRequested":false},"enabled":true,"listening":true}"#,
-        )
-        .unwrap();
-        assert!(status.enabled && status.listening && status.probe.running);
-
-        let arm: AndroidArmResult = serde_json::from_str(
-            r#"{"probe":{"supported":true,"installed":true,"running":true,"permission":true,
-                "toastSuppressed":false,"rearmRequested":false},"enabled":true,"listening":true,
-                "outcome":"succeeded","focused":true}"#,
-        )
-        .unwrap();
-        assert!(arm.status.enabled && arm.status.listening && arm.focused);
-        assert_eq!(arm.outcome, ReadOutcome::Succeeded);
-
-        let clip: Clip =
-            serde_json::from_str(r#"{"text":"hi","source":"process_text","atMs":12}"#).unwrap();
-        assert_eq!(clip.source, CaptureSource::ProcessText);
-        assert_eq!(clip.at_ms, 12);
-
-        let outcome: ReadOutcome = serde_json::from_str(r#""refused""#).unwrap();
-        assert_eq!(outcome, ReadOutcome::Refused);
-
-        // A probe from an older Kotlin that predates a field must not fail the
-        // whole read — it degrades to "not supported", which is a refusal to
-        // capture rather than a false claim to.
-        let partial: ShizukuProbe = serde_json::from_str(r#"{"installed":true}"#).unwrap();
-        assert!(!partial.supported);
     }
 }
