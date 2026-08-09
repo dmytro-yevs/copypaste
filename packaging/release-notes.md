@@ -1,3 +1,11 @@
+## Highlights
+
+- Adds native device-pairing flows on macOS, Android and Windows.
+- Adds the Windows desktop backend and installer/update packaging support.
+- Restores cloud account controls and private mode across the app backends.
+- Hardens clipboard, IPC, cloud-sync and sensitive-content handling.
+- Expands Android accessibility, storage-transfer and dependency release gates.
+
 ## Install
 
 **macOS 14 Sonoma or later** (Apple Silicon):
@@ -11,32 +19,19 @@ brew install copypaste-cli        # the CLI and daemon
 **Android:** download the `.apk` attached below and open it. Android will ask
 you to allow installing from this source.
 
-## Signing
+The current publish workflow does not attach a Windows installer.
 
-**macOS.** These builds are **not notarised by Apple** — the project has no
-Apple Developer ID. On install the cask removes the `com.apple.quarantine`
-attribute from `/Applications/CopyPaste.app`, and only from that bundle, and
-re-signs the app with a certificate generated on your own machine. That
-certificate stays in your keychain, is never sent anywhere, and is what makes
-macOS treat each update as the same app rather than as a new one.
+## Signing and verification caveats
 
-See [ADR-0001](https://github.com/dmytro-yevs/copypaste/blob/main/docs/adr/0001-macos-distribution-without-a-developer-id.md)
-for the reasoning and for what it costs: the app deliberately requires no
-Accessibility or Input Monitoring permission.
+The macOS workflow uses ad-hoc signing and does not notarize artifacts with
+Apple. The Homebrew cask removes quarantine only from the installed CopyPaste
+bundle and re-signs it locally. Android publication requires the configured
+durable release key and fails closed when it is unavailable.
 
-**Android.** Android will warn that this app comes from an unknown developer.
-Every published APK is signed with the durable release key; the release fails
-closed if that key is unavailable. The signed universal APK is installed and
-smoke-tested on an emulator before publication. See
-[ADR-0006](https://github.com/dmytro-yevs/copypaste/blob/main/docs/adr/0006-android-release-signing.md).
+These notes were prepared without running the tagged release workflow. They do
+not claim publication, notarization, new physical-device coverage or a
+completed cross-platform end-to-end run. The tagged macOS and Android release
+gates have not run yet; Windows packaging is present in the tree but is not part
+of the current publish workflow. Treat this build as an early alpha.
 
-macOS builds are Apple Silicon only. Verify what you downloaded against the
-`.sha256` files attached below.
-
-## Not verified on real hardware
-
-This project is developed on Linux. The macOS clipboard backend, the Keychain
-device-secret store and the install-time signing path have been compiled but
-never observed running on a user's Mac or phone. On a publishable tag, the
-signed universal Android APK is installed and smoke-tested on an emulator before
-publication. Treat this as an alpha in the literal sense.
+Verify downloaded artifacts against their attached `.sha256` files.
