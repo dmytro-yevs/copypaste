@@ -504,6 +504,7 @@ SELF_TESTED = {
     "android-storage-transfer.sh": "its accessibility selectors must be fixture-tested without borrowing the owned emulator",
     "android-cloud-evidence.sh": "its accessibility selectors and latency verdicts must be fixture-tested without a device",
     "macos-cloud-evidence.sh": "its accessibility evidence and latency verdicts must be fixture-tested off macOS",
+    "macos-native-evidence.sh": "its accessibility detector must be fixture-tested off macOS",
     "android-rungs.sh": NO_DEVICE,
     "check-wiring.py": "the runner-image table is data, and nothing else would notice it going empty",
 }
