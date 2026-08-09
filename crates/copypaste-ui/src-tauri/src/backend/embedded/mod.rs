@@ -520,6 +520,11 @@ mod tests {
         (backend, clipboard, dir)
     }
 
+    #[test]
+    fn it_opens_without_a_caller_tokio_runtime() {
+        let (_backend, _clip, _dir) = backend();
+    }
+
     #[tokio::test]
     async fn it_opens_and_reports_an_honest_status() {
         let (backend, _clip, _dir) = backend();
