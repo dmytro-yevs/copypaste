@@ -101,6 +101,7 @@ pub fn run() {
     let builder = builder
         .plugin(capture::android::init())
         .plugin(network_discovery::plugin())
+        .plugin(pairing_presentation::android::plugin())
         .plugin(shell::appearance::android::plugin())
         // `set_content_protected` is a no-op on Android (tao gates it to macOS
         // and Windows), so INV-35's Android half is `FLAG_SECURE` and needs a
@@ -118,6 +119,7 @@ pub fn run() {
             app.manage(make_backend(app)?);
             app.manage(source_app_icon::SourceAppIconCache::default());
             app.manage(commands::transfer::PendingImportState::default());
+            #[cfg(not(target_os = "android"))]
             app.manage(pairing_presentation::PairingPresenter::default());
             app.manage(Supervisor::default());
             app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
