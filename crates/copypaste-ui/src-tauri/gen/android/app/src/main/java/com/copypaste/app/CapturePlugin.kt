@@ -43,12 +43,10 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun probe(invoke: Invoke) {
-        invoke.resolve(
-            JSObject()
-                .put("probe", probeObject())
-                .put("enabled", captureEnabled())
-                .put("listening", ShizukuClipboard.isListening())
-        )
+        invoke.resolve(CaptureBridgeJson.objectOf(
+            ProbeResult.serializer(),
+            ProbeResult(probePayload(), captureEnabled(), ShizukuClipboard.isListening()),
+        ))
     }
 
     @Command
@@ -173,18 +171,22 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun resolveArm(invoke: Invoke, listening: Boolean) {
-        invoke.resolve(
-            JSObject()
-                .put("probe", probeObject())
-                .put("enabled", listening)
-                .put("listening", listening)
-                // A read taken now happens with the app in front, so Rust will
-                // not count it as proof. It is here to surface an outright
-                // refusal early rather than to claim success.
-                .put("outcome", if (listening) ShizukuClipboard.readOutcome() else "refused")
-                .put("focused", true)
-            .put("notificationPermission", true)
-        )
+        val outcome = if (listening) {
+            ShizukuClipboard.readOutcome()
+        } else {
+            ReadOutcome.REFUSED
+        }
+        invoke.resolve(CaptureBridgeJson.objectOf(
+            ArmResult.serializer(),
+            ArmResult(
+                probePayload(),
+                listening,
+                listening,
+                outcome,
+                focused = true,
+                notificationPermission = true,
+            ),
+        ))
     }
 
     private fun onNotificationPermissionResult(granted: Boolean) {
@@ -201,15 +203,17 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         // restart without the notification that makes it visible.
         ShizukuClipboard.disarm()
         CaptureService.stop(activity)
-        pending.invoke.resolve(
-            JSObject()
-                .put("probe", probeObject())
-                .put("enabled", false)
-                .put("listening", false)
-                .put("outcome", "refused")
-                .put("focused", true)
-                .put("notificationPermission", false)
-        )
+        pending.invoke.resolve(CaptureBridgeJson.objectOf(
+            ArmResult.serializer(),
+            ArmResult(
+                probePayload(),
+                enabled = false,
+                listening = false,
+                ReadOutcome.REFUSED,
+                focused = true,
+                notificationPermission = false,
+            ),
+        ))
     }
 
     @Command
@@ -236,42 +240,23 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             ?.toString()
 
         val outcome = when {
-            !text.isNullOrBlank() -> "succeeded"
-            clipboard.hasPrimaryClip() -> "refused"
-            else -> "empty"
+            !text.isNullOrBlank() -> ReadOutcome.SUCCEEDED
+            clipboard.hasPrimaryClip() -> ReadOutcome.REFUSED
+            else -> ReadOutcome.EMPTY
         }
-        invoke.resolve(
-            JSObject()
-                .put("outcome", outcome)
-                .put("text", text)
-                .put("atMs", System.currentTimeMillis())
-                // Always true here by construction, and Rust relies on it: this
-                // read proves the clipboard is readable in front, never that it
-                // is readable in the background.
-                .put("focused", true)
-        )
+        invoke.resolve(CaptureBridgeJson.objectOf(
+            ReadResult.serializer(),
+            ReadResult(outcome, text, System.currentTimeMillis(), focused = true),
+        ))
     }
 
     @Command
     fun drain(invoke: Invoke) {
         val (clips, dropped) = ClipQueue.drain()
-        val array = JSArray()
-        clips.forEach {
-            array.put(
-                JSObject()
-                    .put("text", it.text)
-                    .put("source", it.source)
-                    .put("atMs", it.atMs)
-                    .put("sourceAppBundleId", it.sourceAppBundleId)
-                    .put("sourceAppName", it.sourceAppName)
-            )
-        }
-        invoke.resolve(
-            JSObject()
-                .put("clips", array)
-                .put("dropped", dropped)
-                .put("probe", probeObject())
-        )
+        invoke.resolve(CaptureBridgeJson.objectOf(
+            DrainResult.serializer(),
+            DrainResult(clips, dropped, probePayload()),
+        ))
     }
 
     @Command
@@ -286,23 +271,22 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         // here means the user was shown what this does and agreed.
         val suppressed = invoke.getArgs().optBoolean("suppressed", false)
         ShizukuClipboard.setToastSuppressed(suppressed) {
-            invoke.resolve(
-                JSObject()
-                    .put("probe", probeObject())
-                    .put("enabled", captureEnabled())
-                    .put("listening", ShizukuClipboard.isListening())
-            )
+            invoke.resolve(CaptureBridgeJson.objectOf(
+                ProbeResult.serializer(),
+                ProbeResult(probePayload(), captureEnabled(), ShizukuClipboard.isListening()),
+            ))
         }
     }
 
-    private fun probeObject(): JSObject = JSObject()
-        .put("supported", ShizukuClipboard.isSupported())
-        .put("installed", isShizukuInstalled())
-        .put("running", ShizukuClipboard.isRunning())
-        .put("permission", ShizukuClipboard.hasPermission())
-        .put("enabled", CaptureService.isArmed(activity))
-        .put("toastSuppressed", ShizukuClipboard.isToastSuppressed(activity))
-        .put("rearmRequested", takeRearmRequest())
+    private fun probePayload(): ShizukuProbe = ShizukuProbe(
+        ShizukuClipboard.isSupported(),
+        isShizukuInstalled(),
+        ShizukuClipboard.isRunning(),
+        ShizukuClipboard.hasPermission(),
+        CaptureService.isArmed(activity),
+        ShizukuClipboard.isToastSuppressed(activity),
+        takeRearmRequest(),
+    )
 
     /**
      * `CaptureState` is a request to run, not proof that the listener survived.

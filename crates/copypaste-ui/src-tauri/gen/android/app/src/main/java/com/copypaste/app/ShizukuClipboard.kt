@@ -106,7 +106,7 @@ object ShizukuClipboard {
                 pollOnce()?.let { clip ->
                     ClipQueue.offer(
                         clip.text,
-                        "background",
+                        CaptureSource.BACKGROUND,
                         clip.sourceAppBundleId,
                         SourceAppResolver.label(context, clip.sourceAppBundleId),
                     )
@@ -214,17 +214,17 @@ object ShizukuClipboard {
      * to be empty. `hasPrimaryClip` is subject to the same access check, so
      * "has a clip but cannot read it" is the refusal.
      */
-    fun readOutcome(): String = try {
+    fun readOutcome(): ReadOutcome = try {
         val clipboard = clipboardService()
         val has = invoke(clipboard, "hasPrimaryClip") as? Boolean ?: false
         when {
-            !has -> "empty"
-            invoke(clipboard, "getPrimaryClip") != null -> "succeeded"
-            else -> "refused"
+            !has -> ReadOutcome.EMPTY
+            invoke(clipboard, "getPrimaryClip") != null -> ReadOutcome.SUCCEEDED
+            else -> ReadOutcome.REFUSED
         }
     } catch (e: Throwable) {
         lastFailure = e.javaClass.simpleName
-        "refused"
+        ReadOutcome.REFUSED
     }
 
     /**
