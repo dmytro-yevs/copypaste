@@ -87,8 +87,7 @@ mac_set_app_pid "$app_pid"
 surface_ready="no"
 surface_started="$SECONDS"
 while (( SECONDS - surface_started < 30 )); do
-  if mac_ax dump > "$out/ax.log" 2> "$out/ax.err" \
-      && check_accessibility_surface "$out/ax.log" >/dev/null 2>&1; then
+  if mac_ax ready > /dev/null 2> "$out/ax.err"; then
     surface_ready="yes"
     break
   fi
@@ -99,6 +98,7 @@ if [[ "$surface_ready" != "yes" ]]; then
   exit 1
 fi
 ready_ms="$(python3 -c 'import time; print(time.time_ns() // 1000000)')"
+mac_ax surface > "$out/ax.log" 2> "$out/ax.err"
 check_accessibility_surface "$out/ax.log"
 screencapture -x "$out/screenshot.png"
 python3 - "$out/latency.json" "$((ready_ms - start_ms))" <<'PY'

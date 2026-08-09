@@ -31,7 +31,7 @@ mac_set_app_pid() { # <pid>
     MAC_APP_PID="$1"
 }
 
-mac_ax() { # <dump|press|set> [label] [value]
+mac_ax() { # <ready|surface|dump|press|set> [label] [value]
     [[ -n "${MAC_APP_PID:-}" ]] || {
         echo "macOS accessibility target PID is unavailable" >&2
         return 1
@@ -51,7 +51,17 @@ on run argv
         set processRef to item 1 of processMatches
         tell processRef
             if (count of windows) is 0 then error "CopyPaste window is unavailable"
-            set elementsList to entire contents
+            if actionMode is "ready" then
+                if (count of menu bars) is 0 then error "CopyPaste menu bar is unavailable"
+                set windowName to name of window 1 as text
+                if windowName is "" then error "CopyPaste window is unnamed"
+                return "ok"
+            end if
+            if actionMode is "surface" then
+                set elementsList to entire contents
+            else
+                set elementsList to entire contents of window 1
+            end if
             repeat with elementRef in elementsList
                 set roleText to ""
                 set nameText to ""
@@ -64,34 +74,38 @@ on run argv
                 try
                     set nameText to name of elementRef as text
                 end try
-                try
-                    set descriptionText to description of elementRef as text
-                end try
-                try
-                    set helpText to help of elementRef as text
-                end try
-                try
-                    set valueText to value of elementRef as text
-                end try
-                if actionMode is "dump" then
-                    set end of outputLines to roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
-                else if nameText is targetLabel or descriptionText is targetLabel or helpText is targetLabel or valueText is targetLabel then
-                    if actionMode is "press" then
-                        try
-                            perform action "AXPress" of elementRef
-                            return "ok"
-                        end try
-                    else if actionMode is "set" then
-                        try
-                            set value of elementRef to inputValue
-                            return "ok"
-                        end try
+                if actionMode is "surface" then
+                    set end of outputLines to roleText & tab & nameText
+                else
+                    try
+                        set descriptionText to description of elementRef as text
+                    end try
+                    try
+                        set helpText to help of elementRef as text
+                    end try
+                    try
+                        set valueText to value of elementRef as text
+                    end try
+                    if actionMode is "dump" then
+                        set end of outputLines to roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
+                    else if nameText is targetLabel or descriptionText is targetLabel or helpText is targetLabel or valueText is targetLabel then
+                        if actionMode is "press" then
+                            try
+                                perform action "AXPress" of elementRef
+                                return "ok"
+                            end try
+                        else if actionMode is "set" then
+                            try
+                                set value of elementRef to inputValue
+                                return "ok"
+                            end try
+                        end if
                     end if
                 end if
             end repeat
         end tell
     end tell
-    if actionMode is "dump" then
+    if actionMode is "dump" or actionMode is "surface" then
         set AppleScript's text item delimiters to linefeed
         return outputLines as text
     end if
@@ -143,12 +157,25 @@ mac_ui_self_test() {
         || bad "bundle executable name selects the launched process"
 
     osascript() {
-        [[ "$1" == "-" && "$2" == "4242" && "$3" == "dump" ]] || return 1
-        printf 'AXButton\tSign in\t\t\t\nAXStaticText\tConnected\t\t\t\n'
+        [[ "$1" == "-" && "$2" == "4242" ]] || return 1
+        case "$3" in
+            ready) printf 'ok\n' ;;
+            surface) printf 'AXMenuBar\tCopyPaste\nAXMenuBarItem\tCopyPaste\n' ;;
+            dump) printf 'AXButton\tSign in\t\t\t\nAXStaticText\tConnected\t\t\t\n' ;;
+            *) return 1 ;;
+        esac
     }
     mac_set_app_pid "$pid"
+    mac_ax ready >/dev/null
+    mac_ax surface > "$1/surface.txt"
     mac_ax dump > "$fixture"
     unset -f osascript
+    mac_ax_contains "$1/surface.txt" "AXMenuBar" \
+        && ok "the full native surface retains menu bar evidence" \
+        || bad "the full native surface retains menu bar evidence"
+    mac_ax_contains "$fixture" "AXMenuBar" \
+        && bad "window scans exclude unrelated process chrome" \
+        || ok "window scans exclude unrelated process chrome"
     mac_ax_contains "$fixture" "Sign in" \
         && ok "an accessible action is found for the launched PID" \
         || bad "an accessible action is found for the launched PID"
