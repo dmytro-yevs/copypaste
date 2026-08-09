@@ -17,6 +17,7 @@ import type {
   ImportPreview,
   Item,
   ItemPage,
+  PairingCeremony,
   PeerInfo,
   PrivateModeData,
   ServiceState,
@@ -42,6 +43,11 @@ export type {
   Item,
   ItemPage,
   Liveness,
+  PairedDevice,
+  PairingCeremony,
+  PairingPresentationState,
+  PairingRole,
+  PairingState,
   PeerInfo,
   PrivateModeData,
   ServiceState,
@@ -199,6 +205,34 @@ export function listDiscovered(): Promise<DiscoveredDevice[]> {
  *  a retry that is not "quit the app". */
 export function rescanDiscovered(): Promise<DiscoveredDevice[]> {
   return call<DiscoveredDevice[]>("rescan");
+}
+
+export function createPairingInvite(): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_create_invite");
+}
+
+export function scanPairingInvite(): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_scan_invite");
+}
+
+export function getPairingProgress(): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_progress");
+}
+
+export function presentPairing(): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_present");
+}
+
+export function confirmPairing(): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_confirm");
+}
+
+export function rejectPairing(): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_reject");
+}
+
+export function cancelPairing(): Promise<PairingCeremony> {
+  return call<PairingCeremony>("pair_cancel");
 }
 
 export function serviceState(): Promise<ServiceState> {

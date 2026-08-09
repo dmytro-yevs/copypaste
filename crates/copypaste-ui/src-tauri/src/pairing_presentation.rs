@@ -1,0 +1,122 @@
+use copypaste_ipc::{PairingInviteData, PairingProgressData};
+use zeroize::Zeroizing;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+#[serde(rename_all = "snake_case")]
+pub enum PairingPresentationState {
+    Presented,
+    Unavailable,
+}
+
+pub struct ScannedPairing {
+    pub code: Zeroizing<String>,
+    pub addr: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairingDecision {
+    Accept,
+    Reject,
+    Cancel,
+}
+
+pub trait NativePairingUi: Send + Sync + 'static {
+    fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState;
+    fn scan_invite(&self) -> Option<ScannedPairing>;
+    fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState;
+    fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision>;
+}
+
+pub struct PairingPresenter {
+    native: Box<dyn NativePairingUi>,
+}
+
+impl Default for PairingPresenter {
+    fn default() -> Self {
+        Self {
+            native: Box::new(UnavailablePairingUi),
+        }
+    }
+}
+
+impl PairingPresenter {
+    pub fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
+        self.native.present_invite(invite)
+    }
+
+    pub fn scan_invite(&self) -> Option<ScannedPairing> {
+        self.native.scan_invite()
+    }
+
+    pub fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {
+        self.native.present_progress(progress)
+    }
+
+    pub fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision> {
+        self.native.confirm(progress)
+    }
+}
+
+struct UnavailablePairingUi;
+
+impl NativePairingUi for UnavailablePairingUi {
+    fn present_invite(&self, _invite: &PairingInviteData) -> PairingPresentationState {
+        PairingPresentationState::Unavailable
+    }
+
+    fn scan_invite(&self) -> Option<ScannedPairing> {
+        None
+    }
+
+    fn present_progress(&self, _progress: &PairingProgressData) -> PairingPresentationState {
+        PairingPresentationState::Unavailable
+    }
+
+    fn confirm(&self, _progress: &PairingProgressData) -> Option<PairingDecision> {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use copypaste_ipc::{PairingRole, PairingState};
+
+    fn progress() -> PairingProgressData {
+        PairingProgressData {
+            pairing_id: Some("ceremony-1".into()),
+            role: Some(PairingRole::Responder),
+            state: PairingState::AwaitingConfirmation,
+            sas: Some("123456".into()),
+            peer_device_id: Some("device-1".into()),
+            peer_name: Some("Phone".into()),
+            peer_addr: Some("192.0.2.1:47654".into()),
+            known_device: None,
+            error_code: None,
+        }
+    }
+
+    #[test]
+    fn missing_platform_renderers_are_an_explicit_state() {
+        let presenter = PairingPresenter::default();
+        let invite = PairingInviteData {
+            code: "SECRET-CODE".into(),
+            pairing_id: "ceremony-1".into(),
+            listen_addr: Some("192.0.2.2:47654".into()),
+            expires_in_secs: 120,
+        };
+
+        assert_eq!(
+            presenter.present_invite(&invite),
+            PairingPresentationState::Unavailable
+        );
+        assert_eq!(
+            presenter.present_progress(&progress()),
+            PairingPresentationState::Unavailable
+        );
+        assert!(presenter.scan_invite().is_none());
+        assert!(presenter.confirm(&progress()).is_none());
+    }
+}

@@ -22,6 +22,7 @@ const FRIENDLY = {
   key_unusable: "errors.key_unusable",
   pairing_code: "errors.pairing_code",
   pairing_address: "errors.pairing_address",
+  rate_limited: "errors.rate_limited",
   peer_unreachable: "errors.peer_unreachable",
   pairing_limit: "errors.pairing_limit",
   peer_failed: "errors.peer_failed",

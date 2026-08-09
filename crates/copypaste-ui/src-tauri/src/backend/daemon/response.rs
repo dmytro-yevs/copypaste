@@ -1,7 +1,7 @@
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, DiscoveredDevice, ExportData,
-    ImagePreview, ImportData, Item, PeerInfo, PrivateModeData, Response, ResponseData, StatusData,
-    SyncResult,
+    ImagePreview, ImportData, Item, PairingInviteData, PairingProgressData, PeerInfo,
+    PrivateModeData, Response, ResponseData, StatusData, SyncResult,
 };
 
 use super::super::{BackendError, Page, Result};
@@ -64,6 +64,20 @@ pub(super) fn expect_peers(data: Option<ResponseData>) -> Result<Vec<PeerInfo>> 
     match data {
         Some(ResponseData::Peers(peers)) => Ok(peers),
         _ => Err(BackendError::wrong_shape("a list of devices")),
+    }
+}
+
+pub(super) fn expect_pairing_invite(data: Option<ResponseData>) -> Result<PairingInviteData> {
+    match data {
+        Some(ResponseData::PairingInvite(invite)) => Ok(invite),
+        _ => Err(BackendError::wrong_shape("a pairing invitation")),
+    }
+}
+
+pub(super) fn expect_pairing_progress(data: Option<ResponseData>) -> Result<PairingProgressData> {
+    match data {
+        Some(ResponseData::PairingProgress(progress)) => Ok(progress),
+        _ => Err(BackendError::wrong_shape("pairing progress")),
     }
 }
 
