@@ -37,7 +37,7 @@ use crate::meta::Meta;
 use crate::AppState;
 
 use account::Account;
-pub(crate) use account::{ActivateError, KEY_LAST_SYNC, MSG_ACCOUNT_CHANGED};
+pub(crate) use account::{ActivateError, ActivateRequest, KEY_LAST_SYNC, MSG_ACCOUNT_CHANGED};
 #[cfg(test)]
 pub(crate) use account::{KEY_CURSOR_USER_ID, KEY_REFRESH, KEY_SYNC_KEY};
 pub use poll::run;
