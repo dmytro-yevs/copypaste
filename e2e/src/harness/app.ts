@@ -56,16 +56,14 @@ export async function startApp(options: StartOptions = {}): Promise<App> {
         NATIVE_DRIVER,
       ],
       {
-        // tauri-driver spawns the app as a child, so the app's view of
-        // XDG_DATA_HOME — and therefore which daemon socket it dials — is
-        // decided here and nowhere else.
+        // tauri-driver spawns the app as a child, so its data-directory and
+        // endpoint overrides must be inherited here with the daemon's.
         env: { ...process.env, ...daemon.env },
         stdio: ["ignore", "pipe", "pipe"],
         reject: false,
-        detached: true,
+        killDescendants: true,
       },
     ),
-    { group: true },
   );
 
   await waitForDriver(driverPort, driver);

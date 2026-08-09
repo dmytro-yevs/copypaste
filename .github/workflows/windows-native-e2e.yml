@@ -1,0 +1,93 @@
+name: Windows native desktop E2E
+
+on:
+  push:
+    branches: [main, v2-main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-native-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  COPYPASTE_WINDOWS_SHELL_E2E: 1
+  MSEDGEDRIVER_TELEMETRY_OPTOUT: 1
+  OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+  RUST_BACKTRACE: 1
+  RUSTUP_TOOLCHAIN: "1.96"
+
+jobs:
+  native-desktop:
+    name: WebView2, native bridge and Windows shell settings
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: windows-2022-1.96
+          key: native-e2e-profile
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            crates/copypaste-ui/package-lock.json
+            e2e/package-lock.json
+
+      - name: Confirm the hosted Edge driver matches Edge
+        shell: pwsh
+        run: |
+          $driver = Join-Path $env:EDGEWEBDRIVER "msedgedriver.exe"
+          if (-not (Test-Path -LiteralPath $driver -PathType Leaf)) {
+            throw "the hosted runner exposes no Edge WebDriver"
+          }
+          & $driver --version
+          if ($LASTEXITCODE -ne 0) { throw "Edge WebDriver did not start" }
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --version 2.0.6 --locked
+
+      - name: Build the native app and sidecars
+        run: cargo build -p copypaste-ui -p copypaste-daemon -p copypaste-cli --locked
+
+      - name: Install frontend dependencies
+        working-directory: crates/copypaste-ui
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        working-directory: crates/copypaste-ui
+        run: npm audit
+
+      - name: Install harness dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Audit harness dependencies
+        working-directory: e2e
+        run: npm audit
+
+      - name: Run Windows native desktop E2E
+        working-directory: e2e
+        run: npm run test:windows
+
+      - name: Upload native E2E logs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-native-e2e-logs
+          path: ${{ runner.temp }}/cp-e2e/**
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,10 +1,10 @@
-# e2e — the shared frontend in a Linux browser engine
+# e2e — the desktop app through native WebDriver
 
-This is the **browser layer** of [`docs/rewrite/testing-policy.md`](../docs/rewrite/testing-policy.md),
-run by `.github/workflows/browser-webkitgtk.yml`. It owns shared React
-behaviour — rendering, layout, navigation, forms and dialogs, empty and error
-states, keyboard navigation, focus, the accessibility tree, overflow — and it
-owns nothing native. The engine is WebKitGTK on Linux.
+The same WebdriverIO harness runs in two layers from
+[`docs/rewrite/testing-policy.md`](../docs/rewrite/testing-policy.md):
+`.github/workflows/browser-webkitgtk.yml` drives shared React behaviour in
+WebKitGTK on Linux, while `.github/workflows/windows-native-e2e.yml` drives the
+shipped Windows WebView2 and Tauri bridge.
 
 `npm test` builds nothing. It expects `copypaste-ui`, `copypaste-daemon` and
 `copypaste` in `target/debug` (or `target/release`), and drives the app through
@@ -17,16 +17,21 @@ cd crates/copypaste-ui && npm ci
 cd e2e && npm ci && npm test
 ```
 
+On Windows use `npm run test:windows`. The hosted workflow supplies
+`EDGEWEBDRIVER` and opts into the shell-setting tests, which temporarily change
+the disposable runner account's shortcut and launch-at-login registration.
+
 ## What each layer proves, and what it does not
 
 | Layer | Exercised | **Not** exercised |
 |---|---|---|
 | `crates/copypaste-ui` `npm test` (jsdom) | component logic, hooks, reducers | layout, scrolling, virtualisation, anything crossing the Tauri bridge — jsdom has no box model and every rect is 0×0 |
-| this suite | WebKit layout and paint, the virtualiser, keyboard and focus, the accessibility tree, the daemon's IPC socket and the real SQLite store behind it | macOS and Android. The engine here is WebKitGTK; macOS ships WKWebView and Android ships the system WebView. A Tauri command runs here through `wry` on Linux, which the policy does not accept as verification of that command as shipped. Tray, popover, global hotkey and launch-at-login are desktop-shell APIs this harness never touches |
+| this suite on Linux | WebKit layout and paint, the virtualiser, keyboard and focus, the accessibility tree, the Unix socket and real SQLite store | every shipping platform and every native desktop surface |
+| this suite on Windows | WebView2 layout, the shipped Tauri command bridge, named-pipe IPC, native clipboard capture, shortcut and autostart registration state | tray interaction, OS hotkey delivery, execution after sign-in, notifications, native file pickers |
 
-A green run means the shared frontend and the daemon agree on a Linux host. It
-is not evidence about either shipping platform; the layer that owns each native
-requirement, and the ones marked NOT VERIFIED IN CI, are in the policy.
+A green Linux run proves the shared frontend. A green Windows run additionally
+proves the shipped Windows WebView and bridge, but only for the native surfaces
+the suite actually observes. The policy keeps the remaining gaps explicit.
 
 ## What is driven
 
@@ -41,9 +46,10 @@ time and each gets a fresh daemon and a fresh database.
 | `sensitive` · `error-strings` | a flagged item's plaintext is absent from `outerHTML`, and no user-facing string carries a filesystem path (INV-10/12) |
 | `bulk-actions` | per-row actions are **absent** in selection mode rather than hidden, and a bulk delete reaches the database |
 | `devices` | the ADR-0015 boundary in a real engine: pairing-unavailable copy and Pair/Add/code/QR controls absent; a CLI-established peer is listed, syncs, exposes the revoke confirmation and unpairs |
-| `push` | a `copypaste://changed` event crosses the Linux bridge, the list updates inside the poll interval, and a dead daemon degrades to polling |
-| `service-lifecycle` | the offline screen offers to *start* the service, and pressing the button starts a Linux `target/debug` daemon — launchd and Homebrew belong to the macOS layer |
-| `settings` | every tab lays out, a preference reaches layout and survives a reload, and Settings still works with the service down |
+| `push` | a `copypaste://changed` event crosses the host's Tauri bridge, the list updates inside the poll interval, and a dead daemon degrades to polling |
+| `service-lifecycle` | the offline screen offers to *start* the service, and pressing the button starts the sibling `target/debug` daemon |
+| `settings` | every tab lays out, a daemon preference reaches the service, an app preference reaches layout and survives a reload, and Settings still works with the service down |
+| `windows-surfaces` | private mode blocks the native clipboard, cloud stays closed when unconfigured, transfer warnings, shortcut/autostart registration, diagnostics and runtime logs |
 | `export-import` | an export withholds and counts flagged items; an edited backup cannot import a credential marked clean — driven through the CLI, not through Settings (see below) |
 | `daemon-config` | `GetConfig`/`SetConfig` over the socket — **no WebView**, driven through the CLI (see below) |
 
@@ -73,16 +79,12 @@ field that did not survive.
   controls to remain absent until the protocol supplies a bound SAS ceremony.
   `devices` establishes a known-peer fixture through the CLI; that setup is not
   browser coverage for code mint/reveal, QR (INV-13), camera fallback or SAS.
-- **Configuration from the screen.** `commands/config.rs` routes
-  `GetConfig`/`SetConfig` and `ServiceTab` calls them, but `daemon-config`
-  asserts the contract through the CLI and `ServiceTab.test.tsx` mocks both
-  calls. The screen's path to the daemon is NOT VERIFIED IN CI; when it is
-  driven, those assertions belong in `settings`.
 - **Export, import, backup, restore from the screen.** Same shape:
   `commands/transfer.rs` ships all four and `StorageTab` surfaces them, while
-  `export-import` goes through `copypaste export`. NOT VERIFIED IN CI.
-- Tray, popover, global hotkey, launch-at-login — desktop-shell APIs no
-  WebDriver session touches.
+  `export-import` goes through `copypaste export`. The Windows file asserts the
+  safety confirmations, but WebDriver cannot control the native file pickers.
+- Tray and popover interaction, OS hotkey delivery and post-sign-in launch —
+  native lifecycle events no WebDriver session observes.
 - Everything the policy assigns to the macOS or Android layer. Nothing here
   substitutes for either. The Android WebView has its own driven harness in
   [`e2e-android/`](../e2e-android/README.md); WKWebView has none.
@@ -91,9 +93,11 @@ field that did not survive.
 
 - `/usr/bin/WebKitWebDriver`, from the `webkit2gtk-driver` package. Separate
   from the webkit runtime and absent by default.
+- On Windows, a matching `msedgedriver.exe`. GitHub's hosted Windows image
+  exposes its directory through `EDGEWEBDRIVER`.
 - `tauri-driver` — `cargo install tauri-driver --locked`.
-- An X display. `npm test` wraps vitest in `xvfb-run`; `npm run test:headed`
-  does not, for a real display.
+- An X display on Linux. `npm test` wraps vitest in `xvfb-run`; Windows runs
+  directly in the hosted interactive session.
 
 No GPU is needed and no software-rendering flags are set. `LIBGL_ALWAYS_SOFTWARE`,
 `WEBKIT_DISABLE_COMPOSITING_MODE` and `WEBKIT_DISABLE_DMABUF_RENDERER` were each
