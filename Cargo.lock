@@ -1144,6 +1144,7 @@ version = "2.0.0-alpha.4"
 dependencies = [
  "anyhow",
  "copypaste-fs",
+ "hex",
  "regex",
  "reqwest 0.12.28",
  "serde",
