@@ -11,6 +11,9 @@
  * binary this harness would have started itself. So this file asserts the offer
  * *works*, not merely that it is rendered.
  */
+import { existsSync, lstatSync, readdirSync } from "node:fs";
+import path from "node:path";
+
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
 import { startApp, type App } from "../src/harness/app.js";
@@ -33,8 +36,32 @@ const SHELL_WORDS = [
 ];
 
 let app: App;
+let realDataBefore: Record<string, string> = {};
+
+function realWindowsDataDir(): string {
+  const appData = process.env.APPDATA;
+  if (!appData) throw new Error("APPDATA is unavailable in the Windows E2E session");
+  // directories 5.0.1 appends this ProjectDirs suffix after asking
+  // SHGetKnownFolderPath for FOLDERID_RoamingAppData.
+  return path.join(appData, "copypaste", "CopyPaste", "data");
+}
+
+function snapshotTree(root: string): Record<string, string> {
+  if (!existsSync(root)) return {};
+  return Object.fromEntries(
+    (readdirSync(root, { recursive: true }) as string[])
+      .sort()
+      .map((entry) => {
+        const stat = lstatSync(path.join(root, entry));
+        return [entry, `${stat.isDirectory() ? "d" : "f"}:${stat.size}:${stat.mtimeMs}`];
+      }),
+  );
+}
 
 beforeAll(async () => {
+  if (process.platform === "win32") {
+    realDataBefore = snapshotTree(realWindowsDataDir());
+  }
   // No seed: the offline *screen* only replaces the list when there is nothing
   // else to show — a poll that fails with 200 rows on screen keeps the rows and
   // raises a banner instead, which is a different (and deliberate) behaviour.
@@ -100,5 +127,24 @@ describe("starting it from the screen", () => {
   test("the recovered window picks up new clippings", async () => {
     await app.daemon.add("arrived after the service came back");
     await waitForText(app.browser, "arrived after the service came back", 30_000);
+  });
+
+  test("the inherited data directory contains every service-owned file", async () => {
+    const entries = readdirSync(app.daemon.dataHome, { recursive: true }) as string[];
+    const basenames = entries.map((entry) => path.basename(entry));
+
+    expect(basenames).toContain("copypaste-v2.db");
+    expect(basenames).toContain(
+      process.platform === "win32" ? "device_secret.dpapi" : "device_secret.key",
+    );
+    expect(basenames.some((entry) => entry.startsWith("app.") && entry.endsWith(".log"))).toBe(
+      true,
+    );
+    expect(
+      basenames.some((entry) => entry.startsWith("daemon.") && entry.endsWith(".log")),
+    ).toBe(true);
+    if (process.platform === "win32") {
+      expect(snapshotTree(realWindowsDataDir())).toEqual(realDataBefore);
+    }
   });
 });

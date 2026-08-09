@@ -6,6 +6,9 @@
  * start the native-safe commands without any credential reaching the page, and
  * that a known device can sync, expose its revoke confirmation, and unpair.
  */
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -185,6 +188,8 @@ beforeAll(async () => {
     last_addr: confirmed.last_addr,
   });
   expect(paired.last_seen_ms).toBeGreaterThan(0);
+  expect(existsSync(path.join(app.daemon.dataHome, "peers.json"))).toBe(true);
+  expect(existsSync(path.join(other.dataHome, "peers.json"))).toBe(true);
 
   await gotoView(app.browser, "Devices");
   await waitForText(app.browser, paired.name);
@@ -253,12 +258,22 @@ describe("native-safe pairing", () => {
     }
   });
 
-  test("a browser without native presentation cancels safely", async () => {
+  test("native presentation stays outside the page and remains cancellable", async () => {
     await clickButton(app.browser, "Show pairing code");
-    await waitForText(app.browser, "Pairing cancelled");
+
+    if (process.platform === "win32") {
+      await waitForText(app.browser, "Waiting for the other device");
+      const cancel = await app.browser.$("button=Cancel pairing");
+      expect(await cancel.isDisplayed()).toBe(true);
+      await clickButton(app.browser, "Cancel pairing");
+    }
+
+    await waitForText(app.browser, "Pairing cancelled", 30_000);
 
     const surface = await accessibleSurface(app.browser);
-    expect(surface).toMatch(/protected pairing view didn't open/i);
+    if (process.platform !== "win32") {
+      expect(surface).toMatch(/protected pairing view didn't open/i);
+    }
     expectNoFilesystemPath(surface);
     expectNoRawError(surface);
   });

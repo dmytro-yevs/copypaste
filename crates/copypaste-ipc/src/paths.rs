@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 const SOCKET_ENV: &str = "COPYPASTE_SOCKET";
+const DATA_DIR_ENV: &str = "COPYPASTE_DATA_DIR";
 
 /// Where the daemon socket lives.
 ///
@@ -38,10 +39,20 @@ pub fn database_path() -> PathBuf {
     data_dir().join("copypaste-v2.db")
 }
 
+/// Where persistent state lives.
+///
+/// `COPYPASTE_DATA_DIR` relocates the complete storage identity for an
+/// inherited process tree. It is independent of `COPYPASTE_SOCKET`: a pipe is
+/// an endpoint, not the identity of the database, key, peer store, or logs.
 pub fn data_dir() -> PathBuf {
-    directories::ProjectDirs::from("com", "copypaste", "CopyPaste")
-        .map(|d| d.data_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from(".copypaste"))
+    std::env::var_os(DATA_DIR_ENV).map_or_else(
+        || {
+            directories::ProjectDirs::from("com", "copypaste", "CopyPaste")
+                .map(|d| d.data_dir().to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".copypaste"))
+        },
+        PathBuf::from,
+    )
 }
 
 #[cfg(test)]
@@ -56,6 +67,8 @@ mod tests {
 
     const CHILD_CASE: &str = "COPYPASTE_PATH_TEST_CASE";
     const TEST_NAME: &str = "paths::tests::socket_environment_precedence_is_process_isolated";
+    const DATA_CHILD_CASE: &str = "COPYPASTE_DATA_PATH_TEST_CASE";
+    const DATA_TEST_NAME: &str = "paths::tests::data_directory_environment_is_process_isolated";
 
     fn run_case(case: &str, socket: Option<&OsStr>) {
         let mut child = Command::new(std::env::current_exe().expect("current test binary"));
@@ -106,6 +119,53 @@ mod tests {
         {
             let non_utf8 = OsString::from_vec(b"/tmp/copypaste-\xff.sock".to_vec());
             run_case("non-utf8", Some(&non_utf8));
+        }
+    }
+
+    #[test]
+    fn data_directory_environment_is_process_isolated() {
+        if let Some(case) = std::env::var_os(DATA_CHILD_CASE) {
+            match case.to_str().expect("ASCII test case") {
+                "override" => {
+                    let explicit = Path::new("/explicit/copypaste-data");
+                    assert_eq!(data_dir(), explicit);
+                    assert_eq!(database_path(), explicit.join("copypaste-v2.db"));
+                }
+                #[cfg(windows)]
+                "appdata-only" => {
+                    let fake = PathBuf::from(std::env::var_os("APPDATA").expect("APPDATA"));
+                    assert!(
+                        !data_dir().starts_with(&fake),
+                        "directories 5 resolves FOLDERID_RoamingAppData, not APPDATA"
+                    );
+                }
+                other => panic!("unknown child case: {other}"),
+            }
+            return;
+        }
+
+        let mut override_child =
+            Command::new(std::env::current_exe().expect("current test binary"));
+        override_child
+            .args(["--exact", DATA_TEST_NAME])
+            .env(DATA_CHILD_CASE, "override")
+            .env(DATA_DIR_ENV, "/explicit/copypaste-data");
+        assert!(override_child
+            .status()
+            .expect("run data path test")
+            .success());
+
+        #[cfg(windows)]
+        {
+            let fake_appdata = tempfile::tempdir().expect("temporary APPDATA");
+            let mut appdata_child =
+                Command::new(std::env::current_exe().expect("current test binary"));
+            appdata_child
+                .args(["--exact", DATA_TEST_NAME])
+                .env(DATA_CHILD_CASE, "appdata-only")
+                .env_remove(DATA_DIR_ENV)
+                .env("APPDATA", fake_appdata.path());
+            assert!(appdata_child.status().expect("run APPDATA test").success());
         }
     }
 }

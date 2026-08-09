@@ -108,9 +108,10 @@ layout under plain Xvfb. The `libEGL … DRI3` lines on stderr are cosmetic.
 - **One session at a time.** WebKitWebDriver answers a second concurrent
   `POST /session` with "Maximum number of active sessions", so
   `fileParallelism` is off.
-- **Run directories live under `/tmp/cp-e2e`.** The daemon's socket path comes
-  from `XDG_DATA_HOME`, and a socket path over ~108 bytes fails to bind with
-  "path must be shorter than SUN_LEN". Deeper scratch directories break it.
+- **Run directories live under `/tmp/cp-e2e`.** The harness keeps both
+  `COPYPASTE_DATA_DIR` and `COPYPASTE_SOCKET` under this root, and a socket path
+  over ~108 bytes fails to bind with "path must be shorter than SUN_LEN".
+  Deeper scratch directories break it.
 - **A debug build loads `devUrl`.** Global setup runs the Vite dev server on
   1420 and waits for `/src/main.tsx` to be served, not merely for the port to
   answer: the root URL responds before dependency pre-bundling finishes, and a
