@@ -24,7 +24,7 @@ it runs before Gradle, gated on `TAURI_ANDROID_PROJECT_PATH`:
 | `tauri.settings.gradle` | `tauri-build` | absolute paths into the cargo registry |
 | `app/tauri.build.gradle.kts` | `tauri-build` | the plugin list, from `DEP_*_ANDROID_LIBRARY_PATH` |
 | `app/proguard-tauri.pro` | `tauri` | derived from the identifier |
-| `app/tauri.properties` | the CLI | versionName/versionCode per build |
+| `app/tauri.properties` | the CLI | inputs retained for Tauri's generated build logic |
 | `app/src/main/assets/tauri.conf.json` | the CLI | the merged config for this target |
 | `app/src/main/**/generated/*.kt` | `tauri` | codegen |
 
@@ -33,7 +33,7 @@ So CI runs `tauri android build` and nothing else. There is no init step.
 | File | What was added |
 |---|---|
 | `app/src/main/AndroidManifest.xml` | `IntakeActivity`, `CaptureTileService`, `CaptureService`, Shizuku's provider, and the permissions the capture ladder needs |
-| `app/build.gradle.kts` | the Shizuku client library, and `aidl = true` |
+| `app/build.gradle.kts` | the Shizuku client library and `aidl = true`; Tauri rewrites the debug suffix from platform config |
 | `app/src/main/res/values*/themes.xml` | `Theme.CopyPaste.Invisible` |
 | `app/src/main/res/values/strings.xml` | `capture_action` |
 | `app/src/main/java/com/copypaste/app/MainActivity.kt` | `onNewIntent`, so the loss notification's extra is not read off a stale intent |
@@ -44,7 +44,15 @@ Everything else under `app/src/main/java/com/copypaste/app/` and the one
 The Kotlin holds no policy — see
 [ADR-0005](../../../../docs/adr/0005-android-capture-in-rust-kotlin-reports.md).
 The release build is run through `npm run tauri -- android build --apk`; it
-uses this tracked project directly and does not regenerate it. The Android
-emulator smoke job does not exercise rung 2: a stock emulator cannot perform
+uses this tracked project directly. Tauri rewrites generated derivatives such
+as Gradle's debug suffix, so the tracked value must match platform config. The Android
+application ids and version fields come through the tracked
+`src-tauri/tauri.android.conf.json`, updated by
+`scripts/release/android-metadata.mjs`. `Cargo.toml` is the only editable source:
+`[workspace.package].version` plus `[workspace.metadata.copypaste]`.
+After changing either, run `node scripts/release/android-metadata.mjs --sync`;
+CI runs its check mode and rejects stale package or Tauri derivatives. Debug
+adds the configured application-id suffix without changing the Kotlin namespace.
+The Android emulator smoke job does not exercise rung 2: a stock emulator cannot perform
 Shizuku's required wireless-debugging pairing. The device checklist in
 `docs/rewrite/android-spike.md` remains the required verification for that path.

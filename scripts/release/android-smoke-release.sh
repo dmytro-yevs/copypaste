@@ -23,8 +23,8 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-smoke-lib.sh"
 
 APK="${APK:-}"
-MAIN="$PKG/.MainActivity"
-INTAKE="$PKG/.IntakeActivity"
+MAIN="$PKG/$APP_NAMESPACE.MainActivity"
+INTAKE="$PKG/$APP_NAMESPACE.IntakeActivity"
 SETTLE_SECS="${SETTLE_SECS:-25}"
 PAINT_TIMEOUT="${PAINT_TIMEOUT:-90}"
 

@@ -69,7 +69,7 @@ test("no raw transport wording is rendered anywhere", async () => {
 test("the path detector fails when it should", () => {
   for (const leak of [
     `/data/data/${PACKAGE}/databases/copypaste-v2.db`,
-    "/data/user/0/com.copypaste.app/files",
+    `/data/user/0/${PACKAGE}/files`,
     "could not connect to /tmp/copypaste/daemon.sock",
     "C:\\Users\\someone\\AppData",
   ]) {

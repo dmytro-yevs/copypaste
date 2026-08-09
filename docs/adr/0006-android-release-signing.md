@@ -24,6 +24,10 @@ between builds breaks the upgrade path — but with a harsher failure and no
 install-time escape, because there is nothing on the device that can sign for
 us.
 
+v0.4 used `com.copypaste.android`; v2 uses `com.copypaste.app`. Android treats
+them as separate applications, so v2 neither upgrades v0.4 nor imports its
+history or pairings. The two versions may remain installed together.
+
 ## Decision
 
 **The APK is signed by the release workflow, from a durable keystore supplied
@@ -42,16 +46,20 @@ keystore made for v1 still works:
 | `ANDROID_KEY_PASSWORD` | key password |
 
 The public SHA-256 certificate fingerprint lives in
-`packaging/android/release-cert.sha256`. The release workflow compares the
-signed APK's `apksigner` value to that file before it uploads the artifact, so
-a changed or accidentally replaced secret cannot create a non-upgradable
-release. The checked-in value is deliberately `UNCONFIGURED` until the durable
-keystore exists; that sentinel blocks publication.
+`Cargo.toml` under `[workspace.metadata.copypaste]`, beside the public Android
+application IDs. The release workflow compares the signed APK's `apksigner`
+value to that metadata before it uploads the artifact, so a changed or
+accidentally replaced secret cannot create a non-upgradable release.
 
-**None of the secrets is set today.** The maintainer must configure all four
-and replace the sentinel before tagging. A key change requires updating this
-public pin in the same reviewed change; it is an upgrade-breaking event, not a
-routine secret rotation.
+All four secrets must be configured before tagging. A key change requires
+updating the public pin in the same reviewed change; it is an upgrade-breaking
+event, not a routine secret rotation.
+
+The one-time exception is v2 alpha.1, or a local/debug APK that used
+`com.copypaste.app` with an incompatible key. Android requires that package to
+be uninstalled before the durable-key release can be installed, which erases
+that install's history, pairings and settings. Future debug builds use
+`com.copypaste.app.debug`, leaving the release identity and data separate.
 
 ## Why not the alternatives
 
@@ -112,8 +120,9 @@ keytool -genkeypair -v \
 base64 -w0 copypaste-release.jks    # the value for ANDROID_KEYSTORE_BASE64
 ```
 
-Record its public certificate fingerprint, without colons or whitespace, in
-`packaging/android/release-cert.sha256` before setting the secrets:
+Record its public certificate fingerprint, without colons or whitespace, as
+`android-release-certificate-sha256` under
+`[workspace.metadata.copypaste]` before setting the secrets:
 
 ```sh
 keytool -list -v -keystore copypaste-release.jks -alias copypaste \

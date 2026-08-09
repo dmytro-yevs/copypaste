@@ -470,10 +470,29 @@ release_smoke = release_jobs.get("android-smoke") or {}
 release_runner_scripts = [str((step.get("with") or {}).get("script", ""))
                           for step in steps(release_smoke)
                           if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")]
-rec(len(release_runner_scripts) == 1 and "android-storage-transfer.sh" in release_runner_scripts[0],
+release_script = release_runner_scripts[0] if len(release_runner_scripts) == 1 else ""
+if "android-release-emulator-legs.sh" in release_script:
+    release_script += "\n" + pathlib.Path("scripts/release/android-release-emulator-legs.sh").read_text()
+release_env = next((step.get("env") or {} for step in steps(release_smoke)
+                    if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")), {})
+release_android = release_jobs.get("android") or {}
+release_android_uploads = [str((step.get("with") or {}).get("name", ""))
+                           for step in steps(release_android)
+                           if (step.get("uses") or "").startswith("actions/upload-artifact")]
+release_smoke_downloads = [str((step.get("with") or {}).get("name", ""))
+                           for step in steps(release_smoke)
+                           if (step.get("uses") or "").startswith("actions/download-artifact")]
+release_android_body = "\n".join(step.get("run") or "" for step in steps(release_android))
+rec("android-upgrade-fixture" in release_android_uploads
+    and "android-upgrade-fixture" in release_smoke_downloads
+    and release_env.get("PREVIOUS_APK") == "upgrade-dist/copypaste-previous-release.apk"
+    and "--write-overlay" in release_android_body,
+    "release.yml tests a separately signed previous-version APK",
+    "the publish workflow must build, sign, upload, download and install its own upgrade fixture")
+rec("android-storage-transfer.sh" in release_script,
     "release.yml runs storage transfer against the signed Android artifact",
     "the release evidence must come from the APK that publish consumes")
-rec(len(release_runner_scripts) == 1 and "android-cloud-evidence.sh --all" in release_runner_scripts[0],
+rec("android-cloud-evidence.sh" in release_script and release_env.get("CLOUD_MODE") == "all",
     "release.yml captures configured and unconfigured Android cloud evidence",
     "the signed release APK and configured evidence APK must run in the release emulator gate")
 release_uploads = [str((step.get("with") or {}).get("name", ""))
@@ -492,10 +511,14 @@ if emu:
     configured_scripts = "\n".join(str((step.get("with") or {}).get("script", ""))
                                    for step in steps((emu.get("jobs") or {}).get("release-emulator") or {})
                                    if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner"))
+    if "android-release-emulator-legs.sh" in configured_scripts:
+        configured_scripts += "\n" + pathlib.Path("scripts/release/android-release-emulator-legs.sh").read_text()
+    configured_env = next((step.get("env") or {} for step in steps((emu.get("jobs") or {}).get("release-emulator") or {})
+                           if (step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")), {})
     rec("android-cloud-evidence.sh" in debug_scripts and "--unconfigured" in debug_scripts,
         "android-emulator.yml captures the unconfigured cloud state",
         "the debug emulator leg must retain the build-without-deployment state")
-    rec("android-cloud-evidence.sh --configured" in configured_scripts,
+    rec("android-cloud-evidence.sh" in configured_scripts and configured_env.get("CLOUD_MODE") == "configured",
         "android-emulator.yml captures the configured cloud lifecycle",
         "the minified emulator fixture must exercise sign-in, sync, offline, and sign-out")
 

@@ -21,8 +21,8 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/android-rungs-lib.sh"
 
 APK="${APK:-}"
-MAIN="$PKG/.MainActivity"
-TILE="$PKG/.CaptureTileService"
+MAIN="$PKG/$APP_NAMESPACE.MainActivity"
+TILE="$PKG/$APP_NAMESPACE.CaptureTileService"
 CAPTURE_WAIT_SECS="${CAPTURE_WAIT_SECS:-40}"
 SETTLE_SECS="${SETTLE_SECS:-45}"
 
@@ -276,7 +276,7 @@ sleep 6
 sh_ cmd statusbar collapse >/dev/null 2>&1
 dump_logcat tile
 
-if grep -aq "cmp=$PKG/.ClipboardCaptureActivity" "$OUT/tile.log"; then
+if grep -aq "cmp=$PKG/$APP_NAMESPACE.ClipboardCaptureActivity" "$OUT/tile.log"; then
     ok "one tile tap started the activity whose focus makes the read legal"
 else
     bad "one tile tap started the activity whose focus makes the read legal" \
@@ -339,7 +339,7 @@ fi
 
 # The tile's activity reads the clipboard the moment it has focus. If another
 # app could start it, that app would have a clipboard reader it does not own.
-reader_start="$(sh_ am start -n "$PKG/.ClipboardCaptureActivity")"
+reader_start="$(sh_ am start -n "$PKG/$APP_NAMESPACE.ClipboardCaptureActivity")"
 if grep -q 'not exported' <<<"$reader_start"; then
     ok "no other app can start the tile's clipboard reader"
 else
@@ -353,7 +353,7 @@ group "3. The background capture service"
 # over a listener that is not there. CopyPaste-qzhu is the v1 bug of the same
 # shape — reporting working because a permission was present.
 
-start_out="$(sh_ am start-foreground-service -n "$PKG/.CaptureService")"
+start_out="$(sh_ am start-foreground-service -n "$PKG/$APP_NAMESPACE.CaptureService")"
 if grep -q 'not exported' <<<"$start_out"; then
     ok "no other app can start the capture service"
 else
@@ -453,9 +453,9 @@ seen=0
 unprotected=0
 for i in $(seq 1 20); do
     sh_ dumpsys window windows > "$OUT/windows-$i.txt" 2>/dev/null
-    if [[ -n "$(window_flags "$OUT/windows-$i.txt" "$PKG/$PKG.MainActivity")" ]]; then
+    if [[ -n "$(window_flags "$OUT/windows-$i.txt" "$PKG/$APP_NAMESPACE.MainActivity")" ]]; then
         seen=$((seen + 1))
-        window_is_secure "$OUT/windows-$i.txt" "$PKG/$PKG.MainActivity" || unprotected=$((unprotected + 1))
+        window_is_secure "$OUT/windows-$i.txt" "$PKG/$APP_NAMESPACE.MainActivity" || unprotected=$((unprotected + 1))
         cp "$OUT/windows-$i.txt" "$OUT/windows-last.txt"
     fi
     sleep 3
@@ -465,7 +465,7 @@ if (( seen == 0 )); then
     bad "the main window exists to be checked" "20 dumps over a minute held no window named $PKG"
 elif (( unprotected == 0 )); then
     ok "every dump of the main window carried FLAG_SECURE ($seen dumps)"
-    printf '        fl=%s\n' "$(window_flags "$OUT/windows-last.txt" "$PKG/$PKG.MainActivity")"
+    printf '        fl=%s\n' "$(window_flags "$OUT/windows-last.txt" "$PKG/$APP_NAMESPACE.MainActivity")"
 else
     bad "every dump of the main window carried FLAG_SECURE" \
         "$unprotected of $seen dumps had the window without SECURE — the history is capturable in that window"

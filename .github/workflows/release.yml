@@ -102,6 +102,15 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: crates/copypaste-ui/package-lock.json
+
+      - name: Install release metadata dependencies
+        run: npm ci --prefix crates/copypaste-ui --ignore-scripts
+
       - id: resolve
         # The dispatch inputs arrive as environment variables rather than
         # through `${{ }}`. Interpolation splices the value into the script
@@ -122,15 +131,10 @@ jobs:
           fi
           version="${version#v}"
 
-          # The workspace manifest is the single source of the version.
-          # tauri.conf.json points its "version" at crates/copypaste-ui/package.json,
-          # which check.sh holds equal to [workspace.package] — the Android
-          # bundler reads only tauri.conf.json and stamps versionName "1.0" when
-          # that key is absent, so "let Tauri read Cargo.toml" is true of the
-          # macOS bundler and false of the APK. Nothing in this pipeline
-          # rewrites either, and failing here is much cheaper than publishing a
-          # DMG whose Info.plist disagrees with its own filename.
-          ws="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml)"
+          # Cargo workspace metadata is authoritative. The resolver also holds
+          # package.json and Tauri's version indirection equal to it before it
+          # emits the Android versionName and monotonic versionCode.
+          ws="$(node scripts/release/android-metadata.mjs --field versionName)"
           if [[ "$ws" != "$version" ]]; then
             echo "::error::version mismatch — requested '$version', Cargo.toml [workspace.package] says '$ws'"
             exit 1
@@ -478,9 +482,20 @@ jobs:
             exit 1
           }
 
+          previous="$(node ../../scripts/release/android-metadata.mjs --previous-fixture)"
+          previous_config="${RUNNER_TEMP}/copypaste-previous-tauri.json"
+          COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 \
+            node ../../scripts/release/android-metadata.mjs \
+              --version "$previous" --write-overlay "$previous_config"
+          npm run tauri -- android build --apk --config "$previous_config"
+          outputs="src-tauri/gen/android/app/build/outputs/apk"
+          previous_apk="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
+          [[ -n "$previous_apk" ]] || { echo "::error::the previous-version universal APK was not produced"; exit 1; }
+          cp "$previous_apk" "${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
+          find "$outputs" -type f -name '*.apk' -delete
+
           npm run tauri -- android build --apk
 
-          outputs="src-tauri/gen/android/app/build/outputs/apk"
           published="$(find "$outputs" -name '*universal*release*.apk' -print -quit)"
           [[ -n "$published" ]] || { echo "::error::the universal release APK was not produced"; exit 1; }
           cp "$published" "${RUNNER_TEMP}/copypaste-release-unsigned.apk"
@@ -500,17 +515,17 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          EXPECTED_CERT_FILE: packaging/android/release-cert.sha256
         run: |
           set -euo pipefail
           unsigned="${RUNNER_TEMP}/copypaste-release-unsigned.apk"
+          previous_unsigned="${RUNNER_TEMP}/copypaste-previous-unsigned.apk"
           cloud_unsigned="${RUNNER_TEMP}/copypaste-cloud-evidence-unsigned.apk"
-          [[ -f "$unsigned" && -f "$cloud_unsigned" ]] \
+          [[ -f "$unsigned" && -f "$previous_unsigned" && -f "$cloud_unsigned" ]] \
             || { echo "::error::the staged release APKs are missing"; exit 1; }
           echo "Built: $unsigned"
 
           tools="${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}"
-          mkdir -p dist evidence-dist
+          mkdir -p dist evidence-dist upgrade-dist
 
           # Report what the APK claims about itself before signing it. The macOS
           # job makes the same check on CFBundleShortVersionString: a version
@@ -545,13 +560,9 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
           echo "Signing with the release keystore from repository secrets."
 
-          [[ -f "$EXPECTED_CERT_FILE" ]] || {
-            echo "::error::$EXPECTED_CERT_FILE is missing; release signer continuity cannot be checked"
-            exit 1
-          }
-          expected_cert="$(tr -d '[:space:]:' < "$EXPECTED_CERT_FILE" | tr '[:upper:]' '[:lower:]')"
+          expected_cert="$(node scripts/release/android-metadata.mjs --field releaseCertificateSha256)"
           if [[ ! "$expected_cert" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error::$EXPECTED_CERT_FILE must contain one SHA-256 certificate fingerprint before a release can be published"
+            echo "::error::Cargo.toml must contain one Android release certificate SHA-256 fingerprint"
             exit 1
           fi
 
@@ -564,6 +575,15 @@ jobs:
             --key-pass "pass:${KEY_PASSWORD}" \
             --out "$out" \
             "${out}.aligned"
+          previous_out="upgrade-dist/copypaste-previous-release.apk"
+          "${tools}/zipalign" -p -f 4 "$previous_unsigned" "${previous_out}.aligned"
+          "${tools}/apksigner" sign \
+            --ks "$keystore" \
+            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --key-pass "pass:${KEY_PASSWORD}" \
+            --out "$previous_out" \
+            "${previous_out}.aligned"
           cloud_out="evidence-dist/copypaste-cloud-evidence-x86_64-release.apk"
           "${tools}/zipalign" -p -f 4 "$cloud_unsigned" "${cloud_out}.aligned"
           "${tools}/apksigner" sign \
@@ -573,7 +593,8 @@ jobs:
             --key-pass "pass:${KEY_PASSWORD}" \
             --out "$cloud_out" \
             "${cloud_out}.aligned"
-          rm -f "${out}.aligned" "${cloud_out}.aligned" "$keystore"
+          rm -f "${out}.aligned" "${previous_out}.aligned" "${cloud_out}.aligned" "$keystore"
+          "${tools}/apksigner" verify "$previous_out"
           "${tools}/apksigner" verify "$cloud_out"
 
           signer_report="$("${tools}/apksigner" verify --verbose --print-certs "$out")"
@@ -591,9 +612,18 @@ jobs:
             exit 1
           fi
           if [[ "$actual_cert" != "$expected_cert" ]]; then
-            echo "::error::APK signer fingerprint does not match packaging/android/release-cert.sha256"
+            echo "::error::APK signer fingerprint does not match Cargo.toml release metadata"
             exit 1
           fi
+          bash scripts/release/android-artifact-check.sh \
+            --apk "$out" --build-type release \
+            --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner" \
+            --expected-cert "$expected_cert"
+          previous="$(node scripts/release/android-metadata.mjs --previous-fixture)"
+          COPYPASTE_ANDROID_UPGRADE_FIXTURE=1 bash scripts/release/android-artifact-check.sh \
+            --apk "$previous_out" --build-type release --version "$previous" \
+            --aapt2 "${tools}/aapt2" --apksigner "${tools}/apksigner" \
+            --expected-cert "$expected_cert"
           ( cd dist && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
           cat "${out}.sha256"
 
@@ -632,6 +662,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-upgrade-fixture
+          path: upgrade-dist/copypaste-previous-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
   # Test the signed universal artifact, not a separately assembled emulator
   # APK. This job downloads exactly what `publish` will later download, checks
   # its sidecar digest, and installs/runs it through the release smoke harness.
@@ -655,6 +692,11 @@ jobs:
         with:
           name: android-cloud-evidence-apk
           path: evidence-dist
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: android-upgrade-fixture
+          path: upgrade-dist
 
       - name: Verify the release artifact identity
         env:
@@ -690,19 +732,15 @@ jobs:
           ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: |
-            set -uo pipefail
-            ./scripts/release/android-smoke-release.sh; smoke=$?
-            SMOKE_OUT=artifacts/release-android-storage \
-              ./scripts/release/android-storage-transfer.sh; storage=$?
-            APK_UNCONFIGURED="$APK" \
-            CLOUD_EVIDENCE_APK=evidence-dist/copypaste-cloud-evidence-x86_64-release.apk \
-            CLOUD_OUT=artifacts/release-android-cloud \
-              ./scripts/release/android-cloud-evidence.sh --all; cloud=$?
-            [ $smoke -eq 0 ] && [ $storage -eq 0 ] && [ $cloud -eq 0 ]
+          script: bash ./scripts/release/android-release-emulator-legs.sh
         env:
           APK: dist/CopyPaste-v${{ needs.version.outputs.version }}-android.apk
+          PREVIOUS_APK: upgrade-dist/copypaste-previous-release.apk
           SMOKE_OUT: artifacts/release-android-smoke
+          STORAGE_OUT: artifacts/release-android-storage
+          CLOUD_MODE: all
+          CLOUD_EVIDENCE_APK: evidence-dist/copypaste-cloud-evidence-x86_64-release.apk
+          CLOUD_OUT: artifacts/release-android-cloud
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()

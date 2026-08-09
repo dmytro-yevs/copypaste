@@ -70,7 +70,7 @@
       "accessibility_states": ["unconfigured", "signed_out", "connected", "sync_result", "offline_error", "screen_reader"],
       "failure_states": ["restart", "offline", "authentication_rejected"],
       "performance": {
-        "android": {"status": "credited", "scenario": "offline-error", "p95_ms": 60000, "evidence": {"kind": "scenario", "path": "scripts/release/android-cloud-evidence.sh", "executed_by": [".github/workflows/release.yml"]}},
+        "android": {"status": "credited", "scenario": "offline-error", "p95_ms": 60000, "evidence": {"kind": "scenario", "path": "scripts/release/android-cloud-evidence.sh", "executed_by": ["scripts/release/android-release-emulator-legs.sh", ".github/workflows/release.yml"]}},
         "macos": {"status": "credited", "scenario": "offline-error", "p95_ms": 60000, "evidence": {"kind": "scenario", "path": "scripts/release/macos-cloud-evidence.sh", "executed_by": ["scripts/release/smoke-macos-dmg.sh", ".github/workflows/release.yml"]}}
       },
       "native": {

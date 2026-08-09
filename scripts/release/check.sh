@@ -208,10 +208,8 @@ reject "setup-tap.sh needs a user"   ./scripts/release/setup-tap.sh --dry-run
 reject "setup-tap.sh rejects a bad tap name" ./scripts/release/setup-tap.sh --github-user dmytro-yevs --tap-name "Bad Name" --dry-run
 
 group "One version, three files"
-# The macOS bundler falls back to the Cargo package version when tauri.conf.json
-# has no "version"; the Android one does not — it writes no tauri.properties at
-# all and the APK ships versionName "1.0". So tauri.conf.json points its
-# "version" at crates/copypaste-ui/package.json, and the three have to agree.
+# Cargo metadata is authoritative. Tauri still resolves package.json for its
+# other bundlers, so the Android resolver fails unless all three paths agree.
 WS_V="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml)"
 PKG_V="$(python3 -c 'import json;print(json.load(open("crates/copypaste-ui/package.json"))["version"])' 2>/dev/null || true)"
 CONF_V="$(python3 -c 'import json;print(json.load(open("crates/copypaste-ui/src-tauri/tauri.conf.json")).get("version",""))' 2>/dev/null || true)"
@@ -219,13 +217,46 @@ if [[ -n "$WS_V" && "$WS_V" == "$PKG_V" ]]; then
     ok "Cargo.toml [workspace.package] and package.json agree on $WS_V"
 else
     bad "Cargo.toml [workspace.package] and package.json agree" \
-        "workspace=$WS_V package.json=$PKG_V — the APK's versionName comes from package.json"
+        "workspace=$WS_V package.json=$PKG_V — Android metadata rejects a mismatch"
+fi
+
+check "Android release metadata preserves prerelease ordering" \
+    node --test scripts/release/android-metadata.test.mjs
+check "Cargo product metadata derivatives are current" \
+    node scripts/release/android-metadata.mjs --check
+check "Android artifact identity checks fail closed" \
+    bash scripts/release/android-artifact-check.sh --self-test
+if grep -Fq '"debugApplicationIdSuffix":' crates/copypaste-ui/src-tauri/tauri.android.conf.json \
+        && grep -Fq '"versionCode":' crates/copypaste-ui/src-tauri/tauri.android.conf.json \
+        && grep -Fq 'val tauriProperties = Properties().apply' crates/copypaste-ui/src-tauri/gen/android/app/build.gradle.kts \
+        && grep -Fq 'applicationIdSuffix = ".debug"' crates/copypaste-ui/src-tauri/gen/android/app/build.gradle.kts \
+        && ! grep -q 'androidMetadata' crates/copypaste-ui/src-tauri/gen/android/app/build.gradle.kts; then
+    ok "Tauri Android config resolves identity and version from release metadata"
+else
+    bad "Tauri Android config resolves identity and version from release metadata"
+fi
+if grep -q 'android-artifact-check.sh' .github/workflows/android-emulator.yml \
+        && grep -q 'android-install-upgrade.sh' scripts/release/android-release-emulator-legs.sh \
+        && grep -q -- '--write-overlay "$previous_config"' .github/workflows/android-emulator.yml \
+        && grep -q -- '--config "$previous_config"' .github/workflows/android-emulator.yml \
+        && grep -q 'name: android-upgrade-fixture' .github/workflows/release.yml \
+        && grep -q 'PREVIOUS_APK: upgrade-dist/copypaste-previous-release.apk' .github/workflows/release.yml \
+        && grep -q -- '--expected-cert "$expected_cert"' .github/workflows/release.yml; then
+    ok "CI checks assembled Android identity, signer, and upgrade"
+else
+    bad "CI checks assembled Android identity, signer, and upgrade"
+fi
+if grep -q 'script: bash ./scripts/release/android-release-emulator-legs.sh' .github/workflows/release.yml \
+        && grep -q 'script: bash ./scripts/release/android-release-emulator-legs.sh' .github/workflows/android-emulator.yml; then
+    ok "reactivecircus release legs enter through bash"
+else
+    bad "reactivecircus release legs enter through bash"
 fi
 if [[ "$CONF_V" == "../package.json" ]]; then
     ok "tauri.conf.json resolves its version from ../package.json"
 else
     bad "tauri.conf.json resolves its version from ../package.json" \
-        "version=${CONF_V:-<unset>} — unset makes the APK claim versionName 1.0, and the release job then fails on it"
+        "version=${CONF_V:-<unset>} — Android metadata rejects a different release path"
 fi
 
 MACOS_MIN="$(python3 -c 'import json;print(json.load(open("crates/copypaste-ui/src-tauri/tauri.macos.conf.json"))["bundle"]["macOS"]["minimumSystemVersion"])' 2>/dev/null || true)"
@@ -354,7 +385,10 @@ assert download_names.count("android") == 1, \
 assert "android-cloud-evidence-apk" in download_names, \
     "android-smoke does not download the configured cloud evidence APK"
 runner = [s for s in smoke["steps"] if "android-emulator-runner" in str(s.get("uses", ""))]
-assert len(runner) == 1 and "android-smoke-release.sh" in str(runner[0].get("with", {}).get("script", "")), \
+script = str(runner[0].get("with", {}).get("script", "")) if len(runner) == 1 else ""
+if "android-release-emulator-legs.sh" in script:
+    script += open("scripts/release/android-release-emulator-legs.sh").read()
+assert "android-smoke-release.sh" in script, \
     "android-smoke does not run the release smoke harness"
 PY
 for pattern in 'dist/\*\.dmg' 'dist/\*\.apk' 'dist/\*\.tar\.gz'; do
@@ -411,28 +445,18 @@ else
         "expected OWASP Dependency-Check with NVD secret and report wiring"
 fi
 
-CERT_FILE="packaging/android/release-cert.sha256"
 CERT_ERROR=""
-if [[ ! -f "$CERT_FILE" ]]; then
-    CERT_ERROR="$CERT_FILE is missing"
-else
-    EXPECTED_CERT="$(tr -d '[:space:]:' < "$CERT_FILE" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$EXPECTED_CERT" == "unconfigured" ]]; then
-        CERT_ERROR="$CERT_FILE is still UNCONFIGURED; the release owner must verify and record the durable keystore fingerprint"
-    elif [[ ${#EXPECTED_CERT} -ne 64 ]]; then
-        CERT_ERROR="$CERT_FILE must contain one SHA-256 fingerprint; found ${#EXPECTED_CERT} characters after removing whitespace and colons"
-    elif [[ ! "$EXPECTED_CERT" =~ ^[0-9a-f]{64}$ ]]; then
-        CERT_ERROR="$CERT_FILE must contain only hexadecimal characters"
-    fi
-fi
+EXPECTED_CERT="$(node scripts/release/android-metadata.mjs --field releaseCertificateSha256 2>/dev/null || true)"
+[[ "$EXPECTED_CERT" =~ ^[0-9a-f]{64}$ ]] \
+    || CERT_ERROR="Cargo.toml must contain one lowercase Android release certificate SHA-256 fingerprint"
 
 if [[ -z "$CERT_ERROR" ]] \
-   && grep -q 'EXPECTED_CERT_FILE: packaging/android/release-cert.sha256' .github/workflows/release.yml \
-   && grep -q 'APK signer fingerprint does not match' .github/workflows/release.yml; then
+   && grep -q 'releaseCertificateSha256' .github/workflows/release.yml \
+   && grep -q 'APK signer fingerprint does not match Cargo.toml' .github/workflows/release.yml; then
     ok "release.yml pins the Android signing certificate before artifact upload"
 else
     bad "release.yml pins the Android signing certificate before artifact upload" \
-        "${CERT_ERROR:-expected the certificate file and apksigner comparison to remain wired}"
+        "${CERT_ERROR:-expected Cargo metadata and the apksigner comparison to remain wired}"
 fi
 
 if grep -q 'cargo install tauri-driver --version 2.0.6 --locked' .github/workflows/browser-webkitgtk.yml; then
@@ -557,8 +581,8 @@ fi
 NDKDIR="$(mktemp -d)"
 NDKBIN="$NDKDIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
 mkdir -p "$NDKBIN"
-: > "$NDKBIN/llvm-ar"
-: > "$NDKBIN/llvm-ranlib"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$NDKBIN/llvm-ar"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$NDKBIN/llvm-ranlib"
 chmod +x "$NDKBIN/llvm-ar" "$NDKBIN/llvm-ranlib"
 if NDK_ENV="$(./scripts/release/android-ndk-env.sh "$NDKDIR" 2>&1)"; then
     absent=""
