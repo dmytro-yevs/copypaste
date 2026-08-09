@@ -109,8 +109,8 @@ fn join_frame(access_token: &str, user_id: &str) -> Value {
         TOPIC,
         "phx_join",
         {
+            "access_token": access_token,
             "config": {
-                "access_token": access_token,
                 "postgres_changes": [subscription(user_id)],
             }
         }
@@ -204,11 +204,11 @@ pub(super) fn websocket_url(base: &str, anon_key: &str) -> String {
         return base.to_owned();
     };
     // The local Supabase gateway reads `apikey` from the query before proxying
-    // the upgrade. `vsn` selects the five-element Phoenix array serializer.
+    // the upgrade. Phoenix V2 is the five-element array serializer.
     endpoint
         .query_pairs_mut()
         .append_pair("apikey", anon_key)
-        .append_pair("vsn", "1.0.0");
+        .append_pair("vsn", "2.0.0");
     endpoint.into()
 }
 
@@ -276,7 +276,8 @@ mod tests {
         let frame = join_frame("the.jwt.here", USER);
         let config = &frame[4]["config"];
 
-        assert_eq!(config["access_token"], "the.jwt.here");
+        assert_eq!(frame[4]["access_token"], "the.jwt.here");
+        assert!(config.get("access_token").is_none());
 
         let change = &config["postgres_changes"][0];
         assert_eq!(
@@ -448,46 +449,51 @@ mod tests {
     fn the_websocket_url_is_derived_from_the_rest_url() {
         assert_eq!(
             websocket_url("https://proj.supabase.co", "anon.jwt"),
-            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
+            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
         );
         // A trailing slash must not double up.
         assert_eq!(
             websocket_url("https://proj.supabase.co/", "anon.jwt"),
-            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
+            "wss://proj.supabase.co/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
         );
         assert_eq!(
             websocket_url("http://127.0.0.1:54321", "anon.jwt"),
-            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
+            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
         );
         assert_eq!(
             websocket_url("ws://127.0.0.1:54321/harness/", "anon.jwt"),
-            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=1.0.0"
+            "ws://127.0.0.1:54321/realtime/v1/websocket?apikey=anon.jwt&vsn=2.0.0"
         );
         assert_eq!(
             websocket_url(
                 "https://[2001:db8::1]:8443/nested%20base/?apikey=must-go#fragment",
                 "replacement key"
             ),
-            "wss://[2001:db8::1]:8443/realtime/v1/websocket?apikey=replacement+key&vsn=1.0.0"
+            "wss://[2001:db8::1]:8443/realtime/v1/websocket?apikey=replacement+key&vsn=2.0.0"
         );
     }
 
     #[tokio::test]
     #[allow(clippy::result_large_err)]
-    async fn the_handshake_carries_the_key_in_the_query_and_header() {
+    async fn the_v2_handshake_carries_the_key_and_authenticated_join() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut ws = accept_hdr_async(stream, |request: &Request, response: Response| {
                 assert_eq!(request.uri().path(), "/realtime/v1/websocket");
-                assert_eq!(request.uri().query(), Some("apikey=anon.jwt&vsn=1.0.0"));
+                assert_eq!(request.uri().query(), Some("apikey=anon.jwt&vsn=2.0.0"));
                 assert_eq!(request.headers()["apikey"], "anon.jwt");
                 Ok(response)
             })
             .await
             .unwrap();
-            ws.next().await.unwrap().unwrap();
+            let Message::Text(text) = ws.next().await.unwrap().unwrap() else {
+                panic!("join was not a text frame");
+            };
+            let frame: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(frame[4]["access_token"], token_for(USER));
+            assert!(frame[4]["config"].get("access_token").is_none());
             ws.send(Message::Text(reply("ok", &echo(USER))))
                 .await
                 .unwrap();
