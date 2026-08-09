@@ -1,4 +1,13 @@
-import { CloudOff, Copy, EyeOff, ImageIcon, LoaderCircle } from "lucide-react";
+import { useState } from "react";
+import {
+  CloudOff,
+  Copy,
+  Eye,
+  EyeOff,
+  ImageIcon,
+  LoaderCircle,
+  ShieldAlert,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -51,11 +60,20 @@ export function HistoryDetail({
 
   const revealed = item !== null && revealedContent !== null;
   const masked = item?.is_sensitive === true && !revealed;
-  // The plaintext is read from the reveal, never held here: this component
-  // keeps no copy of it, so INV-11's expiry re-masks the view by itself.
-  const body = revealed
-    ? revealedContent
-    : (fullContent ?? item?.content ?? null);
+  const potentialFinding =
+    item !== null && !item.is_sensitive ? item.sensitive_finding : null;
+  const [shownFinding, setShownFinding] =
+    useState<Item["sensitive_finding"]>(null);
+  const potentialRevealed =
+    potentialFinding !== null && shownFinding === potentialFinding;
+  // Whole-item sensitive plaintext comes only from the reveal. This component
+  // keeps no copy, so INV-11's expiry re-masks the view by itself.
+  const body =
+    potentialFinding !== null && !potentialRevealed
+      ? potentialFinding.redacted_preview
+      : revealed
+        ? revealedContent
+        : (fullContent ?? item?.content ?? null);
   const kind = item ? kindOf(item) : "text";
   const isImage = kind === "image";
 
@@ -66,8 +84,13 @@ export function HistoryDetail({
     meta.push(`${t("history.row.fromPrefix")} ${origin}`);
   }
 
+  const close = () => {
+    setShownFinding(null);
+    onClose();
+  };
+
   return (
-    <Dialog open={item !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={item !== null} onOpenChange={(open) => !open && close()}>
       <DialogContent
         className="max-h-[85vh] gap-s-3"
         onCloseAutoFocus={(event) => {
@@ -84,6 +107,17 @@ export function HistoryDetail({
           <p className="flex items-start gap-s-1 text-xs text-warn-strong">
             <CloudOff size={12} aria-hidden="true" className="mt-px shrink-0" />
             {t("history.row.wontSync")}
+          </p>
+        )}
+
+        {potentialFinding !== null && (
+          <p
+            role="status"
+            aria-label={t("history.row.potentialSensitiveWarning")}
+            className="flex items-start gap-s-1 text-xs text-warn-strong"
+          >
+            <ShieldAlert size={12} aria-hidden="true" className="mt-px shrink-0" />
+            {t("history.row.potentialSensitiveWarning")}
           </p>
         )}
 
@@ -139,6 +173,26 @@ export function HistoryDetail({
         )}
 
         <DialogFooter>
+          {potentialFinding !== null && (
+            <Button
+              variant="outline"
+              aria-pressed={potentialRevealed}
+              onClick={() =>
+                setShownFinding(potentialRevealed ? null : potentialFinding)
+              }
+            >
+              {potentialRevealed ? (
+                <EyeOff aria-hidden="true" />
+              ) : (
+                <Eye aria-hidden="true" />
+              )}
+              {t(
+                potentialRevealed
+                  ? "history.row.hideOriginal"
+                  : "history.row.showOriginal",
+              )}
+            </Button>
+          )}
           {revealed && (
             <Button variant="outline" onClick={onHide}>
               <EyeOff aria-hidden="true" />
@@ -148,7 +202,7 @@ export function HistoryDetail({
           <Button
             onClick={() => {
               if (item) onCopy(item);
-              onClose();
+              close();
             }}
           >
             {isImage ? <ImageIcon aria-hidden="true" /> : <Copy aria-hidden="true" />}
