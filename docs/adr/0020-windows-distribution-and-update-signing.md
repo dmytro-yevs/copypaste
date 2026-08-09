@@ -1,4 +1,4 @@
-# ADR-0019: Use NSIS with two independent Windows signatures
+# ADR-0020: Use NSIS with two independent Windows signatures
 
 Status: accepted
 

@@ -216,9 +216,15 @@ build and revoke it on every update. See
 - Android restricts clipboard reads to foreground apps. The four-rung ladder and
   what each rung costs a user are in
   [`docs/rewrite/android-clipboard-access.md`](docs/rewrite/android-clipboard-access.md).
-- Windows and Linux desktop are out of scope.
+- Linux desktop is a test surface, not a shipping target.
 
 ## Dependency auditing
 
 `cargo deny check` and `cargo audit`, both run in CI by
 `.github/workflows/supply-chain.yml` on every push and weekly on a schedule.
+
+`glib 0.18.5` (RUSTSEC-2024-0429) is accepted only in Tauri's Linux desktop
+webview subtree, which is not shipped. Dependabot ignores that crate because
+the tree cannot resolve the non-vulnerable `0.20.0`; every other dependency
+continues to alert. [ADR-0021](docs/adr/0021-accept-the-glib-advisory-as-unshipped.md)
+records the exposure, the wider cost of the ignore, and its removal condition.

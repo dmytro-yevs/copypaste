@@ -355,6 +355,20 @@ release target; the first run on host M remains the baseline.
 
 ---
 
+## 5.2 Late-sealed duplicate inserts — **no after-measurement**
+
+`insert_or_bump_late_sealed` evaluates the sealing closure only after the
+transaction has taken the dedup decision. A re-copy therefore avoids HKDF,
+XChaCha20-Poly1305 and the plaintext clone; the content hash, sensitivity flag
+and AAD-bound item id stay eager because the decision needs them.
+
+Only the before-baseline exists, measured at p50 against 2,000 rows on a
+contended host: 351 µs at 256 B, 365 µs at 4 KiB, 1.448 ms at 64 KiB and
+24.1 ms at 1 MiB. The saving is argued from work the duplicate path no longer
+executes, not observed; take an after-measurement before quoting a speedup.
+
+---
+
 ## 6. Merging a peer's session — **S**
 
 Host M, `cargo bench --bench sync`, load 3.7 to 5.3, both trees. The unit is a
