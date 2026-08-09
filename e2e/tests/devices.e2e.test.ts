@@ -7,6 +7,7 @@
  * that a known device can sync, expose its revoke confirmation, and unpair.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { startApp, type App } from "../src/harness/app.js";
 import { startDaemon, type Daemon } from "../src/harness/daemon.js";
@@ -21,6 +22,14 @@ import { clickButton, gotoView, visibleText, waitForText } from "../src/harness/
 interface PairingData {
   code: string;
   pairing_id: string;
+  expires_in_secs: number;
+}
+
+interface PairingProgress {
+  pairing_id: string | null;
+  state: string;
+  sas: string | null;
+  known_device: PeerInfo | null;
 }
 
 interface PeerInfo {
@@ -34,19 +43,60 @@ let app: App;
 let other: Daemon;
 let paired: PeerInfo;
 
+async function waitForPairing(
+  daemon: Daemon,
+  state: string,
+): Promise<PairingProgress> {
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const progress = await daemon.json<PairingProgress>(["pair", "progress"]);
+    if (progress.state === state) return progress;
+    if (Date.now() >= deadline) {
+      throw new Error(`pairing stayed ${progress.state}; expected ${state}`);
+    }
+    await sleep(100);
+  }
+}
+
+async function completePairing(
+  inviter: Daemon,
+  joiner: Daemon,
+  invite: PairingData,
+): Promise<PeerInfo> {
+  const joined = await joiner.json<PairingProgress>([
+    "pair",
+    "join",
+    invite.code,
+    "--addr",
+    `127.0.0.1:${inviter.peerPort}`,
+  ]);
+  const inbound = await waitForPairing(inviter, "awaiting_confirmation");
+  expect(joined.state).toBe("awaiting_confirmation");
+  expect(joined.pairing_id).toBe(invite.pairing_id);
+  expect(joined.sas).toMatch(/^\d{6}$/);
+  expect(inbound.sas).toBe(joined.sas);
+
+  await Promise.all([
+    inviter.json<PairingProgress>(["pair", "confirm"]),
+    joiner.json<PairingProgress>(["pair", "confirm"]),
+  ]);
+  const [inviterDone, joinerDone] = await Promise.all([
+    waitForPairing(inviter, "confirmed"),
+    waitForPairing(joiner, "confirmed"),
+  ]);
+  expect(inviterDone.known_device).not.toBeNull();
+  if (!joinerDone.known_device) throw new Error("pairing did not persist on the joiner");
+  return joinerDone.known_device;
+}
+
 beforeAll(async () => {
   app = await startApp();
   other = await startDaemon();
 
-  const minted = await other.json<PairingData>([
-    "pair",
-    "create",
-    "-n",
-    "the browser app",
-  ]);
+  const minted = await other.json<PairingData>(["pair", "create"]);
   const wrong = await app.daemon.cli([
     "pair",
-    "accept",
+    "join",
     `${minted.code.slice(0, -1)}${minted.code.endsWith("X") ? "Y" : "X"}`,
     "--addr",
     `127.0.0.1:${other.peerPort}`,
@@ -54,20 +104,14 @@ beforeAll(async () => {
   expect(wrong.exitCode).not.toBe(0);
   expect(await app.daemon.json<PeerInfo[]>(["peers"])).toEqual([]);
 
-  await app.daemon.json<unknown>([
-    "pair",
-    "accept",
-    minted.code,
-    "--addr",
-    `127.0.0.1:${other.peerPort}`,
-  ]);
+  paired = await completePairing(other, app.daemon, minted);
 
   const peers = await app.daemon.json<PeerInfo[]>(["peers"]);
   const known = peers.find((peer) => peer.pairing_id === minted.pairing_id);
   if (!known) {
     throw new Error("the CLI pairing fixture did not persist on the app daemon");
   }
-  paired = known;
+  expect(paired).toEqual(known);
 
   await gotoView(app.browser, "Devices");
   await waitForText(app.browser, paired.name);
@@ -123,18 +167,17 @@ describe("native-safe pairing", () => {
   /** The credential must be absent from the document, not merely unrendered: a
    *  blur, a `display: none` or an `aria-label` all leave it in `outerHTML`. */
   test("never lets a pairing credential reach the page", async () => {
-    const minted = await other.json<PairingData>([
-      "pair",
-      "create",
-      "-n",
-      "leak probe",
-    ]);
-    await clickButton(app.browser, "Refresh devices discovered on this network");
+    const minted = await other.json<PairingData>(["pair", "create"]);
+    try {
+      await clickButton(app.browser, "Refresh devices discovered on this network");
 
-    const html = await outerHtml(app.browser);
-    expect(html).not.toContain(minted.code);
-    expect(html).not.toContain(minted.code.replace(/-/g, ""));
-    expect(html).not.toContain("copypaste://pair");
+      const html = await outerHtml(app.browser);
+      expect(html).not.toContain(minted.code);
+      expect(html).not.toContain(minted.code.replace(/-/g, ""));
+      expect(html).not.toContain("copypaste://pair");
+    } finally {
+      await other.json<PairingProgress>(["pair", "cancel"]);
+    }
   });
 
   test("a browser without native presentation cancels safely", async () => {
@@ -241,16 +284,11 @@ describe("an expired code", () => {
   test("is refused without leaving a phantom peer", async () => {
     const expiring = await startDaemon();
     try {
-      const minted = await expiring.json<PairingData>([
-        "pair",
-        "create",
-        "-n",
-        "expired fixture",
-      ]);
-      await expiring.expirePairing(minted.pairing_id);
+      const minted = await expiring.json<PairingData>(["pair", "create"]);
+      await sleep((minted.expires_in_secs + 1) * 1_000);
       const result = await app.daemon.cli([
         "pair",
-        "accept",
+        "join",
         minted.code,
         "--addr",
         `127.0.0.1:${expiring.peerPort}`,
@@ -264,7 +302,7 @@ describe("an expired code", () => {
     } finally {
       await expiring.stop();
     }
-  });
+  }, 180_000);
 });
 
 describe("unpairing", () => {
@@ -297,19 +335,8 @@ describe("unpairing", () => {
 
 describe("revoking", () => {
   test("blocks a newly established pairing and removes it from the UI", async () => {
-    const minted = await other.json<PairingData>([
-      "pair",
-      "create",
-      "-n",
-      "revoke fixture",
-    ]);
-    await app.daemon.json<unknown>([
-      "pair",
-      "accept",
-      minted.code,
-      "--addr",
-      `127.0.0.1:${other.peerPort}`,
-    ]);
+    const minted = await other.json<PairingData>(["pair", "create"]);
+    await completePairing(other, app.daemon, minted);
     const peer = (await app.daemon.json<PeerInfo[]>(["peers"])).find(
       (candidate) => candidate.pairing_id === minted.pairing_id,
     );

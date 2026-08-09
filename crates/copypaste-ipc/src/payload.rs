@@ -130,7 +130,7 @@ pub struct DiscoveredDevice {
     /// identity; it only de-duplicates announcements in the client.
     pub discovery_id: String,
     pub name: String,
-    /// `host:port` to hand to `pair accept`.
+    /// `host:port` to hand to `pair join`.
     pub addr: String,
     pub last_seen_ms: i64,
     pub paired: bool,
