@@ -79,15 +79,6 @@ impl AccountSlot {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn take(&self) -> Option<Account> {
-        let account = self.lock().take();
-        if let Some(account) = account.as_ref() {
-            account.cancel.cancel();
-        }
-        account
-    }
-
     pub(super) fn with_driver<T>(
         &self,
         expected: &Arc<Driver>,
@@ -263,6 +254,9 @@ impl EmbeddedCloud {
     pub(super) fn take_for_sign_out(&self, store: &Store) -> Option<Arc<Driver>> {
         let mut account = self.account();
         self.account_revision.fetch_add(1, Ordering::AcqRel);
+        if let Some(current) = account.as_ref() {
+            current.driver.fence_session(None);
+        }
         let previous = account.take();
         if let Some(previous) = previous.as_ref() {
             previous.cancel.cancel();
@@ -302,6 +296,7 @@ impl EmbeddedCloud {
         &self,
         store: &Store,
         expected: &Arc<Driver>,
+        expected_revision: u64,
         message: &'static str,
         terminal: bool,
     ) {
@@ -312,7 +307,13 @@ impl EmbeddedCloud {
         {
             return;
         }
+        if expected.session_revision() != expected_revision {
+            return;
+        }
         if terminal {
+            if !expected.fence_session(Some(expected_revision)) {
+                return;
+            }
             if let Some(current) = account.as_ref() {
                 current.cancel.cancel();
             }
@@ -337,14 +338,6 @@ impl EmbeddedCloud {
         self.last_error
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-    }
-
-    #[cfg(test)]
-    pub(super) fn clear_local(&self, store: &Store) {
-        self.account.take();
-        let _ = store.clear_state(CREDENTIAL_KEYS);
-        self.last_sync_ms.store(0, Ordering::Release);
-        *self.error() = None;
     }
 
     #[cfg(test)]

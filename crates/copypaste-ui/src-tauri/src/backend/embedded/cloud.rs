@@ -180,6 +180,7 @@ impl EmbeddedCloud {
             return Err(BackendError::NotReady);
         };
         self.persist_session(&inner.state.store, &driver);
+        let revision = driver.session_revision();
         match outcome {
             Ok(stats) => {
                 let completed = copypaste_core::now_ms();
@@ -195,6 +196,7 @@ impl EmbeddedCloud {
                 self.record_failure(
                     &inner.state.store,
                     &driver,
+                    revision,
                     message,
                     terminal_auth_error(&error),
                 );
@@ -445,7 +447,13 @@ mod tests {
         });
         state.store.set_state(KEY_ACCESS, "secret").unwrap();
 
-        cloud.record_failure(&state.store, &driver, MSG_REJECTED, true);
+        cloud.record_failure(
+            &state.store,
+            &driver,
+            driver.session_revision(),
+            MSG_REJECTED,
+            true,
+        );
 
         let status = cloud.status();
         assert!(!status.signed_in);
@@ -467,7 +475,13 @@ mod tests {
             cancel: CancellationToken::new(),
         });
 
-        cloud.record_failure(&state.store, &stale, MSG_UNAVAILABLE, true);
+        cloud.record_failure(
+            &state.store,
+            &stale,
+            stale.session_revision(),
+            MSG_UNAVAILABLE,
+            true,
+        );
         cloud.note_success(&state.store, &stale, 999);
 
         let status = cloud.status();
@@ -475,6 +489,35 @@ mod tests {
         assert_eq!(status.email.as_deref(), Some("new@example.com"));
         assert_eq!(status.last_error, None);
         assert_eq!(status.last_sync_ms, None);
+    }
+
+    #[test]
+    fn a_stale_failure_revision_cannot_invalidate_the_session() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let cloud = configured();
+        let driver = driver(&cloud, &state, "current");
+        *cloud.account() = Some(Account {
+            email: "a@example.com".into(),
+            user_id: "user-1".into(),
+            driver: Arc::clone(&driver),
+            cancel: CancellationToken::new(),
+        });
+        state.store.set_state(KEY_ACCESS, "secret").unwrap();
+
+        cloud.record_failure(
+            &state.store,
+            &driver,
+            driver.session_revision().wrapping_add(1),
+            MSG_REJECTED,
+            true,
+        );
+
+        assert!(cloud.status().signed_in);
+        assert_eq!(
+            state.store.state(KEY_ACCESS).unwrap().as_deref(),
+            Some("secret")
+        );
     }
 
     #[tokio::test]
@@ -487,13 +530,17 @@ mod tests {
         cloud.account.install(Account {
             email: "a@example.com".into(),
             user_id: "user-1".into(),
-            driver,
+            driver: Arc::clone(&driver),
             cancel: cancel.clone(),
         });
 
-        cloud.clear_local(&state.store);
+        cloud.take_for_sign_out(&state.store);
 
         assert!(cancel.is_cancelled());
+        assert_eq!(
+            driver.refresh_session().await,
+            Err(SyncError::SessionExpired)
+        );
         assert_eq!(
             until_cancelled(&cancel, std::future::pending::<()>()).await,
             None
