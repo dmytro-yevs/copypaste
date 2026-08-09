@@ -43,6 +43,7 @@ function searchLabel(item: Item): string {
   if (item.is_sensitive) return "••••••••";
   if (item.content_type.toLowerCase().startsWith("image/")) return t("quickPaste.row.image");
   if (item.content_type.toLowerCase() === "file") return t("quickPaste.row.file");
+  if (item.sensitive_finding) return item.sensitive_finding.redacted_preview;
   return item.content ?? "";
 }
 
