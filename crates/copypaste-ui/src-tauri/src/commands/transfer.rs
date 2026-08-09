@@ -48,17 +48,12 @@ type Result<T> = std::result::Result<T, BackendError>;
 const EXPORT_NAME: &str = "copypaste-export.json";
 const BACKUP_NAME: &str = "copypaste-backup.cpbak";
 
-const MSG_NO_PLACE: &str =
-    "That location can't be written to directly. Pick a folder on this device instead.";
 const MSG_UNREADABLE: &str = "That file couldn't be read.";
 const MSG_NOT_AN_EXPORT: &str = "That file isn't a CopyPaste export.";
 const MSG_IMPORT_TOO_LARGE: &str = "That export is too large to import safely on this device.";
 const MSG_IMPORT_EXPIRED: &str = "That import is no longer available. Choose the file again.";
 const MSG_IMPORT_STATE: &str = "The pending import couldn't be accessed. Choose the file again.";
 const MSG_NOT_WRITTEN: &str = "The export couldn't be written.";
-const MSG_BACKUP_EXISTS: &str =
-    "There is already a file with that name. A backup is never written over an existing \
-     file — choose another name.";
 
 /// A file import must fit comfortably in the UI process. The item-count limit
 /// in core constrains work only after JSON decoding, so it cannot protect the
@@ -331,14 +326,12 @@ mod tests {
     #[test]
     fn no_message_names_a_place() {
         for message in [
-            MSG_NO_PLACE,
             MSG_UNREADABLE,
             MSG_NOT_AN_EXPORT,
             MSG_IMPORT_TOO_LARGE,
             MSG_IMPORT_EXPIRED,
             MSG_IMPORT_STATE,
             MSG_NOT_WRITTEN,
-            MSG_BACKUP_EXISTS,
         ] {
             assert!(!message.contains('/'), "{message}");
             assert!(!message.contains('~'), "{message}");
