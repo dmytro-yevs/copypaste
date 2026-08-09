@@ -9,7 +9,12 @@ LEDGER = ROOT / "docs/feature-ledger.json"
 HANDLER = ROOT / "crates/copypaste-ui/src-tauri/src/lib.rs"
 FORBIDDEN = re.compile(r"\b(?:todo|tbd|waiv(?:e|ed|er)|placeholder)\b", re.I)
 CLOUD_STATES = {"unconfigured", "signed-out", "signed-in", "sync-with-skips", "offline-error", "signed-out-again"}
-CLOUD_RELEASE = {"release-android-cloud-evidence", "release-macos-cloud-evidence"}
+CLOUD_RELEASE = {
+    "release-android-cloud-evidence",
+    "release-android-hardware-evidence",
+    "release-macos-cloud-evidence",
+    "release-macos-native-evidence",
+}
 
 
 def fail(message):
