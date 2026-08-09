@@ -4,7 +4,8 @@ use crate::config::ConfigData;
 use crate::error::ErrorCode;
 use crate::payload::{
     BackupData, CloudStatusData, CloudSyncData, DiscoveredData, ExportData, ImagePreview,
-    ImportData, Item, ItemPage, PairingData, PeerInfo, PrivateModeData, StatusData, SyncResult,
+    ImportData, Item, ItemPage, PairingData, PairingInviteData, PairingProgressData, PeerInfo,
+    PrivateModeData, StatusData, SyncResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -188,6 +189,8 @@ pub enum ResponseData {
     ImagePreview(ImagePreview),
     Count(u64),
     Pairing(PairingData),
+    PairingInvite(PairingInviteData),
+    PairingProgress(PairingProgressData),
     Peers(Vec<PeerInfo>),
     Sync(Vec<SyncResult>),
     CloudStatus(CloudStatusData),

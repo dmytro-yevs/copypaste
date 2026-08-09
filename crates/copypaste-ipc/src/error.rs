@@ -18,6 +18,7 @@ pub enum ErrorCode {
 
     PairingCode,
     PairingAddress,
+    RateLimited,
     /// The paired device may reappear, so this failure is retryable.
     PeerUnreachable,
     PairingLimit,
@@ -42,6 +43,7 @@ impl ErrorCode {
             Self::KeyUnusable => "key_unusable",
             Self::PairingCode => "pairing_code",
             Self::PairingAddress => "pairing_address",
+            Self::RateLimited => "rate_limited",
             Self::PeerUnreachable => "peer_unreachable",
             Self::PairingLimit => "pairing_limit",
             Self::PeerFailed => "peer_failed",
@@ -62,6 +64,7 @@ impl ErrorCode {
             "key_unusable" => Some(Self::KeyUnusable),
             "pairing_code" => Some(Self::PairingCode),
             "pairing_address" => Some(Self::PairingAddress),
+            "rate_limited" => Some(Self::RateLimited),
             "peer_unreachable" => Some(Self::PeerUnreachable),
             "pairing_limit" => Some(Self::PairingLimit),
             "peer_failed" => Some(Self::PeerFailed),
@@ -88,6 +91,7 @@ impl ErrorCode {
             | Self::KeyUnusable
             | Self::PairingCode
             | Self::PairingAddress
+            | Self::RateLimited
             | Self::PairingLimit
             | Self::PeerVersion
             | Self::PeerNotFound => false,
@@ -111,6 +115,7 @@ mod tests {
             (ErrorCode::KeyUnusable, "\"key_unusable\""),
             (ErrorCode::PairingCode, "\"pairing_code\""),
             (ErrorCode::PairingAddress, "\"pairing_address\""),
+            (ErrorCode::RateLimited, "\"rate_limited\""),
             (ErrorCode::PeerUnreachable, "\"peer_unreachable\""),
             (ErrorCode::PairingLimit, "\"pairing_limit\""),
             (ErrorCode::PeerFailed, "\"peer_failed\""),
@@ -143,6 +148,7 @@ mod tests {
         for code in [
             ErrorCode::PairingCode,
             ErrorCode::PairingAddress,
+            ErrorCode::RateLimited,
             ErrorCode::PairingLimit,
             ErrorCode::PeerVersion,
             ErrorCode::PeerNotFound,

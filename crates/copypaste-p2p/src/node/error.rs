@@ -15,6 +15,10 @@ pub enum NodeError {
     BadAddress,
     #[error("the other device did not accept this pairing code")]
     Handshake,
+    #[error("another pairing is already in progress")]
+    PairingBusy,
+    #[error("no pairing is awaiting confirmation")]
+    NoPairing,
     #[error("a device cannot pair with itself")]
     SelfPairing,
     #[error("no such paired device")]
@@ -50,6 +54,8 @@ impl NodeError {
             NodeError::BadCode
                 | NodeError::BadAddress
                 | NodeError::Handshake
+                | NodeError::PairingBusy
+                | NodeError::NoPairing
                 | NodeError::SelfPairing
                 | NodeError::TooManyPairings
         )
@@ -65,6 +71,8 @@ mod tests {
         NodeError::BadCode,
         NodeError::BadAddress,
         NodeError::Handshake,
+        NodeError::PairingBusy,
+        NodeError::NoPairing,
         NodeError::SelfPairing,
         NodeError::NoPeer,
         NodeError::NoAddress,

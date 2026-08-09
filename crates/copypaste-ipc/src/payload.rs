@@ -215,6 +215,71 @@ pub struct PairingData {
     pub listen_addr: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+#[serde(rename_all = "snake_case")]
+pub enum PairingRole {
+    Initiator,
+    Responder,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+#[serde(rename_all = "snake_case")]
+pub enum PairingState {
+    Idle,
+    WaitingForPeer,
+    Handshaking,
+    AwaitingConfirmation,
+    Confirmed,
+    Rejected,
+    Cancelled,
+    TimedOut,
+    Failed,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct PairingInviteData {
+    /// Secret QR payload input. Product adapters must render it without
+    /// returning the text to the WebView (manifest 06, INV-13).
+    pub code: String,
+    pub pairing_id: String,
+    pub listen_addr: Option<String>,
+    pub expires_in_secs: u64,
+}
+
+impl std::fmt::Debug for PairingInviteData {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PairingInviteData")
+            .field("pairing_id", &self.pairing_id)
+            .field("code", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct PairingProgressData {
+    pub pairing_id: Option<String>,
+    pub role: Option<PairingRole>,
+    pub state: PairingState,
+    /// Present only after the authenticated handshake and before/at a terminal
+    /// state. Six ASCII digits, display-only.
+    pub sas: Option<String>,
+    pub peer_device_id: Option<String>,
+    pub peer_name: Option<String>,
+    pub peer_addr: Option<String>,
+    /// Present only after bilateral confirmation and durable persistence.
+    pub known_device: Option<PeerInfo>,
+    pub error_code: Option<crate::ErrorCode>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]

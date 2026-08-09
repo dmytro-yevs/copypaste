@@ -27,7 +27,10 @@ pub mod protocol;
 pub mod sync;
 pub mod transport;
 
-pub use node::{Node, NodeError};
+pub use node::{
+    Node, NodeError, PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus,
+    PAIRING_CONFIRM_TIMEOUT, PAIRING_INVITE_TTL,
+};
 pub use peers::{Peer, PeerStore, PeerStoreError, RevokedDevice, PAIRING_CODE_TTL};
 pub use protocol::{ItemSummary, SyncItem, SyncMessage, PROTOCOL_VERSION};
 pub use sync::{merge_decision, MergeDecision, SyncOutcome, SyncStats};

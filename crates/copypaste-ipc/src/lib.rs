@@ -40,15 +40,15 @@ pub use limits::{
 pub use payload::{
     BackupData, CloudStatusData, CloudSyncData, DiagnosticCounters, DiscoveredData,
     DiscoveredDevice, ExportData, ExportItem, ImagePreview, ImportData, Item, ItemPage,
-    PairingData, PeerInfo, PrivateModeData, SensitiveFinding, SensitiveSpan, StatusData,
-    SyncResult,
+    PairingData, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
+    PrivateModeData, SensitiveFinding, SensitiveSpan, StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,17 +183,34 @@ pub enum Method {
     },
 
     // ---- peer-to-peer sync -------------------------------------------------
-    /// Mint a pairing token on this device and return the code to read out.
-    /// The token is the Noise pre-shared key; the code is its transferable form.
+    /// Legacy invite shape. Creates the same memory-only invitation as
+    /// [`Method::PairCreateInvite`].
     PairCreate {
         name: String,
     },
-    /// Consume a code produced by `PairCreate` on another device, connect to
-    /// `addr`, and complete the pairing.
+    /// Disabled legacy operation. New clients use [`Method::PairJoin`] and
+    /// [`Method::PairConfirm`].
     PairAccept {
         code: String,
         addr: String,
     },
+    /// Create one in-memory invitation. Nothing is persisted until both peers
+    /// explicitly confirm the handshake-bound SAS.
+    PairCreateInvite,
+    /// Start the initiating half of a pairing ceremony.
+    PairJoin {
+        code: String,
+        addr: String,
+    },
+    /// Current ceremony state, including SAS or confirmed known-device data.
+    PairProgress,
+    /// Record the local SAS decision. Persistence still waits for the peer's
+    /// matching decision.
+    PairConfirm {
+        accept: bool,
+    },
+    /// Idempotently cancel the current ceremony or invitation.
+    PairCancel,
     /// Forget a peer. Its half of the pairing keeps working until it also
     /// unpairs — this is a local decision, not a negotiated one.
     Unpair {
