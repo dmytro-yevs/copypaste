@@ -285,13 +285,14 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
         // The acknowledgement gate has already run on the Rust side; reaching
         // here means the user was shown what this does and agreed.
         val suppressed = invoke.getArgs().optBoolean("suppressed", false)
-        ShizukuClipboard.setToastSuppressed(suppressed)
-        invoke.resolve(
-            JSObject()
-                .put("probe", probeObject())
-                .put("enabled", captureEnabled())
-                .put("listening", ShizukuClipboard.isListening())
-        )
+        ShizukuClipboard.setToastSuppressed(suppressed) {
+            invoke.resolve(
+                JSObject()
+                    .put("probe", probeObject())
+                    .put("enabled", captureEnabled())
+                    .put("listening", ShizukuClipboard.isListening())
+            )
+        }
     }
 
     private fun probeObject(): JSObject = JSObject()

@@ -10,6 +10,11 @@
 # builds only — and then the app cannot open its own history.
 -keep class com.copypaste.app.KeystoreContext { *; }
 
+# Shizuku reflects this constructor in its privileged UserService process.
+-keepclassmembers class com.copypaste.app.ShizukuSettingsService {
+    public <init>();
+}
+
 # If your project uses WebView with JS, uncomment the following
 # and specify the fully qualified class name to the JavaScript interface
 # class:

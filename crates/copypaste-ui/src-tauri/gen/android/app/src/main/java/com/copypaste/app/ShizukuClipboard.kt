@@ -235,13 +235,11 @@ object ShizukuClipboard {
      * in `capture::model::authorise_toast`, on the Rust side, where it is
      * tested.
      */
-    fun setToastSuppressed(suppressed: Boolean): Boolean = try {
-        ShizukuSettings.setClipboardAccessNotifications(suppressed)
-        true
-    } catch (e: Throwable) {
-        Log.w(TAG, "changing the clipboard notice failed", e)
-        lastFailure = e.javaClass.simpleName
-        false
+    fun setToastSuppressed(suppressed: Boolean, completion: (Boolean) -> Unit) {
+        ShizukuSettings.setClipboardAccessNotifications(suppressed) { changed ->
+            if (!changed) lastFailure = "clipboard notice setting was refused"
+            completion(changed)
+        }
     }
 
     fun isToastSuppressed(context: android.content.Context): Boolean = try {
