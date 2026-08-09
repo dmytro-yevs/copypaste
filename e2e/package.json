@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "xvfb-run -a -s \"-screen 0 1280x900x24\" vitest run",
-    "test:headed": "vitest run"
+    "test:headed": "vitest run",
+    "test:windows": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

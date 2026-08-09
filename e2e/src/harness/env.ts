@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,8 +27,9 @@ export const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 function fromEnvOrTarget(envVar: string, name: string): string {
   const override = process.env[envVar];
   if (override) return override;
+  const executable = process.platform === "win32" ? `${name}.exe` : name;
   for (const profile of ["debug", "release"]) {
-    const candidate = path.join(REPO_ROOT, "target", profile, name);
+    const candidate = path.join(REPO_ROOT, "target", profile, executable);
     if (existsSync(candidate)) return candidate;
   }
   throw new Error(
@@ -42,7 +44,17 @@ export const daemonBinary = () =>
   fromEnvOrTarget("COPYPASTE_DAEMON_BIN", "copypaste-daemon");
 export const cliBinary = () => fromEnvOrTarget("COPYPASTE_CLI_BIN", "copypaste");
 
-export const NATIVE_DRIVER = process.env.WEBKIT_WEBDRIVER ?? "/usr/bin/WebKitWebDriver";
+function nativeDriver(): string {
+  const override = process.env.COPYPASTE_NATIVE_DRIVER;
+  if (override) return override;
+  if (process.platform === "win32") {
+    const directory = process.env.EDGEWEBDRIVER;
+    return directory ? path.join(directory, "msedgedriver.exe") : "msedgedriver.exe";
+  }
+  return process.env.WEBKIT_WEBDRIVER ?? "/usr/bin/WebKitWebDriver";
+}
+
+export const NATIVE_DRIVER = nativeDriver();
 
 /**
  * A Unix socket path must fit in `sockaddr_un.sun_path` (~108 bytes) or the
@@ -50,7 +62,8 @@ export const NATIVE_DRIVER = process.env.WEBKIT_WEBDRIVER ?? "/usr/bin/WebKitWeb
  * socket from `XDG_DATA_HOME`, and the usual per-run scratch directories are
  * already long enough to blow the limit, so run roots live directly under /tmp.
  */
-export const RUN_ROOT = "/tmp/cp-e2e";
+export const RUN_ROOT =
+  process.platform === "win32" ? path.join(os.tmpdir(), "cp-e2e") : "/tmp/cp-e2e";
 
 export async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -71,6 +84,7 @@ export async function freePort(): Promise<number> {
 }
 
 export function requireDisplay(): string {
+  if (process.platform === "win32") return "interactive-windows-session";
   const display = process.env.DISPLAY;
   if (!display) {
     throw new Error(

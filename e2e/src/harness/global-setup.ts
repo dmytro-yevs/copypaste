@@ -12,17 +12,18 @@ export async function setup(): Promise<void> {
   requireDisplay();
   await assertPortFree();
 
+  const vite = path.join(UI_DIR, "node_modules/vite/bin/vite.js");
+
   // The vite binary directly, not `npm run dev`: killing npm leaves the vite
   // grandchild holding port 1420, and the next run then silently tests
   // whatever tree that orphan was started from.
   server = track(
-    execa(path.join(UI_DIR, "node_modules/.bin/vite"), ["--port", String(DEV_SERVER_PORT)], {
+    execa(process.execPath, [vite, "--port", String(DEV_SERVER_PORT)], {
       cwd: UI_DIR,
       stdio: ["ignore", "pipe", "pipe"],
       reject: false,
-      detached: true,
+      killDescendants: true,
     }),
-    { group: true },
   );
 
   try {

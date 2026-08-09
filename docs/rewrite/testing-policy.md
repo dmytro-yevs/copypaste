@@ -19,7 +19,7 @@ the assertion.
 | Browser (WebKitGTK, Linux) | `browser-webkitgtk.yml` | shared React behaviour in a real engine: rendering, composition, navigation, responsive layout, forms, dialogs, menus, loading/empty/error states, keyboard navigation, focus, the accessibility tree, overflow and scrolling, console errors, behaviour against a real daemon | Tauri commands as shipped, WKWebView, Android WebView, NSPasteboard, Keychain, Keystore, intents, tray or menu bar, global shortcuts, launch at login, native notifications, native window focus or dismissal, platform permissions, packaging, signing, installation |
 | Android | `android-emulator.yml` on x86_64, including `e2e-android/` over CDP; `release.yml` on a physical arm64 device | Android platform behavior at each API level that ran; the debug WebView document; the signed release APK and arm64 path at release | macOS; OEM background policy; a Play-updated WebView |
 | macOS | `ci.yml` → `macOS check + platform (arm64)`; `release.yml` → `smoke-macos-dmg.sh` on a tag | macOS | Android |
-| Windows | `ci.yml` → `Windows check + device secret (x64)`; user-requested `native-nightly.yml` evidence | DPAPI and named-pipe behavior on Windows | Windows packaging or UI behavior |
+| Windows | `windows-native-e2e.yml` over WebView2; `ci.yml` workspace and installed-product evidence; user-requested `native-nightly.yml` contracts | the shipped WebView and Tauri bridge, native clipboard capture, named-pipe IPC, DPAPI, app launch, shell-setting registration | tray interaction, OS hotkey delivery, autostart after sign-in, notifications, signing |
 
 The browser layer does execute Tauri commands through `wry` on Linux. That is
 useful and it is not verification: the shipped bridges are WKWebView and the
@@ -41,6 +41,11 @@ can break either platform, so it must run every platform layer. `ci.yml`
 (Linux + macOS) and `browser-webkitgtk.yml` run on every push and pull request
 with no path filter. `android-emulator.yml` runs nightly, on demand, and on any
 push or pull request touching those shared paths or the Android tree.
+
+`windows-native-e2e.yml` runs on every push and pull request. It drives the
+debug Windows app through `tauri-driver` and the hosted runner's matching Edge
+WebDriver; the whole shared suite runs against a real named-pipe daemon, and a
+Windows-only file exercises native clipboard and shell-setting state.
 
 `native-nightly.yml` runs Android API 34/36 and macOS 14/15 matrices each night.
 Its optional Windows evidence job runs only when a workflow dispatch explicitly
@@ -105,6 +110,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 |---|---|---|
 | `changeCount`, burst loss, self-write suppression, `org.nspasteboard.*`, size cap | macOS | Verified — `--ignored` tests on `macos-14`; an empty run fails the job |
 | A real `pbcopy` reaches history through the shipped bundle | macOS | Partial — ENFORCED in `smoke-macos-dmg.sh`, tag-only |
+| A real Windows clipboard change reaches history, and private mode blocks it | Windows | Verified — WebView2 changes private mode and PowerShell writes the session clipboard |
 | Capture pipeline against the fake source | Rust | Verified |
 | `ACTION_SEND` / `ACTION_PROCESS_TEXT` reach SQLCipher | Android | Partial — debug leg only; the release leg has no `run-as` and prints `NOT ASSERTED`. `e2e-android/` follows an `ACTION_SEND` onto the screen |
 | Rung 2: the shell-uid clipboard read | Android | Partial — the API 36 leg reads a foreign clip as uid 2000 without focus; Shizuku's binder proxy and listener still need pairing on a phone |
@@ -122,6 +128,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | XChaCha20-Poly1305 + HKDF, item id as AAD, fail-closed, zeroized | Rust | Verified |
 | Device secret in the macOS Keychain | macOS | Verified — throwaway keychain; a self-skipped test fails the job |
 | Device secret in the Android Keystore | Android | Verified — a second launch reopens the same database |
+| Device secret protected by DPAPI | Windows | Verified — Windows runs the keystore suite and refuses an unusable persisted blob over the named pipe |
 | The Keychain item survives a re-signed binary (manifest 02 §3.8) | macOS | **NOT VERIFIED IN CI** — REPORTED leg, tag-only |
 | The aarch64 hardware SHA-2 path executes as built | Android | Partial — the signed universal APK must pass on a physical `arm64-v8a` device before a release is published |
 
@@ -134,7 +141,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | A sensitive item never reaches the index (write, read, purge) | Rust | Verified |
 | Retention: history cap, TTL, sensitive auto-wipe | Rust | Verified |
 | Export, import, backup, restore over IPC | Rust | Verified |
-| The same four from the Settings screen | Browser (WebKitGTK) | **NOT VERIFIED IN CI** — the suite drives the CLI; the commands and the UI exist |
+| The same four from the Settings screen | Windows, Browser (WebKitGTK) | **NOT VERIFIED IN CI** — the Windows run asserts export and restore safety dialogs, but native file pickers prevent completing these flows through WebDriver |
 | Secret-detection ruleset, NFKC, Luhn, confidence bands | Rust | Verified |
 | A v0.4 database is detected and explained, never opened | Rust | Verified as a probe; **NOT VERIFIED IN CI** on either platform — the Android side answers a hardcoded `false` (B-33) |
 
@@ -145,15 +152,15 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | `0600` socket, `LinesCodec`, timeouts, connection and watcher caps | Rust | Verified |
 | No filesystem path in any user-facing string (INV-12) | Rust, and a sweep at the browser layer | Verified |
 | `GetConfig` / `SetConfig` with per-field liveness | Rust | Verified |
-| The Settings screen driving them | Browser (WebKitGTK) | **NOT VERIFIED IN CI** — jsdom mocks the two calls; the e2e file drives the socket through the CLI |
-| Service start, restart and shutdown from the app | macOS | **NOT VERIFIED IN CI** — the browser layer starts a Linux `target/debug` daemon; launchd and Homebrew are unexercised |
-| Push (`Method::Watch`) and degrade-to-polling | Rust, Browser (WebKitGTK) | Verified on Linux; the shipped bridges are **NOT VERIFIED IN CI** |
+| The Settings screen driving them | Windows | Verified — the WebView changes a value and the independent CLI reads it back through the named pipe |
+| Service start, restart and shutdown from the app | Windows, macOS | Verified on Windows; macOS remains **NOT VERIFIED IN CI** because launchd and Homebrew are unexercised |
+| Push (`Method::Watch`) and degrade-to-polling | Rust, Windows, Browser (WebKitGTK) | Verified through the shipped Windows bridge and on Linux; macOS remains **NOT VERIFIED IN CI** |
 
 ### Sync
 
 | Requirement | Authoritative layer | State |
 |---|---|---|
-| Pairing: code mint, TTL, wrong code, unpair, revoke, Noise `NNpsk0` | Rust, Browser (WebKitGTK) | Verified — the browser layer pairs against a second real daemon |
+| Pairing: code mint, TTL, wrong code, unpair, revoke, Noise `NNpsk0` | Rust, Windows, Browser (WebKitGTK) | Verified — both desktop WebDriver runs pair against a second real daemon |
 | Merge: LWW, delete-wins, total tie-break, skew refusal | Rust | Verified |
 | The QR payload never enters the DOM (INV-13) | Browser (WebKitGTK) | Verified |
 | Camera QR scanning | macOS, Android | **NOT VERIFIED IN CI** — only the no-camera fallback runs |
@@ -174,6 +181,7 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | i18n: no catalogue key reaches the screen | Rust, Browser (WebKitGTK) | Verified |
 | Design tokens and contrast | `ci.yml` → `design tokens` | Verified |
 | The app renders on WKWebView | macOS | **NOT VERIFIED IN CI** — the tag-only smoke now requires native accessibility, screenshot and latency evidence, but no recovered run establishes it yet |
+| The app renders and lays out in WebView2 | Windows | Verified — the Windows suite requires the Tauri bridge, a populated React root and non-zero layout boxes |
 | The app renders on the Android WebView | Android | Verified — both APK legs fail unless the screen is awake and uiautomator reports named WebView content |
 | The frontend mounts and lays out in the Android WebView | Android | Verified — `e2e-android/` requires a populated React root and non-zero history-row boxes |
 | Navigation and keyboard input on Android | Android | Verified — the CDP harness taps between screens and types a search that must filter the list |
@@ -189,10 +197,15 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | Requirement | Authoritative layer | State |
 |---|---|---|
 | Menu-bar item, menu, recent-items submenu | macOS | **NOT VERIFIED IN CI** — the tag-only smoke infers it from the daemon answering |
+| Tray icon, menu and recent-items submenu | Windows | **NOT VERIFIED IN CI** — Edge WebDriver reaches the WebView, not the native notification area |
 | Popover placement under the tray icon | macOS | **NOT VERIFIED IN CI** — geometry is unit-tested against synthetic monitors |
 | Window dismissal on blur | macOS | **NOT VERIFIED IN CI** |
+| Main-window launch and WebView response | Windows | Verified — every E2E file opens a native app session and rejects a non-Tauri document |
+| Close-to-tray and Quick Paste window lifecycle | Windows | **NOT VERIFIED IN CI** — WebDriver cannot observe a hidden native window after its session closes |
 | Global hotkey, including whether TCC accepts the certificate (B-31) | macOS | **NOT VERIFIED IN CI** — nothing registers a shortcut anywhere |
 | Launch at login | macOS | **NOT VERIFIED IN CI** |
+| Global shortcut registration | Windows | Partial — Settings replaces and restores the native registration; OS-level delivery is **NOT VERIFIED IN CI** |
+| Launch-at-login registration | Windows | Partial — Settings changes and reads back the Windows registration; execution after sign-in is **NOT VERIFIED IN CI** |
 | Notification on copy | macOS | **NOT VERIFIED IN CI** — nothing posts or asserts one |
 | Sound on copy | macOS | **NOT VERIFIED IN CI** — the `should_play` gate is Rust-verified; the spawn is not |
 | Screen-capture protection, INV-35 (`contentProtected`, `FLAG_SECURE`) | macOS, Android | Partial — the Android API 36 leg finds `FLAG_SECURE` in twenty window dumps, with another window read as unprotected by the same reader. macOS `contentProtected` remains unasserted |
@@ -206,5 +219,6 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | `brew install --cask` as a user runs it | macOS | **NOT VERIFIED IN CI** — `check.sh` round-trips the generators only |
 | Published universal APK: build, R8, release signing, install, launch, no stripped symbol | Android | Partial — the exact signed artifact is checksum-verified and smoke-tested before publication, tag-only |
 | The signed release APK installed on a physical device | Android | Partial — publication depends on a tag-only hardware gate that installs and smoke-tests the exact artifact on one physical `arm64-v8a` device |
+| Windows current-user install, sidecars, launch and uninstall | Windows | Verified — `ci.yml` installs the NSIS output into a throwaway directory and requires complete cleanup; signing is unverified |
 | Notarisation and Gatekeeper acceptance | macOS | **NOT VERIFIED IN CI** — ADR-0001 decided against notarisation; recorded so it is not mistaken for coverage |
 | CLI verbs and `--json` | Rust | Verified |
