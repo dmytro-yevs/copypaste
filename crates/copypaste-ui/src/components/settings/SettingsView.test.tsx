@@ -108,11 +108,18 @@ describe("the settings navigation", () => {
     expect(screen.queryByText("Personal")).toBeNull();
   });
 
-  it("keeps Service visible on Android while omitting desktop-only storage", () => {
+  it("keeps the first native Storage target platform-visible on Android", async () => {
     setUserAgent("Mozilla/5.0 (Linux; Android 15)");
-    withClient(<SettingsView />);
+    const { user } = withUser(<SettingsView />);
     expect(screen.getByRole("tab", { name: "Service" })).toBeTruthy();
-    expect(screen.queryByRole("tab", { name: "Storage" })).toBeNull();
+    const storage = screen.getByRole("tab", { name: "Storage" });
+
+    await user.click(storage);
+
+    expect(storage.getAttribute("aria-selected")).toBe("true");
+    for (const label of ["Export…", "Import…", "Clear history"]) {
+      expect(await screen.findByRole("button", { name: label })).toBeTruthy();
+    }
   });
 
   it("does not offer a desktop shortcut control on Android", () => {
