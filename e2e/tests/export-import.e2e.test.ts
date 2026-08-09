@@ -110,7 +110,8 @@ describe("import", () => {
   test("the window renders the smuggled item as withheld", async () => {
     await waitForRows(app.browser, 3, 45_000);
     await app.browser.waitUntil(
-      async () => (await app.browser.$$('[aria-label^="Sensitive item, hidden"]')).length >= 2,
+      async () =>
+        (await app.browser.$$('[aria-label^="Sensitive item, hidden"]').length) >= 2,
       {
         timeout: 45_000,
         interval: 500,
