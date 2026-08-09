@@ -146,7 +146,7 @@ fn tick(state: &AppState, sweep_due: bool) -> Result<(), IngestError> {
             // `note_local_change` because this is the one caller that knows the
             // change was a *copy*, which is what a client needs to decide
             // whether to notify (parity finding 18).
-            state.note_capture();
+            state.note_capture(item.created_at);
             crate::notify::on_capture(state);
             Ok(())
         }

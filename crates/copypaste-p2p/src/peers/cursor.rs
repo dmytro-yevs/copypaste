@@ -80,10 +80,20 @@ impl CursorStore {
     }
 
     pub fn note_applied(&self, from_pairing_id: &str, floor_ms: i64) {
+        self.note_written(Some(from_pairing_id), floor_ms);
+    }
+
+    pub fn note_local(&self, floor_ms: i64) {
+        self.note_written(None, floor_ms);
+    }
+
+    fn note_written(&self, from_pairing_id: Option<&str>, floor_ms: i64) {
         self.mutate(|state| {
             let mut changed = false;
             for (pairing_id, record) in state.iter_mut() {
-                if pairing_id == from_pairing_id || record.since_ms <= floor_ms {
+                if from_pairing_id.is_some_and(|from| pairing_id == from)
+                    || record.since_ms <= floor_ms
+                {
                     continue;
                 }
                 let lowered = record.relay_floor_ms.map_or(floor_ms, |f| f.min(floor_ms));
@@ -184,6 +194,19 @@ mod tests {
             "the peer it came from already has it"
         );
         assert_eq!(cursors.get("laptop").advertise_from(5_000), 900);
+    }
+
+    #[test]
+    fn writing_an_older_local_version_pulls_every_peer_back_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let cursors = store(&dir);
+        cursors.record_session("laptop", 5_000);
+        cursors.record_session("phone", 6_000);
+
+        cursors.note_local(900);
+
+        assert_eq!(cursors.get("laptop").advertise_from(5_000), 900);
+        assert_eq!(cursors.get("phone").advertise_from(6_000), 900);
     }
 
     #[test]

@@ -131,6 +131,7 @@ impl AppState {
     /// reset the cadence, provoke an empty round on the other device, and ring
     /// back.
     pub fn note_local_change(&self) {
+        self.p2p.node().note_local_version(copypaste_core::now_ms());
         self.publish(EventKind::Items, false, 0);
         self.p2p.wake();
         self.cloud.wake();
@@ -152,7 +153,8 @@ impl AppState {
     /// read `notify_on_copy` — the event says what happened, the setting says
     /// what to do about it, and the surface that owns the notification reads
     /// it.
-    pub fn note_capture(&self) {
+    pub fn note_capture(&self, floor_ms: i64) {
+        self.p2p.node().note_local_version(floor_ms);
         self.publish(EventKind::Items, true, 0);
         self.p2p.wake();
         self.cloud.wake();

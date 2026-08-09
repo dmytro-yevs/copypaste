@@ -77,6 +77,7 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
             // again.
             if let Ok(Some(oldest)) = state.store.oldest_version_ms() {
                 crate::cloud::note_version_written(state, oldest);
+                state.p2p.node().note_local_version(oldest);
             }
             state.note_local_change();
             info!("restored the history database from a backup");

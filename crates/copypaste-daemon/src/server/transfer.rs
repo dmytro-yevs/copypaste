@@ -41,6 +41,7 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
                 // import was the writer that did not.
                 if let Some(oldest) = oldest {
                     crate::cloud::note_version_written(state, oldest);
+                    state.p2p.node().note_local_version(oldest);
                 }
                 state.note_local_change();
             }
