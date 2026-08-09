@@ -1170,6 +1170,7 @@ dependencies = [
  "copypaste-ipc",
  "copypaste-p2p",
  "copypaste-runtime-log",
+ "dispatch2",
  "futures-util",
  "hex",
  "image",
