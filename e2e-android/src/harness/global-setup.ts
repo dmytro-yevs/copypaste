@@ -5,14 +5,13 @@ import type { TestProject } from "vitest/node";
 
 import { PACKAGE, adb, isDebuggable, launchMain, shareText } from "./adb.js";
 import { attachToApp, type AndroidApp } from "./app.js";
+import { storedItems } from "./bridge.js";
 import { closeDevtools } from "./devtools.js";
 import { freshNonce, ordinaryFor, secretFor } from "./fixtures.js";
 import {
-  SEARCH,
-  clearField,
+  resetHistoryFilters,
   gotoView,
   scrollListToTop,
-  topRowIsMasked,
   visibleText,
   waitFor,
   waitForRows,
@@ -20,33 +19,29 @@ import {
 
 const OUT = process.env.HARNESS_OUT ?? "artifacts/android-ui";
 
-const SHARE_ATTEMPTS = 3;
-
-async function shareUntil(
+async function shareAndWait(
   app: AndroidApp,
   text: string,
   arrived: () => Promise<boolean>,
 ): Promise<void> {
-  for (let attempt = 1; attempt <= SHARE_ATTEMPTS; attempt += 1) {
-    await shareText(text);
-    await launchMain();
-    try {
-      await waitFor(arrived, "not yet", 25_000);
-      return;
-    } catch {
-      /* dropped on the way in; send it again */
-    }
-  }
-  throw new Error(`the shared clipping never reached the screen after ${SHARE_ATTEMPTS} attempts`);
+  await shareText(text);
+  await launchMain();
+  await waitFor(arrived, "the shared clipping never reached the store", 60_000);
 }
 
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
-  const devices = (await adb("devices"))
+  const attached = (await adb("devices"))
     .split("\n")
     .slice(1)
-    .filter((line) => /\tdevice$/.test(line));
-  if (devices.length !== 1) {
-    throw new Error(`expected one attached device, adb reports ${devices.length}`);
+    .filter((line) => /\tdevice$/.test(line))
+    .map((line) => line.split("\t", 1)[0]!);
+  const selected = process.env.ANDROID_SERIAL;
+  if (selected ? !attached.includes(selected) : attached.length !== 1) {
+    throw new Error(
+      selected
+        ? `ANDROID_SERIAL ${selected} is not an attached device`
+        : `expected one attached device, adb reports ${attached.length}; set ANDROID_SERIAL`,
+    );
   }
 
   // Stated as a precondition rather than discovered as a timeout: wry compiles
@@ -71,25 +66,29 @@ export default async function setup(project: TestProject): Promise<() => Promise
     // including a search filter from a previous run that would hide this run's
     // fixtures and read as "the item was never ingested".
     await gotoView(app, "History");
-    await clearField(app, SEARCH);
+    await resetHistoryFilters(app);
 
-    // One share at a time, each confirmed on screen before the next. Two
+    // One share at a time, each confirmed in the store before the next. Two
     // `am start`s in a row reach IntakeActivity while the first is still
     // finishing and the second is dropped — silently, because `am` reports
     // that it started the activity either way.
-    //
-    // Confirmed and *re-sent* if it does not arrive: waiting longer does not
-    // help a share that was dropped, and one that is dropped fails the whole
-    // run in global setup. Measured on API 36 with a few dozen rows already in
-    // the store, the second share is the one that goes missing.
-    await shareUntil(app, secret, async () => {
-      await scrollListToTop(app);
-      return topRowIsMasked(app);
-    });
-    await shareUntil(app, ordinary, async () => {
-      await scrollListToTop(app);
-      return (await visibleText(app)).includes(ordinary);
-    });
+    // The store observation is not retried input: a dropped intent fails this
+    // run instead of silently sending a second clipping and reporting green.
+    const before = new Set((await storedItems(app)).map((item) => item.id));
+    await shareAndWait(app, secret, async () =>
+      (await storedItems(app)).some(
+        (item) => !before.has(item.id) && item.is_sensitive,
+      ),
+    );
+    await shareAndWait(app, ordinary, async () =>
+      (await storedItems(app)).some((item) => item.content === ordinary),
+    );
+    await scrollListToTop(app);
+    await waitFor(
+      async () => (await visibleText(app)).includes(ordinary),
+      "the shared ordinary clipping reached the store but not the screen",
+      60_000,
+    );
     await waitForRows(app, 2, 60_000);
 
     mkdirSync(OUT, { recursive: true });
