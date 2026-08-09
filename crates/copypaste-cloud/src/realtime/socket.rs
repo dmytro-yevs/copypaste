@@ -4,14 +4,14 @@
 //! reset rule is a property of the *session*, not of the schedule: only the
 //! code that knows how long a session lasted can decide it was stable.
 
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use backon::{BackoffBuilder, ExponentialBuilder};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, watch, Notify};
+use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
 
 use super::channel::{open_channel, WsStream};
 use super::event::{RealtimeError, RealtimeEvent};
@@ -63,7 +63,7 @@ pub(super) async fn run(
     mut token: watch::Receiver<String>,
     user_id: String,
     tx: mpsc::Sender<Result<RealtimeEvent, RealtimeError>>,
-    shutdown: Arc<Notify>,
+    shutdown: CancellationToken,
 ) {
     let mut schedule = reconnect_policy().build();
     let mut stream = Some(first);
@@ -91,10 +91,8 @@ pub(super) async fn run(
             return;
         };
 
-        tokio::select! {
-            biased;
-            () = shutdown.notified() => return,
-            () = tokio::time::sleep(delay) => {}
+        if wait_to_reconnect(delay, &shutdown).await {
+            return;
         }
 
         // Read the token at each attempt, not once at startup.
@@ -133,7 +131,7 @@ pub(super) async fn run(
 async fn pump(
     ws: WsStream,
     tx: &mpsc::Sender<Result<RealtimeEvent, RealtimeError>>,
-    shutdown: &Notify,
+    shutdown: &CancellationToken,
     token: &mut watch::Receiver<String>,
 ) -> Exit {
     // Split so the heartbeat write and the inbound read are disjoint borrows.
@@ -150,7 +148,7 @@ async fn pump(
         tokio::select! {
             biased;
 
-            () = shutdown.notified() => {
+            () = shutdown.cancelled() => {
                 let _ = leave(&mut write, next_ref).await;
                 return Exit::Shutdown;
             }
@@ -232,6 +230,14 @@ async fn pump(
     }
 }
 
+async fn wait_to_reconnect(delay: Duration, shutdown: &CancellationToken) -> bool {
+    tokio::select! {
+        biased;
+        () = shutdown.cancelled() => true,
+        () = tokio::time::sleep(delay) => false,
+    }
+}
+
 /// The frame that re-authenticates a channel that is already joined.
 ///
 /// Phoenix's `access_token` event, which is how Supabase is told the JWT has
@@ -276,15 +282,11 @@ fn reconnect_policy() -> ExponentialBuilder {
         .with_jitter()
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-//
-// The schedule is arithmetic; nothing here opens a socket.
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{accept_async, connect_async};
 
     #[test]
     fn the_reauth_frame_is_a_phoenix_event_on_our_topic() {
@@ -335,5 +337,55 @@ mod tests {
             schedule.nth(10_000).is_some(),
             "the reconnect schedule gave up"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancellation_interrupts_reconnect_backoff() {
+        let shutdown = CancellationToken::new();
+        let waiting = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { wait_to_reconnect(RECONNECT_MAX, &shutdown).await }
+        });
+        tokio::task::yield_now().await;
+
+        shutdown.cancel();
+        tokio::task::yield_now().await;
+
+        assert!(waiting.is_finished(), "cancellation left backoff running");
+        assert!(waiting.await.expect("backoff task panicked"));
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_an_active_pump_after_leaving() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(tcp).await.unwrap();
+            ws.send(Message::Text("not json".into())).await.unwrap();
+
+            let leave = ws.next().await.unwrap().unwrap();
+            let Message::Text(leave) = leave else {
+                panic!("close arrived before phx_leave");
+            };
+            let frame: Value = serde_json::from_str(&leave).unwrap();
+            assert_eq!(frame[3], "phx_leave");
+            assert!(matches!(ws.next().await, Some(Ok(Message::Close(_)))));
+        });
+        let (client, _) = connect_async(format!("ws://{address}")).await.unwrap();
+        let (tx, mut events) = mpsc::channel(1);
+        let (token_tx, mut token_rx) = watch::channel(String::from("token"));
+        let shutdown = CancellationToken::new();
+        let pumping = tokio::spawn({
+            let shutdown = shutdown.clone();
+            async move { pump(client, &tx, &shutdown, &mut token_rx).await }
+        });
+
+        assert!(events.recv().await.unwrap().is_err());
+        shutdown.cancel();
+
+        assert!(matches!(pumping.await.unwrap(), Exit::Shutdown));
+        server.await.unwrap();
+        drop(token_tx);
     }
 }
