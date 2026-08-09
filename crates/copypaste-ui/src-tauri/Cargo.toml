@@ -102,9 +102,16 @@ tauri-plugin-autostart = "2"
 # AppKit supplies the frontmost-process hand-off after Quick Paste copies an
 # item. Tauri deliberately keeps this platform detail out of its cross-platform
 # window API.
-objc2-app-kit = { workspace = true, features = ["NSEvent", "NSRunningApplication", "NSWorkspace", "NSColor", "NSColorSpace", "libc"] }
+objc2-app-kit = { workspace = true, features = ["NSAccessibilityProtocols", "NSAlert", "NSButton", "NSControl", "NSEvent", "NSImage", "NSImageView", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSTextField", "NSView", "NSWindow", "NSWorkspace", "NSColor", "NSColorSpace", "libc"] }
 objc2.workspace = true
-objc2-foundation.workspace = true
+# The maintained objc2 sibling marshals modal AppKit work onto the main queue;
+# it is already present through Tauri and avoids raw dispatch FFI.
+dispatch2 = "0.3.1"
+objc2-foundation = { workspace = true, features = ["NSThread"] }
+# Maintained encoder/rendering crates own the QR matrix and PNG; pairing code
+# must not grow another handwritten QR implementation.
+qrcode = { version = "0.14.1", default-features = false, features = ["image"] }
+image.workspace = true
 # Tauri's tray hook exposes tray-icon's objc2 0.6 AppKit objects. Keep this
 # narrow alias beside the older capture bindings until they can move together.
 objc2-menu = { package = "objc2", version = "0.6.4" }
