@@ -54,10 +54,11 @@ done
 check "bash -n packaging/macos/selfsign.sh" bash -n packaging/macos/selfsign.sh
 
 for f in scripts/release/*.sh packaging/macos/selfsign.sh; do
-    if [[ -x "$f" ]]; then
+    mode="$(git ls-files --stage -- "$f" | awk '{print $1}')"
+    if [[ "$mode" == 100755 ]]; then
         ok "executable bit set on $f"
     else
-        bad "executable bit set on $f" "chmod +x $f"
+        bad "executable bit set on $f" "git update-index --chmod=+x -- $f"
     fi
 done
 
