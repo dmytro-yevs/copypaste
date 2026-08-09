@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, SyncError};
 use copypaste_core::RemoteVersion;
@@ -8,6 +8,11 @@ use super::{KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMAR
 use crate::backend::embedded::open::Inner;
 
 const UPLOAD_SCAN_LIMIT: i64 = 500;
+
+struct Round {
+    driver: Weak<super::Driver>,
+    cancel: tokio_util::sync::CancellationToken,
+}
 
 #[derive(Clone, Default)]
 struct Offer {
@@ -21,6 +26,7 @@ pub(super) struct StoreSource {
     inner: Arc<Inner>,
     shared: copypaste_core::StoreSource,
     last_offer: Mutex<Offer>,
+    round: Option<Round>,
 }
 
 impl StoreSource {
@@ -44,7 +50,34 @@ impl StoreSource {
             }),
             inner: Arc::clone(inner),
             last_offer: Mutex::new(Offer::default()),
+            round: None,
         }
+    }
+
+    pub(super) fn for_round(
+        inner: &Arc<Inner>,
+        driver: &Arc<super::Driver>,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Self {
+        let mut source = Self::new(inner);
+        source.round = Some(Round {
+            driver: Arc::downgrade(driver),
+            cancel: cancel.clone(),
+        });
+        source
+    }
+
+    fn while_active<T>(&self, f: impl FnOnce() -> Result<T, SyncError>) -> Result<T, SyncError> {
+        let Some(round) = self.round.as_ref() else {
+            return f();
+        };
+        let Some(expected) = round.driver.upgrade() else {
+            return Err(cancelled());
+        };
+        self.inner
+            .cloud
+            .with_driver(&expected, &round.cancel, f)
+            .unwrap_or_else(|| Err(cancelled()))
     }
 
     pub(super) fn commit_upload_floor(&self, started_ms: i64) -> Result<(), SyncError> {
@@ -61,10 +94,12 @@ impl StoreSource {
                 item_id: None,
             }
         };
-        self.inner
-            .cloud
-            .commit_upload_floor(&self.inner, &offer.started, offer.started_epoch, &candidate)
-            .map_err(source_error)
+        self.while_active(|| {
+            self.inner
+                .cloud
+                .commit_upload_floor(&self.inner, &offer.started, offer.started_epoch, &candidate)
+                .map_err(source_error)
+        })
     }
 }
 
@@ -78,6 +113,87 @@ impl CloudSource for StoreSource {
     }
 
     fn local_changes_after(
+        &self,
+        since_ms: i64,
+        after_item_id: Option<&str>,
+    ) -> Result<Vec<LocalItem>, SyncError> {
+        self.while_active(|| self.local_changes_after_active(since_ms, after_item_id))
+    }
+
+    fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError> {
+        self.while_active(|| self.apply_remote_active(item))
+    }
+
+    fn watermark(&self) -> Result<i64, SyncError> {
+        self.while_active(|| {
+            self.inner
+                .state
+                .store
+                .state_ms(KEY_WATERMARK)
+                .map_err(source_error)
+        })
+    }
+    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
+        self.while_active(|| {
+            self.inner
+                .state
+                .store
+                .state(KEY_WATERMARK_ITEM)
+                .map_err(source_error)
+        })
+    }
+    fn upload_floor(&self) -> Result<i64, SyncError> {
+        self.while_active(|| {
+            self.inner
+                .state
+                .store
+                .state_ms(KEY_UPLOAD_FLOOR)
+                .map_err(source_error)
+        })
+    }
+    fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
+        self.while_active(|| {
+            self.inner
+                .state
+                .store
+                .state(KEY_UPLOAD_FLOOR_ITEM)
+                .map_err(source_error)
+        })
+    }
+
+    fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
+        self.while_active(|| {
+            self.inner
+                .state
+                .store
+                .set_state_all(&[
+                    (KEY_WATERMARK, &ms.max(0).to_string()),
+                    (KEY_WATERMARK_ITEM, ""),
+                ])
+                .map_err(source_error)
+        })
+    }
+
+    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
+        self.while_active(|| {
+            self.inner
+                .state
+                .store
+                .set_state_all(&[
+                    (KEY_WATERMARK, &ms.max(0).to_string()),
+                    (KEY_WATERMARK_ITEM, item_id),
+                ])
+                .map_err(source_error)
+        })
+    }
+
+    fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
+        self.while_active(|| self.requeue_local_winner_active(incoming))
+    }
+}
+
+impl StoreSource {
+    fn local_changes_after_active(
         &self,
         since_ms: i64,
         after_item_id: Option<&str>,
@@ -136,7 +252,7 @@ impl CloudSource for StoreSource {
         Ok(items)
     }
 
-    fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError> {
+    fn apply_remote_active(&self, item: LocalItem) -> Result<Applied, SyncError> {
         let text = copypaste_ipc::content_type::is_text(&item.content_type)
             .then(|| String::from_utf8_lossy(&item.content));
         let applied = self
@@ -162,58 +278,7 @@ impl CloudSource for StoreSource {
         })
     }
 
-    fn watermark(&self) -> Result<i64, SyncError> {
-        self.inner
-            .state
-            .store
-            .state_ms(KEY_WATERMARK)
-            .map_err(source_error)
-    }
-    fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
-        self.inner
-            .state
-            .store
-            .state(KEY_WATERMARK_ITEM)
-            .map_err(source_error)
-    }
-    fn upload_floor(&self) -> Result<i64, SyncError> {
-        self.inner
-            .state
-            .store
-            .state_ms(KEY_UPLOAD_FLOOR)
-            .map_err(source_error)
-    }
-    fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
-        self.inner
-            .state
-            .store
-            .state(KEY_UPLOAD_FLOOR_ITEM)
-            .map_err(source_error)
-    }
-
-    fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
-        self.inner
-            .state
-            .store
-            .set_state_all(&[
-                (KEY_WATERMARK, &ms.max(0).to_string()),
-                (KEY_WATERMARK_ITEM, ""),
-            ])
-            .map_err(source_error)
-    }
-
-    fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
-        self.inner
-            .state
-            .store
-            .set_state_all(&[
-                (KEY_WATERMARK, &ms.max(0).to_string()),
-                (KEY_WATERMARK_ITEM, item_id),
-            ])
-            .map_err(source_error)
-    }
-
-    fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
+    fn requeue_local_winner_active(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
         let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
             .then(|| String::from_utf8_lossy(&incoming.content));
         let stamp = copypaste_core::local_winner_stamp(
@@ -242,6 +307,10 @@ impl CloudSource for StoreSource {
     }
 }
 
+fn cancelled() -> SyncError {
+    SyncError::Source("the cloud account changed during this round")
+}
+
 fn source_error(error: impl std::fmt::Debug) -> SyncError {
     tracing::warn!(?error, "embedded cloud source failed");
     SyncError::Source(copypaste_core::sync::MSG_STORE)
@@ -249,14 +318,40 @@ fn source_error(error: impl std::fmt::Debug) -> SyncError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::super::{KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM};
     use super::*;
     use crate::backend::embedded::tests::backend;
     use crate::backend::Backend;
-    use copypaste_cloud::sync::CloudSource;
+    use copypaste_cloud::auth::{Session, SupabaseAuth};
+    use copypaste_cloud::rest::SupabaseRest;
+    use copypaste_cloud::sync::{CloudSource, CloudSync, SensitiveGuard};
+    use copypaste_cloud::{CloudConfig, SyncKey};
     use copypaste_ipc::ExportItem;
     use copypaste_p2p::protocol::{content_hash, SyncItem};
     use copypaste_p2p::sync::SyncSource;
+    use tokio_util::sync::CancellationToken;
+
+    fn driver(token: &str) -> Arc<super::super::Driver> {
+        let config = CloudConfig {
+            url: "https://example.invalid".into(),
+            anon_key: "public-anon".into(),
+        };
+        Arc::new(CloudSync::new(
+            SupabaseRest::new(config.clone()),
+            SupabaseAuth::new(config.clone()),
+            SyncKey::from_bytes([9; 32]),
+            config,
+            Session {
+                access_token: token.into(),
+                refresh_token: format!("refresh-{token}"),
+                user_id: "user-1".into(),
+                expires_at_ms: 123_000,
+            },
+            SensitiveGuard::new(|_| false),
+        ))
+    }
 
     fn set_floor(source: &StoreSource, created_at: i64, item_id: &str) {
         source
@@ -428,5 +523,79 @@ mod tests {
             .unwrap());
         assert_eq!(cloud.upload_floor().unwrap(), tombstone.created_at);
         assert_eq!(cloud.upload_floor_item_id().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_replaced_accounts_source_cannot_apply_or_advance() {
+        let (backend, _clipboard, _dir) = backend();
+        let stale = driver("stale");
+        backend
+            .inner
+            .cloud
+            .account
+            .install(super::super::account::Account {
+                email: "old@example.com".into(),
+                user_id: "user-1".into(),
+                driver: Arc::clone(&stale),
+                cancel: CancellationToken::new(),
+            });
+        let cancel = backend.inner.cloud.account.round().unwrap().1;
+        let source = StoreSource::for_round(&backend.inner, &stale, &cancel);
+        backend
+            .inner
+            .cloud
+            .account
+            .install(super::super::account::Account {
+                email: "new@example.com".into(),
+                user_id: "user-2".into(),
+                driver: driver("current"),
+                cancel: CancellationToken::new(),
+            });
+
+        assert!(source.set_watermark_keyset(9_000, "z").is_err());
+        assert!(source
+            .apply_remote(LocalItem {
+                item_id: "old-account-item".into(),
+                content: b"must not land".to_vec(),
+                content_type: copypaste_ipc::content_type::TEXT.into(),
+                payload_metadata: None,
+                created_at: 9_000,
+                deleted: false,
+                origin_device_id: "old-device".into(),
+            })
+            .is_err());
+
+        assert_eq!(source.inner.state.store.state_ms(KEY_WATERMARK).unwrap(), 0);
+        assert!(source
+            .inner
+            .state
+            .store
+            .version("old-account-item")
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_paused_accounts_old_source_cannot_advance() {
+        let (backend, _clipboard, _dir) = backend();
+        let current = driver("current");
+        backend
+            .inner
+            .cloud
+            .account
+            .install(super::super::account::Account {
+                email: "a@example.com".into(),
+                user_id: "user-1".into(),
+                driver: Arc::clone(&current),
+                cancel: CancellationToken::new(),
+            });
+        let cancel = backend.inner.cloud.account.round().unwrap().1;
+        let source = StoreSource::for_round(&backend.inner, &current, &cancel);
+
+        backend.inner.cloud.account.interrupt();
+
+        assert!(cancel.is_cancelled());
+        assert!(source.set_watermark_keyset(9_000, "z").is_err());
+        assert_eq!(source.inner.state.store.state_ms(KEY_WATERMARK).unwrap(), 0);
     }
 }

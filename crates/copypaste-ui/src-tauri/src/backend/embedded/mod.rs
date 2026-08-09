@@ -372,6 +372,7 @@ impl Backend for EmbeddedBackend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.inner.cloud.shutdown();
         Ok(())
     }
 

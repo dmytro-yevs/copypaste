@@ -1,8 +1,11 @@
+mod account;
+mod credentials;
 mod cursor;
+mod schedule;
 mod source;
 
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use copypaste_cloud::auth::{AuthError, Session, SupabaseAuth};
 use copypaste_cloud::crypto::derive_sync_key;
@@ -11,35 +14,26 @@ use copypaste_cloud::sync::{CloudSync, SensitiveGuard, SyncError};
 use copypaste_cloud::{CloudConfig, SyncKey};
 use copypaste_ipc::{CloudStatusData, CloudSyncData, ErrorCode};
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use super::open::Inner;
 use super::{BackendError, Result};
+use account::{Account, AccountSlot};
+use credentials::{
+    read_key, read_session, write_session, CREDENTIAL_KEYS, KEY_EMAIL, KEY_LAST_SYNC, KEY_SYNC_KEY,
+    KEY_USER_ID,
+};
 use cursor::{UploadCursor, UploadFloor};
+use schedule::until_cancelled;
 use source::StoreSource;
 
 type Driver = CloudSync<SupabaseRest, SupabaseAuth>;
 
-const KEY_EMAIL: &str = "cloud_email";
-const KEY_USER_ID: &str = "cloud_user_id";
-const KEY_ACCESS: &str = "cloud_access_token";
-const KEY_REFRESH: &str = "cloud_refresh_token";
-const KEY_EXPIRES: &str = "cloud_expires_at_ms";
-const KEY_SYNC_KEY: &str = "cloud_sync_key";
-const KEY_LAST_SYNC: &str = "cloud_last_sync_ms";
 pub(super) const KEY_WATERMARK: &str = "cloud_watermark_ms";
 pub(super) const KEY_WATERMARK_ITEM: &str = "cloud_watermark_item_id";
 pub(super) const KEY_UPLOAD_FLOOR: &str = "cloud_upload_floor_ms";
 pub(super) const KEY_UPLOAD_FLOOR_ITEM: &str = "cloud_upload_floor_item_id";
-const CREDENTIAL_KEYS: &[&str] = &[
-    KEY_EMAIL,
-    KEY_USER_ID,
-    KEY_ACCESS,
-    KEY_REFRESH,
-    KEY_EXPIRES,
-    KEY_SYNC_KEY,
-    KEY_LAST_SYNC,
-];
 
 const MSG_NOT_CONFIGURED: &str = "Cloud sync is not configured in this build.";
 const MSG_SIGNED_OUT: &str = "Sign in before syncing.";
@@ -49,32 +43,28 @@ const MSG_UNAVAILABLE: &str = "The account service could not be reached.";
 const MSG_PASSPHRASE: &str = "The sync passphrase is too short.";
 const MSG_STORE: &str = "The sync account could not be stored.";
 
-struct Account {
-    email: String,
-    user_id: String,
-    driver: Arc<Driver>,
-}
-
 pub(super) struct EmbeddedCloud {
     config: Option<CloudConfig>,
-    account: Mutex<Option<Account>>,
+    account: AccountSlot,
     last_sync_ms: AtomicI64,
     last_error: Mutex<Option<&'static str>>,
     upload_cursor: UploadCursor,
     wake: Notify,
     poller_started: AtomicBool,
+    shutdown: CancellationToken,
 }
 
 impl EmbeddedCloud {
     pub(super) fn open(state: &super::state::BackendState) -> Self {
         let cloud = Self {
             config: cloud_config(),
-            account: Mutex::new(None),
+            account: AccountSlot::default(),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
             upload_cursor: UploadCursor::new(),
             wake: Notify::new(),
             poller_started: AtomicBool::new(false),
+            shutdown: CancellationToken::new(),
         };
         cloud.restore(state);
         cloud
@@ -101,7 +91,8 @@ impl EmbeddedCloud {
             return;
         }
         let inner = Arc::downgrade(inner);
-        tokio::spawn(async move { poll(inner).await });
+        let shutdown = self.shutdown.clone();
+        tokio::spawn(async move { schedule::poll(inner, shutdown).await });
     }
 
     pub(super) async fn sign_in(
@@ -131,32 +122,36 @@ impl EmbeddedCloud {
             .map_err(|_| BackendError::internal(MSG_PASSPHRASE))?
             .map_err(|_| BackendError::Invalid(MSG_PASSPHRASE))?;
 
+        self.account.cancel();
         let previous = inner.state.store.state(KEY_USER_ID).ok().flatten();
         let switched = previous.as_deref() != Some(&user_id);
-        if switched {
-            inner
+        if switched
+            && inner
                 .state
                 .store
                 .set_state_all(&[(KEY_WATERMARK, "0"), (KEY_WATERMARK_ITEM, "")])
-                .map_err(|_| BackendError::internal(MSG_STORE))?;
+                .is_err()
+        {
+            self.clear_local(&inner.state.store);
+            return Err(BackendError::internal(MSG_STORE));
         }
-        self.upload_cursor
-            .reset(&inner.state.store)
-            .map_err(|_| BackendError::internal(MSG_STORE))?;
+        if self.upload_cursor.reset(&inner.state.store).is_err() {
+            self.clear_local(&inner.state.store);
+            return Err(BackendError::internal(MSG_STORE));
+        }
         let key_hex = Zeroizing::new(hex::encode(key.to_bytes()));
         let driver = Arc::new(make_driver(inner, config, key, session));
-        let mut account = self.account();
-        *account = Some(Account {
+        self.account.install(Account {
             email,
             user_id,
-            driver,
+            driver: Arc::clone(&driver),
+            cancel: CancellationToken::new(),
         });
         if switched {
             self.last_sync_ms.store(0, Ordering::Release);
             let _ = inner.state.store.clear_state(&[KEY_LAST_SYNC]);
         }
         *self.error() = None;
-        drop(account);
         if self.persist(&inner.state.store, &key_hex).is_err() {
             self.clear_local(&inner.state.store);
             return Err(BackendError::internal(MSG_STORE));
@@ -167,7 +162,7 @@ impl EmbeddedCloud {
     }
 
     pub(super) async fn sign_out(&self, inner: &Arc<Inner>) {
-        let account = self.account().take();
+        let account = self.account.take();
         self.clear_local(&inner.state.store);
         if let (Some(account), Some(config)) = (account, self.config.clone()) {
             let token = account
@@ -187,12 +182,17 @@ impl EmbeddedCloud {
         if self.config.is_none() {
             return Err(BackendError::Unsupported(MSG_NOT_CONFIGURED));
         }
-        let driver = self.driver().ok_or_else(|| {
+        if self.shutdown.is_cancelled() {
+            return Err(BackendError::NotReady);
+        }
+        let (driver, cancel) = self.account.round().ok_or_else(|| {
             BackendError::from_code(Some(ErrorCode::AuthFailed), None, Some(MSG_SIGNED_OUT))
         })?;
-        let source = StoreSource::new(inner);
+        let source = StoreSource::for_round(inner, &driver, &cancel);
         let started = copypaste_core::now_ms();
-        let outcome = driver.sync(&source).await;
+        let Some(outcome) = until_cancelled(&cancel, driver.sync(&source)).await else {
+            return Err(BackendError::NotReady);
+        };
         self.persist_session(&inner.state.store, &driver);
         match outcome {
             Ok(stats) => {
@@ -250,10 +250,11 @@ impl EmbeddedCloud {
             session,
             guard,
         );
-        *self.account() = Some(Account {
+        self.account.install(Account {
             email,
             user_id,
             driver: Arc::new(driver),
+            cancel: CancellationToken::new(),
         });
         if let Ok(ms) = store.state_ms(KEY_LAST_SYNC) {
             self.last_sync_ms.store(ms, Ordering::Release);
@@ -316,7 +317,9 @@ impl EmbeddedCloud {
             return;
         }
         if terminal {
-            let _expired = account.take();
+            if let Some(expired) = account.take() {
+                expired.cancel.cancel();
+            }
             let _ = store.clear_state(CREDENTIAL_KEYS);
             self.last_sync_ms.store(0, Ordering::Release);
         }
@@ -324,21 +327,26 @@ impl EmbeddedCloud {
     }
 
     fn clear_local(&self, store: &copypaste_core::Store) {
-        *self.account() = None;
+        self.account.take();
         let _ = store.clear_state(CREDENTIAL_KEYS);
         self.last_sync_ms.store(0, Ordering::Release);
         *self.error() = None;
     }
 
     fn driver(&self) -> Option<Arc<Driver>> {
-        self.account()
-            .as_ref()
-            .map(|value| Arc::clone(&value.driver))
+        self.account.driver()
+    }
+
+    fn with_driver<T>(
+        &self,
+        expected: &Arc<Driver>,
+        cancel: &CancellationToken,
+        f: impl FnOnce() -> T,
+    ) -> Option<T> {
+        self.account.with_driver(expected, cancel, f)
     }
     fn account(&self) -> MutexGuard<'_, Option<Account>> {
-        self.account
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
+        self.account.lock()
     }
     fn error(&self) -> MutexGuard<'_, Option<&'static str>> {
         self.last_error
@@ -349,6 +357,20 @@ impl EmbeddedCloud {
     pub(super) fn note_version_written(&self, inner: &Inner, created_at: i64) {
         self.upload_cursor
             .note_version_written(&inner.state.store, created_at);
+    }
+
+    pub(super) fn sync_enabled_changed(&self, enabled: bool) {
+        if enabled {
+            self.wake.notify_one();
+        } else {
+            self.account.interrupt();
+        }
+    }
+
+    pub(super) fn shutdown(&self) {
+        self.account.cancel();
+        self.shutdown.cancel();
+        self.wake.notify_one();
     }
 
     fn upload_floor_epoch(&self) -> u64 {
@@ -364,28 +386,6 @@ impl EmbeddedCloud {
     ) -> std::result::Result<(), copypaste_core::StoreError> {
         self.upload_cursor
             .commit(&inner.state.store, started, started_epoch, candidate)
-    }
-}
-
-async fn poll(inner: Weak<Inner>) {
-    loop {
-        let Some(owner) = inner.upgrade() else {
-            break;
-        };
-        let wait = owner
-            .cloud
-            .driver()
-            .map_or(std::time::Duration::from_secs(60), |driver| {
-                driver.poll_interval()
-            });
-        tokio::select! { _ = owner.cloud.wake.notified() => {}, _ = tokio::time::sleep(wait) => {} }
-        drop(owner);
-        let Some(owner) = inner.upgrade() else {
-            break;
-        };
-        if owner.settings().sync_enabled {
-            let _ = owner.cloud.sync_now(&owner).await;
-        }
     }
 }
 
@@ -421,34 +421,6 @@ fn sensitive_guard(detector: &Arc<copypaste_core::Detector>) -> SensitiveGuard {
     let detector = Arc::clone(detector);
     SensitiveGuard::new(move |item| {
         std::str::from_utf8(&item.content).is_ok_and(|text| detector.is_sensitive(text))
-    })
-}
-
-fn read_session(store: &copypaste_core::Store) -> Option<Session> {
-    Some(Session {
-        access_token: store.state(KEY_ACCESS).ok()??,
-        refresh_token: store.state(KEY_REFRESH).ok()??,
-        user_id: store.state(KEY_USER_ID).ok()??,
-        expires_at_ms: store.state_ms(KEY_EXPIRES).ok()?,
-    })
-}
-fn read_key(store: &copypaste_core::Store) -> Option<SyncKey> {
-    let bytes: [u8; 32] = hex::decode(store.state(KEY_SYNC_KEY).ok()??)
-        .ok()?
-        .try_into()
-        .ok()?;
-    Some(SyncKey::from_bytes(bytes))
-}
-fn write_session(
-    store: &copypaste_core::Store,
-    driver: &Driver,
-) -> std::result::Result<(), copypaste_core::StoreError> {
-    driver.inspect_session(|session| {
-        store.set_state_all(&[
-            (KEY_ACCESS, &session.access_token),
-            (KEY_REFRESH, &session.refresh_token),
-            (KEY_EXPIRES, &session.expires_at_ms.to_string()),
-        ])
     })
 }
 
@@ -498,6 +470,7 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
 
 #[cfg(test)]
 mod tests {
+    use super::credentials::KEY_ACCESS;
     use super::*;
 
     fn configured() -> EmbeddedCloud {
@@ -506,12 +479,13 @@ mod tests {
                 url: "https://example.invalid".into(),
                 anon_key: "public-anon".into(),
             }),
-            account: Mutex::new(None),
+            account: AccountSlot::default(),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
             upload_cursor: UploadCursor::new(),
             wake: Notify::new(),
             poller_started: AtomicBool::new(false),
+            shutdown: CancellationToken::new(),
         }
     }
 
@@ -561,6 +535,7 @@ mod tests {
             email: "a@example.com".into(),
             user_id: "user-1".into(),
             driver,
+            cancel: CancellationToken::new(),
         });
         cloud.persist(&state.store, &hex::encode([9; 32])).unwrap();
 
@@ -609,6 +584,7 @@ mod tests {
             email: "a@example.com".into(),
             user_id: "user-1".into(),
             driver: Arc::clone(&driver),
+            cancel: CancellationToken::new(),
         });
         state.store.set_state(KEY_ACCESS, "secret").unwrap();
 
@@ -631,6 +607,7 @@ mod tests {
             email: "new@example.com".into(),
             user_id: "user-1".into(),
             driver: current,
+            cancel: CancellationToken::new(),
         });
 
         cloud.record_failure(&state.store, &stale, MSG_UNAVAILABLE, true);
@@ -641,5 +618,69 @@ mod tests {
         assert_eq!(status.email.as_deref(), Some("new@example.com"));
         assert_eq!(status.last_error, None);
         assert_eq!(status.last_sync_ms, None);
+    }
+
+    #[tokio::test]
+    async fn signing_out_cancels_an_in_flight_round() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let cloud = configured();
+        let driver = driver(&cloud, &state, "access");
+        let cancel = CancellationToken::new();
+        cloud.account.install(Account {
+            email: "a@example.com".into(),
+            user_id: "user-1".into(),
+            driver,
+            cancel: cancel.clone(),
+        });
+
+        cloud.clear_local(&state.store);
+
+        assert!(cancel.is_cancelled());
+        assert_eq!(
+            until_cancelled(&cancel, std::future::pending::<()>()).await,
+            None
+        );
+    }
+
+    #[test]
+    fn disabling_sync_interrupts_a_round_without_signing_out() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let cloud = configured();
+        let driver = driver(&cloud, &state, "access");
+        let previous = CancellationToken::new();
+        cloud.account.install(Account {
+            email: "a@example.com".into(),
+            user_id: "user-1".into(),
+            driver,
+            cancel: previous.clone(),
+        });
+
+        cloud.sync_enabled_changed(false);
+
+        assert!(previous.is_cancelled());
+        assert!(cloud.status().signed_in);
+        assert!(!cloud.account.round().unwrap().1.is_cancelled());
+    }
+
+    #[test]
+    fn shutdown_cancels_the_engine_and_current_round() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let cloud = configured();
+        let driver = driver(&cloud, &state, "access");
+        let cancel = CancellationToken::new();
+        cloud.account.install(Account {
+            email: "a@example.com".into(),
+            user_id: "user-1".into(),
+            driver,
+            cancel: cancel.clone(),
+        });
+
+        cloud.shutdown();
+
+        assert!(cancel.is_cancelled());
+        assert!(cloud.shutdown.is_cancelled());
     }
 }

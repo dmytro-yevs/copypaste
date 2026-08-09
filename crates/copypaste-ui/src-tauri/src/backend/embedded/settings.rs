@@ -100,7 +100,8 @@ pub(super) async fn get(backend: &EmbeddedBackend) -> Result<ConfigApplied> {
 }
 
 pub(super) async fn set(backend: &EmbeddedBackend, patch: ConfigPatch) -> Result<ConfigApplied> {
-    backend
+    let sync_enabled = patch.sync_enabled;
+    let applied = backend
         .blocking(move |inner| {
             let restart_required = copypaste_ipc::ConfigData::restart_required_by(&patch)
                 .into_iter()
@@ -112,7 +113,11 @@ pub(super) async fn set(backend: &EmbeddedBackend, patch: ConfigPatch) -> Result
                 restart_required,
             })
         })
-        .await
+        .await?;
+    if let Some(enabled) = sync_enabled {
+        backend.inner.cloud.sync_enabled_changed(enabled);
+    }
+    Ok(applied)
 }
 
 pub(super) async fn get_private_mode(backend: &EmbeddedBackend) -> Result<PrivateModeData> {
