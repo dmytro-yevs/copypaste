@@ -20,6 +20,7 @@ use zeroize::Zeroizing;
 use super::connection::{apply_connection_pragmas, apply_key, validate_key};
 use super::model::StoreError;
 
+// The live counter is derived by the target database's item triggers.
 const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_device_name"];
 
 #[derive(Debug, thiserror::Error)]
@@ -339,6 +340,27 @@ mod tests {
     }
 
     #[test]
+    fn restore_derives_the_live_count_from_restored_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _path) = file_store(&dir);
+        store.insert(item("backup row", T0)).unwrap();
+        let backup = dir.path().join("history.backup");
+        store.backup_to(&backup).unwrap();
+
+        let candidate = open_validated(&backup, &KEY).unwrap();
+        candidate
+            .execute("UPDATE clipboard_live_count SET live = 99", [])
+            .unwrap();
+        drop(candidate);
+        store.insert(item("later row", T0 + 60_000)).unwrap();
+
+        store
+            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
+            .unwrap();
+        assert_eq!(store.count().unwrap(), 1);
+    }
+
+    #[test]
     fn restore_with_another_devices_key_preserves_history() {
         let dir = tempfile::tempdir().unwrap();
         let (store, _path) = file_store(&dir);
@@ -363,7 +385,7 @@ mod tests {
         store.backup_to(&backup).unwrap();
 
         let conn = open_validated(&backup, &KEY).unwrap();
-        conn.execute("CREATE TABLE clipboard_live_count (count INTEGER)", [])
+        conn.execute("CREATE TABLE future_schema_object (value INTEGER)", [])
             .unwrap();
         drop(conn);
         store.insert(item("live row", T0 + 1)).unwrap();

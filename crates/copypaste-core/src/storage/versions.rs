@@ -573,6 +573,28 @@ mod tests {
     }
 
     #[test]
+    fn an_upsert_counts_tombstoning_and_resurrection() {
+        let s = store();
+        let row = s.insert(item("contested", T0)).unwrap();
+
+        let tombstone = IncomingItem {
+            content_ciphertext: None,
+            nonce: None,
+            deleted: true,
+            search_text: None,
+            ..incoming(&row.id, &row.content_hash, T0 + 1)
+        };
+        s.upsert(&tombstone).unwrap();
+        assert_eq!(s.count().unwrap(), 0);
+        s.upsert(&tombstone).unwrap();
+        assert_eq!(s.count().unwrap(), 0, "reapplying must not decrement twice");
+
+        s.upsert(&incoming(&row.id, "newer-hash", T0 + 900_000))
+            .unwrap();
+        assert_eq!(s.count().unwrap(), 1);
+    }
+
+    #[test]
     fn an_incoming_version_replaces_pin_state() {
         let s = store();
         let kept = s.insert(item("kept", T0)).unwrap();
