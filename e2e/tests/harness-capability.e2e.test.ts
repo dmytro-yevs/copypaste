@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { assertTauriBrowserName } from "../src/harness/app.js";
+import {
+  assertTauriBridge,
+  assertTauriBrowserName,
+} from "../src/harness/app.js";
 
 describe("Tauri WebDriver capabilities", () => {
   it("accepts WebView2 only on Windows", () => {
@@ -29,4 +32,21 @@ describe("Tauri WebDriver capabilities", () => {
       );
     },
   );
+});
+
+describe("Tauri bridge startup", () => {
+  it("waits only for WebView2's initial about:blank", () => {
+    expect(() =>
+      assertTauriBridge({ bridge: false, url: "about:blank" }, false),
+    ).not.toThrow();
+    expect(() =>
+      assertTauriBridge({ bridge: false, url: "about:blank" }, true),
+    ).toThrow(/no IPC is under test/);
+  });
+
+  it("rejects another bridgeless page immediately", () => {
+    expect(() =>
+      assertTauriBridge({ bridge: false, url: "http://localhost:1420/" }, false),
+    ).toThrow(/no IPC is under test/);
+  });
 });

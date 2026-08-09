@@ -214,6 +214,19 @@ export function assertTauriBrowserName(
   }
 }
 
+export function assertTauriBridge(
+  probe: { bridge: boolean; url: string },
+  bootstrapExpired: boolean,
+): void {
+  if (probe.bridge) return;
+  // DMY-41: EdgeDriver can attach while WebView2 still exposes its initial page.
+  if (!bootstrapExpired && probe.url === "about:blank") return;
+  throw new Error(
+    `window.__TAURI_INTERNALS__ is absent at ${probe.url} — the page is ` +
+      `loaded outside the Tauri bridge, so no IPC is under test.`,
+  );
+}
+
 async function probeUntilMounted(browser: Browser, driver: Child): Promise<void> {
   const deadline = Date.now() + 60_000;
   let last = "";
@@ -246,12 +259,7 @@ async function probeUntilMounted(browser: Browser, driver: Child): Promise<void>
     if (probe.js !== 4) {
       throw new Error(`the WebView did not evaluate arithmetic: got ${probe.js}`);
     }
-    if (!probe.bridge) {
-      throw new Error(
-        `window.__TAURI_INTERNALS__ is absent at ${probe.url} — the page is ` +
-          `loaded outside the Tauri bridge, so no IPC is under test.`,
-      );
-    }
+    assertTauriBridge(probe, Date.now() > deadline);
     if (probe.rootChildren > 0 && probe.nodes > 30) return;
 
     last = `url=${probe.url} nodes=${probe.nodes} rootChildren=${probe.rootChildren} text=${JSON.stringify(probe.text)}`;
