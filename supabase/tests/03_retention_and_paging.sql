@@ -1,9 +1,9 @@
 -- ---------------------------------------------------------------------------
 -- Retention behaviour, and the plan the pull query actually gets.
 --
--- Transactional and rolled back, like 02, but this one needs a session role
--- that can write `inserted_at` directly (a superuser, i.e. the local stack or
--- the harness) because the whole point of that column is that no client can.
+-- Transactional and rolled back, like 02, but this one needs a fixture role
+-- that bypasses forced RLS and can write `inserted_at` directly because the
+-- whole point of that column is that no client can.
 --
 --     psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/03_retention_and_paging.sql
 -- ---------------------------------------------------------------------------
@@ -12,10 +12,10 @@
 
 do $$
 begin
-    if not (select rolsuper from pg_roles where rolname = current_user) then
+    if not (select rolsuper or rolbypassrls from pg_roles where rolname = current_user) then
         raise exception
-            'this file needs a superuser session: `inserted_at` is deliberately not writable '
-            'by any other role, and forced RLS applies to the table owner too';
+            'this file needs a BYPASSRLS fixture session: `inserted_at` is deliberately not '
+            'writable by client roles, and forced RLS applies to the table owner too';
     end if;
     if not exists (select 1 from auth.users where id = '11111111-1111-4111-8111-111111111111') then
         raise exception 'the development accounts are missing: run `supabase db reset` or supabase/dev/verify-schema.sh';
