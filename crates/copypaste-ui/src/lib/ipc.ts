@@ -57,7 +57,7 @@ export { hasBridge };
 
 /** The IPC protocol version this build speaks. A daemon reporting anything
  *  else raises the mismatch banner (INV-17) rather than degrading silently. */
-export const CURRENT_PROTOCOL_VERSION = 1;
+export const CURRENT_PROTOCOL_VERSION = 2;
 
 /** `cursor` is a position, not a row number: the list grows at the top while it
  *  is read, so an offset taken for page 1 names a different boundary by page 2
