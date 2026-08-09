@@ -15,7 +15,7 @@ use tracing::{debug, info, warn};
 
 use crate::cloud::refresh::is_terminal_auth_error;
 use crate::cloud::source::StoreSource;
-use crate::cloud::Driver;
+use crate::cloud::{Driver, MSG_ACCOUNT_CHANGED};
 
 use crate::AppState;
 
@@ -64,14 +64,19 @@ pub async fn sync_round(state: &Arc<AppState>) -> Option<Result<CloudSyncData, S
     if !state.settings.get().sync_enabled {
         return None;
     }
-    let driver = state.cloud.driver()?;
-    let source = StoreSource::new(Arc::clone(state));
+    let account = state.cloud.round()?;
+    let driver = account.driver;
+    let source = StoreSource::for_round(Arc::clone(state), Arc::clone(&driver));
 
     // Captured *before* the round, so that everything created while it runs is
     // still offered on the next one. Advancing the floor to "now" afterwards
     // would silently drop items captured mid-round.
     let started_ms = copypaste_core::now_ms();
-    let outcome = driver.sync(&source).await;
+    let outcome = tokio::select! {
+        biased;
+        _ = account.cancel.cancelled() => Err(SyncError::Source(MSG_ACCOUNT_CHANGED)),
+        outcome = driver.sync(&source) => outcome,
+    };
 
     // The refresh token rotates on any 401 recovery inside that call, so it is
     // written back whether the round succeeded or not.

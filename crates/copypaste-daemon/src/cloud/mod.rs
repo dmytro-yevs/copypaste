@@ -15,6 +15,7 @@
 //! Unconfigured and signed-out are both states the daemon runs in normally;
 //! local history and peer sync do not depend on any of this.
 
+mod account;
 pub mod handlers;
 pub mod poll;
 pub mod realtime;
@@ -24,45 +25,25 @@ pub mod source;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use copypaste_cloud::auth::{Session, SupabaseAuth};
+use copypaste_cloud::auth::SupabaseAuth;
 use copypaste_cloud::rest::SupabaseRest;
 use copypaste_cloud::sync::{CloudSync, SensitiveGuard};
-use copypaste_cloud::{CloudConfig, SyncKey};
+use copypaste_cloud::CloudConfig;
 use copypaste_ipc::CloudStatusData;
 use tokio::sync::{watch, Notify};
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::meta::Meta;
 use crate::AppState;
 
+use account::Account;
+pub(crate) use account::{ActivateError, KEY_LAST_SYNC, MSG_ACCOUNT_CHANGED};
+#[cfg(test)]
+pub(crate) use account::{KEY_CURSOR_USER_ID, KEY_REFRESH, KEY_SYNC_KEY};
 pub use poll::run;
 
 /// The production instantiation of the driver.
 pub type Driver = CloudSync<SupabaseRest, SupabaseAuth>;
-
-// Persisted state. Everything in `CREDENTIAL_KEYS` is cleared by sign-out; the
-// two cursors are not, because they describe this device's position in an
-// account it may sign back into.
-const KEY_EMAIL: &str = "cloud_email";
-const KEY_USER_ID: &str = "cloud_user_id";
-const KEY_ACCESS: &str = "cloud_access_token";
-const KEY_REFRESH: &str = "cloud_refresh_token";
-const KEY_EXPIRES: &str = "cloud_expires_at_ms";
-const KEY_SYNC_KEY: &str = "cloud_sync_key";
-/// When a round last completed. Persisted so a restart cannot report `never`
-/// on an account that has been syncing for months — during an outage that is
-/// the only number saying how stale the account is, and "never" reads as "sync
-/// has never worked" rather than "nothing has got through since Tuesday".
-pub(crate) const KEY_LAST_SYNC: &str = "cloud_last_sync_ms";
-const CREDENTIAL_KEYS: &[&str] = &[
-    KEY_EMAIL,
-    KEY_USER_ID,
-    KEY_ACCESS,
-    KEY_REFRESH,
-    KEY_EXPIRES,
-    KEY_SYNC_KEY,
-    KEY_LAST_SYNC,
-];
 
 /// The download cursor: everything this device has reconciled with the account.
 pub(crate) const KEY_WATERMARK: &str = "cloud_watermark_ms";
@@ -82,19 +63,13 @@ pub(crate) struct UploadFloor {
     pub(crate) item_id: Option<String>,
 }
 
-/// A signed-in account and the driver bound to it.
-struct Account {
-    email: String,
-    user_id: String,
-    driver: Arc<Driver>,
-}
-
 /// Everything the cloud half of the daemon shares.
 pub struct Cloud {
     /// `None` when no deployment is configured. Not a credential — the anon key
     /// is publishable and row-level security is what restricts access.
     config: Option<CloudConfig>,
     account: Mutex<Option<Account>>,
+    account_revision: AtomicU64,
     /// Zero means "never". An `AtomicI64` rather than a field of `Account` so
     /// that `status` can read it without taking the account lock a round may be
     /// holding.
@@ -136,6 +111,7 @@ impl Cloud {
         Self {
             config,
             account: Mutex::new(None),
+            account_revision: AtomicU64::new(0),
             last_sync_ms: AtomicI64::new(0),
             last_error: Mutex::new(None),
             upload_floor_lock: Mutex::new(()),
@@ -204,128 +180,6 @@ impl Cloud {
                 .map_or(poll::SIGNED_OUT_INTERVAL, |a| a.driver.poll_interval())
                 .as_secs(),
         }
-    }
-
-    /// Re-open the account a previous run signed into.
-    ///
-    /// Best-effort by design: a missing or unreadable record means signed out,
-    /// which is a state the daemon runs in perfectly well. The stored access
-    /// token may already have expired — that costs one 401 and one refresh on
-    /// the first request, which is the driver's own recovery path, and is
-    /// cheaper than refreshing eagerly at every start.
-    pub fn restore(&self, state: &AppState) -> bool {
-        let Some(config) = self.config.clone() else {
-            return false;
-        };
-        let meta = &state.meta;
-        let Some(session) = read_session(meta) else {
-            return false;
-        };
-        let Some(key) = read_key(meta) else {
-            warn!("a stored cloud account has no sync key; not signing in");
-            return false;
-        };
-        let (Ok(Some(email)), Ok(Some(user_id))) = (meta.state(KEY_EMAIL), meta.state(KEY_USER_ID))
-        else {
-            return false;
-        };
-
-        self.install(state, config, email, user_id, key, session);
-        if let Ok(ms) = meta.state_ms(KEY_LAST_SYNC) {
-            self.last_sync_ms.store(ms, Ordering::Release);
-        }
-        info!("restored a cloud sync account");
-        true
-    }
-
-    /// Build a driver and make it the live account.
-    pub fn install(
-        &self,
-        state: &AppState,
-        config: CloudConfig,
-        email: String,
-        user_id: String,
-        key: SyncKey,
-        session: Session,
-    ) {
-        let switched = Self::stored_user_id(&state.meta).as_deref() != Some(&user_id);
-        let driver = CloudSync::new(
-            SupabaseRest::new(config.clone()),
-            SupabaseAuth::new(config.clone()),
-            key,
-            config,
-            session,
-            sensitive_guard(state),
-        );
-        let mut account = self.lock_account();
-        *account = Some(Account {
-            email,
-            user_id,
-            driver: Arc::new(driver),
-        });
-        if switched {
-            self.last_sync_ms.store(0, Ordering::Release);
-            let _ = state.meta.clear_state(&[KEY_LAST_SYNC]);
-        }
-        *self.lock_error() = None;
-        drop(account);
-        self.notify_session_changed();
-    }
-
-    /// Persist the account, its tokens and its key.
-    pub fn persist(&self, meta: &Meta, key_hex: &str) -> Result<(), crate::meta::MetaError> {
-        let account = self.lock_account();
-        let Some(account) = account.as_ref() else {
-            return Ok(());
-        };
-        meta.set_state(KEY_EMAIL, &account.email)?;
-        meta.set_state(KEY_USER_ID, &account.user_id)?;
-        meta.set_state(KEY_SYNC_KEY, key_hex)?;
-        write_session(meta, &account.driver)
-    }
-
-    /// Persist whatever the driver's session has rotated into.
-    ///
-    /// GoTrue rotates the refresh token on every refresh and retires the old
-    /// one, so a round that refreshed and did not write the new token back
-    /// leaves the next start presenting a token the server has already killed.
-    pub fn persist_session(&self, meta: &Meta, expected: &Arc<Driver>) {
-        let account_guard = self.lock_account();
-        let Some(account) = account_guard
-            .as_ref()
-            .filter(|account| Arc::ptr_eq(&account.driver, expected))
-        else {
-            return;
-        };
-        if let Err(e) = write_session(meta, &account.driver) {
-            warn!(error = ?e, "could not persist the rotated cloud session");
-        }
-        drop(account_guard);
-        self.notify_session_changed();
-    }
-
-    /// Forget the account on this device. Keeps the deployment configuration
-    /// (manifest 04, `CopyPaste-crh3.100`).
-    pub fn sign_out(&self, meta: &Meta) -> Option<Arc<Driver>> {
-        let mut account = self.lock_account();
-        if let Some(current) = account.as_ref() {
-            current.driver.fence_session(None);
-        }
-        let previous = account.take();
-        if let Err(e) = meta.clear_state(CREDENTIAL_KEYS) {
-            warn!(error = ?e, "could not clear the stored cloud account");
-        }
-        self.last_sync_ms.store(0, Ordering::Release);
-        *self.lock_error() = None;
-        drop(account);
-        self.notify_session_changed();
-        previous.map(|account| account.driver)
-    }
-
-    /// The account this device last synced with, for deciding whether a stored
-    /// cursor still means anything.
-    pub fn stored_user_id(meta: &Meta) -> Option<String> {
-        meta.state(KEY_USER_ID).ok().flatten()
     }
 
     // Lock recovery rather than propagation, as elsewhere in the daemon: a
@@ -475,34 +329,11 @@ fn sensitive_guard(state: &AppState) -> SensitiveGuard {
     })
 }
 
-fn read_session(meta: &Meta) -> Option<Session> {
-    Some(Session {
-        access_token: meta.state(KEY_ACCESS).ok()??,
-        refresh_token: meta.state(KEY_REFRESH).ok()??,
-        user_id: meta.state(KEY_USER_ID).ok()??,
-        expires_at_ms: meta.state_ms(KEY_EXPIRES).ok()?,
-    })
-}
-
-fn write_session(meta: &Meta, driver: &Driver) -> Result<(), crate::meta::MetaError> {
-    driver.inspect_session(|session| {
-        meta.set_state(KEY_ACCESS, &session.access_token)?;
-        meta.set_state(KEY_REFRESH, &session.refresh_token)?;
-        meta.set_state_ms(KEY_EXPIRES, session.expires_at_ms)
-    })
-}
-
-fn read_key(meta: &Meta) -> Option<SyncKey> {
-    let raw = meta.state(KEY_SYNC_KEY).ok()??;
-    let bytes = hex::decode(raw).ok()?;
-    let bytes: [u8; 32] = bytes.try_into().ok()?;
-    Some(SyncKey::from_bytes(bytes))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::{test_state, test_state_with_cloud};
+    use copypaste_cloud::auth::Session;
     use copypaste_cloud::crypto::derive_sync_key;
 
     /// The per-item cap, mirrored from `copypaste_cloud::sync::push`. If those

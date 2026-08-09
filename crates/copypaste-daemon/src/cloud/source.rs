@@ -26,7 +26,7 @@ use copypaste_core::RemoteVersion;
 use tracing::warn;
 
 use crate::cloud::{
-    UploadFloor, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM,
+    Driver, UploadFloor, KEY_UPLOAD_FLOOR, KEY_UPLOAD_FLOOR_ITEM, KEY_WATERMARK, KEY_WATERMARK_ITEM,
 };
 use crate::AppState;
 
@@ -39,6 +39,7 @@ const UPLOAD_SCAN_LIMIT: i64 = 500;
 
 pub struct StoreSource {
     state: Arc<AppState>,
+    expected: Option<Arc<Driver>>,
     /// The shared sync view. Held rather than rebuilt per call so one round
     /// opens and merges through one source, and so this file cannot grow a
     /// second answer to "what does this device hold".
@@ -67,7 +68,24 @@ impl StoreSource {
         Self {
             shared: crate::sync::store_source(&state),
             state,
+            expected: None,
             last_offer: Mutex::new(Offer::default()),
+        }
+    }
+
+    pub(crate) fn for_round(state: Arc<AppState>, expected: Arc<Driver>) -> Self {
+        let mut source = Self::new(state);
+        source.expected = Some(expected);
+        source
+    }
+
+    fn with_account<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, SyncError>,
+    ) -> Result<T, SyncError> {
+        match self.expected.as_ref() {
+            Some(expected) => self.state.cloud.with_current_driver(expected, action),
+            None => action(),
         }
     }
 
@@ -93,10 +111,12 @@ impl StoreSource {
                 item_id: None,
             }
         };
-        self.state
-            .cloud
-            .commit_upload_floor(&self.state.meta, &offer.started, offer.started_epoch, &next)
-            .map_err(source_error)
+        self.with_account(|| {
+            self.state
+                .cloud
+                .commit_upload_floor(&self.state.meta, &offer.started, offer.started_epoch, &next)
+                .map_err(source_error)
+        })
     }
 }
 
@@ -114,96 +134,100 @@ impl CloudSource for StoreSource {
         since_ms: i64,
         after_item_id: Option<&str>,
     ) -> Result<Vec<LocalItem>, SyncError> {
-        let started_epoch = self.state.cloud.upload_floor_epoch();
-        blocking(|| {
-            let rows = self
-                .state
-                .store
-                .versions_after(since_ms, after_item_id, UPLOAD_SCAN_LIMIT)
-                .map_err(source_error)?;
+        self.with_account(|| {
+            let started_epoch = self.state.cloud.upload_floor_epoch();
+            blocking(|| {
+                let rows = self
+                    .state
+                    .store
+                    .versions_after(since_ms, after_item_id, UPLOAD_SCAN_LIMIT)
+                    .map_err(source_error)?;
 
-            *self.last_offer.lock().unwrap_or_else(|e| e.into_inner()) = Offer {
-                truncated: rows.len() as i64 >= UPLOAD_SCAN_LIMIT,
-                last: rows.last().map_or_else(
-                    || UploadFloor {
+                *self.last_offer.lock().unwrap_or_else(|e| e.into_inner()) = Offer {
+                    truncated: rows.len() as i64 >= UPLOAD_SCAN_LIMIT,
+                    last: rows.last().map_or_else(
+                        || UploadFloor {
+                            created_at: since_ms,
+                            item_id: after_item_id.map(str::to_owned),
+                        },
+                        |row| UploadFloor {
+                            created_at: row.created_at,
+                            item_id: Some(row.id.clone()),
+                        },
+                    ),
+                    started: UploadFloor {
                         created_at: since_ms,
                         item_id: after_item_id.map(str::to_owned),
                     },
-                    |row| UploadFloor {
-                        created_at: row.created_at,
-                        item_id: Some(row.id.clone()),
-                    },
-                ),
-                started: UploadFloor {
-                    created_at: since_ms,
-                    item_id: after_item_id.map(str::to_owned),
-                },
-                started_epoch,
-            };
-
-            let mut items = Vec::with_capacity(rows.len());
-            for row in rows {
-                // A tombstone has no payload to open, and carries none on the
-                // wire either (manifest 05 T-4).
-                let content = if row.deleted {
-                    Vec::new()
-                } else {
-                    match self.shared.open_bytes(&row) {
-                        Ok(content) => content,
-                        Err(_) => continue,
-                    }
+                    started_epoch,
                 };
-                items.push(LocalItem {
-                    origin_device_id: copypaste_core::origin_or(
-                        &row.origin_device_id,
-                        self.state.meta.device_id(),
-                    )
-                    .to_string(),
-                    item_id: row.id,
-                    content,
-                    content_type: row.content_type,
-                    payload_metadata: row.payload_metadata,
-                    created_at: row.created_at,
-                    deleted: row.deleted,
-                });
-            }
-            Ok(items)
+
+                let mut items = Vec::with_capacity(rows.len());
+                for row in rows {
+                    // A tombstone has no payload to open, and carries none on the
+                    // wire either (manifest 05 T-4).
+                    let content = if row.deleted {
+                        Vec::new()
+                    } else {
+                        match self.shared.open_bytes(&row) {
+                            Ok(content) => content,
+                            Err(_) => continue,
+                        }
+                    };
+                    items.push(LocalItem {
+                        origin_device_id: copypaste_core::origin_or(
+                            &row.origin_device_id,
+                            self.state.meta.device_id(),
+                        )
+                        .to_string(),
+                        item_id: row.id,
+                        content,
+                        content_type: row.content_type,
+                        payload_metadata: row.payload_metadata,
+                        created_at: row.created_at,
+                        deleted: row.deleted,
+                    });
+                }
+                Ok(items)
+            })
         })
     }
 
     fn apply_remote(&self, item: LocalItem) -> Result<Applied, SyncError> {
-        blocking(|| {
-            let text = copypaste_ipc::content_type::is_text(&item.content_type)
-                .then(|| String::from_utf8_lossy(&item.content));
-            let applied = self
-                .shared
-                .apply_version(&RemoteVersion {
-                    item_id: &item.item_id,
-                    content: text.as_deref().unwrap_or(""),
-                    binary_content: (!item.deleted
-                        && !copypaste_ipc::content_type::is_text(&item.content_type))
-                    .then_some(item.content.as_slice()),
-                    payload_metadata: item.payload_metadata.as_deref(),
-                    content_type: &item.content_type,
-                    created_at: item.created_at,
-                    deleted: item.deleted,
-                    // The cloud row carries no hash — see `RemoteVersion`.
-                    content_hash: None,
-                    origin_device_id: &item.origin_device_id,
-                })
-                .map_err(|e| SyncError::Source(e.message()))?;
+        self.with_account(|| {
+            blocking(|| {
+                let text = copypaste_ipc::content_type::is_text(&item.content_type)
+                    .then(|| String::from_utf8_lossy(&item.content));
+                let applied = self
+                    .shared
+                    .apply_version(&RemoteVersion {
+                        item_id: &item.item_id,
+                        content: text.as_deref().unwrap_or(""),
+                        binary_content: (!item.deleted
+                            && !copypaste_ipc::content_type::is_text(&item.content_type))
+                        .then_some(item.content.as_slice()),
+                        payload_metadata: item.payload_metadata.as_deref(),
+                        content_type: &item.content_type,
+                        created_at: item.created_at,
+                        deleted: item.deleted,
+                        // The cloud row carries no hash — see `RemoteVersion`.
+                        content_hash: None,
+                        origin_device_id: &item.origin_device_id,
+                    })
+                    .map_err(|e| SyncError::Source(e.message()))?;
 
-            if applied {
-                self.state
-                    .p2p
-                    .node()
-                    .cursors()
-                    .note_applied("", item.created_at);
-            }
-            Ok(if applied {
-                Applied::Merged
-            } else {
-                Applied::Declined(item)
+                if applied {
+                    self.state
+                        .p2p
+                        .node()
+                        .cursors()
+                        .note_applied("", item.created_at);
+                }
+                Ok(if applied {
+                    Applied::Merged
+                } else {
+                    Applied::Declined(item)
+                })
             })
         })
     }
@@ -218,59 +242,67 @@ impl CloudSource for StoreSource {
     }
 
     fn watermark(&self) -> Result<i64, SyncError> {
-        blocking(|| {
-            self.state
-                .meta
-                .state_ms(KEY_WATERMARK)
-                .map_err(source_error)
+        self.with_account(|| {
+            blocking(|| {
+                self.state
+                    .meta
+                    .state_ms(KEY_WATERMARK)
+                    .map_err(source_error)
+            })
         })
     }
 
     fn upload_floor(&self) -> Result<i64, SyncError> {
-        blocking(|| {
-            self.state
-                .meta
-                .state_ms(KEY_UPLOAD_FLOOR)
-                .map_err(source_error)
+        self.with_account(|| {
+            blocking(|| {
+                self.state
+                    .meta
+                    .state_ms(KEY_UPLOAD_FLOOR)
+                    .map_err(source_error)
+            })
         })
     }
 
     fn upload_floor_item_id(&self) -> Result<Option<String>, SyncError> {
-        blocking(|| {
-            self.state
-                .meta
-                .state(KEY_UPLOAD_FLOOR_ITEM)
-                .map_err(source_error)
+        self.with_account(|| {
+            blocking(|| {
+                self.state
+                    .meta
+                    .state(KEY_UPLOAD_FLOOR_ITEM)
+                    .map_err(source_error)
+            })
         })
     }
 
     fn requeue_local_winner(&self, incoming: &LocalItem) -> Result<bool, SyncError> {
-        blocking(|| {
-            let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
-                .then(|| String::from_utf8_lossy(&incoming.content));
-            let stamp = copypaste_core::local_winner_stamp(
-                self.shared.store(),
-                self.state.meta.device_id(),
-                &RemoteVersion {
-                    item_id: &incoming.item_id,
-                    content: text.as_deref().unwrap_or(""),
-                    binary_content: (!incoming.deleted
-                        && !copypaste_ipc::content_type::is_text(&incoming.content_type))
-                    .then_some(incoming.content.as_slice()),
-                    payload_metadata: incoming.payload_metadata.as_deref(),
-                    content_type: &incoming.content_type,
-                    created_at: incoming.created_at,
-                    deleted: incoming.deleted,
-                    content_hash: None,
-                    origin_device_id: &incoming.origin_device_id,
-                },
-            )
-            .map_err(|error| SyncError::Source(error.message()))?;
-            if let Some(stamp) = stamp {
-                crate::cloud::note_version_written(&self.state, stamp);
-                return Ok(true);
-            }
-            Ok(false)
+        self.with_account(|| {
+            blocking(|| {
+                let text = copypaste_ipc::content_type::is_text(&incoming.content_type)
+                    .then(|| String::from_utf8_lossy(&incoming.content));
+                let stamp = copypaste_core::local_winner_stamp(
+                    self.shared.store(),
+                    self.state.meta.device_id(),
+                    &RemoteVersion {
+                        item_id: &incoming.item_id,
+                        content: text.as_deref().unwrap_or(""),
+                        binary_content: (!incoming.deleted
+                            && !copypaste_ipc::content_type::is_text(&incoming.content_type))
+                        .then_some(incoming.content.as_slice()),
+                        payload_metadata: incoming.payload_metadata.as_deref(),
+                        content_type: &incoming.content_type,
+                        created_at: incoming.created_at,
+                        deleted: incoming.deleted,
+                        content_hash: None,
+                        origin_device_id: &incoming.origin_device_id,
+                    },
+                )
+                .map_err(|error| SyncError::Source(error.message()))?;
+                if let Some(stamp) = stamp {
+                    crate::cloud::note_version_written(&self.state, stamp);
+                    return Ok(true);
+                }
+                Ok(false)
+            })
         })
     }
 
@@ -284,11 +316,13 @@ impl CloudSource for StoreSource {
     /// because a bound over a non-unique key cannot be paged past (INV-N1,
     /// AT-24). Two columns of work, as the trait's own doc says.
     fn watermark_item_id(&self) -> Result<Option<String>, SyncError> {
-        blocking(|| {
-            self.state
-                .meta
-                .state(KEY_WATERMARK_ITEM)
-                .map_err(source_error)
+        self.with_account(|| {
+            blocking(|| {
+                self.state
+                    .meta
+                    .state(KEY_WATERMARK_ITEM)
+                    .map_err(source_error)
+            })
         })
     }
 
@@ -299,14 +333,16 @@ impl CloudSource for StoreSource {
     /// round's id beside a newer millisecond would make the pull query skip
     /// every row at that millisecond sorting below it.
     fn set_watermark(&self, ms: i64) -> Result<(), SyncError> {
-        blocking(|| {
-            self.state
-                .meta
-                .set_state_all(&[
-                    (KEY_WATERMARK, &ms.max(0).to_string()),
-                    (KEY_WATERMARK_ITEM, ""),
-                ])
-                .map_err(source_error)
+        self.with_account(|| {
+            blocking(|| {
+                self.state
+                    .meta
+                    .set_state_all(&[
+                        (KEY_WATERMARK, &ms.max(0).to_string()),
+                        (KEY_WATERMARK_ITEM, ""),
+                    ])
+                    .map_err(source_error)
+            })
         })
     }
 
@@ -321,14 +357,16 @@ impl CloudSource for StoreSource {
         if item_id.is_empty() {
             return self.set_watermark(ms);
         }
-        blocking(|| {
-            self.state
-                .meta
-                .set_state_all(&[
-                    (KEY_WATERMARK, &ms.max(0).to_string()),
-                    (KEY_WATERMARK_ITEM, item_id),
-                ])
-                .map_err(source_error)
+        self.with_account(|| {
+            blocking(|| {
+                self.state
+                    .meta
+                    .set_state_all(&[
+                        (KEY_WATERMARK, &ms.max(0).to_string()),
+                        (KEY_WATERMARK_ITEM, item_id),
+                    ])
+                    .map_err(source_error)
+            })
         })
     }
 }
