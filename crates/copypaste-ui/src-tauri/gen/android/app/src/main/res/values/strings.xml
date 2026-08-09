@@ -4,4 +4,30 @@
     <!-- The share-sheet entry, the text-selection action, and the tile all
          share one label: they are one gesture to the user. -->
     <string name="capture_action">"Save to CopyPaste"</string>
+    <string name="pairing_invite_title">Pair a new device</string>
+    <string name="pairing_qr_label">Pairing QR code</string>
+    <string name="pairing_code_label">Pairing code</string>
+    <string name="pairing_code_value">Code: %1$s</string>
+    <string name="pairing_reveal">Click to reveal</string>
+    <string name="pairing_reveal_label">Click to reveal QR code</string>
+    <string name="pairing_expires">Expires in %1$d seconds</string>
+    <string name="pairing_cancel">Cancel</string>
+    <string name="pairing_progress_title">Pairing progress</string>
+    <string name="pairing_idle">Pairing is ready.</string>
+    <string name="pairing_waiting">Waiting for the other device…</string>
+    <string name="pairing_handshaking">Connecting securely…</string>
+    <string name="pairing_awaiting_confirmation">Ready to compare security codes.</string>
+    <string name="pairing_confirmed">Paired ✓</string>
+    <string name="pairing_rejected">Pairing was rejected.</string>
+    <string name="pairing_cancelled">Pairing was cancelled.</string>
+    <string name="pairing_timed_out">Pairing timed out.</string>
+    <string name="pairing_failed">Pairing could not be completed.</string>
+    <string name="pairing_confirm_instruction">Confirm this code matches the one shown on the other device.</string>
+    <string name="pairing_unverified_label">Unverified device details</string>
+    <string name="pairing_confirm_responder">A device wants to pair</string>
+    <string name="pairing_confirm_initiator">Confirm pairing</string>
+    <string name="pairing_sas_label">Security code: %1$s</string>
+    <string name="pairing_match">Match</string>
+    <string name="pairing_match_label">Codes match — confirm pairing</string>
+    <string name="pairing_mismatch">Doesn’t match</string>
 </resources>

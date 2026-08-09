@@ -3,6 +3,9 @@ use zeroize::Zeroizing;
 
 mod invite;
 
+#[cfg(target_os = "android")]
+pub(crate) mod android;
+
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -53,6 +56,12 @@ impl Default for PairingPresenter {
 }
 
 impl PairingPresenter {
+    pub fn new(native: impl NativePairingUi) -> Self {
+        Self {
+            native: Box::new(native),
+        }
+    }
+
     pub fn present_invite(&self, invite: &PairingInviteData) -> PairingPresentationState {
         self.native.present_invite(invite)
     }

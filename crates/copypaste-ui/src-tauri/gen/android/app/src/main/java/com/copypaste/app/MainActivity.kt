@@ -8,21 +8,12 @@ import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
   private var notificationPermissionResult: ((Boolean) -> Unit)? = null
-  private var cameraPermissionResult: ((Boolean) -> Unit)? = null
 
   private val notificationPermission = registerForActivityResult(
     ActivityResultContracts.RequestPermission(),
   ) { granted ->
     notificationPermissionResult
       ?.also { notificationPermissionResult = null }
-      ?.invoke(granted)
-  }
-
-  private val cameraPermission = registerForActivityResult(
-    ActivityResultContracts.RequestPermission(),
-  ) { granted ->
-    cameraPermissionResult
-      ?.also { cameraPermissionResult = null }
       ?.invoke(granted)
   }
 
@@ -54,10 +45,5 @@ class MainActivity : TauriActivity() {
   fun requestNotificationPermission(onResult: (Boolean) -> Unit) {
     notificationPermissionResult = onResult
     notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-  }
-
-  fun requestCameraPermission(onResult: (Boolean) -> Unit) {
-    cameraPermissionResult = onResult
-    cameraPermission.launch(android.Manifest.permission.CAMERA)
   }
 }
