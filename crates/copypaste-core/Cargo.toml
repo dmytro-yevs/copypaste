@@ -59,7 +59,7 @@ android-native-keyring-store = { version = "1", optional = true }
 # in libsqlite3-sys's build.rs to fall into — it panics on a missing
 # OPENSSL_DIR. Vendored here for the same reason Android vendors below, and
 # scoped the same way so macOS keeps CommonCrypto. See ADR-0007.
-# `windows-sys` binds DPAPI directly for the behavior ADR-0016 records.
+# `windows-sys` binds DPAPI directly for the behavior ADR-0018 records.
 [target.'cfg(target_os = "windows")'.dependencies]
 rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
 windows-sys = { version = "0.61", features = [
