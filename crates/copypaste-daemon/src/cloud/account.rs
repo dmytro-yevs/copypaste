@@ -50,6 +50,17 @@ pub(crate) struct AccountRound {
 #[derive(Clone, Copy)]
 pub(crate) struct SignInAttempt(u64);
 
+pub(crate) struct ActivateRequest<'a> {
+    pub(crate) state: &'a AppState,
+    pub(crate) attempt: SignInAttempt,
+    pub(crate) config: CloudConfig,
+    pub(crate) email: String,
+    pub(crate) user_id: String,
+    pub(crate) key: SyncKey,
+    pub(crate) session: Session,
+    pub(crate) key_hex: &'a str,
+}
+
 #[derive(Debug)]
 pub(crate) enum ActivateError {
     Stale,
@@ -73,17 +84,17 @@ impl Cloud {
         )
     }
 
-    pub(crate) fn activate(
-        &self,
-        state: &AppState,
-        attempt: SignInAttempt,
-        config: CloudConfig,
-        email: String,
-        user_id: String,
-        key: SyncKey,
-        session: Session,
-        key_hex: &str,
-    ) -> Result<bool, ActivateError> {
+    pub(crate) fn activate(&self, request: ActivateRequest<'_>) -> Result<bool, ActivateError> {
+        let ActivateRequest {
+            state,
+            attempt,
+            config,
+            email,
+            user_id,
+            key,
+            session,
+            key_hex,
+        } = request;
         if session.user_id != user_id {
             return Err(ActivateError::AccountMismatch);
         }
@@ -278,9 +289,16 @@ impl Cloud {
     ) {
         let key_hex = hex::encode(key.to_bytes());
         let attempt = self.begin_sign_in();
-        self.activate(
-            state, attempt, config, email, user_id, key, session, &key_hex,
-        )
+        self.activate(ActivateRequest {
+            state,
+            attempt,
+            config,
+            email,
+            user_id,
+            key,
+            session,
+            key_hex: &key_hex,
+        })
         .unwrap_or_else(|_| panic!("test account activation failed"));
     }
 
@@ -415,32 +433,32 @@ mod tests {
                 gate_worker.wait();
                 gate_worker.wait();
                 let key = SyncKey::from_bytes([2; 32]);
-                state_worker.cloud.activate(
-                    &state_worker,
-                    stale_attempt,
-                    config(),
-                    "stale@example.com".into(),
-                    "stale-user".into(),
+                state_worker.cloud.activate(ActivateRequest {
+                    state: &state_worker,
+                    attempt: stale_attempt,
+                    config: config(),
+                    email: "stale@example.com".into(),
+                    user_id: "stale-user".into(),
                     key,
-                    session("stale-user", "stale"),
-                    &hex::encode([2; 32]),
-                )
+                    session: session("stale-user", "stale"),
+                    key_hex: &hex::encode([2; 32]),
+                })
             });
 
             gate.wait();
             let current_attempt = state.cloud.begin_sign_in();
             state
                 .cloud
-                .activate(
-                    &state,
-                    current_attempt,
-                    config(),
-                    "current@example.com".into(),
-                    "current-user".into(),
-                    SyncKey::from_bytes([3; 32]),
-                    session("current-user", "current"),
-                    &hex::encode([3; 32]),
-                )
+                .activate(ActivateRequest {
+                    state: &state,
+                    attempt: current_attempt,
+                    config: config(),
+                    email: "current@example.com".into(),
+                    user_id: "current-user".into(),
+                    key: SyncKey::from_bytes([3; 32]),
+                    session: session("current-user", "current"),
+                    key_hex: &hex::encode([3; 32]),
+                })
                 .unwrap();
             gate.wait();
             assert!(matches!(stale.join().unwrap(), Err(ActivateError::Stale)));
