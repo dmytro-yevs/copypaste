@@ -9,8 +9,8 @@ set -uo pipefail
 # shellcheck source=scripts/release/android-ui-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/android-ui-evidence-lib.sh"
 
-MAIN="$PKG/.MainActivity"
-INTAKE="$PKG/.IntakeActivity"
+MAIN="$PKG/$APP_NAMESPACE.MainActivity"
+INTAKE="$PKG/$APP_NAMESPACE.IntakeActivity"
 export WAIT_SECS="${TRANSFER_WAIT_SECS:-45}"
 REQUIRE_RUN_AS="${TRANSFER_REQUIRE_RUN_AS:-0}"
 CANARY="CopyPasteStorageTransfer$(date +%s)$RANDOM"

@@ -1,5 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "com.copypaste.app",
   "app": {
     "windows": [
       {
@@ -12,7 +13,9 @@
   },
   "bundle": {
     "android": {
-      "minSdkVersion": 24
+      "minSdkVersion": 24,
+      "versionCode": 200000016,
+      "debugApplicationIdSuffix": ".debug"
     }
   }
 }
