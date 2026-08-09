@@ -2,15 +2,9 @@
  * The Devices security boundary and established-device management.
  *
  * A second real daemon and the CLI establish the peer fixture; that setup is
- * not browser coverage for pairing. The browser proves that no pairing control
- * and no credential reach the page at all, and that a known device can sync,
- * expose its revoke confirmation, and unpair.
- *
- * ADR-0015 and manifest 06 §3.3 hold Pair and Add-device controls off every
- * product surface until the wire derives a SAS from the handshake and binds
- * both devices' confirmation to it before anything is persisted. The CLI keeps
- * `pair create` / `pair accept` — it is the scripting surface, and it is how
- * this file builds its fixture.
+ * not browser coverage for the native renderer. The browser proves that it can
+ * start the native-safe commands without any credential reaching the page, and
+ * that a known device can sync, expose its revoke confirmation, and unpair.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
@@ -105,28 +99,15 @@ async function interactiveSurface(): Promise<string> {
   })) as string;
 }
 
-describe("pairing availability (ADR-0015)", () => {
-  test("says pairing is unavailable rather than failing silently", async () => {
+describe("native-safe pairing", () => {
+  test("offers both native entry points", async () => {
     const text = await visibleText(app.browser);
-    expect(text).toMatch(/adding a device isn't available yet/i);
-    expect(text).toMatch(/devices already paired keep syncing/i);
-  });
-
-  test("exposes no control that could start a pairing", async () => {
+    expect(text).toMatch(/add a device/i);
+    expect(text).toMatch(/protected native view/i);
     const controls = await interactiveSurface();
-    for (const forbidden of [
-      /join device/i,
-      /show code/i,
-      /add device/i,
-      /^pair$/im,
-      /scan qr/i,
-      /paste pairing details/i,
-      /copy pairing details/i,
-    ]) {
-      expect(controls, `a pairing control is reachable: ${forbidden}`).not.toMatch(
-        forbidden,
-      );
-    }
+    expect(controls).toMatch(/show pairing code/i);
+    expect(controls).toMatch(/scan pairing code/i);
+    expect(controls).not.toMatch(/paste pairing details|copy pairing details/i);
   });
 
   test("renders no QR, credential field or pairing dialog", async () => {
@@ -154,6 +135,16 @@ describe("pairing availability (ADR-0015)", () => {
     expect(html).not.toContain(minted.code);
     expect(html).not.toContain(minted.code.replace(/-/g, ""));
     expect(html).not.toContain("copypaste://pair");
+  });
+
+  test("a browser without native presentation cancels safely", async () => {
+    await clickButton(app.browser, "Show pairing code");
+    await waitForText(app.browser, "Pairing cancelled");
+
+    const surface = await accessibleSurface(app.browser);
+    expect(surface).toMatch(/protected pairing view didn't open/i);
+    expectNoFilesystemPath(surface);
+    expectNoRawError(surface);
   });
 });
 
