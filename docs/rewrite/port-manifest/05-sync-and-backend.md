@@ -720,8 +720,10 @@ with a monotonically increasing ref counter starting at 2 (ref 1 is the join).
 
 | Event | Handling |
 |---|---|
-| `phx_reply` with `status == "ok"` | **join confirmed** — fire a one-permit notification. Downstream gates "realtime is live" on *this*, not on socket-open (see §4.8). Must use a store-a-permit primitive so a reply arriving before the waiter registers is not lost (`dispatch.rs:92-99`). |
+| `phx_reply` with `status == "ok"` | Confirm the server registered exactly the requested subscription, but keep waiting: PostgreSQL replication starts asynchronously. |
 | `phx_reply` non-ok | warn; do **not** signal joined |
+| `system` for `postgres_changes` with `status == "ok"` | **subscription ready** — only now may downstream treat Realtime as live (see §4.8). |
+| `system` for `postgres_changes` with `status == "error"` | fail the attempt; do **not** signal ready |
 | `phx_error` | log with a **redacted** payload |
 | `phx_close` | server closed the channel |
 | `postgres_changes` | parse and forward |
@@ -760,7 +762,7 @@ running as the backstop; only its *interval* changes.
 
 | State | Interval | Source |
 |---|---|---|
-| WS channel join confirmed | 60 s (catch-up safety net) | `cloud/poll/mod.rs:44` |
+| WS PostgreSQL subscription ready | 60 s (catch-up safety net) | `cloud/poll/mod.rs:44` |
 | WS down / never connected | 10 s (sole download path) | `cloud/poll/mod.rs:49` |
 
 > **v2 divergence, decided 2026-07-30, in the first row only.** v2's cadence is a
@@ -781,10 +783,10 @@ running as the backstop; only its *interval* changes.
 > Realtime up would otherwise put two idle devices ten minutes apart end to end
 > while its own comment claimed the push channel was carrying the latency.
 
-- The fast/slow switch is gated on **channel-join confirmation** (`phx_reply ok`),
-  **not** on socket-open. A socket that is open but whose channel never joined
-  delivers nothing, and backing off on it would silently halve the sync rate
-  (`dispatch.rs:76-80`).
+- The fast/slow switch is gated on the `system` event that reports the
+  **PostgreSQL subscription ready**, not on socket-open or `phx_reply`. Realtime
+  sends the join reply before its asynchronous replication subscription is
+  ready, so returning on that reply can lose the first write with no replay.
 - The slow interval was lowered 120 s → 60 s to halve the worst-case missed-event
   window at negligible HTTP cost (`poll/mod.rs:38-44`).
 - Missed ticks use **skip**, not burst: if one poll round runs long, resume on the
@@ -1099,8 +1101,8 @@ test names are given so the original can be consulted.
 | **AT-44 refresh sleep is floored** | `expires_in <= margin` never yields a zero sleep. | `auth.rs:439` |
 | **AT-45 bytea round-trip** | An item pushed and then polled back decrypts to the original plaintext — this is the end-to-end guard for the `\x<hex>` encoding bug. | `cloud/bytea_e2e.rs`, `cloud/tests.rs:869` |
 | **AT-46 Phoenix wire format** | 5-element array; numeric refs ⇒ absent (not empty string); wrong arity rejected; heartbeat and join round-trip. | `protocol.rs:159-236` |
-| **AT-47 join payload** | Contains the JWT at `/config/access_token`, registers `event:"*"` (asserting `"INSERT"` is **absent**), and always carries `filter: user_id=eq.<uuid>`. A missing `user_id` is a hard session error. | `join.rs:59-120`, `session.rs:65-74` |
-| **AT-48 join-confirmed gating** | `phx_reply` with `status:"ok"` fires the joined signal; a non-ok reply does **not**. The poll interval only slows after the signal. | `dispatch.rs:225, 265` |
+| **AT-47 join payload** | Contains the JWT at top-level `/access_token`, registers `event:"*"` (asserting `"INSERT"` is **absent**), and always carries `filter: user_id=eq.<uuid>`. A missing `user_id` is a hard session error. | `channel.rs` join tests |
+| **AT-48 readiness gating** | `phx_reply` confirms the exact requested filter, but only `system` with `extension:"postgres_changes",status:"ok"` marks the channel ready. The poll interval only slows after both. | `channel.rs` readiness tests |
 | **AT-49 reconnect backoff** | Exponential doubling, capped; reset after a session that ran ≥ max backoff; connect errors always advance. | `reconnect.rs:152, 179`; `reconnect_backoff.rs` |
 | **AT-50 payload never logged** | A parse failure logs length + a 16-byte prefix only; error payloads are redacted; the WS URL is scrubbed. | `dispatch.rs:29-46`, `cloud/tests.rs:716` |
 | **AT-51 RLS policy audit (static)** | Assert against the SQL text itself: RLS enabled **and** forced; every policy scopes on `user_id = auth.uid()`; `anon` privileges revoked; `user_id` default is `auth.uid()`. Cheap, and it caught real drift. | `copypaste-supabase/tests/rls_policies.rs` |

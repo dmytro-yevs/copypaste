@@ -5,7 +5,8 @@
 //! merely working all live here — the token's subject becomes the per-user
 //! filter, the anon key is supplied to the WebSocket handshake, and the join is
 //! not considered done until the server has confirmed **the subscription we
-//! asked for**.
+//! asked for** and reported that its PostgreSQL replication subscription is
+//! ready.
 //!
 //! That last one is stronger than it sounds. Supabase answers `phx_join` with
 //! `{"status":"ok","response":{"postgres_changes":[…]}}`, and the array it
@@ -33,11 +34,12 @@ use super::{JOIN_TIMEOUT, TABLE, TOPIC};
 pub(super) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Open the socket and join the channel, returning only once the server has
-/// confirmed the join with a `phx_reply` whose status is `ok`.
+/// confirmed the join and its PostgreSQL replication subscription is ready.
 ///
-/// Gating on the *reply* rather than on socket-open is deliberate: the caller
-/// uses "realtime is live" to slow its poll loop, and a socket whose channel
-/// never joined delivers nothing (manifest 05 §4.8).
+/// Gating on replication readiness rather than on socket-open is deliberate:
+/// the caller uses "realtime is live" to slow its poll loop, and a joined
+/// channel whose replication subscription is still starting delivers nothing
+/// (manifest 05 §4.8).
 pub(super) async fn open_channel(
     base_url: &str,
     anon_key: &str,
@@ -67,15 +69,23 @@ pub(super) async fn open_channel(
             .await
             .map_err(|_| RealtimeError::Connect("the join could not be sent"))?;
 
-        // Wait for the join confirmation, ignoring anything else that arrives
-        // first.
+        let mut joined = false;
+        let mut postgres_ready = false;
         loop {
             match ws.next().await {
-                Some(Ok(Message::Text(text))) => match join_reply(&text, user_id) {
-                    Some(Ok(())) => return Ok(ws),
-                    Some(Err(e)) => return Err(e),
-                    None => continue,
-                },
+                Some(Ok(Message::Text(text))) => {
+                    if let Some(result) = join_reply(&text, user_id) {
+                        result?;
+                        joined = true;
+                    }
+                    if let Some(result) = postgres_ready_reply(&text) {
+                        result?;
+                        postgres_ready = true;
+                    }
+                    if joined && postgres_ready {
+                        return Ok(ws);
+                    }
+                }
                 Some(Ok(Message::Close(_))) | None => {
                     return Err(RealtimeError::JoinRefused);
                 }
@@ -143,6 +153,32 @@ fn join_reply(text: &str, user_id: &str) -> Option<Result<(), RealtimeError>> {
         return Some(Err(RealtimeError::JoinRefused));
     }
     Some(confirms_subscription(&frame.payload, user_id))
+}
+
+/// Supabase registers PostgreSQL changes asynchronously after `phx_join`.
+/// Returning on the join reply alone races the first write against that work,
+/// and the missed event is not replayed.
+fn postgres_ready_reply(text: &str) -> Option<Result<(), RealtimeError>> {
+    let frame = parse_frame(text).ok()?;
+    if frame.event != "system" || frame.topic != TOPIC {
+        return None;
+    }
+
+    let extension = frame.payload.get("extension").and_then(Value::as_str);
+    let status = frame.payload.get("status").and_then(Value::as_str);
+    let channel = frame.payload.get("channel").and_then(Value::as_str);
+
+    if status == Some("error") {
+        return Some(Err(RealtimeError::JoinRefused));
+    }
+    if extension != Some("postgres_changes") {
+        return None;
+    }
+    Some(if status == Some("ok") && channel == Some(TABLE) {
+        Ok(())
+    } else {
+        Err(RealtimeError::JoinMismatch)
+    })
 }
 
 /// Does the server's echo describe the subscription that was requested?
@@ -252,6 +288,7 @@ pub(super) fn jwt_subject(token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use tokio_tungstenite::accept_hdr_async;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
@@ -311,6 +348,14 @@ mod tests {
         format!(
             r#"[{{"id":12345,"event":"*","schema":"public",
                   "table":"clipboard_items","filter":"user_id=eq.{user}"}}]"#
+        )
+    }
+
+    fn postgres_ready(status: &str, channel: &str) -> String {
+        format!(
+            r#"[null,null,"realtime:clipboard_items","system",
+                {{"channel":"{channel}","extension":"postgres_changes",
+                  "message":"Subscribed to PostgreSQL","status":"{status}"}}]"#
         )
     }
 
@@ -384,6 +429,28 @@ mod tests {
                 "accepted {payload}"
             );
         }
+    }
+
+    #[test]
+    fn only_postgres_readiness_on_our_channel_marks_the_subscription_ready() {
+        assert_eq!(
+            postgres_ready_reply(&postgres_ready("ok", TABLE)),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            postgres_ready_reply(&postgres_ready("error", TABLE)),
+            Some(Err(RealtimeError::JoinRefused))
+        );
+        assert_eq!(
+            postgres_ready_reply(&postgres_ready("ok", "other")),
+            Some(Err(RealtimeError::JoinMismatch))
+        );
+        assert_eq!(
+            postgres_ready_reply(
+                r#"[null,null,"realtime:clipboard_items","system",{"extension":"system","status":"ok"}]"#
+            ),
+            None
+        );
     }
 
     #[test]
@@ -478,6 +545,8 @@ mod tests {
     async fn the_v2_handshake_carries_the_key_and_authenticated_join() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let (joined_tx, joined_rx) = oneshot::channel();
+        let (ready_tx, ready_rx) = oneshot::channel();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut ws = accept_hdr_async(stream, |request: &Request, response: Response| {
@@ -497,16 +566,31 @@ mod tests {
             ws.send(Message::Text(reply("ok", &echo(USER))))
                 .await
                 .unwrap();
+            joined_tx.send(()).unwrap();
+            ready_rx.await.unwrap();
+            ws.send(Message::Text(postgres_ready("ok", TABLE)))
+                .await
+                .unwrap();
         });
 
-        let stream = open_channel(
-            &format!("ws://{address}"),
-            "anon.jwt",
-            &token_for(USER),
-            USER,
-        )
-        .await
-        .unwrap();
+        let client = tokio::spawn(async move {
+            open_channel(
+                &format!("ws://{address}"),
+                "anon.jwt",
+                &token_for(USER),
+                USER,
+            )
+            .await
+        });
+        joined_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            !client.is_finished(),
+            "phx_reply returned before PostgreSQL changes were ready"
+        );
+        ready_tx.send(()).unwrap();
+
+        let stream = client.await.unwrap().unwrap();
         drop(stream);
         server.await.unwrap();
     }
