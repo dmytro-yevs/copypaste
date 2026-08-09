@@ -6,6 +6,11 @@ mod invite;
 #[cfg(target_os = "android")]
 pub(crate) mod android;
 
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(any(test, target_os = "macos"))]
+mod macos_model;
+
 #[cfg(target_os = "windows")]
 mod windows;
 
@@ -43,12 +48,14 @@ pub struct PairingPresenter {
 
 impl Default for PairingPresenter {
     fn default() -> Self {
+        #[cfg(target_os = "macos")]
+        let native = Box::new(macos::MacOsPairingUi);
         #[cfg(target_os = "windows")]
         let native = Box::new(windows::WindowsPairingUi::new(
             invite::encode_native_invite,
             invite::decode_native_invite,
         ));
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let native = Box::new(UnavailablePairingUi);
 
         Self { native }
@@ -79,10 +86,10 @@ impl PairingPresenter {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 struct UnavailablePairingUi;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl NativePairingUi for UnavailablePairingUi {
     fn present_invite(&self, _invite: &PairingInviteData) -> PairingPresentationState {
         PairingPresentationState::Unavailable
@@ -101,7 +108,7 @@ impl NativePairingUi for UnavailablePairingUi {
     }
 }
 
-#[cfg(all(test, not(target_os = "windows")))]
+#[cfg(all(test, not(any(target_os = "macos", target_os = "windows"))))]
 mod tests {
     use super::*;
     use copypaste_ipc::{PairingRole, PairingState};
