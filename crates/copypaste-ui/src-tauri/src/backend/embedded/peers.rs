@@ -225,6 +225,10 @@ impl PeerNode {
         self.node.cursors().note_applied("", created_at);
     }
 
+    pub(super) fn note_local_version(&self, floor_ms: i64) {
+        self.node.note_local_version(floor_ms);
+    }
+
     #[cfg(test)]
     pub(super) fn record_cursor(&self, pairing_id: &str, since_ms: i64) {
         self.node.cursors().record_session(pairing_id, since_ms);

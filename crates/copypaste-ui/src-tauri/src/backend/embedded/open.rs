@@ -53,9 +53,16 @@ impl Inner {
         self.cloud.note_version_written(self, created_at);
     }
 
+    pub(super) fn note_local_version(&self, floor_ms: i64) {
+        if let Some(node) = self.node.get() {
+            node.note_local_version(floor_ms);
+        }
+    }
+
     pub(super) fn note_oldest_version(&self, created_at: Option<i64>) {
         if let Some(created_at) = created_at {
             self.note_version_written(created_at);
+            self.note_local_version(created_at);
         }
     }
 

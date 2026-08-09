@@ -135,6 +135,7 @@ impl Backend for EmbeddedBackend {
                 Ok(ingested) => {
                     let item = inner.to_wire(ingested.into_item())?;
                     inner.note_version_written(item.created_at);
+                    inner.note_local_version(item.created_at);
                     inner.publish_items(false, 0);
                     Ok(item)
                 }
@@ -195,6 +196,7 @@ impl Backend for EmbeddedBackend {
                 Ok(ingested) => {
                     let item = inner.to_wire(ingested.into_item())?;
                     inner.note_version_written(item.created_at);
+                    inner.note_local_version(item.created_at);
                     inner.publish_items(true, 0);
                     Ok(Some(item))
                 }
@@ -258,6 +260,7 @@ impl Backend for EmbeddedBackend {
             match inner.state.store.delete(&id) {
                 Ok(true) => {
                     inner.note_version_written(mutation_started);
+                    inner.note_local_version(mutation_started);
                     inner.publish_items(false, 0);
                     Ok(())
                 }
@@ -278,6 +281,7 @@ impl Backend for EmbeddedBackend {
                 .map_err(|_| BackendError::internal("history could not be cleared"))?;
             if removed > 0 {
                 inner.note_version_written(mutation_started);
+                inner.note_local_version(mutation_started);
                 inner.publish_items(false, 0);
             }
             Ok(removed)
@@ -293,6 +297,7 @@ impl Backend for EmbeddedBackend {
                 Ok(false) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
                 Err(_) => return Err(BackendError::internal("that item could not be changed")),
             }
+            inner.note_local_version(copypaste_core::now_ms());
             inner.publish_items(false, 0);
             // Reply with the updated row so the caller need not re-list.
             inner.fetch(&id)
@@ -441,10 +446,9 @@ impl Backend for EmbeddedBackend {
 
     async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData> {
         self.blocking(move |inner| {
-            let oldest = items.iter().map(|item| item.created_at).min();
             let imported = transfer::import(inner, items)?;
             if imported.inserted > 0 {
-                inner.note_oldest_version(oldest);
+                inner.note_oldest_version(inner.state.store.oldest_version_ms().ok().flatten());
                 inner.publish_items(false, 0);
             }
             Ok(imported)
