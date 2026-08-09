@@ -65,6 +65,12 @@ rust {
 }
 
 dependencies {
+    // Tauri 2.11.5 pins vulnerable jackson-databind 2.15.3. This is the lowest
+    // release outside the five advisories present on that runtime dependency.
+    constraints {
+        implementation("com.fasterxml.jackson.core:jackson-databind:2.18.9")
+    }
+
     implementation("com.google.zxing:core:3.5.4")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 

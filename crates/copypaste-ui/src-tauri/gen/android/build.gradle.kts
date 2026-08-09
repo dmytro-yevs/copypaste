@@ -32,7 +32,16 @@ allprojects {
 apply(plugin = "org.owasp.dependencycheck")
 
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-    failBuildOnCVSS = 0.0F
+    failBuildOnCVSS = 7.0F
+    scanProjects.set(listOf(":app"))
+    scanConfigurations.set(provider {
+        project(":app").configurations.names
+            .filter { it.endsWith("ReleaseRuntimeClasspath") }
+            .sorted()
+            .also { require(it.isNotEmpty()) { ":app exposes no release runtime classpath" } }
+    })
+    suppressionFile = "$projectDir/dependency-check-suppressions.xml"
+    failBuildOnUnusedSuppressionRule = true
     format = ReportGenerator.Format.ALL.toString()
     data.directory = "${System.getProperty("user.home")}/.gradle/dependency-check-data"
     nvd {
