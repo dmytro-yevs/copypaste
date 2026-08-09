@@ -102,6 +102,7 @@ mod tests {
             created_at: 1_700_000_000_000,
             pinned: false,
             is_sensitive,
+            sensitive_finding: None,
             origin_device_id: "device-1".into(),
             origin_device_name: None,
             source_app_bundle_id: None,
