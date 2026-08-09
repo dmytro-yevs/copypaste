@@ -23,11 +23,14 @@
 use std::sync::Arc;
 
 use copypaste_core::StoreSource;
-use copypaste_ipc::{DiscoveredDevice, PeerInfo, SyncResult};
+use copypaste_ipc::{
+    DiscoveredDevice, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
+    SyncResult,
+};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::{Peer, PeerStore};
 use copypaste_p2p::sync::SyncOutcome;
-use copypaste_p2p::{Node, NodeError};
+use copypaste_p2p::{Node, NodeError, PairingInvite, PairingPhase, PairingStatus};
 use tokio::sync::watch;
 
 use super::open::Inner;
@@ -103,6 +106,91 @@ impl PeerNode {
             .iter()
             .map(|peer| peer_info(peer, self.node.find(&peer.pairing_id).is_some()))
             .collect()
+    }
+
+    pub(super) fn pair_create_invite(&self) -> Result<PairingInviteData> {
+        self.node
+            .pair_create_invite()
+            .map(invite_data)
+            .map_err(failed)
+    }
+
+    pub(super) async fn pair_join(
+        &self,
+        inner: &Arc<Inner>,
+        code: &str,
+        addr: &str,
+    ) -> Result<PairingProgressData> {
+        let source = source(inner);
+        let status = self
+            .node
+            .pair_join(code, addr, &source)
+            .await
+            .map_err(failed)?;
+        Ok(self.pairing_progress(inner, status))
+    }
+
+    pub(super) fn pair_progress(&self, inner: &Arc<Inner>) -> PairingProgressData {
+        self.pairing_progress(inner, self.node.pair_progress())
+    }
+
+    pub(super) fn pair_confirm(
+        &self,
+        inner: &Arc<Inner>,
+        accept: bool,
+    ) -> Result<PairingProgressData> {
+        self.node
+            .pair_confirm(accept)
+            .map(|status| self.pairing_progress(inner, status))
+            .map_err(failed)
+    }
+
+    pub(super) fn pair_cancel(&self, inner: &Arc<Inner>) -> PairingProgressData {
+        self.pairing_progress(inner, self.node.pair_cancel())
+    }
+
+    fn pairing_progress(&self, inner: &Arc<Inner>, status: PairingStatus) -> PairingProgressData {
+        if status.phase == PairingPhase::Confirmed {
+            if let Some(peer) = &status.peer {
+                if let Err(error) = inner
+                    .state
+                    .store
+                    .record_device_name(&peer.device_id, &peer.name)
+                {
+                    tracing::warn!(?error, "could not record a paired device name");
+                }
+            }
+        }
+        let known_device = (status.phase == PairingPhase::Confirmed)
+            .then(|| status.pairing_id.as_deref())
+            .flatten()
+            .and_then(|pairing_id| self.node.peers().get(pairing_id))
+            .map(|peer| peer_info(&peer, self.node.find(&peer.pairing_id).is_some()));
+        let peer = status.peer.as_ref();
+        PairingProgressData {
+            pairing_id: status.pairing_id,
+            role: status.role.map(|role| match role {
+                copypaste_p2p::PairingRole::Initiator => PairingRole::Initiator,
+                copypaste_p2p::PairingRole::Responder => PairingRole::Responder,
+            }),
+            state: match status.phase {
+                PairingPhase::Idle => PairingState::Idle,
+                PairingPhase::WaitingForPeer => PairingState::WaitingForPeer,
+                PairingPhase::Handshaking => PairingState::Handshaking,
+                PairingPhase::AwaitingConfirmation => PairingState::AwaitingConfirmation,
+                PairingPhase::Confirmed => PairingState::Confirmed,
+                PairingPhase::Rejected => PairingState::Rejected,
+                PairingPhase::Cancelled => PairingState::Cancelled,
+                PairingPhase::TimedOut => PairingState::TimedOut,
+                PairingPhase::Failed => PairingState::Failed,
+            },
+            sas: status.sas,
+            peer_device_id: peer.map(|peer| peer.device_id.clone()),
+            peer_name: peer.map(|peer| peer.name.clone()),
+            peer_addr: peer.and_then(|peer| peer.addr.map(|addr| addr.to_string())),
+            known_device,
+            error_code: status.error.as_ref().map(node_error_code),
+        }
     }
 
     pub(super) fn unpair(&self, pairing_id: &str) -> Result<bool> {
@@ -303,11 +391,22 @@ fn node_error_code(error: &NodeError) -> copypaste_ipc::ErrorCode {
         NodeError::BadCode | NodeError::Handshake | NodeError::SelfPairing => {
             ErrorCode::PairingCode
         }
+        NodeError::PairingBusy => ErrorCode::RateLimited,
+        NodeError::NoPairing => ErrorCode::NotReady,
         NodeError::BadAddress => ErrorCode::PairingAddress,
         NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
         NodeError::TooManyPairings => ErrorCode::PairingLimit,
         NodeError::Session | NodeError::PeerStore => ErrorCode::PeerFailed,
         NodeError::PeerVersion => ErrorCode::PeerVersion,
         NodeError::NoPeer => ErrorCode::PeerNotFound,
+    }
+}
+
+fn invite_data(invite: PairingInvite) -> PairingInviteData {
+    PairingInviteData {
+        code: invite.code,
+        pairing_id: invite.pairing_id,
+        listen_addr: invite.listen_addr,
+        expires_in_secs: invite.expires_in_secs,
     }
 }

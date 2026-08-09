@@ -52,6 +52,7 @@ pub mod dev_web_bridge;
 pub mod model;
 #[cfg(target_os = "android")]
 pub mod network_discovery;
+mod pairing_presentation;
 pub mod service;
 pub mod shell;
 pub mod source_app_icon;
@@ -117,6 +118,7 @@ pub fn run() {
             app.manage(make_backend(app)?);
             app.manage(source_app_icon::SourceAppIconCache::default());
             app.manage(commands::transfer::PendingImportState::default());
+            app.manage(pairing_presentation::PairingPresenter::default());
             app.manage(Supervisor::default());
             app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
 
@@ -248,6 +250,13 @@ pub fn run() {
             commands::peers::sync_now,
             commands::peers::discovered,
             commands::peers::rescan,
+            commands::pairing::pair_create_invite,
+            commands::pairing::pair_scan_invite,
+            commands::pairing::pair_progress,
+            commands::pairing::pair_present,
+            commands::pairing::pair_confirm,
+            commands::pairing::pair_reject,
+            commands::pairing::pair_cancel,
             // the clipboard, for text the WebView already holds
             commands::clipboard::copy_text,
         ])
@@ -434,7 +443,7 @@ mod tests {
         assert_eq!(registered_entries.len(), registered.len());
         assert_eq!(annotated, registered);
         assert_eq!(registered, product_command_names());
-        assert_eq!(registered.len(), 62);
+        assert_eq!(registered.len(), 69);
     }
 
     #[test]

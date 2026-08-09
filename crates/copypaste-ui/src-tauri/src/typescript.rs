@@ -4,16 +4,18 @@ use std::path::Path;
 
 use copypaste_ipc::{
     CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ConfigPatch, DiagnosticCounters,
-    DiscoveredDevice, ErrorCode, ImportData, Liveness, PeerInfo, PrivateModeData, SensitiveFinding,
-    SensitiveSpan, StatusData,
+    DiscoveredDevice, ErrorCode, ImportData, Liveness, PairingRole, PairingState, PeerInfo,
+    PrivateModeData, SensitiveFinding, SensitiveSpan, StatusData,
 };
 use ts_rs::{Config, ExportError, TS};
 
 use crate::backend::UiError;
+use crate::commands::pairing::{PairedDevice, PairingCeremony};
 use crate::commands::transfer::{ExportReport, ImportPreview};
 use crate::model::{
     UiImagePreview, UiInstalledSourceApp, UiItem, UiPage, UiSourceAppIcon, UiSyncResult,
 };
+use crate::pairing_presentation::PairingPresentationState;
 use crate::service::ServiceState;
 
 /// Export every Rust-owned DTO into one checked-in frontend module.
@@ -44,6 +46,11 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<UiItem>(&config, &mut output);
     declaration::<UiPage>(&config, &mut output);
     declaration::<Liveness>(&config, &mut output);
+    declaration::<PairingRole>(&config, &mut output);
+    declaration::<PairingState>(&config, &mut output);
+    declaration::<PairingPresentationState>(&config, &mut output);
+    declaration::<PairedDevice>(&config, &mut output);
+    declaration::<PairingCeremony>(&config, &mut output);
     declaration::<PeerInfo>(&config, &mut output);
     declaration::<PrivateModeData>(&config, &mut output);
     declaration::<ServiceState>(&config, &mut output);

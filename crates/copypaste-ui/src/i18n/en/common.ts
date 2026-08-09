@@ -43,6 +43,7 @@ export const errors = {
     "That pairing code isn't valid, or the other device didn't accept it. Get a fresh code and try again.",
   pairing_address:
     "That address isn't in the expected form. Use the host and port shown on the other device.",
+  rate_limited: "Another pairing is already in progress.",
   peer_unreachable:
     "That device can't be reached — it isn't visible on this network and isn't responding. Start the sync from the other device, or pair again with an address.",
   pairing_limit:

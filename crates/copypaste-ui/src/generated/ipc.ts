@@ -14,7 +14,7 @@ export type DiagnosticCounters = { rejected_too_large: number, lost_intermediate
 
 export type DiscoveredDevice = { discovery_id: string, name: string, addr: string, last_seen_ms: number, paired: boolean, };
 
-export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_version" | "peer_not_found" | "internal";
+export type ErrorCode = "not_found" | "invalid_request" | "protocol_mismatch" | "not_ready" | "auth_failed" | "key_locked" | "key_unusable" | "pairing_code" | "pairing_address" | "rate_limited" | "peer_unreachable" | "pairing_limit" | "peer_failed" | "peer_version" | "peer_not_found" | "internal";
 
 export type ExportReport = { exported: number, skipped_sensitive: number, skipped_non_text: number, skipped_undecryptable: number, };
 
@@ -37,6 +37,16 @@ export type Item = { id: string, content: string | null, content_type: string, c
 export type ItemPage = { items: Array<Item>, total: number, skipped_undecryptable: number, next_cursor: string | null, };
 
 export type Liveness = "live" | "needs_restart";
+
+export type PairingRole = "initiator" | "responder";
+
+export type PairingState = "idle" | "waiting_for_peer" | "handshaking" | "awaiting_confirmation" | "confirmed" | "rejected" | "cancelled" | "timed_out" | "failed";
+
+export type PairingPresentationState = "presented" | "unavailable";
+
+export type PairedDevice = { name: string, last_seen_ms: number, online: boolean, };
+
+export type PairingCeremony = { ceremony_id: string | null, role: PairingRole | null, state: PairingState, presentation: PairingPresentationState, known_device: PairedDevice | null, error: UiError | null, };
 
 export type PeerInfo = { pairing_id: string, name: string, last_addr: string | null, last_seen_ms: number, online: boolean, };
 

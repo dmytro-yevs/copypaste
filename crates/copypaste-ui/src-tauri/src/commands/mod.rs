@@ -28,6 +28,7 @@ pub mod config;
 pub mod diagnostics;
 mod document;
 pub mod history;
+pub mod pairing;
 pub mod peers;
 pub mod protection;
 pub mod service;

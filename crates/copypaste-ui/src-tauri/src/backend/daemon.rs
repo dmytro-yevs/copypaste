@@ -26,6 +26,7 @@
 //! Connecting per call makes "the daemon went away" the same code path as "the
 //! daemon was never there", which is also what the user sees.
 
+mod pairing;
 mod response;
 
 use std::path::{Path, PathBuf};
@@ -504,23 +505,26 @@ mod tests {
         assert!(peers[0].online);
     }
 
-    /// ADR-0015: this backend is a product surface, so it must not be able to
-    /// mint or redeem a pairing at all. A `Method` it never constructs is a
-    /// method no WebView call can reach.
-    ///
-    /// The needles are assembled by `concat!` so that this test's own source
-    /// does not contain the string it searches for.
     #[test]
-    fn the_backend_names_no_pairing_verb() {
-        let source = include_str!("daemon.rs");
+    fn pairing_uses_only_the_confirmation_bound_methods() {
+        let source = include_str!("daemon/pairing.rs");
         for verb in [
-            concat!("Method::", "PairCreate"),
-            concat!("Method::", "PairAccept"),
+            concat!("Method::", "PairCreate {"),
+            concat!("Method::", "PairAccept {"),
         ] {
             assert!(
                 !source.contains(verb),
-                "{verb} is reachable from the app backend"
+                "legacy operation {verb} is reachable"
             );
+        }
+        for verb in [
+            "Method::PairCreateInvite",
+            "Method::PairJoin",
+            "Method::PairProgress",
+            "Method::PairConfirm",
+            "Method::PairCancel",
+        ] {
+            assert!(source.contains(verb), "missing {verb}");
         }
     }
 
