@@ -1,4 +1,4 @@
-# ADR-0016: Keep two narrow Windows FFI boundaries
+# ADR-0018: Keep two narrow Windows FFI boundaries
 
 Status: accepted
 
