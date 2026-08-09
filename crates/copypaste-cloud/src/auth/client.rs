@@ -8,16 +8,14 @@
 use std::fmt;
 use std::time::Duration;
 
-use backon::{ExponentialBuilder, Retryable};
-use reqwest::Client;
-use serde_json::json;
-use url::Url;
-
 use super::error::{classify, AuthError, GrantKind};
 use super::http::{now_ms, redact_email, transient_backoff};
 use super::session::Session;
 use super::token::TokenBody;
 use crate::CloudConfig;
+use backon::{ExponentialBuilder, Retryable};
+use reqwest::Client;
+use serde_json::json;
 
 /// Per-request timeout on every auth call.
 ///
@@ -41,7 +39,7 @@ impl fmt::Debug for SupabaseAuth {
     /// still noise, and `CloudConfig`'s own `Debug` would.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SupabaseAuth")
-            .field("url", &self.config.url)
+            .field("url", &self.config.url())
             .finish_non_exhaustive()
     }
 }
@@ -76,7 +74,7 @@ impl SupabaseAuth {
             .post(
                 &self.endpoint("/auth/v1/signup", &[]),
                 &body,
-                &self.config.anon_key,
+                self.config.anon_key(),
                 GrantKind::SignUp,
             )
             .await?;
@@ -94,7 +92,7 @@ impl SupabaseAuth {
             .post(
                 &self.endpoint("/auth/v1/token", &[("grant_type", "password")]),
                 &body,
-                &self.config.anon_key,
+                self.config.anon_key(),
                 GrantKind::Password,
             )
             .await?;
@@ -114,7 +112,7 @@ impl SupabaseAuth {
             .post(
                 &self.endpoint("/auth/v1/token", &[("grant_type", "refresh_token")]),
                 &body,
-                &self.config.anon_key,
+                self.config.anon_key(),
                 GrantKind::Refresh,
             )
             .await?;
@@ -147,25 +145,20 @@ impl SupabaseAuth {
         }
     }
 
-    fn endpoint(&self, path: &str, query: &[(&str, &str)]) -> String {
-        let Ok(mut endpoint) = Url::parse(&self.config.url).and_then(|base| base.join(path)) else {
-            // Preserve the existing failure mode for an invalid configuration:
-            // hand the raw value to reqwest, which reports a redacted network
-            // error rather than panicking while constructing the client.
-            return self.config.url.clone();
-        };
+    fn endpoint(&self, path: &str, query: &[(&str, &str)]) -> url::Url {
+        let mut endpoint = self.config.endpoint(path);
         if !query.is_empty() {
             endpoint
                 .query_pairs_mut()
                 .extend_pairs(query.iter().copied());
         }
-        endpoint.into()
+        endpoint
     }
 
     /// One request, retried under the shared policy, classified by `grant`.
     async fn post(
         &self,
-        url: &str,
+        url: &url::Url,
         body: &serde_json::Value,
         bearer: &str,
         grant: GrantKind,
@@ -173,9 +166,9 @@ impl SupabaseAuth {
         let attempt = || async {
             let sent = self
                 .http
-                .post(url)
+                .post(url.clone())
                 .timeout(AUTH_TIMEOUT)
-                .header("apikey", self.config.anon_key.as_str())
+                .header("apikey", self.config.anon_key())
                 .bearer_auth(bearer)
                 .json(body)
                 .send()
@@ -326,10 +319,9 @@ mod tests {
     #[tokio::test]
     async fn a_trailing_slash_on_the_project_url_does_not_double_up() {
         let stub = Stub::start(vec![Reply::json(200, &session_body("at", "rt", 1))], 1).await;
-        let auth = SupabaseAuth::new(CloudConfig {
-            url: format!("{}/", stub.base_url),
-            anon_key: ANON.to_string(),
-        })
+        let auth = SupabaseAuth::new(
+            CloudConfig::new_loopback(format!("{}/", stub.base_url), ANON).unwrap(),
+        )
         .with_retry_policy(fast_retry());
         auth.sign_in("a@b.co", "x").await.expect("sign-in");
         let request = stub.only_request().await;
@@ -339,12 +331,16 @@ mod tests {
 
     #[test]
     fn endpoint_join_preserves_ipv6_and_escapes_query_values() {
-        let auth = SupabaseAuth::new(CloudConfig {
-            url: "https://[2001:db8::1]:8443/nested%20base/?stale=true#old".into(),
-            anon_key: ANON.into(),
-        });
+        let auth = SupabaseAuth::new(
+            CloudConfig::new(
+                "https://[2001:db8::1]:8443/nested%20base/?stale=true#old",
+                ANON,
+            )
+            .unwrap(),
+        );
         assert_eq!(
-            auth.endpoint("/auth/v1/token", &[("grant_type", "refresh token/+")],),
+            auth.endpoint("/auth/v1/token", &[("grant_type", "refresh token/+")],)
+                .as_str(),
             "https://[2001:db8::1]:8443/auth/v1/token?grant_type=refresh+token%2F%2B"
         );
     }
@@ -404,10 +400,9 @@ mod tests {
 
     #[test]
     fn debug_for_the_client_shows_no_key_material() {
-        let auth = SupabaseAuth::new(CloudConfig {
-            url: "https://project.supabase.co".into(),
-            anon_key: "anon-secret-looking-key".into(),
-        });
+        let auth = SupabaseAuth::new(
+            CloudConfig::new("https://project.supabase.co", "anon-secret-looking-key").unwrap(),
+        );
         let rendered = format!("{auth:?}");
         assert!(!rendered.contains("anon-secret-looking-key"), "{rendered}");
     }

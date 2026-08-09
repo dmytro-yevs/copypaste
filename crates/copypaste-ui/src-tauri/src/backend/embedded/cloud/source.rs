@@ -334,10 +334,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     fn driver(token: &str) -> Arc<super::super::Driver> {
-        let config = CloudConfig {
-            url: "https://example.invalid".into(),
-            anon_key: "public-anon".into(),
-        };
+        let config = CloudConfig::new("https://example.invalid", "public-anon").unwrap();
         Arc::new(CloudSync::new(
             SupabaseRest::new(config.clone()),
             SupabaseAuth::new(config.clone()),

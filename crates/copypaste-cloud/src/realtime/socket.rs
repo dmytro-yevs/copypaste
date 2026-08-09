@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
 use super::channel::{open_channel, WsStream};
 use super::event::{RealtimeError, RealtimeEvent};
@@ -58,7 +59,7 @@ enum Exit {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
     first: WsStream,
-    base_url: String,
+    endpoint: Url,
     anon_key: String,
     mut token: watch::Receiver<String>,
     user_id: String,
@@ -97,7 +98,7 @@ pub(super) async fn run(
 
         // Read the token at each attempt, not once at startup.
         let current = token.borrow_and_update().clone();
-        match open_channel(&base_url, &anon_key, &current, &user_id).await {
+        match open_channel(endpoint.clone(), &anon_key, &current, &user_id).await {
             Ok(ws) => {
                 stream = Some(ws);
                 // The gap is not replayed. Say so, so the subscriber polls

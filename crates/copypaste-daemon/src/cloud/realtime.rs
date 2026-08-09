@@ -334,10 +334,11 @@ mod tests {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
                 .await
                 .expect("bind backend");
-            let config = CloudConfig {
-                url: format!("http://{}", listener.local_addr().expect("backend address")),
-                anon_key: "anon".into(),
-            };
+            let config = CloudConfig::new_loopback(
+                format!("http://{}", listener.local_addr().expect("backend address")),
+                "anon",
+            )
+            .unwrap();
             let task = tokio::spawn(async move {
                 loop {
                     let Ok((mut socket, _)) = listener.accept().await else {
@@ -450,10 +451,7 @@ mod tests {
     /// it still observes shutdown while waiting.
     #[tokio::test]
     async fn a_signed_out_daemon_waits_and_still_shuts_down() {
-        let config = copypaste_cloud::CloudConfig {
-            url: "https://example.invalid".into(),
-            anon_key: "anon".into(),
-        };
+        let config = copypaste_cloud::CloudConfig::new("https://example.invalid", "anon").unwrap();
         let (state, _dir) = test_state_with_cloud("alpha", Cloud::new(Some(config)));
         assert!(subscribe(&state).await.is_none());
 

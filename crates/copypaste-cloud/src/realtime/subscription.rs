@@ -64,18 +64,18 @@ impl RealtimeSubscription {
     /// subscription is not confirmed within [`JOIN_TIMEOUT`](super::JOIN_TIMEOUT).
     pub async fn connect(config: &CloudConfig, access_token: &str) -> Result<Self, RealtimeError> {
         let user_id = jwt_subject(access_token).ok_or(RealtimeError::MissingUserId)?;
-        let base_url = config.url.clone();
-        let anon_key = config.anon_key.clone();
+        let endpoint = config.realtime_endpoint();
+        let anon_key = config.anon_key().to_owned();
         let token = access_token.to_owned();
 
-        let stream = open_channel(&base_url, &anon_key, &token, &user_id).await?;
+        let stream = open_channel(endpoint.clone(), &anon_key, &token, &user_id).await?;
 
         let (tx, events) = mpsc::channel(EVENT_QUEUE);
         let (token_tx, token_rx) = watch::channel(token);
         let shutdown = CancellationToken::new();
         let task = tokio::spawn(run(
             stream,
-            base_url,
+            endpoint,
             anon_key,
             token_rx,
             user_id,

@@ -95,7 +95,7 @@ impl EmbeddedBackend {
     pub fn open(data_dir: &Path, clipboard: Box<dyn Clipboard>) -> Result<Self> {
         let (events, _) = tokio::sync::broadcast::channel(64);
         let state = BackendState::open(data_dir)?;
-        let cloud = EmbeddedCloud::open(&state);
+        let cloud = EmbeddedCloud::open(&state)?;
         let inner = Arc::new(Inner {
             state,
             node: OnceCell::new(),
