@@ -33,6 +33,12 @@ fn expected(method: &Method) -> Expected {
         Method::PairCreate { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Pairing(_)))
         }
+        Method::PairCreateInvite => {
+            Expected::Data(|data| matches!(data, ResponseData::PairingInvite(_)))
+        }
+        Method::PairProgress | Method::PairCancel => {
+            Expected::Data(|data| matches!(data, ResponseData::PairingProgress(_)))
+        }
         Method::Revoke { .. } => Expected::Data(|data| matches!(data, ResponseData::Empty { .. })),
         Method::Peers => Expected::Data(|data| matches!(data, ResponseData::Peers(_))),
         Method::SyncNow { .. } => Expected::Data(|data| matches!(data, ResponseData::Sync(_))),
@@ -59,7 +65,9 @@ fn expected(method: &Method) -> Expected {
         | Method::ImagePreview { .. }
         | Method::Delete { .. }
         | Method::Pin { .. } => Expected::Error(ErrorCode::NotFound),
-        Method::PairAccept { .. } => Expected::Error(ErrorCode::PairingCode),
+        Method::PairAccept { .. } => Expected::Error(ErrorCode::InvalidRequest),
+        Method::PairConfirm { .. } => Expected::Error(ErrorCode::NotReady),
+        Method::PairJoin { .. } => Expected::Error(ErrorCode::PairingCode),
         Method::Unpair { .. } => Expected::Error(ErrorCode::PeerNotFound),
         Method::Import { .. }
         | Method::Restore { .. }
@@ -110,6 +118,14 @@ fn cases(root: &Path) -> Vec<Method> {
             name: "contract device".into(),
         },
         Method::PairAccept {
+            code: "malformed".into(),
+            addr: "127.0.0.1:1".into(),
+        },
+        Method::PairCancel,
+        Method::PairCreateInvite,
+        Method::PairProgress,
+        Method::PairConfirm { accept: true },
+        Method::PairJoin {
             code: "malformed".into(),
             addr: "127.0.0.1:1".into(),
         },
@@ -221,7 +237,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        35,
+        40,
         "a Method was added without a contract case"
     );
 

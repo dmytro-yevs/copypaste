@@ -153,12 +153,16 @@ impl Session {
                     .send(Bytes::copy_from_slice(&buf[..len]))
                     .await
                     .map_err(TransportError::Io)?;
+                let handshake_hash = handshake_hash(&hs)?;
                 let noise = hs
                     .into_transport_mode()
                     .map_err(|_| TransportError::Handshake)?;
                 let pairing_id = candidate.pairing_id.clone();
                 tracing::debug!(%peer_addr, %pairing_id, "inbound session established");
-                return Ok((Self::new(framed, noise, peer_addr), pairing_id));
+                return Ok((
+                    Self::new(framed, noise, peer_addr, handshake_hash),
+                    pairing_id,
+                ));
             }
             tracing::debug!(%peer_addr, "inbound handshake matched no known pairing");
             Err(TransportError::Handshake)
@@ -223,12 +227,20 @@ impl Session {
                 .map_err(TransportError::Io)?;
         }
 
+        let handshake_hash = handshake_hash(&hs)?;
         let noise = hs
             .into_transport_mode()
             .map_err(|_| TransportError::Handshake)?;
         tracing::debug!(%peer_addr, initiator, "secure session established");
-        Ok(Self::new(framed, noise, peer_addr))
+        Ok(Self::new(framed, noise, peer_addr, handshake_hash))
     }
+}
+
+fn handshake_hash(state: &snow::HandshakeState) -> Result<[u8; 32], TransportError> {
+    state
+        .get_handshake_hash()
+        .try_into()
+        .map_err(|_| TransportError::Handshake)
 }
 
 pub(super) fn noise_params() -> Result<NoiseParams, TransportError> {

@@ -1,9 +1,9 @@
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, DiagnosticCounters,
     DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, ItemPage, Method, PairingData, PeerInfo, PrivateModeData,
-    Request, Response, ResponseData, SensitiveFinding, SensitiveSpan, StatusData, SyncResult,
-    PROTOCOL_VERSION,
+    ImagePreview, ImportData, Item, ItemPage, Method, PairingData, PairingInviteData,
+    PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData, Request, Response,
+    ResponseData, SensitiveFinding, SensitiveSpan, StatusData, SyncResult, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -70,6 +70,8 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::ImagePreview(_) => "image_preview",
         ResponseData::Count(_) => "count",
         ResponseData::Pairing(_) => "pairing",
+        ResponseData::PairingInvite(_) => "pairing_invite",
+        ResponseData::PairingProgress(_) => "pairing_progress",
         ResponseData::Peers(_) => "peers",
         ResponseData::Sync(_) => "sync",
         ResponseData::CloudStatus(_) => "cloud_status",
@@ -158,6 +160,23 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             pairing_id: "peer-1".into(),
             listen_addr: Some("192.0.2.1:47654".into()),
         }),
+        ResponseData::PairingInvite(PairingInviteData {
+            code: "ABCD-EFGH".into(),
+            pairing_id: "peer-1".into(),
+            listen_addr: Some("192.0.2.1:47654".into()),
+            expires_in_secs: 120,
+        }),
+        ResponseData::PairingProgress(PairingProgressData {
+            pairing_id: Some("peer-1".into()),
+            role: Some(PairingRole::Initiator),
+            state: PairingState::AwaitingConfirmation,
+            sas: Some("123456".into()),
+            peer_device_id: Some("device-1".into()),
+            peer_name: Some("Phone".into()),
+            peer_addr: Some("192.0.2.1:47654".into()),
+            known_device: None,
+            error_code: None,
+        }),
         ResponseData::Peers(vec![peer()]),
         ResponseData::Sync(vec![sync_result()]),
         ResponseData::CloudStatus(CloudStatusData {
@@ -187,7 +206,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 18);
+    assert_eq!(variants.len(), 20);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }

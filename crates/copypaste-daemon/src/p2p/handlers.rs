@@ -1,4 +1,4 @@
-//! The five peer-to-peer IPC operations.
+//! Peer-to-peer IPC handlers.
 //!
 //! Each is [`copypaste_p2p::Node`] plus the two things only the daemon knows:
 //! which `ErrorCode` a failure carries, and what else has to be told about it —
@@ -19,11 +19,11 @@ use std::sync::Arc;
 
 use copypaste_core::now_ms;
 use copypaste_ipc::{
-    DiscoveredData, DiscoveredDevice, ErrorCode, PairingData, PeerInfo, Response, ResponseData,
-    SyncResult,
+    DiscoveredData, DiscoveredDevice, ErrorCode, PairingData, PairingInviteData,
+    PairingProgressData, PairingRole, PairingState, PeerInfo, Response, ResponseData, SyncResult,
 };
 use copypaste_p2p::peers::Peer;
-use copypaste_p2p::NodeError;
+use copypaste_p2p::{NodeError, PairingPhase, PairingStatus};
 use tracing::{info, warn};
 
 use crate::sync::peer_source;
@@ -31,13 +31,16 @@ use crate::AppState;
 
 /// Mint a pairing and hand back the code to read out to the other device.
 pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response {
-    let pairing = match state.p2p.node().pair_create(name) {
+    if !state.settings.get().sync_enabled {
+        return sync_disabled(id);
+    }
+    let _ = name;
+    let pairing = match state.p2p.node().pair_create_invite() {
         Ok(pairing) => pairing,
         Err(e) => return failed(id, e),
     };
 
-    state.note_peers_changed();
-    info!(pairing_id = %pairing.pairing_id, "minted a pairing");
+    info!(pairing_id = %pairing.pairing_id, "minted a pairing invitation");
     Response::ok(
         id,
         ResponseData::Pairing(PairingData {
@@ -50,29 +53,110 @@ pub async fn pair_create(state: &Arc<AppState>, id: u64, name: &str) -> Response
     )
 }
 
-/// Consume a code from the other device and prove the pairing works.
-///
-/// The peer is persisted only after a complete session — the node's rule, and
-/// the reason a failed pairing leaves the paired-device list untouched.
+/// Refuse the legacy one-step operation, which cannot carry SAS confirmation.
 pub async fn pair_accept(state: &Arc<AppState>, id: u64, code: &str, addr: &str) -> Response {
+    let _ = (state, code, addr);
+    Response::err(
+        id,
+        ErrorCode::InvalidRequest,
+        "pair_accept requires the pairing confirmation API",
+    )
+}
+
+pub async fn pair_create_invite(state: &Arc<AppState>, id: u64) -> Response {
+    if !state.settings.get().sync_enabled {
+        return sync_disabled(id);
+    }
+    match state.p2p.node().pair_create_invite() {
+        Ok(invite) => Response::ok(
+            id,
+            ResponseData::PairingInvite(PairingInviteData {
+                code: invite.code,
+                pairing_id: invite.pairing_id,
+                listen_addr: invite.listen_addr,
+                expires_in_secs: invite.expires_in_secs,
+            }),
+        ),
+        Err(error) => failed(id, error),
+    }
+}
+
+pub async fn pair_join(state: &Arc<AppState>, id: u64, code: &str, addr: &str) -> Response {
     if !state.settings.get().sync_enabled {
         return sync_disabled(id);
     }
     let source = peer_source(state);
-    let accepted = match state.p2p.node().pair_accept(code, addr, &source).await {
-        Ok(accepted) => accepted,
-        Err(e) => return failed(id, e),
-    };
-
-    crate::p2p::remember_device(state, &accepted.outcome);
-    let online = state.p2p.find(&accepted.peer.pairing_id).is_some();
-    let info = peer_info(&accepted.peer, online);
-
-    state.note_peers_changed();
-    if accepted.outcome.stats.received > 0 {
-        state.note_remote_change();
+    match state.p2p.node().pair_join(code, addr, &source).await {
+        Ok(status) => pairing_progress(state, id, status),
+        Err(error) => failed(id, error),
     }
-    Response::ok(id, ResponseData::Peers(vec![info]))
+}
+
+pub async fn pair_get_progress(state: &Arc<AppState>, id: u64) -> Response {
+    pairing_progress(state, id, state.p2p.node().pair_progress())
+}
+
+pub async fn pair_confirm(state: &Arc<AppState>, id: u64, accept: bool) -> Response {
+    if accept && !state.settings.get().sync_enabled {
+        state.p2p.node().pair_cancel();
+        return sync_disabled(id);
+    }
+    match state.p2p.node().pair_confirm(accept) {
+        Ok(status) => pairing_progress(state, id, status),
+        Err(error) => failed(id, error),
+    }
+}
+
+pub async fn pair_cancel(state: &Arc<AppState>, id: u64) -> Response {
+    pairing_progress(state, id, state.p2p.node().pair_cancel())
+}
+
+fn pairing_progress(state: &AppState, id: u64, status: PairingStatus) -> Response {
+    if status.phase == PairingPhase::Confirmed {
+        if let Some(peer) = &status.peer {
+            if let Err(error) = state.meta.record_device_name(&peer.device_id, &peer.name) {
+                warn!(%error, "could not record a paired device name");
+            }
+        }
+        state.note_peers_changed();
+    }
+    let known_device = if status.phase == PairingPhase::Confirmed {
+        status
+            .pairing_id
+            .as_deref()
+            .and_then(|pairing_id| state.p2p.peers().get(pairing_id))
+            .map(|peer| peer_info(&peer, state.p2p.find(&peer.pairing_id).is_some()))
+    } else {
+        None
+    };
+    let peer = status.peer.as_ref();
+    Response::ok(
+        id,
+        ResponseData::PairingProgress(PairingProgressData {
+            pairing_id: status.pairing_id,
+            role: status.role.map(|role| match role {
+                copypaste_p2p::PairingRole::Initiator => PairingRole::Initiator,
+                copypaste_p2p::PairingRole::Responder => PairingRole::Responder,
+            }),
+            state: match status.phase {
+                PairingPhase::Idle => PairingState::Idle,
+                PairingPhase::WaitingForPeer => PairingState::WaitingForPeer,
+                PairingPhase::Handshaking => PairingState::Handshaking,
+                PairingPhase::AwaitingConfirmation => PairingState::AwaitingConfirmation,
+                PairingPhase::Confirmed => PairingState::Confirmed,
+                PairingPhase::Rejected => PairingState::Rejected,
+                PairingPhase::Cancelled => PairingState::Cancelled,
+                PairingPhase::TimedOut => PairingState::TimedOut,
+                PairingPhase::Failed => PairingState::Failed,
+            },
+            sas: status.sas,
+            peer_device_id: peer.map(|peer| peer.device_id.clone()),
+            peer_name: peer.map(|peer| peer.name.clone()),
+            peer_addr: peer.and_then(|peer| peer.addr.map(|addr| addr.to_string())),
+            known_device,
+            error_code: status.error.as_ref().map(node_error_code),
+        }),
+    )
 }
 
 /// Forget a peer.
@@ -252,6 +336,8 @@ fn node_error_code(error: &NodeError) -> ErrorCode {
         NodeError::BadCode | NodeError::Handshake | NodeError::SelfPairing => {
             ErrorCode::PairingCode
         }
+        NodeError::PairingBusy => ErrorCode::RateLimited,
+        NodeError::NoPairing => ErrorCode::NotReady,
         NodeError::BadAddress => ErrorCode::PairingAddress,
         NodeError::NoAddress | NodeError::Timeout => ErrorCode::PeerUnreachable,
         NodeError::TooManyPairings => ErrorCode::PairingLimit,
@@ -278,54 +364,100 @@ mod tests {
     use copypaste_p2p::transport::{PairingToken, TOKEN_LEN};
 
     #[tokio::test]
-    async fn creating_a_pairing_returns_a_code_and_stores_the_peer() {
+    async fn creating_an_invite_returns_a_code_and_stores_no_peer() {
         let (state, _dir) = test_state("alpha");
-        let response = pair_create(&state, 1, "laptop").await;
+        let response = pair_create_invite(&state, 1).await;
         assert!(response.ok);
 
         let pairing = match response.data {
-            Some(ResponseData::Pairing(data)) => data,
+            Some(ResponseData::PairingInvite(data)) => data,
             other => panic!("expected pairing data, got {other:?}"),
         };
         assert!(!pairing.code.is_empty());
         assert_ne!(pairing.code, pairing.pairing_id);
 
-        // The code must reconstruct the stored key, or the other device could
-        // never authenticate.
         let token = PairingToken::parse(&pairing.code).expect("a valid code");
         assert_eq!(token.pairing_id(), pairing.pairing_id);
-        let stored = state
-            .p2p
-            .peers()
-            .get(&pairing.pairing_id)
-            .expect("the peer is stored before the other device dials in");
-        assert!(stored.psk_matches(&token.psk()));
-        assert_eq!(stored.name, "laptop");
+        assert!(state.p2p.peers().get(&pairing.pairing_id).is_none());
+        assert!(state.p2p.peers().psks().is_empty());
 
         let listed = peers(&state, 2).await;
         assert!(matches!(listed.data, Some(ResponseData::Peers(ref rows)) if rows.is_empty()));
     }
 
-    #[tokio::test]
-    async fn two_pairings_are_independent() {
+    #[test]
+    fn known_device_data_appears_only_after_confirmation() {
         let (state, _dir) = test_state("alpha");
-        let first = pair_create(&state, 1, "a").await;
-        let second = pair_create(&state, 2, "b").await;
-        let ids: Vec<String> = [first, second]
-            .into_iter()
-            .map(|r| match r.data {
-                Some(ResponseData::Pairing(data)) => data.pairing_id,
-                other => panic!("{other:?}"),
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        state
+            .p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
             })
-            .collect();
-        assert_ne!(ids[0], ids[1]);
-        assert_eq!(state.p2p.peers().usable_count(), 2);
+            .unwrap();
+        let progress = |phase| {
+            pairing_progress(
+                &state,
+                1,
+                PairingStatus {
+                    pairing_id: Some(pairing_id.clone()),
+                    role: Some(copypaste_p2p::PairingRole::Initiator),
+                    phase,
+                    sas: None,
+                    peer: None,
+                    error: None,
+                },
+            )
+        };
+
+        let awaiting = progress(PairingPhase::AwaitingConfirmation);
+        assert!(matches!(
+            awaiting.data,
+            Some(ResponseData::PairingProgress(PairingProgressData {
+                known_device: None,
+                ..
+            }))
+        ));
+        let confirmed = progress(PairingPhase::Confirmed);
+        assert!(matches!(
+            confirmed.data,
+            Some(ResponseData::PairingProgress(PairingProgressData {
+                known_device: Some(PeerInfo { pairing_id: id, .. }),
+                ..
+            })) if id == pairing_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_second_ceremony_is_refused_until_the_first_is_cancelled() {
+        let (state, _dir) = test_state("alpha");
+        let first = match pair_create_invite(&state, 1).await.data {
+            Some(ResponseData::PairingInvite(data)) => data,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            pair_create_invite(&state, 2).await.error_code,
+            Some(ErrorCode::RateLimited)
+        );
+        assert!(pair_cancel(&state, 3).await.ok);
+        let second = match pair_create_invite(&state, 4).await.data {
+            Some(ResponseData::PairingInvite(data)) => data,
+            other => panic!("{other:?}"),
+        };
+        assert_ne!(first.pairing_id, second.pairing_id);
+        assert_eq!(state.p2p.peers().usable_count(), 0);
     }
 
     #[tokio::test]
     async fn a_malformed_code_is_rejected_without_touching_the_peer_list() {
         let (state, _dir) = test_state("alpha");
-        let response = pair_accept(&state, 1, "not-a-code", "127.0.0.1:1").await;
+        let response = pair_join(&state, 1, "not-a-code", "127.0.0.1:1").await;
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::PairingCode));
         assert_eq!(
@@ -342,7 +474,7 @@ mod tests {
         let (state, _dir) = test_state("alpha");
         let code = PairingToken::generate().to_code();
         // Port 1 on loopback: nothing is listening, so the connect fails fast.
-        let response = pair_accept(&state, 1, &code, "127.0.0.1:1").await;
+        let response = pair_join(&state, 1, &code, "127.0.0.1:1").await;
         assert!(!response.ok);
         assert_eq!(
             state.p2p.peers().usable_count(),
@@ -355,7 +487,7 @@ mod tests {
     async fn an_unresolvable_address_is_a_client_error() {
         let (state, _dir) = test_state("alpha");
         let code = PairingToken::generate().to_code();
-        let response = pair_accept(&state, 1, &code, "no-port-here").await;
+        let response = pair_join(&state, 1, &code, "no-port-here").await;
         assert_eq!(response.error_code, Some(ErrorCode::PairingAddress));
         assert_eq!(
             response.error.as_deref(),
@@ -381,13 +513,22 @@ mod tests {
     #[tokio::test]
     async fn unpairing_removes_the_key_from_the_listeners_candidates() {
         let (state, _dir) = test_state("alpha");
-        let pairing = match pair_create(&state, 1, "laptop").await.data {
-            Some(ResponseData::Pairing(data)) => data,
-            other => panic!("{other:?}"),
-        };
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        state
+            .p2p
+            .peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "laptop".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+            })
+            .unwrap();
         assert_eq!(state.p2p.peers().psks().len(), 1);
 
-        let response = unpair(&state, 2, &pairing.pairing_id).await;
+        let response = unpair(&state, 2, &pairing_id).await;
         assert!(response.ok);
         assert!(state.p2p.peers().psks().is_empty());
     }
@@ -521,13 +662,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            pair_accept(&state, 1, "not-a-code", "127.0.0.1:1")
+            pair_create_invite(&state, 1).await.error_code,
+            Some(ErrorCode::NotReady)
+        );
+        assert_eq!(
+            pair_join(&state, 2, "not-a-code", "127.0.0.1:1")
                 .await
                 .error_code,
             Some(ErrorCode::NotReady)
         );
         assert_eq!(
-            sync_now(&state, 2, None).await.error_code,
+            sync_now(&state, 3, None).await.error_code,
             Some(ErrorCode::NotReady)
         );
     }
@@ -582,6 +727,8 @@ mod tests {
         (NodeError::BadCode, ErrorCode::PairingCode),
         (NodeError::Handshake, ErrorCode::PairingCode),
         (NodeError::SelfPairing, ErrorCode::PairingCode),
+        (NodeError::PairingBusy, ErrorCode::RateLimited),
+        (NodeError::NoPairing, ErrorCode::NotReady),
         (NodeError::BadAddress, ErrorCode::PairingAddress),
         (NodeError::NoAddress, ErrorCode::PeerUnreachable),
         (NodeError::Timeout, ErrorCode::PeerUnreachable),

@@ -180,6 +180,7 @@ impl BackendError {
             ErrorCode::NotFound => Self::NotFound("That item is no longer there."),
             ErrorCode::PairingCode
             | ErrorCode::PairingAddress
+            | ErrorCode::RateLimited
             | ErrorCode::PeerUnreachable
             | ErrorCode::PairingLimit
             | ErrorCode::PeerFailed

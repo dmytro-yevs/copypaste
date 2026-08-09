@@ -129,6 +129,11 @@ fn requires_ready(method: &Method) -> bool {
         // the device identity that comes out of the same database.
         | Method::PairCreate { .. }
         | Method::PairAccept { .. }
+        | Method::PairCreateInvite
+        | Method::PairJoin { .. }
+        | Method::PairProgress
+        | Method::PairConfirm { .. }
+        | Method::PairCancel
         | Method::Unpair { .. }
         | Method::Revoke { .. }
         | Method::Peers
@@ -175,6 +180,15 @@ pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) ->
         Method::PairAccept { code, addr } => {
             crate::p2p::handlers::pair_accept(state, id, &code, &addr).await
         }
+        Method::PairCreateInvite => crate::p2p::handlers::pair_create_invite(state, id).await,
+        Method::PairJoin { code, addr } => {
+            crate::p2p::handlers::pair_join(state, id, &code, &addr).await
+        }
+        Method::PairProgress => crate::p2p::handlers::pair_get_progress(state, id).await,
+        Method::PairConfirm { accept } => {
+            crate::p2p::handlers::pair_confirm(state, id, accept).await
+        }
+        Method::PairCancel => crate::p2p::handlers::pair_cancel(state, id).await,
         Method::Unpair { pairing_id } => crate::p2p::handlers::unpair(state, id, &pairing_id).await,
         Method::Revoke { pairing_id } => crate::p2p::handlers::revoke(state, id, &pairing_id).await,
         Method::Peers => crate::p2p::handlers::peers(state, id).await,
@@ -245,6 +259,11 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         // error here, which is the whole point of dispatching on a type.
         Method::PairCreate { .. }
         | Method::PairAccept { .. }
+        | Method::PairCreateInvite
+        | Method::PairJoin { .. }
+        | Method::PairProgress
+        | Method::PairConfirm { .. }
+        | Method::PairCancel
         | Method::Unpair { .. }
         | Method::Revoke { .. }
         | Method::Peers
@@ -298,6 +317,14 @@ mod tests {
             code: "x".into(),
             addr: "127.0.0.1:1".into()
         }));
+        assert!(requires_ready(&Method::PairCreateInvite));
+        assert!(requires_ready(&Method::PairJoin {
+            code: "x".into(),
+            addr: "127.0.0.1:1".into()
+        }));
+        assert!(requires_ready(&Method::PairProgress));
+        assert!(requires_ready(&Method::PairConfirm { accept: true }));
+        assert!(requires_ready(&Method::PairCancel));
         assert!(requires_ready(&Method::Unpair {
             pairing_id: "x".into()
         }));

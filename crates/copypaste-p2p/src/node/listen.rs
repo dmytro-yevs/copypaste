@@ -80,7 +80,7 @@ pub async fn listen<S, F>(
 
 /// One inbound peer, start to finish.
 async fn serve_peer<S, F>(
-    node: &Node,
+    node: &Arc<Node>,
     stream: TcpStream,
     addr: SocketAddr,
     source: &S,
@@ -89,7 +89,14 @@ async fn serve_peer<S, F>(
     S: SyncSource,
     F: Fn(&str, &SyncOutcome),
 {
-    let candidates = node.peers().psks();
+    let mut candidates = node.peers().psks();
+    let pending = node.pairing_candidate();
+    let pending_pairing_id = pending
+        .as_ref()
+        .map(|candidate| candidate.pairing_id.clone());
+    if let Some(candidate) = pending {
+        candidates.push(candidate);
+    }
     if candidates.is_empty() {
         debug!(%addr, "a peer connected but this device has no pairings");
         return;
@@ -102,6 +109,16 @@ async fn serve_peer<S, F>(
             return;
         }
     };
+
+    if pending_pairing_id.as_deref() == Some(pairing_id.as_str()) {
+        if let Err(error) = Arc::clone(node)
+            .accept_pairing(session, &pairing_id, source)
+            .await
+        {
+            debug!(%pairing_id, %error, "inbound pairing ceremony failed");
+        }
+        return;
+    }
 
     let mut channel = NoiseChannel::new(session);
     let listen_addr = node.listen_addr();
@@ -229,7 +246,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_pairing_code_completes_a_session_and_syncs_both_histories() {
+    async fn a_known_peer_session_syncs_both_histories() {
         let a_dir = tempfile::tempdir().unwrap();
         let b_dir = tempfile::tempdir().unwrap();
         let a = Arc::new(Node::new(
@@ -263,16 +280,33 @@ mod tests {
             shutdown_rx,
         ));
 
-        let pairing = a.pair_create("phone").unwrap();
-        let accepted = b
-            .pair_accept(&pairing.code, &addr.to_string(), &b_source)
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        a.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+            })
+            .unwrap();
+        let b_peer = Peer {
+            pairing_id: pairing_id.clone(),
+            name: "desktop".into(),
+            psk: token.psk(),
+            last_addr: Some(addr),
+            last_seen_ms: 0,
+        };
+        b.peers().upsert(b_peer.clone()).unwrap();
+        let outcome = b
+            .sync_one(&b_peer, &b_source)
             .await
-            .expect("the code and listener must establish a pairing");
+            .expect("known peers must establish a session");
 
         assert_eq!(a.peers().usable_count(), 1);
         assert_eq!(b.peers().usable_count(), 1);
-        assert_eq!(accepted.peer.pairing_id, pairing.pairing_id);
-        assert!(accepted.peer.last_addr.is_some());
+        assert_eq!(outcome.peer_device_id, "desktop");
         assert!(a_source
             .snapshot()
             .iter()
