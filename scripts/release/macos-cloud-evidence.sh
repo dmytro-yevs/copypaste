@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# shellcheck source=scripts/release/macos-bundle-lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/macos-bundle-lib.sh"
 # shellcheck source=scripts/release/macos-ui-evidence-lib.sh
 . "$(dirname "${BASH_SOURCE[0]}")/macos-ui-evidence-lib.sh"
 # shellcheck source=scripts/release/native-cloud-evidence-lib.sh
@@ -8,7 +10,7 @@ set -uo pipefail
 
 OUT="${1:-artifacts/native/macos/cloud}"
 APP="${COPYPASTE_APP:-/Applications/CopyPaste.app}"
-BINARY="$APP/Contents/MacOS/CopyPaste"
+BINARY=""
 STUB_PORT="${CLOUD_STUB_PORT:-47800}"
 LATENCIES="$OUT/latency.tsv"
 APP_PID=""
@@ -23,7 +25,7 @@ cleanup() {
 }
 
 launch_app() { # <unconfigured|configured>
-    pkill -x CopyPaste 2>/dev/null || true
+    mac_stop_executable "$BINARY" || return 1
     "$APP/Contents/MacOS/copypaste" shutdown >/dev/null 2>&1 || true
     pkill -f "$APP/Contents/MacOS/copypaste-daemon" 2>/dev/null || true
     if [[ "$1" == configured ]]; then
@@ -34,6 +36,7 @@ launch_app() { # <unconfigured|configured>
             "$BINARY" > "$OUT/app-$1.log" 2>&1 &
     fi
     APP_PID=$!
+    mac_set_app_pid "$APP_PID"
     mac_wait_label "Settings" "$OUT/app-$1-ready.txt" 30
 }
 
@@ -157,7 +160,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
 fi
 
 [[ "$(uname -s)" == Darwin ]] || { echo "ERROR: must run on macOS" >&2; exit 2; }
-[[ -x "$BINARY" ]] || { echo "ERROR: installed CopyPaste executable is missing" >&2; exit 2; }
+BINARY="$(mac_evidence_executable "$APP")" || exit 2
 mkdir -p "$OUT"
 : > "$LATENCIES"
 trap cleanup EXIT

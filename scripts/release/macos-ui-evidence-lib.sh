@@ -1,54 +1,95 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+mac_evidence_executable() { # <app bundle>
+    macos_bundle_executable_path "$1"
+}
+
+mac_stop_executable() { # <bundle executable>
+    local name="${1##*/}" started="$SECONDS"
+    pkill -x "$name" 2>/dev/null || true
+    while pgrep -x "$name" >/dev/null 2>&1; do
+        (( SECONDS - started < 10 )) || return 1
+        sleep 0.1
+    done
+}
+
+mac_wait_executable_pid() { # <bundle executable> [timeout]
+    local name="${1##*/}" timeout="${2:-30}" started="$SECONDS" pids
+    while (( SECONDS - started < timeout )); do
+        pids="$(pgrep -x "$name" 2>/dev/null || true)"
+        if [[ "$pids" =~ ^[0-9]+$ ]]; then
+            printf '%s\n' "$pids"
+            return 0
+        fi
+        sleep 0.1
+    done
+    return 1
+}
+
+mac_set_app_pid() { # <pid>
+    MAC_APP_PID="$1"
+}
+
 mac_ax() { # <dump|press|set> [label] [value]
-    osascript - "$@" <<'APPLESCRIPT'
+    [[ -n "${MAC_APP_PID:-}" ]] || {
+        echo "macOS accessibility target PID is unavailable" >&2
+        return 1
+    }
+    osascript - "$MAC_APP_PID" "$@" <<'APPLESCRIPT'
 on run argv
-    set actionMode to item 1 of argv
+    set appPid to item 1 of argv as integer
+    set actionMode to item 2 of argv
     set targetLabel to ""
     set inputValue to ""
-    if (count of argv) > 1 then set targetLabel to item 2 of argv
-    if (count of argv) > 2 then set inputValue to item 3 of argv
+    if (count of argv) > 2 then set targetLabel to item 3 of argv
+    if (count of argv) > 3 then set inputValue to item 4 of argv
     set outputLines to {}
-    tell application "System Events" to tell process "CopyPaste"
-        set elementsList to entire contents of window 1
-        repeat with elementRef in elementsList
-            set roleText to ""
-            set nameText to ""
-            set descriptionText to ""
-            set helpText to ""
-            set valueText to ""
-            try
-                set roleText to role of elementRef as text
-            end try
-            try
-                set nameText to name of elementRef as text
-            end try
-            try
-                set descriptionText to description of elementRef as text
-            end try
-            try
-                set helpText to help of elementRef as text
-            end try
-            try
-                set valueText to value of elementRef as text
-            end try
-            if actionMode is "dump" then
-                set end of outputLines to roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
-            else if nameText is targetLabel or descriptionText is targetLabel or helpText is targetLabel or valueText is targetLabel then
-                if actionMode is "press" then
-                    try
-                        perform action "AXPress" of elementRef
-                        return "ok"
-                    end try
-                else if actionMode is "set" then
-                    try
-                        set value of elementRef to inputValue
-                        return "ok"
-                    end try
+    tell application "System Events"
+        set processMatches to every process whose unix id is appPid
+        if (count of processMatches) is not 1 then error "CopyPaste process is unavailable"
+        set processRef to item 1 of processMatches
+        tell processRef
+            if (count of windows) is 0 then error "CopyPaste window is unavailable"
+            set elementsList to entire contents
+            repeat with elementRef in elementsList
+                set roleText to ""
+                set nameText to ""
+                set descriptionText to ""
+                set helpText to ""
+                set valueText to ""
+                try
+                    set roleText to role of elementRef as text
+                end try
+                try
+                    set nameText to name of elementRef as text
+                end try
+                try
+                    set descriptionText to description of elementRef as text
+                end try
+                try
+                    set helpText to help of elementRef as text
+                end try
+                try
+                    set valueText to value of elementRef as text
+                end try
+                if actionMode is "dump" then
+                    set end of outputLines to roleText & tab & nameText & tab & descriptionText & tab & helpText & tab & valueText
+                else if nameText is targetLabel or descriptionText is targetLabel or helpText is targetLabel or valueText is targetLabel then
+                    if actionMode is "press" then
+                        try
+                            perform action "AXPress" of elementRef
+                            return "ok"
+                        end try
+                    else if actionMode is "set" then
+                        try
+                            set value of elementRef to inputValue
+                            return "ok"
+                        end try
+                    end if
                 end if
-            end if
-        end repeat
+            end repeat
+        end tell
     end tell
     if actionMode is "dump" then
         set AppleScript's text item delimiters to linefeed
@@ -81,11 +122,36 @@ mac_capture_state() { # <directory>
 }
 
 mac_ui_self_test() {
-    local fixture="$1/ax.txt"
-    printf 'AXButton\tSign in\t\t\t\nAXStaticText\tConnected\t\t\t\n' > "$fixture"
+    local fixture="$1/ax.txt" app="$1/Test.app" binary pid
+    local PLIST_BUDDY="$1/plist-reader"
+
+    mkdir -p "$app/Contents/MacOS"
+    printf 'RenamedProduct' > "$app/Contents/Info.plist"
+    printf '#!/usr/bin/env bash\ncat "$3"\n' > "$PLIST_BUDDY"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$app/Contents/MacOS/RenamedProduct"
+    chmod +x "$PLIST_BUDDY" "$app/Contents/MacOS/RenamedProduct"
+    binary="$(mac_evidence_executable "$app")"
+
+    pgrep() {
+        [[ "$1" == "-x" && "$2" == "RenamedProduct" ]] || return 1
+        printf '4242\n'
+    }
+    pid="$(mac_wait_executable_pid "$binary" 1)"
+    unset -f pgrep
+    [[ "$pid" == "4242" ]] \
+        && ok "bundle executable name selects the launched process" \
+        || bad "bundle executable name selects the launched process"
+
+    osascript() {
+        [[ "$1" == "-" && "$2" == "4242" && "$3" == "dump" ]] || return 1
+        printf 'AXButton\tSign in\t\t\t\nAXStaticText\tConnected\t\t\t\n'
+    }
+    mac_set_app_pid "$pid"
+    mac_ax dump > "$fixture"
+    unset -f osascript
     mac_ax_contains "$fixture" "Sign in" \
-        && ok "an accessible action is found in a native dump" \
-        || bad "an accessible action is found in a native dump"
+        && ok "an accessible action is found for the launched PID" \
+        || bad "an accessible action is found for the launched PID"
     mac_ax_contains "$fixture" "Signed out" \
         && bad "an absent accessibility state is not found" \
         || ok "an absent accessibility state is not found"

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/release/macos-bundle-lib.sh
+. "$REPO_ROOT/scripts/release/macos-bundle-lib.sh"
+# shellcheck source=scripts/release/macos-ui-evidence-lib.sh
+. "$REPO_ROOT/scripts/release/macos-ui-evidence-lib.sh"
+
 check_accessibility_surface() {
   python3 - "$1" <<'PY'
 import csv
@@ -27,6 +33,10 @@ PY
 if [[ "${1:-}" == "--self-test" ]]; then
   fixture_dir="$(mktemp -d)"
   trap 'rm -rf "$fixture_dir"' EXIT
+  PASS=0
+  FAIL=0
+  ok() { PASS=$((PASS + 1)); }
+  bad() { FAIL=$((FAIL + 1)); echo "self-test failed: $1" >&2; }
   printf 'AXMenuBar\tCopyPaste\nAXMenuBarItem\tCopyPaste\n' > "$fixture_dir/good.tsv"
   printf 'AXWindow\tCopyPaste\n' > "$fixture_dir/no-menu.tsv"
   printf 'AXMenuBar\t\n' > "$fixture_dir/unnamed.tsv"
@@ -39,6 +49,8 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo "self-test failed: surface without a name passed" >&2
     exit 1
   fi
+  mac_ui_self_test "$fixture_dir"
+  [[ "$FAIL" -eq 0 ]] || exit 1
   echo "macOS native accessibility self-test passed"
   exit 0
 fi
@@ -46,47 +58,47 @@ fi
 out="${1:?usage: macos-native-evidence.sh OUTPUT_DIRECTORY}"
 mkdir -p "$out"
 
-app="/Applications/CopyPaste.app"
+app="${COPYPASTE_APP:-/Applications/CopyPaste.app}"
 [[ -d "$app" ]] || { echo "CopyPaste.app is not installed" >&2; exit 1; }
+app_executable="$(mac_evidence_executable "$app")"
+cli="$app/Contents/MacOS/copypaste"
+app_pid=""
+
+cleanup() {
+  [[ -z "$app_pid" ]] || kill "$app_pid" 2>/dev/null || true
+  "$cli" shutdown >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+mac_stop_executable "$app_executable" || {
+  echo "the installed CopyPaste process did not stop" >&2
+  exit 1
+}
+"$cli" shutdown >/dev/null 2>&1 || true
 
 start_ms="$(python3 -c 'import time; print(time.time_ns() // 1000000)')"
-open -a "$app"
-for _ in $(seq 1 100); do
-  pgrep -x CopyPaste >/dev/null && break
+open -n -a "$app"
+app_pid="$(mac_wait_executable_pid "$app_executable" 30)" || {
+  echo "CopyPaste did not launch from its bundle executable" >&2
+  exit 1
+}
+mac_set_app_pid "$app_pid"
+
+surface_ready="no"
+surface_started="$SECONDS"
+while (( SECONDS - surface_started < 30 )); do
+  if mac_ax dump > "$out/ax.log" 2> "$out/ax.err" \
+      && check_accessibility_surface "$out/ax.log" >/dev/null 2>&1; then
+    surface_ready="yes"
+    break
+  fi
   sleep 0.1
 done
-pgrep -x CopyPaste >/dev/null || { echo "CopyPaste did not launch" >&2; exit 1; }
-ready_ms="$(python3 -c 'import time; print(time.time_ns() // 1000000)')"
-
-if ! osascript - "CopyPaste" > "$out/ax.log" 2> "$out/ax.err" <<'APPLESCRIPT'
-on run argv
-    set appName to item 1 of argv
-    tell application "System Events"
-        if UI elements enabled is false then error "Accessibility permission is unavailable"
-        if not (exists process appName) then error "CopyPaste process is unavailable"
-        tell process appName
-            set outputLines to {}
-            repeat with elementRef in entire contents
-                set roleText to ""
-                set nameText to ""
-                try
-                    set roleText to role of elementRef as text
-                end try
-                try
-                    set nameText to name of elementRef as text
-                end try
-                set end of outputLines to roleText & tab & nameText
-            end repeat
-            set AppleScript's text item delimiters to linefeed
-            return outputLines as text
-        end tell
-    end tell
-end run
-APPLESCRIPT
-then
+if [[ "$surface_ready" != "yes" ]]; then
   echo "native accessibility observation unavailable: $(tr '\n' ' ' < "$out/ax.err")" >&2
   exit 1
 fi
+ready_ms="$(python3 -c 'import time; print(time.time_ns() // 1000000)')"
 check_accessibility_surface "$out/ax.log"
 screencapture -x "$out/screenshot.png"
 python3 - "$out/latency.json" "$((ready_ms - start_ms))" <<'PY'
