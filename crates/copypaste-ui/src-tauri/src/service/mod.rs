@@ -27,6 +27,7 @@ use std::time::Duration;
 
 use backon::{ExponentialBuilder, Retryable};
 use serde::Serialize;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::backend::{Backend, BackendError, Result};
 
@@ -83,9 +84,24 @@ impl ServiceState {
 }
 
 /// Owns the daemon child process for the life of this app process.
-#[derive(Debug, Default)]
 pub struct Supervisor {
-    child: Mutex<Option<Child>>,
+    lifecycle: AsyncMutex<()>,
+    child: Mutex<Option<Box<dyn ChildProcess>>>,
+}
+
+impl std::fmt::Debug for Supervisor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Supervisor").finish_non_exhaustive()
+    }
+}
+
+impl Default for Supervisor {
+    fn default() -> Self {
+        Self {
+            lifecycle: AsyncMutex::new(()),
+            child: Mutex::new(None),
+        }
+    }
 }
 
 impl Supervisor {
@@ -95,14 +111,27 @@ impl Supervisor {
     /// answers `status` before it is ready, so anything else came from a live
     /// process (manifest 04: `status` is exempt from the readiness gate).
     pub async fn state<B: Backend>(&self, backend: &B) -> ServiceState {
-        match backend.status().await {
+        self.service_state(backend).await
+    }
+
+    async fn service_state<B: ServiceBackend>(&self, backend: &B) -> ServiceState {
+        self.service_state_with(backend, &locate::daemon_binary)
+            .await
+    }
+
+    async fn service_state_with<B, L>(&self, backend: &B, locate: &L) -> ServiceState
+    where
+        B: ServiceBackend,
+        L: Fn() -> Option<std::path::PathBuf>,
+    {
+        match backend.service_status().await {
             Ok(status) => ServiceState::Running {
                 matches_app: status.version == APP_VERSION,
                 version: status.version,
                 ours: self.holds_child(),
             },
             Err(BackendError::Unreachable) => {
-                if locate::daemon_binary().is_some() {
+                if locate().is_some() {
                     ServiceState::Stopped
                 } else {
                     ServiceState::NotInstalled
@@ -118,17 +147,37 @@ impl Supervisor {
     /// live state. That matters because the button that calls this is on a
     /// screen a user can double-click.
     pub async fn start<B: Backend>(&self, backend: &B) -> Result<ServiceState> {
-        let state = self.state(backend).await;
+        let _lifecycle = self.lifecycle.lock().await;
+        self.start_locked(backend, &locate::daemon_binary, &spawn_process)
+            .await
+    }
+
+    async fn start_locked<B, L, S>(
+        &self,
+        backend: &B,
+        locate: &L,
+        spawn: &S,
+    ) -> Result<ServiceState>
+    where
+        B: ServiceBackend,
+        L: Fn() -> Option<std::path::PathBuf>,
+        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
+    {
+        let state = self.service_state_with(backend, locate).await;
         match state {
             ServiceState::NotInstalled => return Err(BackendError::Unsupported(MSG_NOT_INSTALLED)),
             ServiceState::Stopped => {}
             live => return Ok(live),
         }
 
-        let binary = locate::daemon_binary().ok_or(BackendError::Unsupported(MSG_NOT_INSTALLED))?;
-        self.spawn(&binary)?;
-        self.await_ready(backend).await?;
-        Ok(self.state(backend).await)
+        self.stop();
+        let binary = locate().ok_or(BackendError::Unsupported(MSG_NOT_INSTALLED))?;
+        self.spawn(&binary, spawn)?;
+        if let Err(error) = self.await_ready(backend).await {
+            self.stop();
+            return Err(error);
+        }
+        Ok(self.service_state_with(backend, locate).await)
     }
 
     /// Stop the live daemon, then start the bundled version.
@@ -137,21 +186,43 @@ impl Supervisor {
     /// grants every destructive history operation, and this avoids signalling
     /// a pid the app does not own (ADR-0004).
     pub async fn restart<B: Backend>(&self, backend: &B) -> Result<ServiceState> {
-        let state = self.state(backend).await;
+        let _lifecycle = self.lifecycle.lock().await;
+        self.restart_locked(backend, &locate::daemon_binary, &spawn_process)
+            .await
+    }
+
+    async fn restart_locked<B, L, S>(
+        &self,
+        backend: &B,
+        locate: &L,
+        spawn: &S,
+    ) -> Result<ServiceState>
+    where
+        B: ServiceBackend,
+        L: Fn() -> Option<std::path::PathBuf>,
+        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
+    {
+        let state = self.service_state_with(backend, locate).await;
         if state.is_live() {
-            backend.shutdown().await?;
+            backend.stop_service().await?;
             self.await_stopped(backend).await?;
+            self.reap_child().await;
         }
-        self.start(backend).await
+        self.start_locked(backend, locate, spawn).await
     }
 
     /// Gracefully stop the daemon when this app process owns it.
     pub async fn shutdown<B: Backend>(&self, backend: &B) {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.shutdown_locked(backend).await;
+    }
+
+    async fn shutdown_locked<B: ServiceBackend>(&self, backend: &B) {
         if !self.holds_child() {
             return;
         }
-        if backend.shutdown().await.is_ok() && self.await_stopped(backend).await.is_ok() {
-            self.take_child();
+        if backend.stop_service().await.is_ok() && self.await_stopped(backend).await.is_ok() {
+            self.reap_child().await;
             return;
         }
         self.stop();
@@ -162,35 +233,23 @@ impl Supervisor {
     /// `kill` is `SIGKILL` — `std::process::Child` sends nothing else. WAL mode
     /// makes that recoverable and the daemon clears its own stale socket on the
     /// next bind; ADR-0004 records it as a cost rather than a preference.
-    pub fn stop(&self) {
+    fn stop(&self) {
         let Some(mut child) = self.take_child() else {
             return;
         };
         let _ = child.kill();
         // Reaped rather than left a zombie: the app may run for days after.
-        let _ = child.wait();
+        let _ = child.reap();
     }
 
-    fn spawn(&self, binary: &Path) -> Result<()> {
-        let child = Command::new(binary)
-            .arg("--foreground")
-            // No inherited stdio. The daemon writes to `tracing`, and a child
-            // holding the app's descriptors keeps them open past a crash.
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            // The `io::Error` names the binary's path, which is exactly the
-            // disclosure rule 4 is about, so it is dropped rather than wrapped.
-            .map_err(|_| BackendError::Internal(MSG_START_FAILED.into()))?;
-
-        if let Ok(mut slot) = self.child.lock() {
-            // Anything already here has been replaced by `restart`, which
-            // stopped it first; dropping the handle would leak a zombie.
-            if let Some(mut previous) = slot.replace(child) {
-                let _ = previous.kill();
-                let _ = previous.wait();
-            }
+    fn spawn<S>(&self, binary: &Path, spawn: &S) -> Result<()>
+    where
+        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
+    {
+        let child = spawn(binary)?;
+        if let Some(mut previous) = self.child_slot().replace(child) {
+            let _ = previous.kill();
+            let _ = previous.reap();
         }
         Ok(())
     }
@@ -199,7 +258,7 @@ impl Supervisor {
     ///
     /// `backon` rather than a sleep loop: the workspace already carries one
     /// retry implementation and v1 grew six (CLAUDE.md rule 1).
-    async fn await_ready<B: Backend>(&self, backend: &B) -> Result<()> {
+    async fn await_ready<B: ServiceBackend>(&self, backend: &B) -> Result<()> {
         let policy = ExponentialBuilder::new()
             .with_min_delay(Duration::from_millis(50))
             .with_max_delay(Duration::from_millis(400))
@@ -213,7 +272,7 @@ impl Supervisor {
             if self.child_exited() {
                 return Err(BackendError::Internal(MSG_START_FAILED.into()));
             }
-            backend.status().await.map(|_| ())
+            backend.service_status().await.map(|_| ())
         };
 
         probe
@@ -227,14 +286,14 @@ impl Supervisor {
             })
     }
 
-    async fn await_stopped<B: Backend>(&self, backend: &B) -> Result<()> {
+    async fn await_stopped<B: ServiceBackend>(&self, backend: &B) -> Result<()> {
         let policy = ExponentialBuilder::new()
             .with_min_delay(Duration::from_millis(25))
             .with_max_delay(Duration::from_millis(200))
             .without_max_times()
             .with_total_delay(Some(READY_TIMEOUT));
         (|| async {
-            match backend.status().await {
+            match backend.service_status().await {
                 Err(BackendError::Unreachable) => Ok(()),
                 _ => Err(BackendError::Internal(MSG_NEVER_READY.into())),
             }
@@ -245,29 +304,131 @@ impl Supervisor {
 
     /// Whether we hold a child that is still alive, reaping it if it is not.
     fn holds_child(&self) -> bool {
-        let Ok(mut slot) = self.child.lock() else {
-            return false;
-        };
-        match slot.as_mut().map(Child::try_wait) {
-            Some(Ok(None)) => true,
-            // Exited, or unknowable. Either way the handle is spent.
-            Some(_) => {
+        let mut slot = self.child_slot();
+        match slot.as_mut().map(|child| child.reap_if_exited()) {
+            Some(Ok(false)) => true,
+            Some(Ok(true)) => {
                 *slot = None;
                 false
             }
+            Some(Err(_)) => true,
             None => false,
         }
     }
 
     fn child_exited(&self) -> bool {
-        let Ok(mut slot) = self.child.lock() else {
-            return false;
-        };
-        matches!(slot.as_mut().map(Child::try_wait), Some(Ok(Some(_))))
+        let mut slot = self.child_slot();
+        let exited = matches!(
+            slot.as_mut().map(|child| child.reap_if_exited()),
+            Some(Ok(true))
+        );
+        if exited {
+            *slot = None;
+        }
+        exited
     }
 
-    fn take_child(&self) -> Option<Child> {
-        self.child.lock().ok()?.take()
+    async fn reap_child(&self) {
+        if let Some(mut child) = self.take_child() {
+            let _ = tokio::task::spawn_blocking(move || child.reap()).await;
+        }
+    }
+
+    fn take_child(&self) -> Option<Box<dyn ChildProcess>> {
+        self.child_slot().take()
+    }
+
+    fn child_slot(&self) -> std::sync::MutexGuard<'_, Option<Box<dyn ChildProcess>>> {
+        self.child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(test)]
+    async fn start_injected<B, L, S>(
+        &self,
+        backend: &B,
+        locate: &L,
+        spawn: &S,
+    ) -> Result<ServiceState>
+    where
+        B: ServiceBackend,
+        L: Fn() -> Option<std::path::PathBuf>,
+        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
+    {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.start_locked(backend, locate, spawn).await
+    }
+
+    #[cfg(test)]
+    async fn restart_injected<B, L, S>(
+        &self,
+        backend: &B,
+        locate: &L,
+        spawn: &S,
+    ) -> Result<ServiceState>
+    where
+        B: ServiceBackend,
+        L: Fn() -> Option<std::path::PathBuf>,
+        S: Fn(&Path) -> Result<Box<dyn ChildProcess>>,
+    {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.restart_locked(backend, locate, spawn).await
+    }
+
+    #[cfg(test)]
+    async fn shutdown_injected<B: ServiceBackend>(&self, backend: &B) {
+        let _lifecycle = self.lifecycle.lock().await;
+        self.shutdown_locked(backend).await;
+    }
+}
+
+trait ChildProcess: Send {
+    fn reap_if_exited(&mut self) -> std::io::Result<bool>;
+    fn kill(&mut self) -> std::io::Result<()>;
+    fn reap(&mut self) -> std::io::Result<()>;
+}
+
+impl ChildProcess for Child {
+    fn reap_if_exited(&mut self) -> std::io::Result<bool> {
+        self.try_wait().map(|status| status.is_some())
+    }
+
+    fn kill(&mut self) -> std::io::Result<()> {
+        Child::kill(self)
+    }
+
+    fn reap(&mut self) -> std::io::Result<()> {
+        self.wait().map(|_| ())
+    }
+}
+
+fn spawn_process(binary: &Path) -> Result<Box<dyn ChildProcess>> {
+    Command::new(binary)
+        .arg("--foreground")
+        // A child holding the app's descriptors keeps them open past a crash.
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|child| Box::new(child) as Box<dyn ChildProcess>)
+        // The OS error can contain the binary path and local username.
+        .map_err(|_| BackendError::Internal(MSG_START_FAILED.into()))
+}
+
+#[allow(async_fn_in_trait)]
+trait ServiceBackend: Send + Sync {
+    async fn service_status(&self) -> Result<copypaste_ipc::StatusData>;
+    async fn stop_service(&self) -> Result<()>;
+}
+
+impl<B: Backend> ServiceBackend for B {
+    async fn service_status(&self) -> Result<copypaste_ipc::StatusData> {
+        self.status().await
+    }
+
+    async fn stop_service(&self) -> Result<()> {
+        self.shutdown().await
     }
 }
 
@@ -284,6 +445,131 @@ impl Drop for Supervisor {
 mod tests {
     use super::*;
     use crate::backend::testing::FakeBackend;
+    use copypaste_ipc::{DiagnosticCounters, StatusData, PROTOCOL_VERSION};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::task::Poll;
+    use tokio::sync::Semaphore;
+
+    struct OneShotGate {
+        armed: AtomicBool,
+        entered: Semaphore,
+        release: Semaphore,
+    }
+
+    impl OneShotGate {
+        fn new() -> Self {
+            Self {
+                armed: AtomicBool::new(false),
+                entered: Semaphore::new(0),
+                release: Semaphore::new(0),
+            }
+        }
+
+        fn arm(&self) {
+            self.armed.store(true, Ordering::SeqCst);
+        }
+
+        async fn pause_once(&self) {
+            if self.armed.swap(false, Ordering::SeqCst) {
+                self.entered.add_permits(1);
+                self.release.acquire().await.unwrap().forget();
+            }
+        }
+
+        async fn wait_until_entered(&self) {
+            self.entered.acquire().await.unwrap().forget();
+        }
+
+        fn resume(&self) {
+            self.release.add_permits(1);
+        }
+    }
+
+    struct ControlledBackend {
+        running: AtomicBool,
+        status_gate: OneShotGate,
+        shutdown_gate: OneShotGate,
+        shutdown_calls: AtomicUsize,
+    }
+
+    impl ControlledBackend {
+        fn new(running: bool) -> Self {
+            Self {
+                running: AtomicBool::new(running),
+                status_gate: OneShotGate::new(),
+                shutdown_gate: OneShotGate::new(),
+                shutdown_calls: AtomicUsize::new(0),
+            }
+        }
+
+        fn set_running(&self, running: bool) {
+            self.running.store(running, Ordering::SeqCst);
+        }
+    }
+
+    impl ServiceBackend for ControlledBackend {
+        async fn service_status(&self) -> Result<StatusData> {
+            self.status_gate.pause_once().await;
+            if !self.running.load(Ordering::SeqCst) {
+                return Err(BackendError::Unreachable);
+            }
+            Ok(StatusData {
+                device_name: "Test device".into(),
+                version: APP_VERSION.into(),
+                protocol_version: PROTOCOL_VERSION,
+                item_count: 0,
+                capture_running: true,
+                clipboard_backend: "fake".into(),
+                private_mode: false,
+                private_mode_epoch: 0,
+                counters: DiagnosticCounters::default(),
+            })
+        }
+
+        async fn stop_service(&self) -> Result<()> {
+            self.shutdown_calls.fetch_add(1, Ordering::SeqCst);
+            self.shutdown_gate.pause_once().await;
+            self.set_running(false);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct ChildProbe {
+        exited: AtomicBool,
+        kills: AtomicUsize,
+        reaps: AtomicUsize,
+    }
+
+    struct FakeChild {
+        probe: Arc<ChildProbe>,
+    }
+
+    impl ChildProcess for FakeChild {
+        fn reap_if_exited(&mut self) -> std::io::Result<bool> {
+            let exited = self.probe.exited.load(Ordering::SeqCst);
+            if exited {
+                assert_eq!(self.probe.reaps.fetch_add(1, Ordering::SeqCst), 0);
+            }
+            Ok(exited)
+        }
+
+        fn kill(&mut self) -> std::io::Result<()> {
+            self.probe.kills.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn reap(&mut self) -> std::io::Result<()> {
+            assert_eq!(self.probe.reaps.fetch_add(1, Ordering::SeqCst), 0);
+            Ok(())
+        }
+    }
+
+    fn injected_binary() -> Option<PathBuf> {
+        Some(PathBuf::from("injected-daemon"))
+    }
 
     #[tokio::test]
     async fn an_unreachable_daemon_with_no_binary_is_not_installed() {
@@ -350,6 +636,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_starts_spawn_one_child() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(false);
+        backend.status_gate.arm();
+        let spawn_count = AtomicUsize::new(0);
+        let child = Arc::new(ChildProbe::default());
+        let spawn = |_: &Path| -> Result<Box<dyn ChildProcess>> {
+            spawn_count.fetch_add(1, Ordering::SeqCst);
+            backend.set_running(true);
+            Ok(Box::new(FakeChild {
+                probe: Arc::clone(&child),
+            }))
+        };
+
+        let first = sup.start_injected(&backend, &injected_binary, &spawn);
+        tokio::pin!(first);
+        tokio::select! {
+            () = backend.status_gate.wait_until_entered() => {}
+            result = &mut first => panic!("start passed the gate: {result:?}"),
+        }
+
+        let second = sup.start_injected(&backend, &injected_binary, &spawn);
+        tokio::pin!(second);
+        assert!(matches!(futures_util::poll!(&mut second), Poll::Pending));
+        backend.status_gate.resume();
+
+        let (first, second) = tokio::join!(first, second);
+        assert!(first.unwrap().is_live());
+        assert!(second.unwrap().is_live());
+        assert_eq!(spawn_count.load(Ordering::SeqCst), 1);
+        sup.stop();
+        assert_eq!(child.reaps.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_child_that_exits_during_start_is_reaped_once() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(false);
+        let child = Arc::new(ChildProbe::default());
+        child.exited.store(true, Ordering::SeqCst);
+        let spawn = |_: &Path| -> Result<Box<dyn ChildProcess>> {
+            Ok(Box::new(FakeChild {
+                probe: Arc::clone(&child),
+            }))
+        };
+
+        let error = sup
+            .start_injected(&backend, &injected_binary, &spawn)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), MSG_START_FAILED);
+        assert_eq!(child.kills.load(Ordering::SeqCst), 0);
+        assert_eq!(child.reaps.load(Ordering::SeqCst), 1);
+        assert!(sup.take_child().is_none());
+    }
+
+    #[tokio::test]
+    async fn restart_and_shutdown_are_one_ordered_sequence() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+        let old_child = Arc::new(ChildProbe::default());
+        *sup.child_slot() = Some(Box::new(FakeChild {
+            probe: Arc::clone(&old_child),
+        }));
+        backend.shutdown_gate.arm();
+        let new_children = Mutex::new(Vec::new());
+        let spawn = |_: &Path| -> Result<Box<dyn ChildProcess>> {
+            backend.set_running(true);
+            let probe = Arc::new(ChildProbe::default());
+            new_children.lock().unwrap().push(Arc::clone(&probe));
+            Ok(Box::new(FakeChild { probe }))
+        };
+
+        let restart = sup.restart_injected(&backend, &injected_binary, &spawn);
+        tokio::pin!(restart);
+        tokio::select! {
+            () = backend.shutdown_gate.wait_until_entered() => {}
+            result = &mut restart => panic!("restart passed the gate: {result:?}"),
+        }
+
+        let shutdown = sup.shutdown_injected(&backend);
+        tokio::pin!(shutdown);
+        assert!(matches!(futures_util::poll!(&mut shutdown), Poll::Pending));
+        backend.shutdown_gate.resume();
+
+        let (restart, ()) = tokio::join!(restart, shutdown);
+        assert!(restart.unwrap().is_live());
+        assert!(!backend.running.load(Ordering::SeqCst));
+        assert_eq!(backend.shutdown_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(old_child.kills.load(Ordering::SeqCst), 0);
+        assert_eq!(old_child.reaps.load(Ordering::SeqCst), 1);
+        let children = new_children.lock().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].kills.load(Ordering::SeqCst), 0);
+        assert_eq!(children[0].reaps.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn shutdown_leaves_an_adopted_daemon_running() {
+        let sup = Supervisor::default();
+        let backend = ControlledBackend::new(true);
+
+        sup.shutdown_injected(&backend).await;
+
+        assert!(backend.running.load(Ordering::SeqCst));
+        assert_eq!(backend.shutdown_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn restarting_an_adopted_daemon_shuts_it_down_before_starting() {
         let sup = Supervisor::default();
         let err = sup
@@ -383,5 +779,13 @@ mod tests {
             // "background service" (bdac.34/36).
             assert!(!message.contains("daemon"), "{message}");
         }
+    }
+
+    #[test]
+    fn spawn_errors_do_not_expose_the_binary_path() {
+        let path = Path::new("C:/Users/a-person/private/copypaste-daemon");
+        let error = spawn_process(path).err().expect("the path must not exist");
+        assert_eq!(error.to_string(), MSG_START_FAILED);
+        assert!(!error.to_string().contains("a-person"));
     }
 }
