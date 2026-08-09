@@ -56,6 +56,7 @@ export const quickPaste = {
     image: "Image",
     file: "File",
     empty: "Empty item",
+    potentialSensitive: "Potentially sensitive",
     pinned: "Pinned",
     pin: "Pin",
     unpin: "Unpin",

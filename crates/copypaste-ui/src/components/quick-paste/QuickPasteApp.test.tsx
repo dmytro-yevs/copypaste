@@ -263,6 +263,72 @@ describe("Quick Paste", () => {
     ]);
   });
 
+  it("redacts a potential-sensitive row while keeping its original item actionable", async () => {
+    const plaintext = "Send the report to alice@example.com today";
+    const redacted = "Send the report to ***REDACTED*** today";
+    listItems.mockResolvedValue(page([item({
+      id: "potential-sensitive",
+      content: plaintext,
+      sensitive_finding: {
+        label: "email",
+        spans: [{ start: 19, end: 36 }],
+        spans_truncated: false,
+        redacted_preview: redacted,
+      },
+    })]));
+    const { user } = withUser(<QuickPasteApp />);
+
+    expect(await screen.findByText(redacted)).not.toBeNull();
+    expect(screen.getByRole("img", { name: en.quickPaste.row.potentialSensitive })).not.toBeNull();
+    expect(screen.getByRole("img", { name: "Text" })).not.toBeNull();
+    expect(screen.queryByText(en.quickPaste.row.sensitive)).toBeNull();
+    expect(document.body.textContent).not.toContain(plaintext);
+    expect(document.body.innerHTML).not.toContain("alice@example.com");
+    expect(screen.queryByRole("button", { name: /alice@example\.com/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: `Copy ${redacted}` }));
+    await waitFor(() => expect(copyItem).toHaveBeenCalledWith("potential-sensitive"));
+  });
+
+  it("fuzzy-matches potential-sensitive items only against their redacted previews", async () => {
+    listItems.mockResolvedValue(page([
+      item({
+        id: "later",
+        content: "alice@example.com",
+        sensitive_finding: {
+          label: "email",
+          spans: [{ start: 0, end: 17 }],
+          spans_truncated: false,
+          redacted_preview: "notes about contact ***REDACTED***",
+        },
+      }),
+      item({
+        id: "prefix",
+        content: "bob@example.com",
+        sensitive_finding: {
+          label: "email",
+          spans: [{ start: 0, end: 15 }],
+          spans_truncated: false,
+          redacted_preview: "contact ***REDACTED***",
+        },
+      }),
+    ]));
+    const { user } = withUser(<QuickPasteApp />);
+    const search = screen.getByRole("textbox", { name: en.quickPaste.search.label });
+
+    await screen.findAllByRole("listitem");
+    await user.type(search, "contact");
+    expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      expect.stringContaining("contact ***REDACTED***"),
+      expect.stringContaining("notes about contact ***REDACTED***"),
+    ]);
+
+    await user.clear(search);
+    await user.type(search, "alice");
+    expect(await screen.findByText("No matches for “alice”")).not.toBeNull();
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
   it("renders safe labels, type icons, and the copied time in popup metadata", async () => {
     const secret = "sk_live_SUPER_PRIVATE";
     listItems.mockResolvedValue(page([
