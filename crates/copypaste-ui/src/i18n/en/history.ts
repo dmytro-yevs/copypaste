@@ -84,6 +84,10 @@ export const history = {
     delete: "Delete item",
     pinnedBadge: "Pinned",
     sensitiveBadge: "· Sensitive",
+    potentialSensitiveWarning: "Potentially sensitive content",
+    potentialSensitiveBadge: "Potentially sensitive",
+    showOriginal: "Show original content",
+    hideOriginal: "Hide original content",
     open: "Show full contents",
     /** Concatenated with a device name at the call site, for the reason
      *  `pinnedPrefix` is a prefix. */

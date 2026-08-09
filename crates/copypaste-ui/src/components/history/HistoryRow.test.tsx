@@ -31,6 +31,14 @@ vi.mock("@/components/history/HistoryImagePreview", () => ({
 }));
 
 const SECRET = "AKIAIOSFODNN7EXAMPLE";
+const POTENTIAL_ORIGINAL = "Email alice@example.com about the release";
+const REDACTED_PREVIEW = "Email ***REDACTED*** about the release";
+const FINDING = {
+  label: "email",
+  spans: [{ start: 6, end: 23 }],
+  spans_truncated: false,
+  redacted_preview: REDACTED_PREVIEW,
+};
 const noop = () => {};
 const userAgent = navigator.userAgent;
 
@@ -98,6 +106,9 @@ describe("a sensitive item", () => {
     button.click();
     expect(onReveal).toHaveBeenCalledTimes(1);
     expect(onCopy).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Show original content" }),
+    ).toBeNull();
   });
 
   it("shows the plaintext only while it is the revealed row", () => {
@@ -121,6 +132,68 @@ describe("a sensitive item", () => {
     expect(screen.getByRole("button", { name: "Copy to clipboard" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Pin item" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete item" })).toBeTruthy();
+  });
+});
+
+describe("an item with a potential-sensitive finding", () => {
+  const potential = item({
+    content: POTENTIAL_ORIGINAL,
+    sensitive_finding: FINDING,
+  });
+
+  it("renders only the backend-redacted preview and an accessible warning", () => {
+    const { container } = render(<HistoryRow {...props} item={potential} />);
+
+    expect(screen.getByText(REDACTED_PREVIEW)).toBeTruthy();
+    expect(
+      screen.getByRole("status", {
+        name: "Potentially sensitive content",
+      }),
+    ).toBeTruthy();
+    expect(container.textContent).not.toContain(POTENTIAL_ORIGINAL);
+    expect(container.innerHTML).not.toContain(POTENTIAL_ORIGINAL);
+    expect(potential.is_sensitive).toBe(false);
+    expect(rowLabel(potential)).not.toContain(POTENTIAL_ORIGINAL);
+  });
+
+  it("shows and hides the original from an explicit keyboard action", async () => {
+    const onReveal = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <HistoryRow
+        {...props}
+        item={potential}
+        active
+        onReveal={onReveal}
+      />,
+    );
+
+    const show = screen.getByRole("button", { name: "Show original content" });
+    show.focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByText(POTENTIAL_ORIGINAL)).toBeTruthy();
+    expect(onReveal).not.toHaveBeenCalled();
+    const hide = screen.getByRole("button", { name: "Hide original content" });
+    expect(hide.getAttribute("aria-pressed")).toBe("true");
+
+    hide.focus();
+    await user.keyboard(" ");
+    expect(screen.queryByText(POTENTIAL_ORIGINAL)).toBeNull();
+    expect(screen.getByText(REDACTED_PREVIEW)).toBeTruthy();
+  });
+
+  it("copies only after the user activates a copy control", async () => {
+    const onCopy = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(
+      <HistoryRow {...props} item={potential} active onCopy={onCopy} />,
+    );
+
+    expect(onCopy).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Copy to clipboard" }));
+    expect(onCopy).toHaveBeenCalledWith(potential);
+    expect(container.textContent).not.toContain(POTENTIAL_ORIGINAL);
   });
 });
 

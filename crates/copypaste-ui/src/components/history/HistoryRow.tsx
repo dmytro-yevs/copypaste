@@ -8,9 +8,11 @@
  * The body button and the action buttons are siblings, never nested — nesting
  * is the `nested-interactive` violation INV-8 is about.
  */
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import {
   CloudOff,
+  Eye,
+  EyeOff,
   GripVertical,
   LoaderCircle,
   MonitorSmartphone,
@@ -57,11 +59,13 @@ export function rowLabel(
 ): string {
   const body = item.is_sensitive
     ? t("history.row.sensitiveName")
-    : item.content === null
-      ? t("history.row.empty")
-      : item.content_type.toLowerCase().startsWith("image/")
-        ? "Image"
-      : preview ?? previewOf(item.content);
+    : item.sensitive_finding !== null
+      ? `${t("history.row.potentialSensitiveWarning")}. ${item.sensitive_finding.redacted_preview}`
+      : item.content === null
+        ? t("history.row.empty")
+        : item.content_type.toLowerCase().startsWith("image/")
+          ? "Image"
+          : preview ?? previewOf(item.content);
   const named = item.pinned ? `${t("history.row.pinnedPrefix")} ${body}` : body;
 
   const marks: string[] = [];
@@ -131,6 +135,11 @@ function HistoryRowImpl({
   const SourceIcon = source.Icon;
   const revealed = revealedContent !== null;
   const masked = item.is_sensitive && !revealed;
+  const potentialFinding = item.is_sensitive ? null : item.sensitive_finding;
+  const [shownFinding, setShownFinding] =
+    useState<Item["sensitive_finding"]>(null);
+  const potentialRevealed =
+    potentialFinding !== null && shownFinding === potentialFinding;
   const stranded = wontSync(item);
   const android = isAndroidPlatform();
   // Roving: 200 rows must not be 1000 tab stops.
@@ -177,7 +186,7 @@ function HistoryRowImpl({
             KIND_TEXT_CLASS[kind],
           )}
         >
-          {item.is_sensitive && !revealPending ? (
+          {(item.is_sensitive || potentialFinding !== null) && !revealPending ? (
             <ShieldAlert size={14} />
           ) : revealPending ? (
             <LoaderCircle size={14} className="animate-spin" />
@@ -231,6 +240,17 @@ function HistoryRowImpl({
               />
             ))}
           </span>
+        ) : potentialFinding !== null && !potentialRevealed ? (
+          <span
+            className="min-w-0 overflow-hidden text-sm leading-normal break-words whitespace-pre-wrap text-foreground"
+            style={{
+              display: "-webkit-box",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: previewLines,
+            }}
+          >
+            {potentialFinding.redacted_preview}
+          </span>
         ) : isImage ? (
           <HistoryImagePreview
             id={item.id}
@@ -279,6 +299,16 @@ function HistoryRowImpl({
               {tr("history.row.pinnedBadge")}
             </span>
           )}
+          {potentialFinding !== null && (
+            <span
+              role="status"
+              aria-label={tr("history.row.potentialSensitiveWarning")}
+              className="flex shrink-0 items-center gap-0.5 text-warn-strong"
+            >
+              <ShieldAlert size={10} aria-hidden="true" />
+              {tr("history.row.potentialSensitiveBadge")}
+            </span>
+          )}
           {origin !== null && (
             <span className="flex min-w-0 items-center gap-0.5">
               <MonitorSmartphone size={10} aria-hidden="true" className="shrink-0" />
@@ -306,6 +336,34 @@ function HistoryRowImpl({
           destroying the wrong thing (§3.1.5). */}
       {!selecting && (
         <div className="flex shrink-0 items-center gap-0.5">
+          {potentialFinding !== null && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              tabIndex={tab}
+              aria-label={tr(
+                potentialRevealed
+                  ? "history.row.hideOriginal"
+                  : "history.row.showOriginal",
+              )}
+              title={tr(
+                potentialRevealed
+                  ? "history.row.hideOriginal"
+                  : "history.row.showOriginal",
+              )}
+              aria-pressed={potentialRevealed}
+              onClick={() =>
+                setShownFinding(potentialRevealed ? null : potentialFinding)
+              }
+            >
+              {potentialRevealed ? (
+                <EyeOff aria-hidden="true" />
+              ) : (
+                <Eye aria-hidden="true" />
+              )}
+            </Button>
+          )}
           {item.pinned && reorderHandleRef && (
             <Button
               ref={reorderHandleRef}
