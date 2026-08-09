@@ -5,8 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
-
-import { CURRENT_PROTOCOL_VERSION } from "@/lib/ipc";
 import type {
   CaptureSnapshot,
   Item,
